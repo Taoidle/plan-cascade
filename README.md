@@ -177,7 +177,7 @@ planning-with-files/
 ## Acknowledgments
 
 - **Manus AI** — For pioneering context engineering patterns that made this possible
-- **Anthropic** — For Claude Code, the [Agent Skills](https://code.claude.com/docs/en/skills) framework and the [Plugin system](https://code.claude.com/docs/en/plugins.md)
+- **Anthropic** — For Claude Code, the [Agent Skills](https://code.claude.com/docs/en/skills) framework and the [Plugin system](https://code.claude.com/docs/en/plugins)
 - Based on [Context Engineering for AI Agents](https://manus.im/de/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)
 
 ## Contributing
