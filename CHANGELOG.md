@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-01-10
+
+### Added
+
+- **Claude Code v2.1 Compatibility**
+  - Updated skill to leverage all new Claude Code v2.1 features
+  - Requires Claude Code v2.1.0 or later
+
+- **`user-invocable: true` Frontmatter**
+  - Skill now appears in slash command menu
+  - Users can manually invoke with `/planning-with-files`
+  - Auto-detection still works as before
+
+- **`SessionStart` Hook**
+  - Notifies user when skill is loaded and ready
+  - Displays message at session start confirming skill availability
+
+- **`PostToolUse` Hook**
+  - Runs after every Write/Edit operation
+  - Reminds Claude to update `task_plan.md` if a phase was completed
+  - Helps prevent forgotten status updates
+
+- **YAML List Format for `allowed-tools`**
+  - Migrated from comma-separated string to YAML list syntax
+  - Cleaner, more maintainable frontmatter
+  - Follows Claude Code v2.1 best practices
+
+### Changed
+
+- Version bumped to 2.1.0 in SKILL.md, plugin.json, and README.md
+- README.md updated with v2.1.0 features section
+- Versions table updated to reflect new release
+
+### Compatibility
+
+- **Minimum Claude Code Version:** v2.1.0
+- **Backward Compatible:** Yes (works with older Claude Code, but new hooks may not fire)
+
+## [2.0.1] - 2026-01-09
+
+### Fixed
+
+- Planning files now correctly created in project directory, not skill installation folder
+- Added "Important: Where Files Go" section to SKILL.md
+- Added Troubleshooting section to README.md
+
+### Thanks
+
+- @wqh17101 for reporting and confirming the fix
+
 ## [2.0.0] - 2026-01-08
 
 ### Added
