@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.2] - 2026-01-23
+
+### Added
+
+- **Git Worktree Mode** - Optional isolated task branch workflow
+  - New `/planning-with-files:worktree` command to start a task in an isolated Git branch
+  - New `/planning-with-files:complete` command to finish, merge, and cleanup
+  - Creates task branch with format `task-YYYY-MM-DD` or custom name
+  - Auto-detects default branch (main/master) as merge target
+  - Creates `.planning-config.json` to track worktree session
+  - Deletes planning files and merges branch on completion
+  - Bash and PowerShell scripts for cross-platform support
+
+### New Commands
+
+- `commands/worktree.md` - Start worktree mode with branch creation
+- `commands/complete.md` - Complete task and merge branch
+
+### New Scripts
+
+- `scripts/worktree-init.sh` - Bash script for worktree initialization
+- `scripts/worktree-init.ps1` - PowerShell script for worktree initialization
+- `scripts/worktree-complete.sh` - Bash script for worktree completion
+- `scripts/worktree-complete.ps1` - PowerShell script for worktree completion
+
+### Changed
+
+- Updated plugin version to 2.7.2
+- Updated skill version to 2.7.2
+- Added "worktree" and "git" keywords to plugin.json
+- Updated SKILL.md with worktree mode documentation
+- Distributed new commands and scripts to all IDE skill directories
+
+---
+
 ## [2.7.1] - 2026-01-22
 
 ### Fixed

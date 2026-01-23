@@ -84,6 +84,7 @@ See [docs/installation.md](docs/installation.md) for all installation methods.
 
 | Version | Features | Install |
 |---------|----------|---------|
+| **v2.7.2** | Worktree mode support | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.1** (current) | Dynamic Python detection fix | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.0** | Gemini CLI support | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
 | **v2.6.0** | Start command (`/planning-with-files:start`), path resolution fix | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |

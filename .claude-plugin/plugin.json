@@ -1,7 +1,7 @@
 {
   "name": "planning-with-files",
-  "version": "2.7.1",
-  "description": "Manus-style persistent markdown files for planning, progress tracking, and knowledge storage. Use when starting complex tasks, multi-step projects, research tasks, or when you want structured output.",
+  "version": "2.7.2",
+  "description": "Manus-style persistent markdown files for planning, progress tracking, and knowledge storage. Use when starting complex tasks, multi-step projects, research tasks, or when you want structured output. Now with optional Git worktree mode for isolated task branches.",
   "author": {
     "name": "OthmanAdi",
     "url": "https://github.com/OthmanAdi"
@@ -15,6 +15,8 @@
     "markdown",
     "context-engineering",
     "task-management",
-    "templates"
+    "templates",
+    "worktree",
+    "git"
   ]
 }

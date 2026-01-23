@@ -1,7 +1,7 @@
 ---
 name: planning-with-files
-version: "2.4.1"
-description: Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring >5 tool calls. Now with automatic session recovery after /clear.
+version: "2.7.2"
+description: Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring >5 tool calls. Now with automatic session recovery after /clear and optional Git worktree mode.
 user-invocable: true
 allowed-tools:
   - Read
@@ -71,6 +71,8 @@ If catchup report shows unsynced context:
 
 ## Quick Start
 
+### Standard Mode
+
 Before ANY complex task:
 
 1. **Create `task_plan.md`** — Use [templates/task_plan.md](templates/task_plan.md) as reference
@@ -78,6 +80,19 @@ Before ANY complex task:
 3. **Create `progress.md`** — Use [templates/progress.md](templates/progress.md) as reference
 4. **Re-read plan before decisions** — Refreshes goals in attention window
 5. **Update after each phase** — Mark complete, log errors
+
+### Worktree Mode (Git Isolation)
+
+For tasks that need isolated Git branches:
+
+1. **Start worktree mode** — Use `/planning-with-files:worktree [branch-name] [target-branch]`
+   - Example: `/planning-with-files:worktree feature-auth main`
+   - Creates a new branch and planning files
+2. **Work on your task** — Follow standard planning workflow
+3. **Complete and merge** — Use `/planning-with-files:complete [target-branch]`
+   - Deletes planning files
+   - Merges task branch to target
+   - Cleans up the task branch
 
 > **Note:** Planning files go in your project root, not the skill installation folder.
 
@@ -208,9 +223,16 @@ Copy these templates to start:
 
 Helper scripts for automation:
 
+### Standard Mode Scripts
 - `scripts/init-session.sh` — Initialize all planning files
 - `scripts/check-complete.sh` — Verify all phases complete
 - `scripts/session-catchup.py` — Recover context from previous session (v2.2.0)
+
+### Worktree Mode Scripts (v2.7.2)
+- `scripts/worktree-init.sh` — Start a new worktree session (bash)
+- `scripts/worktree-init.ps1` — Start a new worktree session (PowerShell)
+- `scripts/worktree-complete.sh` — Complete and merge worktree (bash)
+- `scripts/worktree-complete.ps1` — Complete and merge worktree (PowerShell)
 
 ## Advanced Topics
 
