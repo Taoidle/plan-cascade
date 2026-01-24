@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.3] - 2026-01-23
+
+### Changed
+
+- **Worktree mode is now optional** - Clarified that standard mode is the default and recommended approach
+- Standard mode uses no extra disk space (planning files in project root)
+- Worktree mode should only be used when multi-task parallel development is needed
+- Updated documentation to clearly distinguish between standard mode (default) and worktree mode (optional)
+
+---
+
 ## [2.7.2] - 2026-01-23
 
 ### Added
