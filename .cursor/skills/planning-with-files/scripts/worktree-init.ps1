@@ -1,8 +1,9 @@
 # Worktree Init Script for PowerShell
-# Usage: .\worktree-init.ps1 [[-BranchName] <string>] [[-TargetBranch] <string>]
+# Creates an isolated Git worktree for parallel multi-task development
+# Usage: .\worktree-init.ps1 [[-TaskName] <string>] [[-TargetBranch] <string>]
 
 param(
-    [string]$BranchName = "task-$(Get-Date -Format 'yyyy-MM-dd')",
+    [string]$TaskName = "task-$(Get-Date -Format 'yyyy-MM-dd-HHmm')",
     [string]$TargetBranch = ""
 )
 
@@ -16,21 +17,25 @@ function Write-ColorOutput($ForegroundColor) {
     $host.UI.RawUI.ForegroundColor = $fc
 }
 
-Write-ColorOutput Green "=== Planning with Files - Worktree Init ==="
+Write-ColorOutput Cyan "=== Planning with Files - Git Worktree Mode ==="
+Write-Output ""
+Write-ColorOutput Blue "Multi-Task Parallel Development"
+Write-Output "Each task gets its own isolated worktree directory."
+Write-Output "You can run multiple tasks simultaneously without conflicts."
 Write-Output ""
 
 # Default values
-$WorktreeDir = ".worktree/$BranchName"
-$ConfigFile = ".planning-config.json"
+$WorktreeDir = ".worktree/$TaskName"
+$TaskBranch = $TaskName
 
-# Step 1: Verify git repository
-$null = & git rev-parse --git-dir 2>&1
+# Save current branch
+$originalBranch = & git branch --show-current
 if ($LASTEXITCODE -ne 0) {
     Write-ColorOutput Red "ERROR: Not a git repository"
     exit 1
 }
 
-# Step 2: Detect default branch
+# Step 1: Detect default branch
 if ([string]::IsNullOrEmpty($TargetBranch)) {
     $targetRef = & git symbolic-ref refs/remotes/origin/HEAD 2>$null
     if ($targetRef) {
@@ -47,54 +52,71 @@ if ([string]::IsNullOrEmpty($TargetBranch)) {
 }
 
 Write-ColorOutput Yellow "Configuration:"
-Write-Output "  Task Branch:    $BranchName"
+Write-Output "  Task Name:      $TaskName"
+Write-Output "  Task Branch:    $TaskBranch"
 Write-Output "  Target Branch:  $TargetBranch"
-Write-Output "  Worktree Dir:   $WorktreeDir"
+Write-Output "  Worktree Path:  $WorktreeDir"
+Write-Output "  Original Branch: $originalBranch"
 Write-Output ""
 
-# Step 3: Check for existing config
-if (Test-Path $ConfigFile) {
-    Write-ColorOutput Yellow "WARNING: .planning-config.json already exists"
+# Step 2: Check if worktree already exists
+if (Test-Path $WorktreeDir) {
+    Write-ColorOutput Yellow "Worktree already exists: $WorktreeDir"
     Write-Output ""
-    Write-Output "Existing configuration:"
-    Get-Content $ConfigFile
+    Write-Output "This task is already in progress."
     Write-Output ""
-    Write-Output "Do you want to:"
-    Write-Output "  1) Continue with existing session"
-    Write-Output "  2) Start a new session (will overwrite config)"
-    Write-Output ""
-    $choice = Read-Host "Choose [1/2]"
-    if ($choice -eq "1") {
-        Write-Output "Continuing with existing session..."
+    $choice = Read-Host "Open existing worktree? [Y/n]"
+    if ($choice -ne "n" -and $choice -ne "N") {
+        Write-Output ""
+        Write-ColorOutput Green "=== Opening Existing Worktree ==="
+        Write-Output ""
+        Write-Output "To work on this task, navigate to:"
+        Write-ColorOutput Cyan "  cd $WorktreeDir"
+        Write-Output ""
+        Write-Output "Planning files are already in that directory."
         exit 0
     }
+    Write-Output "Cancelled."
+    exit 0
 }
 
-# Step 4: Create task branch
-Write-ColorOutput Green "Creating task branch..."
-
-$branchExists = & git show-ref --verify --quiet refs/heads/$BranchName 2>$null
+# Step 3: Check if branch already exists
+$branchExists = & git show-ref --verify --quiet refs/heads/$TaskBranch 2>$null
 if ($LASTEXITCODE -eq 0) {
-    Write-Output "Branch $BranchName already exists. Checking it out..."
-    & git checkout $BranchName
-} else {
-    & git checkout $TargetBranch 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-ColorOutput Red "ERROR: Cannot checkout target branch $TargetBranch"
-        exit 1
-    }
-    & git checkout -b $BranchName
-    Write-ColorOutput Green "Created new branch: $BranchName (from $TargetBranch)"
+    Write-ColorOutput Yellow "Branch $TaskBranch already exists"
+    Write-Output ""
+    Write-Output "This branch is checked out in another worktree."
+    Write-Output "Use that worktree or delete the branch first."
+    exit 1
 }
 
-# Step 5: Create planning config
+# Step 4: Create Git Worktree
+Write-ColorOutput Green "Creating Git worktree..."
+& git worktree add -b $TaskBranch $WorktreeDir $TargetBranch
+if ($LASTEXITCODE -ne 0) {
+    Write-ColorOutput Red "ERROR: Failed to create worktree"
+    exit 1
+}
+Write-ColorOutput Green "Created worktree: $WorktreeDir"
+
+# Step 5: Create planning files in the worktree
+Write-Output ""
+Write-ColorOutput Green "Creating planning files in worktree..."
+
+$ConfigFile = "$WorktreeDir/.planning-config.json"
+$rootDir = Get-Location
 $createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+# Create config in worktree
 $configContent = @"
 {
   "mode": "worktree",
-  "task_branch": "$BranchName",
+  "task_name": "$TaskName",
+  "task_branch": "$TaskBranch",
   "target_branch": "$TargetBranch",
   "worktree_dir": "$WorktreeDir",
+  "original_branch": "$originalBranch",
+  "root_dir": "$rootDir",
   "created_at": "$createdAt",
   "planning_files": [
     "task_plan.md",
@@ -104,18 +126,10 @@ $configContent = @"
 }
 "@
 Set-Content -Path $ConfigFile -Value $configContent
-Write-ColorOutput Green "Created $ConfigFile"
 
-# Step 6: Create planning files
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$initScript = Join-Path $scriptDir "init-session.sh"
-
-if (Test-Path $initScript) {
-    & bash $initScript
-} else {
-    # Create files manually
-    $taskPlanContent = @"
-# Task Plan: [Task Description]
+# Create task_plan.md
+$taskPlanContent = @"
+# Task Plan: $TaskName
 
 ## Goal
 [One sentence describing the end state]
@@ -152,7 +166,7 @@ Phase 1
 ### Phase 5: Delivery
 - [ ] Review all output files
 - [ ] Ensure deliverables are complete
-- [ ] Complete task with worktree-complete command
+- [ ] Complete task with: \`/planning-with-files:complete\`
 - **Status:** pending
 
 ## Decisions Made
@@ -164,13 +178,16 @@ Phase 1
 |-------|---------|------------|
 
 ## Worktree Info
-- **Branch:** $BranchName
+- **Task Name:** $TaskName
+- **Branch:** $TaskBranch
 - **Target:** $TargetBranch
+- **Worktree:** $WorktreeDir
 - **Complete with:** \`/planning-with-files:complete\`
 "@
-    Set-Content -Path "task_plan.md" -Value $taskPlanContent
+Set-Content -Path "$WorktreeDir/task_plan.md" -Value $taskPlanContent
 
-    $findingsContent = @"
+# Create findings.md
+$findingsContent = @"
 # Findings & Decisions
 
 ## Requirements
@@ -190,10 +207,11 @@ Phase 1
 ## Resources
 -
 "@
-    Set-Content -Path "findings.md" -Value $findingsContent
+Set-Content -Path "$WorktreeDir/findings.md" -Value $findingsContent
 
-    $date = Get-Date -Format 'yyyy-MM-dd'
-    $progressContent = @"
+# Create progress.md
+$date = Get-Date -Format 'yyyy-MM-dd'
+$progressContent = @"
 # Progress Log
 
 ## Session: $date
@@ -201,7 +219,8 @@ Phase 1
 ### Current Status
 - **Phase:** 1 - Requirements & Discovery
 - **Started:** $date
-- **Branch:** $BranchName
+- **Branch:** $TaskBranch
+- **Task Name:** $TaskName
 
 ### Actions Taken
 -
@@ -214,26 +233,36 @@ Phase 1
 | Error | Resolution |
 |-------|------------|
 "@
-    Set-Content -Path "progress.md" -Value $progressContent
+Set-Content -Path "$WorktreeDir/progress.md" -Value $progressContent
 
-    Write-ColorOutput Green "Created planning files"
-}
+Write-ColorOutput Green "Planning files created"
 
-# Step 7: Summary
+# Step 6: List all active worktrees
+Write-Output ""
+Write-ColorOutput Cyan "=== Active Worktrees ==="
+& git worktree list
+
+# Step 7: Final instructions
 Write-Output ""
 Write-ColorOutput Green "=== Worktree Session Created ==="
 Write-Output ""
-Write-Output "Branch:       $BranchName"
-Write-Output "Target:       $TargetBranch"
-Write-Output "Config File:  $ConfigFile"
+Write-ColorOutput Yellow "IMPORTANT: Navigate to the worktree to work on this task"
 Write-Output ""
-Write-Output "Planning Files:"
-Write-Output "  - task_plan.md"
-Write-Output "  - findings.md"
-Write-Output "  - progress.md"
+Write-ColorOutput Cyan "cd $WorktreeDir"
 Write-Output ""
-Write-ColorOutput Yellow "Next Steps:"
+Write-Output "Once in the worktree directory:"
 Write-Output "  1. Edit task_plan.md to define your task phases"
-Write-Output "  2. Work on your task in this isolated branch"
+Write-Output "  2. Work on your task in this isolated environment"
 Write-Output "  3. Use /planning-with-files:complete when done"
+Write-Output ""
+Write-ColorOutput Blue "Multi-Task Usage:"
+Write-Output "You can create multiple worktrees for parallel tasks:"
+Write-Output "  /planning-with-files:worktree task-auth-fix"
+Write-Output "  /planning-with-files:worktree task-refactor"
+Write-Output "  /planning-with-files:worktree task-docs"
+Write-Output ""
+Write-Output "Each task works in its own directory without conflicts."
+Write-Output ""
+Write-ColorOutput Blue "To return to the main project:"
+Write-Output "  cd $rootDir"
 Write-Output ""

@@ -1,5 +1,6 @@
 #!/bin/bash
 # Initialize worktree mode for planning-with-files
+# Creates an isolated Git worktree for parallel multi-task development
 # Usage: ./worktree-init.sh [branch-name] [target-branch]
 
 set -e
@@ -8,15 +9,24 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Default values
-TASK_BRANCH="${1:-task-$(date +%Y-%m-%d)}"
+TASK_NAME="${1:-task-$(date +%Y-%m-%d-%H%M)}"
 TARGET_BRANCH="${2:-}"
-WORKTREE_DIR=".worktree/$(basename "$TASK_BRANCH")"
-CONFIG_FILE=".planning-config.json"
+WORKTREE_DIR=".worktree/$(basename "$TASK_NAME")"
+TASK_BRANCH="$TASK_NAME"
 
-echo -e "${GREEN}=== Planning with Files - Worktree Init ===${NC}"
+# Save current branch
+ORIGINAL_BRANCH=$(git branch --show-current)
+
+echo -e "${CYAN}=== Planning with Files - Git Worktree Mode ===${NC}"
+echo ""
+echo -e "${BLUE}Multi-Task Parallel Development${NC}"
+echo "Each task gets its own isolated worktree directory."
+echo "You can run multiple tasks simultaneously without conflicts."
 echo ""
 
 # Step 1: Verify git repository
@@ -40,50 +50,64 @@ if [ -z "$TARGET_BRANCH" ]; then
 fi
 
 echo -e "${YELLOW}Configuration:${NC}"
+echo "  Task Name:      $TASK_NAME"
 echo "  Task Branch:    $TASK_BRANCH"
 echo "  Target Branch:  $TARGET_BRANCH"
-echo "  Worktree Dir:   $WORKTREE_DIR"
+echo "  Worktree Path:  $WORKTREE_DIR"
+echo "  Original Branch: $ORIGINAL_BRANCH"
 echo ""
 
-# Step 3: Check for existing config
-if [ -f "$CONFIG_FILE" ]; then
-    echo -e "${YELLOW}WARNING: .planning-config.json already exists${NC}"
+# Step 3: Check if worktree already exists
+if [ -d "$WORKTREE_DIR" ]; then
+    echo -e "${YELLOW}Worktree already exists: $WORKTREE_DIR${NC}"
     echo ""
-    echo "Existing configuration:"
-    cat "$CONFIG_FILE"
+    echo "This task is already in progress."
     echo ""
-    echo "Do you want to:"
-    echo "  1) Continue with existing session"
-    echo "  2) Start a new session (will overwrite config)"
-    echo ""
-    read -p "Choose [1/2]: " choice
-    if [ "$choice" = "1" ]; then
-        echo "Continuing with existing session..."
+    read -p "Open existing worktree? [Y/n]: " choice
+    if [[ ! "$choice" =~ ^[Nn]$ ]]; then
+        echo ""
+        echo -e "${GREEN}=== Opening Existing Worktree ===${NC}"
+        echo ""
+        echo "To work on this task, navigate to:"
+        echo -e "${CYAN}  cd $WORKTREE_DIR${NC}"
+        echo ""
+        echo "Planning files are already in that directory."
         exit 0
     fi
+    echo "Cancelled."
+    exit 0
 fi
 
-# Step 4: Create task branch
-echo -e "${GREEN}Creating task branch...${NC}"
+# Step 4: Check if branch already exists (in other worktrees)
 if git show-ref --verify --quiet refs/heads/"$TASK_BRANCH"; then
-    echo "Branch $TASK_BRANCH already exists. Checking it out..."
-    git checkout "$TASK_BRANCH"
-else
-    git checkout "$TARGET_BRANCH" 2>/dev/null || {
-        echo -e "${RED}ERROR: Cannot checkout target branch $TARGET_BRANCH${NC}"
-        exit 1
-    }
-    git checkout -b "$TASK_BRANCH"
-    echo -e "${GREEN}Created new branch: $TASK_BRANCH (from $TARGET_BRANCH)${NC}"
+    echo -e "${YELLOW}Branch $TASK_BRANCH already exists${NC}"
+    echo ""
+    echo "This branch is checked out in another worktree."
+    echo "Use that worktree or delete the branch first."
+    exit 1
 fi
 
-# Step 5: Create planning config
+# Step 5: Create Git Worktree
+echo -e "${GREEN}Creating Git worktree...${NC}"
+git worktree add -b "$TASK_BRANCH" "$WORKTREE_DIR" "$TARGET_BRANCH"
+echo -e "${GREEN}Created worktree: $WORKTREE_DIR${NC}"
+
+# Step 6: Create planning files in the worktree
+echo ""
+echo -e "${GREEN}Creating planning files in worktree...${NC}"
+
+CONFIG_FILE="$WORKTREE_DIR/.planning-config.json"
+
+# Create config in worktree
 cat > "$CONFIG_FILE" << EOF
 {
   "mode": "worktree",
+  "task_name": "$TASK_NAME",
   "task_branch": "$TASK_BRANCH",
   "target_branch": "$TARGET_BRANCH",
   "worktree_dir": "$WORKTREE_DIR",
+  "original_branch": "$ORIGINAL_BRANCH",
+  "root_dir": "$(pwd)",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "planning_files": [
     "task_plan.md",
@@ -92,16 +116,10 @@ cat > "$CONFIG_FILE" << EOF
   ]
 }
 EOF
-echo -e "${GREEN}Created $CONFIG_FILE${NC}"
 
-# Step 6: Create planning files
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/init-session.sh" ]; then
-    bash "$SCRIPT_DIR/init-session.sh"
-else
-    # Fallback: create files manually
-    cat > task_plan.md << PLANEOF
-# Task Plan: [Task Description]
+# Create planning files in worktree
+cat > "$WORKTREE_DIR/task_plan.md" << PLANEOF
+# Task Plan: $TASK_NAME
 
 ## Goal
 [One sentence describing the end state]
@@ -138,7 +156,7 @@ Phase 1
 ### Phase 5: Delivery
 - [ ] Review all output files
 - [ ] Ensure deliverables are complete
-- [ ] Complete task with worktree-complete command
+- [ ] Complete task with: \`/planning-with-files:complete\`
 - **Status:** pending
 
 ## Decisions Made
@@ -150,12 +168,14 @@ Phase 1
 |-------|---------|------------|
 
 ## Worktree Info
+- **Task Name:** $TASK_NAME
 - **Branch:** $TASK_BRANCH
 - **Target:** $TARGET_BRANCH
+- **Worktree:** $WORKTREE_DIR
 - **Complete with:** \`/planning-with-files:complete\`
 PLANEOF
 
-    cat > findings.md << FINDINGSEOF
+cat > "$WORKTREE_DIR/findings.md" << FINDINGSEOF
 # Findings & Decisions
 
 ## Requirements
@@ -176,7 +196,7 @@ PLANEOF
 -
 FINDINGSEOF
 
-    cat > progress.md << PROGRESSEOF
+cat > "$WORKTREE_DIR/progress.md" << PROGRESSEOF
 # Progress Log
 
 ## Session: $(date +%Y-%m-%d)
@@ -185,6 +205,7 @@ FINDINGSEOF
 - **Phase:** 1 - Requirements & Discovery
 - **Started:** $(date +%Y-%m-%d)
 - **Branch:** $TASK_BRANCH
+- **Task Name:** $TASK_NAME
 
 ### Actions Taken
 -
@@ -198,24 +219,34 @@ FINDINGSEOF
 |-------|------------|
 PROGRESSEOF
 
-    echo -e "${GREEN}Created planning files${NC}"
-fi
+echo -e "${GREEN}Planning files created${NC}"
 
-# Step 7: Summary
+# Step 7: List all active worktrees
+echo ""
+echo -e "${CYAN}=== Active Worktrees ===${NC}"
+git worktree list
+
+# Step 8: Final instructions
 echo ""
 echo -e "${GREEN}=== Worktree Session Created ===${NC}"
 echo ""
-echo "Branch:       $TASK_BRANCH"
-echo "Target:       $TARGET_BRANCH"
-echo "Config File:  $CONFIG_FILE"
+echo -e "${YELLOW}IMPORTANT: Navigate to the worktree to work on this task${NC}"
 echo ""
-echo "Planning Files:"
-echo "  - task_plan.md"
-echo "  - findings.md"
-echo "  - progress.md"
+echo -e "${CYAN}cd $WORKTREE_DIR${NC}"
 echo ""
-echo -e "${YELLOW}Next Steps:${NC}"
+echo "Once in the worktree directory:"
 echo "  1. Edit task_plan.md to define your task phases"
-echo "  2. Work on your task in this isolated branch"
+echo "  2. Work on your task in this isolated environment"
 echo "  3. Use /planning-with-files:complete when done"
+echo ""
+echo -e "${BLUE}Multi-Task Usage:${NC}"
+echo "You can create multiple worktrees for parallel tasks:"
+echo "  /planning-with-files:worktree task-auth-fix"
+echo "  /planning-with-files:worktree task-refactor"
+echo "  /planning-with-files:worktree task-docs"
+echo ""
+echo "Each task works in its own directory without conflicts."
+echo ""
+echo -e "${BLUE}To return to the main project:${NC}"
+echo "  cd $(pwd)"
 echo ""

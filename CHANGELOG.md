@@ -6,14 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **Git Worktree Mode** - Optional isolated task branch workflow
-  - New `/planning-with-files:worktree` command to start a task in an isolated Git branch
-  - New `/planning-with-files:complete` command to finish, merge, and cleanup
-  - Creates task branch with format `task-YYYY-MM-DD` or custom name
+- **Git Worktree Mode** - True multi-task parallel development using Git worktrees
+  - New `/planning-with-files:worktree` command to create isolated worktree directories
+  - New `/planning-with-files:complete` command to merge and cleanup worktrees
+  - Uses `git worktree add` to create separate working directories per task
+  - **Multiple tasks can run simultaneously without conflicts**
+  - **Main directory stays on original branch** (no branch switching)
+  - Task branch format: `task-YYYY-MM-DD-HHMM` (time included for uniqueness)
   - Auto-detects default branch (main/master) as merge target
-  - Creates `.planning-config.json` to track worktree session
-  - Deletes planning files and merges branch on completion
+  - Creates `.planning-config.json` in each worktree with task metadata
   - Bash and PowerShell scripts for cross-platform support
+
+### Key Features
+
+- **Parallel Development**: Create multiple worktrees for different tasks
+  - Example: `.worktree/fix-auth-bug/`, `.worktree/refactor-api/`, `.worktree/update-docs/`
+  - Each worktree has its own branch, files, and planning documents
+  - Work on multiple tasks in parallel without switching branches
+- **Isolated Environments**: Each task has complete file isolation
+- **Easy Cleanup**: Complete command removes worktree and merges changes
+- **No Main Directory Impact**: Main directory remains untouched on original branch
 
 ### New Commands
 

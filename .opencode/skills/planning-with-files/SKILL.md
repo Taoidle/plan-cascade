@@ -1,7 +1,7 @@
 ---
 name: planning-with-files
-version: "2.4.1"
-description: Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring >5 tool calls. Now with automatic session recovery after /clear.
+version: "2.7.2"
+description: Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring >5 tool calls. Now with automatic session recovery after /clear and optional Git worktree mode.
 user-invocable: true
 allowed-tools:
   - Read
@@ -44,13 +44,13 @@ Work like Manus: Use persistent markdown files as your "working memory on disk."
 **Before starting work**, check for unsynced context from a previous session:
 
 ```bash
-# Linux/macOS (auto-detects python3 or python)
+# Linux/macOS
 $(command -v python3 || command -v python) ${CLAUDE_PLUGIN_ROOT}/scripts/session-catchup.py "$(pwd)"
 ```
 
 ```powershell
 # Windows PowerShell
-python "$env:USERPROFILE\.opencode\skills\planning-with-files\scripts\session-catchup.py" (Get-Location)
+& (Get-Command python -ErrorAction SilentlyContinue).Source "$env:USERPROFILE\.claude\skills\planning-with-files\scripts\session-catchup.py" (Get-Location)
 ```
 
 If catchup report shows unsynced context:
@@ -71,6 +71,8 @@ If catchup report shows unsynced context:
 
 ## Quick Start
 
+### Standard Mode
+
 Before ANY complex task:
 
 1. **Create `task_plan.md`** — Use [templates/task_plan.md](templates/task_plan.md) as reference
@@ -78,6 +80,48 @@ Before ANY complex task:
 3. **Create `progress.md`** — Use [templates/progress.md](templates/progress.md) as reference
 4. **Re-read plan before decisions** — Refreshes goals in attention window
 5. **Update after each phase** — Mark complete, log errors
+
+### Worktree Mode (Multi-Task Parallel Development)
+
+For **parallel multi-task development** with isolated Git worktrees:
+
+1. **Start worktree mode** — Use `/planning-with-files:worktree [task-name] [target-branch]`
+   - Example: `/planning-with-files:worktree feature-auth main`
+   - Creates a new Git worktree directory (`.worktree/feature-auth/`)
+   - Creates a task branch with planning files inside the worktree
+   - **Main directory stays on original branch** (no switching!)
+   - **Multiple worktrees can exist simultaneously** for parallel tasks
+
+2. **Navigate to worktree** — `cd .worktree/feature-auth`
+   - Work on your task in this isolated environment
+   - Follow standard planning workflow
+
+3. **Complete and merge** — Use `/planning-with-files:complete [target-branch]` from **inside the worktree**
+   - Deletes planning files from worktree
+   - Navigates to root directory
+   - Merges task branch to target
+   - Removes the worktree directory
+   - Deletes the task branch
+
+**Multi-Task Example:**
+```bash
+# Start task 1
+/planning-with-files:worktree fix-auth-bug
+cd .worktree/fix-auth-bug
+
+# In another terminal, start task 2 (parallel!)
+/planning-with-files:worktree refactor-api
+cd .worktree/refactor-api
+
+# Each task has its own directory and branch
+# No conflicts, no branch switching needed
+```
+
+**Benefits:**
+- Work on multiple tasks simultaneously without conflicts
+- Each task has its own isolated environment
+- No need to switch branches in the main directory
+- Easy cleanup when tasks are complete
 
 > **Note:** Planning files go in your project root, not the skill installation folder.
 
@@ -208,9 +252,16 @@ Copy these templates to start:
 
 Helper scripts for automation:
 
+### Standard Mode Scripts
 - `scripts/init-session.sh` — Initialize all planning files
 - `scripts/check-complete.sh` — Verify all phases complete
 - `scripts/session-catchup.py` — Recover context from previous session (v2.2.0)
+
+### Worktree Mode Scripts (v2.7.2)
+- `scripts/worktree-init.sh` — Start a new worktree session (bash)
+- `scripts/worktree-init.ps1` — Start a new worktree session (PowerShell)
+- `scripts/worktree-complete.sh` — Complete and merge worktree (bash)
+- `scripts/worktree-complete.ps1` — Complete and merge worktree (PowerShell)
 
 ## Advanced Topics
 

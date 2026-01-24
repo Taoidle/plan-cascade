@@ -1,23 +1,77 @@
 ---
 name: planning-with-files
-description: Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring >5 tool calls.
+version: "2.7.2"
+description: Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring >5 tool calls. Now with automatic session recovery after /clear and optional Git worktree mode.
+user-invocable: true
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Glob
+  - Grep
+  - WebFetch
+  - WebSearch
+hooks:
+  PreToolUse:
+    - matcher: "Write|Edit|Bash|Read|Glob|Grep"
+      hooks:
+        - type: command
+          command: "cat task_plan.md 2>/dev/null | head -30 || true"
+  PostToolUse:
+    - matcher: "Write|Edit"
+      hooks:
+        - type: command
+          command: "echo '[planning-with-files] File updated. If this completes a phase, update task_plan.md status.'"
+  Stop:
+    - hooks:
+        - type: command
+          command: |
+            SCRIPT_DIR="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/planning-with-files}/scripts"
+            if command -v pwsh &> /dev/null && [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OS" == "Windows_NT" ]]; then
+              pwsh -ExecutionPolicy Bypass -File "$SCRIPT_DIR/check-complete.ps1" 2>/dev/null || powershell -ExecutionPolicy Bypass -File "$SCRIPT_DIR/check-complete.ps1" 2>/dev/null || bash "$SCRIPT_DIR/check-complete.sh"
+            else
+              bash "$SCRIPT_DIR/check-complete.sh"
+            fi
 ---
 
 # Planning with Files
 
 Work like Manus: Use persistent markdown files as your "working memory on disk."
 
+## FIRST: Check for Previous Session (v2.2.0)
+
+**Before starting work**, check for unsynced context from a previous session:
+
+```bash
+# Linux/macOS
+$(command -v python3 || command -v python) ${CLAUDE_PLUGIN_ROOT}/scripts/session-catchup.py "$(pwd)"
+```
+
+```powershell
+# Windows PowerShell
+& (Get-Command python -ErrorAction SilentlyContinue).Source "$env:USERPROFILE\.claude\skills\planning-with-files\scripts\session-catchup.py" (Get-Location)
+```
+
+If catchup report shows unsynced context:
+1. Run `git diff --stat` to see actual code changes
+2. Read current planning files
+3. Update planning files based on catchup + git diff
+4. Then proceed with task
+
 ## Important: Where Files Go
 
-- **Templates** are in this skill's `templates/` folder
+- **Templates** are in `${CLAUDE_PLUGIN_ROOT}/templates/`
 - **Your planning files** go in **your project directory**
 
 | Location | What Goes There |
 |----------|-----------------|
-| Skill directory | Templates, scripts, reference docs |
+| Skill directory (`${CLAUDE_PLUGIN_ROOT}/`) | Templates, scripts, reference docs |
 | Your project directory | `task_plan.md`, `findings.md`, `progress.md` |
 
 ## Quick Start
+
+### Standard Mode
 
 Before ANY complex task:
 
@@ -26,6 +80,48 @@ Before ANY complex task:
 3. **Create `progress.md`** — Use [templates/progress.md](templates/progress.md) as reference
 4. **Re-read plan before decisions** — Refreshes goals in attention window
 5. **Update after each phase** — Mark complete, log errors
+
+### Worktree Mode (Multi-Task Parallel Development)
+
+For **parallel multi-task development** with isolated Git worktrees:
+
+1. **Start worktree mode** — Use `/planning-with-files:worktree [task-name] [target-branch]`
+   - Example: `/planning-with-files:worktree feature-auth main`
+   - Creates a new Git worktree directory (`.worktree/feature-auth/`)
+   - Creates a task branch with planning files inside the worktree
+   - **Main directory stays on original branch** (no switching!)
+   - **Multiple worktrees can exist simultaneously** for parallel tasks
+
+2. **Navigate to worktree** — `cd .worktree/feature-auth`
+   - Work on your task in this isolated environment
+   - Follow standard planning workflow
+
+3. **Complete and merge** — Use `/planning-with-files:complete [target-branch]` from **inside the worktree**
+   - Deletes planning files from worktree
+   - Navigates to root directory
+   - Merges task branch to target
+   - Removes the worktree directory
+   - Deletes the task branch
+
+**Multi-Task Example:**
+```bash
+# Start task 1
+/planning-with-files:worktree fix-auth-bug
+cd .worktree/fix-auth-bug
+
+# In another terminal, start task 2 (parallel!)
+/planning-with-files:worktree refactor-api
+cd .worktree/refactor-api
+
+# Each task has its own directory and branch
+# No conflicts, no branch switching needed
+```
+
+**Benefits:**
+- Work on multiple tasks simultaneously without conflicts
+- Each task has its own isolated environment
+- No need to switch branches in the main directory
+- Easy cleanup when tasks are complete
 
 > **Note:** Planning files go in your project root, not the skill installation folder.
 
@@ -156,18 +252,27 @@ Copy these templates to start:
 
 Helper scripts for automation:
 
+### Standard Mode Scripts
 - `scripts/init-session.sh` — Initialize all planning files
 - `scripts/check-complete.sh` — Verify all phases complete
+- `scripts/session-catchup.py` — Recover context from previous session (v2.2.0)
+
+### Worktree Mode Scripts (v2.7.2)
+- `scripts/worktree-init.sh` — Start a new worktree session (bash)
+- `scripts/worktree-init.ps1` — Start a new worktree session (PowerShell)
+- `scripts/worktree-complete.sh` — Complete and merge worktree (bash)
+- `scripts/worktree-complete.ps1` — Complete and merge worktree (PowerShell)
 
 ## Advanced Topics
 
-- **Manus Principles:** See [references/reference.md](references/reference.md)
-- **Real Examples:** See [references/examples.md](references/examples.md)
+- **Manus Principles:** See [reference.md](reference.md)
+- **Real Examples:** See [examples.md](examples.md)
 
 ## Anti-Patterns
 
 | Don't | Do Instead |
 |-------|------------|
+| Use TodoWrite for persistence | Create task_plan.md file |
 | State goals once and forget | Re-read plan before decisions |
 | Hide errors and retry silently | Log errors to plan file |
 | Stuff everything in context | Store large content in files |

@@ -1,5 +1,7 @@
 # Worktree Complete Script for PowerShell
+# Merges the worktree branch and cleans up the worktree directory
 # Usage: .\worktree-complete.ps1 [[-TargetBranch] <string>]
+# Run this FROM INSIDE the worktree directory
 
 param(
     [string]$TargetBranch = ""
@@ -15,24 +17,30 @@ function Write-ColorOutput($ForegroundColor) {
     $host.UI.RawUI.ForegroundColor = $fc
 }
 
-Write-ColorOutput Green "=== Planning with Files - Worktree Complete ==="
+Write-ColorOutput Cyan "=== Planning with Files - Complete Worktree Task ==="
 Write-Output ""
 
-# Step 1: Read configuration
+# Step 1: Verify we're in a worktree
 $ConfigFile = ".planning-config.json"
 
 if (-not (Test-Path $ConfigFile)) {
-    Write-ColorOutput Red "ERROR: No planning configuration found"
-    Write-Output "Are you in a worktree session?"
+    Write-ColorOutput Red "ERROR: .planning-config.json not found"
+    Write-Output ""
+    Write-Output "Are you in a worktree directory?"
+    Write-Output "This command must be run from inside the worktree."
     exit 1
 }
 
+# Step 2: Read configuration
 $config = Get-Content $ConfigFile | ConvertFrom-Json
 
 $mode = $config.mode
+$taskName = $config.task_name
 $taskBranch = $config.task_branch
 $targetBranchConfig = $config.target_branch
 $worktreeDir = $config.worktree_dir
+$rootDir = $config.root_dir
+$originalBranch = $config.original_branch
 
 if ($mode -ne "worktree") {
     Write-ColorOutput Red "ERROR: Not in worktree mode (current mode: $mode)"
@@ -42,20 +50,24 @@ if ($mode -ne "worktree") {
 # Use override target if provided
 $targetFinal = if ([string]::IsNullOrEmpty($TargetBranch)) { $targetBranchConfig } else { $TargetBranch }
 
-Write-ColorOutput Cyan "Configuration:"
+Write-ColorOutput Blue "Current Worktree:"
+Write-Output "  Task Name:      $taskName"
 Write-Output "  Task Branch:    $taskBranch"
 Write-Output "  Target Branch:  $targetBranchConfig"
 if (-not [string]::IsNullOrEmpty($TargetBranch)) {
-    Write-Output "  Override:       $targetFinal"
+    Write-Output "  Override Target: $targetFinal"
 }
+Write-Output "  Worktree Dir:   $worktreeDir"
+Write-Output "  Root Directory: $rootDir"
+Write-Output "  Original Branch: $originalBranch"
 Write-Output ""
 
-# Step 2: Verify completion
+# Step 3: Verify task completion
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $checkScript = Join-Path $scriptDir "check-complete.sh"
 
 if (Test-Path $checkScript) {
-    Write-ColorOutput Cyan "Checking task completion..."
+    Write-ColorOutput Blue "Checking task completion..."
     $result = & bash $checkScript 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Output ""
@@ -69,8 +81,8 @@ if (Test-Path $checkScript) {
     }
 }
 
-# Step 3: Check for uncommitted changes
-Write-ColorOutput Cyan "Checking for uncommitted changes..."
+# Step 4: Check for uncommitted changes
+Write-ColorOutput Blue "Checking for uncommitted changes..."
 $status = & git status --porcelain 2>$null
 if ($status) {
     Write-ColorOutput Yellow "There are uncommitted changes:"
@@ -102,22 +114,16 @@ if ($status) {
     }
 }
 
-# Step 4: Show summary
+# Step 5: Show summary
 Write-Output ""
 Write-ColorOutput Cyan "=== Worktree Completion Summary ==="
 Write-Output ""
-Write-Output "Files to Delete:"
-Write-Output "  - task_plan.md"
-Write-Output "  - findings.md"
-Write-Output "  - progress.md"
-Write-Output "  - .planning-config.json"
-Write-Output ""
-Write-Output "Actions:"
-Write-Output "  1. Delete planning files and config"
-Write-Output "  2. Switch to target branch ($targetFinal)"
-Write-Output "  3. Merge task branch ($taskBranch) into target"
-Write-Output "  4. Delete task branch"
-Write-Output "  5. Clean up worktree (if applicable)"
+Write-Output "This will:"
+Write-Output "  1. Delete planning files from worktree"
+Write-Output "  2. Navigate to root directory"
+Write-Output "  3. Merge $taskBranch into $targetFinal"
+Write-Output "  4. Delete this worktree"
+Write-Output "  5. Delete the task branch"
 Write-Output ""
 $confirm = Read-Host "Proceed? [Y/n]"
 if ($confirm -eq "n" -or $confirm -eq "N") {
@@ -125,9 +131,9 @@ if ($confirm -eq "n" -or $confirm -eq "N") {
     exit 0
 }
 
-# Step 5: Delete planning files
+# Step 6: Delete planning files from worktree
 Write-Output ""
-Write-ColorOutput Cyan "Deleting planning files..."
+Write-ColorOutput Blue "Deleting planning files..."
 $planningFiles = @("task_plan.md", "findings.md", "progress.md")
 foreach ($file in $planningFiles) {
     if (Test-Path $file) {
@@ -140,12 +146,18 @@ if (Test-Path $ConfigFile) {
     Write-Output "  Deleted: $ConfigFile"
 }
 
-# Step 6: Switch to target branch
+# Step 7: Navigate to root directory
 Write-Output ""
-Write-ColorOutput Cyan "Switching to target branch: $targetFinal"
+Write-ColorOutput Blue "Navigating to root directory..."
+Set-Location $rootDir
+Write-Output "  Now in: $(Get-Location)"
+
+# Step 8: Switch to target branch
+Write-Output ""
+Write-ColorOutput Blue "Switching to target branch: $targetFinal"
 
 # Fetch if remote exists
-$null = & git ls-remote --exit-code origin "$targetFinal" 2>$null
+$null = & git ls-remote --exit-code origin $targetFinal 2>$null
 if ($LASTEXITCODE -eq 0) {
     & git fetch origin $targetFinal 2>$null
 }
@@ -159,15 +171,16 @@ if ($LASTEXITCODE -eq 0) {
     if ($LASTEXITCODE -eq 0) {
         Write-Output "  Created and checked out: $targetFinal from origin"
     } else {
-        Write-ColorOutput Yellow "Warning: Could not checkout $targetFinal, staying on current branch"
+        Write-ColorOutput Yellow "Warning: Could not checkout $targetFinal"
+        Write-Output "  Staying on: $(& git branch --show-current)"
     }
 }
 
-# Step 7: Merge task branch
+# Step 9: Merge task branch
 Write-Output ""
-Write-ColorOutput Cyan "Merging $taskBranch into $targetFinal..."
+Write-ColorOutput Blue "Merging $taskBranch into $targetFinal..."
 
-$mergeResult = & git merge --no-ff -m "Merge task branch: $taskBranch" $taskBranch 2>&1
+$mergeResult = & git merge --no-ff -m "Merge task branch: $taskName" $taskBranch 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-ColorOutput Green "Merge successful!"
 } else {
@@ -179,50 +192,53 @@ if ($LASTEXITCODE -eq 0) {
     Write-Output "After resolving conflicts:"
     Write-Output "  1. Run: git add ."
     Write-Output "  2. Run: git commit"
-    Write-Output "  3. Run: git branch -d $taskBranch"
+    Write-Output "  3. Run: git worktree remove $worktreeDir"
+    Write-Output "  4. Run: git branch -d $taskBranch"
     Write-Output ""
     Write-Output "Or abort with: git merge --abort"
     exit 1
 }
 
-# Step 8: Delete task branch
+# Step 10: Remove worktree
 Write-Output ""
-Write-ColorOutput Cyan "Cleaning up task branch: $taskBranch"
+Write-ColorOutput Blue "Removing worktree: $worktreeDir"
+$removeResult = & git worktree remove $worktreeDir 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-ColorOutput Green "Worktree removed"
+} else {
+    # Fallback to manual removal
+    Remove-Item -Recurse -Force $worktreeDir -ErrorAction SilentlyContinue
+    Write-ColorOutput Yellow "Worktree directory removed (manually)"
+}
+
+# Step 11: Delete task branch
+Write-Output ""
+Write-ColorOutput Blue "Deleting task branch: $taskBranch"
 $deleteResult = & git branch -d $taskBranch 2>&1
 if ($LASTEXITCODE -eq 0) {
-    Write-Output "  Deleted branch: $taskBranch"
+    Write-ColorOutput Green "Task branch deleted"
 } else {
     Write-ColorOutput Yellow "Warning: Could not delete branch $taskBranch"
+    Write-Output "  You may need to delete it manually with: git branch -D $taskBranch"
 }
 
-# Step 9: Cleanup worktree if exists
-$worktreePath = ".worktree/$taskBranch"
-if (Test-Path $worktreePath) {
-    Write-Output ""
-    Write-ColorOutput Cyan "Cleaning up worktree: $worktreePath"
-    try {
-        & git worktree remove $worktreePath 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Output "  Removed worktree: $worktreePath"
-        } else {
-            Remove-Item -Recurse -Force $worktreePath 2>$null
-        }
-    } catch {
-        Write-ColorOutput Yellow "Warning: Could not remove $worktreePath"
-    }
-}
-
-# Step 10: Summary
+# Step 12: Summary
 Write-Output ""
 Write-ColorOutput Green "=== Task Completed Successfully ==="
 Write-Output ""
-Write-Output "Task branch $taskBranch has been merged into $targetFinal."
+Write-Output "Task: $taskName"
+Write-Output "Branch: $taskBranch merged into $targetFinal"
 Write-Output ""
 Write-Output "Planning files have been deleted."
+Write-Output "Worktree has been removed."
 Write-Output ""
-$currentBranch = & git branch --show-current
-Write-Output "Current branch: $currentBranch"
+Write-Output "Current branch: $(& git branch --show-current)"
+Write-Output "Current directory: $(Get-Location)"
+Write-Output ""
+Write-ColorOutput Cyan "=== Active Worktrees ==="
+& git worktree list
 Write-Output ""
 Write-ColorOutput Yellow "Next:"
 Write-Output "  - Push the merge if needed: git push"
 Write-Output "  - Continue with your next task"
+Write-Output ""

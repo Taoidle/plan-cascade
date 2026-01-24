@@ -81,18 +81,47 @@ Before ANY complex task:
 4. **Re-read plan before decisions** — Refreshes goals in attention window
 5. **Update after each phase** — Mark complete, log errors
 
-### Worktree Mode (Git Isolation)
+### Worktree Mode (Multi-Task Parallel Development)
 
-For tasks that need isolated Git branches:
+For **parallel multi-task development** with isolated Git worktrees:
 
-1. **Start worktree mode** — Use `/planning-with-files:worktree [branch-name] [target-branch]`
+1. **Start worktree mode** — Use `/planning-with-files:worktree [task-name] [target-branch]`
    - Example: `/planning-with-files:worktree feature-auth main`
-   - Creates a new branch and planning files
-2. **Work on your task** — Follow standard planning workflow
-3. **Complete and merge** — Use `/planning-with-files:complete [target-branch]`
-   - Deletes planning files
+   - Creates a new Git worktree directory (`.worktree/feature-auth/`)
+   - Creates a task branch with planning files inside the worktree
+   - **Main directory stays on original branch** (no switching!)
+   - **Multiple worktrees can exist simultaneously** for parallel tasks
+
+2. **Navigate to worktree** — `cd .worktree/feature-auth`
+   - Work on your task in this isolated environment
+   - Follow standard planning workflow
+
+3. **Complete and merge** — Use `/planning-with-files:complete [target-branch]` from **inside the worktree**
+   - Deletes planning files from worktree
+   - Navigates to root directory
    - Merges task branch to target
-   - Cleans up the task branch
+   - Removes the worktree directory
+   - Deletes the task branch
+
+**Multi-Task Example:**
+```bash
+# Start task 1
+/planning-with-files:worktree fix-auth-bug
+cd .worktree/fix-auth-bug
+
+# In another terminal, start task 2 (parallel!)
+/planning-with-files:worktree refactor-api
+cd .worktree/refactor-api
+
+# Each task has its own directory and branch
+# No conflicts, no branch switching needed
+```
+
+**Benefits:**
+- Work on multiple tasks simultaneously without conflicts
+- Each task has its own isolated environment
+- No need to switch branches in the main directory
+- Easy cleanup when tasks are complete
 
 > **Note:** Planning files go in your project root, not the skill installation folder.
 

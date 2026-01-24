@@ -1,29 +1,34 @@
 ---
-description: "Start a new task in an isolated Git worktree. Creates a task branch, worktree directory, and planning files. Usage: /planning-with-files:worktree [branch-name] [target-branch]. Example: /planning-with-files:worktree fix-auth-bug main"
+description: "Start a new task in an isolated Git worktree for parallel multi-task development. Creates a task branch, worktree directory with planning files, and leaves the main directory untouched. Usage: /planning-with-files:worktree [task-name] [target-branch]. Example: /planning-with-files:worktree feature-login main"
 ---
 
-# Planning with Files - Worktree Mode
+# Planning with Files - Git Worktree Mode
 
-You are now starting a task in **Git Worktree Mode**. This creates an isolated environment for your task with its own branch and planning files.
+You are now starting a task in **Git Worktree Mode**. This creates an isolated environment for your task with its own branch and directory, enabling **parallel multi-task development**.
+
+## What is Git Worktree Mode?
+
+Git worktree allows you to have multiple working trees attached to the same repository, each on a different branch. This means:
+
+- **Multiple tasks, no conflicts**: Each task works in its own directory
+- **No branch switching**: Stay on your main branch while working on feature branches
+- **Isolated environments**: Each task has its own files and planning documents
+- **Easy cleanup**: When done, merge and remove the worktree
 
 ## Step 1: Determine Configuration
 
-First, check if a planning configuration already exists:
+First, check for existing worktrees:
 
 ```bash
-cat .planning-config.json 2>/dev/null || echo "No existing config found"
+git worktree list
 ```
 
-If a config exists, ask the user if they want to:
-- **Continue** the existing worktree session
-- **Start a new** worktree session (will clean up existing)
-
-If no config exists, proceed with the settings below.
+If there are existing worktrees, show them to the user and ask if they want to create another one.
 
 ## Step 2: Parse Parameters
 
 Parse the user's command arguments:
-- **Branch name**: `{{args}}` - First argument (or use `task-YYYY-MM-DD` format)
+- **Task name**: `{{args}}` - First argument (or use `task-YYYY-MM-DD-HHMM` format for uniqueness)
 - **Target branch**: Second argument (or auto-detect `main`/`master`)
 
 ## Step 3: Verify Git Repository
@@ -51,53 +56,73 @@ fi
 echo "Default branch detected: $DEFAULT_BRANCH"
 ```
 
-## Step 5: Determine Branch Names
+## Step 5: Determine Task Names
 
 Set these variables:
 ```bash
-TASK_BRANCH="{{args|first arg or 'task-' + date}}"
+TASK_NAME="{{args|first arg or 'task-' + date + '-' + time}}"
+TASK_BRANCH="$TASK_NAME"
 TARGET_BRANCH="{{args|second arg or $DEFAULT_BRANCH}}"
-WORKTREE_DIR=".worktree/$(basename $TASK_BRANCH)"
+WORKTREE_DIR=".worktree/$(basename $TASK_NAME)"
+ORIGINAL_BRANCH=$(git branch --show-current)
+ROOT_DIR=$(pwd)
 ```
 
 Example with command `/planning-with-files:worktree feature-login main`:
+- `TASK_NAME = "feature-login"`
 - `TASK_BRANCH = "feature-login"`
 - `TARGET_BRANCH = "main"`
 - `WORKTREE_DIR = ".worktree/feature-login"`
 
 Example with no args `/planning-with-files:worktree`:
-- `TASK_BRANCH = "task-2026-01-23"`
+- `TASK_NAME = "task-2026-01-23-1430"` (includes time for uniqueness)
+- `TASK_BRANCH = "task-2026-01-23-1430"`
 - `TARGET_BRANCH = "main"` (detected)
-- `WORKTREE_DIR = ".worktree/task-2026-01-23"`
+- `WORKTREE_DIR = ".worktree/task-2026-01-23-1430"`
 
-## Step 6: Create Git Branch
-
-Create and switch to the new task branch:
+## Step 6: Check for Existing Worktree
 
 ```bash
-# Check if branch already exists
-if git show-ref --verify --quiet refs/heads/"$TASK_BRANCH"; then
-    echo "Branch $TASK_BRANCH already exists. Checking it out..."
-    git checkout "$TASK_BRANCH"
-else
-    # Create new branch from target branch
-    git checkout "$TARGET_BRANCH" || { echo "ERROR: Cannot checkout target branch $TARGET_BRANCH"; exit 1; }
-    git checkout -b "$TASK_BRANCH"
-    echo "Created new branch: $TASK_BRANCH (from $TARGET_BRANCH)"
+if [ -d "$WORKTREE_DIR" ]; then
+    echo "Worktree already exists: $WORKTREE_DIR"
+    echo "This task is already in progress."
+    echo "Navigate to: cd $WORKTREE_DIR"
+    exit 0
 fi
 ```
 
-## Step 7: Create Planning Configuration
+## Step 7: Create Git Worktree
 
-Save the worktree configuration:
+Create the actual Git worktree:
 
 ```bash
-cat > .planning-config.json << EOF
+# Check if branch already exists in another worktree
+if git show-ref --verify --quiet refs/heads/"$TASK_BRANCH"; then
+    echo "ERROR: Branch $TASK_BRANCH already exists in another worktree"
+    exit 1
+fi
+
+# Create the worktree
+git worktree add -b "$TASK_BRANCH" "$WORKTREE_DIR" "$TARGET_BRANCH"
+echo "Created worktree: $WORKTREE_DIR"
+```
+
+**Important**: This uses `git worktree add` which creates a real separate working directory. The main directory remains unchanged and on its original branch.
+
+## Step 8: Create Planning Configuration in Worktree
+
+Save the worktree configuration **inside the worktree directory**:
+
+```bash
+cat > "$WORKTREE_DIR/.planning-config.json" << EOF
 {
   "mode": "worktree",
+  "task_name": "$TASK_NAME",
   "task_branch": "$TASK_BRANCH",
   "target_branch": "$TARGET_BRANCH",
   "worktree_dir": "$WORKTREE_DIR",
+  "original_branch": "$ORIGINAL_BRANCH",
+  "root_dir": "$ROOT_DIR",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "planning_files": [
     "task_plan.md",
@@ -106,24 +131,16 @@ cat > .planning-config.json << EOF
   ]
 }
 EOF
-echo "Created .planning-config.json"
 ```
 
-## Step 8: Create Planning Files
+## Step 9: Create Planning Files in Worktree
 
-Create the three planning files in the current directory:
+Create the three planning files **inside the worktree directory**:
 
 ```bash
-# Use the init-session script or create files directly
-SCRIPT_DIR="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/planning-with-files}/scripts"
-
-if [ -f "$SCRIPT_DIR/init-session.sh" ]; then
-    bash "$SCRIPT_DIR/init-session.sh"
-else
-    echo "Creating planning files manually..."
-    # Create task_plan.md
-    cat > task_plan.md << 'PLANEOF'
-# Task Plan: [Task Description]
+# Create task_plan.md in worktree
+cat > "$WORKTREE_DIR/task_plan.md" << 'PLANEOF'
+# Task Plan: [TASK_NAME]
 
 ## Goal
 [One sentence describing the end state]
@@ -160,7 +177,7 @@ Phase 1
 ### Phase 5: Delivery
 - [ ] Review all output files
 - [ ] Ensure deliverables are complete
-- [ ] Use /planning-with-files:complete to finish
+- [ ] Complete task with: `/planning-with-files:complete`
 - **Status:** pending
 
 ## Decisions Made
@@ -172,91 +189,112 @@ Phase 1
 |-------|---------|------------|
 
 ## Worktree Info
-- **Branch:** $TASK_BRANCH
-- **Target:** $TARGET_BRANCH
+- **Task Name:** [TASK_NAME]
+- **Branch:** [TASK_BRANCH]
+- **Target:** [TARGET_BRANCH]
+- **Worktree:** [WORKTREE_DIR]
 - **Complete with:** `/planning-with-files:complete`
 PLANEOF
 
-    # Create findings.md
-    cat > findings.md << 'FINDINGSEOF'
-# Findings & Decisions
-
-## Requirements
--
-
-## Research Findings
--
-
-## Technical Decisions
-| Decision | Rationale |
-|----------|-----------|
-
-## Issues Encountered
-| Issue | Resolution |
-|-------|------------|
-
-## Resources
--
-FINDINGSEOF
-
-    # Create progress.md
-    cat > progress.md << 'PROGRESSEOF'
-# Progress Log
-
-## Session: $(date +%Y-%m-%d)
-
-### Current Status
-- **Phase:** 1 - Requirements & Discovery
-- **Started:** $(date +%Y-%m-%d)
-- **Branch:** $TASK_BRANCH
-
-### Actions Taken
--
-
-### Test Results
-| Test | Expected | Actual | Status |
-|------|----------|--------|--------|
-
-### Errors
-| Error | Resolution |
-|-------|------------|
-PROGRESSEOF
-fi
-
-echo "Created planning files: task_plan.md, findings.md, progress.md"
+# Create findings.md and progress.md similarly in the worktree
 ```
 
-## Step 9: Display Summary
+## Step 10: List Active Worktrees
 
-Show the user what was created:
+Show the user all active worktrees:
+
+```bash
+echo "=== Active Worktrees ==="
+git worktree list
+```
+
+## Step 11: Display Summary and Instructions
 
 ```
 === Worktree Session Created ===
 
-Branch:       $TASK_BRANCH
-Target:       $TARGET_BRANCH
-Config File:  .planning-config.json
+IMPORTANT: Navigate to the worktree to work on this task
 
-Planning Files:
-  - task_plan.md
-  - findings.md
-  - progress.md
+cd [WORKTREE_DIR]
 
-Next Steps:
+Once in the worktree directory:
   1. Edit task_plan.md to define your task phases
-  2. Work on your task in this isolated branch
+  2. Work on your task in this isolated environment
   3. Use /planning-with-files:complete when done
 
-The planning files will be deleted and the branch merged when you complete the task.
+Multi-Task Usage:
+You can create multiple worktrees for parallel tasks:
+  /planning-with-files:worktree task-auth-fix
+  /planning-with-files:worktree task-refactor
+  /planning-with-files:worktree task-docs
+
+Each task works in its own directory without conflicts.
+
+To return to the main project:
+  cd [ROOT_DIR]
 ```
 
-## Step 10: Remind User
+## Directory Structure
 
-Remind the user:
-- Read the planning-with-files skill for the full workflow
-- Update task_plan.md as you progress through phases
-- Use `/planning-with-files:complete` to finish and merge
+After creating a worktree, your project structure looks like:
+
+```
+project/
+├── .git/
+├── .worktree/
+│   ├── task-auth-fix/          ← Worktree 1
+│   │   ├── .planning-config.json
+│   │   ├── task_plan.md
+│   │   ├── findings.md
+│   │   ├── progress.md
+│   │   └── (complete project copy)
+│   └── task-api-refactor/       ← Worktree 2 (can exist simultaneously)
+│       ├── .planning-config.json
+│       ├── task_plan.md
+│       ├── findings.md
+│       ├── progress.md
+│       └── (complete project copy)
+├── src/
+├── main.go
+└── ...                          ← Main directory (unchanged)
+```
+
+## Key Differences from Branch Mode
+
+| Feature | Branch Mode | Worktree Mode |
+|---------|-------------|---------------|
+| Directory | Same directory, switch branches | Separate directory per task |
+| Parallel tasks | No (must switch branches) | Yes (multiple directories) |
+| Isolation | Partial (same working files) | Complete (separate files) |
+| Main branch | Changes when switching | Stays on original branch |
+| Cleanup | Delete branch | Remove worktree + delete branch |
+
+## Usage Example
+
+```bash
+# Start task 1
+/planning-with-files:worktask fix-auth-bug
+cd .worktree/fix-auth-bug
+# ... work on auth bug ...
+
+# In another terminal, start task 2 (parallel!)
+/planning-with-files:worktree refactor-api
+cd .worktree/refactor-api
+# ... work on api refactor ...
+
+# Complete task 1 (from its directory)
+cd .worktree/fix-auth-bug
+/planning-with-files:complete
+
+# Complete task 2 (from its directory)
+cd .worktree/refactor-api
+/planning-with-files:complete
+```
 
 ---
 
-**Important:** After this command completes, the user is now in worktree mode with their task branch active. Continue with normal task execution following the planning-with-files workflow.
+**Important Reminders**:
+- Tell the user to `cd` into the worktree directory to work on the task
+- The main directory remains on its original branch
+- Multiple worktrees can exist simultaneously for parallel tasks
+- When done, use `/planning-with-files:complete` from **inside** the worktree directory
