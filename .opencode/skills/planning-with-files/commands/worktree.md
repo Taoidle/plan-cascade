@@ -109,6 +109,26 @@ echo "Created worktree: $WORKTREE_DIR"
 
 **Important**: This uses `git worktree add` which creates a real separate working directory. The main directory remains unchanged and on its original branch.
 
+## Step 7.5: Verify Worktree Creation (CRITICAL)
+
+CRITICAL: You MUST verify the worktree was created successfully before proceeding:
+
+```bash
+if [ ! -d "$WORKTREE_DIR" ]; then
+    echo "ERROR: Worktree directory was not created"
+    exit 1
+fi
+
+if [ ! -f "$WORKTREE_DIR/.planning-config.json" ]; then
+    echo "ERROR: Worktree config file was not created"
+    exit 1
+fi
+
+echo "✓ Worktree verified: $WORKTREE_DIR"
+```
+
+**DO NOT proceed to next steps unless verification passes.**
+
 ## Step 8: Create Planning Configuration in Worktree
 
 Save the worktree configuration **inside the worktree directory**:
@@ -208,16 +228,39 @@ echo "=== Active Worktrees ==="
 git worktree list
 ```
 
-## Step 11: Display Summary and Instructions
+## Step 11: Navigate to Worktree (REQUIRED)
+
+CRITICAL: You MUST execute the cd command to navigate to the worktree directory. You cannot work on this task from the main directory.
+
+Execute this command NOW:
+```bash
+cd "$WORKTREE_DIR"
+```
+
+**After executing cd, verify your location:**
+```bash
+pwd
+```
+
+**Expected output should be:** `$WORKTREE_DIR`
+
+**Only proceed to the next step if pwd shows the worktree directory.**
+
+If pwd does NOT show the worktree directory, you MUST:
+1. Stop and review why the cd command did not work
+2. Execute the cd command again
+3. Verify with pwd
+4. Do NOT proceed until you are in the correct directory
+
+## Step 12: Display Summary and Instructions
 
 ```
 === Worktree Session Created ===
 
-IMPORTANT: Navigate to the worktree to work on this task
+You are now in the worktree directory: [WORKTREE_DIR]
+Current branch: [TASK_BRANCH]
 
-cd [WORKTREE_DIR]
-
-Once in the worktree directory:
+From here you can:
   1. Edit task_plan.md to define your task phases
   2. Work on your task in this isolated environment
   3. Use /planning-with-files:complete when done

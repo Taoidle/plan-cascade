@@ -92,6 +92,19 @@ echo -e "${GREEN}Creating Git worktree...${NC}"
 git worktree add -b "$TASK_BRANCH" "$WORKTREE_DIR" "$TARGET_BRANCH"
 echo -e "${GREEN}Created worktree: $WORKTREE_DIR${NC}"
 
+# Step 5.5: Verify Worktree Creation (CRITICAL)
+echo ""
+echo -e "${YELLOW}Verifying worktree creation...${NC}"
+if [ ! -d "$WORKTREE_DIR" ]; then
+    echo -e "${RED}ERROR: Worktree directory was not created${NC}"
+    exit 1
+fi
+if [ ! -d "$WORKTREE_DIR/.git" ]; then
+    echo -e "${RED}ERROR: Worktree .git directory was not created${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Worktree directory verified${NC}"
+
 # Step 6: Create planning files in the worktree
 echo ""
 echo -e "${GREEN}Creating planning files in worktree...${NC}"
@@ -230,9 +243,13 @@ git worktree list
 echo ""
 echo -e "${GREEN}=== Worktree Session Created ===${NC}"
 echo ""
-echo -e "${YELLOW}IMPORTANT: Navigate to the worktree to work on this task${NC}"
+echo -e "${RED}CRITICAL: You MUST navigate to the worktree directory before working on this task${NC}"
 echo ""
-echo -e "${CYAN}cd $WORKTREE_DIR${NC}"
+echo -e "${CYAN}Execute this command NOW:${NC}"
+echo -e "${YELLOW}cd $WORKTREE_DIR${NC}"
+echo ""
+echo -e "${YELLOW}After executing cd, verify with: pwd${NC}"
+echo "Expected output should be the worktree path."
 echo ""
 echo "Once in the worktree directory:"
 echo "  1. Edit task_plan.md to define your task phases"

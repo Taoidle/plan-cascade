@@ -1,6 +1,6 @@
 ---
 name: planning-with-files
-version: "2.7.3"
+version: "2.7.4"
 description: Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring >5 tool calls. Now with automatic session recovery after /clear and optional Git worktree mode.
 user-invocable: true
 allowed-tools:
@@ -14,10 +14,42 @@ allowed-tools:
   - WebSearch
 hooks:
   PreToolUse:
+    # Location verification for worktree mode (Write/Edit operations only)
+    - matcher: "Write|Edit"
+      hooks:
+        - type: command
+          command: |
+            SCRIPT_DIR="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/planning-with-files}/scripts"
+            # Check for worktree config and verify location
+            if [ -f ".planning-config.json" ]; then
+              # Determine which verification script to use
+              if command -v pwsh &> /dev/null && [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OS" == "Windows_NT" ]]; then
+                pwsh -ExecutionPolicy Bypass -File "$SCRIPT_DIR/verify-location.ps1" 2>/dev/null || powershell -ExecutionPolicy Bypass -File "$SCRIPT_DIR/verify-location.ps1" 2>/dev/null || bash "$SCRIPT_DIR/verify-location.sh"
+              else
+                bash "$SCRIPT_DIR/verify-location.sh"
+              fi
+              # Exit code 1 means wrong location - block the operation
+              if [ $? -eq 1 ]; then
+                exit 1
+              fi
+            fi
+    # Show task_plan context for all operations (except in worktree mode for read/grep/glob)
     - matcher: "Write|Edit|Bash|Read|Glob|Grep"
       hooks:
         - type: command
-          command: "cat task_plan.md 2>/dev/null | head -30 || true"
+          command: |
+            # In worktree mode, silence read/grep/glob operations
+            if [ -f ".planning-config.json" ]; then
+              MODE=$(jq -r '.mode' .planning-config.json 2>/dev/null || echo "")
+              if [ "$MODE" = "worktree" ]; then
+                # Silent for read/grep/glob in worktree mode
+                case "$CLAUDE_TOOL_NAME" in
+                  Read|Glob|Grep) exit 0 ;;
+                esac
+              fi
+            fi
+            # Show task_plan for write/edit/bash or standard mode
+            cat task_plan.md 2>/dev/null | head -30 || true
   PostToolUse:
     - matcher: "Write|Edit"
       hooks:
