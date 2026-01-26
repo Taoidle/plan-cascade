@@ -1,12 +1,12 @@
 ---
-description: "Complete a worktree task. Verifies all phases are complete, ensures changes are committed, deletes planning files, merges to target branch, and removes worktree. Must be run from inside the worktree directory. Usage: /planning-with-files:complete [target-branch]"
+description: "Complete a worktree task. Verifies all phases are complete, commits code changes (excluding planning files), merges to target branch, and removes worktree. Must be run from inside the worktree directory. Usage: /planning-with-files:complete [target-branch]"
 ---
 
 # Planning with Files - Complete Worktree Task
 
 You are now completing a worktree task. This will:
 1. Verify all phases are complete
-2. **CRITICAL: Ensure all changes are committed**
+2. **CRITICAL: Commit code changes (planning files excluded)**
 3. Delete planning files from the worktree
 4. Navigate to the root directory
 5. Merge the task branch to target branch
@@ -75,23 +75,46 @@ Continue anyway? [y/N]:
 
 Wait for user confirmation before proceeding.
 
-## Step 5: CRITICAL - Check for Uncommitted Changes
+## Step 5: CRITICAL - Check for Uncommitted Code Changes
+
+**IMPORTANT**: Planning files are NOT included in the commit. We check only actual code changes.
 
 ```bash
-# Check if there are uncommitted changes
-if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+# Define planning files to exclude from commit
+PLANNING_FILES=(
+    "task_plan.md"
+    "findings.md"
+    "progress.md"
+    ".planning-config.json"
+)
+
+# Check if there are changes excluding planning files
+echo "Checking for code changes (excluding planning files)..."
+
+# Get all changes
+ALL_CHANGES=$(git status --short --untracked-files=all --porcelain 2>/dev/null || true)
+
+# Filter out planning files
+CODE_CHANGES="$ALL_CHANGES"
+for file in task_plan.md findings.md progress.md .planning-config.json; do
+    CODE_CHANGES=$(echo "$CODE_CHANGES" | grep -v "$file" || true)
+done
+
+if [ -n "$CODE_CHANGES" ]; then
     echo "=========================================="
-    echo "CRITICAL: Uncommitted changes detected!"
+    echo "Uncommitted CODE changes detected!"
     echo "=========================================="
     echo ""
-    echo "These changes will be LOST if not committed:"
-    git status --short
+    echo "Planning files (task_plan.md, findings.md, etc.) are excluded."
+    echo "These CODE changes will be LOST if not committed:"
     echo ""
-    echo "You MUST commit these changes before completing the task."
+    echo "$CODE_CHANGES"
+    echo ""
+    echo "You MUST commit these code changes before completing the task."
     echo ""
     echo "Options:"
-    echo "  1) Auto-commit changes with generated message"
-    echo "  2) Stash changes (for later)"
+    echo "  1) Auto-commit code changes with generated message"
+    echo "  2) Stash all changes (including planning files)"
     echo "  3) Cancel and handle manually"
     echo ""
     read -p "Choose [1/2/3]: " choice
@@ -99,7 +122,7 @@ if ! git diff-index --quiet HEAD -- 2>/dev/null; then
     case "$choice" in
         1)
             echo ""
-            echo "Committing changes..."
+            echo "Committing code changes (planning files excluded)..."
             COMMIT_MSG="Complete task: $TASK_NAME
 
 Branch: $TASK_BRANCH
@@ -107,13 +130,18 @@ Target: $TARGET_FINAL
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 
+            # Add all files except planning files
             git add -A
-            git commit -m "$COMMIT_MSG"
-            echo "✓ Changes committed"
+            # Unstage planning files
+            git reset HEAD task_plan.md findings.md progress.md .planning-config.json 2>/dev/null || true
+            # Commit the rest
+            git commit -m "$COMMIT_MSG" 2>/dev/null || echo "Note: Only planning files were changed"
+
+            echo "✓ Code changes committed (planning files excluded)"
             ;;
         2)
             echo ""
-            echo "Stashing changes..."
+            echo "Stashing all changes..."
             git stash push -m "WIP for $TASK_NAME"
             echo "✓ Changes stashed"
             echo ""
@@ -128,10 +156,11 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
             ;;
         3)
             echo ""
-            echo "Cancelled. Please commit your changes manually:"
-            echo "  git add -A"
+            echo "Cancelled. Please commit your code changes manually:"
+            echo "  git add <your files>"
             echo "  git commit -m 'Your message here'"
             echo ""
+            echo "Planning files will be excluded automatically."
             echo "Then run this command again."
             exit 0
             ;;
@@ -141,37 +170,13 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
             ;;
     esac
 else
-    echo "✓ No uncommitted changes"
+    echo "✓ No uncommitted code changes"
 fi
 ```
 
-## Step 6: Show What Will Happen
+## Step 6: Delete Planning Files
 
-Before making any changes, show the user what will be done:
-
-```
-=== Worktree Completion Summary ===
-
-Task: $TASK_NAME
-Branch: $TASK_BRANCH
-Target: $TARGET_FINAL
-
-Changes to merge:
-{Show git log --oneline -3 or git diff --stat HEAD~1}
-
-This will:
-  1. Delete planning files from worktree
-  2. Navigate to root directory
-  3. Merge $TASK_BRANCH into $TARGET_FINAL
-  4. Delete this worktree
-  5. Delete the task branch
-
-Proceed? [Y/n]:
-```
-
-Wait for user confirmation.
-
-## Step 7: Delete Planning Files from Worktree
+Now that code changes are handled, delete planning files:
 
 ```bash
 echo "Deleting planning files..."
@@ -187,6 +192,31 @@ if [ -f ".planning-config.json" ]; then
 fi
 echo "✓ Planning files deleted"
 ```
+
+## Step 7: Show What Will Happen
+
+Before making any changes, show the user what will be done:
+
+```
+=== Worktree Completion Summary ===
+
+Task: $TASK_NAME
+Branch: $TASK_BRANCH
+Target: $TARGET_FINAL
+
+Latest commits:
+{Show git log --oneline -3}
+
+This will:
+  1. Navigate to root directory
+  2. Merge $TASK_BRANCH into $TARGET_FINAL
+  3. Delete this worktree
+  4. Delete the task branch
+
+Proceed? [Y/n]:
+```
+
+Wait for user confirmation.
 
 ## Step 8: Navigate to Root Directory
 
@@ -269,7 +299,7 @@ fi
 Task: $TASK_NAME
 Branch: $TASK_BRANCH merged into $TARGET_FINAL
 
-✓ All changes committed
+✓ Code changes committed (planning files excluded)
 ✓ Planning files deleted
 ✓ Worktree removed
 ✓ Task branch deleted
@@ -288,8 +318,9 @@ Next:
 
 ## Safety Features
 
-- **Forces commit**: Won't proceed if there are uncommitted changes
-- **Auto-commit option**: Can automatically commit with generated message
+- **Planning files excluded**: task_plan.md, findings.md, progress.md, .planning-config.json are never committed
+- **Only code changes**: Actual code changes are detected and committed
+- **Auto-commit option**: Automatically commits code with generated message
 - **Stash option**: Can stash changes if needed
 - **Manual cancel**: Always allows manual intervention
 - **Conflict handling**: Provides clear instructions for merge conflicts

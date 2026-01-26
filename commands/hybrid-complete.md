@@ -1,5 +1,5 @@
 ---
-description: "Complete Hybrid Ralph task in worktree, verify all stories complete, commit changes, merge to target branch, and cleanup worktree directory. Ensures all changes are committed before cleanup."
+description: "Complete Hybrid Ralph task in worktree, verify all stories complete, commit code changes (excluding planning files), merge to target branch, and cleanup worktree directory."
 ---
 
 # Hybrid Ralph - Complete Worktree Task
@@ -63,23 +63,56 @@ if [ "$COMPLETE_STORIES" -lt "$TOTAL_STORIES" ]; then
 fi
 ```
 
-## Step 4: CRITICAL - Check for Uncommitted Changes
+## Step 4: CRITICAL - Check for Uncommitted Code Changes
+
+**IMPORTANT**: Planning files are NOT included in the commit. We check only actual code changes.
 
 ```bash
-# Check if there are uncommitted changes
-if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+# Define planning files to exclude from commit
+PLANNING_FILES=(
+    "prd.json"
+    "findings.md"
+    "progress.txt"
+    ".planning-config.json"
+    ".agent-outputs/"
+)
+
+# Check if there are changes excluding planning files
+echo "Checking for code changes (excluding planning files)..."
+
+# Create a temporary gitignore to exclude planning files
+TEMP_GITIGNORE=".temp_planning_gitignore"
+for pf in "${PLANNING_FILES[@]}"; do
+    echo "/$pf" >> "$TEMP_GITIGNORE"
+done
+
+# Check status with planning files excluded
+CHANGES=$(git status --short --ignored --untracked-files=all --porcelain 2>/dev/null | grep -v "^!!" || true)
+
+# Clean up temp gitignore
+rm -f "$TEMP_GITIGNORE"
+
+# Filter out planning files from the status
+CODE_CHANGES=""
+for file in prd.json findings.md progress.txt .planning-config.json .agent-outputs; do
+    CHANGES=$(echo "$CHANGES" | grep -v "$file" || true)
+done
+
+if [ -n "$CHANGES" ]; then
     echo "=========================================="
-    echo "CRITICAL: Uncommitted changes detected!"
+    echo "Uncommitted CODE changes detected!"
     echo "=========================================="
     echo ""
-    echo "These changes will be LOST if not committed:"
-    git status --short
+    echo "Planning files (prd.json, findings.md, etc.) are excluded."
+    echo "These CODE changes will be LOST if not committed:"
     echo ""
-    echo "You MUST commit these changes before completing the task."
+    echo "$CHANGES"
+    echo ""
+    echo "You MUST commit these code changes before completing the task."
     echo ""
     echo "Options:"
-    echo "  1) Auto-commit changes with generated message"
-    echo "  2) Stash changes (for later)"
+    echo "  1) Auto-commit code changes with generated message"
+    echo "  2) Stash all changes (including planning files)"
     echo "  3) Cancel and handle manually"
     echo ""
     read -p "Choose [1/2/3]: " choice
@@ -87,7 +120,7 @@ if ! git diff-index --quiet HEAD -- 2>/dev/null; then
     case "$choice" in
         1)
             echo ""
-            echo "Committing changes..."
+            echo "Committing code changes (planning files excluded)..."
             COMMIT_MSG="Complete hybrid task: $TASK_NAME
 
 Stories completed: $COMPLETE_STORIES/$TOTAL_STORIES
@@ -96,13 +129,19 @@ Target: $TARGET_FINAL
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 
+            # Add all files except planning files
             git add -A
-            git commit -m "$COMMIT_MSG"
-            echo "✓ Changes committed"
+            # Unstage planning files
+            git reset HEAD prd.json findings.md progress.txt .planning-config.json 2>/dev/null || true
+            git reset HEAD .agent-outputs/ 2>/dev/null || true
+            # Commit the rest
+            git commit -m "$COMMIT_MSG" 2>/dev/null || echo "Note: Only planning files were changed"
+
+            echo "✓ Code changes committed (planning files excluded)"
             ;;
         2)
             echo ""
-            echo "Stashing changes..."
+            echo "Stashing all changes..."
             git stash push -m "WIP for $TASK_NAME"
             echo "✓ Changes stashed"
             echo ""
@@ -117,10 +156,11 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
             ;;
         3)
             echo ""
-            echo "Cancelled. Please commit your changes manually:"
-            echo "  git add -A"
+            echo "Cancelled. Please commit your code changes manually:"
+            echo "  git add <your files>"
             echo "  git commit -m 'Your message here'"
             echo ""
+            echo "Planning files will be excluded automatically."
             echo "Then run this command again."
             exit 0
             ;;
@@ -130,11 +170,22 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
             ;;
     esac
 else
-    echo "✓ No uncommitted changes"
+    echo "✓ No uncommitted code changes"
 fi
 ```
 
-## Step 5: Show Completion Summary
+## Step 5: Delete Planning Files
+
+Now that code changes are handled, delete planning files:
+
+```bash
+echo "Deleting planning files..."
+rm -f prd.json findings.md progress.txt .planning-config.json
+rm -rf .agent-outputs
+echo "✓ Planning files deleted"
+```
+
+## Step 6: Show Completion Summary
 
 ```
 === COMPLETION SUMMARY ===
@@ -146,22 +197,13 @@ Target: $TARGET_FINAL
 Stories: $TOTAL_STORIES total
   All complete ✓
 
-Changes to merge:
-{Show git diff --stat HEAD~1 HEAD or git log -1 --oneline}
+Latest commits:
+{Show git log --oneline -3}
 
 Ready to merge to $TARGET_FINAL...
 ```
 
 Wait for user confirmation.
-
-## Step 6: Delete Planning Files
-
-```bash
-echo "Deleting planning files..."
-rm -f prd.json findings.md progress.txt .planning-config.json
-rm -rf .agent-outputs
-echo "Planning files deleted"
-```
 
 ## Step 7: Navigate to Root Directory
 
@@ -231,7 +273,8 @@ echo "✓ Task branch deleted"
 
 ✓ Task: $TASK_NAME
 ✓ Stories: $COMPLETE_STORIES/$TOTAL_STORIES completed
-✓ All changes committed
+✓ Code changes committed (planning files excluded)
+✓ Planning files deleted
 ✓ Merged to: $TARGET_FINAL
 ✓ Worktree removed
 ✓ Task branch deleted
@@ -247,8 +290,9 @@ Next:
 
 ## Safety Features
 
-- **Forces commit**: Won't proceed if there are uncommitted changes
-- **Auto-commit option**: Can automatically commit with generated message
+- **Planning files excluded**: prd.json, findings.md, progress.txt, .planning-config.json, .agent-outputs/ are never committed
+- **Only code changes**: Actual code changes are detected and committed
+- **Auto-commit option**: Automatically commits code with generated message
 - **Stash option**: Can stash changes if needed
 - **Manual cancel**: Always allows manual intervention
 - **Conflict handling**: Provides clear instructions for merge conflicts
