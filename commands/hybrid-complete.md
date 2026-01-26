@@ -1,31 +1,121 @@
 ---
-description: "Complete Hybrid Ralph task in worktree, verify all stories complete, commit code changes (excluding planning files), merge to target branch, and cleanup worktree directory."
+description: "Complete Hybrid Ralph task in worktree, verify all stories complete, commit code changes (excluding planning files), merge to target branch, and cleanup worktree directory. Can be run from any directory."
 ---
 
 # Hybrid Ralph - Complete Worktree Task
 
 You are completing a Hybrid Ralph task in a worktree and merging it to the target branch.
 
-## Step 1: Verify Worktree Mode
+## Step 1: Detect Current Location
 
-Check if in worktree mode:
+Check if we're in a worktree or the root directory:
 
 ```bash
-if [ ! -f ".planning-config.json" ]; then
-    echo "ERROR: Not in worktree mode. .planning-config.json not found."
-    echo "This command must be run from inside a worktree directory."
-    echo "Use /planning-with-files:complete for standard mode instead."
-    exit 1
-fi
+if [ -f ".planning-config.json" ]; then
+    # We're in a worktree directory
+    echo "Currently in worktree directory: $(pwd)"
+    IN_WORKTREE=true
+else
+    # We're not in a worktree, check if there are any worktrees
+    IN_WORKTREE=false
 
-MODE=$(jq -r '.mode' .planning-config.json 2>/dev/null || echo "")
+    # Check for worktrees
+    WORKTREES=$(git worktree list 2>/dev/null | grep -v "\bare$" | wc -l)
+
+    if [ "$WORKTREES" -eq 0 ]; then
+        echo "ERROR: No worktrees found."
+        echo "This command requires an existing hybrid worktree."
+        echo ""
+        echo "Create one first with:"
+        echo "  /planning-with-files:hybrid-worktree <task-name> <branch> <description>"
+        exit 1
+    fi
+
+    echo "Not in a worktree directory. Found $WORKTREES worktree(s):"
+    echo ""
+    git worktree list
+    echo ""
+
+    # Find all hybrid worktrees
+    echo "Scanning for hybrid worktrees..."
+    HYBRID_WORKTREES=()
+
+    while IFS= read -r line; do
+        worktree_path=$(echo "$line" | awk '{print $1}')
+        worktree_branch=$(echo "$line" | awk '{print $2}')
+
+        # Check if this is a hybrid worktree
+        if [ -f "$worktree_path/.planning-config.json" ]; then
+            mode=$(jq -r '.mode // empty' "$worktree_path/.planning-config.json" 2>/dev/null)
+            if [ "$mode" = "hybrid" ]; then
+                task_name=$(jq -r '.task_name // empty' "$worktree_path/.planning-config.json" 2>/dev/null)
+                HYBRID_WORKTREES+=("$worktree_path|$task_name|$worktree_branch")
+            fi
+        fi
+    done < <(git worktree list 2>/dev/null | grep -v "\bare$")
+
+    if [ ${#HYBRID_WORKTREES[@]} -eq 0 ]; then
+        echo "ERROR: No hybrid worktrees found."
+        echo "Found worktrees but none are in hybrid mode."
+        exit 1
+    fi
+
+    echo "Found ${#HYBRID_WORKTREES[@]} hybrid worktree(s):"
+    echo ""
+
+    # Display options
+    for i in "${!HYBRID_WORKTREES[@]}"; do
+        IFS='|' read -r path name branch <<< "$i"
+        echo "  [$((i+1))] $name"
+        echo "      Path: $path"
+        echo "      Branch: $branch"
+        echo ""
+    done
+
+    # Ask user to select
+    echo "Which worktree would you like to complete?"
+    read -p "Enter number (or 0 to cancel): " selection
+
+    if [ "$selection" = "0" ]; then
+        echo "Cancelled."
+        exit 0
+    fi
+
+    if [ "$selection" -lt 1 ] || [ "$selection" -gt ${#HYBRID_WORKTREES[@]} ]; then
+        echo "Invalid selection."
+        exit 1
+    fi
+
+    # Get the selected worktree
+    selected="${HYBRID_WORKTREES[$((selection-1))]}"
+    IFS='|' read -r WORKTREE_PATH TASK_NAME TASK_BRANCH <<< "$selected"
+
+    echo ""
+    echo "Selected: $TASK_NAME"
+    echo "Navigating to worktree: $WORKTREE_PATH"
+
+    # Change to worktree directory
+    cd "$WORKTREE_PATH" || {
+        echo "ERROR: Failed to navigate to worktree: $WORKTREE_PATH"
+        exit 1
+    }
+
+    echo "✓ Now in worktree: $(pwd)"
+    IN_WORKTREE=true
+fi
+```
+
+## Step 2: Verify Worktree Mode (if in worktree)
+
+```bash
+MODE=$(jq -r '.mode // empty' .planning-config.json 2>/dev/null || echo "")
 if [ "$MODE" != "hybrid" ]; then
     echo "ERROR: Not in hybrid worktree mode."
     exit 1
 fi
 ```
 
-## Step 2: Read Planning Config
+## Step 3: Read Planning Config
 
 ```bash
 TASK_NAME=$(jq -r '.task_name' .planning-config.json)
@@ -39,7 +129,7 @@ OVERRIDE_TARGET="{{args|first arg or empty}}"
 TARGET_FINAL="${OVERRIDE_TARGET:-$TARGET_BRANCH}"
 ```
 
-## Step 3: Verify All Stories Complete
+## Step 4: Verify All Stories Complete
 
 Check if all stories in `prd.json` are marked complete in `progress.txt`:
 
@@ -63,7 +153,7 @@ if [ "$COMPLETE_STORIES" -lt "$TOTAL_STORIES" ]; then
 fi
 ```
 
-## Step 4: CRITICAL - Check for Uncommitted Code Changes
+## Step 5: CRITICAL - Check for Uncommitted Code Changes
 
 **IMPORTANT**: Planning files are NOT included in the commit. We check only actual code changes.
 
@@ -80,25 +170,16 @@ PLANNING_FILES=(
 # Check if there are changes excluding planning files
 echo "Checking for code changes (excluding planning files)..."
 
-# Create a temporary gitignore to exclude planning files
-TEMP_GITIGNORE=".temp_planning_gitignore"
-for pf in "${PLANNING_FILES[@]}"; do
-    echo "/$pf" >> "$TEMP_GITIGNORE"
-done
+# Get all changes
+ALL_CHANGES=$(git status --short --untracked-files=all --porcelain 2>/dev/null || true)
 
-# Check status with planning files excluded
-CHANGES=$(git status --short --ignored --untracked-files=all --porcelain 2>/dev/null | grep -v "^!!" || true)
-
-# Clean up temp gitignore
-rm -f "$TEMP_GITIGNORE"
-
-# Filter out planning files from the status
-CODE_CHANGES=""
+# Filter out planning files
+CODE_CHANGES="$ALL_CHANGES"
 for file in prd.json findings.md progress.txt .planning-config.json .agent-outputs; do
-    CHANGES=$(echo "$CHANGES" | grep -v "$file" || true)
+    CODE_CHANGES=$(echo "$CODE_CHANGES" | grep -v "$file" || true)
 done
 
-if [ -n "$CHANGES" ]; then
+if [ -n "$CODE_CHANGES" ]; then
     echo "=========================================="
     echo "Uncommitted CODE changes detected!"
     echo "=========================================="
@@ -106,7 +187,7 @@ if [ -n "$CHANGES" ]; then
     echo "Planning files (prd.json, findings.md, etc.) are excluded."
     echo "These CODE changes will be LOST if not committed:"
     echo ""
-    echo "$CHANGES"
+    echo "$CODE_CHANGES"
     echo ""
     echo "You MUST commit these code changes before completing the task."
     echo ""
@@ -174,7 +255,7 @@ else
 fi
 ```
 
-## Step 5: Delete Planning Files
+## Step 6: Delete Planning Files
 
 Now that code changes are handled, delete planning files:
 
@@ -185,7 +266,7 @@ rm -rf .agent-outputs
 echo "✓ Planning files deleted"
 ```
 
-## Step 6: Show Completion Summary
+## Step 7: Show Completion Summary
 
 ```
 === COMPLETION SUMMARY ===
@@ -205,14 +286,15 @@ Ready to merge to $TARGET_FINAL...
 
 Wait for user confirmation.
 
-## Step 7: Navigate to Root Directory
+## Step 8: Navigate to Root Directory
 
 ```bash
-echo "Navigating to root directory..."
+echo "Navigating to root directory: $ROOT_DIR"
 cd "$ROOT_DIR"
+echo "✓ Now in: $(pwd)"
 ```
 
-## Step 8: Switch to Target Branch
+## Step 9: Switch to Target Branch
 
 ```bash
 echo "Switching to target branch: $TARGET_FINAL"
@@ -225,7 +307,7 @@ fi
 git checkout "$TARGET_FINAL" || git checkout -b "$TARGET_FINAL"
 ```
 
-## Step 9: Merge Task Branch
+## Step 10: Merge Task Branch
 
 ```bash
 echo "Merging $TASK_BRANCH into $TARGET_FINAL..."
@@ -250,7 +332,7 @@ else
 fi
 ```
 
-## Step 10: Remove Worktree
+## Step 11: Remove Worktree
 
 ```bash
 echo "Removing worktree: $WORKTREE_DIR"
@@ -258,7 +340,7 @@ git worktree remove "$WORKTREE_DIR" 2>/dev/null || rm -rf "$WORKTREE_DIR"
 echo "✓ Worktree removed"
 ```
 
-## Step 11: Delete Task Branch
+## Step 12: Delete Task Branch
 
 ```bash
 echo "Deleting task branch: $TASK_BRANCH"
@@ -266,7 +348,7 @@ git branch -d "$TASK_BRANCH" 2>/dev/null || echo "Warning: Could not delete bran
 echo "✓ Task branch deleted"
 ```
 
-## Step 12: Show Final Summary
+## Step 13: Show Final Summary
 
 ```
 === TASK COMPLETE ===
@@ -288,8 +370,25 @@ Next:
   - Start a new task: /planning-with-files:hybrid-worktree
 ```
 
+## Usage Examples
+
+```bash
+# Option 1: Run from worktree directory (recommended)
+cd .worktree/feature-auth
+/planning-with-files:hybrid-complete
+
+# Option 2: Run from root directory (auto-detects worktree)
+/planning-with-files:hybrid-complete
+# → Will show list of worktrees to select from
+
+# Option 3: Specify target branch override
+/planning-with-files:hybrid-complete develop
+```
+
 ## Safety Features
 
+- **Smart directory detection**: Works from any directory
+- **Auto worktree detection**: Lists all hybrid worktrees for selection
 - **Planning files excluded**: prd.json, findings.md, progress.txt, .planning-config.json, .agent-outputs/ are never committed
 - **Only code changes**: Actual code changes are detected and committed
 - **Auto-commit option**: Automatically commits code with generated message
