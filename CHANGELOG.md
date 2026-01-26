@@ -2,6 +2,78 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.5] - 2026-01-26
+
+### Added
+
+- **Hybrid Ralph + Planning-with-Files** (NEW)
+  - PRD-based parallel story execution with dependency resolution
+  - Auto-generates PRDs from task descriptions using `/hybrid:auto`
+  - Manages parallel execution of user stories with Claude Code Task tool
+  - Context-filtered agents receive only relevant information per story
+  - Complete orchestration system for multi-story development
+
+### New Skills
+
+- **`hybrid-ralph`** - Combines Ralph's PRD format with Planning-with-Files' structured approach
+  - `/hybrid:auto <description>` - Generate PRD from task description
+  - `/hybrid:manual [path]` - Load existing PRD file
+  - `/hybrid:worktree <name> [branch] [desc]` - Create worktree + PRD in one command
+  - `/approve` - Approve PRD and begin execution
+  - `/edit` - Edit PRD in default editor
+  - `/status` - Show execution status of all stories
+  - `/show-dependencies` - Display dependency graph and analysis
+  - `/hybrid:complete [branch]` - Complete worktree task and merge
+
+### New Core Modules
+
+- `context_filter.py` - Filter findings by tags/dependencies for specific stories
+- `state_manager.py` - Thread-safe file operations with platform-specific locking
+- `prd_generator.py` - Generate PRDs from descriptions, manage story dependencies
+- `orchestrator.py` - Manage parallel execution of stories with batch coordination
+
+### New Scripts
+
+- `prd-validate.py` - Validate PRD structure and display review
+- `status.py` - Monitor execution status of all stories
+- `show-dependencies.py` - Visualize dependency graph with analysis
+- `agent-exec.py` - Helper for agents executing individual stories
+- `prd-generate.py` - Generate PRD template from description
+- `hybrid-worktree-init.sh` / `.ps1` - Initialize worktree + hybrid mode
+- `hybrid-worktree-complete.sh` / `.ps1` - Complete worktree task and merge
+
+### New Templates
+
+- `templates/prd_review.md` - PRD review display format
+- `templates/prd.json.example` - Complete PRD structure example
+
+### Key Features
+
+- **Automatic PRD Generation**: Describe your task, get structured user stories
+- **Dependency Resolution**: Stories automatically organized into execution batches
+- **Parallel Execution**: Independent stories run simultaneously
+- **Context Filtering**: Each agent gets only relevant context
+- **Progress Tracking**: Real-time status monitoring with `/status`
+- **File Locking**: Concurrent access safety across platforms (fcntl/msvcrt)
+- **Worktree Integration**: `/hybrid:worktree` combines Git worktree with PRD mode for isolated parallel tasks
+
+### Changed
+
+- Updated plugin version to 2.7.5
+- Updated skill version to 2.7.5
+- Added "prd", "ralph", "hybrid", "orchestration", "story-execution" keywords
+- Updated plugin.json with skills metadata
+- Updated README.md with hybrid-ralph documentation
+
+### Architecture
+
+Hybrid Ralph combines three approaches:
+- **Ralph**: PRD format (prd.json), progress.txt pattern, small task philosophy
+- **Planning-with-Files**: 3-file planning pattern, Git Worktree support
+- **Claude Code Native**: Task tool with subagents for parallel execution
+
+---
+
 ## [2.7.3] - 2026-01-23
 
 ### Changed

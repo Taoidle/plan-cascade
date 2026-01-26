@@ -18,7 +18,7 @@ A Claude Code plugin that transforms your workflow to use persistent markdown fi
 [![Cursor Skills](https://img.shields.io/badge/Cursor-Skills-purple)](https://docs.cursor.com/context/skills)
 [![Kilocode Skills](https://img.shields.io/badge/Kilocode-Skills-orange)](https://kilo.ai/docs/agent-behavior/skills)
 [![Gemini CLI](https://img.shields.io/badge/Gemini%20CLI-Skills-4285F4)](https://geminicli.com/docs/cli/skills/)
-[![Version](https://img.shields.io/badge/version-2.7.1-brightgreen)](https://github.com/OthmanAdi/planning-with-files/releases)
+[![Version](https://img.shields.io/badge/version-2.7.5-brightgreen)](https://github.com/OthmanAdi/planning-with-files/releases)
 [![SkillCheck Validated](https://img.shields.io/badge/SkillCheck-Validated-4c1)](https://getskillcheck.com)
 
 ## Quick Install
@@ -84,8 +84,9 @@ See [docs/installation.md](docs/installation.md) for all installation methods.
 
 | Version | Features | Install |
 |---------|----------|---------|
+| **v2.7.5** (current) | Hybrid Ralph: PRD-based parallel story execution | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.2** | Worktree mode support | `claude plugins install OthmanAdi/planning-with-files` |
-| **v2.7.1** (current) | Dynamic Python detection fix | `claude plugins install OthmanAdi/planning-with-files` |
+| **v2.7.1** | Dynamic Python detection fix | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.0** | Gemini CLI support | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
 | **v2.6.0** | Start command (`/planning-with-files:start`), path resolution fix | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
 | **v2.5.0** | Fixed autocomplete - SKILL.md matches Anthropic format | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
@@ -149,6 +150,195 @@ Once installed, Claude will automatically:
 Or invoke manually with `/planning-with-files:start` (or `/planning-with-files` if you copied skills).
 
 See [docs/quickstart.md](docs/quickstart.md) for the full 5-step guide.
+
+## Hybrid Ralph: PRD-Based Parallel Story Execution (NEW in v2.7.5)
+
+A new skill that combines Ralph's PRD format with Planning-with-Files' structured approach. Auto-generates PRDs from task descriptions and manages parallel story execution with dependency resolution.
+
+### Quick Start
+
+Generate a PRD from your task description:
+
+```
+/hybrid:auto Implement a user authentication system with login, registration, and password reset
+```
+
+This will:
+1. Analyze your task and generate a structured PRD
+2. Break it into user stories with priorities and dependencies
+3. Show the PRD for your review
+4. Wait for approval before executing
+
+### Key Features
+
+- **Automatic PRD Generation**: Describe your task, get structured user stories
+- **Dependency Resolution**: Stories automatically organized into execution batches
+- **Parallel Execution**: Independent stories run simultaneously using background Task agents
+- **Context Filtering**: Each agent receives only relevant context for their story
+- **Progress Tracking**: Real-time status monitoring with `/status`
+- **Visual Dependency Graph**: See story relationships with `/show-dependencies`
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/hybrid:auto <description>` | Generate PRD from task description |
+| `/hybrid:manual [path]` | Load existing PRD file |
+| `/hybrid:worktree <name> [branch] [desc]` | Create worktree + PRD (isolated parallel tasks) |
+| `/approve` | Approve PRD and begin execution |
+| `/edit` | Edit PRD in your default editor |
+| `/status` | Show execution status of all stories |
+| `/show-dependencies` | Display dependency graph |
+| `/hybrid:complete [branch]` | Complete worktree task and merge |
+
+### How It Works
+
+1. **PRD Creation**: Either auto-generate from description or load existing PRD
+2. **Review**: Review the generated stories, dependencies, and execution plan
+3. **Approval**: Approve to start parallel execution
+4. **Batch Execution**: Stories execute in parallel batches based on dependencies
+5. **Monitoring**: Track progress with `/status`
+
+### Worktree + Hybrid Mode (Isolated Parallel Tasks)
+
+For multi-task parallel development with complete isolation:
+
+```
+# Create worktree + PRD in one command
+/hybrid:worktree feature-auth main "Implement user authentication"
+
+# This automatically:
+# 1. Creates .worktree/feature-auth/ directory
+# 2. Creates task branch (task-YYYYMMDD-HHMM)
+# 3. Generates PRD from description
+# 4. Initializes planning files
+
+# Work in the isolated environment
+cd .worktree/feature-auth
+/approve
+
+# Complete and merge when done
+/hybrid:complete main
+```
+
+**Advantages of Worktree + Hybrid:**
+- Complete branch isolation
+- Main directory untouched
+- Multiple parallel tasks possible
+- Automatic merge on completion
+- Easy to discard if needed
+
+### Example Workflow
+
+**Standard Mode (Single Task):**
+```
+# 1. Generate PRD
+/hybrid:auto Build a REST API with user CRUD operations
+
+# 2. Review the output (shows stories, dependencies, execution plan)
+
+# 3. Approve to start
+/approve
+
+# 4. Monitor progress
+/status
+
+# 5. Check dependencies
+/show-dependencies
+```
+
+**Worktree Mode (Multiple Parallel Tasks):**
+```
+# Terminal 1: Start authentication feature
+/hybrid:worktree feature-auth main "Implement user auth"
+cd .worktree/feature-auth
+/approve
+
+# Terminal 2: Start API refactoring (parallel!)
+/hybrid:worktree refactor-api main "Refactor API endpoints"
+cd .worktree/refactor-api
+/approve
+
+# Each worktree has its own branch, PRD, and execution context
+# Complete when done:
+cd .worktree/feature-auth
+/hybrid:complete main
+```
+
+### File Structure
+
+```
+project-root/
+├── prd.json              # Product Requirements Document
+├── findings.md           # Research findings (tagged by story)
+├── progress.txt          # Progress tracking
+└── .agent-outputs/       # Individual agent logs
+```
+
+### PRD Format
+
+The `prd.json` contains:
+- **Goal**: One-sentence project objective
+- **Objectives**: List of specific objectives
+- **Stories**: User stories with:
+  - ID, title, description
+  - Priority (high/medium/low)
+  - Dependencies on other stories
+  - Acceptance criteria
+  - Context size estimate
+  - Tags for categorization
+
+### Parallel Execution Model
+
+Stories are organized into batches:
+- **Batch 1**: Stories with no dependencies (run in parallel)
+- **Batch 2+**: Stories whose dependencies are complete
+
+Example:
+```
+Batch 1 (Parallel):
+  - story-001: Design database schema
+  - story-002: Design API endpoints
+
+Batch 2 (After story-001 complete):
+  - story-003: Implement database schema
+
+Batch 3 (After story-002, story-003 complete):
+  - story-004: Implement API endpoints
+```
+
+### When to Use Hybrid Ralph
+
+**Use for:**
+- Multi-story projects with clear dependencies
+- Tasks that can be broken into independent units
+- Projects requiring parallel execution
+- Complex features with multiple components
+
+**Use Worktree + Hybrid for:**
+- Multiple parallel tasks requiring isolation
+- Features that need separate branches
+- Team collaboration on different features
+- Experimental work you might discard
+
+**Stick to standard planning-with-files for:**
+- Single-phase tasks
+- Simple implementations
+- Quick fixes and tweaks
+
+### Integration with Standard Mode
+
+Hybrid Ralph integrates seamlessly with planning-with-files:
+- Can be used alongside `task_plan.md`, `findings.md`, `progress.md`
+- Compatible with worktree mode for isolated parallel tasks
+- Uses the same session recovery mechanism
+
+### See Also
+
+- [CHANGELOG.md](CHANGELOG.md#275---2026-01-26) - Detailed v2.7.5 release notes
+- `skills/hybrid-ralph/SKILL.md` - Complete skill documentation
+
+---
 
 ## Session Recovery (NEW in v2.2.0)
 
@@ -215,21 +405,46 @@ planning-with-files/
 │   ├── kilocode.md
 │   ├── codex.md
 │   └── opencode.md
-├── planning-with-files/     # Plugin skill folder
-│   ├── SKILL.md
-│   ├── templates/
-│   └── scripts/
-├── skills/                  # Legacy skill folder
-│   └── planning-with-files/
+├── skills/                  # Skill folders
+│   ├── planning-with-files/ # Main planning skill
+│   │   ├── SKILL.md
+│   │   ├── examples.md
+│   │   ├── reference.md
+│   │   ├── templates/
+│   │   └── scripts/
+│   │       ├── init-session.sh
+│   │       ├── check-complete.sh
+│   │       ├── init-session.ps1   # Windows PowerShell
+│   │       └── check-complete.ps1 # Windows PowerShell
+│   └── hybrid-ralph/        # NEW: Hybrid Ralph skill (v2.7.5)
 │       ├── SKILL.md
-│       ├── examples.md
-│       ├── reference.md
-│       ├── templates/
-│       └── scripts/
-│           ├── init-session.sh
-│           ├── check-complete.sh
-│           ├── init-session.ps1   # Windows PowerShell
-│           └── check-complete.ps1 # Windows PowerShell
+│       ├── commands/        # Skill commands
+│       │   ├── auto.md
+│       │   ├── manual.md
+│       │   ├── worktree.md
+│       │   ├── complete.md
+│       │   ├── approve.md
+│       │   ├── edit.md
+│       │   ├── status.md
+│       │   └── show-dependencies.md
+│       ├── core/            # Python modules
+│       │   ├── context_filter.py
+│       │   ├── state_manager.py
+│       │   ├── prd_generator.py
+│       │   └── orchestrator.py
+│       ├── scripts/         # Helper scripts
+│       │   ├── prd-validate.py
+│       │   ├── status.py
+│       │   ├── show-dependencies.py
+│       │   ├── agent-exec.py
+│       │   ├── prd-generate.py
+│       │   ├── hybrid-worktree-init.sh
+│       │   ├── hybrid-worktree-init.ps1
+│       │   ├── hybrid-worktree-complete.sh
+│       │   └── hybrid-worktree-complete.ps1
+│       └── templates/       # PRD templates
+│           ├── prd_review.md
+│           └── prd.json.example
 ├── .gemini/                 # Gemini CLI skills
 │   └── skills/
 │       └── planning-with-files/

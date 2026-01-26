@@ -1,0 +1,407 @@
+#!/usr/bin/env python3
+"""
+Shared State Manager for Hybrid Ralph + Planning-with-Files
+
+Provides thread-safe file operations with platform-specific locking.
+Handles prd.json, findings.md, and progress.txt with concurrent access safety.
+"""
+
+import json
+import os
+import sys
+import time
+from pathlib import Path
+from typing import Optional, Dict, Any, List
+
+# Platform-specific locking imports
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
+
+try:
+    import msvcrt
+    HAS_MSVCRT = True
+except ImportError:
+    HAS_MSVCRT = False
+
+
+class FileLock:
+    """Platform-independent file locking."""
+
+    def __init__(self, lock_file: Path, timeout: float = 30.0):
+        """
+        Initialize a file lock.
+
+        Args:
+            lock_file: Path to the lock file
+            timeout: Maximum time to wait for lock (seconds)
+        """
+        self.lock_file = lock_file
+        self.timeout = timeout
+        self.lock_fd = None
+
+    def acquire(self) -> bool:
+        """
+        Acquire the file lock.
+
+        Returns:
+            True if lock acquired, False if timeout
+        """
+        # Create lock directory if needed
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+        start_time = time.time()
+
+        while True:
+            try:
+                # Open file for exclusive access
+                self.lock_fd = open(self.lock_file, 'w')
+
+                if HAS_FCNTL:
+                    # Unix/Linux/Mac - use fcntl
+                    fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return True
+                elif HAS_MSVCRT:
+                    # Windows - use msvcrt
+                    # Try to lock the file (mode 0 is exclusive lock)
+                    msvcrt.locking(self.lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+                    return True
+                else:
+                    # Fallback: no locking available
+                    # Create a PID-based lock file for basic coordination
+                    pid = os.getpid()
+                    self.lock_fd.write(str(pid))
+                    self.lock_fd.flush()
+                    return True
+
+            except (IOError, OSError) as e:
+                # Lock failed - file is locked
+                self.lock_fd.close()
+                self.lock_fd = None
+
+                # Check timeout
+                if time.time() - start_time >= self.timeout:
+                    return False
+
+                # Exponential backoff
+                wait_time = min(0.1 * (2 ** int((time.time() - start_time))), 2.0)
+                time.sleep(wait_time)
+
+    def release(self):
+        """Release the file lock."""
+        if self.lock_fd:
+            try:
+                if HAS_FCNTL:
+                    fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_UN)
+                elif HAS_MSVCRT:
+                    msvcrt.locking(self.lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+
+                self.lock_fd.close()
+            except Exception:
+                pass
+
+            self.lock_fd = None
+
+            # Try to remove lock file
+            try:
+                self.lock_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def __enter__(self):
+        """Context manager entry."""
+        if not self.acquire():
+            raise TimeoutError(f"Could not acquire lock on {self.lock_file} within {self.timeout}s")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.release()
+
+
+class StateManager:
+    """Manages shared state files with locking."""
+
+    def __init__(self, project_root: Path):
+        """
+        Initialize the state manager.
+
+        Args:
+            project_root: Root directory of the project
+        """
+        self.project_root = Path(project_root)
+        self.locks_dir = self.project_root / ".locks"
+        self.prd_path = self.project_root / "prd.json"
+        self.findings_path = self.project_root / "findings.md"
+        self.progress_path = self.project_root / "progress.txt"
+
+    def _get_lock_path(self, file_path: Path) -> Path:
+        """Get the lock file path for a given file."""
+        return self.locks_dir / f"{file_path.name}.lock"
+
+    # ========== PRD Operations ==========
+
+    def read_prd(self) -> Optional[Dict]:
+        """
+        Read the PRD file safely.
+
+        Returns:
+            PRD dictionary or None if not found
+        """
+        if not self.prd_path.exists():
+            return None
+
+        lock_path = self._get_lock_path(self.prd_path)
+
+        with FileLock(lock_path):
+            try:
+                with open(self.prd_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                raise IOError(f"Could not read PRD: {e}")
+
+    def write_prd(self, prd: Dict) -> None:
+        """
+        Write the PRD file safely.
+
+        Args:
+            prd: PRD dictionary to write
+        """
+        lock_path = self._get_lock_path(self.prd_path)
+
+        with FileLock(lock_path):
+            try:
+                with open(self.prd_path, "w", encoding="utf-8") as f:
+                    json.dump(prd, f, indent=2)
+            except IOError as e:
+                raise IOError(f"Could not write PRD: {e}")
+
+    def update_story_status(self, story_id: str, status: str) -> None:
+        """
+        Update the status of a story in the PRD.
+
+        Args:
+            story_id: Story ID to update
+            status: New status (pending, in_progress, complete)
+        """
+        prd = self.read_prd()
+        if not prd:
+            raise ValueError("No PRD found")
+
+        for story in prd.get("stories", []):
+            if story.get("id") == story_id:
+                story["status"] = status
+                break
+
+        self.write_prd(prd)
+
+    # ========== Findings Operations ==========
+
+    def append_findings(self, content: str, tags: Optional[List[str]] = None) -> None:
+        """
+        Append content to findings.md with optional tags.
+
+        Args:
+            content: Content to append
+            tags: Optional list of story tags
+        """
+        lock_path = self._get_lock_path(self.findings_path)
+
+        with FileLock(lock_path):
+            try:
+                # Create file if it doesn't exist
+                self.findings_path.parent.mkdir(parents=True, exist_ok=True)
+
+                with open(self.findings_path, "a", encoding="utf-8") as f:
+                    # Write tags if provided
+                    if tags:
+                        tags_str = ",".join(tags)
+                        f.write(f"\n<!-- @tags: {tags_str} -->\n")
+
+                    f.write(content)
+                    f.write("\n\n")
+            except IOError as e:
+                raise IOError(f"Could not append to findings: {e}")
+
+    def read_findings(self) -> str:
+        """
+        Read the findings file safely.
+
+        Returns:
+            Findings content or empty string if not found
+        """
+        if not self.findings_path.exists():
+            return ""
+
+        lock_path = self._get_lock_path(self.findings_path)
+
+        with FileLock(lock_path):
+            try:
+                with open(self.findings_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except IOError as e:
+                raise IOError(f"Could not read findings: {e}")
+
+    # ========== Progress Operations ==========
+
+    def append_progress(self, content: str, story_id: Optional[str] = None) -> None:
+        """
+        Append content to progress.txt.
+
+        Args:
+            content: Content to append
+            story_id: Optional story ID for tracking
+        """
+        lock_path = self._get_lock_path(self.progress_path)
+
+        with FileLock(lock_path):
+            try:
+                # Create file if it doesn't exist
+                self.progress_path.parent.mkdir(parents=True, exist_ok=True)
+
+                with open(self.progress_path, "a", encoding="utf-8") as f:
+                    if story_id:
+                        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                        f.write(f"[{timestamp}] {story_id}: {content}\n")
+                    else:
+                        f.write(content + "\n")
+            except IOError as e:
+                raise IOError(f"Could not append to progress: {e}")
+
+    def mark_story_complete(self, story_id: str) -> None:
+        """
+        Mark a story as complete in progress.txt.
+
+        Args:
+            story_id: Story ID to mark complete
+        """
+        self.append_progress(f"[COMPLETE] {story_id}", story_id=story_id)
+
+    def mark_story_in_progress(self, story_id: str) -> None:
+        """
+        Mark a story as in progress in progress.txt.
+
+        Args:
+            story_id: Story ID to mark in progress
+        """
+        self.append_progress(f"[IN_PROGRESS] {story_id}", story_id=story_id)
+
+    def read_progress(self) -> str:
+        """
+        Read the progress file safely.
+
+        Returns:
+            Progress content or empty string if not found
+        """
+        if not self.progress_path.exists():
+            return ""
+
+        lock_path = self._get_lock_path(self.progress_path)
+
+        with FileLock(lock_path):
+            try:
+                with open(self.progress_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except IOError as e:
+                raise IOError(f"Could not read progress: {e}")
+
+    # ========== Utility Methods ==========
+
+    def get_all_story_statuses(self) -> Dict[str, str]:
+        """
+        Get the status of all stories from progress.txt.
+
+        Returns:
+            Dictionary mapping story_id to status
+        """
+        content = self.read_progress()
+        if not content:
+            return {}
+
+        statuses: Dict[str, str] = {}
+
+        for line in content.split("\n"):
+            line = line.strip()
+            if "[COMPLETE]" in line:
+                # Extract story ID
+                for word in line.split():
+                    if word.startswith("story-"):
+                        statuses[word] = "complete"
+                        break
+            elif "[IN_PROGRESS]" in line:
+                for word in line.split():
+                    if word.startswith("story-"):
+                        statuses[word] = "in_progress"
+                        break
+
+        return statuses
+
+    def cleanup_locks(self):
+        """Remove stale lock files."""
+        try:
+            if self.locks_dir.exists():
+                for lock_file in self.locks_dir.glob("*.lock"):
+                    # Check if lock is stale (older than 1 hour)
+                    if lock_file.stat().st_mtime < time.time() - 3600:
+                        lock_file.unlink()
+        except Exception:
+            pass
+
+
+def main():
+    """CLI interface for testing state manager."""
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: state_manager.py <command> [args]")
+        print("Commands:")
+        print("  read-prd                    - Read PRD file")
+        print("  write-prd <json>            - Write PRD file")
+        print("  append-findings <content>   - Append to findings")
+        print("  mark-complete <story_id>    - Mark story complete")
+        print("  get-statuses                - Get all story statuses")
+        print("  cleanup-locks               - Remove stale locks")
+        sys.exit(1)
+
+    command = sys.argv[1]
+    project_root = Path.cwd()
+
+    sm = StateManager(project_root)
+
+    if command == "read-prd":
+        prd = sm.read_prd()
+        print(json.dumps(prd, indent=2) if prd else "No PRD found")
+
+    elif command == "write-prd" and len(sys.argv) >= 3:
+        prd = json.loads(sys.argv[2])
+        sm.write_prd(prd)
+        print("PRD written successfully")
+
+    elif command == "append-findings" and len(sys.argv) >= 3:
+        content = sys.argv[2]
+        tags = sys.argv[3].split(",") if len(sys.argv) >= 4 else None
+        sm.append_findings(content, tags)
+        print("Findings appended successfully")
+
+    elif command == "mark-complete" and len(sys.argv) >= 3:
+        story_id = sys.argv[2]
+        sm.mark_story_complete(story_id)
+        print(f"Marked {story_id} as complete")
+
+    elif command == "get-statuses":
+        statuses = sm.get_all_story_statuses()
+        print(json.dumps(statuses, indent=2))
+
+    elif command == "cleanup-locks":
+        sm.cleanup_locks()
+        print("Locks cleaned up")
+
+    else:
+        print(f"Unknown command: {command}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
