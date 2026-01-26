@@ -18,7 +18,7 @@ A Claude Code plugin that transforms your workflow to use persistent markdown fi
 [![Cursor Skills](https://img.shields.io/badge/Cursor-Skills-purple)](https://docs.cursor.com/context/skills)
 [![Kilocode Skills](https://img.shields.io/badge/Kilocode-Skills-orange)](https://kilo.ai/docs/agent-behavior/skills)
 [![Gemini CLI](https://img.shields.io/badge/Gemini%20CLI-Skills-4285F4)](https://geminicli.com/docs/cli/skills/)
-[![Version](https://img.shields.io/badge/version-2.7.5-brightgreen)](https://github.com/OthmanAdi/planning-with-files/releases)
+[![Version](https://img.shields.io/badge/version-2.7.6-brightgreen)](https://github.com/OthmanAdi/planning-with-files/releases)
 [![SkillCheck Validated](https://img.shields.io/badge/SkillCheck-Validated-4c1)](https://getskillcheck.com)
 
 ## Quick Install
@@ -84,7 +84,8 @@ See [docs/installation.md](docs/installation.md) for all installation methods.
 
 | Version | Features | Install |
 |---------|----------|---------|
-| **v2.7.5** (current) | Hybrid Ralph: PRD-based parallel story execution | `claude plugins install OthmanAdi/planning-with-files` |
+| **v2.7.6** (current) | Hybrid Ralph: PRD-based parallel story execution + plugin validation fix | `claude plugins install OthmanAdi/planning-with-files` |
+| **v2.7.5** | Hybrid Ralph: PRD-based parallel story execution | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.2** | Worktree mode support | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.1** | Dynamic Python detection fix | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.0** | Gemini CLI support | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
@@ -151,7 +152,7 @@ Or invoke manually with `/planning-with-files:start` (or `/planning-with-files` 
 
 See [docs/quickstart.md](docs/quickstart.md) for the full 5-step guide.
 
-## Hybrid Ralph: PRD-Based Parallel Story Execution (NEW in v2.7.5)
+## Hybrid Ralph: PRD-Based Parallel Story Execution (NEW in v2.7.6)
 
 A new skill that combines Ralph's PRD format with Planning-with-Files' structured approach. Auto-generates PRDs from task descriptions and manages parallel story execution with dependency resolution.
 
@@ -335,7 +336,7 @@ Hybrid Ralph integrates seamlessly with planning-with-files:
 
 ### See Also
 
-- [CHANGELOG.md](CHANGELOG.md#275---2026-01-26) - Detailed v2.7.5 release notes
+- [CHANGELOG.md](CHANGELOG.md#276---2026-01-26) - Detailed v2.7.6 release notes
 - `skills/hybrid-ralph/SKILL.md` - Complete skill documentation
 
 ---
@@ -416,7 +417,7 @@ planning-with-files/
 │   │       ├── check-complete.sh
 │   │       ├── init-session.ps1   # Windows PowerShell
 │   │       └── check-complete.ps1 # Windows PowerShell
-│   └── hybrid-ralph/        # NEW: Hybrid Ralph skill (v2.7.5)
+│   └── hybrid-ralph/        # NEW: Hybrid Ralph skill (v2.7.6)
 │       ├── SKILL.md
 │       ├── commands/        # Skill commands
 │       │   ├── auto.md

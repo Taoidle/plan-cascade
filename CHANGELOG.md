@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.6] - 2026-01-26
+
+### Fixed
+
+- **Plugin Validation Error** (Critical)
+  - Removed invalid `skills` field from `.claude-plugin/plugin.json`
+  - The `skills` field is not part of Claude Code's plugin manifest format
+  - Plugin now installs correctly without validation errors
+  - All hybrid-ralph functionality remains fully available
+
+### Changed
+
+- Updated plugin version to 2.7.6
+- Updated skill version to 2.7.6 in all SKILL.md files
+
+### Notes
+
+- Hybrid Ralph skill is fully functional and available in all IDE locations
+- Commands `/hybrid:auto`, `/hybrid:manual`, `/hybrid:worktree`, `/approve`, `/edit`, `/status`, `/show-dependencies`, `/hybrid:complete` all work as expected
+
+---
+
 ## [2.7.5] - 2026-01-26
 
 ### Added
@@ -59,8 +81,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Updated plugin version to 2.7.5
-- Updated skill version to 2.7.5
+- Updated plugin version to 2.7.6
+- Updated skill version to 2.7.6
 - Added "prd", "ralph", "hybrid", "orchestration", "story-execution" keywords
 - Updated plugin.json with skills metadata
 - Updated README.md with hybrid-ralph documentation
