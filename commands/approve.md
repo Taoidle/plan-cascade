@@ -200,6 +200,10 @@ while [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; do
         # Show progress every 10 seconds
         echo "Progress: $COMPLETE_COUNT stories completed..."
         sleep 10
+
+        # IMPORTANT: Do NOT add any timeout or iteration limit
+        # Keep polling until all stories in the batch are complete
+        # Stories may take varying amounts of time depending on complexity
     done
 
     # Move to next batch
@@ -249,6 +253,9 @@ while [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; do
 
         echo "Progress: $COMPLETE_COUNT stories completed..."
         sleep 10
+
+        # IMPORTANT: Do NOT add any timeout or iteration limit
+        # Keep polling until all stories in the batch are complete
     done
 
     # Move to next batch
