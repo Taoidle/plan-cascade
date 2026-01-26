@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.7] - 2026-01-26
+
+### Added
+
+- **Claude Code Command Definitions** (NEW)
+  - Created 8 new command definition files in `commands/` directory
+  - All hybrid-ralph functionality now discoverable in Claude Code
+  - Commands: `/planning-with-files:hybrid-auto`, `/planning-with-files:hybrid-manual`, `/planning-with-files:hybrid-worktree`, `/planning-with-files:approve`, `/planning-with-files:edit`, `/planning-with-files:hybrid-status`, `/planning-with-files:show-dependencies`, `/planning-with-files:hybrid-complete`
+
+### Fixed
+
+- **Command Discovery** - Claude Code only discovers commands from `commands/` directory, not from `skills/` subdirectories
+  - All hybrid-ralph commands now properly accessible in Claude Code
+  - Fixed issue where hybrid functionality was not available after plugin installation
+
+### Changed
+
+- Updated plugin version to 2.7.7
+- Updated hybrid-ralph skill version to 2.7.7 in all IDE locations
+
+---
+
 ## [2.7.6] - 2026-01-26
 
 ### Fixed

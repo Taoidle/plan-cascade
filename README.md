@@ -18,7 +18,7 @@ A Claude Code plugin that transforms your workflow to use persistent markdown fi
 [![Cursor Skills](https://img.shields.io/badge/Cursor-Skills-purple)](https://docs.cursor.com/context/skills)
 [![Kilocode Skills](https://img.shields.io/badge/Kilocode-Skills-orange)](https://kilo.ai/docs/agent-behavior/skills)
 [![Gemini CLI](https://img.shields.io/badge/Gemini%20CLI-Skills-4285F4)](https://geminicli.com/docs/cli/skills/)
-[![Version](https://img.shields.io/badge/version-2.7.6-brightgreen)](https://github.com/OthmanAdi/planning-with-files/releases)
+[![Version](https://img.shields.io/badge/version-2.7.7-brightgreen)](https://github.com/OthmanAdi/planning-with-files/releases)
 [![SkillCheck Validated](https://img.shields.io/badge/SkillCheck-Validated-4c1)](https://getskillcheck.com)
 
 ## Quick Install
@@ -84,7 +84,8 @@ See [docs/installation.md](docs/installation.md) for all installation methods.
 
 | Version | Features | Install |
 |---------|----------|---------|
-| **v2.7.6** (current) | Hybrid Ralph: PRD-based parallel story execution + plugin validation fix | `claude plugins install OthmanAdi/planning-with-files` |
+| **v2.7.7** (current) | Claude Code command definitions for hybrid-ralph functionality | `claude plugins install OthmanAdi/planning-with-files` |
+| **v2.7.6** | Hybrid Ralph: PRD-based parallel story execution + plugin validation fix | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.5** | Hybrid Ralph: PRD-based parallel story execution | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.2** | Worktree mode support | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.1** | Dynamic Python detection fix | `claude plugins install OthmanAdi/planning-with-files` |

@@ -1,6 +1,6 @@
 {
   "name": "planning-with-files",
-  "version": "2.7.6",
+  "version": "2.7.7",
   "description": "Manus-style persistent markdown files for planning, progress tracking, and knowledge storage. Use when starting complex tasks, multi-step projects, research tasks, or when you want structured output. Now with optional Git worktree mode for parallel multi-task development with isolated branches. Includes hybrid-ralph skill for PRD-based parallel story execution.",
   "author": {
     "name": "OthmanAdi",
