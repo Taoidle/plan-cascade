@@ -65,7 +65,21 @@ Launch this as a background task with `run_in_background: true`.
 
 ## Step 3: Wait for PRD Generation
 
-Wait for the Task tool to complete generating the PRD. Monitor its output.
+IMPORTANT: After launching the background task, you MUST use the TaskOutput tool to wait for completion:
+
+1. Launch the Task tool with run_in_background: true
+2. Store the returned task_id
+3. Immediately call TaskOutput with:
+   - task_id: <the task_id from step 2>
+   - block: true (wait for completion)
+   - timeout: 600000 (10 minutes)
+
+Example pattern:
+```
+Launch Task tool with run_in_background: true → Get task_id → TaskOutput(task_id, block=true)
+```
+
+DO NOT use sleep loops or polling. The TaskOutput tool with block=true will properly wait for the agent to complete.
 
 ## Step 4: Validate and Display PRD
 

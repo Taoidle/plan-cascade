@@ -195,8 +195,26 @@ The PRD format must be:
 Work methodically and create a well-structured PRD.
 ```
 
-Launch this as a background task with `run_in_background: true`.
-Wait for completion and monitor output.
+Launch this as a background task with `run_in_background: true`:
+
+```
+IMPORTANT: After launching the background task, you MUST use the TaskOutput tool to wait for completion:
+
+1. Launch the Task tool with run_in_background: true
+2. Store the returned task_id
+3. Immediately call TaskOutput with:
+   - task_id: <the task_id from step 2>
+   - block: true (wait for completion)
+   - timeout: 600000 (10 minutes)
+
+Example pattern:
+```
+Launch Task tool with run_in_background: true → Get task_id → TaskOutput(task_id, block=true)
+```
+
+DO NOT use sleep loops or polling. The TaskOutput tool with block=true will properly wait for the agent to complete.
+
+After TaskOutput returns, the prd.json file will be ready. Continue to Step 12.
 
 ```bash
 PRD_SOURCE="Auto-generated from description"
