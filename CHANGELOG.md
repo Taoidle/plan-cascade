@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.9] - 2026-01-27
+
+### Fixed
+
+- **Worktree Directory Path Issue** - Fixed `hybrid-worktree` mode using relative path instead of absolute path
+  - Previously: `WORKTREE_DIR=".worktree/$(basename $TASK_NAME)"` (relative)
+  - Now: `WORKTREE_DIR="$ROOT_DIR/.worktree/$(basename $TASK_NAME)"` (absolute)
+  - Prevents planning files from being created in project root directory
+  - Ensures all planning files are correctly placed in worktree directory
+  - Variables re-ordered to define `ROOT_DIR` before `WORKTREE_DIR`
+
+### Added
+
+- **Execution Mode Selection** - Choose between Auto and Manual batch progression in hybrid mode
+  - Auto Mode (default): Batches progress automatically when successful, pause only on errors
+  - Manual Mode: Require approval before each batch starts for full control
+  - User prompted at start: `[1] Auto Mode` or `[2] Manual Mode`
+  - Best for: Auto (routine tasks), Manual (critical/complex tasks)
+
+### Changed
+
+- Updated plugin version to 2.7.9
+- Updated commands/approve.md with mode selection dialog
+- Split execution logic into Auto/Manual paths in Step 7
+- Both modes pause on `[ERROR]` or `[FAILED]` markers from agents
+- Auto mode:无缝流转 between batches without intervention
+- Manual mode: Explicit confirmation before launching each batch
+
+### Technical Details
+
+**Auto Mode Flow:**
+```
+Batch 1 → Monitor → Success? → Auto-launch Batch 2 → Monitor → Success? → ...
+                ↓ Error? → Pause → Fix → Resume
+```
+
+**Manual Mode Flow:**
+```
+Batch 1 → Monitor → Success? → Prompt user → Confirm? → Launch Batch 2
+                ↓ Error? → Pause → Fix → Resume
+```
+
+---
+
 ## [2.7.8] - 2026-01-26
 
 ### Fixed

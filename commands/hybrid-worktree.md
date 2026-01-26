@@ -47,9 +47,9 @@ TARGET_BRANCH="${TARGET_BRANCH:-$DEFAULT_BRANCH}"
 
 ```bash
 TASK_BRANCH="$TASK_NAME"
-WORKTREE_DIR=".worktree/$(basename $TASK_NAME)"
 ORIGINAL_BRANCH=$(git branch --show-current)
 ROOT_DIR=$(pwd)
+WORKTREE_DIR="$ROOT_DIR/.worktree/$(basename $TASK_NAME)"
 ```
 
 ## Step 5: Determine PRD Mode
