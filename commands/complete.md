@@ -1,16 +1,17 @@
 ---
-description: "Complete a worktree task. Verifies all phases are complete, deletes planning files from the worktree, navigates to root directory, merges the task branch to target branch, and removes the worktree. Must be run from inside the worktree directory. Usage: /planning-with-files:complete [target-branch]"
+description: "Complete a worktree task. Verifies all phases are complete, ensures changes are committed, deletes planning files, merges to target branch, and removes worktree. Must be run from inside the worktree directory. Usage: /planning-with-files:complete [target-branch]"
 ---
 
 # Planning with Files - Complete Worktree Task
 
 You are now completing a worktree task. This will:
 1. Verify all phases are complete
-2. Delete planning files from the worktree
-3. Navigate to the root directory
-4. Merge the task branch to the target branch
-5. Remove the worktree
-6. Delete the task branch
+2. **CRITICAL: Ensure all changes are committed**
+3. Delete planning files from the worktree
+4. Navigate to the root directory
+5. Merge the task branch to target branch
+6. Remove the worktree
+7. Delete the task branch
 
 **IMPORTANT**: This command must be run from **inside the worktree directory**.
 
@@ -33,23 +34,20 @@ Read the planning configuration from `.planning-config.json`:
 
 ```bash
 config=$(cat .planning-config.json)
-MODE=$(echo "$config" | grep '"mode"' | sed 's/.*"mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-TASK_NAME=$(echo "$config" | grep '"task_name"' | sed 's/.*"task_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-TASK_BRANCH=$(echo "$config" | grep '"task_branch"' | sed 's/.*"task_branch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-TARGET_BRANCH=$(echo "$config" | grep '"target_branch"' | sed 's/.*"target_branch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-WORKTREE_DIR=$(echo "$config" | grep '"worktree_dir"' | sed 's/.*"worktree_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-ROOT_DIR=$(echo "$config" | grep '"root_dir"' | sed 's/.*"root_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-ORIGINAL_BRANCH=$(echo "$config" | grep '"original_branch"' | sed 's/.*"original_branch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+MODE=$(echo "$config" | jq -r '.mode // empty')
+TASK_NAME=$(echo "$config" | jq -r '.task_name')
+TASK_BRANCH=$(echo "$config" | jq -r '.task_branch')
+TARGET_BRANCH=$(echo "$config" | jq -r '.target_branch')
+WORKTREE_DIR=$(echo "$config" | jq -r '.worktree_dir')
+ROOT_DIR=$(echo "$config" | jq -r '.root_dir')
+ORIGINAL_BRANCH=$(echo "$config" | jq -r '.original_branch')
 ```
-
-Parse the configuration to get all necessary information.
 
 ## Step 3: Parse Override Target (Optional)
 
 If user provided a target branch argument, use that instead:
 
 ```bash
-# If {{args}} is provided, use it as the override target
 OVERRIDE_TARGET="{{args|first arg or empty}}"
 TARGET_FINAL="${OVERRIDE_TARGET:-$TARGET_BRANCH}"
 ```
@@ -77,20 +75,73 @@ Continue anyway? [y/N]:
 
 Wait for user confirmation before proceeding.
 
-## Step 5: Check for Uncommitted Changes
+## Step 5: CRITICAL - Check for Uncommitted Changes
 
 ```bash
+# Check if there are uncommitted changes
 if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-    echo "There are uncommitted changes:"
+    echo "=========================================="
+    echo "CRITICAL: Uncommitted changes detected!"
+    echo "=========================================="
+    echo ""
+    echo "These changes will be LOST if not committed:"
     git status --short
     echo ""
+    echo "You MUST commit these changes before completing the task."
+    echo ""
     echo "Options:"
-    echo "  1) Commit changes now"
-    echo "  2) Stash changes"
+    echo "  1) Auto-commit changes with generated message"
+    echo "  2) Stash changes (for later)"
     echo "  3) Cancel and handle manually"
     echo ""
     read -p "Choose [1/2/3]: " choice
-    # Handle the choice...
+
+    case "$choice" in
+        1)
+            echo ""
+            echo "Committing changes..."
+            COMMIT_MSG="Complete task: $TASK_NAME
+
+Branch: $TASK_BRANCH
+Target: $TARGET_FINAL
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+
+            git add -A
+            git commit -m "$COMMIT_MSG"
+            echo "✓ Changes committed"
+            ;;
+        2)
+            echo ""
+            echo "Stashing changes..."
+            git stash push -m "WIP for $TASK_NAME"
+            echo "✓ Changes stashed"
+            echo ""
+            echo "WARNING: Stashed changes are NOT included in the merge."
+            echo "You can apply them later with: git stash pop"
+            echo ""
+            read -p "Continue anyway? [y/N]: " stash_confirm
+            if [[ ! "$stash_confirm" =~ ^[Yy]$ ]]; then
+                echo "Aborted."
+                exit 1
+            fi
+            ;;
+        3)
+            echo ""
+            echo "Cancelled. Please commit your changes manually:"
+            echo "  git add -A"
+            echo "  git commit -m 'Your message here'"
+            echo ""
+            echo "Then run this command again."
+            exit 0
+            ;;
+        *)
+            echo "Invalid choice. Aborted."
+            exit 1
+            ;;
+    esac
+else
+    echo "✓ No uncommitted changes"
 fi
 ```
 
@@ -100,6 +151,13 @@ Before making any changes, show the user what will be done:
 
 ```
 === Worktree Completion Summary ===
+
+Task: $TASK_NAME
+Branch: $TASK_BRANCH
+Target: $TARGET_FINAL
+
+Changes to merge:
+{Show git log --oneline -3 or git diff --stat HEAD~1}
 
 This will:
   1. Delete planning files from worktree
@@ -127,6 +185,7 @@ if [ -f ".planning-config.json" ]; then
     rm ".planning-config.json"
     echo "  Deleted: .planning-config.json"
 fi
+echo "✓ Planning files deleted"
 ```
 
 ## Step 8: Navigate to Root Directory
@@ -137,13 +196,9 @@ cd "$ROOT_DIR"
 echo "  Now in: $(pwd)"
 ```
 
-Important: We switch to the root directory to perform the merge operation.
-
 ## Step 9: Switch to Target Branch
 
 ```bash
-TARGET_FINAL="${OVERRIDE_TARGET:-$TARGET_BRANCH}"
-
 echo "Switching to target branch: $TARGET_FINAL"
 
 # Fetch latest if remote exists
@@ -152,7 +207,6 @@ if git ls-remote --exit-code origin "$TARGET_FINAL" > /dev/null 2>&1; then
 fi
 
 git checkout "$TARGET_FINAL" || git checkout -b "$TARGET_FINAL" "origin/$TARGET_FINAL"
-
 echo "  Checked out: $TARGET_FINAL"
 ```
 
@@ -162,7 +216,7 @@ echo "  Checked out: $TARGET_FINAL"
 echo "Merging $TASK_BRANCH into $TARGET_FINAL..."
 
 if git merge --no-ff -m "Merge task branch: $TASK_NAME" "$TASK_BRANCH"; then
-    echo "Merge successful!"
+    echo "✓ Merge successful!"
 else
     echo ""
     echo "=== MERGE CONFLICT DETECTED ==="
@@ -186,11 +240,11 @@ fi
 echo "Removing worktree: $WORKTREE_DIR"
 
 if git worktree remove "$WORKTREE_DIR" 2>/dev/null; then
-    echo "Worktree removed"
+    echo "✓ Worktree removed"
 else
     # Fallback to manual removal
     rm -rf "$WORKTREE_DIR"
-    echo "Worktree directory removed (manually)"
+    echo "✓ Worktree directory removed (manually)"
 fi
 ```
 
@@ -200,7 +254,7 @@ fi
 echo "Deleting task branch: $TASK_BRANCH"
 
 if git branch -d "$TASK_BRANCH" 2>/dev/null; then
-    echo "Task branch deleted"
+    echo "✓ Task branch deleted"
 else
     echo "Warning: Could not delete branch $TASK_BRANCH"
     echo "  You may need to delete it manually with: git branch -D $TASK_BRANCH"
@@ -215,8 +269,10 @@ fi
 Task: $TASK_NAME
 Branch: $TASK_BRANCH merged into $TARGET_FINAL
 
-Planning files have been deleted.
-Worktree has been removed.
+✓ All changes committed
+✓ Planning files deleted
+✓ Worktree removed
+✓ Task branch deleted
 
 Current branch: $(git branch --show-current)
 Current directory: $(pwd)
@@ -225,37 +281,16 @@ Current directory: $(pwd)
 [Show git worktree list]
 
 Next:
-  - Push the merge if needed: git push
+  - Review changes: git log --oneline -5
+  - Push the merge: git push
   - Continue with your next task
 ```
 
-## Example Workflow
+## Safety Features
 
-```bash
-# Start a task
-/planning-with-files:worktree fix-auth-bug
-
-# Navigate to worktree (as instructed)
-cd .worktree/fix-auth-bug
-
-# ... work on the task ...
-# ... update task_plan.md as you progress ...
-
-# When done, complete the task (from inside worktree)
-/planning-with-files:complete
-
-# You'll be returned to the root directory automatically
-# The worktree is cleaned up, branch is merged
-```
-
-## Important Notes
-
-1. **Run from worktree**: This command must be run from inside the worktree directory (where `.planning-config.json` exists)
-
-2. **Automatic navigation**: The command automatically navigates back to the root directory for the merge
-
-3. **Cleanup**: Both the worktree directory and the task branch are cleaned up
-
-4. **Merge conflicts**: If there are merge conflicts, you'll need to resolve them manually and then clean up
-
-5. **Active worktrees**: After completion, the command shows all remaining active worktrees so you can see what other tasks are in progress
+- **Forces commit**: Won't proceed if there are uncommitted changes
+- **Auto-commit option**: Can automatically commit with generated message
+- **Stash option**: Can stash changes if needed
+- **Manual cancel**: Always allows manual intervention
+- **Conflict handling**: Provides clear instructions for merge conflicts
+- **Verification**: Shows exactly what will be merged before proceeding
