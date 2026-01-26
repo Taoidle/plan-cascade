@@ -84,9 +84,9 @@ See [docs/installation.md](docs/installation.md) for all installation methods.
 
 | Version | Features | Install |
 |---------|----------|---------|
-| **v2.7.7** (current) | Claude Code command definitions for hybrid-ralph functionality | `claude plugins install OthmanAdi/planning-with-files` |
-| **v2.7.6** | Hybrid Ralph: PRD-based parallel story execution + plugin validation fix | `claude plugins install OthmanAdi/planning-with-files` |
-| **v2.7.5** | Hybrid Ralph: PRD-based parallel story execution | `claude plugins install OthmanAdi/planning-with-files` |
+| **v2.7.7** (current) | Hybrid Ralph: Smart PRD detection + planning file exclusion from commits | `claude plugins install OthmanAdi/planning-with-files` |
+| **v2.7.6** | Hybrid Ralph: Claude Code command definitions for hybrid-ralph functionality | `claude plugins install OthmanAdi/planning-with-files` |
+| **v2.7.5** | Hybrid Ralph: PRD-based parallel story execution + plugin validation fix | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.2** | Worktree mode support | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.1** | Dynamic Python detection fix | `claude plugins install OthmanAdi/planning-with-files` |
 | **v2.7.0** | Gemini CLI support | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
@@ -153,74 +153,104 @@ Or invoke manually with `/planning-with-files:start` (or `/planning-with-files` 
 
 See [docs/quickstart.md](docs/quickstart.md) for the full 5-step guide.
 
-## Hybrid Ralph: PRD-Based Parallel Story Execution (NEW in v2.7.6)
+## Hybrid Ralph: PRD-Based Parallel Story Execution (NEW in v2.7.5)
 
-A new skill that combines Ralph's PRD format with Planning-with-Files' structured approach. Auto-generates PRDs from task descriptions and manages parallel story execution with dependency resolution.
+A powerful feature that combines Ralph's PRD format with Planning-with-Files' structured approach. Auto-generates PRDs from task descriptions and manages parallel story execution with dependency resolution.
 
 ### Quick Start
 
-Generate a PRD from your task description:
-
+**Standard Mode (Non-Worktree):**
 ```
-/hybrid:auto Implement a user authentication system with login, registration, and password reset
+# Auto-generate PRD from description
+/planning-with-files:hybrid-auto Implement a user authentication system
+
+# Or load existing PRD file
+/planning-with-files:hybrid-manual ./my-prd.json
+
+# Approve and start parallel execution
+/planning-with-files:approve
 ```
 
-This will:
-1. Analyze your task and generate a structured PRD
-2. Break it into user stories with priorities and dependencies
-3. Show the PRD for your review
-4. Wait for approval before executing
+**Worktree Mode (Fully Automated):**
+```
+# Create worktree + auto-generate PRD in one command
+/planning-with-files:hybrid-worktree feature-auth main "Implement user authentication"
+
+# Or create worktree + load existing PRD
+/planning-with-files:hybrid-worktree feature-auth main ./my-prd.json
+
+# Complete and merge when done
+/planning-with-files:hybrid-complete main
+```
 
 ### Key Features
 
 - **Automatic PRD Generation**: Describe your task, get structured user stories
+- **Smart PRD Detection**: Automatically detects if argument is a file path or description
 - **Dependency Resolution**: Stories automatically organized into execution batches
 - **Parallel Execution**: Independent stories run simultaneously using background Task agents
 - **Context Filtering**: Each agent receives only relevant context for their story
-- **Progress Tracking**: Real-time status monitoring with `/status`
-- **Visual Dependency Graph**: See story relationships with `/show-dependencies`
+- **Progress Tracking**: Real-time status monitoring with `/planning-with-files:hybrid-status`
+- **Visual Dependency Graph**: See story relationships with `/planning-with-files:show-dependencies`
+- **Safety Features**: Commits code changes only, excludes planning files from repository
 
 ### Commands
 
 | Command | Description |
 |---------|-------------|
-| `/hybrid:auto <description>` | Generate PRD from task description |
-| `/hybrid:manual [path]` | Load existing PRD file |
-| `/hybrid:worktree <name> [branch] [desc]` | Create worktree + PRD (isolated parallel tasks) |
-| `/approve` | Approve PRD and begin execution |
-| `/edit` | Edit PRD in your default editor |
-| `/status` | Show execution status of all stories |
-| `/show-dependencies` | Display dependency graph |
-| `/hybrid:complete [branch]` | Complete worktree task and merge |
+| `/planning-with-files:hybrid-auto <description>` | Generate PRD from task description (standard mode) |
+| `/planning-with-files:hybrid-manual [path]` | Load existing PRD file (standard mode) |
+| `/planning-with-files:hybrid-worktree <name> <branch> <path-or-desc>` | Create worktree + load/generate PRD (fully automated) |
+| `/planning-with-files:approve` | Approve PRD and begin parallel execution |
+| `/planning-with-files:edit` | Edit PRD in your default editor |
+| `/planning-with-files:hybrid-status` | Show execution status of all stories |
+| `/planning-with-files:show-dependencies` | Display dependency graph and analysis |
+| `/planning-with-files:hybrid-complete [branch]` | Complete worktree task and merge |
 
 ### How It Works
 
-1. **PRD Creation**: Either auto-generate from description or load existing PRD
-2. **Review**: Review the generated stories, dependencies, and execution plan
-3. **Approval**: Approve to start parallel execution
-4. **Batch Execution**: Stories execute in parallel batches based on dependencies
-5. **Monitoring**: Track progress with `/status`
+**Standard Mode:**
+1. Generate PRD from description or load existing file
+2. Review stories, dependencies, and execution plan
+3. Approve to start parallel execution
+4. Monitor progress with status command
+
+**Worktree Mode (Fully Automated):**
+1. Create worktree with one command
+2. Automatically generates/loads PRD
+3. Automatically switches to worktree directory
+4. Display PRD for immediate review
+5. Complete and merge with automatic cleanup
 
 ### Worktree + Hybrid Mode (Isolated Parallel Tasks)
 
 For multi-task parallel development with complete isolation:
 
 ```
-# Create worktree + PRD in one command
-/hybrid:worktree feature-auth main "Implement user authentication"
+# Create worktree + auto-generate PRD (fully automated)
+/planning-with-files:hybrid-worktree feature-auth main "Implement user authentication"
 
 # This automatically:
 # 1. Creates .worktree/feature-auth/ directory
-# 2. Creates task branch (task-YYYYMMDD-HHMM)
+# 2. Creates task branch (feature-auth)
 # 3. Generates PRD from description
-# 4. Initializes planning files
+# 4. Switches to worktree directory
+# 5. Displays PRD for review
 
 # Work in the isolated environment
-cd .worktree/feature-auth
-/approve
+/planning-with-files:approve
 
-# Complete and merge when done
-/hybrid:complete main
+# Complete and merge when done (automatically commits code, excludes planning files)
+/planning-with-files:hybrid-complete main
+```
+
+**Smart PRD Detection:**
+```bash
+# If argument is an existing file → loads that PRD
+/planning-with-files:hybrid-worktree task main ./my-prd.json
+
+# If argument is not a file → generates PRD from description
+/planning-with-files:hybrid-worktree task main "Implement user auth"
 ```
 
 **Advantages of Worktree + Hybrid:**
@@ -228,53 +258,84 @@ cd .worktree/feature-auth
 - Main directory untouched
 - Multiple parallel tasks possible
 - Automatic merge on completion
+- Planning files never committed to repository
+- Safe code commit before cleanup
 - Easy to discard if needed
+
+### Safety Features
+
+**Code-Only Commits:**
+When completing a worktree, only code changes are committed:
+- ✅ Source code changes
+- ✅ New files (excluding planning files)
+- ❌ prd.json (excluded)
+- ❌ findings.md (excluded)
+- ❌ progress.txt (excluded)
+- ❌ .planning-config.json (excluded)
+- ❌ .agent-outputs/ (excluded)
+
+**Pre-commit Safety:**
+- Detects uncommitted code changes before cleanup
+- Offers to auto-commit with generated message
+- Provides stash option for temporary changes
+- Always allows manual cancellation
 
 ### Example Workflow
 
 **Standard Mode (Single Task):**
 ```
-# 1. Generate PRD
-/hybrid:auto Build a REST API with user CRUD operations
+# 1. Generate PRD from description
+/planning-with-files:hybrid-auto Build a REST API with user CRUD operations
 
 # 2. Review the output (shows stories, dependencies, execution plan)
 
-# 3. Approve to start
-/approve
+# 3. Edit if needed
+/planning-with-files:edit
 
-# 4. Monitor progress
-/status
+# 4. Approve to start parallel execution
+/planning-with-files:approve
 
-# 5. Check dependencies
-/show-dependencies
+# 5. Monitor progress
+/planning-with-files:hybrid-status
+
+# 6. Check dependencies
+/planning-with-files:show-dependencies
 ```
 
 **Worktree Mode (Multiple Parallel Tasks):**
 ```
 # Terminal 1: Start authentication feature
-/hybrid:worktree feature-auth main "Implement user auth"
-cd .worktree/feature-auth
-/approve
+/planning-with-files:hybrid-worktree feature-auth main "Implement user auth"
 
 # Terminal 2: Start API refactoring (parallel!)
-/hybrid:worktree refactor-api main "Refactor API endpoints"
-cd .worktree/refactor-api
-/approve
+/planning-with-files:hybrid-worktree refactor-api main "Refactor API endpoints"
 
 # Each worktree has its own branch, PRD, and execution context
 # Complete when done:
 cd .worktree/feature-auth
-/hybrid:complete main
+/planning-with-files:hybrid-complete main
 ```
 
 ### File Structure
 
+**Standard Mode:**
 ```
 project-root/
 ├── prd.json              # Product Requirements Document
 ├── findings.md           # Research findings (tagged by story)
 ├── progress.txt          # Progress tracking
 └── .agent-outputs/       # Individual agent logs
+```
+
+**Worktree Mode:**
+```
+.worktree/task-name/
+├── [git worktree files]  # Complete project copy
+├── prd.json              # PRD for this task
+├── findings.md           # Research findings
+├── progress.txt          # Progress tracking
+├── .planning-config.json # Worktree metadata
+└── .agent-outputs/       # Agent logs
 ```
 
 ### PRD Format
@@ -287,12 +348,12 @@ The `prd.json` contains:
   - Priority (high/medium/low)
   - Dependencies on other stories
   - Acceptance criteria
-  - Context size estimate
+  - Context size estimate (small/medium/large)
   - Tags for categorization
 
 ### Parallel Execution Model
 
-Stories are organized into batches:
+Stories are organized into batches based on dependencies:
 - **Batch 1**: Stories with no dependencies (run in parallel)
 - **Batch 2+**: Stories whose dependencies are complete
 
@@ -337,7 +398,7 @@ Hybrid Ralph integrates seamlessly with planning-with-files:
 
 ### See Also
 
-- [CHANGELOG.md](CHANGELOG.md#276---2026-01-26) - Detailed v2.7.6 release notes
+- [CHANGELOG.md](CHANGELOG.md) - Detailed release notes and version history
 - `skills/hybrid-ralph/SKILL.md` - Complete skill documentation
 
 ---
