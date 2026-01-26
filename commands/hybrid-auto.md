@@ -1,52 +1,99 @@
 ---
-name: planning-with-files:hybrid-auto
-description: Generate PRD from task description and enter review mode. Auto-generates user stories with priorities, dependencies, and acceptance criteria for parallel execution.
-disable-model-invocation: true
+description: "Generate PRD from task description and enter review mode. Auto-generates user stories with priorities, dependencies, and acceptance criteria for parallel execution."
 ---
 
-# /planning-with-files:hybrid-auto
+# Hybrid Ralph - Auto Generate PRD
 
-Automatically generate a Product Requirements Document (PRD) from your task description and enter review mode.
+You are automatically generating a Product Requirements Document (PRD) from the task description.
 
-## Usage
+## Step 1: Parse Task Description
+
+Get the task description from user arguments:
+```
+TASK_DESC="{{args}}"
+```
+
+If no description provided, ask the user for it.
+
+## Step 2: Use Task Tool to Generate PRD
+
+Use Claude Code's Task tool with a planning agent to analyze and generate the PRD:
 
 ```
-/planning-with-files:hybrid-auto <task description>
+You are a PRD generation specialist. Your task is to:
+
+1. ANALYZE the task description: "$TASK_DESC"
+2. EXPLORE the codebase to understand:
+   - Existing patterns and conventions
+   - Relevant code files
+   - Architecture and structure
+3. GENERATE a PRD (prd.json) with:
+   - Clear goal statement
+   - 3-7 user stories
+   - Each story with: id, title, description, priority (high/medium/low), dependencies, acceptance_criteria, context_estimate (small/medium/large)
+   - Dependencies between stories (where one story must complete before another)
+4. SAVE the PRD to prd.json in the current directory
+
+The PRD format must be:
+{
+  "metadata": {
+    "created_at": "ISO-8601 timestamp",
+    "version": "1.0.0",
+    "description": "Task description"
+  },
+  "goal": "One sentence goal",
+  "objectives": ["obj1", "obj2"],
+  "stories": [
+    {
+      "id": "story-001",
+      "title": "Story title",
+      "description": "Detailed description",
+      "priority": "high",
+      "dependencies": [],
+      "status": "pending",
+      "acceptance_criteria": ["criterion1", "criterion2"],
+      "context_estimate": "medium",
+      "tags": ["feature", "api"]
+    }
+  ]
+}
+
+Work methodically and create a well-structured PRD.
 ```
 
-## What It Does
+Launch this as a background task with `run_in_background: true`.
 
-1. **Parses your task description** - Takes your natural language task description
-2. **Launches Planning Agent** - Uses Claude Code's Task tool to analyze and plan
-3. **Generates PRD draft** - Creates prd.json with:
+## Step 3: Wait for PRD Generation
+
+Wait for the Task tool to complete generating the PRD. Monitor its output.
+
+## Step 4: Validate and Display PRD
+
+Once the task completes:
+
+1. Read the generated `prd.json` file
+2. Validate the structure (check for required fields)
+3. Display a PRD review summary showing:
    - Goal and objectives
-   - User stories with priorities
-   - Dependency analysis
-   - Context size estimates
-4. **Enters review mode** - Shows the PRD for your approval
+   - All stories with IDs, titles, priorities
+   - Dependency graph (ASCII)
+   - Execution batches
 
-## Example
+## Step 5: Show Next Steps
+
+After displaying the PRD review, tell the user their options:
 
 ```
-/planning-with-files:hybrid-auto Implement a user authentication system with login, registration, and password reset
+PRD generated successfully!
+
+Next steps:
+  - /planning-with-files:approve - Approve PRD and start parallel execution
+  - /planning-with-files:edit - Edit PRD manually
+  - /planning-with-files:show-dependencies - View dependency graph
 ```
-
-## After PRD Generation
-
-You'll see the PRD review with options to:
-- `/planning-with-files:approve` - Accept the PRD and start execution
-- `/planning-with-files:edit` - Open prd.json in your editor for manual changes
-- `/planning-with-files:replan` - Regenerate the PRD with different parameters
 
 ## Notes
 
-- The Planning Agent will analyze your codebase to understand existing patterns
-- Stories are automatically prioritized (high/medium/low)
-- Dependencies are detected between stories
-- Context estimates help agents work efficiently
-
-## See Also
-
-- `/planning-with-files:hybrid-manual` - Load an existing PRD file
-- `/planning-with-files:approve` - Approve the current PRD
-- `/planning-with-files:edit` - Edit the current PRD
+- If PRD validation fails, show errors and suggest `/planning-with-files:edit` to fix manually
+- The planning agent may take time to explore the codebase - be patient
+- Generated PRD is a draft - user should review and can edit before approving

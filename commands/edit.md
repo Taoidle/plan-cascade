@@ -1,119 +1,94 @@
 ---
-name: planning-with-files:edit
-description: Edit the current PRD in your default editor. Opens prd.json, validates after saving, and re-displays review. Supports adding/removing stories, changing priorities, and modifying dependencies.
-disable-model-invocation: true
+description: "Edit the current PRD in your default editor. Opens prd.json, validates after saving, and re-displays review. Supports adding/removing stories, changing priorities, and modifying dependencies."
 ---
 
-# /planning-with-files:edit
+# Hybrid Ralph - Edit PRD
 
-Open the current PRD file (prd.json) in your default text editor for manual modification.
+You are opening the PRD file for manual editing.
 
-## Usage
+## Step 1: Verify PRD Exists
 
-```
-/planning-with-files:edit
-```
-
-## What It Does
-
-1. **Opens prd.json** - Launches your system's default editor
-2. **Waits for changes** - Pauses until you save and close
-3. **Re-validates** - Checks the PRD after editing
-4. **Shows updated review** - Displays the modified PRD
-
-## Common Edits
-
-### Adding a Story
-
-```json
-{
-  "id": "story-005",
-  "title": "New feature title",
-  "description": "What this story does",
-  "priority": "medium",
-  "dependencies": ["story-001"],
-  "status": "pending",
-  "acceptance_criteria": [
-    "First criterion",
-    "Second criterion"
-  ],
-  "context_estimate": "small",
-  "tags": ["feature", "api"]
-}
+```bash
+if [ ! -f "prd.json" ]; then
+    echo "ERROR: No PRD found. Please generate one first with:"
+    echo "  /planning-with-files:hybrid-auto <description>"
+    echo "  /planning-with-files:hybrid-manual <path>"
+    exit 1
+fi
 ```
 
-### Changing Priority
+## Step 2: Open in Editor
 
-```json
-"priority": "high"  // Options: high, medium, low
+Open `prd.json` with the system's default editor:
+
+```bash
+# Detect platform and open editor
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OS" == "Windows_NT" ]]; then
+    # Windows
+    start prd.json
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    open prd.json
+else
+    # Linux - use $EDITOR or fallback
+    ${EDITOR:-nano} prd.json
+fi
 ```
 
-### Adding Dependencies
+Tell the user:
+```
+Opening prd.json in your default editor...
 
-```json
-"dependencies": ["story-001", "story-002"]
+Make your changes, then save and close the editor to continue.
 ```
 
-### Modifying Acceptance Criteria
+## Step 3: Wait for Editor to Close
 
-```json
-"acceptance_criteria": [
-  "Updated criterion 1",
-  "New criterion 2",
-  "Additional requirement"
-]
+Wait for the user to finish editing. (The editor command will block until closed.)
+
+## Step 4: Validate Updated PRD
+
+After the editor closes, validate the modified PRD:
+
+```bash
+# Check JSON syntax
+if ! python3 -m json.tool prd.json > /dev/null 2>&1; then
+    echo "ERROR: Invalid JSON in prd.json"
+    echo "Please fix the syntax errors and run /planning-with-files:edit again"
+    exit 1
+fi
 ```
 
-## Validation After Edit
+Validate structure:
+- Has `metadata`, `goal`, `objectives`, `stories`
+- Each story has required fields
+- Story IDs are unique
+- Dependency references exist
 
-When you save and close, the PRD is validated for:
-- Proper JSON syntax
-- Unique story IDs
-- Valid dependency references
-- Required fields present
+If validation fails, show specific errors and suggest re-running `/planning-with-files:edit`.
 
-If validation fails, you'll see specific errors to fix.
+## Step 5: Display Updated PRD Review
 
-## Re-entering Review Mode
-
-After saving your changes, the PRD review is displayed again with:
-- Updated story list
+Show the updated PRD review with:
+- Goal and objectives
+- All stories with current status
 - Re-calculated dependency graph
 - Re-generated execution batches
 
-You can then:
-- `/planning-with-files:approve` - Approve the modified PRD
-- `/planning-with-files:edit` - Make more changes
-- `/planning-with-files:show-dependencies` - Review the updated dependency graph
+## Step 6: Show Next Steps
 
-## Editor Configuration
+```
+PRD updated successfully!
 
-The command uses your system's default editor:
-- **Linux**: `$EDITOR` environment variable, or `nano` if not set
-- **macOS**: `$EDITOR` environment variable, or `vim` if not set
-- **Windows**: Opens with `start` command (uses associated app)
-
-To set a custom editor:
-
-```bash
-# Linux/macOS
-export EDITOR="code --wait"  # VS Code
-export EDITOR="vim"          # Vim
-export EDITOR="nano"         # Nano
-
-# Windows PowerShell
-$env:EDITOR="code --wait"
+Next steps:
+  - /planning-with-files:approve - Approve and start execution
+  - /planning-with-files:edit - Make more changes
+  - /planning-with-files:show-dependencies - View dependency graph
 ```
 
-## Tips
+## Notes
 
-1. **Use a JSON-aware editor** - VS Code, Sublime Text, or similar provide syntax highlighting
-2. **Validate after changes** - The tool automatically validates on save
-3. **Check dependencies** - Ensure referenced story IDs exist
-4. **Keep descriptions clear** - Agents work better with specific descriptions
-
-## See Also
-
-- `/planning-with-files:approve` - Approve after editing
-- `/planning-with-files:hybrid-manual` - Load a different PRD file
-- `/planning-with-files:show-dependencies` - Verify dependency structure
+- The editor used depends on your system default application for .json files
+- On Linux, you can set the EDITOR environment variable to control which editor is used
+- Changes are validated automatically after saving
+- If stories were added/removed, execution batches will be recalculated

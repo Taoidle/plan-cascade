@@ -1,85 +1,153 @@
 ---
-name: planning-with-files:hybrid-manual
-description: Load an existing PRD file and enter review mode. Supports JSON format with stories, priorities, dependencies, and acceptance criteria.
-disable-model-invocation: true
+description: "Load an existing PRD file and enter review mode. Supports JSON format with stories, priorities, dependencies, and acceptance criteria."
 ---
 
-# /planning-with-files:hybrid-manual
+# Hybrid Ralph - Load Manual PRD
 
-Load an existing Product Requirements Document (PRD) from a file and enter review mode.
+You are loading an existing Product Requirements Document (PRD) from a file.
 
-## Usage
+## Step 1: Parse PRD Path
 
+Get the PRD path from arguments:
 ```
-/planning-with-files:hybrid-manual [path/to/prd.json]
-```
-
-If no path is provided, looks for `prd.json` in the current directory.
-
-## What It Does
-
-1. **Reads the PRD file** - Loads and parses the JSON file
-2. **Validates structure** - Checks for required fields
-3. **Shows PRD review** - Displays the plan for your approval
-
-## Example
-
-```
-/planning-with-files:hybrid-manual ./prd.json
+PRD_PATH="{{args|first arg or 'prd.json'}}"
 ```
 
-or simply:
+## Step 2: Verify PRD Exists
 
-```
-/planning-with-files:hybrid-manual
-```
-
-## PRD Format
-
-The PRD file should follow this structure:
-
-```json
-{
-  "metadata": {
-    "created_at": "2024-01-15T10:00:00",
-    "version": "1.0.0",
-    "description": "Task description"
-  },
-  "goal": "One sentence goal",
-  "objectives": ["Objective 1", "Objective 2"],
-  "stories": [
-    {
-      "id": "story-001",
-      "title": "Story title",
-      "description": "Story description",
-      "priority": "high",
-      "dependencies": [],
-      "status": "pending",
-      "acceptance_criteria": ["Criteria 1", "Criteria 2"],
-      "context_estimate": "medium",
-      "tags": ["tag1", "tag2"]
-    }
-  ]
-}
+```bash
+if [ ! -f "$PRD_PATH" ]; then
+    echo "ERROR: PRD file not found: $PRD_PATH"
+    echo "Please provide a valid path to a prd.json file"
+    exit 1
+fi
 ```
 
-## After Loading
+## Step 3: Read and Validate PRD
 
-You'll see the PRD review with options to:
-- `/planning-with-files:approve` - Accept the PRD and start execution
-- `/planning-with-files:edit` - Open prd.json in your editor for changes
-- `/planning-with-files:show-dependencies` - View the dependency graph
+Read the PRD file and validate structure:
 
-## Validation
+Required fields:
+- `metadata.description`
+- `goal`
+- `stories` array
 
-The command will check for:
-- Required metadata fields
-- Valid story IDs
-- Existing dependencies
-- Proper priority values (high/medium/low)
+Each story must have:
+- `id`
+- `title`
+- `description`
+- `priority` (high/medium/low)
+- `dependencies` (array of story IDs)
+- `acceptance_criteria` (array)
 
-## See Also
+If validation fails, show specific errors and suggest fixes.
 
-- `/planning-with-files:hybrid-auto` - Generate PRD from description
-- `/planning-with-files:approve` - Approve the current PRD
-- `/planning-with-files:show-dependencies` - View dependency graph
+## Step 4: Copy PRD to Current Directory (if needed)
+
+If the PRD is not already `prd.json` in the current directory:
+
+```bash
+if [ "$PRD_PATH" != "prd.json" ]; then
+    cp "$PRD_PATH" prd.json
+    echo "Copied PRD to prd.json"
+fi
+```
+
+## Step 5: Initialize Supporting Files (if missing)
+
+Create `findings.md` if it doesn't exist:
+
+```bash
+if [ ! -f "findings.md" ]; then
+    cat > findings.md << 'EOF'
+# Findings
+
+Research and discovery notes will be accumulated here.
+
+Use <!-- @tags: story-id --> to tag sections for specific stories.
+EOF
+fi
+```
+
+Create `progress.txt` if it doesn't exist:
+
+```bash
+if [ ! -f "progress.txt" ]; then
+    cat > progress.txt << 'EOF'
+# Progress Log
+
+Story execution progress will be tracked here.
+EOF
+fi
+```
+
+## Step 6: Display PRD Review
+
+Show a comprehensive PRD review:
+
+```
+============================================================
+PRD REVIEW
+============================================================
+
+## Goal
+
+{goal from PRD}
+
+## Objectives
+
+- {objective 1}
+- {objective 2}
+...
+
+## Stories Summary
+
+Total Stories: {count}
+By Priority:
+  High: {count}
+  Medium: {count}
+  Low: {count}
+
+## All Stories
+
+### story-001: {title} [High]
+Description: {description}
+Dependencies: {none or list}
+Acceptance Criteria:
+  - {criterion 1}
+  - {criterion 2}
+...
+
+### story-002: {title} [Medium]
+...
+
+## Execution Batches
+
+Batch 1 (parallel):
+  - story-001
+  - story-002
+
+Batch 2:
+  - story-003 (depends on: story-001)
+
+...
+
+============================================================
+```
+
+## Step 7: Show Next Steps
+
+```
+PRD loaded successfully!
+
+Next steps:
+  - /planning-with-files:approve - Approve PRD and start execution
+  - /planning-with-files:edit - Edit PRD manually
+  - /planning-with-files:show-dependencies - View dependency graph
+```
+
+## Notes
+
+- Validates all dependency references exist
+- Shows warnings for orphan stories (no dependencies, nothing depends on them)
+- Detects circular dependencies if any exist

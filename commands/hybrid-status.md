@@ -1,50 +1,38 @@
 ---
-name: planning-with-files:hybrid-status
-description: Show execution status of all stories in the PRD. Displays batch progress, individual story states, completion percentage, and recent activity logs.
-disable-model-invocation: true
+description: "Show execution status of all stories in the PRD. Displays batch progress, individual story states, completion percentage, and recent activity logs."
 ---
 
-# /planning-with-files:hybrid-status
+# Hybrid Ralph - Show Execution Status
 
-Show the current execution status of all stories in the PRD, including batch progress and individual story states.
+You are displaying the current execution status of all stories in the PRD.
 
-## Usage
+## Step 1: Verify PRD Exists
 
+```bash
+if [ ! -f "prd.json" ]; then
+    echo "ERROR: No PRD found."
+    exit 1
+fi
 ```
-/planning-with-files:hybrid-status
-```
 
-## What It Shows
+## Step 2: Read PRD and Progress Files
 
-### Summary
-- Total stories and batches
-- Stories by status (complete, in progress, pending, failed)
-- Overall progress percentage
+Read `prd.json` to get all stories.
+Read `progress.txt` to get completion status.
 
-### Current Batch
-- Which batch is currently executing
-- Stories in the current batch with their statuses
+## Step 3: Calculate Story Status
 
-### All Batches
-- All batches with their stories
-- Status of each story
+For each story in the PRD, determine its status:
+- **Complete**: If `progress.txt` contains `[COMPLETE] {story_id}`
+- **In Progress**: If `progress.txt` contains `[IN_PROGRESS] {story_id}`
+- **Pending**: If no entry in `progress.txt`
+- **Failed**: If `progress.txt` contains `[FAILED] {story_id}`
 
-### Recent Activity
-- Last 10 entries from progress.txt
+## Step 4: Calculate Execution Batches
 
-### Failed Stories
-- List of any failed stories (if applicable)
+Re-calculate batches based on story dependencies.
 
-## Status Indicators
-
-| Symbol | Meaning |
-|--------|---------|
-| ● | Complete |
-| ◐ | In Progress |
-| ○ | Pending |
-| ✗ | Failed |
-
-## Example Output
+## Step 5: Display Status Report
 
 ```
 ============================================================
@@ -52,45 +40,78 @@ EXECUTION STATUS
 ============================================================
 
 ## Summary
-  Total Stories: 4
-  Total Batches: 2
+  Total Stories: {count}
+  Total Batches: {batch_count}
 
-  Complete:     2 ✓
-  In Progress:  1 ◐
-  Pending:      1 ○
-  Failed:       0 ✗
+  Complete:     {complete_count} ●
+  In Progress:  {in_progress_count} ◐
+  Pending:      {pending_count} ○
+  Failed:       {failed_count} ✗
 
 ## Progress
-  [███░░░░░░░░░░░░░░░░░░░░░░░░░░] 50.0%
+  [{progress_bar}] {percentage}%
 
-## Current Batch: 2
+## Current Batch: {current_batch_number}
 
-  ◐ story-003: Implement user login [in_progress]
-  ○ story-004: Implement password reset [pending]
+  {stories in current batch with their statuses}
 
 ## All Batches
 
-  Batch 1: ✓ (2 stories)
-    ● story-001: Design database schema
-    ● story-002: Design API endpoints
+  Batch 1: {status} ({count} stories)
+    {story statuses}
 
-  Batch 2: ○ (2 stories)
-    ◐ story-003: Implement user login
-    ○ story-004: Implement password reset
+  Batch 2: {status} ({count} stories)
+    {story statuses}
+
+...
 
 ============================================================
 ```
 
-## Completion
+Status indicators:
+- `●` Complete
+- `◐` In Progress
+- `○` Pending
+- `✗` Failed
 
-When all stories are complete, you'll see:
+## Step 6: Show Recent Activity
+
+Display the last 10 entries from `progress.txt`:
+
+```
+## Recent Activity
+
+{last 10 lines from progress.txt}
+```
+
+## Step 7: Show Failed Stories (if any)
+
+If there are failed stories, show them:
+
+```
+## Failed Stories
+
+  ✗ {story_id}: {title}
+     {error details from progress.txt}
+```
+
+## Step 8: Show Completion Status
+
+If all stories are complete:
 
 ```
 ✓ All stories complete!
+
+Next:
+  - /planning-with-files:hybrid-complete - Complete and merge (if in worktree)
+  - /planning-with-files:show-dependencies - Review final state
 ```
 
-## See Also
+If some stories are still pending/in-progress:
 
-- `/planning-with-files:hybrid-auto` - Start a new task
-- `/planning-with-files:hybrid-manual` - Load existing PRD
-- `/planning-with-files:approve` - Approve PRD and begin execution
+```
+Next:
+  - Continue monitoring with: /planning-with-files:hybrid-status
+  - View progress details in: progress.txt
+  - View agent logs in: .agent-outputs/
+```

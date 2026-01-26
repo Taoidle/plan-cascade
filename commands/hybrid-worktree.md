@@ -1,155 +1,164 @@
 ---
-name: planning-with-files:hybrid-worktree
-description: Create a new Git worktree and initialize Hybrid Ralph mode for parallel multi-task development with PRD-based story execution. Creates isolated branch, generates PRD from description, and prepares for parallel story execution.
-disable-model-invocation: true
+description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, and initializes PRD for parallel story execution. Usage: /planning-with-files:hybrid-worktree <task-name> <target-branch> <task-description>"
 ---
 
-# /planning-with-files:hybrid-worktree
+# Hybrid Ralph + Worktree Mode
 
-Create a new Git worktree with isolated environment and initialize Hybrid Ralph mode for PRD-based parallel story execution.
+You are starting a task in **Git Worktree + Hybrid Ralph mode**. This combines isolated parallel development with PRD-based story execution.
 
-## Usage
+## Step 1: Parse Parameters
 
-```
-/planning-with-files:hybrid-worktree <task-name> <target-branch> <task-description>
-```
-
-### Arguments
-
-- `task-name` (required): Name for the task/worktree (e.g., "feature-auth", "fix-api-bug")
-- `target-branch` (optional): Branch to merge into when complete (default: auto-detects main/master)
-- `task-description` (optional): Description for auto-generating PRD
-
-### Examples
+Parse user arguments:
+- **Task name**: First arg (or `task-YYYY-MM-DD-HHMM`)
+- **Target branch**: Second arg (or auto-detect `main`/`master`)
+- **Task description**: Remaining args or ask user
 
 ```bash
-# Create worktree and generate PRD from description
-/planning-with-files:hybrid-worktree feature-auth main "Implement user authentication with login and registration"
-
-# Create worktree, will prompt for PRD description later
-/planning-with-files:hybrid-worktree refactor-api main
-
-# Create worktree with custom target branch
-/planning-with-files:hybrid-worktree feature-payment develop "Add payment processing"
+TASK_NAME="{{args|arg 1 or 'task-' + date + '-' + time}}"
+TARGET_BRANCH="{{args|arg 2 or auto-detect}}"
+TASK_DESC="{{args|args 3+ or ask user}}"
 ```
 
-## What It Does
-
-### Phase 1: Worktree Creation
-
-1. **Creates Git worktree** at `.worktree/<task-name>/`
-2. **Creates task branch** with format `task-YYYY-MM-DD-HHMM`
-3. **Initializes planning files** in the worktree
-4. **Creates `.planning-config.json`** with task metadata
-5. **Main directory remains untouched** on original branch
-
-### Phase 2: Hybrid Ralph Initialization
-
-1. **Changes to worktree directory**
-2. **Generates PRD** from task description (or prompts for it)
-3. **Enters review mode** for PRD approval
-4. **Ready for parallel story execution** with `/planning-with-files:approve`
-
-## Workflow
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  /planning-with-files:hybrid-worktree feature-auth main │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│  Phase 1: Worktree Creation                              │
-│  - git worktree add .worktree/feature-auth -b task-*    │
-│  - Create planning files in worktree                    │
-│  - Create .planning-config.json                         │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│  Phase 2: Navigate to Worktree                           │
-│  - cd .worktree/feature-auth/                           │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│  Phase 3: Hybrid Ralph Initialization                     │
-│  - Generate PRD from description                         │
-│  - Show PRD for review                                   │
-│  - Wait for /planning-with-files:approve                 │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Worktree Structure
-
-```
-.worktree/feature-auth/
-├── [git worktree files]
-├── prd.json              # Generated PRD
-├── findings.md           # Research findings (tagged)
-├── progress.txt          # Progress tracking
-├── .planning-config.json # Worktree metadata
-└── .agent-outputs/       # Agent logs
-```
-
-## After PRD Approval
-
-Once you approve the PRD with `/planning-with-files:approve`:
-
-1. **Stories execute in parallel batches**
-2. **Progress tracked in progress.txt**
-3. **Findings tagged by story ID**
-4. **Each story gets filtered context**
-
-## Completion
-
-When all stories complete:
-
-```
-/planning-with-files:hybrid-complete [target-branch]
-```
-
-This will:
-1. Verify all stories are complete
-2. Navigate to root directory
-3. Merge task branch to target
-4. Remove worktree directory
-5. Delete task branch
-6. Clean up planning files
-
-## Multi-Task Parallel Development
-
-Create multiple worktrees for parallel tasks:
+## Step 2: Verify Git Repository
 
 ```bash
-# Terminal 1: Start authentication feature
-/planning-with-files:hybrid-worktree feature-auth main
-cd .worktree/feature-auth
-
-# Terminal 2: Start API refactoring (parallel!)
-/planning-with-files:hybrid-worktree refactor-api main
-cd .worktree/refactor-api
-
-# Each worktree has:
-# - Its own branch and directory
-# - Its own PRD and stories
-# - Its own execution context
-# No conflicts, no branch switching!
+git rev-parse --git-dir > /dev/null 2>&1 || { echo "ERROR: Not a git repository"; exit 1; }
 ```
 
-## Advantages Over Standard Hybrid
+## Step 3: Detect Default Branch
 
-| Feature | Standard Hybrid | Worktree + Hybrid |
-|---------|----------------|-------------------|
-| Branch isolation | ❌ Works on current branch | ✅ Isolated task branch |
-| Main directory safety | ❌ Files modified directly | ✅ Main directory untouched |
-| Parallel tasks | ❌ Only one at a time | ✅ Multiple simultaneously |
-| Clean merge | ❌ Manual cleanup | ✅ Automatic merge on complete |
-| Experiment safety | ❌ Changes affect main | ✅ Isolated, easy to discard |
+```bash
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@refs/remotes/origin/@@')
+if [ -z "$DEFAULT_BRANCH" ]; then
+    if git show-ref --verify --quiet refs/heads/main; then
+        DEFAULT_BRANCH="main"
+    elif git show-ref --verify --quiet refs/heads/master; then
+        DEFAULT_BRANCH="master"
+    else
+        DEFAULT_BRANCH="main"
+    fi
+fi
+TARGET_BRANCH="${TARGET_BRANCH:-$DEFAULT_BRANCH}"
+```
 
-## See Also
+## Step 4: Set Variables
 
-- `/planning-with-files:hybrid-complete` - Complete and merge
-- `/planning-with-files:hybrid-auto` - Standard hybrid mode (no worktree)
-- `/planning-with-files:hybrid-manual` - Load existing PRD in worktree
-- `/planning-with-files:status` - Check execution status
+```bash
+TASK_BRANCH="$TASK_NAME"
+WORKTREE_DIR=".worktree/$(basename $TASK_NAME)"
+ORIGINAL_BRANCH=$(git branch --show-current)
+ROOT_DIR=$(pwd)
+```
+
+## Step 5: Check for Existing Worktree
+
+```bash
+if [ -d "$WORKTREE_DIR" ]; then
+    echo "Worktree already exists: $WORKTREE_DIR"
+    echo "Navigate to: cd $WORKTREE_DIR"
+    exit 0
+fi
+```
+
+## Step 6: Create Git Worktree
+
+```bash
+if git show-ref --verify --quiet refs/heads/"$TASK_BRANCH"; then
+    echo "ERROR: Branch $TASK_BRANCH already exists"
+    exit 1
+fi
+
+git worktree add -b "$TASK_BRANCH" "$WORKTREE_DIR" "$TARGET_BRANCH"
+echo "Created worktree: $WORKTREE_DIR"
+```
+
+## Step 7: Create Planning Configuration
+
+```bash
+cat > "$WORKTREE_DIR/.planning-config.json" << EOF
+{
+  "mode": "hybrid",
+  "task_name": "$TASK_NAME",
+  "task_branch": "$TASK_BRANCH",
+  "target_branch": "$TARGET_BRANCH",
+  "worktree_dir": "$WORKTREE_DIR",
+  "original_branch": "$ORIGINAL_BRANCH",
+  "root_dir": "$ROOT_DIR",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+```
+
+## Step 8: Create Initial PRD Structure in Worktree
+
+```bash
+cat > "$WORKTREE_DIR/prd.json" << 'PRDEOF'
+{
+  "metadata": {
+    "created_at": null,
+    "version": "1.0.0",
+    "description": null
+  },
+  "goal": null,
+  "objectives": [],
+  "stories": []
+}
+PRDEOF
+
+cat > "$WORKTREE_DIR/findings.md" << 'FINdingEOF'
+# Findings
+
+Research and discovery notes will be accumulated here.
+FINdingEOF
+
+cat > "$WORKTREE_DIR/progress.txt" << 'PROGEEOF'
+# Progress Log
+
+Story execution progress will be tracked here.
+PROGEOF
+```
+
+## Step 9: Display Summary
+
+```
+=== Hybrid Ralph Worktree Created ===
+
+Worktree: $WORKTREE_DIR
+Branch: $TASK_BRANCH
+Target: $TARGET_BRANCH
+
+IMPORTANT: Navigate to the worktree:
+
+  cd $WORKTREE_DIR
+
+Then generate your PRD:
+
+  /planning-with-files:hybrid-auto $TASK_DESC
+
+Or load existing PRD:
+
+  /planning-with-files:hybrid-manual path/to/prd.json
+
+Multi-Task Usage:
+  Multiple worktrees can run in parallel:
+  - /planning-with-files:hybrid-worktree task-auth-fix main "fix auth bug"
+  - /planning-with-files:hybrid-worktree task-refactor main "refactor API"
+
+Each works in isolated directories with separate PRDs.
+```
+
+## Step 10: Show Active Worktrees
+
+```bash
+echo "=== Active Worktrees ==="
+git worktree list
+```
+
+---
+
+**Next Steps for User:**
+1. `cd $WORKTREE_DIR`
+2. Run `/planning-with-files:hybrid-auto <description>` to generate PRD
+3. Or run `/planning-with-files:hybrid-manual <path>` to load existing PRD
+4. Use `/planning-with-files:approve` to start parallel story execution
+5. Use `/planning-with-files:hybrid-complete` when done
