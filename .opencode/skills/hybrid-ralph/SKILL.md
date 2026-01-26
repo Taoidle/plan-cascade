@@ -1,6 +1,6 @@
 ---
 name: hybrid-ralph
-version: "2.7.7"
+version: "2.7.8"
 description: Hybrid architecture combining Ralph's PRD format with Planning-with-Files' structured approach. Auto-generates PRDs from task descriptions, manages parallel story execution with dependency resolution, and provides context-filtered agents for efficient multi-story development.
 user-invocable: true
 allowed-tools:

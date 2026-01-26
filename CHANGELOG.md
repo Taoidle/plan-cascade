@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.8] - 2026-01-26
+
+### Fixed
+
+- **Directory-Aware Worktree Completion** - Both `/planning-with-files:complete` and `/planning-with-files:hybrid-complete` now work from any directory
+  - Commands previously required being inside the worktree directory
+  - Now automatically scan for available worktrees and prompt user to select
+  - Intelligently detects planning vs hybrid mode worktrees
+  - Auto-navigates to selected worktree before proceeding with completion
+  - Prevents accidental data loss from running completion from wrong directory
+
+### Changed
+
+- Updated plugin version to 2.7.8
+- Updated hybrid-ralph skill version to 2.7.8 in all IDE locations
+- Updated command descriptions to reflect "can be run from any directory" capability
+
+---
+
 ## [2.7.7] - 2026-01-26
 
 ### Added

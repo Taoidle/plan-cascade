@@ -1,5 +1,5 @@
 ---
-description: "Complete a worktree task. Verifies all phases are complete, commits code changes (excluding planning files), merges to target branch, and removes worktree. Must be run from inside the worktree directory. Usage: /planning-with-files:complete [target-branch]"
+description: "Complete a worktree task. Verifies all phases are complete, commits code changes (excluding planning files), merges to target branch, and removes worktree. Can be run from any directory. Usage: /planning-with-files:complete [target-branch]"
 ---
 
 # Planning with Files - Complete Worktree Task
@@ -13,18 +13,105 @@ You are now completing a worktree task. This will:
 6. Remove the worktree
 7. Delete the task branch
 
-**IMPORTANT**: This command must be run from **inside the worktree directory**.
+## Step 1: Detect Current Location
 
-## Step 1: Verify You're in a Worktree
-
-First, check if we're in a worktree directory:
+Check if we're in a worktree or the root directory:
 
 ```bash
-if [ ! -f ".planning-config.json" ]; then
-    echo "ERROR: .planning-config.json not found"
-    echo "Are you in a worktree directory?"
-    echo "This command must be run from inside the worktree."
-    exit 1
+if [ -f ".planning-config.json" ]; then
+    # We're in a worktree directory
+    echo "Currently in worktree directory: $(pwd)"
+    IN_WORKTREE=true
+else
+    # We're not in a worktree, check if there are any worktrees
+    IN_WORKTREE=false
+
+    # Check for worktrees
+    WORKTREES=$(git worktree list 2>/dev/null | grep -v "\bare$" | wc -l)
+
+    if [ "$WORKTREES" -eq 0 ]; then
+        echo "ERROR: No worktrees found."
+        echo "This command requires an existing worktree."
+        echo ""
+        echo "Create one first with:"
+        echo "  /planning-with-files:worktree <task-name> <branch>"
+        exit 1
+    fi
+
+    echo "Not in a worktree directory. Found $WORKTREES worktree(s):"
+    echo ""
+    git worktree list
+    echo ""
+
+    # Find all worktrees with .planning-config.json
+    echo "Scanning for planning worktrees..."
+    WORKTREE_LIST=()
+
+    while IFS= read -r line; do
+        worktree_path=$(echo "$line" | awk '{print $1}')
+        worktree_branch=$(echo "$line" | awk '{print $2}')
+
+        # Check if this is a planning worktree
+        if [ -f "$worktree_path/.planning-config.json" ]; then
+            # Exclude hybrid mode worktrees (those use /planning-with-files:hybrid-complete)
+            mode=$(jq -r '.mode // empty' "$worktree_path/.planning-config.json" 2>/dev/null)
+            if [ "$mode" != "hybrid" ]; then
+                task_name=$(jq -r '.task_name // empty' "$worktree_path/.planning-config.json" 2>/dev/null)
+                WORKTREE_LIST+=("$worktree_path|$task_name|$worktree_branch")
+            fi
+        fi
+    done < <(git worktree list 2>/dev/null | grep -v "\bare$")
+
+    if [ ${#WORKTREE_LIST[@]} -eq 0 ]; then
+        echo "ERROR: No planning worktrees found."
+        echo "Found worktrees but none are in planning mode."
+        echo ""
+        echo "Note: Hybrid mode worktrees should use /planning-with-files:hybrid-complete"
+        exit 1
+    fi
+
+    echo "Found ${#WORKTREE_LIST[@]} planning worktree(s):"
+    echo ""
+
+    # Display options
+    for i in "${!WORKTREE_LIST[@]}"; do
+        IFS='|' read -r path name branch <<< "${WORKTREE_LIST[$i]}"
+        echo "  [$((i+1))] $name"
+        echo "      Path: $path"
+        echo "      Branch: $branch"
+        echo ""
+    done
+
+    # Ask user to select
+    echo "Which worktree would you like to complete?"
+    read -p "Enter number (or 0 to cancel): " selection
+
+    if [ "$selection" = "0" ]; then
+        echo "Cancelled."
+        exit 0
+    fi
+
+    if [ "$selection" -lt 1 ] || [ "$selection" -gt ${#WORKTREE_LIST[@]} ]; then
+        echo "Invalid selection."
+        exit 1
+    fi
+
+    # Get the selected worktree
+    selected="${WORKTREE_LIST[$((selection-1))]}"
+    IFS='|' read -r WORKTREE_PATH TASK_NAME TASK_BRANCH <<< "$selected"
+
+    echo ""
+    echo "Selected: $TASK_NAME"
+    echo "Navigating to worktree: $WORKTREE_PATH"
+
+    # Change to worktree directory
+    cd "$WORKTREE_PATH" || {
+        echo "ERROR: Failed to navigate to worktree: $WORKTREE_PATH"
+        exit 1
+    }
+
+    echo "✓ Now in worktree: $(pwd)"
+    IN_WORKTREE=true
 fi
 ```
 
