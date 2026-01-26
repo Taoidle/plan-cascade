@@ -1,22 +1,24 @@
 ---
-description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, auto-generates PRD from description, and enters review mode. Usage: /planning-with-files:hybrid-worktree <task-name> <target-branch> <task-description>"
+description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, loads existing PRD or auto-generates from description. Usage: /planning-with-files:hybrid-worktree <task-name> <target-branch> <prd-path-or-description>"
 ---
 
 # Hybrid Ralph + Worktree Mode (Fully Automated)
 
-You are starting a task in **Git Worktree + Hybrid Ralph mode**. This will create the worktree and automatically generate the PRD.
+You are starting a task in **Git Worktree + Hybrid Ralph mode**. This will create the worktree and handle the PRD automatically.
 
 ## Step 1: Parse Parameters
 
 Parse user arguments:
 - **Task name**: First arg (or `task-YYYY-MM-DD-HHMM`)
 - **Target branch**: Second arg (or auto-detect `main`/`master`)
-- **Task description**: Remaining args or ask user
+- **PRD path OR description**: Third arg
+  - If it's an existing file path → Load that PRD
+  - Otherwise → Use as task description to auto-generate PRD
 
 ```bash
 TASK_NAME="{{args|arg 1 or 'task-' + date + '-' + time}}"
 TARGET_BRANCH="{{args|arg 2 or auto-detect}}"
-TASK_DESC="{{args|args 3+ or ask user}}"
+PRD_ARG="{{args|arg 3 or ask user 'Provide PRD file path or task description'}}"
 ```
 
 ## Step 2: Verify Git Repository
@@ -50,16 +52,34 @@ ORIGINAL_BRANCH=$(git branch --show-current)
 ROOT_DIR=$(pwd)
 ```
 
-## Step 5: Check for Existing Worktree
+## Step 5: Determine PRD Mode
+
+Check if PRD_ARG is an existing file:
+
+```bash
+if [ -f "$PRD_ARG" ]; then
+    # User provided an existing PRD file
+    PRD_PATH="$PRD_ARG"
+    PRD_MODE="load"
+    echo "Loading PRD from: $PRD_PATH"
+else
+    # User provided a task description
+    TASK_DESC="$PRD_ARG"
+    PRD_MODE="generate"
+    echo "Will generate PRD from description"
+fi
+```
+
+## Step 6: Check for Existing Worktree
 
 ```bash
 if [ -d "$WORKTREE_DIR" ]; then
     echo "Worktree already exists: $WORKTREE_DIR"
     echo "Navigating to existing worktree..."
     cd "$WORKTREE_DIR"
-    # Continue to PRD generation for existing worktree
+    # Continue to PRD handling for existing worktree
 else
-    ## Step 6: Create Git Worktree (only if new)
+    ## Step 7: Create Git Worktree (only if new)
 
     if git show-ref --verify --quiet refs/heads/"$TASK_BRANCH"; then
         echo "ERROR: Branch $TASK_BRANCH already exists"
@@ -69,7 +89,7 @@ else
     git worktree add -b "$TASK_BRANCH" "$WORKTREE_DIR" "$TARGET_BRANCH"
     echo "Created worktree: $WORKTREE_DIR"
 
-    ## Step 7: Create Planning Configuration
+    ## Step 8: Create Planning Configuration
 
     cat > "$WORKTREE_DIR/.planning-config.json" << EOF
 {
@@ -84,7 +104,7 @@ else
 }
 EOF
 
-    ## Step 8: Create Initial Files in Worktree
+    ## Step 9: Create Initial Files in Worktree
 
     cat > "$WORKTREE_DIR/findings.md" << 'EOF'
 # Findings
@@ -102,16 +122,36 @@ EOF
 fi
 ```
 
-## Step 9: Navigate to Worktree
+## Step 10: Navigate to Worktree
 
 ```bash
 cd "$WORKTREE_DIR"
 echo "Now working in: $(pwd)"
 ```
 
-## Step 10: Auto-Generate PRD
+## Step 11: Handle PRD (Load or Generate)
 
-Use the Task tool to automatically generate the PRD in the worktree:
+### If PRD_MODE is "load" (user provided PRD file):
+
+```bash
+if [ "$PRD_MODE" = "load" ]; then
+    # Copy PRD file to worktree
+    cp "$PRD_PATH" prd.json
+    echo "Loaded PRD from: $PRD_PATH"
+
+    # Validate PRD
+    if ! python3 -m json.tool prd.json > /dev/null 2>&1; then
+        echo "ERROR: Invalid JSON in PRD file"
+        exit 1
+    fi
+
+    PRD_SOURCE="Loaded from file: $PRD_PATH"
+fi
+```
+
+### If PRD_MODE is "generate" (auto-generate from description):
+
+Use the Task tool to automatically generate the PRD:
 
 ```
 You are a PRD generation specialist. Your task is to:
@@ -156,16 +196,18 @@ Work methodically and create a well-structured PRD.
 ```
 
 Launch this as a background task with `run_in_background: true`.
+Wait for completion and monitor output.
 
-## Step 11: Wait for PRD Generation
-
-Wait for the Task tool to complete generating the PRD. Monitor its output.
+```bash
+PRD_SOURCE="Auto-generated from description"
+fi
+```
 
 ## Step 12: Validate and Display PRD
 
-Once the task completes:
+After PRD is loaded or generated:
 
-1. Read the generated `prd.json` file
+1. Read the `prd.json` file
 2. Validate the structure (check for required fields)
 3. Display a comprehensive PRD review showing:
    - Goal and objectives
@@ -185,7 +227,7 @@ Worktree: $WORKTREE_DIR
 Branch: $TASK_BRANCH
 Target: $TARGET_BRANCH
 
-✓ PRD Generated Successfully
+✓ PRD Ready: $PRD_SOURCE
 
 Stories: {count}
 Batches: {batch_count}
@@ -214,9 +256,23 @@ Active Worktrees:
 
 ---
 
+## Usage Examples
+
+```bash
+# Auto-generate PRD from description
+/planning-with-files:hybrid-worktree fix-auth main "Fix authentication bug in login flow"
+
+# Load existing PRD file
+/planning-with-files:hybrid-worktree fix-auth main ./my-prd.json
+
+# Load PRD from different location
+/planning-with-files:hybrid-worktree fix-auth main ../prd-files/api-refactor.json
+```
+
 ## Notes
 
-- The entire process is automated: worktree creation → PRD generation → review
+- **File path mode**: If the third argument is an existing file, it's loaded as PRD
+- **Description mode**: If the third argument is not a file, it's used to auto-generate PRD
+- The entire process is automated: worktree creation → PRD loading/generation → review
 - You can edit the PRD before approving: `/planning-with-files:edit`
 - Multiple worktrees can run in parallel for different tasks
-- Each worktree is completely isolated with its own PRD
