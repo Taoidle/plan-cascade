@@ -2,6 +2,10 @@
 
 > **Work like Manus** — the AI agent company Meta acquired for **$2 billion**.
 
+> **🍴 Fork** from [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) v2.7.1
+
+> **⚡ Enhanced** with improved Hybrid Ralph execution modes and bug fixes
+
 ## Thank You
 
 To everyone who starred, forked, and shared this skill — thank you. This project blew up in less than 24 hours, and the support from the community has been incredible.
@@ -18,13 +22,18 @@ A Claude Code plugin that transforms your workflow to use persistent markdown fi
 [![Cursor Skills](https://img.shields.io/badge/Cursor-Skills-purple)](https://docs.cursor.com/context/skills)
 [![Kilocode Skills](https://img.shields.io/badge/Kilocode-Skills-orange)](https://kilo.ai/docs/agent-behavior/skills)
 [![Gemini CLI](https://img.shields.io/badge/Gemini%20CLI-Skills-4285F4)](https://geminicli.com/docs/cli/skills/)
-[![Version](https://img.shields.io/badge/version-2.7.9-brightgreen)](https://github.com/OthmanAdi/planning-with-files/releases)
+[![Version](https://img.shields.io/badge/version-2.7.9-brightgreen)](https://github.com/Taoidle/planning-with-files)
 [![SkillCheck Validated](https://img.shields.io/badge/SkillCheck-Validated-4c1)](https://getskillcheck.com)
 
 ## Quick Install
 
 ```bash
-# Install the plugin
+# Install from this fork
+claude plugins install Taoidle/planning-with-files
+```
+
+For the original upstream version:
+```bash
 claude plugins install OthmanAdi/planning-with-files
 ```
 
@@ -39,8 +48,8 @@ cp -r ~/.claude/plugins/cache/planning-with-files/planning-with-files/*/skills/p
 
 **Windows (PowerShell):**
 ```powershell
-# Install the plugin
-claude plugins install OthmanAdi/planning-with-files
+# Install from this fork
+claude plugins install Taoidle/planning-with-files
 
 # Optional: Copy skills for /planning-with-files command
 Copy-Item -Recurse -Path "$env:USERPROFILE\.claude\plugins\cache\planning-with-files\planning-with-files\*\skills\planning-with-files" -Destination "$env:USERPROFILE\.claude\skills\"
@@ -84,11 +93,11 @@ See [docs/installation.md](docs/installation.md) for all installation methods.
 
 | Version | Features | Install |
 |---------|----------|---------|
-| **v2.7.9** (current) | Hybrid Ralph: Auto/Manual batch progression modes + worktree path fix | `claude plugins install OthmanAdi/planning-with-files` |
-| **v2.7.6** | Hybrid Ralph: Claude Code command definitions for hybrid-ralph functionality | `claude plugins install OthmanAdi/planning-with-files` |
-| **v2.7.5** | Hybrid Ralph: PRD-based parallel story execution + plugin validation fix | `claude plugins install OthmanAdi/planning-with-files` |
-| **v2.7.2** | Worktree mode support | `claude plugins install OthmanAdi/planning-with-files` |
-| **v2.7.1** | Dynamic Python detection fix | `claude plugins install OthmanAdi/planning-with-files` |
+| **v2.7.9** (current) | Hybrid Ralph: Auto/Manual batch progression modes + worktree path fix | `claude plugins install Taoidle/planning-with-files` |
+| **v2.7.6** | Hybrid Ralph: Claude Code command definitions for hybrid-ralph functionality | Upstream |
+| **v2.7.5** | Hybrid Ralph: PRD-based parallel story execution + plugin validation fix | Upstream |
+| **v2.7.2** | Worktree mode support | Upstream |
+| **v2.7.1** | Dynamic Python detection fix | Upstream |
 | **v2.7.0** | Gemini CLI support | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
 | **v2.6.0** | Start command (`/planning-with-files:start`), path resolution fix | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
 | **v2.5.0** | Fixed autocomplete - SKILL.md matches Anthropic format | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
@@ -153,9 +162,24 @@ Or invoke manually with `/planning-with-files:start` (or `/planning-with-files` 
 
 See [docs/quickstart.md](docs/quickstart.md) for the full 5-step guide.
 
-## Hybrid Ralph: PRD-Based Parallel Story Execution (NEW in v2.7.5)
+## Hybrid Ralph: PRD-Based Parallel Story Execution
 
 A powerful feature that combines Ralph's PRD format with Planning-with-Files' structured approach. Auto-generates PRDs from task descriptions and manages parallel story execution with dependency resolution.
+
+### ✨ Enhanced Features in This Fork
+
+**v2.7.9 Enhancements:**
+- 🚀 **Auto/Manual Execution Modes** - Choose how batches progress
+- 🔧 **Worktree Path Fix** - Planning files now correctly created in worktree directory only
+- 🐛 **Background Task Wait Fix** - PRD generation now properly waits for completion
+
+**Execution Modes:**
+| Mode | Batch Progression | Best For |
+|------|------------------|----------|
+| **Auto** (default) | Automatic between batches | Routine tasks, trusted PRDs |
+| **Manual** | Confirm before each batch | Critical tasks, careful oversight |
+
+*Note: In both modes, agents execute commands autonomously. The mode only controls batch-to-batch progression.*
 
 ### Quick Start
 
@@ -201,7 +225,7 @@ A powerful feature that combines Ralph's PRD format with Planning-with-Files' st
 | `/planning-with-files:hybrid-auto <description>` | Generate PRD from task description (standard mode) |
 | `/planning-with-files:hybrid-manual [path]` | Load existing PRD file (standard mode) |
 | `/planning-with-files:hybrid-worktree <name> <branch> <path-or-desc>` | Create worktree + load/generate PRD (fully automated) |
-| `/planning-with-files:approve` | Approve PRD and begin parallel execution |
+| `/planning-with-files:approve` | **Choose Auto/Manual mode**, then approve PRD and begin parallel execution |
 | `/planning-with-files:edit` | Edit PRD in your default editor |
 | `/planning-with-files:hybrid-status` | Show execution status of all stories |
 | `/planning-with-files:show-dependencies` | Display dependency graph and analysis |
@@ -567,7 +591,59 @@ See [docs/kilocode.md](docs/kilocode.md) for detailed Kilo Code integration guid
 
 *Built something? Open an issue to get listed!*
 
-## Acknowledgments
+---
+
+## 🍴 This Fork - Enhancements & Focus
+
+This fork focuses on improving the **Hybrid Ralph** workflow with better execution control and bug fixes.
+
+### Changes from Upstream (v2.7.1 → v2.7.9)
+
+#### v2.7.9 - Execution Mode Control
+
+**Added:**
+- **Auto/Manual Execution Modes** - Choose how batches progress in hybrid mode
+  - Auto mode: Batches progress automatically, pause only on errors
+  - Manual mode: Confirm before launching each batch
+  - Agents execute commands autonomously in both modes
+
+**Fixed:**
+- **Worktree Directory Path** - Fixed relative path causing planning files in root directory
+  - Changed: `WORKTREE_DIR=".worktree/..."` → `WORKTREE_DIR="$ROOT_DIR/.worktree/..."`
+  - Ensures all planning files are created in worktree only
+
+- **Background Task Waiting** - Fixed PRD generation using sleep loops
+  - Added explicit TaskOutput tool usage instructions
+  - Prevents indefinite waiting when PRD generation completes
+
+**Changed:**
+- Clarified execution mode semantics: mode controls batch progression, not command execution
+- Updated all platform skill files to v2.7.9
+
+### Installation (This Fork)
+
+```bash
+# Install from this fork
+claude plugins install Taoidle/planning-with-files
+```
+
+Or for the latest updates:
+```bash
+git clone https://github.com/Taoidle/planning-with-files.git
+cd planning-with-files
+npm link  # or copy to Claude plugins directory
+```
+
+### Upstream Compatibility
+
+This fork maintains full compatibility with the original project. All original features are preserved, with enhancements focused on:
+- ✅ Hybrid Ralph workflow improvements
+- ✅ Bug fixes for worktree and PRD generation
+- ✅ Better execution control options
+
+For the original upstream project, visit: [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files)
+
+---
 
 - **Manus AI** — For pioneering context engineering patterns
 - **Anthropic** — For Claude Code, Agent Skills, and the Plugin system
@@ -591,4 +667,7 @@ MIT License — feel free to use, modify, and distribute.
 
 ## Star History
 
+[![Star History Chart](https://api.star-history.com/svg?repos=Taoidle/planning-with-files&type=Date)](https://star-history.com/#Taoidle/planning-with-files&Date)
+
+**Original Project Star History:**
 [![Star History Chart](https://api.star-history.com/svg?repos=OthmanAdi/planning-with-files&type=Date)](https://star-history.com/#OthmanAdi/planning-with-files&Date)
