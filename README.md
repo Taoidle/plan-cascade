@@ -1,673 +1,236 @@
 # Planning with Files
 
-> **Work like Manus** — the AI agent company Meta acquired for **$2 billion**.
+> **并行开发多个复杂功能的利器** — 在隔离环境中同时推进多个任务
 
-> **🍴 Fork** from [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) v2.7.1
-
-> **⚡ Enhanced** with improved Hybrid Ralph execution modes and bug fixes
-
-## Thank You
-
-To everyone who starred, forked, and shared this skill — thank you. This project blew up in less than 24 hours, and the support from the community has been incredible.
-
-If this skill helps you work smarter, that's all I wanted.
-
----
-
-A Claude Code plugin that transforms your workflow to use persistent markdown files for planning, progress tracking, and knowledge storage — the exact pattern that made Manus worth billions.
+> **⚡ Enhanced fork** with improved Hybrid Ralph execution modes and workflow automation
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://code.claude.com/docs/en/plugins)
-[![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-green)](https://code.claude.com/docs/en/skills)
-[![Cursor Skills](https://img.shields.io/badge/Cursor-Skills-purple)](https://docs.cursor.com/context/skills)
-[![Kilocode Skills](https://img.shields.io/badge/Kilocode-Skills-orange)](https://kilo.ai/docs/agent-behavior/skills)
-[![Gemini CLI](https://img.shields.io/badge/Gemini%20CLI-Skills-4285F4)](https://geminicli.com/docs/cli/skills/)
 [![Version](https://img.shields.io/badge/version-2.7.9-brightgreen)](https://github.com/Taoidle/planning-with-files)
-[![SkillCheck Validated](https://img.shields.io/badge/SkillCheck-Validated-4c1)](https://getskillcheck.com)
 
-## Quick Install
+## 核心功能：多任务并发开发
+
+这是 planning-with-files 的增强版本，专注于**多任务并行开发**场景。
+
+### 解决的问题
+
+在软件开发中，经常需要同时推进多个功能：
+- 🔨 正在开发 Feature A
+- 🔧 同时需要修复 Bug B
+- 📊 还要重构模块 C
+- 📝 文档更新任务 D
+
+传统方式：串行开发或频繁切换分支，效率低下
+
+**我们的方案：并行推进，互不干扰**
+
+```
+工作台/
+├── .worktree/feature-auth/         ← 终端 1: 开发认证功能
+├── .worktree/fix-api-bug/          ← 终端 2: 修复 API bug
+├── .worktree/refactor-database/    ← 终端 3: 重构数据库
+└── .worktree/update-docs/          ← 终端 4: 更新文档
+
+每个任务都有独立的：
+- Git 分支
+- 工作目录
+- PRD（需求分解）
+- 执行进度
+```
+
+### 工作流程
 
 ```bash
-# Install from this fork
-claude plugins install Taoidle/planning-with-files
-```
+# 1. 创建多个并行任务（每个在独立的 worktree 中）
+/planning-with-files:hybrid-worktree feature-auth main "实现用户认证"
+/planning-with-files:hybrid-worktree fix-api-bug main "修复API超时bug"
+/planning-with-files:hybrid-worktree refactor-db main "重构数据库层"
 
-For the original upstream version:
-```bash
-claude plugins install OthmanAdi/planning-with-files
-```
+# 2. 每个任务自动生成 PRD，分解成多个可并行执行的 story
 
-That's it! Now use `/planning-with-files:start` in Claude Code.
+# 3. 在 Auto 模式下，stories 自动并行执行，批次自动流转
+# 在 Manual 模式下，每批次完成后确认，再继续下一批次
 
-**Alternative:** If you want `/planning-with-files` (without `:start`), copy skills to your local folder:
-
-```bash
-# Optional: Copy skills for /planning-with-files command
-cp -r ~/.claude/plugins/cache/planning-with-files/planning-with-files/*/skills/planning-with-files ~/.claude/skills/
-```
-
-**Windows (PowerShell):**
-```powershell
-# Install from this fork
-claude plugins install Taoidle/planning-with-files
-
-# Optional: Copy skills for /planning-with-files command
-Copy-Item -Recurse -Path "$env:USERPROFILE\.claude\plugins\cache\planning-with-files\planning-with-files\*\skills\planning-with-files" -Destination "$env:USERPROFILE\.claude\skills\"
-```
-
-See [docs/installation.md](docs/installation.md) for all installation methods.
-
-## Supported IDEs
-
-| IDE | Status | Installation Guide | Format |
-|-----|--------|-------------------|--------|
-| Claude Code | ✅ Full Support | [Installation](docs/installation.md) | Plugin + SKILL.md |
-| Gemini CLI | ✅ Full Support | [Gemini Setup](docs/gemini.md) | Agent Skills |
-| Cursor | ✅ Full Support | [Cursor Setup](docs/cursor.md) | Skills |
-| Kilocode | ✅ Full Support | [Kilocode Setup](docs/kilocode.md) | Skills |
-| OpenCode | ✅ Full Support | [OpenCode Setup](docs/opencode.md) | Personal/Project Skill |
-| Codex | ✅ Full Support | [Codex Setup](docs/codex.md) | Personal Skill |
-| FactoryAI Droid | ✅ Full Support | [Factory Setup](docs/factory.md) | Workspace/Personal Skill |
-| Antigravity | ✅ Full Support | [Antigravity Setup](docs/antigravity.md) | Workspace/Personal Skill |
-
-> **Note:** If your IDE uses the legacy Rules system instead of Skills, see the [`legacy-rules-support`](https://github.com/OthmanAdi/planning-with-files/tree/legacy-rules-support) branch.
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Installation Guide](docs/installation.md) | All installation methods (plugin, manual, Cursor, Windows) |
-| [Quick Start](docs/quickstart.md) | 5-step guide to using the pattern |
-| [Workflow Diagram](docs/workflow.md) | Visual diagram of how files and hooks interact |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
-| [Gemini CLI Setup](docs/gemini.md) | Google Gemini CLI integration guide |
-| [Cursor Setup](docs/cursor.md) | Cursor IDE-specific instructions |
-| [Windows Setup](docs/windows.md) | Windows-specific notes |
-| [Kilo Code Support](docs/kilocode.md) | Kilo Code integration guide |
-| [Codex Setup](docs/codex.md) | Codex IDE installation and usage |
-| [OpenCode Setup](docs/opencode.md) | OpenCode IDE installation, oh-my-opencode config |
-| [FactoryAI Droid Setup](docs/factory.md) | FactoryAI Droid integration guide |
-| [Antigravity Setup](docs/antigravity.md) | Antigravity IDE integration guide |
-
-## Versions
-
-| Version | Features | Install |
-|---------|----------|---------|
-| **v2.7.9** (current) | Hybrid Ralph: Auto/Manual batch progression modes + worktree path fix | `claude plugins install Taoidle/planning-with-files` |
-| **v2.7.6** | Hybrid Ralph: Claude Code command definitions for hybrid-ralph functionality | Upstream |
-| **v2.7.5** | Hybrid Ralph: PRD-based parallel story execution + plugin validation fix | Upstream |
-| **v2.7.2** | Worktree mode support | Upstream |
-| **v2.7.1** | Dynamic Python detection fix | Upstream |
-| **v2.7.0** | Gemini CLI support | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v2.6.0** | Start command (`/planning-with-files:start`), path resolution fix | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v2.5.0** | Fixed autocomplete - SKILL.md matches Anthropic format | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v2.3.0** | Codex & OpenCode IDE support | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v2.2.2** | Restored skill activation language | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v2.2.1** | Session recovery after /clear, enhanced PreToolUse hook | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v2.2.0** | Kilo Code IDE support, Windows PowerShell support, OS-aware hooks | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v2.1.2** | Fix template cache issue (Issue #18) | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v2.1.0** | Claude Code v2.1 compatible, PostToolUse hook, user-invocable | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v2.0.x** | Hooks, templates, scripts | See [releases](https://github.com/OthmanAdi/planning-with-files/releases) |
-| **v1.0.0** (legacy) | Core 3-file pattern | `git clone -b legacy` |
-
-See [CHANGELOG.md](CHANGELOG.md) for details.
-
-## Why This Skill?
-
-On December 29, 2025, [Meta acquired Manus for $2 billion](https://techcrunch.com/2025/12/29/meta-just-bought-manus-an-ai-startup-everyone-has-been-talking-about/). In just 8 months, Manus went from launch to $100M+ revenue. Their secret? **Context engineering**.
-
-> "Markdown is my 'working memory' on disk. Since I process information iteratively and my active context has limits, Markdown files serve as scratch pads for notes, checkpoints for progress, building blocks for final deliverables."
-> — Manus AI
-
-## The Problem
-
-Claude Code (and most AI agents) suffer from:
-
-- **Volatile memory** — TodoWrite tool disappears on context reset
-- **Goal drift** — After 50+ tool calls, original goals get forgotten
-- **Hidden errors** — Failures aren't tracked, so the same mistakes repeat
-- **Context stuffing** — Everything crammed into context instead of stored
-
-## The Solution: 3-File Pattern
-
-For every complex task, create THREE files:
-
-```
-task_plan.md      → Track phases and progress
-findings.md       → Store research and findings
-progress.md       → Session log and test results
-```
-
-### The Core Principle
-
-```
-Context Window = RAM (volatile, limited)
-Filesystem = Disk (persistent, unlimited)
-
-→ Anything important gets written to disk.
-```
-
-## Usage
-
-Once installed, Claude will automatically:
-
-1. **Create `task_plan.md`** before starting complex tasks
-2. **Re-read plan** before major decisions (via PreToolUse hook)
-3. **Remind you** to update status after file writes (via PostToolUse hook)
-4. **Store findings** in `findings.md` instead of stuffing context
-5. **Log errors** for future reference
-6. **Verify completion** before stopping (via Stop hook)
-
-Or invoke manually with `/planning-with-files:start` (or `/planning-with-files` if you copied skills).
-
-See [docs/quickstart.md](docs/quickstart.md) for the full 5-step guide.
-
-## Hybrid Ralph: PRD-Based Parallel Story Execution
-
-A powerful feature that combines Ralph's PRD format with Planning-with-Files' structured approach. Auto-generates PRDs from task descriptions and manages parallel story execution with dependency resolution.
-
-### ✨ Enhanced Features in This Fork
-
-**v2.7.9 Enhancements:**
-- 🚀 **Auto/Manual Execution Modes** - Choose how batches progress
-- 🔧 **Worktree Path Fix** - Planning files now correctly created in worktree directory only
-- 🐛 **Background Task Wait Fix** - PRD generation now properly waits for completion
-
-**Execution Modes:**
-| Mode | Batch Progression | Best For |
-|------|------------------|----------|
-| **Auto** (default) | Automatic between batches | Routine tasks, trusted PRDs |
-| **Manual** | Confirm before each batch | Critical tasks, careful oversight |
-
-*Note: In both modes, agents execute commands autonomously. The mode only controls batch-to-batch progression.*
-
-### Quick Start
-
-**Standard Mode (Non-Worktree):**
-```
-# Auto-generate PRD from description
-/planning-with-files:hybrid-auto Implement a user authentication system
-
-# Or load existing PRD file
-/planning-with-files:hybrid-manual ./my-prd.json
-
-# Approve and start parallel execution
-/planning-with-files:approve
-```
-
-**Worktree Mode (Fully Automated):**
-```
-# Create worktree + auto-generate PRD in one command
-/planning-with-files:hybrid-worktree feature-auth main "Implement user authentication"
-
-# Or create worktree + load existing PRD
-/planning-with-files:hybrid-worktree feature-auth main ./my-prd.json
-
-# Complete and merge when done
+# 4. 任务完成后，自动合并到主分支
 /planning-with-files:hybrid-complete main
 ```
 
-### Key Features
+### 与原版的区别
 
-- **Automatic PRD Generation**: Describe your task, get structured user stories
-- **Smart PRD Detection**: Automatically detects if argument is a file path or description
-- **Dependency Resolution**: Stories automatically organized into execution batches
-- **Parallel Execution**: Independent stories run simultaneously using background Task agents
-- **Context Filtering**: Each agent receives only relevant context for their story
-- **Progress Tracking**: Real-time status monitoring with `/planning-with-files:hybrid-status`
-- **Visual Dependency Graph**: See story relationships with `/planning-with-files:show-dependencies`
-- **Safety Features**: Commits code changes only, excludes planning files from repository
+| 特性 | 原版 planning-with-files | **这个 fork** |
+|------|------------------------|--------------|
+| 核心场景 | 单任务规划管理 | **多任务并行开发** |
+| Worktree | 可选功能 | **核心功能** - 多任务隔离的基础 |
+| PRD 执行 | 需要人工介入每个批次 | **Auto 模式全自动流转** |
+| 并行粒度 | 单个任务 | **任务级并行** + **Story级并行** |
 
-### Commands
+### 为什么选择这个版本
 
-| Command | Description |
-|---------|-------------|
-| `/planning-with-files:hybrid-auto <description>` | Generate PRD from task description (standard mode) |
-| `/planning-with-files:hybrid-manual [path]` | Load existing PRD file (standard mode) |
-| `/planning-with-files:hybrid-worktree <name> <branch> <path-or-desc>` | Create worktree + load/generate PRD (fully automated) |
-| `/planning-with-files:approve` | **Choose Auto/Manual mode**, then approve PRD and begin parallel execution |
-| `/planning-with-files:edit` | Edit PRD in your default editor |
-| `/planning-with-files:hybrid-status` | Show execution status of all stories |
-| `/planning-with-files:show-dependencies` | Display dependency graph and analysis |
-| `/planning-with-files:hybrid-complete [branch]` | Complete worktree task and merge |
+**选择这个 fork，如果你需要：**
 
-### How It Works
+✅ **同时推进多个功能** - 三个功能一起开发，互不影响
+✅ **快速试错** - Feature A 写一半发现不行，直接丢弃，不影响其他任务
+✅ **代码审查友好** - 每个 Feature 独立一个 PR，清晰易懂
+✅ **团队协作** - 不同开发者可以在不同的 worktree 中并行工作
 
-**Standard Mode:**
-1. Generate PRD from description or load existing file
-2. Review stories, dependencies, and execution plan
-3. Approve to start parallel execution
-4. Monitor progress with status command
+**使用原版，如果：**
 
-**Worktree Mode (Fully Automated):**
-1. Create worktree with one command
-2. Automatically generates/loads PRD
-3. Automatically switches to worktree directory
-4. Display PRD for immediate review
-5. Complete and merge with automatic cleanup
+- 只需要规划单个任务
+- 不需要并行开发
+- 不需要 PRD 驱动的开发模式
 
-### Worktree + Hybrid Mode (Isolated Parallel Tasks)
+## 快速开始
 
-For multi-task parallel development with complete isolation:
+### 安装
 
-```
-# Create worktree + auto-generate PRD (fully automated)
-/planning-with-files:hybrid-worktree feature-auth main "Implement user authentication"
-
-# This automatically:
-# 1. Creates .worktree/feature-auth/ directory
-# 2. Creates task branch (feature-auth)
-# 3. Generates PRD from description
-# 4. Switches to worktree directory
-# 5. Displays PRD for review
-
-# Work in the isolated environment
-/planning-with-files:approve
-
-# Complete and merge when done (automatically commits code, excludes planning files)
-/planning-with-files:hybrid-complete main
-```
-
-**Smart PRD Detection:**
 ```bash
-# If argument is an existing file → loads that PRD
-/planning-with-files:hybrid-worktree task main ./my-prd.json
-
-# If argument is not a file → generates PRD from description
-/planning-with-files:hybrid-worktree task main "Implement user auth"
+claude plugins install Taoidle/planning-with-files
 ```
 
-**Advantages of Worktree + Hybrid:**
-- Complete branch isolation
-- Main directory untouched
-- Multiple parallel tasks possible
-- Automatic merge on completion
-- Planning files never committed to repository
-- Safe code commit before cleanup
-- Easy to discard if needed
+### 多任务并行开发示例
 
-### Safety Features
+```bash
+# === 终端 1: 开发用户认证功能 ===
+/planning-with-files:hybrid-worktree feature-auth main "实现JWT认证和用户管理"
+/planning-with-files:approve  # 选择 Auto 模式，自动执行所有 story
+# ... 工作在隔离环境中 ...
 
-**Code-Only Commits:**
-When completing a worktree, only code changes are committed:
-- ✅ Source code changes
-- ✅ New files (excluding planning files)
-- ❌ prd.json (excluded)
-- ❌ findings.md (excluded)
-- ❌ progress.txt (excluded)
-- ❌ .planning-config.json (excluded)
-- ❌ .agent-outputs/ (excluded)
-
-**Pre-commit Safety:**
-- Detects uncommitted code changes before cleanup
-- Offers to auto-commit with generated message
-- Provides stash option for temporary changes
-- Always allows manual cancellation
-
-### Example Workflow
-
-**Standard Mode (Single Task):**
-```
-# 1. Generate PRD from description
-/planning-with-files:hybrid-auto Build a REST API with user CRUD operations
-
-# 2. Review the output (shows stories, dependencies, execution plan)
-
-# 3. Edit if needed
-/planning-with-files:edit
-
-# 4. Approve to start parallel execution
+# === 终端 2: 同时修复 API bug ===
+/planning-with-files:hybrid-worktree fix-api-timeout main "修复API超时问题"
 /planning-with-files:approve
+# ... 同时进行，互不影响 ...
 
-# 5. Monitor progress
-/planning-with-files:hybrid-status
-
-# 6. Check dependencies
-/planning-with-files:show-dependencies
-```
-
-**Worktree Mode (Multiple Parallel Tasks):**
-```
-# Terminal 1: Start authentication feature
-/planning-with-files:hybrid-worktree feature-auth main "Implement user auth"
-
-# Terminal 2: Start API refactoring (parallel!)
-/planning-with-files:hybrid-worktree refactor-api main "Refactor API endpoints"
-
-# Each worktree has its own branch, PRD, and execution context
-# Complete when done:
+# === 终端 1 完成 ===
 cd .worktree/feature-auth
+/planning-with-files:hybrid-complete main  # 合并到 main 分支
+
+# === 终端 2 完成 ===
+cd .worktree/fix-api-timeout
 /planning-with-files:hybrid-complete main
 ```
 
-### File Structure
+## Hybrid Ralph 工作流
 
-**Standard Mode:**
-```
-project-root/
-├── prd.json              # Product Requirements Document
-├── findings.md           # Research findings (tagged by story)
-├── progress.txt          # Progress tracking
-└── .agent-outputs/       # Individual agent logs
-```
+这是本 fork 的核心功能 - 将复杂功能自动分解为可并行执行的 story。
 
-**Worktree Mode:**
-```
-.worktree/task-name/
-├── [git worktree files]  # Complete project copy
-├── prd.json              # PRD for this task
-├── findings.md           # Research findings
-├── progress.txt          # Progress tracking
-├── .planning-config.json # Worktree metadata
-└── .agent-outputs/       # Agent logs
-```
-
-### PRD Format
-
-The `prd.json` contains:
-- **Goal**: One-sentence project objective
-- **Objectives**: List of specific objectives
-- **Stories**: User stories with:
-  - ID, title, description
-  - Priority (high/medium/low)
-  - Dependencies on other stories
-  - Acceptance criteria
-  - Context size estimate (small/medium/large)
-  - Tags for categorization
-
-### Parallel Execution Model
-
-Stories are organized into batches based on dependencies:
-- **Batch 1**: Stories with no dependencies (run in parallel)
-- **Batch 2+**: Stories whose dependencies are complete
-
-Example:
-```
-Batch 1 (Parallel):
-  - story-001: Design database schema
-  - story-002: Design API endpoints
-
-Batch 2 (After story-001 complete):
-  - story-003: Implement database schema
-
-Batch 3 (After story-002, story-003 complete):
-  - story-004: Implement API endpoints
-```
-
-### When to Use Hybrid Ralph
-
-**Use for:**
-- Multi-story projects with clear dependencies
-- Tasks that can be broken into independent units
-- Projects requiring parallel execution
-- Complex features with multiple components
-
-**Use Worktree + Hybrid for:**
-- Multiple parallel tasks requiring isolation
-- Features that need separate branches
-- Team collaboration on different features
-- Experimental work you might discard
-
-**Stick to standard planning-with-files for:**
-- Single-phase tasks
-- Simple implementations
-- Quick fixes and tweaks
-
-### Integration with Standard Mode
-
-Hybrid Ralph integrates seamlessly with planning-with-files:
-- Can be used alongside `task_plan.md`, `findings.md`, `progress.md`
-- Compatible with worktree mode for isolated parallel tasks
-- Uses the same session recovery mechanism
-
-### See Also
-
-- [CHANGELOG.md](CHANGELOG.md) - Detailed release notes and version history
-- `skills/hybrid-ralph/SKILL.md` - Complete skill documentation
-
----
-
-## Session Recovery (NEW in v2.2.0)
-
-When your context window fills up and you run `/clear`, this skill automatically recovers unsynced work from your previous session.
-
-### Optimal Workflow
-
-For the best experience, we recommend:
-
-1. **Disable auto-compact** in Claude Code settings (use full context window)
-2. **Start a fresh session** in your project
-3. **Run `/planning-with-files`** when ready to work on a complex task
-4. **Work until context fills up** (Claude will warn you)
-5. **Run `/clear`** to start fresh
-6. **Run `/planning-with-files`** again — it will automatically recover where you left off
-
-### How Recovery Works
-
-When you invoke `/planning-with-files`, the skill:
-
-1. Checks for previous session data (stored in `~/.claude/projects/`)
-2. Finds the last time planning files were updated
-3. Extracts conversation that happened after (potentially lost context)
-4. Shows a catchup report so you can sync planning files
-
-This means even if context filled up before you could update your planning files, the skill will recover that context in your next session.
-
-### Disabling Auto-Compact
-
-To use the full context window without automatic compaction:
+### PRD 自动生成
 
 ```bash
-# In your Claude Code settings or .claude/settings.json
-{
-  "autoCompact": false
-}
+# 描述你的功能，自动生成 PRD
+/planning-with-files:hybrid-auto "实现用户认证系统，包括登录、注册、密码重置"
 ```
 
-This lets you maximize context usage before manually clearing with `/clear`.
+生成的 PRD 包含：
+- **Goal**: 一句话目标
+- **Stories**: 3-7 个用户故事
+- **Dependencies**: Story 之间的依赖关系
+- **Batches**: 自动计算并行执行批次
 
-## Key Rules
+### 批次自动流转
 
-1. **Create Plan First** — Never start without `task_plan.md`
-2. **The 2-Action Rule** — Save findings after every 2 view/browser operations
-3. **Log ALL Errors** — They help avoid repetition
-4. **Never Repeat Failures** — Track attempts, mutate approach
+**Auto Mode** (默认):
+```
+Batch 1 (3个story并行) → 完成 → 自动启动 Batch 2 → 完成 → 自动启动 Batch 3
+```
 
-## File Structure
+**Manual Mode**:
+```
+Batch 1 完成 → 你审查 → 确认 → Batch 2 启动 → 完成 → 你审查 → 确认 → Batch 3
+```
+
+### 执行模式选择
+
+| 模式 | 适用场景 | 控制粒度 |
+|------|---------|---------|
+| **Auto** | 日常开发、可信 PRD | 批次级自动 |
+| **Manual** | 关键功能、需要仔细审查 | 批次级手动确认 |
+
+**注意**: 两种模式下，agent 都会直接执行命令，不在命令级别打断你。
+
+## 命令参考
+
+### 核心命令
+
+| 命令 | 说明 |
+|------|------|
+| `/planning-with-files:hybrid-worktree <name> <branch> <desc>` | **创建隔离的并行任务环境** |
+| `/planning-with-files:approve` | **选择模式并执行 PRD** |
+| `/planning-with-files:hybrid-complete [branch]` | **完成任务并合并** |
+| `/planning-with-files:hybrid-status` | 查看执行状态 |
+| `/planning-with-files:hybrid-auto <desc>` | 生成 PRD（非 worktree 模式） |
+
+### Worktree 目录结构
+
+```
+.worktree/feature-auth/
+├── [项目文件完整副本]
+├── .git/                      # 独立的 Git 仓库
+├── prd.json                   # 这个任务的需求分解
+├── findings.md                # 研究发现
+├── progress.txt               # 执行进度
+├── .planning-config.json      # 任务元数据
+└── .agent-outputs/            # 各个 story agent 的输出
+```
+
+## v2.7.9 更新
+
+**新增:**
+- 🚀 **Auto/Manual 执行模式** - 选择批次流转方式
+- 📊 **模式选择对话框** - 启动时清晰选择执行模式
+
+**修复:**
+- 🔧 **Worktree 路径修复** - 规划文件不再误入根目录
+- 🐛 **后台任务等待修复** - PRD 生成不再卡住
+- 📝 **执行语义明确** - 模式只控制批次，不控制命令
+
+## 文件结构
 
 ```
 planning-with-files/
-├── commands/                # Plugin commands
-│   └── start.md             # /planning-with-files:start command
-├── templates/               # Root-level templates (for CLAUDE_PLUGIN_ROOT)
-├── scripts/                 # Root-level scripts (for CLAUDE_PLUGIN_ROOT)
-├── docs/                    # Documentation
-│   ├── installation.md
-│   ├── quickstart.md
-│   ├── workflow.md
-│   ├── troubleshooting.md
-│   ├── gemini.md            # Gemini CLI setup
-│   ├── cursor.md
-│   ├── windows.md
-│   ├── kilocode.md
-│   ├── codex.md
-│   └── opencode.md
-├── skills/                  # Skill folders
-│   ├── planning-with-files/ # Main planning skill
-│   │   ├── SKILL.md
-│   │   ├── examples.md
-│   │   ├── reference.md
-│   │   ├── templates/
-│   │   └── scripts/
-│   │       ├── init-session.sh
-│   │       ├── check-complete.sh
-│   │       ├── init-session.ps1   # Windows PowerShell
-│   │       └── check-complete.ps1 # Windows PowerShell
-│   └── hybrid-ralph/        # NEW: Hybrid Ralph skill (v2.7.6)
-│       ├── SKILL.md
-│       ├── commands/        # Skill commands
-│       │   ├── auto.md
-│       │   ├── manual.md
-│       │   ├── worktree.md
-│       │   ├── complete.md
-│       │   ├── approve.md
-│       │   ├── edit.md
-│       │   ├── status.md
-│       │   └── show-dependencies.md
-│       ├── core/            # Python modules
-│       │   ├── context_filter.py
-│       │   ├── state_manager.py
-│       │   ├── prd_generator.py
-│       │   └── orchestrator.py
-│       ├── scripts/         # Helper scripts
-│       │   ├── prd-validate.py
-│       │   ├── status.py
-│       │   ├── show-dependencies.py
-│       │   ├── agent-exec.py
-│       │   ├── prd-generate.py
-│       │   ├── hybrid-worktree-init.sh
-│       │   ├── hybrid-worktree-init.ps1
-│       │   ├── hybrid-worktree-complete.sh
-│       │   └── hybrid-worktree-complete.ps1
-│       └── templates/       # PRD templates
-│           ├── prd_review.md
-│           └── prd.json.example
-├── .gemini/                 # Gemini CLI skills
-│   └── skills/
-│       └── planning-with-files/
-├── .codex/                  # Codex IDE skills
-│   └── skills/
-├── .opencode/               # OpenCode IDE skills
-│   └── skills/
-├── .claude-plugin/          # Plugin manifest
-├── .cursor/                 # Cursor skills
-│   └── skills/
-├── .kilocode/               # Kilo Code skills
-│   └── skills/
-├── CHANGELOG.md
-├── LICENSE
-└── README.md
+├── commands/                   # Claude Code 命令定义
+│   ├── hybrid-worktree.md     # 创建并行任务环境
+│   ├── approve.md              # 执行 PRD（含模式选择）
+│   └── hybrid-complete.md      # 完成并合并
+├── skills/hybrid-ralph/        # Hybrid Ralph 技能
+│   └── commands/              # 技能命令
+└── docs/                      # 文档
 ```
 
-## The Manus Principles
+## 文档
 
-| Principle | Implementation |
-|-----------|----------------|
-| Filesystem as memory | Store in files, not context |
-| Attention manipulation | Re-read plan before decisions (hooks) |
-| Error persistence | Log failures in plan file |
-| Goal tracking | Checkboxes show progress |
-| Completion verification | Stop hook checks all phases |
+| 文档 | 说明 |
+|------|------|
+| [CHANGELOG.md](CHANGELOG.md) | 详细更新日志 |
+| [docs/installation.md](docs/installation.md) | 安装指南 |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | 常见问题 |
 
-## When to Use
+## 致谢
 
-**Use this pattern for:**
-- Multi-step tasks (3+ steps)
-- Research tasks
-- Building/creating projects
-- Tasks spanning many tool calls
+本项目基于以下优秀项目：
 
-**Skip for:**
-- Simple questions
-- Single-file edits
-- Quick lookups
+- **[OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files)** - 提供了核心的 3 文件规划模式、worktree 支持和基础框架
 
-## Kilo Code Support
+- **[snarktank/ralph](https://github.com/snarktank/ralph)** - 启发了 PRD 格式、progress.txt 模式和小任务分解方法，我们将其适配为 Hybrid Ralph 工作流
 
-This skill also supports Kilo Code AI through the `.kilocode/rules/` directory.
+- **Manus AI** - 开创了上下文工程模式
 
-The [`.kilocode/rules/planning-with-files.md`](.kilocode/rules/planning-with-files.md) file contains all the planning guidelines formatted for Kilo Code's rules system, providing the same Manus-style planning workflow for Kilo Code users.
+- **Anthropic** - Claude Code、Agent Skills 和 Plugin 系统
 
-**Windows users:** The skill now includes PowerShell scripts ([`init-session.ps1`](skills/planning-with-files/scripts/init-session.ps1) and [`check-complete.ps1`](skills/planning-with-files/scripts/check-complete.ps1)) for native Windows support.
+## 贡献
 
-See [docs/kilocode.md](docs/kilocode.md) for detailed Kilo Code integration guide.
+欢迎贡献！请：
+1. Fork 本仓库
+2. 创建功能分支
+3. 提交 Pull Request
 
-## Community Forks
+## 许可证
 
-| Fork | Author | Features |
-|------|--------|----------|
-| [devis](https://github.com/st01cs/devis) | [@st01cs](https://github.com/st01cs) | Interview-first workflow, `/devis:intv` and `/devis:impl` commands, guaranteed activation |
-| [multi-manus-planning](https://github.com/kmichels/multi-manus-planning) | [@kmichels](https://github.com/kmichels) | Multi-project support, SessionStart git sync |
-
-*Built something? Open an issue to get listed!*
+MIT License — 自由使用、修改和分发
 
 ---
 
-## 🍴 This Fork - Enhancements & Focus
-
-This fork focuses on improving the **Hybrid Ralph** workflow with better execution control and bug fixes.
-
-### Changes from Upstream (v2.7.1 → v2.7.9)
-
-#### v2.7.9 - Execution Mode Control
-
-**Added:**
-- **Auto/Manual Execution Modes** - Choose how batches progress in hybrid mode
-  - Auto mode: Batches progress automatically, pause only on errors
-  - Manual mode: Confirm before launching each batch
-  - Agents execute commands autonomously in both modes
-
-**Fixed:**
-- **Worktree Directory Path** - Fixed relative path causing planning files in root directory
-  - Changed: `WORKTREE_DIR=".worktree/..."` → `WORKTREE_DIR="$ROOT_DIR/.worktree/..."`
-  - Ensures all planning files are created in worktree only
-
-- **Background Task Waiting** - Fixed PRD generation using sleep loops
-  - Added explicit TaskOutput tool usage instructions
-  - Prevents indefinite waiting when PRD generation completes
-
-**Changed:**
-- Clarified execution mode semantics: mode controls batch progression, not command execution
-- Updated all platform skill files to v2.7.9
-
-### Installation (This Fork)
-
-```bash
-# Install from this fork
-claude plugins install Taoidle/planning-with-files
-```
-
-Or for the latest updates:
-```bash
-git clone https://github.com/Taoidle/planning-with-files.git
-cd planning-with-files
-npm link  # or copy to Claude plugins directory
-```
-
-### Upstream Compatibility
-
-This fork maintains full compatibility with the original project. All original features are preserved, with enhancements focused on:
-- ✅ Hybrid Ralph workflow improvements
-- ✅ Bug fixes for worktree and PRD generation
-- ✅ Better execution control options
-
-For the original upstream project, visit: [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files)
-
----
-
-- **Manus AI** — For pioneering context engineering patterns
-- **Anthropic** — For Claude Code, Agent Skills, and the Plugin system
-- **Lance Martin** — For the detailed Manus architecture analysis
-- Based on [Context Engineering for AI Agents](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
-
-## License
-
-MIT License — feel free to use, modify, and distribute.
-
----
-
-**Author:** [Ahmad Othman Ammar Adi](https://github.com/OthmanAdi)
+**项目地址**: [Taoidle/planning-with-files](https://github.com/Taoidle/planning-with-files)
 
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Taoidle/planning-with-files&type=Date)](https://star-history.com/#Taoidle/planning-with-files&Date)
-
-**Original Project Star History:**
-[![Star History Chart](https://api.star-history.com/svg?repos=OthmanAdi/planning-with-files&type=Date)](https://star-history.com/#OthmanAdi/planning-with-files&Date)
