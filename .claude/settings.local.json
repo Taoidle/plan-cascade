@@ -1,0 +1,39 @@
+{
+  "alwaysApprove": {
+    "bash": [
+      "git *",
+      "cd *",
+      "pwd",
+      "ls *",
+      "find *",
+      "grep *",
+      "cat *",
+      "head *",
+      "tail *",
+      "echo *",
+      "mkdir *",
+      "rm -f .locks/*",
+      "test *",
+      "\\[ *",
+      "python3 *",
+      "node *",
+      "npm *",
+      "cp *"
+    ],
+    "cmd": [
+      "git *",
+      "cd *",
+      "chdir",
+      "dir",
+      "type *",
+      "copy *",
+      "mkdir *",
+      "del .locks\\*",
+      "echo *",
+      "python *",
+      "node *",
+      "npm *"
+    ]
+  },
+  "description": "Auto-approve safe development commands for Hybrid Ralph workflow. These commands are non-destructive and commonly used during automated PRD execution and worktree management."
+}

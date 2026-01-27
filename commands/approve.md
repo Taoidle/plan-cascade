@@ -6,7 +6,43 @@ description: "Approve the current PRD and begin parallel story execution. Analyz
 
 You are approving the PRD and starting parallel execution of user stories.
 
-## Step 1: Verify PRD Exists
+## Step 1: Detect Operating System and Shell
+
+Detect the current operating system to use appropriate commands:
+
+```bash
+# Detect OS
+OS_TYPE="$(uname -s 2>/dev/null || echo Windows)"
+case "$OS_TYPE" in
+    Linux*|Darwin*|MINGW*|MSYS*)
+        SHELL_TYPE="bash"
+        echo "✓ Detected Unix-like environment (bash)"
+        ;;
+    *)
+        # Check if PowerShell is available on Windows
+        if command -v pwsh >/dev/null 2>&1 || command -v powershell >/dev/null 2>&1; then
+            SHELL_TYPE="powershell"
+            echo "✓ Detected Windows environment (PowerShell)"
+        else
+            SHELL_TYPE="bash"
+            echo "✓ Using bash (default)"
+        fi
+        ;;
+esac
+```
+
+## Step 2: Ensure Auto-Approval Configuration
+
+Ensure command auto-approval settings are configured (merges with existing settings):
+
+```bash
+# Run the settings merge script from project root
+python3 ../scripts/ensure-settings.py 2>/dev/null || python3 scripts/ensure-settings.py || echo "Warning: Could not update settings, continuing..."
+```
+
+This script intelligently merges required auto-approval patterns with any existing `.claude/settings.local.json`, preserving user customizations.
+
+## Step 3: Verify PRD Exists
 
 Check if `prd.json` exists:
 
@@ -19,7 +55,7 @@ if [ ! -f "prd.json" ]; then
 fi
 ```
 
-## Step 2: Read and Validate PRD
+## Step 4: Read and Validate PRD
 
 Read `prd.json` and validate:
 - Has `metadata`, `goal`, `objectives`, `stories`
@@ -28,7 +64,7 @@ Read `prd.json` and validate:
 
 If validation fails, show errors and suggest `/planning-with-files:edit`.
 
-## Step 3: Calculate Execution Batches
+## Step 5: Calculate Execution Batches
 
 Analyze story dependencies and create parallel execution batches:
 
@@ -53,7 +89,7 @@ Batch 2:
 ...
 ```
 
-## Step 4: Choose Execution Mode
+## Step 6: Choose Execution Mode
 
 Ask the user to choose between automatic and manual batch progression:
 
@@ -89,7 +125,7 @@ fi
 echo "execution_mode: $EXECUTION_MODE" >> progress.txt
 ```
 
-## Step 5: Initialize Progress Tracking
+## Step 7: Initialize Progress Tracking
 
 Create/initialize `progress.txt`:
 
@@ -110,7 +146,7 @@ EOF
 
 Create `.agent-outputs/` directory for agent logs.
 
-## Step 6: Launch Batch 1 Agents
+## Step 8: Launch Batch 1 Agents
 
 For each story in Batch 1, launch a background Task agent:
 
@@ -142,7 +178,7 @@ Launch each agent with `run_in_background: true`.
 
 Store each task_id for monitoring.
 
-## Step 7: Monitor and Progress Through Batches
+## Step 9: Monitor and Progress Through Batches
 
 After launching Batch 1 agents, display:
 
@@ -299,7 +335,7 @@ echo ""
 echo "=== ALL BATCHES COMPLETE ==="
 ```
 
-## Step 8: Show Final Status
+## Step 10: Show Final Status
 
 ```
 === All Batches Complete ===

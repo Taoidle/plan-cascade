@@ -2,6 +2,68 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.11] - 2026-01-27
+
+### Added
+
+- **Operating System Detection** - Auto-detect OS and use appropriate shell (bash/PowerShell)
+  - Commands now detect Linux/macOS/Windows environments automatically
+  - Choose bash for Unix-like systems, PowerShell for Windows
+  - Ensures commands use correct syntax for detected shell
+  - Applied to both `hybrid-worktree` and `approve` commands
+
+- **Intelligent Settings Merge** - New `scripts/ensure-settings.py` for smart configuration management
+  - Checks for existing `.claude/settings.local.json` before creating new one
+  - Merges required auto-approval patterns with user's existing configuration
+  - Preserves custom user settings while ensuring Hybrid Ralph patterns are present
+  - Non-destructive: adds missing patterns without overwriting existing ones
+  - Runs automatically during `hybrid-worktree` and `approve` command execution
+
+### Changed
+
+- Updated `hybrid-worktree.md` with OS detection (Step 2) and settings merge (Step 3)
+- Updated `approve.md` with OS detection (Step 1) and settings merge (Step 2)
+- Settings file now created via Python script for intelligent merging
+- All renumbered steps in commands after adding new detection steps
+
+### Technical Details
+
+**OS Detection Pattern:**
+```bash
+OS_TYPE="$(uname -s 2>/dev/null || echo Windows)"
+case "$OS_TYPE" in
+    Linux*|Darwin*|MINGW*|MSYS*) SHELL_TYPE="bash" ;;
+    *) SHELL_TYPE="powershell" ;;
+esac
+```
+
+**Settings Merge Pattern:**
+- Read existing settings if present
+- Compare with required patterns list
+- Add only missing patterns
+- Preserve all user customizations
+- Write back merged configuration
+
+---
+
+## [2.7.10] - 2026-01-27
+
+### Added
+
+- **Command Auto-Approval Configuration** - Added `.claude/settings.local.json` for seamless automated workflow
+  - Eliminates manual confirmation prompts for safe development commands
+  - Auto-approves: `git *`, `cd *`, `pwd`, `ls *`, `find *`, `grep *`, `cat *`, `head *`, `tail *`, `mkdir *`, `echo *`, `python3 *`, `node *`, `npm *`, `cp *`
+  - Windows PowerShell commands also supported: `dir`, `type`, `chdir`, `copy`
+  - Users can customize patterns to add their own safe commands
+  - Critical for unattended hybrid-worktree and approve command execution
+
+### Changed
+
+- Updated README with "命令自动批准配置" section documenting the new settings file
+- Enhanced quick start guide with auto-approval configuration instructions
+
+---
+
 ## [2.7.9] - 2026-01-27
 
 ### Fixed

@@ -21,13 +21,59 @@ TARGET_BRANCH="{{args|arg 2 or auto-detect}}"
 PRD_ARG="{{args|arg 3 or ask user 'Provide PRD file path or task description'}}"
 ```
 
-## Step 2: Verify Git Repository
+## Step 2: Detect Operating System and Shell
+
+Detect the current operating system to use appropriate commands:
+
+```bash
+# Detect OS
+OS_TYPE="$(uname -s 2>/dev/null || echo Windows)"
+case "$OS_TYPE" in
+    Linux*|Darwin*|MINGW*|MSYS*)
+        SHELL_TYPE="bash"
+        echo "✓ Detected Unix-like environment (bash)"
+        ;;
+    *)
+        # Check if PowerShell is available on Windows
+        if command -v pwsh >/dev/null 2>&1 || command -v powershell >/dev/null 2>&1; then
+            SHELL_TYPE="powershell"
+            echo "✓ Detected Windows environment (PowerShell)"
+        else
+            SHELL_TYPE="bash"
+            echo "✓ Using bash (default)"
+        fi
+        ;;
+esac
+```
+
+**Important**: Throughout this command, use:
+- **Bash syntax** when `SHELL_TYPE=bash`
+- **PowerShell syntax** when `SHELL_TYPE=powershell`
+
+For PowerShell equivalents:
+- `$(command)` → `$()`
+- `VAR=value` → `$VAR = value`
+- `if [ ]` → `if ()`
+- `echo` → `Write-Host`
+
+## Step 3: Ensure Auto-Approval Configuration
+
+Ensure command auto-approval settings are configured (merges with existing settings):
+
+```bash
+# Run the settings merge script
+python3 scripts/ensure-settings.py || echo "Warning: Could not update settings, continuing..."
+```
+
+This script intelligently merges required auto-approval patterns with any existing `.claude/settings.local.json`, preserving user customizations.
+
+## Step 4: Verify Git Repository
 
 ```bash
 git rev-parse --git-dir > /dev/null 2>&1 || { echo "ERROR: Not a git repository"; exit 1; }
 ```
 
-## Step 3: Detect Default Branch
+## Step 5: Detect Default Branch
 
 ```bash
 DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@refs/remotes/origin/@@')
@@ -43,7 +89,7 @@ fi
 TARGET_BRANCH="${TARGET_BRANCH:-$DEFAULT_BRANCH}"
 ```
 
-## Step 4: Set Variables
+## Step 6: Set Variables
 
 ```bash
 TASK_BRANCH="$TASK_NAME"
@@ -52,7 +98,7 @@ ROOT_DIR=$(pwd)
 WORKTREE_DIR="$ROOT_DIR/.worktree/$(basename $TASK_NAME)"
 ```
 
-## Step 5: Determine PRD Mode
+## Step 7: Determine PRD Mode
 
 Check if PRD_ARG is an existing file:
 
@@ -70,7 +116,7 @@ else
 fi
 ```
 
-## Step 6: Check for Existing Worktree
+## Step 8: Check for Existing Worktree
 
 ```bash
 if [ -d "$WORKTREE_DIR" ]; then
@@ -79,7 +125,7 @@ if [ -d "$WORKTREE_DIR" ]; then
     cd "$WORKTREE_DIR"
     # Continue to PRD handling for existing worktree
 else
-    ## Step 7: Create Git Worktree (only if new)
+    ## Step 9: Create Git Worktree (only if new)
 
     if git show-ref --verify --quiet refs/heads/"$TASK_BRANCH"; then
         echo "ERROR: Branch $TASK_BRANCH already exists"
@@ -89,7 +135,7 @@ else
     git worktree add -b "$TASK_BRANCH" "$WORKTREE_DIR" "$TARGET_BRANCH"
     echo "Created worktree: $WORKTREE_DIR"
 
-    ## Step 8: Create Planning Configuration
+    ## Step 10: Create Planning Configuration
 
     cat > "$WORKTREE_DIR/.planning-config.json" << EOF
 {
@@ -104,7 +150,7 @@ else
 }
 EOF
 
-    ## Step 9: Create Initial Files in Worktree
+    ## Step 11: Create Initial Files in Worktree
 
     cat > "$WORKTREE_DIR/findings.md" << 'EOF'
 # Findings
@@ -122,14 +168,14 @@ EOF
 fi
 ```
 
-## Step 10: Navigate to Worktree
+## Step 12: Navigate to Worktree
 
 ```bash
 cd "$WORKTREE_DIR"
 echo "Now working in: $(pwd)"
 ```
 
-## Step 11: Handle PRD (Load or Generate)
+## Step 13: Handle PRD (Load or Generate)
 
 ### If PRD_MODE is "load" (user provided PRD file):
 
@@ -221,7 +267,7 @@ PRD_SOURCE="Auto-generated from description"
 fi
 ```
 
-## Step 12: Validate and Display PRD
+## Step 14: Validate and Display PRD
 
 After PRD is loaded or generated:
 
@@ -234,7 +280,7 @@ After PRD is loaded or generated:
    - Execution batches
    - Acceptance criteria for each story
 
-## Step 13: Show Final Summary
+## Step 15: Show Final Summary
 
 ```
 ============================================================

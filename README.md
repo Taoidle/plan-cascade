@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://code.claude.com/docs/en/plugins)
-[![Version](https://img.shields.io/badge/version-2.7.9-brightgreen)](https://github.com/Taoidle/planning-with-files)
+[![Version](https://img.shields.io/badge/version-2.7.11-brightgreen)](https://github.com/Taoidle/planning-with-files)
 
 ## 核心功能：多任务并发开发
 
@@ -85,6 +85,27 @@
 
 ```bash
 claude plugins install Taoidle/planning-with-files
+```
+
+### 命令自动批准配置（可选）
+
+为了避免在执行过程中频繁确认 `git`、`cd`、`find` 等安全命令，项目已包含 `.claude/settings.local.json` 配置文件，自动批准常见的开发命令。
+
+项目包含的默认配置会自动批准：
+- Git 操作：`git *`
+- 目录操作：`cd *`, `pwd`, `ls *`, `find *`
+- 文件查看：`cat *`, `head *`, `tail *`, `grep *`
+- 其他安全命令：`mkdir *`, `echo *`, `python3 *`, `node *`, `npm *`
+
+**自定义配置**：
+```json
+{
+  "alwaysApprove": {
+    "bash": [
+      "你的命令模式 *"
+    ]
+  }
+}
 ```
 
 ### 多任务并行开发示例
@@ -171,6 +192,27 @@ Batch 1 完成 → 你审查 → 确认 → Batch 2 启动 → 完成 → 你审
 ├── .planning-config.json      # 任务元数据
 └── .agent-outputs/            # 各个 story agent 的输出
 ```
+
+## v2.7.11 更新
+
+**新增:**
+- 🔍 **操作系统自动检测** - 自动检测 OS 并使用对应的 shell（bash/PowerShell）
+  - Linux/macOS 使用 bash
+  - Windows 使用 PowerShell
+  - 确保命令使用正确的语法
+
+- 🧩 **智能配置合并** - 新增 `scripts/ensure-settings.py` 智能配置管理脚本
+  - 检查现有配置，不直接覆盖
+  - 只添加缺失的自动批准模式
+  - 保留用户自定义设置
+
+## v2.7.10 更新
+
+**新增:**
+- 🔓 **命令自动批准配置** - `.claude/settings.local.json` 消除手动确认提示
+  - 自动批准：git, cd, find, grep, cat, mkdir, python3, node, npm 等安全命令
+  - 支持 Windows PowerShell 命令：dir, type, chdir, copy
+  - 用户可自定义命令模式
 
 ## v2.7.9 更新
 
