@@ -1,12 +1,12 @@
 {
-  "name": "planning-with-files",
-  "version": "2.7.11",
-  "description": "Manus-style persistent markdown files for planning, progress tracking, and knowledge storage. Use when starting complex tasks, multi-step projects, research tasks, or when you want structured output. Now with optional Git worktree mode for parallel multi-task development with isolated branches. Includes hybrid-ralph skill for PRD-based parallel story execution.",
+  "name": "plan-cascade",
+  "version": "2.8.0",
+  "description": "Three-layer cascaded parallel development framework. Breaks down projects into Features (Mega Plan), Features into Stories (Hybrid Ralph), with dependency-driven batch execution and Git Worktree isolation. Fork of planning-with-files with major enhancements.",
   "author": {
-    "name": "OthmanAdi",
-    "url": "https://github.com/OthmanAdi"
+    "name": "Taoidle",
+    "url": "https://github.com/Taoidle"
   },
-  "repository": "https://github.com/OthmanAdi/planning-with-files",
+  "repository": "https://github.com/Taoidle/plan-cascade",
   "license": "MIT",
   "keywords": [
     "planning",
@@ -24,6 +24,9 @@
     "ralph",
     "hybrid",
     "orchestration",
-    "story-execution"
+    "story-execution",
+    "mega-plan",
+    "project-level",
+    "feature-orchestration"
   ]
 }

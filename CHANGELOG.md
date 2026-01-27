@@ -2,6 +2,75 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.8.0] - 2026-01-28
+
+### Project Renamed
+
+- **planning-with-files → Plan Cascade**
+- New name reflects the three-layer cascaded architecture
+- Forked from [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) v2.7.1
+
+### Added
+
+- **Mega Plan: Project-Level Multi-Feature Orchestration** - A new three-layer architecture for managing complex projects
+  - **Level 1: Mega Plan** - Project-level orchestration of multiple features
+  - **Level 2: Features** - Each feature runs as a `hybrid:worktree` task
+  - **Level 3: Stories** - Internal parallelism within each feature
+
+- **New Commands:**
+  - `/mega:plan <description>` - Generate a mega-plan from project description, breaking it into features with dependencies
+  - `/mega:edit` - Edit the mega-plan interactively
+  - `/mega:approve [--auto-prd]` - Approve mega-plan and start execution; `--auto-prd` skips PRD review
+  - `/mega:status` - Show comprehensive project progress with visual progress bars
+  - `/mega:complete [target-branch]` - Merge all features in dependency order and clean up
+
+- **Core Modules:**
+  - `mega_generator.py` - Generate and validate mega-plans, calculate feature batches
+  - `mega_state.py` - Thread-safe state management with file locking
+  - `feature_orchestrator.py` - Create worktrees, generate PRDs, manage batch execution
+  - `merge_coordinator.py` - Coordinate dependency-ordered merging and cleanup
+
+- **Shared Findings Mechanism:**
+  - `mega-findings.md` at project root for cross-feature discoveries
+  - Read-only copies automatically placed in each feature worktree
+  - Feature-specific findings remain independent in each worktree
+
+- **Dependency-Driven Batch Execution:**
+  - Automatic calculation of feature dependencies
+  - Features without dependencies execute in parallel
+  - Dependent features wait for their dependencies to complete
+
+### Technical Details
+
+**Feature Status Flow:**
+```
+pending → prd_generated → approved → in_progress → complete
+                                           ↓
+                                        failed
+```
+
+**PRD Approval Modes:**
+| Mode | Command | Behavior |
+|------|---------|----------|
+| Manual | `/mega:approve` | Review and `/approve` in each worktree |
+| Auto | `/mega:approve --auto-prd` | PRDs auto-approved, immediate execution |
+
+**File Structure:**
+```
+project-root/
+├── mega-plan.json              # Project-level plan
+├── mega-findings.md            # Shared findings
+├── .mega-status.json           # Execution status
+└── .worktree/
+    ├── feature-auth/           # Feature 1 worktree
+    │   ├── prd.json
+    │   ├── findings.md         # Feature-specific
+    │   └── mega-findings.md    # Read-only copy
+    └── feature-products/       # Feature 2 worktree
+```
+
+---
+
 ## [2.7.11] - 2026-01-27
 
 ### Added

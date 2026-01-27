@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "created_at": "{{TIMESTAMP}}",
+    "version": "1.0.0"
+  },
+  "goal": "{{GOAL}}",
+  "description": "{{DESCRIPTION}}",
+  "execution_mode": "auto",
+  "target_branch": "main",
+  "features": [
+    {
+      "id": "feature-001",
+      "name": "feature-{{NAME}}",
+      "title": "{{TITLE}}",
+      "description": "{{FEATURE_DESCRIPTION}}",
+      "priority": "high",
+      "dependencies": [],
+      "status": "pending"
+    }
+  ]
+}
