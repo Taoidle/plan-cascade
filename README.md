@@ -24,30 +24,23 @@
 
 Plan Cascade 是一个 Claude Code 插件，提供**三层级联**的并行开发能力：
 
-```mermaid
-block-beta
-    columns 1
-    block:L1:1
-        columns 3
-        L1T["Level 1: Mega Plan (项目级)"]
-        L1A["将大型项目分解为多个 Feature"]
-        L1B["管理依赖关系 & 统一合并"]
-    end
-    space
-    block:L2:1
-        columns 3
-        L2T["Level 2: Hybrid Ralph (功能级)"]
-        L2A["独立 Git Worktree 开发"]
-        L2B["自动生成 PRD & 分解 Story"]
-    end
-    space
-    block:L3:1
-        columns 3
-        L3T["Level 3: Stories (故事级)"]
-        L3A["独立 Agent 执行"]
-        L3B["并行执行 & 批次流转"]
-    end
-    L1 --> L2 --> L3
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Level 1: Mega Plan (项目级)                                 │
+│  ├── 将大型项目分解为多个 Feature                             │
+│  ├── 管理 Feature 之间的依赖关系                              │
+│  └── 统一合并所有完成的 Feature                               │
+├─────────────────────────────────────────────────────────────┤
+│  Level 2: Hybrid Ralph (功能级)                              │
+│  ├── 每个 Feature 在独立的 Git Worktree 中开发                │
+│  ├── 自动生成 PRD，分解为多个 Story                           │
+│  └── 完成后合并到目标分支                                     │
+├─────────────────────────────────────────────────────────────┤
+│  Level 3: Stories (故事级)                                   │
+│  ├── 每个 Story 由独立 Agent 执行                             │
+│  ├── 无依赖的 Story 并行执行                                  │
+│  └── 按批次自动或手动流转                                     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## 安装
