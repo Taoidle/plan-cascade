@@ -127,12 +127,21 @@ Acceptance Criteria:
 
 Dependencies: None
 
+Execution Mode: $EXECUTION_MODE
+
+IMPORTANT - Behavior based on execution mode:
+- If AUTO mode: Execute all bash/powershell commands directly WITHOUT waiting for user confirmation
+- If MANUAL mode: Show commands and wait for user approval before executing
+
 Your task:
 1. Read relevant code and documentation
 2. Implement the story according to acceptance criteria
 3. Test your implementation
 4. Update findings.md with discoveries (use <!-- @tags: {story_id} -->)
 5. Mark complete by appending to progress.txt: [COMPLETE] {story_id}
+
+In AUTO mode, work autonomously and execute all commands directly.
+In MANUAL mode, document your plan and wait for approval before executing.
 
 Work methodically and document your progress.
 ```
@@ -211,7 +220,13 @@ while [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; do
 
     if [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; then
         echo "=== Auto-launching Batch $CURRENT_BATCH ==="
-        # Launch agents for stories in this batch...
+
+        # Launch agents for stories in this batch
+        # Use the SAME agent prompt format as Batch 1, including:
+        # - Story details (id, title, description, acceptance criteria)
+        # - Execution Mode: $EXECUTION_MODE (AUTO)
+        # - IMPORTANT: In AUTO mode, execute bash/powershell commands directly without confirmation
+        # Launch each agent with run_in_background: true
     fi
 done
 
@@ -279,7 +294,13 @@ while [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; do
         fi
 
         echo "=== Launching Batch $CURRENT_BATCH ==="
-        # Launch agents for stories in this batch...
+
+        # Launch agents for stories in this batch
+        # Use the SAME agent prompt format as Batch 1, including:
+        # - Story details (id, title, description, acceptance criteria)
+        # - Execution Mode: $EXECUTION_MODE (MANUAL)
+        # - In MANUAL mode, show plan and wait for approval before executing commands
+        # Launch each agent with run_in_background: true
     fi
 done
 
@@ -309,10 +330,12 @@ Next steps:
 **Auto Mode (default)**:
 - Batches progress automatically when previous batch completes
 - Pauses only on errors or failures
+- Agents execute bash/powershell commands directly WITHOUT waiting for user confirmation
 - Best for: routine tasks, trusted PRDs, faster execution
 
 **Manual Mode**:
 - Requires approval before each batch starts
+- Agents show their plan and wait for user approval before executing commands
 - Full control to review between batches
 - Best for: critical tasks, complex PRDs, careful oversight
 
