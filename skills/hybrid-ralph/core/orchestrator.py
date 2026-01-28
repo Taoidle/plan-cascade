@@ -2,8 +2,11 @@
 """
 Orchestrator for Hybrid Ralph + Planning-with-Files
 
-Manages parallel execution of user stories using Claude Code's Task tool.
+Manages parallel execution of user stories using Claude Code's Task tool
+or external CLI agents (codex, amp-code, aider, etc.).
 Handles dependency resolution, batch execution, and failure recovery.
+
+Extended for multi-agent collaboration support.
 """
 
 import json
@@ -11,11 +14,12 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from context_filter import ContextFilter
 from state_manager import StateManager
 from prd_generator import PRDGenerator
+from agent_executor import AgentExecutor
 
 
 class StoryAgent:
@@ -90,17 +94,32 @@ Work methodically and document your progress.
 class Orchestrator:
     """Orchestrates parallel execution of user stories."""
 
-    def __init__(self, project_root: Path):
+    def __init__(
+        self,
+        project_root: Path,
+        agents_config: Optional[Dict] = None,
+        default_agent: Optional[str] = None
+    ):
         """
         Initialize the orchestrator.
 
         Args:
             project_root: Root directory of the project
+            agents_config: Optional agent configuration dict
+            default_agent: Optional default agent name override
         """
         self.project_root = Path(project_root)
         self.context_filter = ContextFilter(project_root)
         self.state_manager = StateManager(project_root)
         self.prd_generator = PRDGenerator(project_root)
+
+        # Initialize agent executor
+        self.agent_executor = AgentExecutor(
+            project_root,
+            agents_config=agents_config
+        )
+        if default_agent:
+            self.agent_executor.default_agent = default_agent
 
         # Track running agents
         self.running_agents: Dict[str, StoryAgent] = {}
@@ -120,13 +139,23 @@ class Orchestrator:
 
         return self.prd_generator.generate_execution_batches(prd)
 
-    def launch_agent(self, story: Dict, batch_num: int) -> StoryAgent:
+    def launch_agent(
+        self,
+        story: Dict,
+        batch_num: int,
+        agent_name: Optional[str] = None,
+        task_callback: Optional[Callable] = None
+    ) -> StoryAgent:
         """
-        Launch a background Task agent for a story.
+        Launch a background agent for a story.
+
+        Supports both Task tool agents (claude-code) and CLI agents.
 
         Args:
             story: Story dictionary
             batch_num: Current batch number
+            agent_name: Optional specific agent to use
+            task_callback: Callback for Task tool execution
 
         Returns:
             StoryAgent instance
@@ -136,7 +165,7 @@ class Orchestrator:
         # Get context for this story
         context = self.context_filter.get_context_for_story(story_id)
 
-        # Create agent
+        # Create agent wrapper
         agent = StoryAgent(story_id, story, context)
         agent.status = "running"
 
@@ -145,16 +174,81 @@ class Orchestrator:
         output_dir.mkdir(exist_ok=True)
         agent.output_file = output_dir / f"{story_id}.log"
 
-        # Mark story as in progress
-        self.state_manager.mark_story_in_progress(story_id)
+        # Get PRD metadata for agent defaults
+        prd = self.state_manager.read_prd()
+        prd_metadata = prd.get("metadata", {}) if prd else {}
 
-        # Note: Actual agent launching is done via Claude Code's Task tool
-        # This method prepares the agent configuration
+        # Execute via AgentExecutor
+        result = self.agent_executor.execute_story(
+            story=story,
+            context=context,
+            agent_name=agent_name,
+            prd_metadata=prd_metadata,
+            task_callback=task_callback
+        )
+
+        # Update agent with execution result
+        if result.get("success"):
+            agent.task_id = result.get("pid") or result.get("task_id")
+            if result.get("output_file"):
+                agent.output_file = Path(result["output_file"])
+        else:
+            agent.status = "failed"
+
         self.running_agents[story_id] = agent
-
         return agent
 
-    def execute_batch(self, batch: List[Dict], batch_num: int, dry_run: bool = False) -> bool:
+    def launch_agent_for_story(
+        self,
+        story_id: str,
+        agent_name: Optional[str] = None,
+        task_callback: Optional[Callable] = None
+    ) -> Dict[str, Any]:
+        """
+        Launch an agent for a specific story by ID.
+
+        Args:
+            story_id: Story ID to execute
+            agent_name: Optional specific agent to use
+            task_callback: Callback for Task tool execution
+
+        Returns:
+            Execution result dict
+        """
+        # Get story from PRD
+        prd = self.state_manager.read_prd()
+        if not prd:
+            return {"success": False, "error": "No PRD found"}
+
+        story = None
+        for s in prd.get("stories", []):
+            if s.get("id") == story_id:
+                story = s
+                break
+
+        if not story:
+            return {"success": False, "error": f"Story {story_id} not found"}
+
+        # Get context
+        context = self.context_filter.get_context_for_story(story_id)
+
+        # Execute
+        return self.agent_executor.execute_story(
+            story=story,
+            context=context,
+            agent_name=agent_name,
+            prd_metadata=prd.get("metadata", {}),
+            task_callback=task_callback
+        )
+
+    def execute_batch(
+        self,
+        batch: List[Dict],
+        batch_num: int,
+        dry_run: bool = False,
+        agent_name: Optional[str] = None,
+        task_callback: Optional[Callable] = None
+    ) -> bool:
         """
         Execute a batch of stories in parallel.
 
@@ -162,6 +256,8 @@ class Orchestrator:
             batch: List of stories in this batch
             batch_num: Batch number
             dry_run: If True, only print what would be done
+            agent_name: Optional agent to use for all stories
+            task_callback: Callback for Task tool execution
 
         Returns:
             True if all stories succeeded, False otherwise
@@ -173,21 +269,39 @@ class Orchestrator:
         if dry_run:
             print("\nStories in this batch:")
             for story in batch:
-                print(f"  - {story['id']}: {story['title']}")
+                story_agent = story.get("agent", agent_name or self.agent_executor.default_agent)
+                print(f"  - {story['id']}: {story['title']} [agent: {story_agent}]")
             return True
 
         # Launch all agents in parallel
         agents = []
+        results = []
         for story in batch:
-            agent = self.launch_agent(story, batch_num)
+            # Determine agent for this story
+            story_agent_name = story.get("agent") or agent_name
+
+            agent = self.launch_agent(
+                story,
+                batch_num,
+                agent_name=story_agent_name,
+                task_callback=task_callback
+            )
             agents.append(agent)
-            print(f"Launched agent for {story['id']}: {story['title']}")
+
+            # Get resolved agent name from executor
+            resolved_name, _ = self.agent_executor._resolve_agent(
+                agent_name=story_agent_name,
+                story_agent=story.get("agent")
+            )
+            print(f"Launched agent for {story['id']}: {story['title']} [via {resolved_name}]")
 
         # In real execution, agents run in background
-        # For now, we'll prepare the execution plan
         print("\nAgents launched. Monitor progress with:")
         for agent in agents:
-            print(f"  tail -f {agent.output_file}")
+            if agent.output_file:
+                print(f"  tail -f {agent.output_file}")
+
+        print("\nCheck status with: /hybrid:status or /agent-status")
 
         return True
 
@@ -316,13 +430,25 @@ class Orchestrator:
                 return False
         return True
 
-    def print_status(self):
-        """Print current execution status."""
+    def print_status(self, show_agents: bool = True):
+        """
+        Print current execution status.
+
+        Args:
+            show_agents: Include agent information in output
+        """
         batches = self.analyze_dependencies()
 
         print("\n" + "=" * 60)
         print("EXECUTION STATUS")
         print("=" * 60)
+
+        # Show agent summary if enabled
+        if show_agents:
+            agent_summary = self.state_manager.get_agent_summary()
+            print(f"\nAgents: {agent_summary['running']} running, "
+                  f"{agent_summary['completed']} completed, "
+                  f"{agent_summary['failed']} failed")
 
         for i, batch in enumerate(batches, 1):
             print(f"\nBatch {i}:")
@@ -338,9 +464,61 @@ class Orchestrator:
                     "failed": "✗"
                 }.get(status, "?")
 
-                print(f"  {status_symbol} {story_id}: {title} [{status}]")
+                # Get agent info if available
+                agent_info = ""
+                if show_agents:
+                    agent_entry = self.state_manager.get_agent_for_story(story_id)
+                    if agent_entry:
+                        agent_info = f" [via {agent_entry.get('agent', 'unknown')}]"
+
+                print(f"  {status_symbol} {story_id}: {title} [{status}]{agent_info}")
 
         print("\n" + "=" * 60)
+
+    def get_agent_status(self) -> Dict[str, Any]:
+        """
+        Get current agent execution status.
+
+        Returns:
+            Dict with running, completed, failed agents
+        """
+        return self.agent_executor.get_agent_status()
+
+    def get_available_agents(self) -> Dict[str, Dict]:
+        """
+        Get all configured agents with availability status.
+
+        Returns:
+            Dict mapping agent names to their config with 'available' flag
+        """
+        return self.agent_executor.get_available_agents()
+
+    def stop_agent(self, story_id: str) -> Dict[str, Any]:
+        """
+        Stop a running CLI agent.
+
+        Args:
+            story_id: Story ID of the agent to stop
+
+        Returns:
+            Result dict with success status
+        """
+        return self.agent_executor.stop_agent(story_id)
+
+    def set_default_agent(self, agent_name: str) -> bool:
+        """
+        Set the default agent for execution.
+
+        Args:
+            agent_name: Agent name to set as default
+
+        Returns:
+            True if agent exists and was set
+        """
+        if agent_name in self.agent_executor.agents:
+            self.agent_executor.default_agent = agent_name
+            return True
+        return False
 
 
 def main():

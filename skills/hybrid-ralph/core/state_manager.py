@@ -3,7 +3,10 @@
 Shared State Manager for Hybrid Ralph + Planning-with-Files
 
 Provides thread-safe file operations with platform-specific locking.
-Handles prd.json, findings.md, and progress.txt with concurrent access safety.
+Handles prd.json, findings.md, progress.txt, and .agent-status.json
+with concurrent access safety.
+
+Extended for multi-agent collaboration support.
 """
 
 import json
@@ -11,7 +14,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 # Platform-specific locking imports
 try:
@@ -136,6 +139,7 @@ class StateManager:
         self.prd_path = self.project_root / "prd.json"
         self.findings_path = self.project_root / "findings.md"
         self.progress_path = self.project_root / "progress.txt"
+        self.agent_status_path = self.project_root / ".agent-status.json"
 
     def _get_lock_path(self, file_path: Path) -> Path:
         """Get the lock file path for a given file."""
@@ -348,6 +352,240 @@ class StateManager:
                         lock_file.unlink()
         except Exception:
             pass
+
+    # ========== Agent Status Operations ==========
+
+    def read_agent_status(self) -> Dict:
+        """
+        Read .agent-status.json file safely.
+
+        Returns:
+            Agent status dictionary with running, completed, failed lists
+        """
+        if not self.agent_status_path.exists():
+            return {
+                "running": [],
+                "completed": [],
+                "failed": [],
+                "updated_at": None
+            }
+
+        lock_path = self._get_lock_path(self.agent_status_path)
+
+        with FileLock(lock_path):
+            try:
+                with open(self.agent_status_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {
+                    "running": [],
+                    "completed": [],
+                    "failed": [],
+                    "updated_at": None
+                }
+
+    def write_agent_status(self, status: Dict) -> None:
+        """
+        Write .agent-status.json file safely.
+
+        Args:
+            status: Agent status dictionary
+        """
+        lock_path = self._get_lock_path(self.agent_status_path)
+        status["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        with FileLock(lock_path):
+            try:
+                with open(self.agent_status_path, "w", encoding="utf-8") as f:
+                    json.dump(status, f, indent=2)
+            except IOError as e:
+                raise IOError(f"Could not write agent status: {e}")
+
+    def record_agent_start(
+        self,
+        story_id: str,
+        agent_name: str,
+        pid: Optional[int] = None,
+        output_file: Optional[str] = None
+    ) -> None:
+        """
+        Record agent start in .agent-status.json.
+
+        Args:
+            story_id: Story ID being executed
+            agent_name: Name of the agent
+            pid: Process ID (for CLI agents)
+            output_file: Path to output log file
+        """
+        status = self.read_agent_status()
+
+        # Remove any existing entry for this story
+        status["running"] = [
+            r for r in status.get("running", [])
+            if r.get("story_id") != story_id
+        ]
+
+        # Add new running entry
+        entry = {
+            "story_id": story_id,
+            "agent": agent_name,
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        }
+        if pid is not None:
+            entry["pid"] = pid
+        if output_file:
+            entry["output_file"] = output_file
+
+        status["running"].append(entry)
+        self.write_agent_status(status)
+
+        # Also log to progress.txt with agent info
+        self.append_progress(f"[START] via {agent_name}" + (f" (pid:{pid})" if pid else ""), story_id=story_id)
+
+    def record_agent_complete(self, story_id: str, agent_name: str) -> None:
+        """
+        Record agent completion in .agent-status.json.
+
+        Args:
+            story_id: Story ID that completed
+            agent_name: Name of the agent
+        """
+        status = self.read_agent_status()
+
+        # Find entry in running
+        running_entry = None
+        for entry in status.get("running", []):
+            if entry.get("story_id") == story_id:
+                running_entry = entry
+                break
+
+        # Remove from running
+        status["running"] = [
+            r for r in status.get("running", [])
+            if r.get("story_id") != story_id
+        ]
+
+        # Add to completed
+        entry = {
+            "story_id": story_id,
+            "agent": agent_name,
+            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        }
+        if running_entry:
+            entry["started_at"] = running_entry.get("started_at")
+
+        if "completed" not in status:
+            status["completed"] = []
+        status["completed"].append(entry)
+
+        self.write_agent_status(status)
+
+        # Log to progress.txt
+        self.append_progress(f"[COMPLETE] via {agent_name}", story_id=story_id)
+
+    def record_agent_failure(
+        self,
+        story_id: str,
+        agent_name: str,
+        error: str
+    ) -> None:
+        """
+        Record agent failure in .agent-status.json.
+
+        Args:
+            story_id: Story ID that failed
+            agent_name: Name of the agent
+            error: Error message
+        """
+        status = self.read_agent_status()
+
+        # Find entry in running
+        running_entry = None
+        for entry in status.get("running", []):
+            if entry.get("story_id") == story_id:
+                running_entry = entry
+                break
+
+        # Remove from running
+        status["running"] = [
+            r for r in status.get("running", [])
+            if r.get("story_id") != story_id
+        ]
+
+        # Add to failed
+        entry = {
+            "story_id": story_id,
+            "agent": agent_name,
+            "failed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "error": error
+        }
+        if running_entry:
+            entry["started_at"] = running_entry.get("started_at")
+
+        if "failed" not in status:
+            status["failed"] = []
+        status["failed"].append(entry)
+
+        self.write_agent_status(status)
+
+        # Log to progress.txt
+        self.append_progress(f"[FAILED] via {agent_name}: {error}", story_id=story_id)
+
+    def get_running_agents(self) -> List[Dict]:
+        """
+        Get list of currently running agents.
+
+        Returns:
+            List of running agent entries
+        """
+        status = self.read_agent_status()
+        return status.get("running", [])
+
+    def get_agent_for_story(self, story_id: str) -> Optional[Dict]:
+        """
+        Get agent info for a specific story.
+
+        Args:
+            story_id: Story ID to look up
+
+        Returns:
+            Agent entry dict or None
+        """
+        status = self.read_agent_status()
+
+        # Check running
+        for entry in status.get("running", []):
+            if entry.get("story_id") == story_id:
+                entry["status"] = "running"
+                return entry
+
+        # Check completed
+        for entry in status.get("completed", []):
+            if entry.get("story_id") == story_id:
+                entry["status"] = "completed"
+                return entry
+
+        # Check failed
+        for entry in status.get("failed", []):
+            if entry.get("story_id") == story_id:
+                entry["status"] = "failed"
+                return entry
+
+        return None
+
+    def get_agent_summary(self) -> Dict[str, int]:
+        """
+        Get summary counts of agent statuses.
+
+        Returns:
+            Dict with running, completed, failed counts
+        """
+        status = self.read_agent_status()
+        return {
+            "running": len(status.get("running", [])),
+            "completed": len(status.get("completed", [])),
+            "failed": len(status.get("failed", []))
+        }
 
 
 def main():

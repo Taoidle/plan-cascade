@@ -9,6 +9,10 @@ Provides MCP tools for story execution and state management:
 - mark_story_complete: Mark a story as complete
 - get_progress: Get progress summary
 - cleanup_locks: Clean up stale lock files
+- get_agent_status: Get status of running agents
+- get_available_agents: List configured agents with availability
+- set_default_agent: Set the default agent for execution
+- stop_agent: Stop a running CLI agent
 """
 
 import json
@@ -28,6 +32,7 @@ if str(SKILLS_HYBRID_RALPH_CORE) not in sys.path:
 from context_filter import ContextFilter
 from state_manager import StateManager
 from prd_generator import PRDGenerator
+from agent_executor import AgentExecutor
 
 
 def register_execution_tools(mcp: Any, project_root: Path) -> None:
@@ -375,6 +380,372 @@ def register_execution_tools(mcp: Any, project_root: Path) -> None:
                 "success": True,
                 "message": f"Lock cleanup complete. Removed {removed_count} stale lock files.",
                 "locks_removed": removed_count
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    # ========== Agent Management Tools ==========
+
+    @mcp.tool()
+    def get_agent_status() -> Dict[str, Any]:
+        """
+        Get status of all agents executing stories.
+
+        Shows running, completed, and failed agents with their details.
+        For CLI agents, includes PID and output file location.
+
+        Returns:
+            Agent status including running, completed, and failed lists
+        """
+        agent_executor = AgentExecutor(project_root)
+
+        try:
+            status = agent_executor.get_agent_status()
+
+            return {
+                "success": True,
+                "running": status.get("running", []),
+                "completed": status.get("completed", []),
+                "failed": status.get("failed", []),
+                "summary": {
+                    "running_count": len(status.get("running", [])),
+                    "completed_count": len(status.get("completed", [])),
+                    "failed_count": len(status.get("failed", []))
+                },
+                "updated_at": status.get("updated_at")
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @mcp.tool()
+    def get_available_agents() -> Dict[str, Any]:
+        """
+        Get list of all configured agents with availability status.
+
+        Shows which agents are available (CLI found in PATH) and which
+        would fall back to claude-code.
+
+        Returns:
+            Dictionary of agents with their type, description, and availability
+        """
+        agent_executor = AgentExecutor(project_root)
+
+        try:
+            agents = agent_executor.get_available_agents()
+
+            available = [name for name, cfg in agents.items() if cfg.get("available")]
+            unavailable = [name for name, cfg in agents.items() if not cfg.get("available")]
+
+            return {
+                "success": True,
+                "default_agent": agent_executor.default_agent,
+                "agents": agents,
+                "available": available,
+                "unavailable": unavailable
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @mcp.tool()
+    def set_default_agent(agent_name: str) -> Dict[str, Any]:
+        """
+        Set the default agent for story execution.
+
+        This affects which agent is used when no specific agent is specified
+        in the story or command.
+
+        Args:
+            agent_name: Name of the agent to set as default (e.g., "codex", "amp-code")
+
+        Returns:
+            Confirmation of the change
+        """
+        agent_executor = AgentExecutor(project_root)
+
+        if agent_name not in agent_executor.agents:
+            return {
+                "success": False,
+                "error": f"Agent '{agent_name}' is not configured. Available agents: {list(agent_executor.agents.keys())}"
+            }
+
+        # Check availability
+        agent_config = agent_executor.agents[agent_name]
+        if agent_config.get("type") == "cli":
+            import shutil
+            command = agent_config.get("command", "")
+            if not shutil.which(command):
+                return {
+                    "success": False,
+                    "error": f"Agent '{agent_name}' CLI command '{command}' is not available in PATH. Will fall back to claude-code.",
+                    "warning": True
+                }
+
+        # Update the agents.json file
+        agents_config_path = project_root / "agents.json"
+        try:
+            if agents_config_path.exists():
+                with open(agents_config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            else:
+                config = {"agents": {}}
+
+            config["default_agent"] = agent_name
+
+            with open(agents_config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+
+            return {
+                "success": True,
+                "message": f"Default agent set to '{agent_name}'",
+                "previous_default": agent_executor.default_agent,
+                "new_default": agent_name
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to update agents.json: {e}"
+            }
+
+    @mcp.tool()
+    def stop_agent(story_id: str) -> Dict[str, Any]:
+        """
+        Stop a running CLI agent for a specific story.
+
+        Only works for CLI agents (not Task tool agents).
+        The agent will be marked as failed with "Stopped by user" error.
+
+        Args:
+            story_id: Story ID of the agent to stop (e.g., "story-001")
+
+        Returns:
+            Result of the stop operation
+        """
+        agent_executor = AgentExecutor(project_root)
+
+        try:
+            result = agent_executor.stop_agent(story_id)
+            return result
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @mcp.tool()
+    def execute_story_with_agent(
+        story_id: str,
+        agent_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute a specific story using the specified agent.
+
+        This launches an agent to work on the story in the background.
+        For CLI agents, the process runs asynchronously.
+        For Task tool agents, returns the execution plan.
+
+        Args:
+            story_id: Story ID to execute (e.g., "story-001")
+            agent_name: Optional agent to use (defaults to PRD default or claude-code)
+
+        Returns:
+            Execution result with agent info and status
+        """
+        from orchestrator import Orchestrator
+
+        try:
+            orchestrator = Orchestrator(project_root)
+            result = orchestrator.launch_agent_for_story(story_id, agent_name=agent_name)
+
+            if result.get("success"):
+                return {
+                    "success": True,
+                    "story_id": story_id,
+                    "agent": result.get("agent"),
+                    "agent_type": result.get("agent_type"),
+                    "execution_mode": result.get("execution_mode"),
+                    "pid": result.get("pid") or result.get("wrapper_pid"),
+                    "output_file": result.get("output_file"),
+                    "result_file": result.get("result_file"),
+                    "message": f"Story {story_id} execution started via {result.get('agent')}"
+                }
+            else:
+                return result
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @mcp.tool()
+    def get_agent_result(story_id: str) -> Dict[str, Any]:
+        """
+        Get the result of a completed agent execution.
+
+        Returns the final result including success/failure status,
+        exit code, and output file location.
+
+        Args:
+            story_id: Story ID to get result for (e.g., "story-001")
+
+        Returns:
+            Result dict with success status, exit code, and output info
+        """
+        agent_executor = AgentExecutor(project_root)
+
+        try:
+            result = agent_executor.get_agent_result(story_id)
+
+            if result is None:
+                return {
+                    "success": False,
+                    "error": f"No result found for story {story_id}"
+                }
+
+            return {
+                "success": True,
+                "result": result
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @mcp.tool()
+    def get_agent_output(
+        story_id: str,
+        tail_lines: int = 50
+    ) -> Dict[str, Any]:
+        """
+        Get the output log of an agent execution.
+
+        Returns the content of the agent's output log file.
+
+        Args:
+            story_id: Story ID to get output for (e.g., "story-001")
+            tail_lines: Number of lines from end (default 50, 0 = all)
+
+        Returns:
+            Output content from the agent's log file
+        """
+        agent_executor = AgentExecutor(project_root)
+
+        try:
+            output = agent_executor.get_agent_output(story_id, tail_lines)
+
+            if output is None:
+                return {
+                    "success": False,
+                    "error": f"No output found for story {story_id}"
+                }
+
+            return {
+                "success": True,
+                "story_id": story_id,
+                "output": output,
+                "tail_lines": tail_lines
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @mcp.tool()
+    def wait_for_agent(
+        story_id: str,
+        timeout: int = 300,
+        poll_interval: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Wait for a specific agent to complete.
+
+        Blocks until the agent finishes or timeout is reached.
+        Use this when you need to wait for an agent result before proceeding.
+
+        Args:
+            story_id: Story ID to wait for (e.g., "story-001")
+            timeout: Maximum wait time in seconds (default 300)
+            poll_interval: Seconds between status checks (default 5)
+
+        Returns:
+            Final result of the agent execution
+        """
+        agent_executor = AgentExecutor(project_root)
+
+        try:
+            result = agent_executor.wait_for_agents(
+                story_ids=[story_id],
+                timeout=timeout,
+                poll_interval=poll_interval
+            )
+
+            if result.get("completed"):
+                return {
+                    "success": True,
+                    "status": "completed",
+                    "result": result["completed"][0],
+                    "elapsed_seconds": result.get("elapsed_seconds")
+                }
+            elif result.get("failed"):
+                return {
+                    "success": True,
+                    "status": "failed",
+                    "result": result["failed"][0],
+                    "elapsed_seconds": result.get("elapsed_seconds")
+                }
+            elif result.get("still_running"):
+                return {
+                    "success": True,
+                    "status": "timeout",
+                    "message": f"Agent still running after {timeout}s",
+                    "elapsed_seconds": result.get("elapsed_seconds")
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Agent for story {story_id} not found"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @mcp.tool()
+    def check_agents() -> Dict[str, Any]:
+        """
+        Check all running agents and update their status.
+
+        This polls all running agents to detect completions.
+        Call this periodically to get the latest status.
+
+        Returns:
+            Updated status with any newly completed/failed agents
+        """
+        agent_executor = AgentExecutor(project_root)
+
+        try:
+            status = agent_executor.get_agent_status(check_processes=True)
+
+            return {
+                "success": True,
+                "running_count": len(status.get("running", [])),
+                "completed_count": len(status.get("completed", [])),
+                "failed_count": len(status.get("failed", [])),
+                "updated": status.get("updated", []),
+                "newly_completed": status.get("newly_completed", []),
+                "newly_failed": status.get("newly_failed", []),
+                "running": status.get("running", [])
             }
         except Exception as e:
             return {

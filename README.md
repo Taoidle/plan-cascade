@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-3.0.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-3.1.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
 
 ## 项目起源
 
@@ -18,6 +18,7 @@
 | PRD | 无 | **自动生成** + 依赖分析 |
 | 编排 | 无 | **Mega Plan 项目级编排** |
 | 合并 | 无 | **依赖顺序批量合并** |
+| 多 Agent | 无 | **支持 Codex、Amp、Aider 等多种 Agent** |
 | 工具支持 | Claude Code, Cursor, etc. | **Claude Code + MCP 兼容工具** |
 
 ---
@@ -40,9 +41,82 @@ Plan Cascade 提供**三层级联**的并行开发能力，支持 Claude Code �
 ├─────────────────────────────────────────────────────────────┤
 │  Level 3: Stories (故事级)                                   │
 │  ├── 每个 Story 由独立 Agent 执行                             │
+│  ├── 支持多种 Agent（Claude Code、Codex、Amp、Aider 等）        │
 │  ├── 无依赖的 Story 并行执行                                  │
 │  └── 按批次自动或手动流转                                     │
 └─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 多 Agent 协作
+
+Plan Cascade 支持使用不同的 AI Agent 工具来执行 Story，可根据任务特点选择最合适的 Agent。
+
+### 支持的 Agent
+
+| Agent | 类型 | 说明 |
+|-------|------|------|
+| `claude-code` | task-tool | Claude Code Task tool（内置，始终可用） |
+| `codex` | cli | OpenAI Codex CLI |
+| `amp-code` | cli | Amp Code CLI |
+| `aider` | cli | Aider AI 结对编程助手 |
+| `cursor-cli` | cli | Cursor CLI |
+| `claude-cli` | cli | Claude CLI（独立版） |
+
+### Agent 优先级
+
+```
+1. 命令参数 --agent         # 最高优先级
+2. Story 级别 agent 字段     # story.agent
+3. PRD 级别默认 agent       # metadata.default_agent
+4. agents.json 默认配置     # default_agent
+5. claude-code             # 最终降级（始终可用）
+```
+
+### 使用示例
+
+```bash
+# 使用默认 agent (claude-code)
+/plan-cascade:hybrid-auto "实现用户认证"
+
+# 指定使用 codex 执行
+/plan-cascade:hybrid-auto "实现用户认证" --agent codex
+
+# 在 prd.json 中为特定 story 指定 agent
+{
+  "stories": [
+    {
+      "id": "story-001",
+      "agent": "aider",  // 这个 story 使用 aider
+      ...
+    }
+  ]
+}
+
+# Mega Plan 中指定 PRD 和 Story 的 agent
+/plan-cascade:mega-plan "电商平台" --prd-agent codex --story-agent amp-code
+```
+
+### 状态追踪
+
+Agent 执行状态通过文件共享：
+
+```
+.agent-status.json         # Agent 运行/完成/失败状态
+.agent-outputs/
+├── story-001.log          # Agent 输出日志
+├── story-001.prompt.txt   # 发送给 Agent 的 prompt
+├── story-001.result.json  # 执行结果（退出码、成功/失败）
+progress.txt               # 包含 Agent 信息的进度日志
+```
+
+### 自动降级
+
+如果指定的 CLI Agent 不可用（未安装或不在 PATH 中），系统会自动降级到 `claude-code`：
+
+```
+[AgentExecutor] Agent 'codex' unavailable (CLI 'codex' not found in PATH), falling back to claude-code
 ```
 
 ---
@@ -204,6 +278,20 @@ Plan Cascade 提供完整的 MCP 服务器，支持 18 个工具和 8 个资源�
 | `get_progress` | 获取进度 |
 | `cleanup_locks` | 清理锁文件 |
 
+#### Agent 管理
+
+| 工具 | 说明 |
+|------|------|
+| `get_agent_status` | 获取 Agent 运行状态 |
+| `get_available_agents` | 列出可用 Agent |
+| `set_default_agent` | 设置默认 Agent |
+| `execute_story_with_agent` | 使用指定 Agent 执行 Story |
+| `get_agent_result` | 获取 Agent 执行结果 |
+| `get_agent_output` | 获取 Agent 输出日志 |
+| `wait_for_agent` | 等待 Agent 完成 |
+| `stop_agent` | 停止运行中的 Agent |
+| `check_agents` | 检查并更新所有 Agent 状态 |
+
 ### 可用资源
 
 | 资源 URI | 说明 |
@@ -251,9 +339,10 @@ ls mcp-configs/
 
 ```bash
 /plan-cascade:hybrid-worktree <name> <branch> <desc>  # 创建开发环境
-/plan-cascade:hybrid-auto <desc>                       # 生成 PRD
-/plan-cascade:approve                                  # 执行 PRD
+/plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD（可指定 Agent）
+/plan-cascade:approve [--agent <name>]                # 执行 PRD（可指定 Agent）
 /plan-cascade:hybrid-status                            # 查看状态
+/plan-cascade:agent-status [--story-id <id>]          # 查看 Agent 状态
 /plan-cascade:hybrid-complete [branch]                 # 完成并合并
 /plan-cascade:edit                                     # 编辑 PRD
 /plan-cascade:show-dependencies                        # 依赖图
@@ -275,6 +364,7 @@ ls mcp-configs/
 plan-cascade/
 ├── .claude-plugin/
 │   └── plugin.json          # 插件配置
+├── agents.json              # Agent 配置文件
 ├── commands/                # 顶层命令 (16 个)
 │   ├── mega-*.md           # Mega Plan 命令
 │   ├── hybrid-*.md         # Hybrid Ralph 命令
@@ -287,7 +377,16 @@ plan-cascade/
 │   ├── hybrid-ralph/       # 功能级技能
 │   │   ├── SKILL.md
 │   │   ├── core/
+│   │   │   ├── orchestrator.py
+│   │   │   ├── agent_executor.py   # Agent 执行器
+│   │   │   ├── agent_monitor.py    # Agent 监控器
+│   │   │   └── ...
+│   │   ├── scripts/
+│   │   │   ├── agent-wrapper.py    # CLI Agent 包装器
+│   │   │   └── ...
 │   │   └── commands/
+│   │       ├── agent-status.md     # Agent 状态命令
+│   │       └── ...
 │   └── planning-with-files/ # 基础规划技能
 │       ├── SKILL.md
 │       └── templates/
@@ -297,7 +396,7 @@ plan-cascade/
 │   └── tools/              # MCP 工具
 │       ├── prd_tools.py
 │       ├── mega_tools.py
-│       └── execution_tools.py
+│       └── execution_tools.py  # 包含 Agent 管理工具
 ├── mcp-configs/             # MCP 配置示例
 │   ├── README.md
 │   ├── cursor-mcp.json
@@ -311,6 +410,17 @@ plan-cascade/
 ---
 
 ## 更新日志
+
+### v3.1.0
+
+- **多 Agent 协作** - 支持使用不同 Agent 执行 Story
+  - 支持 Codex、Amp Code、Aider、Cursor CLI 等
+  - 自动降级：CLI 不可用时降级到 claude-code
+  - Agent 包装器：统一的进程管理和状态追踪
+  - Agent 监控器：轮询状态、读取结果
+- 9 个新 MCP 工具用于 Agent 管理
+- agents.json 配置文件
+- `/agent-status` 命令
 
 ### v3.0.0
 

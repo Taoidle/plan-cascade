@@ -5,6 +5,12 @@ arguments:
   - name: description
     description: Project description to generate mega-plan from
     required: true
+  - name: prd-agent
+    description: Agent to use for PRD generation (e.g., codex, amp-code, claude-code)
+    required: false
+  - name: story-agent
+    description: Default agent for story execution (e.g., codex, amp-code, claude-code)
+    required: false
 ---
 
 # /mega:plan
@@ -44,7 +50,9 @@ Create `mega-plan.json` with this structure:
 {
   "metadata": {
     "created_at": "<current ISO timestamp>",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "prd_agent": "<agent for PRD generation, optional>",
+    "default_story_agent": "<default agent for stories, optional>"
   },
   "goal": "<one-sentence project goal>",
   "description": "<original user description>",
@@ -58,10 +66,21 @@ Create `mega-plan.json` with this structure:
       "description": "<detailed description for PRD generation>",
       "priority": "high|medium|low",
       "dependencies": [],
-      "status": "pending"
+      "status": "pending",
+      "prd_agent": "<optional: override agent for this feature's PRD>",
+      "story_agent": "<optional: override agent for this feature's stories>"
     }
   ]
 }
+```
+
+**Agent Configuration:**
+- `metadata.prd_agent`: Agent used to generate PRDs for all features
+- `metadata.default_story_agent`: Default agent for executing stories
+- `feature.prd_agent`: Override PRD generation agent for specific feature
+- `feature.story_agent`: Override story execution agent for specific feature
+
+Available agents: `claude-code` (built-in), `codex`, `amp-code`, `aider`, `cursor-cli`, `claude-cli`
 ```
 
 **Feature Naming Rules:**

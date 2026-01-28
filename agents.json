@@ -1,0 +1,57 @@
+{
+  "$schema": "./agents.schema.json",
+  "description": "Agent configuration for Plan Cascade multi-agent collaboration",
+  "default_agent": "claude-code",
+  "agents": {
+    "claude-code": {
+      "type": "task-tool",
+      "description": "Claude Code Task tool (built-in)",
+      "subagent_type": "general-purpose"
+    },
+    "codex": {
+      "type": "cli",
+      "description": "OpenAI Codex CLI agent",
+      "command": "codex",
+      "args": ["--prompt", "{prompt}"],
+      "working_dir": "{working_dir}",
+      "timeout": 600,
+      "env": {}
+    },
+    "amp-code": {
+      "type": "cli",
+      "description": "Amp Code CLI agent",
+      "command": "amp",
+      "args": ["run", "--prompt", "{prompt}"],
+      "working_dir": "{working_dir}",
+      "timeout": 600,
+      "env": {}
+    },
+    "aider": {
+      "type": "cli",
+      "description": "Aider AI pair programming assistant",
+      "command": "aider",
+      "args": ["--message", "{prompt}", "--yes"],
+      "working_dir": "{working_dir}",
+      "timeout": 600,
+      "env": {}
+    },
+    "cursor-cli": {
+      "type": "cli",
+      "description": "Cursor CLI agent",
+      "command": "cursor",
+      "args": ["--prompt", "{prompt}"],
+      "working_dir": "{working_dir}",
+      "timeout": 600,
+      "env": {}
+    },
+    "claude-cli": {
+      "type": "cli",
+      "description": "Claude CLI (standalone)",
+      "command": "claude",
+      "args": ["-p", "{prompt}"],
+      "working_dir": "{working_dir}",
+      "timeout": 600,
+      "env": {}
+    }
+  }
+}

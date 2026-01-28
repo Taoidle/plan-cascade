@@ -1,6 +1,13 @@
 ---
 name: hybrid:auto
 description: Generate PRD from task description and enter review mode
+arguments:
+  - name: description
+    description: Task description to generate PRD from
+    required: true
+  - name: agent
+    description: Agent to use for PRD generation and story execution (e.g., codex, amp-code, claude-code)
+    required: false
 ---
 
 # /hybrid:auto
@@ -11,6 +18,7 @@ Automatically generate a Product Requirements Document (PRD) from your task desc
 
 ```
 /hybrid:auto <task description>
+/hybrid:auto <task description> --agent <agent-name>
 ```
 
 ## What It Does
@@ -30,6 +38,48 @@ Automatically generate a Product Requirements Document (PRD) from your task desc
 /hybrid:auto Implement a user authentication system with login, registration, and password reset
 ```
 
+With a specific agent:
+```
+/hybrid:auto Implement a user authentication system --agent codex
+```
+
+## Agent Support
+
+You can specify which agent to use for PRD generation and story execution:
+
+| Agent | Description |
+|-------|-------------|
+| `claude-code` | Built-in Task tool (default, always available) |
+| `codex` | OpenAI Codex CLI |
+| `amp-code` | Amp Code CLI |
+| `aider` | Aider AI pair programming |
+| `cursor-cli` | Cursor CLI |
+| `claude-cli` | Claude CLI (standalone) |
+
+If the specified agent is not available, it automatically falls back to `claude-code`.
+
+You can also set a default agent in `prd.json` metadata:
+```json
+{
+  "metadata": {
+    "default_agent": "codex"
+  }
+}
+```
+
+Or specify per-story agents:
+```json
+{
+  "stories": [
+    {
+      "id": "story-001",
+      "agent": "amp-code",
+      ...
+    }
+  ]
+}
+```
+
 ## After PRD Generation
 
 You'll see the PRD review with options to:
@@ -43,9 +93,11 @@ You'll see the PRD review with options to:
 - Stories are automatically prioritized (high/medium/low)
 - Dependencies are detected between stories
 - Context estimates help agents work efficiently
+- Use `/agent-status` to check running agents
 
 ## See Also
 
 - `/hybrid:manual` - Load an existing PRD file
 - `/approve` - Approve the current PRD
 - `/edit` - Edit the current PRD
+- `/agent-status` - View running agent status

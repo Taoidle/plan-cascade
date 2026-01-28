@@ -2,6 +2,100 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.0] - 2026-01-28
+
+### Added
+
+- **Multi-Agent Collaboration** - Support for using different AI agents to execute stories
+  - Support for Codex, Amp Code, Aider, Cursor CLI, Claude CLI
+  - Automatic fallback: CLI agents unavailable → fallback to claude-code
+  - Agent wrapper script for unified process management and status tracking
+  - Agent monitor for polling status and reading results
+
+- **New Core Modules:**
+  - `agent_executor.py` - Agent execution abstraction layer with automatic fallback
+  - `agent_monitor.py` - Monitor for checking agent status and reading results
+  - `agent-wrapper.py` - Wrapper script for CLI agent execution with proper status tracking
+
+- **New MCP Tools (9):**
+  - `get_agent_status` - Get status of running agents
+  - `get_available_agents` - List configured agents with availability
+  - `set_default_agent` - Set default agent for execution
+  - `execute_story_with_agent` - Execute a story with specific agent
+  - `get_agent_result` - Get result of completed agent
+  - `get_agent_output` - Get output log of agent
+  - `wait_for_agent` - Wait for specific agent to complete
+  - `stop_agent` - Stop a running CLI agent
+  - `check_agents` - Poll all running agents and update status
+
+- **New Commands:**
+  - `/plan-cascade:agent-status` - View status of running agents
+
+- **New Configuration:**
+  - `agents.json` - Agent configuration file for defining CLI agents
+
+- **Agent Priority Chain:**
+  1. `--agent` command argument (highest priority)
+  2. `story.agent` field in PRD
+  3. `metadata.default_agent` in PRD
+  4. `default_agent` in agents.json
+  5. `claude-code` (always available fallback)
+
+- **Status Tracking Files:**
+  - `.agent-status.json` - Agent running/completed/failed status
+  - `.agent-outputs/story-xxx.log` - Agent output logs
+  - `.agent-outputs/story-xxx.prompt.txt` - Prompt sent to agent
+  - `.agent-outputs/story-xxx.result.json` - Execution result (exit code, success/fail)
+
+### Changed
+
+- Updated `orchestrator.py` to integrate AgentExecutor
+- Updated `state_manager.py` with agent status tracking methods
+- Updated `execution_tools.py` with agent management tools
+- Updated `/hybrid:auto` command to support `--agent` parameter
+- Updated `/hybrid:approve` command to support `--agent` parameter
+- Updated `/mega:plan` command to support `--prd-agent` and `--story-agent` parameters
+- Updated `/hybrid:status` to show agent information
+- Enhanced `progress.txt` format to include agent info
+
+### Technical Details
+
+**Agent Wrapper Architecture:**
+```
+Main Session (Claude Code)
+    │
+    ├── AgentExecutor.execute_story()
+    │       │
+    │       ▼
+    │   agent-wrapper.py (background process)
+    │       │
+    │       ├── Write .agent-status.json [START]
+    │       ├── Execute CLI agent (codex/amp/aider)
+    │       ├── Capture stdout/stderr → .agent-outputs/story-xxx.log
+    │       ├── Monitor exit code
+    │       ├── Write .agent-outputs/story-xxx.result.json
+    │       ├── Update .agent-status.json [COMPLETE/FAILED]
+    │       └── Append progress.txt
+    │
+    └── AgentMonitor
+            │
+            ├── check_running_agents() → Poll PIDs, read result files
+            ├── get_agent_result() → Read result.json
+            └── wait_for_completion() → Block until done
+```
+
+**Supported Agents:**
+| Agent | Type | Description |
+|-------|------|-------------|
+| `claude-code` | task-tool | Claude Code Task tool (built-in, always available) |
+| `codex` | cli | OpenAI Codex CLI |
+| `amp-code` | cli | Amp Code CLI |
+| `aider` | cli | Aider AI pair programming |
+| `cursor-cli` | cli | Cursor CLI |
+| `claude-cli` | cli | Claude CLI (standalone) |
+
+---
+
 ## [3.0.0] - 2026-01-28
 
 ### Added
