@@ -1,6 +1,6 @@
 ---
 name: mega-plan
-version: "1.0.0"
+version: "3.2.0"
 description: Project-level multi-task orchestration system. Manages multiple hybrid:worktree features in parallel with dependency resolution, coordinated PRD generation, and unified merge workflow.
 user-invocable: true
 allowed-tools:

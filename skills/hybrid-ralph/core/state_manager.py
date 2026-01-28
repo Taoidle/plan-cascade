@@ -140,6 +140,8 @@ class StateManager:
         self.findings_path = self.project_root / "findings.md"
         self.progress_path = self.project_root / "progress.txt"
         self.agent_status_path = self.project_root / ".agent-status.json"
+        self.iteration_state_path = self.project_root / ".iteration-state.json"
+        self.retry_state_path = self.project_root / ".retry-state.json"
 
     def _get_lock_path(self, file_path: Path) -> Path:
         """Get the lock file path for a given file."""
@@ -586,6 +588,200 @@ class StateManager:
             "completed": len(status.get("completed", [])),
             "failed": len(status.get("failed", []))
         }
+
+    # ========== Iteration State Operations ==========
+
+    def read_iteration_state(self) -> Optional[Dict]:
+        """
+        Read .iteration-state.json file safely.
+
+        Returns:
+            Iteration state dictionary or None if not found
+        """
+        if not self.iteration_state_path.exists():
+            return None
+
+        lock_path = self._get_lock_path(self.iteration_state_path)
+
+        with FileLock(lock_path):
+            try:
+                with open(self.iteration_state_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return None
+
+    def write_iteration_state(self, state: Dict) -> None:
+        """
+        Write .iteration-state.json file safely.
+
+        Args:
+            state: Iteration state dictionary
+        """
+        lock_path = self._get_lock_path(self.iteration_state_path)
+        state["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        with FileLock(lock_path):
+            try:
+                with open(self.iteration_state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
+            except IOError as e:
+                raise IOError(f"Could not write iteration state: {e}")
+
+    def clear_iteration_state(self) -> None:
+        """Clear the iteration state file."""
+        lock_path = self._get_lock_path(self.iteration_state_path)
+
+        with FileLock(lock_path):
+            try:
+                if self.iteration_state_path.exists():
+                    self.iteration_state_path.unlink()
+            except IOError:
+                pass
+
+    def get_iteration_progress(self) -> Optional[Dict[str, Any]]:
+        """
+        Get iteration progress summary.
+
+        Returns:
+            Progress summary dict or None if no iteration state
+        """
+        state = self.read_iteration_state()
+        if not state:
+            return None
+
+        return {
+            "status": state.get("status", "unknown"),
+            "current_batch": state.get("current_batch", 0),
+            "total_batches": state.get("total_batches", 0),
+            "completed_stories": state.get("completed_stories", 0),
+            "failed_stories": state.get("failed_stories", 0),
+            "total_stories": state.get("total_stories", 0),
+            "current_iteration": state.get("current_iteration", 0),
+        }
+
+    # ========== Retry State Operations ==========
+
+    def read_retry_state(self) -> Optional[Dict]:
+        """
+        Read .retry-state.json file safely.
+
+        Returns:
+            Retry state dictionary or None if not found
+        """
+        if not self.retry_state_path.exists():
+            return None
+
+        lock_path = self._get_lock_path(self.retry_state_path)
+
+        with FileLock(lock_path):
+            try:
+                with open(self.retry_state_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return None
+
+    def write_retry_state(self, state: Dict) -> None:
+        """
+        Write .retry-state.json file safely.
+
+        Args:
+            state: Retry state dictionary
+        """
+        lock_path = self._get_lock_path(self.retry_state_path)
+        state["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        with FileLock(lock_path):
+            try:
+                with open(self.retry_state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
+            except IOError as e:
+                raise IOError(f"Could not write retry state: {e}")
+
+    def clear_retry_state(self) -> None:
+        """Clear the retry state file."""
+        lock_path = self._get_lock_path(self.retry_state_path)
+
+        with FileLock(lock_path):
+            try:
+                if self.retry_state_path.exists():
+                    self.retry_state_path.unlink()
+            except IOError:
+                pass
+
+    def get_retry_summary(self, story_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get retry summary for all or a specific story.
+
+        Args:
+            story_id: Optional story ID to get summary for
+
+        Returns:
+            Retry summary dict
+        """
+        state = self.read_retry_state()
+        if not state:
+            return {"total_retries": 0, "stories": {}}
+
+        stories = state.get("stories", {})
+
+        if story_id:
+            story_state = stories.get(story_id, {})
+            return {
+                "story_id": story_id,
+                "current_attempt": story_state.get("current_attempt", 0),
+                "exhausted": story_state.get("exhausted", False),
+                "failures": len(story_state.get("failures", [])),
+            }
+
+        # Summary of all stories
+        total_retries = sum(s.get("current_attempt", 0) for s in stories.values())
+        exhausted_count = sum(1 for s in stories.values() if s.get("exhausted", False))
+
+        return {
+            "total_retries": total_retries,
+            "exhausted_stories": exhausted_count,
+            "stories_with_retries": len(stories),
+        }
+
+    def record_retry_attempt(
+        self,
+        story_id: str,
+        agent: str,
+        error_type: str,
+        error_message: str
+    ) -> None:
+        """
+        Record a retry attempt for a story.
+
+        Args:
+            story_id: Story ID
+            agent: Agent that failed
+            error_type: Type of error
+            error_message: Error message
+        """
+        state = self.read_retry_state() or {"version": "1.0.0", "stories": {}}
+
+        if story_id not in state["stories"]:
+            state["stories"][story_id] = {
+                "story_id": story_id,
+                "current_attempt": 0,
+                "failures": [],
+                "exhausted": False,
+            }
+
+        story_state = state["stories"][story_id]
+        story_state["current_attempt"] += 1
+        story_state["last_agent"] = agent
+
+        story_state["failures"].append({
+            "attempt": story_state["current_attempt"],
+            "agent": agent,
+            "error_type": error_type,
+            "error_message": error_message,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        })
+
+        self.write_retry_state(state)
 
 
 def main():

@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-3.1.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-3.2.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
 
 ## 项目起源
 
@@ -19,33 +19,516 @@
 | 编排 | 无 | **Mega Plan 项目级编排** |
 | 合并 | 无 | **依赖顺序批量合并** |
 | 多 Agent | 无 | **支持 Codex、Amp、Aider 等多种 Agent** |
+| 自动迭代 | 无 | **自动批次执行 + 质量门控 + 智能重试** |
 | 工具支持 | Claude Code, Cursor, etc. | **Claude Code + MCP 兼容工具** |
 
 ---
 
 ## 概述
 
-Plan Cascade 提供**三层级联**的并行开发能力，支持 Claude Code 插件和 MCP 服务器两种使用方式：
+Plan Cascade 是一个**三层级联的 AI 并行开发框架**，专为大型软件项目设计。它将复杂项目逐层分解，通过多 Agent 协作实现高效的并行开发。
 
+### 核心理念
+
+- **层层分解**：项目 → 功能 → 故事，逐级细化任务粒度
+- **并行执行**：无依赖的任务在同一批次中并行处理
+- **多 Agent 协作**：根据任务特点自动选择最优 Agent
+- **质量保障**：自动化质量门控 + 智能重试机制
+- **状态追踪**：基于文件的状态共享，支持断点恢复
+
+### 三层架构
+
+```mermaid
+graph TB
+    subgraph "Level 1: Mega Plan 项目级"
+        MP[mega-plan.json] --> F1[Feature 1]
+        MP --> F2[Feature 2]
+        MP --> F3[Feature 3]
+    end
+
+    subgraph "Level 2: Hybrid Ralph 功能级"
+        F1 --> W1[Worktree 1]
+        F2 --> W2[Worktree 2]
+        F3 --> W3[Worktree 3]
+        W1 --> PRD1[prd.json]
+        W2 --> PRD2[prd.json]
+        W3 --> PRD3[prd.json]
+    end
+
+    subgraph "Level 3: Stories 故事级"
+        PRD1 --> S1[Story 1-1]
+        PRD1 --> S2[Story 1-2]
+        PRD2 --> S3[Story 2-1]
+        PRD2 --> S4[Story 2-2]
+        PRD3 --> S5[Story 3-1]
+    end
+
+    subgraph "Agents"
+        S1 --> A1[Claude Code]
+        S2 --> A2[Codex]
+        S3 --> A3[Aider]
+        S4 --> A1
+        S5 --> A2
+    end
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Level 1: Mega Plan (项目级)                                 │
-│  ├── 将大型项目分解为多个 Feature                             │
-│  ├── 管理 Feature 之间的依赖关系                              │
-│  └── 统一合并所有完成的 Feature                               │
-├─────────────────────────────────────────────────────────────┤
-│  Level 2: Hybrid Ralph (功能级)                              │
-│  ├── 每个 Feature 在独立的 Git Worktree 中开发                │
-│  ├── 自动生成 PRD，分解为多个 Story                           │
-│  └── 完成后合并到目标分支                                     │
-├─────────────────────────────────────────────────────────────┤
-│  Level 3: Stories (故事级)                                   │
-│  ├── 每个 Story 由独立 Agent 执行                             │
-│  ├── 支持多种 Agent（Claude Code、Codex、Amp、Aider 等）        │
-│  ├── 无依赖的 Story 并行执行                                  │
-│  └── 按批次自动或手动流转                                     │
-└─────────────────────────────────────────────────────────────┘
+
+### 层级详解
+
+| 层级 | 名称 | 职责 | 产物 |
+|------|------|------|------|
+| **Level 1** | Mega Plan | 项目级编排，管理多个 Feature 的依赖和执行顺序 | `mega-plan.json` |
+| **Level 2** | Hybrid Ralph | 功能级开发，在独立 Worktree 中执行，自动生成 PRD | `prd.json`, `findings.md` |
+| **Level 3** | Stories | 故事级执行，由 Agent 并行处理，支持质量门控和重试 | 代码变更, `progress.txt` |
+
+### 核心组件
+
+```mermaid
+graph LR
+    subgraph "编排层"
+        O[Orchestrator<br/>编排器]
+        IL[IterationLoop<br/>迭代循环]
+    end
+
+    subgraph "执行层"
+        AE[AgentExecutor<br/>Agent执行器]
+        PM[PhaseManager<br/>阶段管理器]
+        CPD[CrossPlatformDetector<br/>跨平台检测]
+    end
+
+    subgraph "质量层"
+        QG[QualityGate<br/>质量门控]
+        RM[RetryManager<br/>重试管理器]
+    end
+
+    subgraph "状态层"
+        SM[StateManager<br/>状态管理器]
+        CF[ContextFilter<br/>上下文过滤]
+    end
+
+    O --> IL
+    IL --> AE
+    AE --> PM
+    PM --> CPD
+    IL --> QG
+    QG --> RM
+    O --> SM
+    SM --> CF
 ```
+
+### 支持的使用方式
+
+| 方式 | 说明 | 适用场景 |
+|------|------|----------|
+| **Claude Code 插件** | 原生集成，功能最完整 | Claude Code 用户 |
+| **MCP 服务器** | 通过 MCP 协议集成 | Cursor, Windsurf, Cline 等 |
+
+---
+
+## 核心流程
+
+Plan Cascade 提供三个主要入口命令，适用于不同规模的开发场景：
+
+| 入口命令 | 适用场景 | 特点 | MCP 工具 |
+|----------|----------|------|----------|
+| `/plan-cascade:mega-plan` | 大型项目（多个相关功能） | Feature 级并行 + Story 级并行 | `mega_generate` |
+| `/plan-cascade:hybrid-worktree` | 单个复杂功能 | Worktree 隔离 + Story 并行 | `prd_generate` |
+| `/plan-cascade:hybrid-auto` | 简单功能 | 快速 PRD 生成 + Story 并行 | `prd_generate` |
+
+### 完整工作流概览
+
+```mermaid
+flowchart TB
+    subgraph "入口选择"
+        START{项目规模?}
+        START -->|多功能模块| MEGA["/plan-cascade:mega-plan"]
+        START -->|单功能+隔离| HW["/plan-cascade:hybrid-worktree"]
+        START -->|简单功能| HA["/plan-cascade:hybrid-auto"]
+    end
+
+    subgraph "Mega Plan 流程"
+        MEGA --> MP_GEN[生成 mega-plan.json]
+        MP_GEN --> MP_EDIT{编辑?}
+        MP_EDIT -->|是| MP_MODIFY["/plan-cascade:mega-edit"]
+        MP_MODIFY --> MP_GEN
+        MP_EDIT -->|否| MP_APPROVE["/plan-cascade:mega-approve"]
+        MP_APPROVE --> MP_BATCH[按批次创建 Worktree]
+        MP_BATCH --> MP_PRD[每个 Feature 生成 PRD]
+    end
+
+    subgraph "Hybrid Worktree 流程"
+        HW --> HW_CREATE[创建 Worktree + 分支]
+        HW_CREATE --> HW_PRD["/plan-cascade:hybrid-auto 生成 PRD"]
+    end
+
+    subgraph "Hybrid Auto 流程"
+        HA --> HA_GEN[分析任务 + 生成 PRD]
+    end
+
+    MP_PRD --> PRD_REVIEW
+    HW_PRD --> PRD_REVIEW
+    HA_GEN --> PRD_REVIEW
+
+    subgraph "PRD 审核"
+        PRD_REVIEW[显示 PRD 预览]
+        PRD_REVIEW --> PRD_EDIT{编辑?}
+        PRD_EDIT -->|是| PRD_MODIFY["/plan-cascade:edit"]
+        PRD_MODIFY --> PRD_REVIEW
+        PRD_EDIT -->|否| APPROVE["/plan-cascade:approve"]
+    end
+
+    subgraph "执行阶段"
+        APPROVE --> EXEC_MODE{执行模式?}
+        EXEC_MODE -->|手动| MANUAL[手动推进批次]
+        EXEC_MODE -->|自动| AUTO[自动迭代循环]
+
+        AUTO --> BATCH[执行当前批次]
+        MANUAL --> BATCH
+        BATCH --> PARALLEL[并行启动 Agent]
+        PARALLEL --> WAIT[等待完成]
+        WAIT --> QG{质量门控}
+        QG -->|通过| NEXT{下一批次?}
+        QG -->|失败| RETRY{重试?}
+        RETRY -->|是| BATCH
+        RETRY -->|否| FAIL[标记失败]
+        NEXT -->|是| BATCH
+        NEXT -->|否| DONE[执行完成]
+    end
+
+    subgraph "完成阶段"
+        DONE --> COMPLETE["/plan-cascade:complete 或<br/>/plan-cascade:mega-complete"]
+        COMPLETE --> MERGE[合并到目标分支]
+        MERGE --> CLEANUP[清理 Worktree]
+    end
+```
+
+### `/plan-cascade:mega-plan` 流程：大型项目
+
+适用于包含多个相关功能模块的大型项目开发。
+
+**适用场景：**
+
+| 类型 | 场景 | 示例 |
+|------|------|------|
+| ✅ 适用 | 多功能模块的新项目开发 | 构建 SaaS 平台（用户 + 订阅 + 计费 + 后台） |
+| ✅ 适用 | 涉及多子系统的大规模重构 | 单体应用重构为微服务架构 |
+| ✅ 适用 | 功能群开发 | 电商平台（用户、商品、购物车、订单） |
+| ❌ 不适用 | 单个功能开发 | 仅实现用户认证（用 Hybrid Ralph） |
+| ❌ 不适用 | Bug 修复 | 修复登录页表单验证问题 |
+
+```mermaid
+flowchart TD
+    A["<b>/plan-cascade:mega-plan</b><br/>电商平台：用户、商品、订单"] --> B[分析项目需求]
+    B --> C[识别功能模块]
+    C --> D[生成 Feature 列表]
+    D --> E[分析 Feature 依赖]
+    E --> F[生成 mega-plan.json]
+
+    F --> G{用户操作}
+    G -->|编辑| H["/plan-cascade:mega-edit"]
+    H --> F
+    G -->|批准| I["<b>/plan-cascade:mega-approve</b>"]
+
+    I --> J[创建执行批次]
+    J --> K[Batch 1: 基础设施]
+
+    subgraph "Feature 并行开发"
+        K --> L1["Feature: 用户系统<br/>Worktree: .worktrees/user"]
+        K --> L2["Feature: 商品系统<br/>Worktree: .worktrees/product"]
+
+        L1 --> M1[自动生成 PRD]
+        L2 --> M2[自动生成 PRD]
+
+        M1 --> N1[执行 Stories<br/>+ 质量门控 + 重试]
+        M2 --> N2[执行 Stories<br/>+ 质量门控 + 重试]
+    end
+
+    N1 --> O1[Feature 完成]
+    N2 --> O2[Feature 完成]
+
+    O1 --> P[Batch 2: 订单系统<br/>依赖用户+商品]
+    O2 --> P
+
+    P --> Q[继续执行...]
+    Q --> R[所有 Feature 完成]
+    R --> S["<b>/plan-cascade:mega-complete</b>"]
+    S --> T[按依赖顺序合并分支]
+    T --> U[清理所有 Worktrees]
+```
+
+### `/plan-cascade:hybrid-worktree` 流程：隔离开发
+
+适用于需要分支隔离的单个复杂功能开发。
+
+**适用场景：**
+
+| 类型 | 场景 | 示例 |
+|------|------|------|
+| ✅ 适用 | 包含多子任务的完整功能 | 用户认证（注册 + 登录 + 密码重置） |
+| ✅ 适用 | 需要分支隔离的实验功能 | 新支付渠道集成测试 |
+| ✅ 适用 | 中等规模重构（5-20 文件） | API 层统一错误处理改造 |
+| ❌ 不适用 | 简单单文件修改 | 修改一个组件的样式 |
+| ❌ 不适用 | 快速原型验证 | 验证某个库是否可用 |
+
+```mermaid
+flowchart TD
+    A["<b>/plan-cascade:hybrid-worktree</b><br/>feature-auth main 用户认证"] --> B[创建 Git 分支]
+    B --> C[创建 Worktree 目录]
+    C --> D[初始化规划文件]
+    D --> E["<b>/plan-cascade:hybrid-auto</b><br/>生成 PRD"]
+
+    E --> F[分析任务描述]
+    F --> G[扫描代码库结构]
+    G --> H[生成 prd.json]
+    H --> I[显示 PRD 预览]
+
+    I --> J{用户操作}
+    J -->|编辑| K["/plan-cascade:edit"]
+    K --> I
+    J -->|批准| L["<b>/plan-cascade:approve</b>"]
+
+    L --> M{执行模式}
+    M -->|"--auto-run"| N[自动迭代模式]
+    M -->|手动| O[手动模式]
+
+    subgraph "自动迭代"
+        N --> P[执行 Batch 1]
+        P --> Q[并行 Agent 执行]
+        Q --> R[质量门控检查]
+        R --> S{通过?}
+        S -->|是| T{还有批次?}
+        S -->|否| U[智能重试]
+        U --> Q
+        T -->|是| P
+        T -->|否| V[全部完成]
+    end
+
+    subgraph "手动模式"
+        O --> W[执行 Batch 1]
+        W --> X["/plan-cascade:status 查看进度"]
+        X --> Y[手动推进下一批次]
+        Y --> W
+    end
+
+    V --> Z["<b>/plan-cascade:hybrid-complete</b>"]
+    Z --> AA[合并到 main 分支]
+    AA --> AB[删除 Worktree]
+```
+
+### `/plan-cascade:hybrid-auto` 流程：快速开发
+
+适用于简单功能的快速开发，无需 Worktree 隔离。
+
+**快速开始示例：**
+
+```bash
+# 场景一：大型项目
+/plan-cascade:mega-plan "构建电商平台：用户认证、商品管理、购物车、订单处理"
+/plan-cascade:mega-approve --auto-prd
+/plan-cascade:mega-status
+/plan-cascade:mega-complete
+
+# 场景二：单个功能（使用 Worktree 隔离）
+/plan-cascade:hybrid-worktree feature-auth main "实现用户认证：登录、注册、密码重置"
+/plan-cascade:approve --auto-run
+/plan-cascade:hybrid-complete
+
+# 场景三：简单功能
+/plan-cascade:hybrid-auto "添加密码重置功能"
+/plan-cascade:approve --auto-run
+```
+
+```mermaid
+flowchart TD
+    A["<b>/plan-cascade:hybrid-auto</b><br/>添加密码重置功能"] --> B[解析任务描述]
+    B --> C[分析代码库上下文]
+    C --> D{生成 PRD}
+
+    D --> E[Goal: 主要目标]
+    D --> F[Objectives: 子目标列表]
+    D --> G[Stories: 用户故事]
+
+    G --> H[Story 1: 设计 API]
+    G --> I[Story 2: 实现后端]
+    G --> J[Story 3: 添加邮件]
+    G --> K[Story 4: 前端页面]
+
+    H --> L[依赖分析]
+    I --> L
+    J --> L
+    K --> L
+
+    L --> M[生成执行批次]
+    M --> N["Batch 1: Story 1<br/>Batch 2: Story 2, 3<br/>Batch 3: Story 4"]
+
+    N --> O[显示 PRD 预览]
+    O --> P{用户操作}
+
+    P -->|编辑| Q["/plan-cascade:edit"]
+    Q --> O
+    P -->|批准| R["<b>/plan-cascade:approve</b>"]
+    P -->|"批准+自动"| S["<b>/plan-cascade:approve --auto-run</b>"]
+
+    R --> T[手动执行模式]
+    S --> U[自动迭代模式]
+
+    subgraph "执行详情"
+        T --> V[启动 Batch 1]
+        U --> V
+        V --> W["Agent 并行执行<br/>(支持多种 Agent)"]
+        W --> X[质量门控]
+        X --> Y{检查结果}
+        Y -->|typecheck ❌| Z[重试 + 失败上下文]
+        Y -->|test ❌| Z
+        Y -->|通过 ✓| AA[推进下一批次]
+        Z --> W
+        AA --> V
+    end
+
+    AA --> AB[所有 Stories 完成]
+    AB --> AC[显示执行摘要]
+```
+
+### 自动迭代详细流程
+
+`/plan-cascade:approve --auto-run` 或单独的 `/plan-cascade:auto-run` 命令会启动自动迭代循环：
+
+```mermaid
+flowchart TD
+    A[开始自动迭代] --> B[加载配置]
+    B --> C{迭代模式}
+
+    C -->|until_complete| D[循环直到全部完成]
+    C -->|max_iterations| E[最多执行 N 次]
+    C -->|batch_complete| F[仅执行当前批次]
+
+    D --> G[初始化迭代状态]
+    E --> G
+    F --> G
+
+    G --> H[获取当前批次 Stories]
+    H --> I{有待执行?}
+
+    I -->|否| J[检查完成条件]
+    I -->|是| K[解析 Agent 分配]
+
+    K --> L[阶段: Implementation]
+    L --> M{Agent 选择}
+    M --> N1[Story类型: feature → claude-code]
+    M --> N2[Story类型: bugfix → codex]
+    M --> N3[Story类型: refactor → aider]
+
+    N1 --> O[并行启动 Agents]
+    N2 --> O
+    N3 --> O
+
+    O --> P[轮询等待<br/>poll_interval: 10s]
+    P --> Q{Story 完成?}
+
+    Q -->|运行中| P
+    Q -->|完成| R{质量门控启用?}
+    Q -->|超时| S[记录超时失败]
+
+    R -->|否| T[标记完成]
+    R -->|是| U[执行质量检查]
+
+    U --> V{TypeCheck}
+    V -->|✓| W{Tests}
+    V -->|✗| X[记录失败详情]
+
+    W -->|✓| Y{Lint}
+    W -->|✗| X
+
+    Y -->|✓| T
+    Y -->|✗ 且必需| X
+    Y -->|✗ 但可选| T
+
+    X --> Z{可重试?}
+    S --> Z
+
+    Z -->|是| AA[构建重试 Prompt]
+    Z -->|否| AB[标记最终失败]
+
+    AA --> AC[注入失败上下文]
+    AC --> AD[选择重试 Agent]
+    AD --> O
+
+    T --> AE[更新迭代状态]
+    AB --> AE
+
+    AE --> AF{批次完成?}
+    AF -->|否| H
+    AF -->|是| AG[推进到下一批次]
+
+    AG --> AH{还有批次?}
+    AH -->|是| H
+    AH -->|否| J
+
+    J --> AI{全部成功?}
+    AI -->|是| AJ[状态: COMPLETED]
+    AI -->|否| AK[状态: FAILED]
+
+    AJ --> AL[保存最终状态]
+    AK --> AL
+    AL --> AM[生成执行报告]
+```
+
+### 数据流与状态文件
+
+```mermaid
+graph TB
+    subgraph "输入"
+        U[用户描述] --> CMD[命令解析]
+        CFG[agents.json] --> CMD
+    end
+
+    subgraph "规划文件"
+        CMD --> PRD[prd.json<br/>PRD文档]
+        CMD --> MP[mega-plan.json<br/>项目计划]
+    end
+
+    subgraph "执行状态"
+        PRD --> AS[.agent-status.json<br/>Agent状态]
+        PRD --> IS[.iteration-state.json<br/>迭代状态]
+        PRD --> RS[.retry-state.json<br/>重试状态]
+    end
+
+    subgraph "共享上下文"
+        AS --> FD[findings.md<br/>发现记录]
+        AS --> PG[progress.txt<br/>进度日志]
+    end
+
+    subgraph "Agent 输出"
+        AS --> AO[.agent-outputs/<br/>├─ story-001.log<br/>├─ story-001.prompt.txt<br/>└─ story-001.result.json]
+    end
+
+    subgraph "缓存"
+        AD[.agent-detection.json<br/>Agent检测缓存]
+        LK[.locks/<br/>文件锁]
+    end
+
+    style PRD fill:#e1f5fe
+    style MP fill:#e1f5fe
+    style AS fill:#fff3e0
+    style IS fill:#fff3e0
+    style RS fill:#fff3e0
+    style FD fill:#e8f5e9
+    style PG fill:#e8f5e9
+```
+
+### 文件说明
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `prd.json` | 规划 | PRD 文档，包含目标、故事、依赖关系 |
+| `mega-plan.json` | 规划 | 项目级计划，管理多个 Feature |
+| `agents.json` | 配置 | Agent 配置，包含阶段默认和降级链 |
+| `findings.md` | 共享 | Agent 发现记录，支持标签过滤 |
+| `progress.txt` | 共享 | 进度时间线，包含 Agent 执行信息 |
+| `.agent-status.json` | 状态 | Agent 运行/完成/失败状态 |
+| `.iteration-state.json` | 状态 | 自动迭代进度和批次结果 |
+| `.retry-state.json` | 状态 | 重试历史和失败记录 |
+| `.agent-detection.json` | 缓存 | 跨平台 Agent 检测结果（1小时TTL） |
+| `.agent-outputs/` | 输出 | Agent 日志、Prompt 和结果文件 |
 
 ---
 
@@ -67,12 +550,16 @@ Plan Cascade 支持使用不同的 AI Agent 工具来执行 Story，可根据任
 ### Agent 优先级
 
 ```
-1. 命令参数 --agent         # 最高优先级
-2. Story 级别 agent 字段     # story.agent
-3. PRD 级别默认 agent       # metadata.default_agent
-4. agents.json 默认配置     # default_agent
-5. claude-code             # 最终降级（始终可用）
+1. 命令参数 --agent              # 最高优先级（全局覆盖）
+2. 阶段覆盖 --impl-agent 等      # 阶段特定覆盖
+3. Story 级别 agent 字段         # story.agent
+4. Story 类型覆盖               # bugfix → codex, refactor → aider
+5. 阶段默认 Agent               # phase_defaults 配置
+6. 降级链                       # fallback_chain
+7. claude-code                  # 最终降级（始终可用）
 ```
+
+使用 `--no-fallback` 可禁用自动降级，当指定 Agent 不可用时直接失败。
 
 ### 使用示例
 
@@ -121,6 +608,142 @@ progress.txt               # 包含 Agent 信息的进度日志
 
 ---
 
+## 自动迭代与质量门控
+
+### 自动迭代循环（Auto-Run）
+
+Plan Cascade 支持完全自动化的批次执行，无需手动干预：
+
+```bash
+# 启动自动迭代，直到所有 Story 完成
+/plan-cascade:auto-run
+
+# 限制最大迭代次数
+/plan-cascade:auto-run --mode max_iterations --max-iterations 10
+
+# 仅执行当前批次
+/plan-cascade:auto-run --mode batch_complete
+
+# 批准 PRD 后立即开始自动迭代
+/plan-cascade:approve --auto-run
+```
+
+#### 迭代模式
+
+| 模式 | 说明 |
+|------|------|
+| `until_complete` | 持续执行直到所有 Story 完成（默认） |
+| `max_iterations` | 执行最多 N 次迭代后停止 |
+| `batch_complete` | 仅执行当前批次后停止 |
+
+#### 状态文件
+
+```
+.iteration-state.json    # 迭代进度状态
+.retry-state.json        # 重试历史记录
+.agent-detection.json    # Agent 检测缓存
+```
+
+### 质量门控（Quality Gates）
+
+每个 Story 完成后自动运行质量验证：
+
+| 门控类型 | 工具 | 说明 |
+|----------|------|------|
+| `typecheck` | tsc, mypy, pyright | 类型检查（自动检测） |
+| `test` | pytest, jest, npm test | 单元测试 |
+| `lint` | eslint, ruff | 代码风格检查（可选） |
+| `custom` | 自定义脚本 | 用户自定义验证 |
+
+#### 配置示例
+
+在 `prd.json` 中配置：
+
+```json
+{
+  "quality_gates": {
+    "enabled": true,
+    "gates": [
+      {"name": "typecheck", "type": "typecheck", "required": true},
+      {"name": "tests", "type": "test", "required": true},
+      {"name": "lint", "type": "lint", "required": false}
+    ]
+  }
+}
+```
+
+### 智能重试管理
+
+失败的 Story 会自动重试，并注入失败上下文：
+
+```json
+{
+  "retry_config": {
+    "max_retries": 3,
+    "inject_failure_context": true
+  }
+}
+```
+
+重试提示会包含：
+- 上次失败的错误信息
+- 质量门控失败详情
+- 建议的修复方向
+
+### 阶段化 Agent 分配
+
+不同执行阶段可使用不同的 Agent：
+
+| 阶段 | 默认 Agent | 降级链 |
+|------|-----------|--------|
+| `planning` | codex | claude-code |
+| `implementation` | claude-code | codex, aider |
+| `retry` | claude-code | aider |
+| `refactor` | aider | claude-code |
+
+#### 配置示例
+
+在 `agents.json` 中配置：
+
+```json
+{
+  "phase_defaults": {
+    "implementation": {
+      "default_agent": "claude-code",
+      "fallback_chain": ["codex", "aider"],
+      "story_type_overrides": {
+        "refactor": "aider",
+        "bugfix": "codex"
+      }
+    }
+  },
+  "story_type_defaults": {
+    "feature": "claude-code",
+    "bugfix": "codex",
+    "refactor": "aider"
+  }
+}
+```
+
+### 跨平台 Agent 检测
+
+自动检测已安装的 Agent，支持：
+
+- **PATH 环境变量** - 标准命令查找
+- **常用安装路径** - 平台特定位置
+- **Windows 注册表** - 已安装应用程序
+- **版本检测** - 获取 Agent 版本信息
+
+```bash
+# 查看检测结果
+/plan-cascade:agent-config --action detect
+
+# 刷新检测缓存
+/plan-cascade:agent-config --action refresh
+```
+
+---
+
 ## 支持的工具
 
 | 工具 | 方式 | 状态 |
@@ -164,78 +787,6 @@ pip install 'mcp[cli]'
 ```
 
 详细配置见 [mcp-configs/README.md](mcp-configs/README.md)
-
----
-
-## 使用场景
-
-| 场景 | 推荐方案 | Claude Code 命令 | MCP 工具 |
-|------|---------|------------------|----------|
-| 大型项目（多个相关功能） | Mega Plan | `/plan-cascade:mega-plan` | `mega_generate` |
-| 单个复杂功能 | Hybrid Ralph + Worktree | `/plan-cascade:hybrid-worktree` | `prd_generate` |
-| 简单任务 | Hybrid Ralph | `/plan-cascade:hybrid-auto` | `prd_generate` |
-
-### 适用场景详解
-
-#### Mega Plan（项目级编排）
-
-| 类型 | 场景 | 示例 |
-|------|------|------|
-| ✅ 适用 | 多功能模块的新项目开发 | 构建 SaaS 平台（用户 + 订阅 + 计费 + 后台） |
-| ✅ 适用 | 涉及多子系统的大规模重构 | 单体应用重构为微服务架构 |
-| ✅ 适用 | 功能群开发 | 电商平台（用户、商品、购物车、订单） |
-| ❌ 不适用 | 单个功能开发 | 仅实现用户认证（用 Hybrid Ralph） |
-| ❌ 不适用 | Bug 修复 | 修复登录页表单验证问题 |
-
-#### Hybrid Ralph（功能级开发）
-
-| 类型 | 场景 | 示例 |
-|------|------|------|
-| ✅ 适用 | 包含多子任务的完整功能 | 用户认证（注册 + 登录 + 密码重置） |
-| ✅ 适用 | 需要分支隔离的实验功能 | 新支付渠道集成测试 |
-| ✅ 适用 | 中等规模重构（5-20 文件） | API 层统一错误处理改造 |
-| ❌ 不适用 | 简单单文件修改 | 修改一个组件的样式 |
-| ❌ 不适用 | 快速原型验证 | 验证某个库是否可用 |
-
----
-
-## 快速开始
-
-### Claude Code 使用方式
-
-```bash
-# 场景一：大型项目
-/plan-cascade:mega-plan "构建电商平台：用户认证、商品管理、购物车、订单处理"
-/plan-cascade:mega-approve --auto-prd
-/plan-cascade:mega-status
-/plan-cascade:mega-complete
-
-# 场景二：单个功能
-/plan-cascade:hybrid-worktree feature-auth main "实现用户认证：登录、注册、密码重置"
-/plan-cascade:approve
-/plan-cascade:hybrid-complete
-```
-
-### MCP 工具使用方式（Cursor 等）
-
-```python
-# 场景一：大型项目
-mega_generate("构建电商平台：用户认证、商品管理、购物车、订单处理")
-mega_add_feature("feature-auth", "用户认证", "实现 JWT 认证...")
-mega_validate()
-mega_get_batches()
-
-# 场景二：单个功能
-prd_generate("实现用户认证：登录、注册、密码重置")
-prd_add_story("设计用户表", "创建用户数据库 Schema...", priority="high")
-prd_validate()
-prd_get_batches()
-
-# 执行过程
-get_story_context("story-001")
-append_findings("决定使用 bcrypt 加密密码...", story_id="story-001")
-mark_story_complete("story-001")
-```
 
 ---
 
@@ -340,12 +891,34 @@ ls mcp-configs/
 ```bash
 /plan-cascade:hybrid-worktree <name> <branch> <desc>  # 创建开发环境
 /plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD（可指定 Agent）
-/plan-cascade:approve [--agent <name>]                # 执行 PRD（可指定 Agent）
-/plan-cascade:hybrid-status                            # 查看状态
+/plan-cascade:approve [--agent <name>] [--auto-run]   # 执行 PRD（可指定 Agent，可自动迭代）
+/plan-cascade:auto-run [--mode <mode>]                # 启动自动迭代
+/plan-cascade:iteration-status [--verbose]            # 查看迭代进度
+/plan-cascade:agent-config [--action <action>]        # 配置 Agent
+/plan-cascade:hybrid-status                           # 查看状态
 /plan-cascade:agent-status [--story-id <id>]          # 查看 Agent 状态
-/plan-cascade:hybrid-complete [branch]                 # 完成并合并
-/plan-cascade:edit                                     # 编辑 PRD
-/plan-cascade:show-dependencies                        # 依赖图
+/plan-cascade:hybrid-complete [branch]                # 完成并合并
+/plan-cascade:edit                                    # 编辑 PRD
+/plan-cascade:show-dependencies                       # 依赖图
+```
+
+#### 自动迭代参数
+
+```bash
+# approve 命令新增参数
+--impl-agent <name>     # 实现阶段使用的 Agent
+--planning-agent <name> # 规划阶段使用的 Agent
+--retry-agent <name>    # 重试时使用的 Agent
+--no-fallback           # 禁用自动降级
+--auto-run              # 批准后立即开始自动迭代
+--auto-run-mode <mode>  # 自动迭代模式
+
+# auto-run 命令参数
+--mode <mode>           # until_complete | max_iterations | batch_complete
+--max-iterations <n>    # 最大迭代次数（默认 50）
+--agent <name>          # 强制所有阶段使用指定 Agent
+--no-quality-gates      # 禁用质量门控
+--dry-run               # 预览模式，不实际执行
 ```
 
 #### 基础规划
@@ -377,15 +950,23 @@ plan-cascade/
 │   ├── hybrid-ralph/       # 功能级技能
 │   │   ├── SKILL.md
 │   │   ├── core/
-│   │   │   ├── orchestrator.py
-│   │   │   ├── agent_executor.py   # Agent 执行器
-│   │   │   ├── agent_monitor.py    # Agent 监控器
+│   │   │   ├── orchestrator.py         # 编排器（含自动迭代）
+│   │   │   ├── agent_executor.py       # Agent 执行器（含阶段分配）
+│   │   │   ├── agent_monitor.py        # Agent 监控器
+│   │   │   ├── iteration_loop.py       # 自动迭代循环
+│   │   │   ├── quality_gate.py         # 质量门控系统
+│   │   │   ├── retry_manager.py        # 重试管理器
+│   │   │   ├── cross_platform_detector.py  # 跨平台检测
+│   │   │   ├── phase_config.py         # 阶段配置
 │   │   │   └── ...
 │   │   ├── scripts/
-│   │   │   ├── agent-wrapper.py    # CLI Agent 包装器
+│   │   │   ├── agent-wrapper.py        # CLI Agent 包装器
 │   │   │   └── ...
 │   │   └── commands/
-│   │       ├── agent-status.md     # Agent 状态命令
+│   │       ├── auto-run.md             # 自动迭代命令
+│   │       ├── iteration-status.md     # 迭代状态命令
+│   │       ├── agent-config.md         # Agent 配置命令
+│   │       ├── agent-status.md         # Agent 状态命令
 │   │       └── ...
 │   └── planning-with-files/ # 基础规划技能
 │       ├── SKILL.md
@@ -411,6 +992,34 @@ plan-cascade/
 
 ## 更新日志
 
+### v3.2.0
+
+- **自动迭代循环** - 完全自动化的批次执行
+  - 三种迭代模式：until_complete、max_iterations、batch_complete
+  - 支持暂停、恢复、停止
+  - 迭代状态持久化 (.iteration-state.json)
+- **质量门控系统** - Story 完成后自动验证
+  - 支持 typecheck、test、lint、custom 门控
+  - 自动检测项目类型（Node.js、Python、Rust、Go）
+  - 可配置必选/可选门控
+- **智能重试管理** - 失败自动重试
+  - 最多 3 次重试（可配置）
+  - 指数退避延迟
+  - 失败上下文注入到重试 prompt
+  - 支持重试时切换 Agent
+- **跨平台 Agent 检测** - 增强的 Agent 发现
+  - 支持 Windows、macOS、Linux
+  - 检测 PATH、常用位置、Windows 注册表
+  - 检测结果缓存（1 小时 TTL）
+  - 版本信息获取
+- **阶段化 Agent 分配** - 不同阶段使用不同 Agent
+  - 支持 planning、implementation、retry、refactor、review 阶段
+  - Story 类型自动推断（feature、bugfix、refactor 等）
+  - 可配置降级链
+- 新增命令：`/plan-cascade:auto-run`、`/plan-cascade:iteration-status`、`/plan-cascade:agent-config`
+- `/plan-cascade:approve` 命令新增 `--auto-run`、`--impl-agent`、`--no-fallback` 等参数
+- agents.json 新增 `phase_defaults` 和 `story_type_defaults` 配置
+
 ### v3.1.0
 
 - **多 Agent 协作** - 支持使用不同 Agent 执行 Story
@@ -420,7 +1029,7 @@ plan-cascade/
   - Agent 监控器：轮询状态、读取结果
 - 9 个新 MCP 工具用于 Agent 管理
 - agents.json 配置文件
-- `/agent-status` 命令
+- `/plan-cascade:agent-status` 命令
 
 ### v3.0.0
 

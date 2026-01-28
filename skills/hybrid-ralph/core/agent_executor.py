@@ -11,6 +11,8 @@ Features:
 - Process management for CLI agents
 - Agent status tracking via .agent-status.json
 - Enhanced progress logging with agent info
+- Cross-platform agent detection with caching
+- Phase-based agent assignment
 """
 
 import json
@@ -20,14 +22,31 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 # Import state manager for logging
 try:
-    from state_manager import StateManager
+    from .state_manager import StateManager
 except ImportError:
-    # Allow running standalone
-    StateManager = None
+    try:
+        from state_manager import StateManager
+    except ImportError:
+        # Allow running standalone
+        StateManager = None
+
+# Import cross-platform detector and phase config
+try:
+    from .cross_platform_detector import CrossPlatformDetector, DetectorConfig
+    from .phase_config import PhaseAgentManager, ExecutionPhase, AgentOverrides
+except ImportError:
+    try:
+        from cross_platform_detector import CrossPlatformDetector, DetectorConfig
+        from phase_config import PhaseAgentManager, ExecutionPhase, AgentOverrides
+    except ImportError:
+        CrossPlatformDetector = None
+        PhaseAgentManager = None
+        ExecutionPhase = None
+        AgentOverrides = None
 
 
 class AgentExecutor:
@@ -56,7 +75,9 @@ class AgentExecutor:
         self,
         project_root: Path,
         agents_config: Optional[Dict] = None,
-        config_path: Optional[Path] = None
+        config_path: Optional[Path] = None,
+        detector: Optional["CrossPlatformDetector"] = None,
+        phase_manager: Optional["PhaseAgentManager"] = None
     ):
         """
         Initialize the AgentExecutor.
@@ -65,11 +86,14 @@ class AgentExecutor:
             project_root: Root directory of the project
             agents_config: Direct agent configuration dict (optional)
             config_path: Path to agents.json file (optional, defaults to project_root)
+            detector: CrossPlatformDetector instance (optional, created if not provided)
+            phase_manager: PhaseAgentManager instance (optional, created if not provided)
         """
         self.project_root = Path(project_root)
         self.default_agent = "claude-code"
         self.agents = self.DEFAULT_AGENTS.copy()
         self.state_manager = StateManager(project_root) if StateManager else None
+        self._full_config: Dict[str, Any] = {}
 
         # Agent status tracking
         self.agent_status_path = self.project_root / ".agent-status.json"
@@ -85,8 +109,27 @@ class AgentExecutor:
             if default_config.exists():
                 self._load_config_file(default_config)
 
+        # Initialize cross-platform detector
+        if CrossPlatformDetector:
+            self.detector = detector or CrossPlatformDetector(
+                project_root=self.project_root
+            )
+        else:
+            self.detector = None
+
+        # Initialize phase-based agent manager
+        if PhaseAgentManager:
+            self.phase_manager = phase_manager or PhaseAgentManager(
+                config=self._full_config,
+                detector=self.detector
+            )
+        else:
+            self.phase_manager = None
+
     def _load_config(self, config: Dict) -> None:
         """Load configuration from a dictionary."""
+        self._full_config = config
+
         if "default_agent" in config:
             self.default_agent = config["default_agent"]
 
@@ -106,27 +149,55 @@ class AgentExecutor:
         self,
         agent_name: Optional[str] = None,
         story_agent: Optional[str] = None,
-        prd_agent: Optional[str] = None
+        prd_agent: Optional[str] = None,
+        phase: Optional["ExecutionPhase"] = None,
+        story: Optional[Dict] = None,
+        override: Optional["AgentOverrides"] = None
     ) -> Tuple[str, Dict]:
         """
         Resolve agent with automatic fallback to claude-code.
 
         Priority order:
         1. agent_name parameter (explicit override)
-        2. story_agent from story metadata
-        3. prd_agent from PRD metadata
-        4. default_agent from config
-        5. "claude-code" as ultimate fallback
+        2. Phase-based resolution (if phase and phase_manager available)
+        3. story_agent from story metadata
+        4. prd_agent from PRD metadata
+        5. default_agent from config
+        6. "claude-code" as ultimate fallback
 
         Args:
             agent_name: Explicit agent name override
             story_agent: Agent specified in story metadata
             prd_agent: Default agent from PRD metadata
+            phase: Execution phase for phase-based resolution
+            story: Story dictionary (for phase-based resolution)
+            override: Command-line agent overrides
 
         Returns:
             Tuple of (resolved_agent_name, agent_config)
         """
-        # Priority chain
+        # Use phase-based resolution if available and phase is specified
+        if self.phase_manager and phase and story and ExecutionPhase:
+            resolved_name = self.phase_manager.get_agent_for_story(
+                story=story,
+                phase=phase,
+                override=override
+            )
+            if resolved_name in self.agents:
+                agent = self.agents[resolved_name]
+                # Verify CLI availability
+                if agent.get("type") == "cli":
+                    if self._check_cli_available_enhanced(resolved_name, agent.get("command", "")):
+                        return resolved_name, agent
+                    else:
+                        self._log_fallback(resolved_name, "CLI not available")
+                        # Let phase manager handle fallback
+                        if override and override.no_fallback:
+                            return "claude-code", self.agents["claude-code"]
+                else:
+                    return resolved_name, agent
+
+        # Traditional priority chain
         name = agent_name or story_agent or prd_agent or self.default_agent
 
         # claude-code is always available
@@ -143,14 +214,33 @@ class AgentExecutor:
         # For CLI agents, check if command is available
         if agent.get("type") == "cli":
             command = agent.get("command", "")
-            if not self._check_cli_available(command):
-                self._log_fallback(name, f"CLI '{command}' not found in PATH")
+            if not self._check_cli_available_enhanced(name, command):
+                self._log_fallback(name, f"CLI '{command}' not found")
                 return "claude-code", self.agents["claude-code"]
 
         return name, agent
 
     def _check_cli_available(self, command: str) -> bool:
         """Check if a CLI command is available in PATH."""
+        return shutil.which(command) is not None
+
+    def _check_cli_available_enhanced(self, agent_name: str, command: str) -> bool:
+        """
+        Check if a CLI command is available using CrossPlatformDetector.
+
+        Falls back to shutil.which if detector not available.
+
+        Args:
+            agent_name: Name of the agent (for detector lookup)
+            command: Command to check
+
+        Returns:
+            True if command is available
+        """
+        if self.detector:
+            info = self.detector.detect_agent(agent_name)
+            return info.available
+
         return shutil.which(command) is not None
 
     def _log_fallback(self, agent_name: str, reason: str) -> None:
@@ -168,7 +258,9 @@ class AgentExecutor:
         context: Dict,
         agent_name: Optional[str] = None,
         prd_metadata: Optional[Dict] = None,
-        task_callback: Optional[Callable] = None
+        task_callback: Optional[Callable] = None,
+        phase: Optional["ExecutionPhase"] = None,
+        override: Optional["AgentOverrides"] = None
     ) -> Dict[str, Any]:
         """
         Execute a story using the specified agent (with fallback).
@@ -179,20 +271,29 @@ class AgentExecutor:
             agent_name: Optional explicit agent override
             prd_metadata: Optional PRD metadata for agent defaults
             task_callback: Callback for Task tool execution (for claude-code)
+            phase: Execution phase for phase-based agent selection
+            override: Command-line agent overrides
 
         Returns:
             Execution result dictionary
         """
         story_id = story.get("id", "unknown")
 
-        # Resolve agent with priority chain
+        # Resolve agent with priority chain and phase-based resolution
         story_agent = story.get("agent")
         prd_agent = (prd_metadata or {}).get("default_agent")
+
+        # Default to implementation phase if not specified
+        if phase is None and ExecutionPhase:
+            phase = ExecutionPhase.IMPLEMENTATION
 
         resolved_name, agent_config = self._resolve_agent(
             agent_name=agent_name,
             story_agent=story_agent,
-            prd_agent=prd_agent
+            prd_agent=prd_agent,
+            phase=phase,
+            story=story,
+            override=override
         )
 
         # Build prompt

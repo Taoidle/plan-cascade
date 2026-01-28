@@ -6,7 +6,11 @@ Manages parallel execution of user stories using Claude Code's Task tool
 or external CLI agents (codex, amp-code, aider, etc.).
 Handles dependency resolution, batch execution, and failure recovery.
 
-Extended for multi-agent collaboration support.
+Extended for multi-agent collaboration support with:
+- Automatic iteration loop
+- Quality gates
+- Retry management
+- Phase-based agent selection
 """
 
 import json
@@ -14,12 +18,41 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from context_filter import ContextFilter
-from state_manager import StateManager
-from prd_generator import PRDGenerator
-from agent_executor import AgentExecutor
+try:
+    from .context_filter import ContextFilter
+    from .state_manager import StateManager
+    from .prd_generator import PRDGenerator
+    from .agent_executor import AgentExecutor
+except ImportError:
+    from context_filter import ContextFilter
+    from state_manager import StateManager
+    from prd_generator import PRDGenerator
+    from agent_executor import AgentExecutor
+
+# Import new modules for iteration, quality gates, and retry management
+try:
+    from .iteration_loop import IterationLoop, IterationConfig, IterationMode, IterationCallbacks, IterationState
+    from .quality_gate import QualityGate, GateConfig, GateType
+    from .retry_manager import RetryManager, RetryConfig, ErrorType
+    from .phase_config import PhaseAgentManager, ExecutionPhase, AgentOverrides
+    from .cross_platform_detector import CrossPlatformDetector
+except ImportError:
+    try:
+        from iteration_loop import IterationLoop, IterationConfig, IterationMode, IterationCallbacks, IterationState
+        from quality_gate import QualityGate, GateConfig, GateType
+        from retry_manager import RetryManager, RetryConfig, ErrorType
+        from phase_config import PhaseAgentManager, ExecutionPhase, AgentOverrides
+        from cross_platform_detector import CrossPlatformDetector
+    except ImportError:
+        IterationLoop = None
+        QualityGate = None
+        RetryManager = None
+        PhaseAgentManager = None
+        ExecutionPhase = None
+        AgentOverrides = None
+        CrossPlatformDetector = None
 
 
 class StoryAgent:
@@ -98,7 +131,11 @@ class Orchestrator:
         self,
         project_root: Path,
         agents_config: Optional[Dict] = None,
-        default_agent: Optional[str] = None
+        default_agent: Optional[str] = None,
+        iteration_config: Optional["IterationConfig"] = None,
+        quality_gate: Optional["QualityGate"] = None,
+        retry_config: Optional["RetryConfig"] = None,
+        agent_overrides: Optional["AgentOverrides"] = None
     ):
         """
         Initialize the orchestrator.
@@ -107,6 +144,10 @@ class Orchestrator:
             project_root: Root directory of the project
             agents_config: Optional agent configuration dict
             default_agent: Optional default agent name override
+            iteration_config: Configuration for automatic iteration
+            quality_gate: Quality gate instance
+            retry_config: Configuration for retry management
+            agent_overrides: Command-line agent overrides
         """
         self.project_root = Path(project_root)
         self.context_filter = ContextFilter(project_root)
@@ -125,6 +166,35 @@ class Orchestrator:
         self.running_agents: Dict[str, StoryAgent] = {}
         self.completed_stories: set = set()
         self.failed_stories: set = set()
+
+        # Store agent overrides
+        self.agent_overrides = agent_overrides
+
+        # Initialize quality gate
+        if quality_gate:
+            self.quality_gate = quality_gate
+        elif QualityGate:
+            # Try to create from PRD
+            prd = self.state_manager.read_prd()
+            if prd and prd.get("quality_gates", {}).get("enabled"):
+                self.quality_gate = QualityGate.from_prd(project_root, prd)
+            else:
+                self.quality_gate = None
+        else:
+            self.quality_gate = None
+
+        # Initialize retry manager
+        if RetryManager:
+            self.retry_manager = RetryManager(
+                project_root,
+                config=retry_config
+            )
+        else:
+            self.retry_manager = None
+
+        # Initialize iteration loop (created on demand in start_auto_run)
+        self.iteration_config = iteration_config
+        self.iteration_loop: Optional["IterationLoop"] = None
 
     def analyze_dependencies(self) -> List[List[Dict]]:
         """
@@ -519,6 +589,323 @@ class Orchestrator:
             self.agent_executor.default_agent = agent_name
             return True
         return False
+
+    # ========== Auto-Run / Iteration Loop Methods ==========
+
+    def start_auto_run(
+        self,
+        mode: Optional["IterationMode"] = None,
+        max_iterations: int = 50,
+        callbacks: Optional["IterationCallbacks"] = None,
+        dry_run: bool = False
+    ) -> Optional["IterationState"]:
+        """
+        Start automatic iteration through all batches.
+
+        Args:
+            mode: Iteration mode (until_complete, max_iterations, batch_complete)
+            max_iterations: Maximum iterations (for max_iterations mode)
+            callbacks: Optional callbacks for iteration events
+            dry_run: If True, don't actually execute
+
+        Returns:
+            IterationState on completion, None if not available
+        """
+        if not IterationLoop:
+            print("[Error] IterationLoop not available")
+            return None
+
+        # Create iteration config
+        config = self.iteration_config or IterationConfig()
+        if mode:
+            config.mode = mode
+        config.max_iterations = max_iterations
+
+        # Load quality gates from PRD if enabled
+        prd = self.state_manager.read_prd()
+        if prd:
+            prd_iteration = prd.get("iteration_config", {})
+            if prd_iteration:
+                config = IterationConfig.from_dict(prd_iteration)
+
+        # Create iteration loop
+        self.iteration_loop = IterationLoop(
+            project_root=self.project_root,
+            config=config,
+            orchestrator=self,
+            quality_gate=self.quality_gate,
+            retry_manager=self.retry_manager
+        )
+
+        # Start iteration
+        try:
+            state = self.iteration_loop.start(callbacks=callbacks, dry_run=dry_run)
+            return state
+        except Exception as e:
+            print(f"[Error] Auto-run failed: {e}")
+            return None
+
+    def pause_auto_run(self, reason: Optional[str] = None) -> None:
+        """Pause the automatic iteration loop."""
+        if self.iteration_loop:
+            self.iteration_loop.pause(reason)
+
+    def resume_auto_run(self) -> Optional["IterationState"]:
+        """Resume a paused iteration loop."""
+        if self.iteration_loop:
+            return self.iteration_loop.resume()
+        return None
+
+    def stop_auto_run(self) -> None:
+        """Stop the automatic iteration loop."""
+        if self.iteration_loop:
+            self.iteration_loop.stop()
+
+    def get_iteration_state(self) -> Optional[Dict[str, Any]]:
+        """Get the current iteration state."""
+        if self.iteration_loop:
+            return self.iteration_loop.get_progress_summary()
+        # Try to load from state file
+        return self.state_manager.get_iteration_progress()
+
+    # ========== Quality Gate Methods ==========
+
+    def execute_batch_with_quality_gates(
+        self,
+        batch: List[Dict],
+        batch_num: int,
+        agent_name: Optional[str] = None,
+        task_callback: Optional[Callable] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute a batch with quality gate verification after each story.
+
+        Args:
+            batch: List of stories in this batch
+            batch_num: Batch number
+            agent_name: Optional agent to use for all stories
+            task_callback: Callback for Task tool execution
+
+        Returns:
+            Dict with execution results including quality gate outcomes
+        """
+        results = {
+            "batch_num": batch_num,
+            "stories_launched": 0,
+            "stories_completed": 0,
+            "stories_failed": 0,
+            "quality_gate_failures": 0,
+            "story_results": {}
+        }
+
+        # Execute batch
+        self.execute_batch(batch, batch_num, agent_name=agent_name, task_callback=task_callback)
+        results["stories_launched"] = len(batch)
+
+        # Wait for completion and run quality gates
+        if self.quality_gate:
+            for story in batch:
+                story_id = story["id"]
+
+                # Wait for story to complete (simple polling)
+                max_wait = 3600  # 1 hour
+                poll_interval = 10
+                elapsed = 0
+
+                while elapsed < max_wait:
+                    status = self.get_story_status(story_id)
+                    if status in ["complete", "failed"]:
+                        break
+                    time.sleep(poll_interval)
+                    elapsed += poll_interval
+
+                if status == "complete":
+                    # Run quality gates
+                    gate_results = self.quality_gate.execute_all(story_id, {"story": story})
+                    results["story_results"][story_id] = {
+                        "status": "complete",
+                        "quality_gates": {
+                            name: output.passed
+                            for name, output in gate_results.items()
+                        }
+                    }
+
+                    if not self.quality_gate.should_allow_progression(gate_results):
+                        results["quality_gate_failures"] += 1
+
+                        # Handle failure with retry if enabled
+                        if self.retry_manager:
+                            self.handle_story_failure(
+                                story_id=story_id,
+                                agent_name=agent_name or self.agent_executor.default_agent,
+                                error_type="quality_gate",
+                                error_message=self.quality_gate.get_failure_summary(gate_results) or "Quality gate failed",
+                                quality_gate_results=gate_results
+                            )
+                    else:
+                        results["stories_completed"] += 1
+                else:
+                    results["stories_failed"] += 1
+                    results["story_results"][story_id] = {"status": "failed"}
+
+        return results
+
+    def run_quality_gates(self, story_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Run quality gates for a specific story.
+
+        Args:
+            story_id: Story ID to verify
+
+        Returns:
+            Quality gate results or None if not configured
+        """
+        if not self.quality_gate:
+            return None
+
+        # Get story
+        prd = self.state_manager.read_prd()
+        story = None
+        if prd:
+            for s in prd.get("stories", []):
+                if s.get("id") == story_id:
+                    story = s
+                    break
+
+        results = self.quality_gate.execute_all(story_id, {"story": story or {}})
+        return {
+            name: {
+                "passed": output.passed,
+                "exit_code": output.exit_code,
+                "duration": output.duration_seconds,
+                "error_summary": output.error_summary
+            }
+            for name, output in results.items()
+        }
+
+    # ========== Retry Management Methods ==========
+
+    def handle_story_failure(
+        self,
+        story_id: str,
+        agent_name: str,
+        error_type: str,
+        error_message: str,
+        quality_gate_results: Optional[Dict] = None,
+        exit_code: Optional[int] = None,
+        output_excerpt: Optional[str] = None
+    ) -> bool:
+        """
+        Handle a story failure with potential retry.
+
+        Args:
+            story_id: ID of the failed story
+            agent_name: Agent that failed
+            error_type: Type of error ("timeout", "exit_code", "quality_gate")
+            error_message: Error message
+            quality_gate_results: Quality gate results if applicable
+            exit_code: Process exit code if applicable
+            output_excerpt: Output excerpt if applicable
+
+        Returns:
+            True if retry was initiated, False otherwise
+        """
+        if not self.retry_manager or not ErrorType:
+            return False
+
+        # Map error type
+        error_type_enum = {
+            "timeout": ErrorType.TIMEOUT,
+            "exit_code": ErrorType.EXIT_CODE,
+            "quality_gate": ErrorType.QUALITY_GATE,
+            "process_crash": ErrorType.PROCESS_CRASH,
+        }.get(error_type, ErrorType.UNKNOWN)
+
+        # Convert quality gate results for storage
+        qg_results = None
+        if quality_gate_results:
+            qg_results = {
+                name: {"passed": result.passed if hasattr(result, "passed") else result.get("passed", False)}
+                for name, result in quality_gate_results.items()
+            }
+
+        # Record failure
+        self.retry_manager.record_failure(
+            story_id=story_id,
+            agent=agent_name,
+            error_type=error_type_enum,
+            error_message=error_message,
+            quality_gate_results=qg_results,
+            exit_code=exit_code,
+            output_excerpt=output_excerpt
+        )
+
+        # Check if we can retry
+        if not self.retry_manager.can_retry(story_id):
+            return False
+
+        # Get retry agent (may switch agents)
+        retry_agent = self.retry_manager.get_retry_agent(story_id, agent_name)
+
+        # Log retry
+        retry_count = self.retry_manager.get_retry_count(story_id)
+        self.state_manager.append_progress(
+            f"[RETRY] Attempt {retry_count} with {retry_agent}",
+            story_id=story_id
+        )
+
+        # Initiate retry (will be picked up by iteration loop or manual trigger)
+        return True
+
+    def get_retry_summary(self) -> Dict[str, Any]:
+        """Get summary of all retry states."""
+        if not self.retry_manager:
+            return {"enabled": False}
+
+        return {
+            "enabled": True,
+            **self.retry_manager.get_all_states()
+        }
+
+    # ========== Agent Override Methods ==========
+
+    def set_agent_overrides(self, overrides: "AgentOverrides") -> None:
+        """Set agent overrides for current session."""
+        self.agent_overrides = overrides
+        if self.agent_executor and hasattr(self.agent_executor, "phase_manager"):
+            # Overrides will be passed to execute_story
+            pass
+
+    def get_resolution_chain(self, story_id: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get the agent resolution chain for a story.
+
+        Args:
+            story_id: Story ID
+
+        Returns:
+            List of resolution steps or None
+        """
+        if not self.agent_executor.phase_manager or not ExecutionPhase:
+            return None
+
+        # Get story
+        prd = self.state_manager.read_prd()
+        story = None
+        if prd:
+            for s in prd.get("stories", []):
+                if s.get("id") == story_id:
+                    story = s
+                    break
+
+        if not story:
+            return None
+
+        return self.agent_executor.phase_manager.get_resolution_chain(
+            story=story,
+            phase=ExecutionPhase.IMPLEMENTATION,
+            override=self.agent_overrides
+        )
 
 
 def main():

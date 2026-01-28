@@ -53,5 +53,39 @@
       "timeout": 600,
       "env": {}
     }
+  },
+  "phase_defaults": {
+    "planning": {
+      "default_agent": "codex",
+      "fallback_chain": ["claude-code"]
+    },
+    "implementation": {
+      "default_agent": "claude-code",
+      "fallback_chain": ["codex", "aider"],
+      "story_type_overrides": {
+        "refactor": "aider",
+        "bugfix": "codex"
+      }
+    },
+    "retry": {
+      "default_agent": "claude-code",
+      "fallback_chain": ["aider"]
+    },
+    "refactor": {
+      "default_agent": "aider",
+      "fallback_chain": ["claude-code"]
+    },
+    "review": {
+      "default_agent": "claude-code",
+      "fallback_chain": ["codex"]
+    }
+  },
+  "story_type_defaults": {
+    "feature": "claude-code",
+    "bugfix": "codex",
+    "refactor": "aider",
+    "test": "claude-code",
+    "documentation": "claude-code",
+    "infrastructure": "claude-code"
   }
 }
