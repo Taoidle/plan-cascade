@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "plan-cascade": {
+      "command": "python3",
+      "args": ["-m", "mcp_server.server"],
+      "cwd": "/Users/username/projects/plan-cascade",
+      "env": {
+        "PYTHONPATH": "/Users/username/projects/plan-cascade"
+      }
+    }
+  }
+}

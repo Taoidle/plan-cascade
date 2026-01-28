@@ -16,11 +16,54 @@ progress.md
 research_notes.md
 notes.md
 
-# But keep example and template files
-!examples/*.md
-!examples/**/*.md
+# But keep template files
 !**/templates/*.md
 
 # Keep the skill folder clean
 *.log
 *.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Testing
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.hypothesis/
+
+# mypy
+.mypy_cache/
+
+# Deprecated tool configs (not supported)
+.cursor/skills/
+.agent/

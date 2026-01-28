@@ -1,0 +1,14 @@
+{
+  "experimental": {
+    "modelContextProtocolServers": [
+      {
+        "transport": {
+          "type": "stdio",
+          "command": "python",
+          "args": ["-m", "mcp_server.server"],
+          "cwd": "{{PLAN_CASCADE_PATH}}"
+        }
+      }
+    ]
+  }
+}

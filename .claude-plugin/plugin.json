@@ -1,6 +1,6 @@
 {
   "name": "plan-cascade",
-  "version": "2.8.0",
+  "version": "3.0.0",
   "description": "Three-layer cascaded parallel development framework. Breaks down projects into Features (Mega Plan), Features into Stories (Hybrid Ralph), with dependency-driven batch execution and Git Worktree isolation. Fork of planning-with-files with major enhancements.",
   "author": {
     "name": "Taoidle",

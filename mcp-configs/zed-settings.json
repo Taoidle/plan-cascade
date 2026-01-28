@@ -1,0 +1,14 @@
+{
+  "context_servers": {
+    "plan-cascade": {
+      "command": {
+        "path": "python",
+        "args": ["-m", "mcp_server.server"],
+        "env": {
+          "PYTHONPATH": "{{PLAN_CASCADE_PATH}}"
+        }
+      },
+      "settings": {}
+    }
+  }
+}

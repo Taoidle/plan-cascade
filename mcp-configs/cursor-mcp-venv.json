@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "plan-cascade": {
+      "command": "/path/to/plan-cascade/.venv/bin/python",
+      "args": ["-m", "mcp_server.server"],
+      "cwd": "/path/to/plan-cascade",
+      "env": {
+        "PYTHONPATH": "/path/to/plan-cascade",
+        "VIRTUAL_ENV": "/path/to/plan-cascade/.venv"
+      }
+    }
+  }
+}
