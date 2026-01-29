@@ -68,6 +68,17 @@ htmlcov/
 .cursor/skills/
 .agent/
 
+# Plan Cascade planning files (should not be committed)
+.worktree/
+mega-plan.json
+mega-findings.md
+.mega-status.json
+.planning-config.json
+prd.json
+findings.md
+progress.txt
+.agent-status.json
+
 # Desktop app (Tauri + React)
 desktop/node_modules/
 desktop/dist/

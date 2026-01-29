@@ -131,6 +131,12 @@ Group features by dependencies:
 - **Batch 2**: Features depending only on Batch 1 (run in parallel after Batch 1)
 - And so on...
 
+**IMPORTANT**: Batches are executed sequentially:
+1. Batch 1 features run in parallel
+2. When ALL Batch 1 features complete, they are **merged to target_branch**
+3. Batch 2 worktrees are created from the **updated** target_branch
+4. This ensures Batch 2 features have access to Batch 1 code
+
 ## Step 7: Ask Execution Mode
 
 Use AskUserQuestion to ask:

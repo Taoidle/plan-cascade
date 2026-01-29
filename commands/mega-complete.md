@@ -1,14 +1,12 @@
 ---
-description: "Complete the mega-plan by merging all features in dependency order and cleaning up worktrees. Usage: /planning-with-files:mega-complete [target-branch]"
+description: "Complete the mega-plan by cleaning up planning files. All features should already be merged via mega-approve. Usage: /planning-with-files:mega-complete"
 ---
 
 # Complete Mega Plan
 
-Complete the mega-plan by merging all features in dependency order and cleaning up.
+Complete the mega-plan by cleaning up remaining planning files.
 
-## Arguments
-
-- `target-branch` (optional): Target branch to merge into. Uses mega-plan's target_branch if not specified.
+**Note**: In the new batch-by-batch execution model, code merging happens automatically when each batch completes (via `mega-approve`). This command only performs final cleanup.
 
 ## Step 1: Verify Mega Plan Exists
 
@@ -20,288 +18,237 @@ if [ ! -f "mega-plan.json" ]; then
 fi
 ```
 
-## Step 2: Parse Arguments
+## Step 2: Check Completion Status
 
-```bash
-TARGET_BRANCH="$ARGUMENTS"
-if [ -z "$TARGET_BRANCH" ]; then
-    # Read from mega-plan.json
-    TARGET_BRANCH=$(python3 -c "import json; print(json.load(open('mega-plan.json'))['target_branch'])")
-fi
-```
+Read `.mega-status.json` and `mega-plan.json` to verify:
+1. All batches have been completed
+2. All features have been merged
 
-## Step 3: Verify All Features Complete
-
-Check each feature's status:
-
-```bash
-# Read mega-plan and verify all features are complete
-```
-
-If any features are not complete:
+If any batches are still pending:
 
 ```
 ============================================================
-CANNOT COMPLETE - FEATURES INCOMPLETE
+CANNOT COMPLETE - BATCHES PENDING
 ============================================================
 
-The following features are not yet complete:
+The following batches have not been completed:
 
-  [>] feature-002: Product Catalog
-      Status: in_progress
-      Stories: 3/5 complete
-      Location: .worktree/feature-products/
+  Batch 2:
+    [ ] feature-003: Shopping Cart
+    [ ] feature-004: Order Processing
 
-  [ ] feature-003: Shopping Cart
-      Status: pending
-      Blocked by: feature-002
+Complete remaining batches first:
+  /planning-with-files:mega-approve
 
+Then run this command again.
 ============================================================
-
-Complete the remaining features first:
-  cd .worktree/feature-products
-  /planning-with-files:hybrid-status
-
-Then run /planning-with-files:mega-complete again.
 ```
 
 Exit without changes.
 
-## Step 4: Show Merge Plan
+## Step 3: Verify Current Branch
+
+```bash
+# Check we're on the target branch
+TARGET_BRANCH=$(read from mega-plan.json)
+CURRENT_BRANCH=$(git branch --show-current)
+
+if [ "$CURRENT_BRANCH" != "$TARGET_BRANCH" ]; then
+    echo "Warning: Not on target branch ($TARGET_BRANCH)"
+    echo "Currently on: $CURRENT_BRANCH"
+fi
+```
+
+## Step 4: Show Completion Summary
 
 ```
 ============================================================
 MEGA PLAN COMPLETION
 ============================================================
 
-All features are complete!
+All features have been merged!
 
 Target Branch: <target_branch>
 
-Merge Order (dependency-based):
-  1. feature-001: User Authentication
-  2. feature-002: Product Catalog
-  3. feature-003: Shopping Cart (after 1, 2)
-  4. feature-004: Order Processing (after 3)
+Completed Features:
+  Batch 1:
+    [X] feature-001: User Authentication
+    [X] feature-002: Product Catalog
 
-Cleanup will include:
-  - Remove .worktree/* directories
-  - Delete mega-* branches
+  Batch 2:
+    [X] feature-003: Shopping Cart
+    [X] feature-004: Order Processing
+
+Total: 4 features merged
+
+Remaining cleanup:
   - Remove mega-plan.json
-  - Remove .mega-status.json
   - Remove mega-findings.md
+  - Remove .mega-status.json
+  - Prune any remaining worktrees
 
 ============================================================
 ```
 
-## Step 5: Confirm Action
+## Step 5: Confirm Cleanup
 
 Use AskUserQuestion:
 
-**Proceed with merge and cleanup?**
+**Proceed with cleanup?**
 
 Options:
-1. **Yes, merge and cleanup** - Full completion
-2. **Merge only** - Keep worktrees and files
-3. **Cancel** - Don't do anything
+1. **Yes, cleanup** - Remove planning files
+2. **Keep files** - Keep planning files for reference
+3. **Cancel** - Do nothing
 
-## Step 6: Checkout Target Branch
+## Step 6: Cleanup Planning Files
 
-```bash
-git checkout "$TARGET_BRANCH"
-git pull origin "$TARGET_BRANCH" 2>/dev/null || true
-```
+If user selected "Yes, cleanup":
 
-## Step 7: Merge Features in Order
-
-For each feature in dependency order:
+### 6.1: Remove Planning Files
 
 ```bash
-FEATURE_NAME="<name>"
-BRANCH_NAME="mega-$FEATURE_NAME"
-
-git merge "$BRANCH_NAME" --no-ff -m "Merge feature: <title>
-
-Mega-plan feature: <feature-id>
-Stories completed: <count>"
-```
-
-Show progress:
-
-```
-Merging features...
-
-[OK] feature-001: User Authentication
-     Merged mega-feature-auth into <target>
-
-[OK] feature-002: Product Catalog
-     Merged mega-feature-products into <target>
-
-[OK] feature-003: Shopping Cart
-     Merged mega-feature-cart into <target>
-
-[OK] feature-004: Order Processing
-     Merged mega-feature-orders into <target>
-
-All features merged successfully!
-```
-
-### Handle Merge Conflicts
-
-If a conflict occurs:
-
-```
-============================================================
-MERGE CONFLICT
-============================================================
-
-Conflict while merging feature-002: Product Catalog
-
-Conflicting files:
-  - src/api/products.ts
-  - src/models/product.ts
-
-To resolve:
-  1. Edit conflicting files
-  2. git add <resolved files>
-  3. git commit
-  4. Re-run /planning-with-files:mega-complete
-
-Or abort: git merge --abort
-```
-
-Exit and let user resolve.
-
-## Step 8: Cleanup Worktrees
-
-If user selected "merge and cleanup":
-
-```bash
-# For each feature
-git worktree remove ".worktree/$FEATURE_NAME" --force
-```
-
-Progress:
-
-```
-Cleaning up worktrees...
-
-[OK] Removed .worktree/feature-auth
-[OK] Removed .worktree/feature-products
-[OK] Removed .worktree/feature-cart
-[OK] Removed .worktree/feature-orders
-[OK] Removed .worktree/ directory
-```
-
-## Step 9: Delete Feature Branches
-
-```bash
-# For each feature
-git branch -d "mega-$FEATURE_NAME"
-```
-
-Progress:
-
-```
-Deleting feature branches...
-
-[OK] Deleted mega-feature-auth
-[OK] Deleted mega-feature-products
-[OK] Deleted mega-feature-cart
-[OK] Deleted mega-feature-orders
-```
-
-## Step 10: Cleanup Mega Files
-
-```bash
+# Remove mega-plan files (they are in .gitignore, so not tracked)
 rm -f mega-plan.json
-rm -f .mega-status.json
 rm -f mega-findings.md
+rm -f .mega-status.json
+
+echo "[OK] Removed mega-plan.json"
+echo "[OK] Removed mega-findings.md"
+echo "[OK] Removed .mega-status.json"
 ```
 
-## Step 11: Prune Git
+### 6.2: Cleanup Any Remaining Worktrees
 
 ```bash
+# Check for any remaining worktrees
+if [ -d ".worktree" ]; then
+    # List and remove any remaining worktrees
+    for dir in .worktree/*/; do
+        if [ -d "$dir" ]; then
+            FEATURE_NAME=$(basename "$dir")
+            git worktree remove "$dir" --force 2>/dev/null || rm -rf "$dir"
+            echo "[OK] Removed worktree: $dir"
+        fi
+    done
+
+    # Remove the .worktree directory if empty
+    rmdir .worktree 2>/dev/null || rm -rf .worktree
+fi
+
+# Prune git worktree list
 git worktree prune
+echo "[OK] Pruned git worktree list"
 ```
 
-## Step 12: Show Completion Summary
+### 6.3: Cleanup Remaining Feature Branches
+
+```bash
+# Delete any remaining mega-* branches
+for branch in $(git branch --list "mega-*"); do
+    git branch -d "$branch" 2>/dev/null || git branch -D "$branch"
+    echo "[OK] Deleted branch: $branch"
+done
+```
+
+## Step 7: Show Final Summary
 
 ```
 ============================================================
-MEGA PLAN COMPLETED
+MEGA PLAN COMPLETED SUCCESSFULLY
 ============================================================
 
-All features have been merged into <target_branch>!
+All features have been merged to <target_branch>!
 
 Summary:
-  Features merged: 4
+  Total features: 4
+  Total batches: 2
   Target branch: <target_branch>
 
-Merged Features:
-  1. feature-001: User Authentication
-  2. feature-002: Product Catalog
-  3. feature-003: Shopping Cart
-  4. feature-004: Order Processing
-
 Cleanup completed:
-  [X] Worktrees removed
+  [X] Planning files removed
+  [X] Worktrees cleaned up
   [X] Feature branches deleted
-  [X] Mega-plan files removed
 
 ============================================================
 
-Your code is now on the <target_branch> branch.
+Your code is now on the <target_branch> branch with all features.
 
 Next steps:
   - Review merged code: git log --oneline -10
-  - Run tests
+  - Run tests to verify integration
   - Push to remote: git push origin <target_branch>
 
 ============================================================
 ```
 
-## Partial Completion (Merge Only)
+## Keep Files Option
 
-If user selected "Merge only":
+If user selected "Keep files":
 
 ```
 ============================================================
-MERGE COMPLETED (Cleanup Skipped)
+MEGA PLAN COMPLETED (Files Kept)
 ============================================================
 
-All features merged into <target_branch>.
+All features have been merged to <target_branch>!
 
-Remaining cleanup (when ready):
-  # Remove worktrees
-  git worktree remove .worktree/<name> --force
+Planning files kept for reference:
+  - mega-plan.json
+  - mega-findings.md
+  - .mega-status.json
 
-  # Delete branches
-  git branch -d mega-<name>
+Note: These files are in .gitignore and won't be committed.
 
-  # Remove files
-  rm mega-plan.json .mega-status.json mega-findings.md
+To cleanup later:
+  rm mega-plan.json mega-findings.md .mega-status.json
 
-Or run /planning-with-files:mega-complete again for full cleanup.
 ============================================================
 ```
 
 ## Error Handling
 
-### Feature Not Complete
-
-Show which features are incomplete and their status.
-
 ### Worktree Removal Fails
 
 ```
 Warning: Could not remove .worktree/<name>
-Manual cleanup: rm -rf .worktree/<name> && git worktree prune
+Manual cleanup:
+  rm -rf .worktree/<name>
+  git worktree prune
 ```
 
 ### Branch Deletion Fails
 
 ```
 Warning: Could not delete branch mega-<name>
+This branch may have unmerged changes.
 Force delete: git branch -D mega-<name>
 ```
+
+### Not on Target Branch
+
+```
+Warning: You are not on the target branch (<target_branch>).
+Current branch: <current>
+
+The features were merged to <target_branch>.
+Switch to it: git checkout <target_branch>
+```
+
+## Files That Should NOT Be Committed
+
+The following files are in `.gitignore` and should never be committed:
+
+```
+.worktree/              # Git worktree directories
+mega-plan.json          # Mega plan definition
+mega-findings.md        # Shared findings
+.mega-status.json       # Execution status
+.planning-config.json   # Per-worktree config
+prd.json                # PRD files
+findings.md             # Per-feature findings
+progress.txt            # Progress tracking
+.agent-status.json      # Agent status
+```
+
+These are all planning/execution artifacts that are temporary and should not be part of the codebase.

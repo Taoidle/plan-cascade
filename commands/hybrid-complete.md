@@ -165,6 +165,8 @@ PLANNING_FILES=(
     "progress.txt"
     ".planning-config.json"
     ".agent-outputs/"
+    "mega-findings.md"
+    ".agent-status.json"
 )
 
 # Check if there are changes excluding planning files
@@ -175,7 +177,7 @@ ALL_CHANGES=$(git status --short --untracked-files=all --porcelain 2>/dev/null |
 
 # Filter out planning files
 CODE_CHANGES="$ALL_CHANGES"
-for file in prd.json findings.md progress.txt .planning-config.json .agent-outputs; do
+for file in prd.json findings.md progress.txt .planning-config.json .agent-outputs mega-findings.md .agent-status.json; do
     CODE_CHANGES=$(echo "$CODE_CHANGES" | grep -v "$file" || true)
 done
 
@@ -213,7 +215,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
             # Add all files except planning files
             git add -A
             # Unstage planning files
-            git reset HEAD prd.json findings.md progress.txt .planning-config.json 2>/dev/null || true
+            git reset HEAD prd.json findings.md progress.txt .planning-config.json mega-findings.md .agent-status.json 2>/dev/null || true
             git reset HEAD .agent-outputs/ 2>/dev/null || true
             # Commit the rest
             git commit -m "$COMMIT_MSG" 2>/dev/null || echo "Note: Only planning files were changed"
@@ -261,7 +263,7 @@ Now that code changes are handled, delete planning files:
 
 ```bash
 echo "Deleting planning files..."
-rm -f prd.json findings.md progress.txt .planning-config.json
+rm -f prd.json findings.md progress.txt .planning-config.json mega-findings.md .agent-status.json
 rm -rf .agent-outputs
 echo "✓ Planning files deleted"
 ```
@@ -389,7 +391,14 @@ cd .worktree/feature-auth
 
 - **Smart directory detection**: Works from any directory
 - **Auto worktree detection**: Lists all hybrid worktrees for selection
-- **Planning files excluded**: prd.json, findings.md, progress.txt, .planning-config.json, .agent-outputs/ are never committed
+- **Planning files excluded**: The following files are NEVER committed:
+  - `prd.json` - PRD definition
+  - `findings.md` - Development findings
+  - `progress.txt` - Progress tracking
+  - `.planning-config.json` - Worktree config
+  - `.agent-outputs/` - Agent output directory
+  - `mega-findings.md` - Mega plan shared findings
+  - `.agent-status.json` - Agent status
 - **Only code changes**: Actual code changes are detected and committed
 - **Auto-commit option**: Automatically commits code with generated message
 - **Stash option**: Can stash changes if needed

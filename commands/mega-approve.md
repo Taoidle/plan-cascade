@@ -4,7 +4,14 @@ description: "Approve the mega-plan and start feature execution. Creates worktre
 
 # Approve Mega Plan and Start Execution
 
-Approve the mega-plan and begin executing features in parallel batches.
+Approve the mega-plan and begin executing features in **batch-by-batch** order.
+
+**IMPORTANT**: This command can be called multiple times:
+1. First call: Starts Batch 1
+2. When Batch 1 completes: Merges Batch 1, then starts Batch 2
+3. And so on...
+
+This ensures each batch builds upon the previous batch's code.
 
 ## Arguments
 
@@ -20,7 +27,7 @@ if [ ! -f "mega-plan.json" ]; then
 fi
 ```
 
-## Step 2: Parse Arguments
+## Step 2: Parse Arguments and State
 
 Check if `--auto-prd` was specified:
 
@@ -28,242 +35,275 @@ Check if `--auto-prd` was specified:
 AUTO_PRD=false
 if [[ "$ARGUMENTS" == *"--auto-prd"* ]]; then
     AUTO_PRD=true
-    echo "Auto-PRD mode enabled: PRDs will be automatically approved"
 fi
 ```
 
-## Step 3: Validate Mega Plan
+Read current state from `.mega-status.json`:
+- `current_batch`: Which batch is currently executing (0 = not started)
+- `completed_batches`: List of completed batch numbers
 
-Read and validate the mega-plan:
-- Check required fields (metadata, goal, features)
-- Verify feature names are valid
-- Check dependencies exist
-- Detect circular dependencies
+## Step 3: Determine Current State
 
-If validation fails, show errors and exit.
+Calculate all batches from mega-plan.json based on dependencies:
+- **Batch 1**: Features with no dependencies
+- **Batch 2**: Features depending only on Batch 1 features
+- **Batch N**: Features depending only on Batch 1..N-1 features
 
-## Step 4: Display Execution Plan
+Check the current state:
+
+### Case A: No batch started yet (current_batch = 0)
+→ Start Batch 1
+
+### Case B: Current batch is in progress
+→ Check if all features in current batch are complete
+→ If not complete: Show status and exit
+→ If complete: Merge current batch, then start next batch
+
+### Case C: All batches complete
+→ Inform user to run `/planning-with-files:mega-complete`
+
+## Step 4: Handle Batch Completion (if needed)
+
+If current batch is complete, **merge it before starting the next batch**:
 
 ```
 ============================================================
-MEGA PLAN APPROVAL
+BATCH <N> COMPLETED - MERGING TO TARGET BRANCH
 ============================================================
 
-Goal: <goal>
-Execution Mode: <auto|manual>
-PRD Approval: <auto|manual>
-Target Branch: <branch>
-
-Execution Plan:
-
-Batch 1 (Starting Now):
-  - feature-001: <title>
-    → Worktree: .worktree/<name>/
-    → Branch: mega-<name>
-
-  - feature-002: <title>
-    → Worktree: .worktree/<name>/
-    → Branch: mega-<name>
-
-Batch 2 (After Batch 1):
-  - feature-003: <title>
-    → Depends on: feature-001, feature-002
-
-============================================================
-
-Proceed with execution? This will:
-1. Create Git worktrees for Batch 1 features
-2. Generate PRDs in each worktree
-3. <Auto-approve PRDs | Wait for manual approval>
-4. Execute stories in each feature
+Merging completed features in dependency order...
 ```
 
-## Step 5: Create Batch 1 Worktrees
-
-For each feature in Batch 1:
+### 4.1: Checkout Target Branch
 
 ```bash
-# Create worktree
+TARGET_BRANCH=$(read from mega-plan.json)
+git checkout "$TARGET_BRANCH"
+git pull origin "$TARGET_BRANCH" 2>/dev/null || true
+```
+
+### 4.2: Merge Each Feature in Current Batch
+
+For each feature in the completed batch (in dependency order):
+
+```bash
+FEATURE_NAME="<name>"
+WORKTREE_PATH=".worktree/$FEATURE_NAME"
+BRANCH_NAME="mega-$FEATURE_NAME"
+
+# First, commit any uncommitted changes in the worktree (code only, not planning files)
+cd "$WORKTREE_PATH"
+
+# Stage only code files, explicitly exclude planning files
+git add -A
+git reset HEAD -- prd.json findings.md progress.txt .planning-config.json .agent-status.json mega-findings.md 2>/dev/null || true
+git commit -m "feat: complete $FEATURE_NAME" || true
+
+cd -
+
+# Now merge from target branch
+git merge "$BRANCH_NAME" --no-ff -m "Merge feature: <title>
+
+Mega-plan feature: <feature-id>
+Batch: <batch-number>"
+```
+
+Show progress:
+```
+[OK] Merged feature-001: <title>
+[OK] Merged feature-002: <title>
+
+Batch <N> merged successfully!
+```
+
+### 4.3: Cleanup Current Batch Worktrees
+
+```bash
+# Remove worktrees for completed batch
+git worktree remove ".worktree/$FEATURE_NAME" --force
+git branch -d "mega-$FEATURE_NAME"
+```
+
+### 4.4: Update Status
+
+Update `.mega-status.json`:
+- Add current batch to `completed_batches`
+- Increment `current_batch` or set to next batch number
+
+## Step 5: Start Next Batch
+
+If there are more batches to execute:
+
+### 5.1: Create Worktrees from UPDATED Target Branch
+
+**CRITICAL**: Worktrees must be created from the **current** target branch HEAD, which now includes all previously merged batches.
+
+```bash
+# Make sure we're on the updated target branch
+git checkout "$TARGET_BRANCH"
+
 FEATURE_NAME="<feature-name>"
 BRANCH_NAME="mega-$FEATURE_NAME"
 WORKTREE_PATH=".worktree/$FEATURE_NAME"
 
+# Create worktree from current HEAD (which includes previous batches)
 git worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH"
-echo "Created worktree: $WORKTREE_PATH"
 ```
 
-## Step 6: Initialize Each Worktree
+### 5.2: Initialize Each Worktree
 
-For each worktree:
+Create planning files in each worktree:
 
-1. Create `.planning-config.json`:
+1. `.planning-config.json`
+2. `findings.md`
+3. `progress.txt`
+4. Copy `mega-findings.md` (for reference)
+
+### 5.3: Generate PRDs
+
+Launch Task agents to generate PRDs for each feature in the new batch.
+
+### 5.4: Execute Stories
+
+If `--auto-prd`, immediately start story execution.
+Otherwise, prompt user to review PRDs.
+
+## Step 6: Update Status
+
+Update `.mega-status.json`:
 ```json
 {
-  "task_name": "<feature-name>",
-  "target_branch": "<target-branch>",
-  "mega_feature_id": "<feature-id>",
-  "created_at": "<timestamp>"
+  "updated_at": "<timestamp>",
+  "current_batch": <batch-number>,
+  "completed_batches": [1, 2, ...],
+  "features": {
+    "<feature-id>": {
+      "status": "in_progress",
+      "batch": <batch-number>,
+      "worktree": ".worktree/<name>"
+    }
+  }
 }
 ```
 
-2. Create `findings.md`:
-```markdown
-# Findings: <feature-title>
-
-Feature: <feature-name> (<feature-id>)
-
----
-
-```
-
-3. Create `progress.txt`:
-```
-[<timestamp>] Feature <feature-id> initialized
-```
-
-4. Copy `mega-findings.md` (read-only):
-```bash
-cp mega-findings.md "$WORKTREE_PATH/mega-findings.md"
-# Add read-only header
-```
-
-## Step 7: Generate PRDs
-
-For each feature in Batch 1, use a Task agent to generate the PRD:
-
-```
-Launch a background Task agent for each feature:
-
-subagent_type: general-purpose
-description: Generate PRD for <feature-name>
-prompt: |
-  You are in worktree: .worktree/<feature-name>/
-
-  Generate a PRD (prd.json) for this feature:
-
-  Feature: <title>
-  Description: <description>
-
-  Break this feature into 3-7 user stories with:
-  - Clear acceptance criteria
-  - Appropriate dependencies
-  - Priority levels
-
-  Save as prd.json in the current directory.
-run_in_background: true
-```
-
-Wait for all PRD generation tasks to complete using TaskOutput.
-
-## Step 8: Update Feature Statuses
-
-Update mega-plan.json to set Batch 1 features to `prd_generated`.
-
-## Step 9: Handle PRD Approval
-
-### If `--auto-prd` (Auto Mode):
+## Step 7: Show Status
 
 ```
 ============================================================
-AUTO-APPROVING PRDs
+BATCH <N> STARTED
 ============================================================
 
-[OK] feature-001: PRD approved (5 stories)
-[OK] feature-002: PRD approved (4 stories)
-
-Starting story execution...
-```
-
-Update statuses to `approved`, then `in_progress`.
-
-For each feature, launch a Task agent to execute stories:
-
-```
-subagent_type: general-purpose
-description: Execute <feature-name> stories
-prompt: |
-  You are in worktree: .worktree/<feature-name>/
-  Execution mode: <auto|manual>
-
-  Execute the stories in prd.json according to execution batches.
-
-  For each story:
-  1. Read story details
-  2. Implement the story
-  3. Update progress.txt
-  4. Mark story complete
-
-  Update findings.md with discoveries.
-run_in_background: true
-```
-
-### If Manual Mode:
-
-```
-============================================================
-PRD REVIEW REQUIRED
-============================================================
-
-PRDs have been generated for Batch 1 features.
-Please review and approve each one:
-
-Feature 1: <title>
-  cd .worktree/<name>
-  cat prd.json
-  /planning-with-files:approve
-
-Feature 2: <title>
-  cd .worktree/<name>
-  cat prd.json
-  /planning-with-files:approve
-
-============================================================
-
-Run /planning-with-files:mega-status to monitor progress.
-When all PRDs are approved, story execution will begin.
-```
-
-## Step 10: Show Status
-
-```
-============================================================
-BATCH 1 EXECUTION STARTED
-============================================================
+Previous batches merged: [1, 2, ...]
+Current batch: <N>
 
 Features in progress:
-  [>] feature-001: <title>
+  [>] feature-003: <title>
       Worktree: .worktree/<name>/
-      Stories: 0/5 complete
+      Branch base: <target_branch> (includes Batch 1-2 code)
 
-  [>] feature-002: <title>
+  [>] feature-004: <title>
       Worktree: .worktree/<name>/
-      Stories: 0/4 complete
+      Branch base: <target_branch> (includes Batch 1-2 code)
 
 ============================================================
 
 Monitor progress: /planning-with-files:mega-status
 
-When Batch 1 completes, Batch 2 will start automatically.
-When all features complete: /planning-with-files:mega-complete
+When Batch <N> completes, run:
+  /planning-with-files:mega-approve
+
+To merge and start Batch <N+1>.
+
+============================================================
+```
+
+## All Batches Complete
+
+If all batches are done:
+
+```
+============================================================
+ALL BATCHES COMPLETE
+============================================================
+
+All feature batches have been merged to <target_branch>!
+
+Completed batches: [1, 2, 3]
+Total features merged: <count>
+
+Final cleanup:
+  /planning-with-files:mega-complete
+
+This will remove remaining planning files.
 
 ============================================================
 ```
 
 ## Error Handling
 
-### Worktree Creation Fails
+### Merge Conflict
 
 ```
-Error: Could not create worktree for <feature>
-Try: git worktree prune
-Then re-run /planning-with-files:mega-approve
+============================================================
+MERGE CONFLICT
+============================================================
+
+Conflict while merging feature-002: <title>
+
+Conflicting files:
+  - src/api/products.ts
+
+To resolve:
+  1. Resolve conflicts in the listed files
+  2. git add <resolved-files>
+  3. git commit
+  4. Re-run /planning-with-files:mega-approve
+
+Or abort: git merge --abort
 ```
 
-### Branch Already Exists
+### Feature Not Complete
 
 ```
-Error: Branch mega-<name> already exists
-Options:
-  1. Delete branch: git branch -D mega-<name>
-  2. Use different feature name: /planning-with-files:mega-edit
+============================================================
+BATCH <N> NOT COMPLETE
+============================================================
+
+Cannot proceed - some features are still in progress:
+
+  [>] feature-002: Product Catalog
+      Status: in_progress
+      Stories: 3/5 complete
+      Location: .worktree/feature-products/
+
+Wait for all features to complete, then run:
+  /planning-with-files:mega-approve
+```
+
+## Execution Flow Summary
+
+```
+mega-approve (1st call)
+    │
+    ├─→ Create Batch 1 worktrees (from target_branch)
+    ├─→ Generate PRDs
+    └─→ Execute stories
+
+    ... Batch 1 features execute ...
+
+mega-approve (2nd call, after Batch 1 complete)
+    │
+    ├─→ Merge Batch 1 to target_branch
+    ├─→ Cleanup Batch 1 worktrees
+    ├─→ Create Batch 2 worktrees (from UPDATED target_branch)
+    ├─→ Generate PRDs
+    └─→ Execute stories
+
+    ... Batch 2 features execute ...
+
+mega-approve (3rd call, after Batch 2 complete)
+    │
+    ├─→ Merge Batch 2 to target_branch
+    ├─→ Cleanup Batch 2 worktrees
+    └─→ All batches complete! → mega-complete
 ```

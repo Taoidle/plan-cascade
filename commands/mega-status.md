@@ -112,14 +112,32 @@ Current work:
   cd .worktree/feature-products
   # Continue story execution
 
-When Batch 1 completes:
-  Batch 2 will start automatically (auto mode)
+When current batch completes:
+  /planning-with-files:mega-approve
+  # This will merge current batch and start next batch
 
-When all complete:
+When all batches complete:
   /planning-with-files:mega-complete
+  # This will cleanup planning files
 
 ============================================================
 ```
+
+## Batch-by-Batch Execution Model
+
+```
+Batch 1: feature-001, feature-002 (parallel, from target_branch)
+    │
+    └─→ When ALL complete: mega-approve merges to target_branch
+                                │
+Batch 2: feature-003, feature-004 (parallel, from UPDATED target_branch)
+    │                           ↑ includes Batch 1 code
+    └─→ When ALL complete: mega-approve merges to target_branch
+                                │
+Final: mega-complete (cleanup only)
+```
+
+This ensures each batch's features have access to code from previous batches.
 
 ## Status Symbols
 
