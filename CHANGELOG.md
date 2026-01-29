@@ -2,6 +2,135 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.1.0] - 2026-01-29
+
+### Added
+
+- **Auto Strategy Command** - New `/plan-cascade:auto` command for AI-driven automatic strategy selection
+  - AI automatically analyzes task description and selects optimal strategy
+  - Four strategies supported: direct, hybrid-auto, hybrid-worktree, mega-plan
+  - Keyword-based detection (not word count based)
+  - No user confirmation required - direct execution
+  - Strategy routing to corresponding commands
+
+- **Strategy Detection Rules:**
+  | Strategy | Trigger Keywords | Example |
+  |----------|------------------|---------|
+  | direct | fix, typo, update, simple, single | "Fix the login button styling" |
+  | hybrid-auto | implement, create, feature, api | "Implement user authentication" |
+  | hybrid-worktree | (feature keywords) + experimental, refactor | "Experimental refactoring of payment module" |
+  | mega-plan | platform, system, architecture, 3+ modules | "Build e-commerce platform" |
+
+### Changed
+
+- **Command Prefix Standardization** - All command prefixes updated from `planning-with-files:` to `plan-cascade:`
+  - Affects 16 command files: approve, complete, edit, hybrid-auto, hybrid-complete, hybrid-manual, hybrid-status, hybrid-worktree, mega-approve, mega-complete, mega-edit, mega-plan, mega-status, show-dependencies, start, worktree
+  - Documentation updated accordingly
+
+- Updated version to 4.1.0
+- Updated System-Architecture documentation with Auto Strategy Workflow flowchart
+- Updated Plugin-Guide documentation with auto command section
+
+---
+
+## [4.0.1] - 2026-01-29
+
+### Added
+
+- **Bilingual Documentation** - Added Chinese translations for all documentation files
+  - `README_zh.md` - Chinese README
+  - `docs/Plugin-Guide_zh.md` - Chinese Plugin Guide
+  - `docs/System-Architecture_zh.md` - Chinese System Architecture
+  - Language switcher links between English and Chinese versions
+
+### Changed
+
+- Renamed plugin from `planning-with-files` to `plan-cascade` in plugin.json
+- Updated settings and configuration for clarity
+
+---
+
+## [4.0.0] - 2026-01-29
+
+### Added
+
+- **Standalone CLI Complete** - Independent command-line tool fully functional
+  - Simple mode for beginners
+  - Expert mode for advanced users
+  - Interactive REPL chat mode with session management
+  - AI automatic strategy selection based on task analysis
+
+- **Multi-LLM Backend Support** - Support for 5 LLM providers
+  - **Claude Max** - No API key required (uses Claude Code)
+  - **Claude API** - Direct Anthropic API access
+  - **OpenAI** - GPT-4 and other OpenAI models
+  - **DeepSeek** - DeepSeek API support
+  - **Ollama** - Local model support for offline usage
+
+- **Independent ReAct Engine** - Complete agentic execution
+  - Think → Act → Observe loop implementation
+  - Tool execution with result parsing
+  - Multi-turn conversation support
+
+- **Per-Story Agent Selection** - Specify different agents for different stories
+  - `--agent` flag for global agent selection
+  - `--impl-agent` for implementation phase
+  - Story-level `agent` field in PRD
+
+- **Quality Gates Configuration** - Configurable quality checks
+  - TypeCheck, Test, Lint gates
+  - Per-project configuration in `agents.json`
+  - Automatic retry on failure
+
+- **New CLI Commands:**
+  - `plan-cascade agents` - List available agents with status
+  - `plan-cascade chat` - Interactive REPL mode
+  - `plan-cascade run` - Execute task with strategy selection
+
+### Changed
+
+- **Documentation Restructure** - Split into separate focused guides
+  - `docs/Plugin-Guide.md` - Claude Code plugin usage
+  - `docs/System-Architecture.md` - Technical architecture details
+  - Separate CLI documentation
+
+- Updated orchestrator with quality gate integration
+- Enhanced agent executor with fallback chain support
+
+### Technical Details
+
+**Dual-Mode Architecture:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Plan Cascade                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   ┌─────────────────────┐     ┌─────────────────────┐       │
+│   │    Simple Mode      │     │    Expert Mode      │       │
+│   │                     │     │                     │       │
+│   │  AI auto-select     │     │  Manual strategy    │       │
+│   │  strategy           │     │  selection          │       │
+│   └─────────────────────┘     └─────────────────────┘       │
+│                                                              │
+│                    Shared Core Engine                        │
+│   ┌─────────────────────────────────────────────────────┐   │
+│   │  PRDGenerator │ Orchestrator │ QualityGate │ ...    │   │
+│   └─────────────────────────────────────────────────────┘   │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**LLM Backend Selection:**
+| Backend | API Key Required | Offline | Best For |
+|---------|-----------------|---------|----------|
+| Claude Max | No | No | Claude Code users |
+| Claude API | Yes | No | Direct API access |
+| OpenAI | Yes | No | GPT-4 preference |
+| DeepSeek | Yes | No | Cost-effective |
+| Ollama | No | Yes | Privacy/offline |
+
+---
+
 ## [3.1.0] - 2026-01-28
 
 ### Added
