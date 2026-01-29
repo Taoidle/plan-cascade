@@ -1,0 +1,32 @@
+[package]
+name = "plan-cascade-desktop"
+version = "0.1.0"
+description = "Plan Cascade Desktop Application"
+authors = ["Plan Cascade Team"]
+license = "MIT"
+repository = "https://github.com/plan-cascade/plan-cascade"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["shell-open"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+futures-util = "0.3"
+tokio-tungstenite = "0.24"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
