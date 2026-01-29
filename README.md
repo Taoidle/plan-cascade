@@ -5,7 +5,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-3.2.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-3.3.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![PyPI](https://img.shields.io/pypi/v/plan-cascade)](https://pypi.org/project/plan-cascade/)
 
 ## 项目起源
 
@@ -121,6 +122,8 @@ graph LR
 |------|------|----------|
 | **Claude Code 插件** | 原生集成，功能最完整 | Claude Code 用户 |
 | **MCP 服务器** | 通过 MCP 协议集成 | Cursor, Windsurf, Cline 等 |
+| **Standalone CLI** | 独立命令行工具 | 任何终端环境 |
+| **Desktop 应用** | 图形化界面 | 偏好 GUI 的用户 |
 
 ---
 
@@ -215,6 +218,25 @@ flowchart TB
 | ❌ 不适用 | 单个功能开发 | 仅实现用户认证（用 Hybrid Ralph） |
 | ❌ 不适用 | Bug 修复 | 修复登录页表单验证问题 |
 
+**重要：批次间顺序执行**
+
+Mega-plan 使用**批次间顺序执行**模式，确保每个批次从更新后的目标分支创建 worktree：
+
+```
+mega-approve (第1次) → 启动 Batch 1
+    ↓ Batch 1 完成
+mega-approve (第2次) → 合并 Batch 1 → 从更新后的分支创建 Batch 2
+    ↓ Batch 2 完成
+mega-approve (第3次) → 合并 Batch 2 → ...
+    ↓ 所有批次完成
+mega-complete → 清理计划文件
+```
+
+关键点：
+- `mega-approve` 需要多次调用（每个批次一次）
+- 每个批次从**更新后的目标分支**创建 worktree
+- 计划文件不会被提交（已加入 .gitignore）
+
 ```mermaid
 flowchart TD
     A["<b>/plan-cascade:mega-plan</b><br/>电商平台：用户、商品、订单"] --> B[分析项目需求]
@@ -226,12 +248,12 @@ flowchart TD
     F --> G{用户操作}
     G -->|编辑| H["/plan-cascade:mega-edit"]
     H --> F
-    G -->|批准| I["<b>/plan-cascade:mega-approve</b>"]
+    G -->|批准| I["<b>/plan-cascade:mega-approve</b><br/>(第1次)"]
 
-    I --> J[创建执行批次]
+    I --> J[创建 Batch 1 Worktrees]
     J --> K[Batch 1: 基础设施]
 
-    subgraph "Feature 并行开发"
+    subgraph "Feature 并行开发 (Batch 1)"
         K --> L1["Feature: 用户系统<br/>Worktree: .worktrees/user"]
         K --> L2["Feature: 商品系统<br/>Worktree: .worktrees/product"]
 
@@ -245,14 +267,17 @@ flowchart TD
     N1 --> O1[Feature 完成]
     N2 --> O2[Feature 完成]
 
-    O1 --> P[Batch 2: 订单系统<br/>依赖用户+商品]
+    O1 --> P["<b>/plan-cascade:mega-approve</b><br/>(第2次)"]
     O2 --> P
+    P --> P1[合并 Batch 1 到目标分支]
+    P1 --> P2[从更新后的分支创建 Batch 2]
+    P2 --> Q[Batch 2: 订单系统<br/>依赖用户+商品]
 
-    P --> Q[继续执行...]
-    Q --> R[所有 Feature 完成]
-    R --> S["<b>/plan-cascade:mega-complete</b>"]
-    S --> T[按依赖顺序合并分支]
-    T --> U[清理所有 Worktrees]
+    Q --> R[继续执行...]
+    R --> S[所有 Feature 完成]
+    S --> T["<b>/plan-cascade:mega-complete</b>"]
+    T --> U[清理计划文件]
+    U --> V[清理所有 Worktrees]
 ```
 
 ### `/plan-cascade:hybrid-worktree` 流程：隔离开发
@@ -746,19 +771,40 @@ Plan Cascade 支持完全自动化的批次执行，无需手动干预：
 
 ## 支持的工具
 
-| 工具 | 方式 | 状态 |
+| 工具 | 类型 | 状态 |
 |------|------|------|
-| **Claude Code** | 插件 | ✅ 完整支持 |
+| **Claude Code** | Plugin | ✅ 完整支持 |
 | **Cursor** | MCP Server | ✅ 支持 |
 | **Windsurf** | MCP Server | ✅ 支持 |
 | **Cline** | MCP Server | ✅ 支持 |
 | **Continue** | MCP Server | ✅ 支持 |
 | **Zed** | MCP Server | ✅ 支持 |
 | **Amp Code** | MCP Server | ✅ 支持 |
+| **Plan Cascade CLI** | CLI | ✅ 新增 |
+| **Plan Cascade Desktop** | Desktop | ✅ 新增 |
 
 ---
 
 ## 安装
+
+### Standalone CLI
+
+```bash
+# 从 PyPI 安装
+pip install plan-cascade
+
+# 简单模式 - 快速开始
+plan-cascade run "实现用户登录功能"
+
+# 专家模式 - 更多控制
+plan-cascade run "实现用户登录功能" --expert
+
+# 配置向导
+plan-cascade config --setup
+
+# 查看版本
+plan-cascade version
+```
 
 ### Claude Code 插件
 
@@ -787,6 +833,25 @@ pip install 'mcp[cli]'
 ```
 
 详细配置见 [mcp-configs/README.md](mcp-configs/README.md)
+
+### Desktop 应用
+
+下载适合您平台的安装包：
+
+| 平台 | 安装包格式 | 说明 |
+|------|-----------|------|
+| **Windows** | `.msi` 或 `.exe` | 标准 Windows 安装程序 |
+| **macOS (Intel)** | `.dmg` | x64 架构 |
+| **macOS (Apple Silicon)** | `.dmg` | ARM64 架构 |
+| **Linux** | `.AppImage` 或 `.deb` | 通用 Linux 格式 |
+
+从 [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases) 下载最新版本。
+
+**Desktop 特性：**
+- 图形化界面，无需命令行
+- 简单/专家双模式切换
+- 实时进度可视化
+- 可作为 Claude Code 的 GUI 前端
 
 ---
 
@@ -991,6 +1056,26 @@ plan-cascade/
 ---
 
 ## 更新日志
+
+### v3.3.0
+
+- **Standalone CLI** - 独立命令行工具
+  - `pip install plan-cascade` 直接安装
+  - 简单模式/专家模式双模式支持
+  - 配置向导 `plan-cascade config --setup`
+- **Desktop 桌面应用** - 图形化界面
+  - 支持 Windows (.msi/.exe)、macOS (.dmg)、Linux (.AppImage/.deb)
+  - 实时进度可视化
+  - 可作为 Claude Code 的 GUI
+- **GitHub Actions CI/CD** - 自动化发布
+  - Python 包自动发布到 PyPI（Trusted Publishing）
+  - Desktop 应用多平台构建和发布
+  - Dependabot 依赖更新
+- **Mega-plan 批次执行改进**
+  - 批次间顺序执行，确保依赖正确处理
+  - 每个批次从更新后的目标分支创建 worktree
+  - 计划文件不会被提交
+- 版本号同步修复
 
 ### v3.2.0
 
