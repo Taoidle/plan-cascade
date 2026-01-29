@@ -1,4 +1,36 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(tree:*)",
+      "Bash(git -C \"D:\\\\VsCodeProjects\\\\planning-with-files\" log --oneline)",
+      "Bash(wc:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(claude plugin install:*)",
+      "Bash(claude plugin list:*)",
+      "Bash(claude mcp list:*)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(ls:*)",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, ''.''\\); from mcp_server.tools.prd_tools import *; print\\(''prd_tools OK''\\)\")",
+      "Bash(python:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "Bash(gh repo view:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git worktree:*)",
+      "Bash(git checkout:*)",
+      "Bash(git pull:*)",
+      "Bash(git merge mega-feature-core-package --no-ff -m \"$\\(cat <<''EOF''\nMerge feature: 核心包重构 \\(src/plan_cascade/\\)\n\nMega-plan feature: feature-001\nStories completed: 6\n\nCreated:\n- src/plan_cascade/ package structure\n- State management \\(StateManager, ContextFilter, MegaStateManager\\)\n- Core orchestration \\(Orchestrator, PRDGenerator, IterationLoop\\)\n- Quality gates and retry management\n- Mode and strategy definitions\n- Backward compatibility layer\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  },
   "alwaysApprove": {
     "bash": [
       "git *",

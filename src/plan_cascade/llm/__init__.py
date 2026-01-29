@@ -1,14 +1,24 @@
 """
 Plan Cascade LLM Module
 
-Contains LLM provider abstractions:
+Provides the LLM provider abstraction layer for standalone execution mode.
+This enables Plan Cascade to work independently of Claude Code by directly
+calling LLM APIs (Claude, OpenAI, Ollama, etc.).
+
+Key Components:
 - LLMProvider: Abstract base class for LLM providers
-- LLMFactory: Factory for creating LLM provider instances
-- Provider implementations for Claude, OpenAI, Ollama, etc.
+- LLMResponse: Standardized response type
+- ToolCall: Tool call representation
+- LLMFactory: Provider instantiation factory
 """
 
-# LLM module is a placeholder for future implementation
-# Currently, the package uses Claude Code's built-in LLM capabilities
-# through the ClaudeCodeBackend
+from .base import LLMProvider, LLMResponse, ToolCall, TokenUsage
+from .factory import LLMFactory
 
-__all__ = []
+__all__ = [
+    "LLMProvider",
+    "LLMResponse",
+    "ToolCall",
+    "TokenUsage",
+    "LLMFactory",
+]

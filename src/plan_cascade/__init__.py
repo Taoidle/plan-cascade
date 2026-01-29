@@ -10,6 +10,12 @@ Architecture:
     - Hybrid Layer: PRD-based story management with dependency resolution
     - Execution Layer: Multi-agent task execution with quality gates
 
+Supports:
+    - Claude Code as GUI (ClaudeCodeBackend)
+    - Standalone LLM execution (BuiltinBackend)
+    - Multi-agent collaboration
+    - PRD-driven task decomposition
+
 Example usage:
     from plan_cascade import Orchestrator, PRDGenerator, StateManager
 
@@ -66,25 +72,28 @@ from .state.state_manager import StateManager, FileLock
 from .state.context_filter import ContextFilter
 from .state.mega_state import MegaStateManager
 
-# Backend layer
-from .backends.base import AgentBackend, ExecutionResult
-from .backends.agent_executor import AgentExecutor
-from .backends.agent_monitor import AgentMonitor
-from .backends.cross_platform_detector import (
-    CrossPlatformDetector,
-    DetectorConfig,
-    AgentInfo,
-    Platform,
-)
-from .backends.phase_config import (
-    PhaseAgentManager,
-    PhaseConfig,
-    ExecutionPhase,
-    StoryType,
-    AgentOverrides,
+# Backend layer (from feature-002)
+from .backends import (
+    AgentBackend,
+    ExecutionResult,
+    BackendFactory,
+    ClaudeCodeBackend,
+    BuiltinBackend,
 )
 
-# Settings management
+# LLM providers (from feature-002)
+from .llm import (
+    LLMProvider,
+    LLMResponse,
+    LLMFactory,
+    ToolCall,
+    TokenUsage,
+)
+
+# Tools (from feature-002)
+from .tools import ToolRegistry, Tool, ToolResult
+
+# Settings management (from feature-004)
 from .settings import (
     BackendType,
     AgentConfig,
@@ -146,17 +155,19 @@ __all__ = [
     # Backend layer
     "AgentBackend",
     "ExecutionResult",
-    "AgentExecutor",
-    "AgentMonitor",
-    "CrossPlatformDetector",
-    "DetectorConfig",
-    "AgentInfo",
-    "Platform",
-    "PhaseAgentManager",
-    "PhaseConfig",
-    "ExecutionPhase",
-    "StoryType",
-    "AgentOverrides",
+    "BackendFactory",
+    "ClaudeCodeBackend",
+    "BuiltinBackend",
+    # LLM
+    "LLMProvider",
+    "LLMResponse",
+    "LLMFactory",
+    "ToolCall",
+    "TokenUsage",
+    # Tools
+    "ToolRegistry",
+    "Tool",
+    "ToolResult",
     # Settings
     "BackendType",
     "AgentConfig",

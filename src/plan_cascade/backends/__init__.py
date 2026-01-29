@@ -1,48 +1,29 @@
 """
 Plan Cascade Backends Module
 
-Contains the backend abstraction layer for agent execution:
+Contains the backend abstraction layer for agent execution.
+Supports dual-mode operation:
+- ClaudeCodeBackend: Plan Cascade as GUI for Claude Code
+- BuiltinBackend: Standalone operation with direct LLM API calls
+
+Key Components:
 - AgentBackend: Abstract base class for all backends
-- ExecutionResult: Standardized execution result dataclass
-- AgentExecutor: Multi-agent execution with automatic fallback
-- AgentMonitor: Process monitoring and status tracking
-- CrossPlatformDetector: Platform-specific agent detection
-- PhaseAgentManager: Phase-based agent selection
+- ExecutionResult: Standardized execution result
+- BackendFactory: Backend instantiation factory
 """
 
 from .base import AgentBackend, ExecutionResult
-from .agent_executor import AgentExecutor
-from .agent_monitor import AgentMonitor
-from .cross_platform_detector import (
-    CrossPlatformDetector,
-    DetectorConfig,
-    AgentInfo,
-    Platform,
-)
-from .phase_config import (
-    PhaseAgentManager,
-    PhaseConfig,
-    ExecutionPhase,
-    StoryType,
-    AgentOverrides,
-)
+from .factory import BackendFactory
+from .claude_code import ClaudeCodeBackend
+from .builtin import BuiltinBackend
 
 __all__ = [
-    # Base abstractions
+    # Base classes
     "AgentBackend",
     "ExecutionResult",
-    # Execution
-    "AgentExecutor",
-    "AgentMonitor",
-    # Detection
-    "CrossPlatformDetector",
-    "DetectorConfig",
-    "AgentInfo",
-    "Platform",
-    # Phase configuration
-    "PhaseAgentManager",
-    "PhaseConfig",
-    "ExecutionPhase",
-    "StoryType",
-    "AgentOverrides",
+    # Factory
+    "BackendFactory",
+    # Implementations
+    "ClaudeCodeBackend",
+    "BuiltinBackend",
 ]
