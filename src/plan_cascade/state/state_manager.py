@@ -335,12 +335,16 @@ class StateManager:
                 # Extract story ID
                 for word in line.split():
                     if word.startswith("story-"):
-                        statuses[word] = "complete"
+                        # Remove trailing colon if present
+                        story_id = word.rstrip(":")
+                        statuses[story_id] = "complete"
                         break
             elif "[IN_PROGRESS]" in line:
                 for word in line.split():
                     if word.startswith("story-"):
-                        statuses[word] = "in_progress"
+                        # Remove trailing colon if present
+                        story_id = word.rstrip(":")
+                        statuses[story_id] = "in_progress"
                         break
 
         return statuses

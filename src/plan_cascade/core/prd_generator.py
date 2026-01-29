@@ -116,7 +116,7 @@ class PRDGenerator:
 
         # Check for complexity indicators
         complexity_keywords = {
-            "high": ["refactor", "architecture", "migration", "rewrite", "restructure"],
+            "xlarge": ["refactor", "architecture", "migration", "rewrite", "restructure"],
             "large": ["implement", "create", "build", "develop", "integrate", "multiple"],
             "medium": ["add", "update", "modify", "extend", "enhance"],
             "small": ["fix", "correct", "adjust", "tweak", "minor"]
