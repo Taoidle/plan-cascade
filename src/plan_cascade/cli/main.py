@@ -24,6 +24,7 @@ try:
 except ImportError:
     HAS_TYPER = False
 
+from .. import __version__
 from .output import OutputManager
 
 if HAS_TYPER:
@@ -61,7 +62,7 @@ if HAS_TYPER:
 
         # Print header
         output.print_header(
-            "Plan Cascade v1.0.0",
+            f"Plan Cascade v{__version__}",
             f"Project: {project}"
         )
         output.print_info(f"Mode: {'Expert' if expert else 'Simple'}")
