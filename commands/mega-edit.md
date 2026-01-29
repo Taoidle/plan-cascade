@@ -1,5 +1,5 @@
 ---
-description: "Edit the mega-plan interactively. Add, remove, or modify features. Usage: /planning-with-files:mega-edit"
+description: "Edit the mega-plan interactively. Add, remove, or modify features. Usage: /plan-cascade:mega-edit"
 ---
 
 # Edit Mega Plan
@@ -11,7 +11,7 @@ Edit the mega-plan.json file interactively to add, remove, or modify features.
 ```bash
 if [ ! -f "mega-plan.json" ]; then
     echo "No mega-plan.json found."
-    echo "Use /planning-with-files:mega-plan <description> to create one first."
+    echo "Use /plan-cascade:mega-plan <description> to create one first."
     exit 1
 fi
 ```
@@ -134,7 +134,7 @@ Batch 2 (After Batch 1):
 
 Next steps:
   - Review changes: cat mega-plan.json
-  - Start execution: /planning-with-files:mega-approve
+  - Start execution: /plan-cascade:mega-approve
 ```
 
 ## Validation Rules

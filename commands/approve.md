@@ -49,8 +49,8 @@ Check if `prd.json` exists:
 ```bash
 if [ ! -f "prd.json" ]; then
     echo "ERROR: No PRD found. Please generate one first with:"
-    echo "  /planning-with-files:hybrid-auto <description>"
-    echo "  /planning-with-files:hybrid-manual <path>"
+    echo "  /plan-cascade:hybrid-auto <description>"
+    echo "  /plan-cascade:hybrid-manual <path>"
     exit 1
 fi
 ```
@@ -62,7 +62,7 @@ Read `prd.json` and validate:
 - Each story has `id`, `title`, `description`, `priority`, `dependencies`, `acceptance_criteria`
 - All dependency references exist
 
-If validation fails, show errors and suggest `/planning-with-files:edit`.
+If validation fails, show errors and suggest `/plan-cascade:edit`.
 
 ## Step 5: Calculate Execution Batches
 
@@ -225,7 +225,7 @@ while [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; do
             echo "  - progress.txt for error details"
             echo "  - .agent-outputs/ for agent logs"
             echo ""
-            echo "Execution PAUSED. Fix issues and run /planning-with-files:approve to continue."
+            echo "Execution PAUSED. Fix issues and run /plan-cascade:approve to continue."
             exit 1
         fi
 
@@ -316,7 +316,7 @@ while [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; do
         CONFIRM="${CONFIRM:-Y}"
 
         if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-            echo "Paused. Run /planning-with-files:approve to continue."
+            echo "Paused. Run /plan-cascade:approve to continue."
             exit 0
         fi
 
@@ -346,8 +346,8 @@ Completed: X
 All batches have been executed successfully.
 
 Next steps:
-  - /planning-with-files:hybrid-status - Verify completion
-  - /planning-with-files:hybrid-complete - Finalize and merge
+  - /plan-cascade:hybrid-status - Verify completion
+  - /plan-cascade:hybrid-complete - Finalize and merge
 ```
 
 ## Notes
@@ -377,4 +377,4 @@ Next steps:
 - **Pause on errors**: Both modes pause if any agent reports `[ERROR]` or `[FAILED]`
 - **Real-time monitoring**: Progress is polled every 10 seconds and displayed
 - **Error markers**: Agents should use `[ERROR]` for recoverable issues, `[FAILED]` for blocking problems
-- **Resume capability**: After fixing errors, run `/planning-with-files:approve` to continue
+- **Resume capability**: After fixing errors, run `/plan-cascade:approve` to continue

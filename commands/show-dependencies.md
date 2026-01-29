@@ -135,7 +135,7 @@ For Planning:
   The critical path shows the minimum number of sequential steps.
 
 Next steps:
-  - /planning-with-files:approve - See execution plan with batches
-  - /planning-with-files:edit - Modify dependencies
-  - /planning-with-files:hybrid-status - Check execution progress
+  - /plan-cascade:approve - See execution plan with batches
+  - /plan-cascade:edit - Modify dependencies
+  - /plan-cascade:hybrid-status - Check execution progress
 ```

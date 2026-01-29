@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**版本**: 4.0.0
+**版本**: 4.1.0
 **最后更新**: 2026-01-29
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
@@ -24,13 +24,53 @@ claude plugins install ./plan-cascade
 
 ## 命令概览
 
-Plan Cascade 提供三个主要入口命令，适用于不同规模的开发场景：
+Plan Cascade 提供四个主要入口命令，适用于不同规模的开发场景：
 
 | 入口命令 | 适用场景 | 特点 |
 |----------|----------|------|
+| `/plan-cascade:auto` | 任意任务（AI 自动选择策略） | 自动策略选择 + 直接执行 |
 | `/plan-cascade:mega-plan` | 大型项目（多个相关功能） | Feature 级并行 + Story 级并行 |
 | `/plan-cascade:hybrid-worktree` | 单个复杂功能 | Worktree 隔离 + Story 并行 |
 | `/plan-cascade:hybrid-auto` | 简单功能 | 快速 PRD 生成 + Story 并行 |
+
+---
+
+## `/plan-cascade:auto` - AI 自动策略
+
+最简单的入口。AI 分析任务描述并自动选择最佳策略。
+
+### 工作原理
+
+1. 用户提供任务描述
+2. AI 分析关键词和模式
+3. AI 选择最优策略（direct、hybrid-auto、hybrid-worktree 或 mega-plan）
+4. 无需确认，直接执行
+
+### 策略选择
+
+| 策略 | 触发关键词 | 示例 |
+|------|------------|------|
+| **direct** | fix、typo、update、simple、single | "修复登录按钮样式" |
+| **hybrid-auto** | implement、create、feature、api | "实现用户认证" |
+| **hybrid-worktree** | experimental、refactor、isolated | "实验性重构支付模块" |
+| **mega-plan** | platform、system、3+ 个模块 | "构建电商平台：用户、商品、订单" |
+
+### 使用示例
+
+```bash
+# AI 自动判断策略
+/plan-cascade:auto "修复 README 中的拼写错误"
+# → 使用 direct 策略
+
+/plan-cascade:auto "实现 OAuth 用户登录"
+# → 使用 hybrid-auto 策略
+
+/plan-cascade:auto "实验性重构 API 层"
+# → 使用 hybrid-worktree 策略
+
+/plan-cascade:auto "构建博客平台：用户、文章、评论、RSS"
+# → 使用 mega-plan 策略
+```
 
 ---
 
@@ -309,6 +349,12 @@ mega-complete → 清理计划文件
 ---
 
 ## 完整命令参考
+
+### 自动策略
+
+```bash
+/plan-cascade:auto <描述>                # AI 自动选择并执行策略
+```
 
 ### 项目级（Mega Plan）
 

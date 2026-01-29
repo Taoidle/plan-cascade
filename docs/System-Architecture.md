@@ -2,7 +2,7 @@
 
 # Plan Cascade - System Architecture and Workflow Design
 
-**Version**: 4.0.0
+**Version**: 4.1.0
 **Last Updated**: 2026-01-29
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
@@ -14,13 +14,14 @@ This document contains detailed architecture diagrams, flowcharts, and system de
 1. [Three-Tier Architecture](#1-three-tier-architecture)
 2. [Core Components](#2-core-components)
 3. [Complete Workflow](#3-complete-workflow)
-4. [Mega Plan Workflow](#4-mega-plan-workflow)
-5. [Hybrid Worktree Workflow](#5-hybrid-worktree-workflow)
-6. [Hybrid Auto Workflow](#6-hybrid-auto-workflow)
-7. [Auto-Iteration Workflow](#7-auto-iteration-workflow)
-8. [Data Flow and State Files](#8-data-flow-and-state-files)
-9. [Dual-Mode Architecture](#9-dual-mode-architecture)
-10. [Multi-Agent Collaboration Architecture](#10-multi-agent-collaboration-architecture)
+4. [Auto Strategy Workflow](#4-auto-strategy-workflow)
+5. [Mega Plan Workflow](#5-mega-plan-workflow)
+6. [Hybrid Worktree Workflow](#6-hybrid-worktree-workflow)
+7. [Hybrid Auto Workflow](#7-hybrid-auto-workflow)
+8. [Auto-Iteration Workflow](#8-auto-iteration-workflow)
+9. [Data Flow and State Files](#9-data-flow-and-state-files)
+10. [Dual-Mode Architecture](#10-dual-mode-architecture)
+11. [Multi-Agent Collaboration Architecture](#11-multi-agent-collaboration-architecture)
 
 ---
 
@@ -189,7 +190,56 @@ flowchart TB
 
 ---
 
-## 4. Mega Plan Workflow
+## 4. Auto Strategy Workflow
+
+The `/plan-cascade:auto` command provides AI-driven automatic strategy selection based on task analysis.
+
+### Strategy Selection Flowchart
+
+```mermaid
+flowchart TD
+    A["/plan-cascade:auto<br/>Task Description"] --> B[Gather Project Context]
+    B --> C[AI Strategy Analysis]
+
+    C --> D{Keyword Detection}
+
+    D -->|"platform, system,<br/>architecture, 3+ modules"| E[MEGA_PLAN]
+    D -->|"implement, create +<br/>experimental, refactor"| F[HYBRID_WORKTREE]
+    D -->|"implement, create,<br/>build, feature"| G[HYBRID_AUTO]
+    D -->|"fix, update, simple<br/>or default"| H[DIRECT]
+
+    E --> I["/plan-cascade:mega-plan"]
+    F --> J["/plan-cascade:hybrid-worktree"]
+    G --> K["/plan-cascade:hybrid-auto"]
+    H --> L[Direct Execution]
+
+    I --> M[Multi-Feature Orchestration]
+    J --> N[Isolated Development]
+    K --> O[PRD + Story Execution]
+    L --> P[Task Complete]
+```
+
+### Strategy Detection Rules
+
+| Priority | Strategy | Keywords | Condition |
+|----------|----------|----------|-----------|
+| 1 | **MEGA_PLAN** | platform, system, architecture, microservices | OR 3+ independent modules listed |
+| 2 | **HYBRID_WORKTREE** | (feature keywords) + experimental, refactor, isolated | Both conditions required |
+| 3 | **HYBRID_AUTO** | implement, create, build, feature, api | Without isolation keywords |
+| 4 | **DIRECT** | fix, typo, update, simple, single | Default fallback |
+
+### Example Strategy Mappings
+
+| Task Description | Detected Keywords | Selected Strategy |
+|-----------------|-------------------|-------------------|
+| "Fix the typo in README" | fix, typo | DIRECT |
+| "Implement user authentication with OAuth" | implement, authentication | HYBRID_AUTO |
+| "Experimental refactoring of payment module" | refactoring + experimental | HYBRID_WORKTREE |
+| "Build e-commerce platform with users, products, cart, orders" | platform + 4 modules | MEGA_PLAN |
+
+---
+
+## 5. Mega Plan Workflow
 
 Suitable for large project development containing multiple related feature modules.
 
@@ -262,7 +312,7 @@ flowchart TD
 
 ---
 
-## 5. Hybrid Worktree Workflow
+## 6. Hybrid Worktree Workflow
 
 Suitable for single complex feature development requiring branch isolation.
 
@@ -325,7 +375,7 @@ flowchart TD
 
 ---
 
-## 6. Hybrid Auto Workflow
+## 7. Hybrid Auto Workflow
 
 Suitable for quick development of simple features without Worktree isolation.
 
@@ -384,7 +434,7 @@ flowchart TD
 
 ---
 
-## 7. Auto-Iteration Workflow
+## 8. Auto-Iteration Workflow
 
 Auto-iteration loop started by `/plan-cascade:approve --auto-run` or `/plan-cascade:auto-run` command:
 
@@ -478,7 +528,7 @@ flowchart TD
 
 ---
 
-## 8. Data Flow and State Files
+## 9. Data Flow and State Files
 
 ```mermaid
 graph TB
@@ -538,7 +588,7 @@ graph TB
 
 ---
 
-## 9. Dual-Mode Architecture
+## 10. Dual-Mode Architecture
 
 ### Mode Switching Design
 
@@ -706,7 +756,7 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 
 ---
 
-## 10. Multi-Agent Collaboration Architecture
+## 11. Multi-Agent Collaboration Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐

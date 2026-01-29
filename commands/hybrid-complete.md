@@ -27,7 +27,7 @@ else
         echo "This command requires an existing hybrid worktree."
         echo ""
         echo "Create one first with:"
-        echo "  /planning-with-files:hybrid-worktree <task-name> <branch> <description>"
+        echo "  /plan-cascade:hybrid-worktree <task-name> <branch> <description>"
         exit 1
     fi
 
@@ -369,7 +369,7 @@ Current branch: $(git branch --show-current)
 Next:
   - Review changes: git log --oneline -5
   - Push to remote: git push
-  - Start a new task: /planning-with-files:hybrid-worktree
+  - Start a new task: /plan-cascade:hybrid-worktree
 ```
 
 ## Usage Examples
@@ -377,14 +377,14 @@ Next:
 ```bash
 # Option 1: Run from worktree directory (recommended)
 cd .worktree/feature-auth
-/planning-with-files:hybrid-complete
+/plan-cascade:hybrid-complete
 
 # Option 2: Run from root directory (auto-detects worktree)
-/planning-with-files:hybrid-complete
+/plan-cascade:hybrid-complete
 # → Will show list of worktrees to select from
 
 # Option 3: Specify target branch override
-/planning-with-files:hybrid-complete develop
+/plan-cascade:hybrid-complete develop
 ```
 
 ## Safety Features

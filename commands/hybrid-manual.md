@@ -141,9 +141,9 @@ Batch 2:
 PRD loaded successfully!
 
 Next steps:
-  - /planning-with-files:approve - Approve PRD and start execution
-  - /planning-with-files:edit - Edit PRD manually
-  - /planning-with-files:show-dependencies - View dependency graph
+  - /plan-cascade:approve - Approve PRD and start execution
+  - /plan-cascade:edit - Edit PRD manually
+  - /plan-cascade:show-dependencies - View dependency graph
 ```
 
 ## Notes

@@ -1,5 +1,5 @@
 ---
-description: "Approve the mega-plan and start feature execution. Creates worktrees and generates PRDs for each feature. Usage: /planning-with-files:mega-approve [--auto-prd]"
+description: "Approve the mega-plan and start feature execution. Creates worktrees and generates PRDs for each feature. Usage: /plan-cascade:mega-approve [--auto-prd]"
 ---
 
 # Approve Mega Plan and Start Execution
@@ -22,7 +22,7 @@ This ensures each batch builds upon the previous batch's code.
 ```bash
 if [ ! -f "mega-plan.json" ]; then
     echo "No mega-plan.json found."
-    echo "Use /planning-with-files:mega-plan <description> to create one first."
+    echo "Use /plan-cascade:mega-plan <description> to create one first."
     exit 1
 fi
 ```
@@ -60,7 +60,7 @@ Check the current state:
 → If complete: Merge current batch, then start next batch
 
 ### Case C: All batches complete
-→ Inform user to run `/planning-with-files:mega-complete`
+→ Inform user to run `/plan-cascade:mega-complete`
 
 ## Step 4: Handle Batch Completion (if needed)
 
@@ -207,10 +207,10 @@ Features in progress:
 
 ============================================================
 
-Monitor progress: /planning-with-files:mega-status
+Monitor progress: /plan-cascade:mega-status
 
 When Batch <N> completes, run:
-  /planning-with-files:mega-approve
+  /plan-cascade:mega-approve
 
 To merge and start Batch <N+1>.
 
@@ -232,7 +232,7 @@ Completed batches: [1, 2, 3]
 Total features merged: <count>
 
 Final cleanup:
-  /planning-with-files:mega-complete
+  /plan-cascade:mega-complete
 
 This will remove remaining planning files.
 
@@ -257,7 +257,7 @@ To resolve:
   1. Resolve conflicts in the listed files
   2. git add <resolved-files>
   3. git commit
-  4. Re-run /planning-with-files:mega-approve
+  4. Re-run /plan-cascade:mega-approve
 
 Or abort: git merge --abort
 ```
@@ -277,7 +277,7 @@ Cannot proceed - some features are still in progress:
       Location: .worktree/feature-products/
 
 Wait for all features to complete, then run:
-  /planning-with-files:mega-approve
+  /plan-cascade:mega-approve
 ```
 
 ## Execution Flow Summary

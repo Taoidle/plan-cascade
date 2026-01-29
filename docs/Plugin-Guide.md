@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.0.0
+**Version**: 4.1.0
 **Last Updated**: 2026-01-29
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
@@ -24,13 +24,53 @@ claude plugins install ./plan-cascade
 
 ## Command Overview
 
-Plan Cascade provides three main entry commands, suitable for development scenarios of different scales:
+Plan Cascade provides four main entry commands, suitable for development scenarios of different scales:
 
 | Entry Command | Use Case | Features |
 |--------------|----------|----------|
+| `/plan-cascade:auto` | Any task (AI auto-selects strategy) | Automatic strategy selection + Direct execution |
 | `/plan-cascade:mega-plan` | Large projects (multiple related features) | Feature-level parallel + Story-level parallel |
 | `/plan-cascade:hybrid-worktree` | Single complex feature | Worktree isolation + Story parallel |
 | `/plan-cascade:hybrid-auto` | Simple features | Quick PRD generation + Story parallel |
+
+---
+
+## `/plan-cascade:auto` - AI Auto Strategy
+
+The easiest entry point. AI analyzes your task description and automatically selects the best strategy.
+
+### How It Works
+
+1. You provide a task description
+2. AI analyzes keywords and patterns
+3. AI selects optimal strategy (direct, hybrid-auto, hybrid-worktree, or mega-plan)
+4. Executes the strategy without confirmation
+
+### Strategy Selection
+
+| Strategy | Trigger Keywords | Example |
+|----------|------------------|---------|
+| **direct** | fix, typo, update, simple, single | "Fix the login button styling" |
+| **hybrid-auto** | implement, create, feature, api | "Implement user authentication" |
+| **hybrid-worktree** | experimental, refactor, isolated | "Experimental refactoring of payment module" |
+| **mega-plan** | platform, system, 3+ modules | "Build e-commerce platform with users, products, orders" |
+
+### Usage Example
+
+```bash
+# AI automatically determines strategy
+/plan-cascade:auto "Fix the typo in README"
+# → Uses direct strategy
+
+/plan-cascade:auto "Implement user login with OAuth"
+# → Uses hybrid-auto strategy
+
+/plan-cascade:auto "Experimental refactoring of the API layer"
+# → Uses hybrid-worktree strategy
+
+/plan-cascade:auto "Build a blog platform with users, posts, comments, and RSS"
+# → Uses mega-plan strategy
+```
 
 ---
 
@@ -309,6 +349,12 @@ Configure in `prd.json`:
 ---
 
 ## Complete Command Reference
+
+### Auto Strategy
+
+```bash
+/plan-cascade:auto <description>             # AI auto-select and execute strategy
+```
 
 ### Project-Level (Mega Plan)
 

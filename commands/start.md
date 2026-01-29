@@ -3,4 +3,4 @@ description: "Implements Manus-style file-based planning for complex tasks. Crea
 disable-model-invocation: true
 ---
 
-Invoke the planning-with-files:planning-with-files skill and follow it exactly as presented to you
+Invoke the plan-cascade:planning-with-files skill and follow it exactly as presented to you

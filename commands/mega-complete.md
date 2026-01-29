@@ -1,5 +1,5 @@
 ---
-description: "Complete the mega-plan by cleaning up planning files. All features should already be merged via mega-approve. Usage: /planning-with-files:mega-complete"
+description: "Complete the mega-plan by cleaning up planning files. All features should already be merged via mega-approve. Usage: /plan-cascade:mega-complete"
 ---
 
 # Complete Mega Plan
@@ -38,7 +38,7 @@ The following batches have not been completed:
     [ ] feature-004: Order Processing
 
 Complete remaining batches first:
-  /planning-with-files:mega-approve
+  /plan-cascade:mega-approve
 
 Then run this command again.
 ============================================================

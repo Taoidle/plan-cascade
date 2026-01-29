@@ -2,7 +2,7 @@
 
 # Plan Cascade - 系统架构与流程设计
 
-**版本**: 4.0.0
+**版本**: 4.1.0
 **最后更新**: 2026-01-29
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
@@ -14,13 +14,14 @@
 1. [三层架构](#1-三层架构)
 2. [核心组件](#2-核心组件)
 3. [完整工作流](#3-完整工作流)
-4. [Mega Plan 流程](#4-mega-plan-流程)
-5. [Hybrid Worktree 流程](#5-hybrid-worktree-流程)
-6. [Hybrid Auto 流程](#6-hybrid-auto-流程)
-7. [自动迭代流程](#7-自动迭代流程)
-8. [数据流与状态文件](#8-数据流与状态文件)
-9. [双模式架构](#9-双模式架构)
-10. [多 Agent 协同架构](#10-多-agent-协同架构)
+4. [Auto 自动策略流程](#4-auto-自动策略流程)
+5. [Mega Plan 流程](#5-mega-plan-流程)
+6. [Hybrid Worktree 流程](#6-hybrid-worktree-流程)
+7. [Hybrid Auto 流程](#7-hybrid-auto-流程)
+8. [自动迭代流程](#8-自动迭代流程)
+9. [数据流与状态文件](#9-数据流与状态文件)
+10. [双模式架构](#10-双模式架构)
+11. [多 Agent 协同架构](#11-多-agent-协同架构)
 
 ---
 
@@ -189,7 +190,56 @@ flowchart TB
 
 ---
 
-## 4. Mega Plan 流程
+## 4. Auto 自动策略流程
+
+`/plan-cascade:auto` 命令提供基于任务分析的 AI 驱动自动策略选择。
+
+### 策略选择流程图
+
+```mermaid
+flowchart TD
+    A["/plan-cascade:auto<br/>任务描述"] --> B[收集项目上下文]
+    B --> C[AI 策略分析]
+
+    C --> D{关键词检测}
+
+    D -->|"platform, system,<br/>architecture, 3+ 模块"| E[MEGA_PLAN]
+    D -->|"implement, create +<br/>experimental, refactor"| F[HYBRID_WORKTREE]
+    D -->|"implement, create,<br/>build, feature"| G[HYBRID_AUTO]
+    D -->|"fix, update, simple<br/>或默认"| H[DIRECT]
+
+    E --> I["/plan-cascade:mega-plan"]
+    F --> J["/plan-cascade:hybrid-worktree"]
+    G --> K["/plan-cascade:hybrid-auto"]
+    H --> L[直接执行]
+
+    I --> M[多功能编排]
+    J --> N[隔离开发]
+    K --> O[PRD + Story 执行]
+    L --> P[任务完成]
+```
+
+### 策略检测规则
+
+| 优先级 | 策略 | 关键词 | 条件 |
+|--------|------|--------|------|
+| 1 | **MEGA_PLAN** | platform, system, architecture, microservices | 或列举 3+ 个独立模块 |
+| 2 | **HYBRID_WORKTREE** | (功能关键词) + experimental, refactor, isolated | 两个条件同时满足 |
+| 3 | **HYBRID_AUTO** | implement, create, build, feature, api | 无隔离关键词 |
+| 4 | **DIRECT** | fix, typo, update, simple, single | 默认回退 |
+
+### 策略映射示例
+
+| 任务描述 | 检测到的关键词 | 选择的策略 |
+|----------|----------------|------------|
+| "修复 README 中的拼写错误" | fix, typo | DIRECT |
+| "实现 OAuth 用户认证" | implement, authentication | HYBRID_AUTO |
+| "实验性重构支付模块" | refactoring + experimental | HYBRID_WORKTREE |
+| "构建电商平台：用户、商品、购物车、订单" | platform + 4 个模块 | MEGA_PLAN |
+
+---
+
+## 5. Mega Plan 流程
 
 适用于包含多个相关功能模块的大型项目开发。
 
@@ -262,7 +312,7 @@ flowchart TD
 
 ---
 
-## 5. Hybrid Worktree 流程
+## 6. Hybrid Worktree 流程
 
 适用于需要分支隔离的单个复杂功能开发。
 
@@ -325,7 +375,7 @@ flowchart TD
 
 ---
 
-## 6. Hybrid Auto 流程
+## 7. Hybrid Auto 流程
 
 适用于简单功能的快速开发，无需 Worktree 隔离。
 
@@ -384,7 +434,7 @@ flowchart TD
 
 ---
 
-## 7. 自动迭代流程
+## 8. 自动迭代流程
 
 `/plan-cascade:approve --auto-run` 或 `/plan-cascade:auto-run` 命令启动的自动迭代循环：
 
@@ -478,7 +528,7 @@ flowchart TD
 
 ---
 
-## 8. 数据流与状态文件
+## 9. 数据流与状态文件
 
 ```mermaid
 graph TB
@@ -538,7 +588,7 @@ graph TB
 
 ---
 
-## 9. 双模式架构
+## 10. 双模式架构
 
 ### 模式切换设计
 
@@ -701,7 +751,7 @@ graph TB
 
 ---
 
-## 10. 多 Agent 协同架构
+## 11. 多 Agent 协同架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐

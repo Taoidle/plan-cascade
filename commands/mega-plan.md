@@ -1,5 +1,5 @@
 ---
-description: "Generate a mega-plan for project-level multi-feature orchestration. Breaks a complex project into parallel features with dependencies. Usage: /planning-with-files:mega-plan <project description>"
+description: "Generate a mega-plan for project-level multi-feature orchestration. Breaks a complex project into parallel features with dependencies. Usage: /plan-cascade:mega-plan <project description>"
 ---
 
 # Mega Plan - Project-Level Feature Orchestration
@@ -38,7 +38,7 @@ fi
 
 If exists, ask user:
 - Overwrite the existing plan?
-- Or use `/planning-with-files:mega-edit` to modify it?
+- Or use `/plan-cascade:mega-edit` to modify it?
 
 ## Step 3: Analyze the Project
 
@@ -182,16 +182,16 @@ Files created:
 
 Next steps:
   1. Review the plan: cat mega-plan.json
-  2. Edit if needed: /planning-with-files:mega-edit
-  3. Start execution: /planning-with-files:mega-approve
-     Or with auto PRD approval: /planning-with-files:mega-approve --auto-prd
+  2. Edit if needed: /plan-cascade:mega-edit
+  3. Start execution: /plan-cascade:mega-approve
+     Or with auto PRD approval: /plan-cascade:mega-approve --auto-prd
 
 ============================================================
 ```
 
 ## Example
 
-User: `/planning-with-files:mega-plan Build a blog platform with user accounts, post management, comments, and RSS feeds`
+User: `/plan-cascade:mega-plan Build a blog platform with user accounts, post management, comments, and RSS feeds`
 
 Generated features:
 1. **feature-users** (high, no deps) - User accounts with registration, login, profiles

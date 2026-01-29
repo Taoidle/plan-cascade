@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-4.0.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.1.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![PyPI](https://img.shields.io/pypi/v/plan-cascade)](https://pypi.org/project/plan-cascade/)
 
 ---
@@ -72,7 +72,10 @@ plan-cascade chat
 # 安装
 claude plugins install Taoidle/plan-cascade
 
-# 使用
+# 使用 - 自动模式（推荐新手使用）
+/plan-cascade:auto "你的任务描述"
+
+# 使用 - 手动选择模式
 /plan-cascade:hybrid-auto "添加搜索功能"
 /plan-cascade:approve --auto-run
 ```
@@ -154,6 +157,9 @@ plan-cascade status                     # 查看状态
 ### Claude Code Plugin
 
 ```bash
+# 自动模式 - AI 自动选择策略
+/plan-cascade:auto <描述>               # 自动选择并执行最佳策略
+
 # 项目级
 /plan-cascade:mega-plan <描述>          # 生成项目计划
 /plan-cascade:mega-approve              # 批准执行
@@ -211,6 +217,14 @@ plan-cascade/
 ---
 
 ## 更新日志
+
+### v4.1.0
+
+- **自动策略命令** - 新增 `/plan-cascade:auto` 命令
+  - AI 自动分析任务并选择最佳策略
+  - 支持 4 种策略：direct 直接执行、hybrid-auto、hybrid-worktree、mega-plan
+  - 基于关键词检测（非字数判断）
+  - 无需用户确认，直接执行
 
 ### v4.0.0
 

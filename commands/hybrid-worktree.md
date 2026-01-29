@@ -1,5 +1,5 @@
 ---
-description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, loads existing PRD or auto-generates from description. Usage: /planning-with-files:hybrid-worktree <task-name> <target-branch> <prd-path-or-description>"
+description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, loads existing PRD or auto-generates from description. Usage: /plan-cascade:hybrid-worktree <task-name> <target-branch> <prd-path-or-description>"
 ---
 
 # Hybrid Ralph + Worktree Mode (Fully Automated)
@@ -305,11 +305,11 @@ Batches: {batch_count}
 NEXT STEPS:
 
 1. Review the PRD above
-2. Edit if needed: /planning-with-files:edit
-3. Approve to start execution: /planning-with-files:approve
+2. Edit if needed: /plan-cascade:edit
+3. Approve to start execution: /plan-cascade:approve
 
 When complete:
-  /planning-with-files:hybrid-complete
+  /plan-cascade:hybrid-complete
 
 To return to main project:
   cd $ROOT_DIR
@@ -324,13 +324,13 @@ Active Worktrees:
 
 ```bash
 # Auto-generate PRD from description
-/planning-with-files:hybrid-worktree fix-auth main "Fix authentication bug in login flow"
+/plan-cascade:hybrid-worktree fix-auth main "Fix authentication bug in login flow"
 
 # Load existing PRD file
-/planning-with-files:hybrid-worktree fix-auth main ./my-prd.json
+/plan-cascade:hybrid-worktree fix-auth main ./my-prd.json
 
 # Load PRD from different location
-/planning-with-files:hybrid-worktree fix-auth main ../prd-files/api-refactor.json
+/plan-cascade:hybrid-worktree fix-auth main ../prd-files/api-refactor.json
 ```
 
 ## Notes
@@ -338,5 +338,5 @@ Active Worktrees:
 - **File path mode**: If the third argument is an existing file, it's loaded as PRD
 - **Description mode**: If the third argument is not a file, it's used to auto-generate PRD
 - The entire process is automated: worktree creation → PRD loading/generation → review
-- You can edit the PRD before approving: `/planning-with-files:edit`
+- You can edit the PRD before approving: `/plan-cascade:edit`
 - Multiple worktrees can run in parallel for different tasks

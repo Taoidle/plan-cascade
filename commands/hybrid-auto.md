@@ -101,13 +101,13 @@ After displaying the PRD review, tell the user their options:
 PRD generated successfully!
 
 Next steps:
-  - /planning-with-files:approve - Approve PRD and start parallel execution
-  - /planning-with-files:edit - Edit PRD manually
-  - /planning-with-files:show-dependencies - View dependency graph
+  - /plan-cascade:approve - Approve PRD and start parallel execution
+  - /plan-cascade:edit - Edit PRD manually
+  - /plan-cascade:show-dependencies - View dependency graph
 ```
 
 ## Notes
 
-- If PRD validation fails, show errors and suggest `/planning-with-files:edit` to fix manually
+- If PRD validation fails, show errors and suggest `/plan-cascade:edit` to fix manually
 - The planning agent may take time to explore the codebase - be patient
 - Generated PRD is a draft - user should review and can edit before approving

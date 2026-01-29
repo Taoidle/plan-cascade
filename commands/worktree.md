@@ -1,5 +1,5 @@
 ---
-description: "Start a new task in an isolated Git worktree for parallel multi-task development. Creates a task branch, worktree directory with planning files, and leaves the main directory untouched. Usage: /planning-with-files:worktree [task-name] [target-branch]. Example: /planning-with-files:worktree feature-login main"
+description: "Start a new task in an isolated Git worktree for parallel multi-task development. Creates a task branch, worktree directory with planning files, and leaves the main directory untouched. Usage: /plan-cascade:worktree [task-name] [target-branch]. Example: /plan-cascade:worktree feature-login main"
 ---
 
 # Planning with Files - Git Worktree Mode
@@ -68,13 +68,13 @@ ORIGINAL_BRANCH=$(git branch --show-current)
 ROOT_DIR=$(pwd)
 ```
 
-Example with command `/planning-with-files:worktree feature-login main`:
+Example with command `/plan-cascade:worktree feature-login main`:
 - `TASK_NAME = "feature-login"`
 - `TASK_BRANCH = "feature-login"`
 - `TARGET_BRANCH = "main"`
 - `WORKTREE_DIR = ".worktree/feature-login"`
 
-Example with no args `/planning-with-files:worktree`:
+Example with no args `/plan-cascade:worktree`:
 - `TASK_NAME = "task-2026-01-23-1430"` (includes time for uniqueness)
 - `TASK_BRANCH = "task-2026-01-23-1430"`
 - `TARGET_BRANCH = "main"` (detected)
@@ -177,7 +177,7 @@ Phase 1
 ### Phase 5: Delivery
 - [ ] Review all output files
 - [ ] Ensure deliverables are complete
-- [ ] Complete task with: `/planning-with-files:complete`
+- [ ] Complete task with: `/plan-cascade:complete`
 - **Status:** pending
 
 ## Decisions Made
@@ -193,7 +193,7 @@ Phase 1
 - **Branch:** [TASK_BRANCH]
 - **Target:** [TARGET_BRANCH]
 - **Worktree:** [WORKTREE_DIR]
-- **Complete with:** `/planning-with-files:complete`
+- **Complete with:** `/plan-cascade:complete`
 PLANEOF
 
 # Create findings.md and progress.md similarly in the worktree
@@ -220,13 +220,13 @@ cd [WORKTREE_DIR]
 Once in the worktree directory:
   1. Edit task_plan.md to define your task phases
   2. Work on your task in this isolated environment
-  3. Use /planning-with-files:complete when done
+  3. Use /plan-cascade:complete when done
 
 Multi-Task Usage:
 You can create multiple worktrees for parallel tasks:
-  /planning-with-files:worktree task-auth-fix
-  /planning-with-files:worktree task-refactor
-  /planning-with-files:worktree task-docs
+  /plan-cascade:worktree task-auth-fix
+  /plan-cascade:worktree task-refactor
+  /plan-cascade:worktree task-docs
 
 Each task works in its own directory without conflicts.
 
@@ -273,22 +273,22 @@ project/
 
 ```bash
 # Start task 1
-/planning-with-files:worktask fix-auth-bug
+/plan-cascade:worktask fix-auth-bug
 cd .worktree/fix-auth-bug
 # ... work on auth bug ...
 
 # In another terminal, start task 2 (parallel!)
-/planning-with-files:worktree refactor-api
+/plan-cascade:worktree refactor-api
 cd .worktree/refactor-api
 # ... work on api refactor ...
 
 # Complete task 1 (from its directory)
 cd .worktree/fix-auth-bug
-/planning-with-files:complete
+/plan-cascade:complete
 
 # Complete task 2 (from its directory)
 cd .worktree/refactor-api
-/planning-with-files:complete
+/plan-cascade:complete
 ```
 
 ---
@@ -297,4 +297,4 @@ cd .worktree/refactor-api
 - Tell the user to `cd` into the worktree directory to work on the task
 - The main directory remains on its original branch
 - Multiple worktrees can exist simultaneously for parallel tasks
-- When done, use `/planning-with-files:complete` from **inside** the worktree directory
+- When done, use `/plan-cascade:complete` from **inside** the worktree directory

@@ -1,5 +1,5 @@
 ---
-description: "Show detailed status of mega-plan execution including feature progress and story completion. Usage: /planning-with-files:mega-status"
+description: "Show detailed status of mega-plan execution including feature progress and story completion. Usage: /plan-cascade:mega-status"
 ---
 
 # Mega Plan Status
@@ -11,7 +11,7 @@ Display comprehensive status of the mega-plan execution.
 ```bash
 if [ ! -f "mega-plan.json" ]; then
     echo "No mega-plan.json found."
-    echo "Use /planning-with-files:mega-plan <description> to create one first."
+    echo "Use /plan-cascade:mega-plan <description> to create one first."
     exit 1
 fi
 ```
@@ -113,11 +113,11 @@ Current work:
   # Continue story execution
 
 When current batch completes:
-  /planning-with-files:mega-approve
+  /plan-cascade:mega-approve
   # This will merge current batch and start next batch
 
 When all batches complete:
-  /planning-with-files:mega-complete
+  /plan-cascade:mega-complete
   # This will cleanup planning files
 
 ============================================================
@@ -173,7 +173,7 @@ Based on current status:
 ```
 To check a feature's detailed progress:
   cd .worktree/<feature-name>
-  /planning-with-files:hybrid-status
+  /plan-cascade:hybrid-status
 
 To view feature logs:
   cat .worktree/<feature-name>/progress.txt
@@ -182,7 +182,7 @@ To view feature logs:
 **If all features complete:**
 ```
 All features are complete!
-Run /planning-with-files:mega-complete to merge and clean up.
+Run /plan-cascade:mega-complete to merge and clean up.
 ```
 
 **If a feature failed:**
@@ -190,7 +190,7 @@ Run /planning-with-files:mega-complete to merge and clean up.
 Feature <name> failed. To investigate:
   cd .worktree/<feature-name>
   cat progress.txt
-  # Fix issues and re-run /planning-with-files:approve
+  # Fix issues and re-run /plan-cascade:approve
 ```
 
 **If PRDs awaiting approval:**
@@ -198,5 +198,5 @@ Feature <name> failed. To investigate:
 PRDs waiting for approval:
   cd .worktree/<feature-name>
   cat prd.json
-  /planning-with-files:approve
+  /plan-cascade:approve
 ```

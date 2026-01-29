@@ -1,5 +1,5 @@
 ---
-description: "Complete a worktree task. Verifies all phases are complete, commits code changes (excluding planning files), merges to target branch, and removes worktree. Can be run from any directory. Usage: /planning-with-files:complete [target-branch]"
+description: "Complete a worktree task. Verifies all phases are complete, commits code changes (excluding planning files), merges to target branch, and removes worktree. Can be run from any directory. Usage: /plan-cascade:complete [target-branch]"
 ---
 
 # Planning with Files - Complete Worktree Task
@@ -34,7 +34,7 @@ else
         echo "This command requires an existing worktree."
         echo ""
         echo "Create one first with:"
-        echo "  /planning-with-files:worktree <task-name> <branch>"
+        echo "  /plan-cascade:worktree <task-name> <branch>"
         exit 1
     fi
 
@@ -53,7 +53,7 @@ else
 
         # Check if this is a planning worktree
         if [ -f "$worktree_path/.planning-config.json" ]; then
-            # Exclude hybrid mode worktrees (those use /planning-with-files:hybrid-complete)
+            # Exclude hybrid mode worktrees (those use /plan-cascade:hybrid-complete)
             mode=$(jq -r '.mode // empty' "$worktree_path/.planning-config.json" 2>/dev/null)
             if [ "$mode" != "hybrid" ]; then
                 task_name=$(jq -r '.task_name // empty' "$worktree_path/.planning-config.json" 2>/dev/null)
@@ -66,7 +66,7 @@ else
         echo "ERROR: No planning worktrees found."
         echo "Found worktrees but none are in planning mode."
         echo ""
-        echo "Note: Hybrid mode worktrees should use /planning-with-files:hybrid-complete"
+        echo "Note: Hybrid mode worktrees should use /plan-cascade:hybrid-complete"
         exit 1
     fi
 

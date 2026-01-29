@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-4.0.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.1.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![PyPI](https://img.shields.io/pypi/v/plan-cascade)](https://pypi.org/project/plan-cascade/)
 
 ---
@@ -72,7 +72,10 @@ plan-cascade chat
 # Install
 claude plugins install Taoidle/plan-cascade
 
-# Usage
+# Usage - Auto mode (recommended for new users)
+/plan-cascade:auto "Your task description"
+
+# Usage - Manual mode selection
 /plan-cascade:hybrid-auto "Add search functionality"
 /plan-cascade:approve --auto-run
 ```
@@ -154,6 +157,9 @@ plan-cascade status                     # View status
 ### Claude Code Plugin
 
 ```bash
+# Auto mode - AI automatically selects strategy
+/plan-cascade:auto <description>        # Auto-select and execute best strategy
+
 # Project level
 /plan-cascade:mega-plan <description>   # Generate project plan
 /plan-cascade:mega-approve              # Approve execution
@@ -211,6 +217,14 @@ plan-cascade/
 ---
 
 ## Changelog
+
+### v4.1.0
+
+- **Auto Strategy Command** - New `/plan-cascade:auto` command
+  - AI automatically analyzes task and selects optimal strategy
+  - Supports 4 strategies: direct, hybrid-auto, hybrid-worktree, mega-plan
+  - Keyword-based detection (not word count based)
+  - No user confirmation required - direct execution
 
 ### v4.0.0
 

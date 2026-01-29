@@ -103,15 +103,15 @@ If all stories are complete:
 ✓ All stories complete!
 
 Next:
-  - /planning-with-files:hybrid-complete - Complete and merge (if in worktree)
-  - /planning-with-files:show-dependencies - Review final state
+  - /plan-cascade:hybrid-complete - Complete and merge (if in worktree)
+  - /plan-cascade:show-dependencies - Review final state
 ```
 
 If some stories are still pending/in-progress:
 
 ```
 Next:
-  - Continue monitoring with: /planning-with-files:hybrid-status
+  - Continue monitoring with: /plan-cascade:hybrid-status
   - View progress details in: progress.txt
   - View agent logs in: .agent-outputs/
 ```

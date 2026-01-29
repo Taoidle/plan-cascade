@@ -11,8 +11,8 @@ You are opening the PRD file for manual editing.
 ```bash
 if [ ! -f "prd.json" ]; then
     echo "ERROR: No PRD found. Please generate one first with:"
-    echo "  /planning-with-files:hybrid-auto <description>"
-    echo "  /planning-with-files:hybrid-manual <path>"
+    echo "  /plan-cascade:hybrid-auto <description>"
+    echo "  /plan-cascade:hybrid-manual <path>"
     exit 1
 fi
 ```
@@ -54,7 +54,7 @@ After the editor closes, validate the modified PRD:
 # Check JSON syntax
 if ! python3 -m json.tool prd.json > /dev/null 2>&1; then
     echo "ERROR: Invalid JSON in prd.json"
-    echo "Please fix the syntax errors and run /planning-with-files:edit again"
+    echo "Please fix the syntax errors and run /plan-cascade:edit again"
     exit 1
 fi
 ```
@@ -65,7 +65,7 @@ Validate structure:
 - Story IDs are unique
 - Dependency references exist
 
-If validation fails, show specific errors and suggest re-running `/planning-with-files:edit`.
+If validation fails, show specific errors and suggest re-running `/plan-cascade:edit`.
 
 ## Step 5: Display Updated PRD Review
 
@@ -81,9 +81,9 @@ Show the updated PRD review with:
 PRD updated successfully!
 
 Next steps:
-  - /planning-with-files:approve - Approve and start execution
-  - /planning-with-files:edit - Make more changes
-  - /planning-with-files:show-dependencies - View dependency graph
+  - /plan-cascade:approve - Approve and start execution
+  - /plan-cascade:edit - Make more changes
+  - /plan-cascade:show-dependencies - View dependency graph
 ```
 
 ## Notes
