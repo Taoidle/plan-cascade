@@ -28,7 +28,7 @@ Example usage:
     results = orchestrator.execute_prd(prd)
 """
 
-__version__ = "3.3.11"
+__version__ = "3.3.12"
 __author__ = "Plan Cascade Team"
 
 # Core orchestration

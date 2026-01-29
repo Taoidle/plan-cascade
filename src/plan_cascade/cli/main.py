@@ -100,6 +100,26 @@ if HAS_TYPER:
         # Create backend
         backend_instance = _create_backend(backend, provider, model, project)
 
+        # Set up streaming output callback for real-time AI response display
+        def on_text(text: str):
+            """Stream AI text output to console in real-time."""
+            console.print(text, end="", highlight=False)
+
+        def on_tool_call(data: dict):
+            """Display tool calls when in verbose mode."""
+            if verbose:
+                tool_name = data.get("name", data.get("type", "unknown"))
+                if tool_name == "tool_result":
+                    is_error = data.get("is_error", False)
+                    if is_error:
+                        output.print_error(f"    Tool error")
+                else:
+                    output.print(f"  [dim]> Tool: {tool_name}[/dim]")
+
+        # Attach streaming callbacks to backend
+        backend_instance.on_text = on_text
+        backend_instance.on_tool_call = on_tool_call
+
         # Progress callback
         def on_progress(event: ProgressEvent):
             output.handle_progress_event(event)

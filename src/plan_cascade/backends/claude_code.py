@@ -125,12 +125,14 @@ class ClaudeCodeBackend(AgentBackend):
         tool_calls: list[dict[str, Any]] = []
 
         try:
-            # Start subprocess
+            # Start subprocess with increased buffer limit to handle large JSON lines
+            # Default limit is 64KB which is too small for tool outputs with large file contents
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(self.project_root),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=10 * 1024 * 1024,  # 10 MB limit for large tool outputs
             )
 
             self._process = process
@@ -355,11 +357,13 @@ class ClaudeCodeLLM:
         output_text = ""
 
         try:
+            # Increased buffer limit to handle large JSON lines
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(self.backend.project_root),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=10 * 1024 * 1024,  # 10 MB limit
             )
 
             if process.stdout:
