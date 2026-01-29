@@ -50,7 +50,6 @@ class ClaudeCodeBackend(AgentBackend):
         claude_path: str = "claude",
         project_root: Path | None = None,
         output_format: str = "stream-json",
-        print_mode: str = "tools"
     ):
         """
         Initialize the Claude Code backend.
@@ -59,13 +58,11 @@ class ClaudeCodeBackend(AgentBackend):
             claude_path: Path to claude CLI (default: "claude")
             project_root: Project root directory
             output_format: Output format ("stream-json" recommended)
-            print_mode: What to print ("tools", "all", "none")
         """
         super().__init__(project_root)
 
         self.claude_path = claude_path
         self.output_format = output_format
-        self.print_mode = print_mode
 
         self._process: asyncio.subprocess.Process | None = None
         self._llm: LLMProvider | None = None
@@ -117,10 +114,10 @@ class ClaudeCodeBackend(AgentBackend):
         # Build command
         cmd = [
             self.claude_path,
+            "--print",
             "--output-format", self.output_format,
-            "--print", self.print_mode,
             "--verbose",
-            "-p", prompt,
+            prompt,
         ]
 
         # Collect output
@@ -349,10 +346,10 @@ class ClaudeCodeLLM:
         # Use Claude Code to complete
         cmd = [
             self.backend.claude_path,
+            "--print",
             "--output-format", "stream-json",
-            "--print", "none",
             "--verbose",
-            "-p", prompt,
+            prompt,
         ]
 
         output_text = ""

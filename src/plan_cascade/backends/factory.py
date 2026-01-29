@@ -46,7 +46,6 @@ class BackendFactory:
         "claude-code": {
             "claude_path": "claude",
             "output_format": "stream-json",
-            "print_mode": "tools",
         },
         "builtin": {
             "provider": "claude",
@@ -114,7 +113,6 @@ class BackendFactory:
                 claude_path=merged_config.get("claude_path", "claude"),
                 project_root=project_root,
                 output_format=merged_config.get("output_format", "stream-json"),
-                print_mode=merged_config.get("print_mode", "tools"),
             )
 
         elif backend_type == "builtin":
