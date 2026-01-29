@@ -3,8 +3,8 @@ name: Release Desktop Application
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+-desktop"
-      - "v[0-9]+.[0-9]+.[0-9]+-desktop-rc.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
 
 permissions:
   contents: write
@@ -108,7 +108,6 @@ jobs:
         id: version
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          VERSION=${VERSION%-desktop*}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Check if prerelease
