@@ -50,6 +50,7 @@ class ClaudeCodeBackend(AgentBackend):
         claude_path: str = "claude",
         project_root: Path | None = None,
         output_format: str = "stream-json",
+        skip_permissions: bool = True,
     ):
         """
         Initialize the Claude Code backend.
@@ -58,11 +59,15 @@ class ClaudeCodeBackend(AgentBackend):
             claude_path: Path to claude CLI (default: "claude")
             project_root: Project root directory
             output_format: Output format ("stream-json" recommended)
+            skip_permissions: Whether to skip permission checks (default: True)
+                             This allows Claude Code to write/edit files without
+                             interactive permission prompts.
         """
         super().__init__(project_root)
 
         self.claude_path = claude_path
         self.output_format = output_format
+        self.skip_permissions = skip_permissions
 
         self._process: asyncio.subprocess.Process | None = None
         self._llm: LLMProvider | None = None
@@ -123,6 +128,10 @@ class ClaudeCodeBackend(AgentBackend):
             "--verbose",
             "--include-partial-messages",  # Enable true streaming output
         ]
+
+        # Add permission bypass if enabled (required for non-interactive write/edit)
+        if self.skip_permissions:
+            cmd.append("--dangerously-skip-permissions")
 
         # Add session resume if we have a session_id
         if self._session_id:
@@ -464,8 +473,13 @@ class ClaudeCodeLLM:
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",  # Enable true streaming
-            prompt,
         ]
+
+        # Add permission bypass if enabled
+        if self.backend.skip_permissions:
+            cmd.append("--dangerously-skip-permissions")
+
+        cmd.append(prompt)
 
         output_text = ""
 
