@@ -1,15 +1,15 @@
 {
-  "name": "planning-with-files",
+  "name": "plan-cascade",
   "owner": {
-    "name": "Ahmad Othman Ammar Adi",
-    "url": "https://github.com/OthmanAdi"
+    "name": "Taoidle",
+    "url": "https://github.com/Taoidle"
   },
   "plugins": [
     {
-      "name": "planning-with-files",
+      "name": "plan-cascade",
       "source": "./",
-      "description": "Manus-style persistent markdown files for planning, progress tracking, and knowledge storage. Now with hooks integration.",
-      "version": "2.0.0"
+      "description": "Three-layer cascaded parallel development framework with multi-agent collaboration. Breaks down projects into Features (Mega Plan), Features into Stories (Hybrid Ralph), with dependency-driven batch execution, Git Worktree isolation, and support for multiple AI agents (Codex, Amp, Aider, etc.).",
+      "version": "4.0.1"
     }
   ]
 }
