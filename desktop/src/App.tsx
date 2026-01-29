@@ -2,12 +2,14 @@
  * App Component
  *
  * Main application layout integrating all components.
+ * Supports Simple, Expert, and Claude Code modes.
  */
 
 import { ModeSwitch } from './components/ModeSwitch';
 import { SettingsButton } from './components/SettingsButton';
 import { SimpleMode } from './components/SimpleMode';
 import { ExpertMode } from './components/ExpertMode';
+import { ClaudeCodeMode } from './components/ClaudeCodeMode';
 import { SetupWizard } from './components/Settings';
 import { useModeStore } from './store/mode';
 import { useExecutionStore } from './store/execution';
@@ -59,7 +61,9 @@ export function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden">
-        {mode === 'simple' ? <SimpleMode /> : <ExpertMode />}
+        {mode === 'simple' && <SimpleMode />}
+        {mode === 'expert' && <ExpertMode />}
+        {mode === 'claude-code' && <ClaudeCodeMode />}
       </main>
 
       {/* Footer (optional status bar) */}

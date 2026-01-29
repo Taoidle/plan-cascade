@@ -4,7 +4,7 @@
  * Central export point for all Zustand stores.
  */
 
-export { useModeStore } from './mode';
+export { useModeStore, MODES, MODE_LABELS, MODE_DESCRIPTIONS } from './mode';
 export type { Mode } from './mode';
 
 export { useExecutionStore } from './execution';
@@ -31,3 +31,15 @@ export type {
   PRDDraft,
   PRD,
 } from './prd';
+
+export { useClaudeCodeStore } from './claudeCode';
+export type {
+  ToolCallStatus,
+  ToolType,
+  ToolCallParameters,
+  ToolCallResult,
+  ToolCall,
+  MessageRole,
+  Message,
+  Conversation,
+} from './claudeCode';

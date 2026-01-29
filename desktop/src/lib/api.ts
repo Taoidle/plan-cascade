@@ -87,6 +87,27 @@ export interface AnalyzeResponse {
   complexity: 'low' | 'medium' | 'high';
 }
 
+// Claude Code types
+export interface ClaudeCodeSession {
+  session_id: string;
+  status: string;
+  message: string;
+}
+
+export interface ClaudeCodeSessionInfo {
+  id: string;
+  working_dir: string;
+  model?: string;
+  status: string;
+  messages: Array<{ role: string; content: string }>;
+  tool_calls: Array<{
+    id: string;
+    name: string;
+    parameters: Record<string, unknown>;
+    status: string;
+  }>;
+}
+
 // ============================================================================
 // Error Handling
 // ============================================================================
@@ -284,6 +305,67 @@ export const api = {
       body: JSON.stringify({ description }),
     });
     return handleResponse<AnalyzeResponse>(response);
+  },
+
+  // --------------------------------------------------------------------------
+  // Claude Code
+  // --------------------------------------------------------------------------
+
+  /**
+   * Create a new Claude Code session
+   */
+  async createClaudeCodeSession(
+    workingDir?: string,
+    model?: string
+  ): Promise<ClaudeCodeSession> {
+    const params = new URLSearchParams();
+    if (workingDir) params.append('working_dir', workingDir);
+    if (model) params.append('model', model);
+
+    const url = `${API_BASE_URL}/claude-code/session${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await fetch(url, { method: 'POST' });
+    return handleResponse<ClaudeCodeSession>(response);
+  },
+
+  /**
+   * Get Claude Code session info
+   */
+  async getClaudeCodeSession(sessionId: string): Promise<ClaudeCodeSessionInfo> {
+    const response = await fetch(`${API_BASE_URL}/claude-code/session/${sessionId}`);
+    return handleResponse<ClaudeCodeSessionInfo>(response);
+  },
+
+  /**
+   * Cancel Claude Code session
+   */
+  async cancelClaudeCodeSession(sessionId: string): Promise<{ status: string; session_id: string }> {
+    const response = await fetch(`${API_BASE_URL}/claude-code/session/${sessionId}`, {
+      method: 'DELETE',
+    });
+    return handleResponse(response);
+  },
+
+  /**
+   * List all Claude Code sessions
+   */
+  async listClaudeCodeSessions(): Promise<ClaudeCodeSessionInfo[]> {
+    const response = await fetch(`${API_BASE_URL}/claude-code/sessions`);
+    return handleResponse<ClaudeCodeSessionInfo[]>(response);
+  },
+
+  /**
+   * Send message to Claude Code (non-streaming)
+   */
+  async sendClaudeCodeMessage(
+    sessionId: string,
+    content: string
+  ): Promise<{ content: string; tool_calls: unknown[] }> {
+    const response = await fetch(`${API_BASE_URL}/claude-code/session/${sessionId}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    return handleResponse(response);
   },
 };
 
