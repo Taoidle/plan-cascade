@@ -578,40 +578,46 @@ Your task:
 Execute bash/powershell commands directly. Work methodically.
 ```
 
-Launch with `run_in_background: true` for parallel execution.
+Launch with `run_in_background: true` for parallel execution. Store all task_ids.
 
-### 6.4: Monitor Execution
+### 6.4: Wait for Agents Using TaskOutput
 
-Same monitoring loop as approve.md:
+**CRITICAL**: Use TaskOutput to wait instead of polling. This avoids Bash confirmation prompts.
 
 ```
-while true:
-    # Count completions
-    complete_count = count("[COMPLETE]" in progress.txt)
+For each story_id, task_id in current_batch_tasks:
+    echo "Waiting for {story_id}..."
 
-    # Check for errors
-    error_count = count("[ERROR]" or "[FAILED]" in progress.txt)
+    result = TaskOutput(
+        task_id=task_id,
+        block=true,
+        timeout=600000  # 10 minutes per story
+    )
 
-    if error_count > 0:
-        echo "⚠️ ERRORS DETECTED"
-        echo "Review progress.txt and fix issues"
-        if not AUTO_MODE:
-            exit 1
-        # With AUTO_MODE, continue anyway
+    echo "✓ {story_id} agent completed"
+```
 
-    # Check if current batch complete
-    if all ready_stories complete:
-        # Recalculate next batch
-        # Some blocked stories may now be ready
-        recalculate_ready_stories()
+### 6.5: Verify and Continue
 
-        if no more stories:
-            break  # All done!
+After all TaskOutput calls return, verify using Read tool (NOT Bash):
 
-        # Launch next batch
-        launch_ready_stories()
+```
+# Use Read tool
+progress_content = Read("progress.txt")
 
-    sleep 10 seconds
+# Count markers yourself in your response
+complete_count = count "[COMPLETE]" occurrences
+error_count = count "[ERROR]" or "[FAILED]" occurrences
+
+if error_count > 0:
+    echo "⚠️ ERRORS DETECTED"
+    # Show error details from progress_content
+    if not AUTO_MODE:
+        pause for review
+
+# Check if more stories are now unblocked
+# Recalculate ready stories based on completed dependencies
+# If more ready stories exist, launch them and repeat TaskOutput wait
 ```
 
 ### 6.5: Handle Batch Progression

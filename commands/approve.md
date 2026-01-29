@@ -197,7 +197,7 @@ Launch each agent with `run_in_background: true`.
 
 Store each task_id for monitoring.
 
-## Step 9: Monitor and Progress Through Batches
+## Step 9: Wait for Batch Completion (Using TaskOutput)
 
 After launching Batch 1 agents, display:
 
@@ -208,151 +208,81 @@ Launched X parallel agents:
   - story-001: task_id-xxx (running in background)
   - story-002: task_id-yyy (running in background)
 
-Monitoring progress...
-Agent logs: .agent-outputs/
-Progress log: progress.txt
+Waiting for completion...
 ```
 
-Then execute based on the selected mode:
+**CRITICAL**: Use TaskOutput to wait instead of sleep+grep polling. This avoids Bash confirmation prompts.
 
-### If EXECUTION_MODE is "auto":
+### 9.1: Wait for Current Batch Agents
 
-```bash
-# Wait for current batch to complete before launching next batch
-CURRENT_BATCH=1
-TOTAL_BATCHES=Y
+```
+For each story_id, task_id in current_batch_tasks:
+    echo "Waiting for {story_id}..."
 
-while [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; do
-    echo "Waiting for Batch $CURRENT_BATCH to complete..."
+    result = TaskOutput(
+        task_id=task_id,
+        block=true,
+        timeout=600000  # 10 minutes per story
+    )
 
-    # Poll progress.txt for completion
-    while true; do
-        COMPLETE_COUNT=$(grep -c "\[COMPLETE\]" progress.txt 2>/dev/null || echo "0")
-        ERROR_COUNT=$(grep -c "\[ERROR\]" progress.txt 2>/dev/null || echo "0")
-        FAILED_COUNT=$(grep -c "\[FAILED\]" progress.txt 2>/dev/null || echo "0")
-
-        # Calculate expected complete count for this batch
-        EXPECTED_COUNT=<calculate from PRD>
-
-        # Check for errors or failures in current batch
-        if [ "$ERROR_COUNT" -gt 0 ] || [ "$FAILED_COUNT" -gt 0 ]; then
-            echo ""
-            echo "⚠️  ISSUES DETECTED IN BATCH $CURRENT_BATCH"
-            echo "Errors: $ERROR_COUNT | Failures: $FAILED_COUNT"
-            echo ""
-            echo "Please review:"
-            echo "  - progress.txt for error details"
-            echo "  - .agent-outputs/ for agent logs"
-            echo ""
-            echo "Execution PAUSED. Fix issues and run /plan-cascade:approve to continue."
-            exit 1
-        fi
-
-        if [ "$COMPLETE_COUNT" -ge "$EXPECTED_COUNT" ]; then
-            echo "✓ Batch $CURRENT_BATCH complete!"
-            break
-        fi
-
-        # Show progress every 10 seconds
-        echo "Progress: $COMPLETE_COUNT stories completed..."
-        sleep 10
-
-        # IMPORTANT: Do NOT add any timeout or iteration limit
-        # Keep polling until all stories in the batch are complete
-        # Stories may take varying amounts of time depending on complexity
-    done
-
-    # Move to next batch
-    CURRENT_BATCH=$((CURRENT_BATCH + 1))
-
-    if [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; then
-        echo "=== Auto-launching Batch $CURRENT_BATCH ==="
-
-        # Launch agents for stories in this batch
-        # Use the SAME agent prompt format as Batch 1, including:
-        # - Story details (id, title, description, acceptance criteria)
-        # - Clear instruction to execute bash/powershell commands directly
-        # Launch each agent with run_in_background: true
-    fi
-done
-
-echo ""
-echo "=== ALL BATCHES COMPLETE ==="
+    echo "✓ {story_id} agent completed"
 ```
 
-### If EXECUTION_MODE is "manual":
+### 9.2: Verify Batch Completion
 
-```bash
-CURRENT_BATCH=1
-TOTAL_BATCHES=Y
+After all TaskOutput calls return, verify using Read tool (NOT Bash grep):
 
-while [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; do
-    echo "Waiting for Batch $CURRENT_BATCH to complete..."
-
-    # Poll progress.txt for completion
-    while true; do
-        COMPLETE_COUNT=$(grep -c "\[COMPLETE\]" progress.txt 2>/dev/null || echo "0")
-        ERROR_COUNT=$(grep -c "\[ERROR\]" progress.txt 2>/dev/null || echo "0")
-        FAILED_COUNT=$(grep -c "\[FAILED\]" progress.txt 2>/dev/null || echo "0")
-
-        EXPECTED_COUNT=<calculate from PRD>
-
-        # Check for errors or failures
-        if [ "$ERROR_COUNT" -gt 0 ] || [ "$FAILED_COUNT" -gt 0 ]; then
-            echo ""
-            echo "⚠️  ISSUES DETECTED IN BATCH $CURRENT_BATCH"
-            echo "Errors: $ERROR_COUNT | Failures: $FAILED_COUNT"
-            echo ""
-            echo "Please review and fix issues before continuing."
-            exit 1
-        fi
-
-        if [ "$COMPLETE_COUNT" -ge "$EXPECTED_COUNT" ]; then
-            echo "✓ Batch $CURRENT_BATCH complete!"
-            break
-        fi
-
-        echo "Progress: $COMPLETE_COUNT stories completed..."
-        sleep 10
-
-        # IMPORTANT: Do NOT add any timeout or iteration limit
-        # Keep polling until all stories in the batch are complete
-    done
-
-    # Move to next batch
-    CURRENT_BATCH=$((CURRENT_BATCH + 1))
-
-    if [ $CURRENT_BATCH -le $TOTAL_BATCHES ]; then
-        echo ""
-        echo "=========================================="
-        echo "Batch $CURRENT_BATCH Ready"
-        echo "=========================================="
-        echo ""
-        echo "Stories in this batch:"
-        <list stories>
-        echo ""
-        read -p "Launch Batch $CURRENT_BATCH? [Y/n]: " CONFIRM
-        CONFIRM="${CONFIRM:-Y}"
-
-        if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-            echo "Paused. Run /plan-cascade:approve to continue."
-            exit 0
-        fi
-
-        echo "=== Launching Batch $CURRENT_BATCH ==="
-
-        # Launch agents for stories in this batch
-        # Use the SAME agent prompt format as Batch 1, including:
-        # - Story details (id, title, description, acceptance criteria)
-        # - Clear instruction to execute bash/powershell commands directly
-        # Note: MANUAL mode only controls batch progression, not individual command execution
-        # Launch each agent with run_in_background: true
-    fi
-done
-
-echo ""
-echo "=== ALL BATCHES COMPLETE ==="
 ```
+# Use Read tool to get progress.txt content
+progress_content = Read("progress.txt")
+
+# Parse content yourself in your response
+complete_count = count occurrences of "[COMPLETE]" in progress_content
+error_count = count occurrences of "[ERROR]" in progress_content
+failed_count = count occurrences of "[FAILED]" in progress_content
+
+if error_count > 0 or failed_count > 0:
+    echo "⚠️ ISSUES DETECTED IN BATCH"
+    # Show which stories failed
+    pause for review
+
+if complete_count >= expected_count:
+    echo "✓ Batch complete!"
+```
+
+### 9.3: Progress to Next Batch
+
+**AUTO MODE**: Automatically launch next batch
+
+```
+if more batches remain:
+    echo "=== Auto-launching Batch {N+1} ==="
+
+    # Launch agents for next batch stories
+    # Store new task_ids
+    # Go back to Step 9.1 to wait for them
+```
+
+**MANUAL MODE**: Ask before launching next batch
+
+```
+if more batches remain:
+    echo "Batch {N+1} Ready"
+    echo "Stories: {list}"
+
+    # Use AskUserQuestion tool to ask for confirmation
+    # If confirmed, launch next batch agents
+    # Go back to Step 9.1
+```
+
+### Why TaskOutput Instead of Polling?
+
+| Method | Confirmation Prompts | How it works |
+|--------|---------------------|--------------|
+| `sleep + grep` loop | YES - every iteration | Bash commands need confirmation |
+| `TaskOutput(block=true)` | NO | Native wait for agent completion |
+
+TaskOutput is the correct way to wait for background agents.
 
 ## Step 10: Show Final Status
 

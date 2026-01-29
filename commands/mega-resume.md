@@ -281,37 +281,44 @@ IMPORTANT:
 When done, [FEATURE_COMPLETE] marker signals ready for merge.
 ```
 
-Launch with `run_in_background: true` for all features in parallel.
+Launch with `run_in_background: true` for all features in parallel. Store all task_ids.
 
-### 6.3: Monitor Until Batch Complete
+### 6.3: Wait for Agents Using TaskOutput
 
-Same monitoring loop as mega-approve:
+**CRITICAL**: Use TaskOutput to wait instead of polling. This avoids Bash confirmation prompts.
 
 ```
-while true:
-    all_complete = true
+For each feature_id, task_id in resume_tasks:
+    echo "Waiting for {feature_id} to complete..."
 
-    for each feature in current_batch:
-        progress_file = "{worktree_path}/progress.txt"
+    result = TaskOutput(
+        task_id=task_id,
+        block=true,
+        timeout=1800000  # 30 minutes
+    )
 
-        # Check for new-style completion
-        if "[FEATURE_COMPLETE]" in progress_file:
-            feature_status = "complete"
-        # Check for old-style completion (all stories in prd.json complete)
-        elif all_stories_complete_in_prd():
-            feature_status = "complete"
-            # Add marker for consistency
-            echo "[FEATURE_COMPLETE] {feature_id} (auto-detected)" >> progress_file
-        else:
-            feature_status = "in_progress"
-            all_complete = false
+    echo "✓ {feature_id} agent finished"
+```
 
-    if all_complete:
-        break
+### 6.4: Verify Completion After Agents Finish
 
-    # Show progress
-    echo "Batch {CURRENT_BATCH} progress: {completed}/{total} features"
-    sleep 30 seconds
+After all TaskOutput calls return, verify using Read tool (NOT Bash):
+
+```
+For each feature in current_batch:
+    # Use Read tool
+    progress_content = Read("{worktree_path}/progress.txt")
+    prd_content = Read("{worktree_path}/prd.json")
+
+    # Parse content yourself (no grep)
+    if "[FEATURE_COMPLETE]" in progress_content:
+        feature_status = "complete"
+    elif all stories in prd_content have status="complete":
+        feature_status = "complete"
+        # Add marker for consistency (this one Bash is OK - it's a write)
+        echo "[FEATURE_COMPLETE] {feature_id} (auto-detected)" >> progress.txt
+    else:
+        feature_status = "incomplete"
 ```
 
 ### 6.4: Merge and Continue

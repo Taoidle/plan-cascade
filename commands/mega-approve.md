@@ -312,55 +312,83 @@ For each feature in batch:
     Store task_id in execution_tasks[feature_id]
 ```
 
-## Step 8: Monitor Batch Until Complete
+## Step 8: Wait for Batch Completion (Using TaskOutput)
 
-**CRITICAL**: This is the monitoring loop. Keep polling until ALL features in batch are complete.
+**CRITICAL**: Use TaskOutput to wait for agents instead of polling. This avoids Bash confirmation prompts.
+
+### 8.1: Wait for All Feature Agents
+
+For each feature agent launched in Step 7, wait using TaskOutput:
 
 ```
-while true:
-    all_complete = true
-    has_errors = false
+For each feature_id, task_id in execution_tasks:
+    echo "Waiting for {feature_id}..."
 
-    for each feature in current_batch:
-        progress_file = "{worktree_path}/progress.txt"
+    result = TaskOutput(
+        task_id=task_id,
+        block=true,
+        timeout=1800000  # 30 minutes per feature
+    )
 
-        # Check for completion
-        if "[FEATURE_COMPLETE] {feature_id}" in progress_file:
-            feature_status = "complete"
-        elif "[FEATURE_FAILED] {feature_id}" in progress_file:
-            feature_status = "failed"
-            has_errors = true
-        else:
-            feature_status = "in_progress"
-            all_complete = false
-
-        # Count story progress
-        complete_count = count("[STORY_COMPLETE]" in progress_file)
-        failed_count = count("[STORY_FAILED]" in progress_file)
-
-        # Update .mega-status.json with progress
-        update_feature_status(feature_id, feature_status, complete_count, failed_count)
-
-    # Check if batch is done
-    if all_complete:
-        if has_errors:
-            echo "⚠️  BATCH COMPLETE WITH ERRORS"
-            echo "Some features failed. Review and fix before continuing."
-            if not AUTO_PRD:
-                exit 1  # Pause for manual review
-            # With AUTO_PRD, continue anyway (failed features won't merge)
-        break
-
-    # Show progress
-    echo "Batch {CURRENT_BATCH} progress: {completed}/{total} features"
-    for each feature:
-        echo "  {feature_id}: {stories_complete}/{stories_total} stories"
-
-    # Wait before next check
-    sleep 30 seconds
-
-    # IMPORTANT: NO TIMEOUT - keep monitoring until complete
+    echo "✓ {feature_id} agent completed"
 ```
+
+**IMPORTANT**:
+- Call TaskOutput for ALL feature agents (can be parallel or sequential)
+- TaskOutput blocks until the agent finishes - NO polling needed
+- NO sleep commands - NO Bash confirmation prompts
+
+### 8.2: Verify Completion After Agents Finish
+
+After all TaskOutput calls return, verify the results by reading progress files:
+
+```
+For each feature in current_batch:
+    # Use Read tool (not Bash) to check progress
+    progress_content = Read("{worktree_path}/progress.txt")
+
+    # Parse in your response (not with grep)
+    if "[FEATURE_COMPLETE] {feature_id}" in progress_content:
+        feature_status = "complete"
+    elif "[FEATURE_FAILED] {feature_id}" in progress_content:
+        feature_status = "failed"
+    else:
+        feature_status = "incomplete"
+
+    # Count markers by parsing the content yourself
+    story_complete_count = count occurrences of "[STORY_COMPLETE]"
+    story_failed_count = count occurrences of "[STORY_FAILED]"
+```
+
+### 8.3: Handle Results
+
+```
+if all features complete:
+    echo "✓ BATCH {N} COMPLETE"
+    proceed to Step 9 (merge)
+
+elif some features failed:
+    echo "⚠️ BATCH COMPLETE WITH ERRORS"
+    list failed features
+    if AUTO_PRD:
+        continue (skip failed features during merge)
+    else:
+        pause for manual review
+
+elif some features incomplete (agent finished but no FEATURE_COMPLETE marker):
+    echo "⚠️ AGENT FINISHED BUT FEATURE INCOMPLETE"
+    # This means the agent hit an issue - check progress.txt for details
+    Use Read tool to show last entries from progress.txt
+```
+
+### Why TaskOutput Instead of Polling?
+
+| Method | Confirmation Prompts | Efficiency |
+|--------|---------------------|------------|
+| `sleep + Bash cat/grep` | YES - every iteration | Poor (wastes cycles) |
+| `TaskOutput(block=true)` | NO | Good (proper wait) |
+
+TaskOutput is the native way to wait for background agents in Claude Code.
 
 ## Step 9: Merge Completed Batch
 
