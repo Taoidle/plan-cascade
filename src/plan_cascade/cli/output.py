@@ -88,12 +88,12 @@ class OutputManager:
 
     # ==================== Basic Output ====================
 
-    def print(self, message: str, style: str | None = None) -> None:
+    def print(self, message: str = "", style: str | None = None) -> None:
         """
         Print a message with optional styling.
 
         Args:
-            message: Message to print
+            message: Message to print (defaults to empty string for blank line)
             style: Optional rich style string
         """
         if self.is_available:
