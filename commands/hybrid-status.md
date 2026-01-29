@@ -6,6 +6,20 @@ description: "Show execution status of all stories in the PRD. Displays batch pr
 
 You are displaying the current execution status of all stories in the PRD.
 
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts:**
+
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - ✅ `Read("prd.json")`, `Read("progress.txt")`
+   - ❌ `Bash("cat prd.json")`
+
+2. **Use Grep tool for content search** - NEVER use `grep` via Bash
+   - ✅ `Grep("[COMPLETE]", path="progress.txt")`
+   - ❌ `Bash("grep '[COMPLETE]' progress.txt")`
+
+3. **Parse file contents in your response** - After reading with Read tool, count markers yourself
+
 ## Step 1: Verify PRD Exists
 
 ```bash

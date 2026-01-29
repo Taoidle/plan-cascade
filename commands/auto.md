@@ -6,6 +6,24 @@ description: "AI auto strategy executor. Analyzes task and automatically selects
 
 AI automatically analyzes the task and executes the optimal strategy without user confirmation.
 
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts during automatic execution:**
+
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - ✅ `Read("prd.json")`, `Read("mega-plan.json")`
+   - ❌ `Bash("cat prd.json")`
+
+2. **Use Glob tool for file finding** - NEVER use `ls` or `find` via Bash
+   - ✅ `Glob("*.json")`, `Glob(".worktree/*")`
+   - ❌ `Bash("ls *.json")`
+
+3. **Only use Bash for actual system commands:**
+   - Git operations: `git rev-parse`, `git branch`, `git show-ref`
+   - File existence checks (when necessary)
+
+4. **For strategy routing:** Use the Skill tool to invoke other commands
+
 ## Step 1: Parse Task Description
 
 Get the task description from user arguments:

@@ -6,6 +6,25 @@ description: "Approve the current PRD and begin parallel story execution. Analyz
 
 You are approving the PRD and starting parallel execution of user stories.
 
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts during automatic execution:**
+
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - ✅ `Read("prd.json")`, `Read("progress.txt")`
+   - ❌ `Bash("cat prd.json")`
+
+2. **Use Grep tool for content search** - NEVER use `grep` via Bash
+   - ✅ `Grep("[COMPLETE]", path="progress.txt")`
+   - ❌ `Bash("grep -c '[COMPLETE]' progress.txt")`
+
+3. **Only use Bash for actual system commands:**
+   - Git operations
+   - File writing: `echo "..." >> progress.txt`
+   - Running tests or build commands
+
+4. **For monitoring loops:** Use Read tool to poll `progress.txt`, then parse the content in your response to count markers
+
 ## Step 1: Detect Operating System and Shell
 
 Detect the current operating system to use appropriate commands:

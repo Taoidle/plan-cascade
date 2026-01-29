@@ -6,6 +6,18 @@ description: "Generate PRD from task description and enter review mode. Auto-gen
 
 You are automatically generating a Product Requirements Document (PRD) from the task description.
 
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts:**
+
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - ✅ `Read("prd.json")`
+   - ❌ `Bash("cat prd.json")`
+
+2. **Use Write tool for file creation** - When creating prd.json
+   - ✅ `Write("prd.json", content)`
+   - Or have the Task agent write it directly
+
 ## Step 1: Parse Task Description
 
 Get the task description from user arguments:

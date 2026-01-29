@@ -6,6 +6,29 @@ description: "Approve the mega-plan and start feature execution. Creates worktre
 
 Approve the mega-plan and begin executing features in **batch-by-batch** order with **FULL AUTOMATION**.
 
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts during automatic execution:**
+
+1. **Use Read tool for file reading** - NEVER use `cat`, `head`, `tail` via Bash
+   - ✅ `Read("mega-plan.json")`
+   - ❌ `Bash("cat mega-plan.json")`
+
+2. **Use Glob tool for file finding** - NEVER use `find`, `ls` via Bash
+   - ✅ `Glob(".worktree/*/progress.txt")`
+   - ❌ `Bash("ls .worktree/*/progress.txt")`
+
+3. **Use Grep tool for content search** - NEVER use `grep` via Bash
+   - ✅ `Grep("[FEATURE_COMPLETE]", path=".worktree/feature-x/progress.txt")`
+   - ❌ `Bash("grep '[FEATURE_COMPLETE]' .worktree/feature-x/progress.txt")`
+
+4. **Only use Bash for actual system commands:**
+   - Git operations: `git checkout`, `git merge`, `git worktree add`
+   - Directory creation: `mkdir -p`
+   - File writing (when Write tool cannot be used): `echo "..." >> file`
+
+5. **For monitoring loops:** Use Read tool to poll file contents, not Bash cat/grep
+
 **CRITICAL**: With `--auto-prd`, this command runs the ENTIRE mega-plan to completion automatically:
 1. Creates worktrees for current batch
 2. Generates PRDs for each feature (via Task agents)

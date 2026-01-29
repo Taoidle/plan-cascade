@@ -6,6 +6,24 @@ description: "Show detailed status of mega-plan execution including feature prog
 
 Display comprehensive status of the mega-plan execution.
 
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts:**
+
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - ✅ `Read("mega-plan.json")`, `Read(".mega-status.json")`
+   - ❌ `Bash("cat mega-plan.json")`
+
+2. **Use Glob tool for finding files** - NEVER use `ls` or `find` via Bash
+   - ✅ `Glob(".worktree/*/progress.txt")`
+   - ❌ `Bash("ls .worktree/")`
+
+3. **Use Grep tool for content search** - NEVER use `grep` via Bash
+   - ✅ `Grep("[FEATURE_COMPLETE]", path="...")`
+   - ❌ `Bash("grep '[FEATURE_COMPLETE]' ...")`
+
+4. **Only use Bash for actual system commands** (git, mkdir, etc.)
+
 ## Step 1: Verify Mega Plan Exists
 
 ```bash

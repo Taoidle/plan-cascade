@@ -6,6 +6,27 @@ description: "Resume an interrupted hybrid task (worktree or regular). Auto-dete
 
 Resume execution of an interrupted hybrid task by detecting current state from existing files.
 
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts during automatic execution:**
+
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - ✅ `Read("prd.json")`, `Read("progress.txt")`, `Read(".planning-config.json")`
+   - ❌ `Bash("cat prd.json")`
+
+2. **Use Glob tool for finding files** - NEVER use `ls` or `find` via Bash
+   - ✅ `Glob(".worktree/*/.planning-config.json")`
+   - ❌ `Bash("ls .worktree/")`
+
+3. **Use Grep tool for content search** - NEVER use `grep` via Bash
+   - ✅ `Grep("[COMPLETE]", path="progress.txt")`
+   - ❌ `Bash("grep '[COMPLETE]' progress.txt")`
+
+4. **Only use Bash for actual system commands:**
+   - Git operations: `git status`, `git checkout`
+   - Directory navigation: `cd` (only when necessary)
+   - File writing: `echo "..." >> progress.txt`
+
 **Works with both:**
 - `hybrid-worktree` tasks (in `.worktree/` directories)
 - `hybrid-auto` tasks (in regular directories)

@@ -6,6 +6,27 @@ description: "Resume an interrupted mega-plan execution. Detects current state f
 
 Resume execution of an interrupted mega-plan by detecting the current state from existing files.
 
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts during automatic execution:**
+
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - ✅ `Read("mega-plan.json")`, `Read(".mega-status.json")`, `Read(".worktree/x/progress.txt")`
+   - ❌ `Bash("cat mega-plan.json")`
+
+2. **Use Glob tool for finding files** - NEVER use `ls` or `find` via Bash
+   - ✅ `Glob(".worktree/*/prd.json")`
+   - ❌ `Bash("ls .worktree/")`
+
+3. **Use Grep tool for content search** - NEVER use `grep` via Bash
+   - ✅ `Grep("[PRD_COMPLETE]", path=".worktree/x/progress.txt")`
+   - ❌ `Bash("grep '[PRD_COMPLETE]' ...")`
+
+4. **Only use Bash for actual system commands:**
+   - Git operations: `git worktree add`, `git merge`
+   - Directory creation: `mkdir -p`
+   - File writing: `echo "..." >> progress.txt`
+
 **Compatibility**: Works with both old-style (pre-4.1.1) and new-style mega-plan executions.
 
 ## Arguments

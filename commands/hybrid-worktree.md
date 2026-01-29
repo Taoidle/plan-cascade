@@ -6,6 +6,22 @@ description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD
 
 You are starting a task in **Git Worktree + Hybrid Ralph mode**. This will create the worktree and handle the PRD automatically.
 
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts:**
+
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - ✅ `Read("prd.json")`, `Read(".planning-config.json")`
+   - ❌ `Bash("cat prd.json")`
+
+2. **Only use Bash for actual system commands:**
+   - Git operations: `git worktree add`, `git show-ref`
+   - OS detection: `uname -s`
+   - File writing when creating new files
+
+3. **Use Write tool for creating structured files** - When possible
+   - ✅ `Write("prd.json", content)` for JSON files
+
 ## Step 1: Parse Parameters
 
 Parse user arguments:
