@@ -9,6 +9,9 @@ from fastapi import APIRouter
 from .health import router as health_router
 from .execute import router as execute_router
 from .status import router as status_router
+from .analyze import router as analyze_router
+from .settings import router as settings_router
+from .logs import router as logs_router
 
 api_router = APIRouter()
 
@@ -16,3 +19,6 @@ api_router = APIRouter()
 api_router.include_router(health_router, tags=["health"])
 api_router.include_router(execute_router, tags=["execution"])
 api_router.include_router(status_router, tags=["status"])
+api_router.include_router(analyze_router, tags=["strategy"])
+api_router.include_router(settings_router, tags=["settings"])
+api_router.include_router(logs_router, tags=["logs"])
