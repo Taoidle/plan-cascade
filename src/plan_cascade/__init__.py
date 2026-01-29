@@ -22,7 +22,7 @@ Example usage:
     results = orchestrator.execute_prd(prd)
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "Plan Cascade Team"
 
 # Core orchestration
@@ -82,6 +82,19 @@ from .backends.phase_config import (
     ExecutionPhase,
     StoryType,
     AgentOverrides,
+)
+
+# Settings management
+from .settings import (
+    BackendType,
+    AgentConfig,
+    QualityGateConfig,
+    Settings,
+    SettingsStorage,
+    ConfigMigration,
+    ConfigValidator,
+    ValidationResult,
+    SetupWizard,
 )
 
 __all__ = [
@@ -144,4 +157,14 @@ __all__ = [
     "ExecutionPhase",
     "StoryType",
     "AgentOverrides",
+    # Settings
+    "BackendType",
+    "AgentConfig",
+    "QualityGateConfig",
+    "Settings",
+    "SettingsStorage",
+    "ConfigMigration",
+    "ConfigValidator",
+    "ValidationResult",
+    "SetupWizard",
 ]

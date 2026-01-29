@@ -1,15 +1,40 @@
 """
-Plan Cascade Settings Module
+Settings management module for Plan Cascade.
 
-Contains settings management:
-- Settings: Global settings model
-- SettingsStorage: Persistent settings storage with keyring support
-- BackendType: Supported backend types
-- AgentConfig: Agent configuration
-- QualityGateConfig: Quality gate configuration
+This module provides configuration management including:
+- Settings data models (BackendType, AgentConfig, QualityGateConfig, Settings)
+- YAML-based configuration storage
+- Secure API key storage using keyring
+- Configuration validation
+- Interactive setup wizard
+- Configuration migration and versioning
 """
 
-# Settings module is a placeholder for future implementation
-# The full settings implementation will be added in a later phase
+from .models import (
+    BackendType,
+    AgentConfig,
+    QualityGateConfig,
+    Settings,
+)
+from .storage import SettingsStorage
+from .migration import ConfigMigration
+from .validation import ConfigValidator, ValidationResult
+from .wizard import SetupWizard, run_setup_wizard
 
-__all__ = []
+__all__ = [
+    # Models
+    "BackendType",
+    "AgentConfig",
+    "QualityGateConfig",
+    "Settings",
+    # Storage
+    "SettingsStorage",
+    # Migration
+    "ConfigMigration",
+    # Validation
+    "ConfigValidator",
+    "ValidationResult",
+    # Wizard
+    "SetupWizard",
+    "run_setup_wizard",
+]
