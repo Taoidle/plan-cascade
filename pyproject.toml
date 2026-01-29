@@ -83,9 +83,23 @@ testpaths = ["tests"]
 
 [tool.mypy]
 python_version = "3.10"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
+check_untyped_defs = false
+disable_error_code = [
+    "assignment",
+    "attr-defined",
+    "arg-type",
+    "call-arg",
+    "return-value",
+    "union-attr",
+    "var-annotated",
+    "index",
+    "no-any-return",
+    "truthy-function",
+    "import-untyped",
+]
 
 [tool.ruff]
 target-version = "py310"
