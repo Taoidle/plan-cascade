@@ -23,10 +23,10 @@ Read `progress.txt` to get completion status.
 ## Step 3: Calculate Story Status
 
 For each story in the PRD, determine its status:
-- **Complete**: If `progress.txt` contains `[COMPLETE] {story_id}`
+- **Complete**: If `progress.txt` contains `[COMPLETE] {story_id}` or `[STORY_COMPLETE] {story_id}`
 - **In Progress**: If `progress.txt` contains `[IN_PROGRESS] {story_id}`
 - **Pending**: If no entry in `progress.txt`
-- **Failed**: If `progress.txt` contains `[FAILED] {story_id}`
+- **Failed**: If `progress.txt` contains `[FAILED] {story_id}` or `[STORY_FAILED] {story_id}` or `[ERROR] {story_id}`
 
 ## Step 4: Calculate Execution Batches
 
@@ -114,4 +114,16 @@ Next:
   - Continue monitoring with: /plan-cascade:hybrid-status
   - View progress details in: progress.txt
   - View agent logs in: .agent-outputs/
+```
+
+If execution was interrupted:
+
+```
+To resume an interrupted task:
+  /plan-cascade:hybrid-resume --auto
+
+This will:
+  - Auto-detect current state from files
+  - Skip already-completed stories
+  - Resume execution from where it left off
 ```

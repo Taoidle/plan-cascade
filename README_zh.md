@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-4.1.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.1.1-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![PyPI](https://img.shields.io/pypi/v/plan-cascade)](https://pypi.org/project/plan-cascade/)
 
 ---
@@ -162,12 +162,14 @@ plan-cascade status                     # 查看状态
 
 # 项目级
 /plan-cascade:mega-plan <描述>          # 生成项目计划
-/plan-cascade:mega-approve              # 批准执行
+/plan-cascade:mega-approve --auto-prd   # 批准并全自动执行所有批次
+/plan-cascade:mega-resume --auto-prd    # 恢复中断的 mega-plan
 /plan-cascade:mega-complete             # 完成合并
 
 # 功能级
 /plan-cascade:hybrid-auto <描述>        # 生成 PRD
 /plan-cascade:approve --auto-run        # 批准并自动执行
+/plan-cascade:hybrid-resume --auto      # 恢复中断的任务
 /plan-cascade:hybrid-complete           # 完成
 
 # 通用
@@ -217,6 +219,17 @@ plan-cascade/
 ---
 
 ## 更新日志
+
+### v4.1.1
+
+- **Mega-Approve 全自动化** - 修复 `/plan-cascade:mega-approve --auto-prd` 不能完全自动执行的问题
+  - 现在可以全自动执行整个 mega-plan，无需手动干预
+  - 仅在出错或合并冲突时暂停
+- **恢复命令** - 新增中断恢复命令
+  - `/plan-cascade:mega-resume` - 恢复中断的 mega-plan 执行
+  - `/plan-cascade:hybrid-resume` - 恢复中断的 hybrid 任务
+  - 自动从文件检测状态，跳过已完成的工作
+  - 兼容新旧两种进度标记格式
 
 ### v4.1.0
 

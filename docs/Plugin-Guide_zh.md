@@ -2,8 +2,8 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**版本**: 4.1.0
-**最后更新**: 2026-01-29
+**版本**: 4.1.1
+**最后更新**: 2026-01-30
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
 
@@ -112,10 +112,34 @@ mega-complete → 清理计划文件
 ```bash
 /plan-cascade:mega-plan <描述>           # 生成项目计划
 /plan-cascade:mega-edit                  # 编辑计划
-/plan-cascade:mega-approve [--auto-prd]  # 批准并执行
+/plan-cascade:mega-approve --auto-prd    # 批准并全自动执行所有批次
+/plan-cascade:mega-resume --auto-prd     # 恢复中断的执行
 /plan-cascade:mega-status                # 查看进度
 /plan-cascade:mega-complete [branch]     # 合并并清理
 ```
+
+### 使用 --auto-prd 全自动执行
+
+使用 `--auto-prd` 参数，mega-approve 会全自动执行整个 mega-plan：
+1. 为当前批次创建 worktree
+2. 为每个 feature 生成 PRD（通过 Task agent）
+3. 执行所有 stories（通过 Task agent）
+4. 监控直到批次完成
+5. 合并批次到目标分支
+6. 自动继续下一批次
+7. 仅在出错或合并冲突时暂停
+
+### 恢复中断的执行
+
+如果执行被中断：
+```bash
+/plan-cascade:mega-resume --auto-prd
+```
+
+此命令会：
+- 自动从文件检测当前状态（mega-plan.json、.mega-status.json、worktrees）
+- 跳过已完成的 feature 和 story
+- 从中断处继续执行
 
 ### 使用示例
 
@@ -164,6 +188,7 @@ mega-complete → 清理计划文件
 /plan-cascade:hybrid-worktree <name> <branch> <desc>  # 创建开发环境
 /plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD
 /plan-cascade:approve [--auto-run]                    # 执行 PRD
+/plan-cascade:hybrid-resume --auto                    # 恢复中断的执行
 /plan-cascade:hybrid-status                           # 查看状态
 /plan-cascade:hybrid-complete [branch]                # 完成并合并
 ```
@@ -361,7 +386,8 @@ mega-complete → 清理计划文件
 ```bash
 /plan-cascade:mega-plan <描述>           # 生成项目计划
 /plan-cascade:mega-edit                  # 编辑计划
-/plan-cascade:mega-approve [--auto-prd]  # 批准并执行
+/plan-cascade:mega-approve --auto-prd    # 批准并全自动执行所有批次
+/plan-cascade:mega-resume --auto-prd     # 恢复中断的执行
 /plan-cascade:mega-status                # 查看进度
 /plan-cascade:mega-complete [branch]     # 合并并清理
 ```
@@ -372,6 +398,7 @@ mega-complete → 清理计划文件
 /plan-cascade:hybrid-worktree <name> <branch> <desc>  # 创建开发环境
 /plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD
 /plan-cascade:approve [--agent <name>] [--auto-run]   # 执行
+/plan-cascade:hybrid-resume --auto                    # 恢复中断的执行
 /plan-cascade:auto-run [--mode <mode>]                # 自动迭代
 /plan-cascade:iteration-status [--verbose]            # 迭代状态
 /plan-cascade:agent-config [--action <action>]        # Agent 配置

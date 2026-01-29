@@ -340,3 +340,17 @@ Active Worktrees:
 - The entire process is automated: worktree creation → PRD loading/generation → review
 - You can edit the PRD before approving: `/plan-cascade:edit`
 - Multiple worktrees can run in parallel for different tasks
+
+## Recovery
+
+If execution is interrupted at any point:
+
+```bash
+# Resume from where it left off
+/plan-cascade:hybrid-resume --auto
+```
+
+This will:
+- Auto-detect current state from files
+- Skip already-completed work
+- Continue execution from incomplete stories

@@ -31,9 +31,14 @@ For each feature with a worktree, check:
 - Does the worktree exist?
 - Does prd.json exist?
 - What's the story completion status?
-- Any errors in progress.txt?
+- Check progress.txt for markers:
+  - `[PRD_COMPLETE] {feature_id}` - PRD generation done
+  - `[STORY_COMPLETE] {story_id}` - Story done
+  - `[STORY_FAILED] {story_id}` - Story failed
+  - `[FEATURE_COMPLETE] {feature_id}` - All stories done
+  - `[FEATURE_FAILED] {feature_id}` - Feature failed
 
-Update mega-plan.json with current statuses.
+Update .mega-status.json with current statuses.
 
 ## Step 4: Calculate Progress
 
@@ -193,6 +198,17 @@ Feature <name> failed. To investigate:
   # Fix issues and re-run /plan-cascade:approve
 ```
 
+**If execution was interrupted:**
+```
+To resume an interrupted mega-plan:
+  /plan-cascade:mega-resume --auto-prd
+
+This will:
+  - Auto-detect current state from files
+  - Skip already-completed work
+  - Resume from where it left off
+```
+
 **If PRDs awaiting approval:**
 ```
 PRDs waiting for approval:
@@ -200,3 +216,21 @@ PRDs waiting for approval:
   cat prd.json
   /plan-cascade:approve
 ```
+
+## Automated Execution Mode
+
+When running `/plan-cascade:mega-approve --auto-prd`, the execution is fully automated:
+- PRDs are generated automatically for each feature
+- Stories are executed automatically
+- Progress is monitored continuously
+- Batches merge and transition automatically
+
+To check progress during automated execution:
+```
+/plan-cascade:mega-status
+```
+
+Progress markers in worktree progress.txt files:
+- `[PRD_COMPLETE] feature-xxx` - PRD generation finished
+- `[STORY_COMPLETE] story-xxx` - Individual story completed
+- `[FEATURE_COMPLETE] feature-xxx` - All stories done, ready for merge

@@ -2,6 +2,65 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.1.1] - 2026-01-30
+
+### Added
+
+- **Mega-Resume Command** - New `/plan-cascade:mega-resume` command to resume interrupted mega-plan executions
+  - Auto-detects current state from existing files (worktrees, prd.json, progress.txt)
+  - Compatible with both old-style (pre-4.1.1) and new-style executions
+  - Skips already-completed work, resumes from where it left off
+  - Supports `--auto-prd` flag for fully automatic resumption
+  - Handles edge cases: missing worktrees, corrupted PRDs, partial completions
+
+- **Hybrid-Resume Command** - New `/plan-cascade:hybrid-resume` command to resume interrupted hybrid tasks
+  - Works with both `hybrid-worktree` and `hybrid-auto` tasks
+  - Auto-detects context (worktree directory vs regular directory)
+  - Scans for interrupted tasks if not in a task directory
+  - Determines task state: needs_prd, needs_approval, executing, complete
+  - Supports both old-style `[COMPLETE]` and new-style `[STORY_COMPLETE]` markers
+  - Calculates remaining work and resumes from incomplete stories
+  - `--auto` flag for fully automatic execution
+
+### Fixed
+
+- **Mega-Approve Full Automation** - Fixed `/plan-cascade:mega-approve --auto-prd` not running to completion automatically
+  - Previously would stop after creating worktrees and require manual intervention
+  - Now runs the ENTIRE mega-plan automatically with `--auto-prd` flag:
+    1. Creates worktrees for current batch
+    2. Launches PRD generation Task agents in parallel
+    3. Executes all stories via Task agents in parallel
+    4. Monitors until batch complete
+    5. Merges completed batch to target branch
+    6. Automatically continues to next batch
+    7. Repeats until ALL batches complete
+  - Only pauses on errors or merge conflicts
+
+### Changed
+
+- **mega-approve.md** - Complete rewrite with explicit automation instructions
+  - Added Step 4: Main Execution Loop with pseudocode
+  - Added Step 6: PRD Generation with Task agent prompts
+  - Added Step 7: Story Execution with Task agent prompts
+  - Added Step 8: Monitoring loop with progress markers
+  - Added Step 10: Automatic batch continuation
+  - Clear separation of `--auto-prd` (fully automatic) vs manual mode
+
+- **mega-status.md** - Updated to use new progress markers
+  - Added documentation for `[PRD_COMPLETE]`, `[STORY_COMPLETE]`, `[FEATURE_COMPLETE]` markers
+  - Added section on automated execution mode
+
+### Added
+
+- **Progress Markers** - Standardized markers for mega-plan execution tracking:
+  - `[PRD_COMPLETE] {feature_id}` - PRD generation done
+  - `[STORY_COMPLETE] {story_id}` - Individual story done
+  - `[STORY_FAILED] {story_id}` - Story failed
+  - `[FEATURE_COMPLETE] {feature_id}` - All stories done, ready for merge
+  - `[FEATURE_FAILED] {feature_id}` - Feature cannot complete
+
+---
+
 ## [4.1.0] - 2026-01-29
 
 ### Added

@@ -377,4 +377,7 @@ Next steps:
 - **Pause on errors**: Both modes pause if any agent reports `[ERROR]` or `[FAILED]`
 - **Real-time monitoring**: Progress is polled every 10 seconds and displayed
 - **Error markers**: Agents should use `[ERROR]` for recoverable issues, `[FAILED]` for blocking problems
-- **Resume capability**: After fixing errors, run `/plan-cascade:approve` to continue
+- **Resume capability**: After fixing errors or interruption, run `/plan-cascade:hybrid-resume --auto` to intelligently resume
+  - Auto-detects completed stories and skips them
+  - Works with both old and new progress markers
+  - Or run `/plan-cascade:approve` to restart current batch

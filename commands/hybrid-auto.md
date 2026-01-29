@@ -111,3 +111,17 @@ Next steps:
 - If PRD validation fails, show errors and suggest `/plan-cascade:edit` to fix manually
 - The planning agent may take time to explore the codebase - be patient
 - Generated PRD is a draft - user should review and can edit before approving
+
+## Recovery
+
+If the task is interrupted at any point (PRD generation, story execution):
+
+```bash
+# Resume from where it left off
+/plan-cascade:hybrid-resume --auto
+```
+
+This will:
+- Auto-detect current state from prd.json and progress.txt
+- Skip already-completed work
+- Resume execution from incomplete stories

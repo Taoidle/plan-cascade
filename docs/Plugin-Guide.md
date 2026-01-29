@@ -2,8 +2,8 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.1.0
-**Last Updated**: 2026-01-29
+**Version**: 4.1.1
+**Last Updated**: 2026-01-30
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
 
@@ -112,10 +112,34 @@ Key points:
 ```bash
 /plan-cascade:mega-plan <description>        # Generate project plan
 /plan-cascade:mega-edit                      # Edit plan
-/plan-cascade:mega-approve [--auto-prd]      # Approve and execute
+/plan-cascade:mega-approve --auto-prd        # Approve and auto-execute all batches
+/plan-cascade:mega-resume --auto-prd         # Resume interrupted execution
 /plan-cascade:mega-status                    # View progress
 /plan-cascade:mega-complete [branch]         # Merge and cleanup
 ```
+
+### Full Automation with --auto-prd
+
+With `--auto-prd`, mega-approve runs the ENTIRE mega-plan automatically:
+1. Creates worktrees for current batch
+2. Generates PRDs for each feature (via Task agents)
+3. Executes all stories (via Task agents)
+4. Monitors until batch complete
+5. Merges batch to target branch
+6. Automatically continues to next batch
+7. Only pauses on errors or merge conflicts
+
+### Resume Interrupted Execution
+
+If execution is interrupted:
+```bash
+/plan-cascade:mega-resume --auto-prd
+```
+
+This will:
+- Auto-detect current state from files (mega-plan.json, .mega-status.json, worktrees)
+- Skip already-completed features and stories
+- Resume from where it left off
 
 ### Usage Example
 
@@ -164,6 +188,7 @@ Suitable for single complex feature development requiring branch isolation.
 /plan-cascade:hybrid-worktree <name> <branch> <desc>  # Create development environment
 /plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD
 /plan-cascade:approve [--auto-run]                    # Execute PRD
+/plan-cascade:hybrid-resume --auto                    # Resume interrupted execution
 /plan-cascade:hybrid-status                           # View status
 /plan-cascade:hybrid-complete [branch]                # Complete and merge
 ```
@@ -361,7 +386,8 @@ Configure in `prd.json`:
 ```bash
 /plan-cascade:mega-plan <description>        # Generate project plan
 /plan-cascade:mega-edit                      # Edit plan
-/plan-cascade:mega-approve [--auto-prd]      # Approve and execute
+/plan-cascade:mega-approve --auto-prd        # Approve and auto-execute all batches
+/plan-cascade:mega-resume --auto-prd         # Resume interrupted execution
 /plan-cascade:mega-status                    # View progress
 /plan-cascade:mega-complete [branch]         # Merge and cleanup
 ```
@@ -372,6 +398,7 @@ Configure in `prd.json`:
 /plan-cascade:hybrid-worktree <name> <branch> <desc>  # Create development environment
 /plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD
 /plan-cascade:approve [--agent <name>] [--auto-run]   # Execute
+/plan-cascade:hybrid-resume --auto                    # Resume interrupted execution
 /plan-cascade:auto-run [--mode <mode>]                # Auto-iteration
 /plan-cascade:iteration-status [--verbose]            # Iteration status
 /plan-cascade:agent-config [--action <action>]        # Agent configuration
@@ -433,3 +460,21 @@ fatal: 'feature-xxx' is already checked out
 ```
 
 Solution: Use `/plan-cascade:hybrid-complete` to clean up existing worktree.
+
+### Interrupted Execution
+
+If a mega-plan or hybrid task was interrupted (e.g., connection lost, Claude Code crashed):
+
+```bash
+# For mega-plan
+/plan-cascade:mega-resume --auto-prd
+
+# For hybrid task
+/plan-cascade:hybrid-resume --auto
+```
+
+These commands will:
+- Auto-detect current state from existing files
+- Skip already-completed work
+- Resume from where execution stopped
+- Support both old and new progress marker formats

@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-4.1.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.1.1-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![PyPI](https://img.shields.io/pypi/v/plan-cascade)](https://pypi.org/project/plan-cascade/)
 
 ---
@@ -162,12 +162,14 @@ plan-cascade status                     # View status
 
 # Project level
 /plan-cascade:mega-plan <description>   # Generate project plan
-/plan-cascade:mega-approve              # Approve execution
+/plan-cascade:mega-approve --auto-prd   # Approve and auto-execute all batches
+/plan-cascade:mega-resume --auto-prd    # Resume interrupted mega-plan
 /plan-cascade:mega-complete             # Complete and merge
 
 # Feature level
 /plan-cascade:hybrid-auto <description> # Generate PRD
 /plan-cascade:approve --auto-run        # Approve and auto-execute
+/plan-cascade:hybrid-resume --auto      # Resume interrupted task
 /plan-cascade:hybrid-complete           # Complete
 
 # General
@@ -217,6 +219,17 @@ plan-cascade/
 ---
 
 ## Changelog
+
+### v4.1.1
+
+- **Mega-Approve Full Automation** - Fixed `/plan-cascade:mega-approve --auto-prd` not running to completion
+  - Now runs the ENTIRE mega-plan automatically without manual intervention
+  - Only pauses on errors or merge conflicts
+- **Resume Commands** - New commands to resume interrupted tasks
+  - `/plan-cascade:mega-resume` - Resume interrupted mega-plan execution
+  - `/plan-cascade:hybrid-resume` - Resume interrupted hybrid task
+  - Auto-detects state from files, skips completed work
+  - Compatible with both old and new progress markers
 
 ### v4.1.0
 
