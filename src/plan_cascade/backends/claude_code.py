@@ -114,11 +114,12 @@ class ClaudeCodeBackend(AgentBackend):
         story_id = story.get("id", "unknown")
         prompt = self._build_prompt(story, context)
 
-        # Build command - use -p for prompt via stdin on Windows
+        # Build command
         cmd = [
             self.claude_path,
             "--output-format", self.output_format,
             "--print", self.print_mode,
+            "--verbose",
             "-p", prompt,
         ]
 
@@ -350,7 +351,8 @@ class ClaudeCodeLLM:
             self.backend.claude_path,
             "--output-format", "stream-json",
             "--print", "none",
-            "--prompt", prompt,
+            "--verbose",
+            "-p", prompt,
         ]
 
         output_text = ""

@@ -29,7 +29,10 @@
       "Bash(git checkout:*)",
       "Bash(git pull:*)",
       "Bash(git merge mega-feature-core-package --no-ff -m \"$\\(cat <<''EOF''\nMerge feature: 核心包重构 \\(src/plan_cascade/\\)\n\nMega-plan feature: feature-001\nStories completed: 6\n\nCreated:\n- src/plan_cascade/ package structure\n- State management \\(StateManager, ContextFilter, MegaStateManager\\)\n- Core orchestration \\(Orchestrator, PRDGenerator, IterationLoop\\)\n- Quality gates and retry management\n- Mode and strategy definitions\n- Backward compatibility layer\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(pytest:*)"
+      "Bash(pytest:*)",
+      "Bash(git add:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)"
     ]
   },
   "alwaysApprove": {
