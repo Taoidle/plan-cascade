@@ -8,6 +8,7 @@ import { ModeSwitch } from './components/ModeSwitch';
 import { SettingsButton } from './components/SettingsButton';
 import { SimpleMode } from './components/SimpleMode';
 import { ExpertMode } from './components/ExpertMode';
+import { SetupWizard } from './components/Settings';
 import { useModeStore } from './store/mode';
 import { useExecutionStore } from './store/execution';
 import { clsx } from 'clsx';
@@ -20,6 +21,9 @@ export function App() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-950">
+      {/* First-time Setup Wizard */}
+      <SetupWizard />
+
       {/* Header */}
       <header
         className={clsx(
