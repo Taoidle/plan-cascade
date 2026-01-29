@@ -1,33 +1,35 @@
+[中文版](Desktop-Guide_zh.md)
+
 # Plan Cascade - Desktop Application Guide
 
-**版本**: 4.0.0
-**最后更新**: 2026-01-29
-**状态**: 规划中 (Phase 2)
+**Version**: 4.0.0
+**Last Updated**: 2026-01-29
+**Status**: Planning (Phase 2)
 
-本文档介绍 Plan Cascade Desktop 桌面应用的使用方法。
-
----
-
-## 概述
-
-Plan Cascade Desktop 是 CLI 的图形化版本，提供与 CLI 完全相同的功能，以更直观的界面呈现。
-
-### 核心特性
-
-- **双模式切换** - 简单模式/专家模式一键切换
-- **可视化 PRD 编辑** - 拖拽、依赖关系可视化
-- **实时进度监控** - 图形化执行进度
-- **工具调用预览** - 实时显示 Agent 操作
-- **文件变更 Diff** - 代码变更实时预览
-- **Claude Code GUI** - 可作为 Claude Code 的图形前端
+This document introduces how to use the Plan Cascade Desktop application.
 
 ---
 
-## 安装
+## Overview
+
+Plan Cascade Desktop is a graphical version of the CLI, providing the same functionality as the CLI with a more intuitive interface.
+
+### Core Features
+
+- **Dual-mode switching** - One-click switch between simple mode/expert mode
+- **Visual PRD editing** - Drag and drop, dependency visualization
+- **Real-time progress monitoring** - Graphical execution progress
+- **Tool call preview** - Real-time display of Agent operations
+- **File change diff** - Real-time code change preview
+- **Claude Code GUI** - Can serve as a graphical frontend for Claude Code
+
+---
+
+## Installation
 
 ### Windows
 
-下载 `.msi` 或 `.exe` 安装包：
+Download `.msi` or `.exe` installer:
 
 ```
 plan-cascade-4.0.0-x64.msi
@@ -36,7 +38,7 @@ plan-cascade-4.0.0-setup.exe
 
 ### macOS
 
-下载 `.dmg` 安装包：
+Download `.dmg` installer:
 
 ```
 plan-cascade-4.0.0-x64.dmg      # Intel
@@ -45,41 +47,41 @@ plan-cascade-4.0.0-arm64.dmg    # Apple Silicon
 
 ### Linux
 
-下载 `.AppImage` 或 `.deb`：
+Download `.AppImage` or `.deb`:
 
 ```
 plan-cascade-4.0.0-x86_64.AppImage
 plan-cascade-4.0.0-amd64.deb
 ```
 
-从 [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases) 下载最新版本。
+Download the latest version from [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases).
 
 ---
 
-## 界面概览
+## Interface Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Plan Cascade                        [Simple ▼] [⚙ Settings]   │
+│  Plan Cascade                        [Simple ▼] [⚙ Settings]    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  ┌─ 任务输入 ─────────────────────────────────────────────────┐│
+│  ┌─ Task Input ─────────────────────────────────────────────────┐│
 │  │                                                              ││
-│  │  实现用户登录功能，支持 OAuth 和手机验证码                 ││
+│  │  Implement user login functionality with OAuth and SMS       ││
 │  │                                                              ││
-│  │                                        [开始执行]           ││
+│  │                                        [Start Execution]     ││
 │  └──────────────────────────────────────────────────────────────┘│
 │                                                                  │
-│  ┌─ 执行进度 ─────────────────────────────────────────────────┐│
+│  ┌─ Execution Progress ─────────────────────────────────────────┐│
 │  │                                                              ││
-│  │  [████████████░░░░░░░░] 60%                                 ││
+│  │  [████████████░░░░░░░░] 60%                                  ││
 │  │                                                              ││
-│  │  ✓ 生成计划 (5 个任务)                                      ││
-│  │  ✓ 数据库 Schema                                            ││
-│  │  ✓ API 路由结构                                             ││
-│  │  ⟳ OAuth 登录 (执行中...)                                   ││
-│  │  ○ 手机验证码登录                                           ││
-│  │  ○ 集成测试                                                 ││
+│  │  ✓ Generate plan (5 tasks)                                   ││
+│  │  ✓ Database Schema                                           ││
+│  │  ✓ API route structure                                       ││
+│  │  ⟳ OAuth login (in progress...)                              ││
+│  │  ○ SMS verification login                                    ││
+│  │  ○ Integration tests                                         ││
 │  │                                                              ││
 │  └──────────────────────────────────────────────────────────────┘│
 │                                                                  │
@@ -88,64 +90,64 @@ plan-cascade-4.0.0-amd64.deb
 
 ---
 
-## 简单模式
+## Simple Mode
 
-### 使用流程
+### Usage Flow
 
-1. **输入需求** - 在文本框中描述你想要实现的功能
-2. **点击执行** - AI 自动分析、规划、执行
-3. **等待完成** - 查看实时进度
+1. **Enter requirements** - Describe the functionality you want to implement in the text box
+2. **Click execute** - AI automatically analyzes, plans, and executes
+3. **Wait for completion** - View real-time progress
 
-### 界面元素
+### Interface Elements
 
-- **输入框** - 支持多行输入
-- **进度条** - 整体完成百分比
-- **任务列表** - Stories 执行状态
-- **日志面板** - 错误和警告信息
+- **Input box** - Supports multi-line input
+- **Progress bar** - Overall completion percentage
+- **Task list** - Stories execution status
+- **Log panel** - Error and warning information
 
 ---
 
-## 专家模式
+## Expert Mode
 
-### 使用流程
+### Usage Flow
 
-1. **输入需求** - 描述功能
-2. **生成 PRD** - 查看 AI 生成的计划
-3. **编辑调整** - 修改 Stories、依赖、Agent
-4. **执行监控** - 详细日志和进度
+1. **Enter requirements** - Describe functionality
+2. **Generate PRD** - View AI-generated plan
+3. **Edit and adjust** - Modify Stories, dependencies, Agent
+4. **Execute and monitor** - Detailed logs and progress
 
-### PRD 编辑器
+### PRD Editor
 
 ```
-┌─ PRD 编辑器 ─────────────────────────────────────────────────────┐
+┌─ PRD Editor ─────────────────────────────────────────────────────┐
 │                                                                   │
-│  执行策略:                              AI 建议: Hybrid Auto     │
-│  ○ 直接执行   ● Hybrid Auto   ○ Mega Plan                       │
+│  Execution Strategy:                      AI Suggests: Hybrid Auto │
+│  ○ Direct Execute   ● Hybrid Auto   ○ Mega Plan                   │
 │                                                                   │
-│  □ 使用 Git Worktree 隔离开发                                    │
+│  □ Use Git Worktree for isolated development                      │
 │                                                                   │
-│  Stories:                                             [+ 添加]   │
+│  Stories:                                             [+ Add]     │
 │  ┌─────────────────────────────────────────────────────────────┐ │
-│  │ ☐ 设计数据库 Schema                                         │ │
-│  │   Priority: high  │  Agent: [claude-code ▼]                 │ │
-│  │   Dependencies: none                         [编辑] [删除]  │ │
+│  │ ☐ Design database Schema                                     │ │
+│  │   Priority: high  │  Agent: [claude-code ▼]                  │ │
+│  │   Dependencies: none                         [Edit] [Delete] │ │
 │  ├─────────────────────────────────────────────────────────────┤ │
-│  │ ☐ 实现 OAuth 登录                                           │ │
-│  │   Priority: medium │  Agent: [aider ▼]                      │ │
-│  │   Dependencies: [Schema ▼]                   [编辑] [删除]  │ │
+│  │ ☐ Implement OAuth login                                      │ │
+│  │   Priority: medium │  Agent: [aider ▼]                       │ │
+│  │   Dependencies: [Schema ▼]                   [Edit] [Delete] │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                                                                   │
-│  质量门控: [✓] TypeCheck  [✓] Test  [✓] Lint  [ ] Custom        │
+│  Quality Gates: [✓] TypeCheck  [✓] Test  [✓] Lint  [ ] Custom    │
 │                                                                   │
-│                               [保存草稿]  [开始执行]             │
+│                               [Save Draft]  [Start Execution]     │
 │                                                                   │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-### 依赖关系可视化
+### Dependency Visualization
 
 ```
-┌─ 依赖图 ─────────────────────────────────────────────────────────┐
+┌─ Dependency Graph ───────────────────────────────────────────────┐
 │                                                                   │
 │         ┌─────────────┐                                          │
 │         │   Schema    │                                          │
@@ -163,24 +165,24 @@ plan-cascade-4.0.0-amd64.deb
 │         │    Test     │                                          │
 │         └─────────────┘                                          │
 │                                                                   │
-│  批次 1: [Schema]                                                │
-│  批次 2: [OAuth, SMS]                                            │
-│  批次 3: [Test]                                                  │
+│  Batch 1: [Schema]                                               │
+│  Batch 2: [OAuth, SMS]                                           │
+│  Batch 3: [Test]                                                 │
 │                                                                   │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 设置页面
+## Settings Page
 
-### 后端配置
+### Backend Configuration
 
 ```
-┌─ 设置 > 后端配置 ────────────────────────────────────────────────┐
+┌─ Settings > Backend Configuration ───────────────────────────────┐
 │                                                                   │
-│  主后端:                                                          │
-│  ● Claude Code（推荐，无需 API Key）                             │
+│  Primary Backend:                                                 │
+│  ● Claude Code (recommended, no API Key required)                │
 │  ○ Claude API    [API Key: ••••••••••]                           │
 │  ○ OpenAI        [API Key: ••••••••••] [Model: gpt-4o ▼]         │
 │  ○ DeepSeek      [API Key: ••••••••••]                           │
@@ -189,132 +191,133 @@ plan-cascade-4.0.0-amd64.deb
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-### Agent 配置
+### Agent Configuration
 
 ```
-┌─ 设置 > Agent 配置 ──────────────────────────────────────────────┐
+┌─ Settings > Agent Configuration ─────────────────────────────────┐
 │                                                                   │
-│  执行 Agent:                                          [+ 添加]   │
+│  Execution Agents:                                    [+ Add]     │
 │  ┌─────────────────────────────────────────────────────────────┐ │
-│  │ ✓ claude-code                                    [默认]     │ │
-│  │   └─ 路径: claude                                           │ │
+│  │ ✓ claude-code                                    [Default]   │ │
+│  │   └─ Path: claude                                            │ │
 │  ├─────────────────────────────────────────────────────────────┤ │
-│  │ ✓ aider                                          [配置]     │ │
-│  │   └─ 命令: aider --model gpt-4o                             │ │
+│  │ ✓ aider                                          [Configure] │ │
+│  │   └─ Command: aider --model gpt-4o                           │ │
 │  ├─────────────────────────────────────────────────────────────┤ │
-│  │ □ codex (未配置)                                 [配置]     │ │
+│  │ □ codex (not configured)                         [Configure] │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                                                                   │
-│  Agent 自动选择策略:                                              │
-│  ○ 智能匹配（根据任务类型自动选择）                               │
-│  ● 优先使用: [claude-code ▼]                                     │
-│  ○ 手动指定（每个 Story 单独选择）                                │
+│  Agent Auto-Selection Strategy:                                   │
+│  ○ Smart matching (auto-select based on task type)               │
+│  ● Prefer using: [claude-code ▼]                                 │
+│  ○ Manual specification (select for each Story individually)     │
 │                                                                   │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-### 质量门控配置
+### Quality Gate Configuration
 
 ```
-┌─ 设置 > 质量门控 ────────────────────────────────────────────────┐
+┌─ Settings > Quality Gates ───────────────────────────────────────┐
 │                                                                   │
-│  默认启用的检查:                                                  │
+│  Default enabled checks:                                          │
 │  [✓] TypeCheck (tsc / mypy / pyright)                            │
 │  [✓] Test (pytest / jest / npm test)                             │
 │  [✓] Lint (eslint / ruff)                                        │
 │  [ ] Custom                                                       │
 │                                                                   │
-│  自定义脚本:                                                      │
+│  Custom script:                                                   │
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │ npm run validate                                             │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                                                                   │
-│  重试设置:                                                        │
-│  最大重试次数: [3]                                                │
-│  重试间隔: [指数退避 ▼]                                          │
+│  Retry settings:                                                  │
+│  Maximum retries: [3]                                             │
+│  Retry interval: [Exponential backoff ▼]                         │
 │                                                                   │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Claude Code GUI 模式
+## Claude Code GUI Mode
 
-Desktop 可作为 Claude Code 的完整图形界面：
+Desktop can serve as a complete graphical interface for Claude Code:
 
 ```
-┌─ Claude Code GUI 模式 ───────────────────────────────────────────┐
+┌─ Claude Code GUI Mode ───────────────────────────────────────────┐
 │                                                                   │
-│  ┌─ 对话视图 ─────────────────────────────────────────────────┐  │
-│  │ User: 实现用户登录功能                                      │  │
-│  │                                                              │  │
-│  │ Claude: 我来帮你实现用户登录功能。首先让我分析一下项目...   │  │
-│  │                                                              │  │
-│  │ [Reading src/auth/...]                                       │  │
-│  │ [Writing src/auth/login.py...]                               │  │
-│  │                                                              │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌─ 工具调用 ─────────────────────────────────────────────────┐  │
-│  │ ✓ Read src/auth/base.py                                     │  │
-│  │ ✓ Read src/auth/oauth.py                                    │  │
-│  │ ⟳ Edit src/auth/login.py                                    │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌─ 文件变更预览 ─────────────────────────────────────────────┐  │
-│  │ - old_code()                                                 │  │
-│  │ + new_code()                                                 │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐   │
-│  │ 输入消息...                                        [发送]  │   │
+│  ┌─ Chat View ───────────────────────────────────────────────┐   │
+│  │ User: Implement user login functionality                   │   │
+│  │                                                            │   │
+│  │ Claude: I'll help you implement user login. First let me   │   │
+│  │         analyze the project...                             │   │
+│  │                                                            │   │
+│  │ [Reading src/auth/...]                                     │   │
+│  │ [Writing src/auth/login.py...]                             │   │
+│  │                                                            │   │
 │  └────────────────────────────────────────────────────────────┘   │
 │                                                                   │
+│  ┌─ Tool Calls ──────────────────────────────────────────────┐   │
+│  │ ✓ Read src/auth/base.py                                   │   │
+│  │ ✓ Read src/auth/oauth.py                                  │   │
+│  │ ⟳ Edit src/auth/login.py                                  │   │
+│  └────────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│  ┌─ File Change Preview ─────────────────────────────────────┐   │
+│  │ - old_code()                                               │   │
+│  │ + new_code()                                               │   │
+│  └────────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ Enter message...                                    [Send] │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                   │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 技术栈
+## Tech Stack
 
-| 组件 | 技术 | 说明 |
-|------|------|------|
-| 框架 | Tauri | 轻量跨平台 (~10MB) |
-| 前端 | React + TypeScript | 成熟生态 |
-| 状态管理 | Zustand | 轻量易用 |
-| UI 组件 | Radix UI + Tailwind | 可访问性好 |
-| 后端 | Python Sidecar (FastAPI) | 复用核心代码 |
-
----
-
-## 开发进度
-
-Desktop 应用目前处于 **Phase 2** 规划阶段：
-
-| 功能 | 状态 |
-|------|------|
-| Tauri 框架搭建 | ⏳ 规划中 |
-| 简单模式 UI | ⏳ 规划中 |
-| 专家模式 UI | ⏳ 规划中 |
-| PRD 编辑器 | ⏳ 规划中 |
-| 依赖图可视化 | ⏳ 规划中 |
-| Claude Code GUI | ⏳ 规划中 |
-| 设置页面 | ⏳ 规划中 |
-| 多平台构建 | ⏳ 规划中 |
-
-预计发布时间：Phase 2 完成后
+| Component | Technology | Description |
+|-----------|------------|-------------|
+| Framework | Tauri | Lightweight cross-platform (~10MB) |
+| Frontend | React + TypeScript | Mature ecosystem |
+| State Management | Zustand | Lightweight and easy to use |
+| UI Components | Radix UI + Tailwind | Good accessibility |
+| Backend | Python Sidecar (FastAPI) | Reuse core code |
 
 ---
 
-## 与 CLI 的区别
+## Development Progress
 
-| 特性 | Desktop | CLI |
-|------|---------|-----|
-| 界面 | 图形化 | 命令行 |
-| PRD 编辑 | 可视化拖拽 | 文本编辑 |
-| 进度监控 | 实时图形 | 文本输出 |
-| 依赖关系 | 可视化图 | 文本列表 |
-| 文件变更 | Diff 预览 | 日志输出 |
-| 适用场景 | 偏好 GUI | 偏好 CLI |
+Desktop application is currently in **Phase 2** planning stage:
 
-两者共享相同的核心代码，功能完全一致。
+| Feature | Status |
+|---------|--------|
+| Tauri framework setup | ⏳ Planning |
+| Simple mode UI | ⏳ Planning |
+| Expert mode UI | ⏳ Planning |
+| PRD editor | ⏳ Planning |
+| Dependency graph visualization | ⏳ Planning |
+| Claude Code GUI | ⏳ Planning |
+| Settings page | ⏳ Planning |
+| Multi-platform builds | ⏳ Planning |
+
+Expected release: After Phase 2 completion
+
+---
+
+## Differences from CLI
+
+| Feature | Desktop | CLI |
+|---------|---------|-----|
+| Interface | Graphical | Command line |
+| PRD editing | Visual drag-and-drop | Text editing |
+| Progress monitoring | Real-time graphics | Text output |
+| Dependencies | Visual graph | Text list |
+| File changes | Diff preview | Log output |
+| Use case | Prefer GUI | Prefer CLI |
+
+Both share the same core code and have identical functionality.

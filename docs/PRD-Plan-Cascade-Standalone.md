@@ -1,333 +1,341 @@
-# Plan Cascade Standalone - 产品需求文档 (PRD)
+[中文版](PRD-Plan-Cascade-Standalone_zh.md)
 
-**版本**: 4.0.0
-**日期**: 2026-01-29
-**作者**: Plan Cascade Team
-**状态**: Implementation In Progress
+# Plan Cascade Standalone - Product Requirements Document (PRD)
 
----
-
-## 实现状态总览
-
-> **当前进度**: ~98% 核心功能已实现
-> **最后更新**: 2026-01-29
-
-### 功能需求实现状态
-
-| 功能 (章节) | 优先级 | 状态 | 说明 |
-|-------------|--------|------|------|
-| **4.1 工作模式选择** | P0 | ✅ 已完成 | |
-| 独立编排模式 | P0 | ✅ 已完成 | ReAct 引擎 + 工具执行 |
-| Claude Max LLM 后端 | P0 | ✅ 已完成 | `llm/providers/claude_max.py` |
-| Claude API | P0 | ✅ 已完成 | `llm/providers/claude.py` |
-| OpenAI | P0 | ✅ 已完成 | `llm/providers/openai.py` |
-| DeepSeek | P1 | ✅ 已完成 | `llm/providers/deepseek.py` |
-| Ollama | P2 | ✅ 已完成 | `llm/providers/ollama.py` |
-| **4.2 多 Agent 协同** | P0 | ✅ 已完成 | |
-| 基于阶段的 Agent 分配 | P0 | ✅ 已完成 | `backends/phase_config.py` |
-| Agent 执行器 | P0 | ✅ 已完成 | `backends/agent_executor.py` |
-| **4.2 简单模式功能** | P0 | ✅ 已完成 | |
-| 一键式工作流 | P0 | ✅ 已完成 | `core/simple_workflow.py` |
-| AI 自动策略判断 | P0 | ✅ 已完成 | `core/strategy_analyzer.py` |
-| **4.3 专家模式功能** | P0 | ✅ 已完成 | |
-| PRD 编辑器 | P0 | ✅ 已完成 | `core/expert_workflow.py` |
-| 执行策略选择 | P0 | ✅ 已完成 | direct/hybrid/mega |
-| Agent 指定 | P0 | ✅ 已完成 | 每个 Story 可指定 Agent |
-| **4.4 设置页面** | P0 | ✅ 已完成 | |
-| Agent 配置 | P0 | ✅ 已完成 | `settings/models.py` |
-| 质量门控配置 | P0 | ✅ 已完成 | `core/quality_gate.py` |
-| API Key 安全存储 | P0 | ✅ 已完成 | Keyring 集成 |
-| **4.5 CLI 功能** | P1 | ✅ 已完成 | |
-| `plan-cascade run` | P0 | ✅ 已完成 | 简单/专家模式 |
-| `plan-cascade config` | P0 | ✅ 已完成 | 配置向导 |
-| `plan-cascade status` | P1 | ✅ 已完成 | 状态查看 |
-| **4.6 Claude Code GUI 模式** | P0 | ⚠️ 部分完成 | |
-| Claude Code CLI 集成 | P0 | ✅ 已完成 | `backends/claude_code.py` |
-| GUI 专用后端 | P2 | ⏳ 规划中 | `backends/claude_code_gui.py` |
-| 工具调用可视化 | P1 | ✅ 已完成 | 流式事件解析 |
-| **4.7 交互式 REPL 模式** | P0 | ✅ 已完成 | |
-| REPL 循环 | P0 | ✅ 已完成 | `plan-cascade chat` |
-| 特殊命令 | P0 | ✅ 已完成 | /exit, /clear, /status, /mode |
-| 智能意图识别 | P0 | ✅ 已完成 | `core/intent_classifier.py` |
-
-### 产品形态实现状态
-
-| 形态 | 状态 | 说明 |
-|------|------|------|
-| CLI | ✅ 已完成 | `pip install plan-cascade` |
-| Desktop (GUI) | ⏳ 规划中 | Tauri 实现，Phase 2 目标 |
-| Claude Code Plugin | ✅ 已完成 | 现有 Plugin 保持兼容 |
-
-### 里程碑进度
-
-| 阶段 | 状态 | 完成度 |
-|------|------|--------|
-| Phase 1: CLI + 双模式 | ✅ 已完成 | 100% |
-| Phase 2: 桌面应用 Alpha | ⏳ 规划中 | 0% |
-| Phase 3: 功能完善 | ⏳ 待开始 | - |
-| Phase 4: 高级功能 | ⏳ 待开始 | - |
+**Version**: 4.0.0
+**Date**: 2026-01-29
+**Author**: Plan Cascade Team
+**Status**: Implementation In Progress
 
 ---
 
-## 1. 概述
+## Implementation Status Overview
 
-### 1.1 产品愿景
+> **Current Progress**: ~98% core functionality implemented
+> **Last Updated**: 2026-01-29
 
-将 Plan Cascade 发展为一个**完整的 AI 编程编排平台**，具备自主工具执行能力，让 AI 编程变得简单。
+### Feature Requirements Implementation Status
 
-**核心定位**：
-- 作为 **完整的编排层**：自己执行工具，LLM 只提供思考（独立模式）
-- 作为 **Claude Code 的图形界面**：兼容 Claude Code 所有功能（GUI 模式）
-- 支持 **多种 LLM 后端**：Claude Max、Claude API、OpenAI、DeepSeek 等
+| Feature (Section) | Priority | Status | Notes |
+|-------------------|----------|--------|-------|
+| **4.1 Working Mode Selection** | P0 | ✅ Complete | |
+| Standalone Orchestration Mode | P0 | ✅ Complete | ReAct engine + tool execution |
+| Claude Max LLM Backend | P0 | ✅ Complete | `llm/providers/claude_max.py` |
+| Claude API | P0 | ✅ Complete | `llm/providers/claude.py` |
+| OpenAI | P0 | ✅ Complete | `llm/providers/openai.py` |
+| DeepSeek | P1 | ✅ Complete | `llm/providers/deepseek.py` |
+| Ollama | P2 | ✅ Complete | `llm/providers/ollama.py` |
+| **4.2 Multi-Agent Collaboration** | P0 | ✅ Complete | |
+| Phase-based Agent Assignment | P0 | ✅ Complete | `backends/phase_config.py` |
+| Agent Executor | P0 | ✅ Complete | `backends/agent_executor.py` |
+| **4.2 Simple Mode Features** | P0 | ✅ Complete | |
+| One-click Workflow | P0 | ✅ Complete | `core/simple_workflow.py` |
+| AI Auto Strategy Determination | P0 | ✅ Complete | `core/strategy_analyzer.py` |
+| **4.3 Expert Mode Features** | P0 | ✅ Complete | |
+| PRD Editor | P0 | ✅ Complete | `core/expert_workflow.py` |
+| Execution Strategy Selection | P0 | ✅ Complete | direct/hybrid/mega |
+| Agent Specification | P0 | ✅ Complete | Each Story can specify Agent |
+| **4.4 Settings Page** | P0 | ✅ Complete | |
+| Agent Configuration | P0 | ✅ Complete | `settings/models.py` |
+| Quality Gate Configuration | P0 | ✅ Complete | `core/quality_gate.py` |
+| API Key Secure Storage | P0 | ✅ Complete | Keyring integration |
+| **4.5 CLI Features** | P1 | ✅ Complete | |
+| `plan-cascade run` | P0 | ✅ Complete | Simple/expert mode |
+| `plan-cascade config` | P0 | ✅ Complete | Configuration wizard |
+| `plan-cascade status` | P1 | ✅ Complete | Status viewing |
+| **4.6 Claude Code GUI Mode** | P0 | ⚠️ Partial | |
+| Claude Code CLI Integration | P0 | ✅ Complete | `backends/claude_code.py` |
+| GUI-specific Backend | P2 | ⏳ Planning | `backends/claude_code_gui.py` |
+| Tool Call Visualization | P1 | ✅ Complete | Streaming event parsing |
+| **4.7 Interactive REPL Mode** | P0 | ✅ Complete | |
+| REPL Loop | P0 | ✅ Complete | `plan-cascade chat` |
+| Special Commands | P0 | ✅ Complete | /exit, /clear, /status, /mode |
+| Smart Intent Recognition | P0 | ✅ Complete | `core/intent_classifier.py` |
 
-### 1.2 核心价值主张
+### Product Form Implementation Status
 
-| 价值点 | 描述 |
-|--------|------|
-| **完整编排能力** | 自主执行工具（Read/Write/Edit/Bash/Glob/Grep），不依赖外部 Agent |
-| **零门槛使用** | Claude Max 会员无需 API Key，直接通过 Claude Code 作为 LLM 后端 |
-| **双模式切换** | 简单模式快速上手，专家模式精细控制 |
-| **模型自由** | 支持 Claude Max、Claude API、OpenAI、DeepSeek、Ollama 等 |
-| **理念延续** | 完整保留 Plan Cascade 的核心设计理念 |
-| **Claude Code 兼容** | 可作为 Claude Code 的完整 GUI，兼容所有功能 |
+| Form | Status | Notes |
+|------|--------|-------|
+| CLI | ✅ Complete | `pip install plan-cascade` |
+| Desktop (GUI) | ⏳ Planning | Tauri implementation, Phase 2 target |
+| Claude Code Plugin | ✅ Complete | Existing Plugin maintains compatibility |
 
-### 1.3 产品定位
+### Milestone Progress
+
+| Phase | Status | Completion |
+|-------|--------|------------|
+| Phase 1: CLI + Dual-Mode | ✅ Complete | 100% |
+| Phase 2: Desktop Application Alpha | ⏳ Planning | 0% |
+| Phase 3: Feature Completion | ⏳ Pending | - |
+| Phase 4: Advanced Features | ⏳ Pending | - |
+
+---
+
+## 1. Overview
+
+### 1.1 Product Vision
+
+Develop Plan Cascade into a **complete AI programming orchestration platform** with autonomous tool execution capabilities, making AI programming simple.
+
+**Core Positioning**:
+- As a **complete orchestration layer**: Execute tools itself, LLM only provides thinking (standalone mode)
+- As a **graphical interface for Claude Code**: Compatible with all Claude Code features (GUI mode)
+- Support **multiple LLM backends**: Claude Max, Claude API, OpenAI, DeepSeek, etc.
+
+### 1.2 Core Value Propositions
+
+| Value Point | Description |
+|-------------|-------------|
+| **Complete Orchestration Capability** | Autonomously executes tools (Read/Write/Edit/Bash/Glob/Grep), no external Agent dependency |
+| **Zero Barrier Entry** | Claude Max members need no API Key, directly use Claude Code as LLM backend |
+| **Dual-Mode Switching** | Simple mode for quick start, expert mode for fine-grained control |
+| **Model Freedom** | Supports Claude Max, Claude API, OpenAI, DeepSeek, Ollama, etc. |
+| **Philosophy Continuation** | Fully preserves Plan Cascade's core design philosophy |
+| **Claude Code Compatible** | Can serve as complete GUI for Claude Code, compatible with all features |
+
+### 1.3 Product Positioning
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Plan Cascade                              │
-│          完整的 AI 编程编排平台 + Claude Code GUI             │
+│          Complete AI Programming Orchestration Platform      │
+│                    + Claude Code GUI                         │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   ┌─ 工作模式选择 ─────────────────────────────────────────┐│
+│   ┌─ Working Mode Selection ─────────────────────────────────┐│
 │   │                                                        ││
-│   │  ● 独立编排模式（推荐）                                ││
-│   │    └─ Plan Cascade 执行所有工具                       ││
-│   │    └─ LLM 只提供思考（支持 Claude Max/API/OpenAI 等）  ││
+│   │  ● Standalone Orchestration Mode (Recommended)         ││
+│   │    └─ Plan Cascade executes all tools                  ││
+│   │    └─ LLM only provides thinking (Claude Max/API/      ││
+│   │       OpenAI etc.)                                     ││
 │   │                                                        ││
-│   │  ○ Claude Code GUI 模式                                ││
-│   │    └─ 作为 Claude Code 的图形界面                      ││
-│   │    └─ Claude Code 执行工具，Plan Cascade 提供可视化    ││
+│   │  ○ Claude Code GUI Mode                                ││
+│   │    └─ Serves as graphical interface for Claude Code    ││
+│   │    └─ Claude Code executes tools, Plan Cascade         ││
+│   │       provides visualization                           ││
 │   │                                                        ││
 │   └────────────────────────────────────────────────────────┘│
 │                                                              │
-│   ┌─ 独立编排模式：LLM 后端选择 ───────────────────────────┐│
+│   ┌─ Standalone Mode: LLM Backend Selection ─────────────────┐│
 │   │                                                        ││
 │   │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   ││
 │   │   │ Claude Max  │  │ Claude API  │  │   OpenAI    │   ││
-│   │   │ (无需API Key)│  │ (需API Key) │  │ (需API Key) │   ││
-│   │   │ 通过Claude  │  │  直接调用   │  │  直接调用   │   ││
-│   │   │ Code获取LLM │  │             │  │             │   ││
+│   │   │(No API Key) │  │(API Key Req)│  │(API Key Req)│   ││
+│   │   │ Get LLM via │  │  Direct     │  │  Direct     │   ││
+│   │   │ Claude Code │  │  Calling    │  │  Calling    │   ││
 │   │   └─────────────┘  └─────────────┘  └─────────────┘   ││
 │   │                                                        ││
 │   └────────────────────────────────────────────────────────┘│
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 
-独立编排模式：Plan Cascade = 完整编排 + 工具执行 + LLM 思考
-Claude Code GUI 模式：Plan Cascade = Claude Code 的可视化界面
+Standalone Orchestration Mode: Plan Cascade = Complete orchestration + Tool execution + LLM thinking
+Claude Code GUI Mode: Plan Cascade = Visual interface for Claude Code
 ```
 
-### 1.4 目标用户
+### 1.4 Target Users
 
-| 用户群体 | 场景 | 痛点 | 解决方案 |
-|----------|------|------|----------|
-| **Claude Max 会员** | 有 Max 订阅但无 API Key | Claude Code Plugin 使用复杂 | 独立编排模式 + Claude Code LLM 后端 |
-| **新手开发者** | 想用 AI 辅助开发 | Claude Code CLI 学习成本高 | 简单模式一键完成 |
-| **资深开发者** | 需要精细控制 | 现有工具控制力不足 | 专家模式自定义 |
-| **小型团队** | 统一工具链 | 不同成员用不同 LLM | 多后端支持 |
-| **企业用户** | 数据安全要求 | 需要私有部署 | 支持本地模型 |
+| User Group | Scenario | Pain Point | Solution |
+|------------|----------|------------|----------|
+| **Claude Max Members** | Have Max subscription but no API Key | Claude Code Plugin is complex to use | Standalone orchestration mode + Claude Code LLM backend |
+| **New Developers** | Want AI-assisted development | Claude Code CLI has high learning curve | Simple mode one-click completion |
+| **Senior Developers** | Need fine-grained control | Existing tools lack control | Expert mode customization |
+| **Small Teams** | Unified toolchain | Different members use different LLMs | Multi-backend support |
+| **Enterprise Users** | Data security requirements | Need private deployment | Local model support |
 
 ---
 
-## 2. 核心设计理念
+## 2. Core Design Philosophy
 
-### 2.1 易用性优先
+### 2.1 Usability First
 
-**设计原则**：用户只需描述想做什么，系统自动处理一切。
+**Design Principle**: Users only need to describe what they want to do, the system automatically handles everything.
 
 ```
-用户输入
+User Input
    │
    ▼
-"帮我做一个用户登录功能，要支持 OAuth 和手机验证码"
+"Help me implement user login functionality, supporting OAuth and SMS verification"
    │
    ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Plan Cascade 自动处理                     │
+│                    Plan Cascade Auto-Processing              │
 │                                                              │
-│   ✓ 判断任务规模 → 自动选择执行策略                         │
-│   ✓ 生成 PRD 和 Stories                                     │
-│   ✓ 分析依赖关系 → 安排执行批次                             │
-│   ✓ 选择合适的 Agent                                        │
-│   ✓ 并行执行任务                                            │
-│   ✓ 自动质量检查和重试                                      │
+│   ✓ Determine task scale → Auto-select execution strategy   │
+│   ✓ Generate PRD and Stories                                 │
+│   ✓ Analyze dependencies → Arrange execution batches         │
+│   ✓ Select appropriate Agent                                 │
+│   ✓ Execute tasks in parallel                                │
+│   ✓ Auto quality check and retry                             │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
    │
    ▼
-完成
+Complete
 ```
 
-**用户不需要理解**：Mega Plan、Hybrid Ralph、Worktree、批次依赖等内部概念。
+**Users don't need to understand**: Mega Plan, Hybrid Ralph, Worktree, batch dependencies, and other internal concepts.
 
-### 2.2 双模式设计
+### 2.2 Dual-Mode Design
 
-#### 简单模式（默认）
+#### Simple Mode (Default)
 
-面向：新手用户、快速任务
+For: New users, quick tasks
 
 ```
-┌─ 简单模式 ──────────────────────────────────────────────────┐
+┌─ Simple Mode ────────────────────────────────────────────────┐
 │                                                              │
-│   描述你想要实现的功能：                                     │
+│   Describe the functionality you want to implement:          │
 │   ┌────────────────────────────────────────────────────────┐│
-│   │ 实现用户登录功能，支持 OAuth 和手机验证码               ││
+│   │ Implement user login functionality, support OAuth and   ││
+│   │ SMS verification                                        ││
 │   └────────────────────────────────────────────────────────┘│
 │                                                              │
-│                              [开始] ← 一键启动，自动完成全部 │
+│                              [Start] ← One-click, auto-      │
+│                                        completes everything  │
 │                                                              │
 │  ────────────────────────────────────────────────────────── │
 │                                                              │
-│   执行中...                                                  │
+│   Executing...                                               │
 │   ┌────────────────────────────────────────────────────────┐│
-│   │ ✓ 生成计划 (5 个任务)                                  ││
-│   │ ✓ Batch 1: 数据库 Schema, API 路由 (2/2)               ││
-│   │ ⟳ Batch 2: OAuth 登录, 手机验证码 (1/2)                ││
-│   │ ○ Batch 3: 集成测试                                    ││
+│   │ ✓ Generate plan (5 tasks)                              ││
+│   │ ✓ Batch 1: Database Schema, API routes (2/2)           ││
+│   │ ⟳ Batch 2: OAuth login, SMS verification (1/2)         ││
+│   │ ○ Batch 3: Integration tests                           ││
 │   └────────────────────────────────────────────────────────┘│
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-#### 专家模式
+#### Expert Mode
 
-面向：资深用户、需要精细控制
+For: Senior users, needs fine-grained control
 
 ```
-┌─ 专家模式 ──────────────────────────────────────────────────┐
+┌─ Expert Mode ────────────────────────────────────────────────┐
 │                                                              │
-│  ┌─ Step 1: 需求输入 ──────────────────────────────────────┐│
-│  │ 实现用户登录功能，支持 OAuth 和手机验证码               ││
+│  ┌─ Step 1: Requirement Input ───────────────────────────────┐│
+│  │ Implement user login functionality, support OAuth and SMS ││
 │  └────────────────────────────────────────────────────────┘│
-│                                            [生成 PRD]       │
+│                                            [Generate PRD]    │
 │                                                              │
-│  ┌─ Step 2: Review PRD ────────────────────────────────────┐│
+│  ┌─ Step 2: Review PRD ──────────────────────────────────────┐│
 │  │                                                          ││
-│  │  执行策略:                        AI 建议: Hybrid Auto  ││
-│  │  ○ 直接执行   ● Hybrid Auto   ○ Mega Plan              ││
+│  │  Execution Strategy:              AI Suggests: Hybrid Auto ││
+│  │  ○ Direct Execute   ● Hybrid Auto   ○ Mega Plan          ││
 │  │                                                          ││
-│  │  □ 使用 Git Worktree 隔离开发                           ││
+│  │  □ Use Git Worktree for isolated development             ││
 │  │                                                          ││
-│  │  Stories:                                    [+ 添加]   ││
+│  │  Stories:                                    [+ Add]     ││
 │  │  ┌────────────────────────────────────────────────────┐ ││
-│  │  │ □ 设计数据库 Schema                                │ ││
-│  │  │   Priority: high  │  Agent: [claude-code ▼]        │ ││
-│  │  │   Dependencies: none                    [编辑][删除]│ ││
+│  │  │ □ Design database Schema                            │ ││
+│  │  │   Priority: high  │  Agent: [claude-code ▼]         │ ││
+│  │  │   Dependencies: none                    [Edit][Delete]│ ││
 │  │  ├────────────────────────────────────────────────────┤ ││
-│  │  │ □ 实现 OAuth 登录                                  │ ││
-│  │  │   Priority: medium │  Agent: [aider ▼]             │ ││
-│  │  │   Dependencies: [Schema ▼]              [编辑][删除]│ ││
+│  │  │ □ Implement OAuth login                              │ ││
+│  │  │   Priority: medium │  Agent: [aider ▼]               │ ││
+│  │  │   Dependencies: [Schema ▼]              [Edit][Delete]│ ││
 │  │  └────────────────────────────────────────────────────┘ ││
 │  │                                                          ││
-│  │  质量门控: [✓] TypeCheck  [✓] Test  [✓] Lint  [ ] Custom ││
+│  │  Quality Gates: [✓] TypeCheck  [✓] Test  [✓] Lint  [ ] Custom ││
 │  │                                                          ││
 │  └──────────────────────────────────────────────────────────┘│
 │                                                              │
-│                              [保存草稿]  [开始执行]          │
+│                              [Save Draft]  [Start Execution] │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-#### 模式对比
+#### Mode Comparison
 
-| 功能 | 简单模式 | 专家模式 |
-|------|----------|----------|
-| 需求输入 | ✓ | ✓ |
-| 自动生成 PRD | ✓ (直接执行) | ✓ (可编辑) |
-| Review/编辑 PRD | ✗ | ✓ |
-| 选择执行策略 | ✗ (AI 自动) | ✓ |
-| 指定 Agent | ✗ (自动) | ✓ |
-| 调整依赖关系 | ✗ | ✓ |
-| 自定义质量门控 | ✗ (使用默认) | ✓ |
-| 执行监控 | 简化视图 | 详细视图 |
-| 日志查看 | 仅错误 | 完整日志 |
+| Feature | Simple Mode | Expert Mode |
+|---------|-------------|-------------|
+| Requirement Input | ✓ | ✓ |
+| Auto-generate PRD | ✓ (direct execute) | ✓ (editable) |
+| Review/Edit PRD | ✗ | ✓ |
+| Select Execution Strategy | ✗ (AI auto) | ✓ |
+| Specify Agent | ✗ (auto) | ✓ |
+| Adjust Dependencies | ✗ | ✓ |
+| Custom Quality Gates | ✗ (use default) | ✓ |
+| Execution Monitoring | Simplified view | Detailed view |
+| Log Viewing | Errors only | Full logs |
 
-### 2.3 AI 自动判断执行策略
+### 2.3 AI Automatic Strategy Determination
 
-简单模式下，AI 根据用户需求自动选择最佳执行策略：
+In simple mode, AI automatically selects the best execution strategy based on user requirements:
 
 ```
-用户输入                              AI 判断                    内部执行
+User Input                            AI Determination           Internal Execution
 ───────────────────────────────────────────────────────────────────────────
-"添加一个退出按钮"            →   小任务              →   直接执行（无 PRD）
+"Add an exit button"              →   Small task            →   Direct execution (no PRD)
 
-"实现用户登录功能"            →   中等功能            →   Hybrid Auto
-                                                          (自动生成 PRD)
+"Implement user login             →   Medium feature        →   Hybrid Auto
+ functionality"                                                  (auto-generate PRD)
 
-"开发一个博客系统，           →   大型项目            →   Mega Plan
- 包含用户、文章、评论"                                    (多 PRD 级联)
+"Develop a blog system            →   Large project         →   Mega Plan
+ with users, articles, comments"                                 (multi-PRD cascade)
 
-"重构支付模块，               →   需要隔离            →   Hybrid Worktree
- 不要影响现有功能"                                        (Git 隔离开发)
+"Refactor payment module,         →   Requires isolation    →   Hybrid Worktree
+ don't affect existing                                          (Git isolated development)
+ functionality"
 ```
 
-**判断维度**：
-1. **任务规模**：单一任务 / 多功能 / 完整项目
-2. **复杂度**：是否需要分解为多个 Stories
-3. **风险程度**：是否需要隔离开发
-4. **依赖关系**：是否有跨模块依赖
+**Determination Dimensions**:
+1. **Task Scale**: Single task / Multiple features / Complete project
+2. **Complexity**: Whether decomposition into multiple Stories is needed
+3. **Risk Level**: Whether isolated development is needed
+4. **Dependencies**: Whether there are cross-module dependencies
 
-### 2.4 核心架构理念（必须保留）
+### 2.4 Core Architecture Philosophy (Must Preserve)
 
-#### 层层分解
+#### Hierarchical Decomposition
 
 ```
-项目 (Mega Plan)
+Project (Mega Plan)
    │
-   ├── 功能1 (Hybrid Ralph / PRD)
+   ├── Feature 1 (Hybrid Ralph / PRD)
    │      ├── Story 1.1
    │      ├── Story 1.2
    │      └── Story 1.3
    │
-   └── 功能2 (Hybrid Ralph / PRD)
+   └── Feature 2 (Hybrid Ralph / PRD)
           ├── Story 2.1
           └── Story 2.2
 ```
 
-#### 并行执行
+#### Parallel Execution
 
 ```
-批次1: [Story A, Story B, Story C]  ← 无依赖，并行执行
-           ↓ 全部完成
-批次2: [Story D, Story E]           ← 依赖批次1，并行执行
-           ↓ 全部完成
-批次3: [Story F]                    ← 依赖批次2
+Batch 1: [Story A, Story B, Story C]  ← No dependencies, parallel execution
+           ↓ All complete
+Batch 2: [Story D, Story E]           ← Depends on Batch 1, parallel execution
+           ↓ All complete
+Batch 3: [Story F]                    ← Depends on Batch 2
 ```
 
-#### 多 Agent 协作
+#### Multi-Agent Collaboration
 
-- 根据任务类型自动选择最优 Agent
-- 支持 Agent 降级链（主 Agent 不可用时自动切换）
-- 支持阶段化 Agent 配置
+- Auto-select optimal Agent based on task type
+- Support Agent fallback chain (auto-switch when primary Agent unavailable)
+- Support phased Agent configuration
 
-#### 质量保障
+#### Quality Assurance
 
-- **质量门控**: typecheck、test、lint、custom
-- **智能重试**: 失败后自动重试，注入失败上下文
-- **可配置**: 门控类型、重试次数均可配置
+- **Quality Gates**: typecheck, test, lint, custom
+- **Smart Retry**: Auto-retry on failure, inject failure context
+- **Configurable**: Gate types, retry counts all configurable
 
-#### 状态追踪
+#### State Tracking
 
-- **基于文件的状态共享**: prd.json、.agent-status.json
-- **发现共享**: findings.md 记录开发过程中的发现
-- **断点恢复**: 中断后可从上次状态继续
+- **File-based State Sharing**: prd.json, .agent-status.json
+- **Finding Sharing**: findings.md records discoveries during development
+- **Checkpoint Recovery**: Can resume from last state after interruption
 
 ---
 
-## 3. 产品形态
+## 3. Product Forms
 
-### 3.1 三形态统一架构
+### 3.1 Three Forms Unified Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -335,11 +343,15 @@ Claude Code GUI 模式：Plan Cascade = Claude Code 的可视化界面
 ├───────────────────┬───────────────────┬─────────────────────┤
 │   Desktop (GUI)   │      CLI          │  Claude Code Plugin │
 ├───────────────────┼───────────────────┼─────────────────────┤
-│ • CLI 的图形版本  │ • 命令行操作      │ • 依赖 Claude Code   │
-│ • 简单/专家模式   │ • 简单/专家模式   │ • 作为插件运行       │
-│ • 交互式 REPL     │ • 交互式 REPL     │ • Slash 命令调用     │
-│ • Claude Code     │ • pip install     │                     │
-│   GUI 模式可选    │   plan-cascade    │                     │
+│ • GUI version of  │ • Command line    │ • Depends on Claude │
+│   CLI             │   operation       │   Code              │
+│ • Simple/Expert   │ • Simple/Expert   │ • Runs as plugin    │
+│   modes           │   modes           │ • Slash command     │
+│ • Interactive     │ • Interactive     │   invocation        │
+│   REPL            │   REPL            │                     │
+│ • Optional        │ • pip install     │                     │
+│   Claude Code     │   plan-cascade    │                     │
+│   GUI mode        │                   │                     │
 └───────────────────┴───────────────────┴─────────────────────┘
                            │
                            ▼
@@ -347,300 +359,244 @@ Claude Code GUI 模式：Plan Cascade = Claude Code 的可视化界面
 │                   Plan Cascade Core                          │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │ 工具执行引擎  │  │ ReAct 循环   │  │ PRD 生成器   │       │
-│  │ Read/Write   │  │ Think→Act   │  │ 策略分析     │       │
-│  │ Edit/Bash    │  │ →Observe    │  │ 批次编排     │       │
-│  │ Glob/Grep    │  │             │  │              │       │
+│  │ Tool Execution│  │ ReAct Loop   │  │ PRD Generator│       │
+│  │ Engine       │  │ Think→Act    │  │ Strategy     │       │
+│  │ Read/Write   │  │ →Observe     │  │ Analysis     │       │
+│  │ Edit/Bash    │  │             │  │ Batch        │       │
+│  │ Glob/Grep    │  │             │  │ Orchestration│       │
 │  └──────────────┘  └──────────────┘  └──────────────┘       │
 │                           │                                  │
 │                           ▼                                  │
 │           ┌─────────────────────────────┐                   │
-│           │      LLM 抽象层             │                   │
+│           │      LLM Abstraction Layer  │                   │
 │           │  Claude Max | API | OpenAI  │                   │
 │           └─────────────────────────────┘                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Desktop 定位
+### 3.2 Desktop Positioning
 
-**Desktop = CLI 的 GUI 版本**
+**Desktop = GUI Version of CLI**
 
-Desktop 提供与 CLI 完全相同的功能，以图形界面呈现：
-- 可视化的需求输入和执行监控
-- PRD 编辑器（拖拽、依赖关系可视化）
-- 实时工具调用展示
-- 文件变更预览
+Desktop provides the same functionality as CLI, presented in a graphical interface:
+- Visual requirement input and execution monitoring
+- PRD editor (drag-and-drop, dependency visualization)
+- Real-time tool call display
+- File change preview
 
-**可选：Claude Code GUI 模式**
+**Optional: Claude Code GUI Mode**
 
-Desktop 可作为 Claude Code 的完整图形界面：
-- 对话视图（与 Claude Code 交互）
-- 工具调用可视化
-- 兼容 Claude Code 所有功能
+Desktop can serve as complete graphical interface for Claude Code:
+- Chat view (interact with Claude Code)
+- Tool call visualization
+- Compatible with all Claude Code features
 
-### 3.3 发布产物
+### 3.3 Release Artifacts
 
-| 产物 | 说明 | 目标用户 |
-|------|------|----------|
-| **Desktop** | Windows/macOS/Linux 安装包 | 希望图形界面的用户 |
-| **CLI** | `pip install plan-cascade` | 喜欢命令行的开发者 |
-| **Claude Code Plugin** | 现有 Plugin (保持兼容) | Claude Code 深度用户 |
-| **Python 包** | `plan-cascade-core` | 集成到其他工具的开发者 |
+| Artifact | Description | Target Users |
+|----------|-------------|--------------|
+| **Desktop** | Windows/macOS/Linux installers | Users wanting graphical interface |
+| **CLI** | `pip install plan-cascade` | Developers preferring command line |
+| **Claude Code Plugin** | Existing Plugin (maintain compatibility) | Claude Code power users |
+| **Python Package** | `plan-cascade-core` | Developers integrating into other tools |
 
 ---
 
-## 4. 功能需求
+## 4. Feature Requirements
 
-### 4.1 工作模式选择 (P0)
+### 4.1 Working Mode Selection (P0)
 
-#### 独立编排模式（推荐）
+#### Standalone Orchestration Mode (Recommended)
 
-Plan Cascade 作为完整的编排层，自己执行所有工具：
+Plan Cascade as complete orchestration layer, executing all tools itself:
 
 ```
-┌─ 设置 ──────────────────────────────────────────────────────┐
+┌─ Settings ───────────────────────────────────────────────────┐
 │                                                              │
-│  工作模式：                                                  │
+│  Working Mode:                                               │
 │                                                              │
-│  ● 独立编排模式（推荐）                                      │
-│    └─ Plan Cascade 自己执行所有工具（Read/Write/Edit/Bash） │
-│    └─ LLM 只提供思考，Plan Cascade 执行动作                 │
-│    └─ 支持完整的 PRD 驱动开发流程                           │
+│  ● Standalone Orchestration Mode (Recommended)               │
+│    └─ Plan Cascade executes all tools itself                │
+│       (Read/Write/Edit/Bash)                                │
+│    └─ LLM only provides thinking, Plan Cascade executes     │
+│       actions                                               │
+│    └─ Supports complete PRD-driven development flow         │
 │                                                              │
-│  ○ Claude Code GUI 模式                                      │
-│    └─ Plan Cascade 作为 Claude Code 的图形界面              │
-│    └─ Claude Code 执行工具，Plan Cascade 提供可视化         │
-│    └─ 兼容 Claude Code 所有功能                              │
+│  ○ Claude Code GUI Mode                                      │
+│    └─ Plan Cascade as graphical interface for Claude Code   │
+│    └─ Claude Code executes tools, Plan Cascade provides     │
+│       visualization                                         │
+│    └─ Compatible with all Claude Code features              │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-#### 独立编排模式：LLM 后端选择
+#### Standalone Mode: LLM Backend Selection
 
 ```
-┌─ LLM 后端选择 ───────────────────────────────────────────────┐
+┌─ LLM Backend Selection ───────────────────────────────────────┐
 │                                                              │
-│  ● Claude Max（无需 API Key）                                │
-│    └─ 通过本地 Claude Code 获取 LLM 能力                    │
-│    └─ 适合：已购买 Claude Max 但无 API Key 的用户           │
+│  ● Claude Max (No API Key Required)                          │
+│    └─ Get LLM capability through local Claude Code           │
+│    └─ Suitable for: Users with Claude Max but no API Key     │
 │                                                              │
 │  ○ Claude API                                                │
-│    └─ 直接调用 Anthropic API                                 │
-│    └─ 需要配置 API Key                                       │
+│    └─ Direct Anthropic API calls                             │
+│    └─ Requires API Key configuration                         │
 │                                                              │
 │  ○ OpenAI                                                    │
-│    └─ 使用 GPT-4o 等模型                                     │
-│    └─ 需要配置 API Key                                       │
+│    └─ Use GPT-4o and other models                           │
+│    └─ Requires API Key configuration                         │
 │                                                              │
 │  ○ DeepSeek                                                  │
-│    └─ 国内用户推荐                                           │
-│    └─ 需要配置 API Key                                       │
+│    └─ Recommended for users in China                         │
+│    └─ Requires API Key configuration                         │
 │                                                              │
 │  ○ Ollama                                                    │
-│    └─ 本地模型，完全离线                                     │
-│    └─ 需要配置 Ollama 地址                                   │
+│    └─ Local models, completely offline                       │
+│    └─ Requires Ollama address configuration                  │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**两种工作模式的本质区别**：
+**Essential Difference Between Two Working Modes**:
 
-| | 独立编排模式 | Claude Code GUI 模式 |
+| | Standalone Orchestration Mode | Claude Code GUI Mode |
 |---|---|---|
-| **编排层** | Plan Cascade | Plan Cascade |
-| **工具执行** | Plan Cascade 自己执行 | Claude Code 执行 |
-| **LLM 来源** | 多种（Claude Max/API/OpenAI 等） | Claude Code |
-| **PRD 驱动** | ✅ 支持 | ✅ 支持 |
-| **批次执行** | ✅ 支持 | ✅ 支持 |
-| **适用场景** | 需要其他 LLM 或离线使用 | 有 Claude Max/Code 订阅 |
+| **Orchestration Layer** | Plan Cascade | Plan Cascade |
+| **Tool Execution** | Plan Cascade executes itself | Claude Code executes |
+| **LLM Source** | Multiple (Claude Max/API/OpenAI etc.) | Claude Code |
+| **PRD-Driven** | ✅ Supported | ✅ Supported |
+| **Batch Execution** | ✅ Supported | ✅ Supported |
+| **Use Case** | Need other LLMs or offline use | Have Claude Max/Code subscription |
 
-**核心理念：Plan Cascade = 大脑（编排），执行层 = 手（工具执行）**
+**Core Philosophy: Plan Cascade = Brain (Orchestration), Execution Layer = Hands (Tool Execution)**
 
-两种模式都由 Plan Cascade 控制编排流程（PRD 生成、依赖分析、批次调度），区别只在于谁执行工具：
-- 独立模式：Plan Cascade 内置工具引擎执行
-- GUI 模式：Claude Code CLI 执行
+Both modes are controlled by Plan Cascade for the orchestration workflow (PRD generation, dependency analysis, batch scheduling), the difference is only who executes tools:
+- Standalone mode: Plan Cascade built-in tool engine executes
+- GUI mode: Claude Code CLI executes
 
-#### 独立编排模式：Claude Max LLM 后端原理
+#### Supported LLM Backends
 
-对于购买了 Claude Max 但没有 API Key 的用户：
+| Backend | Priority | Requires API Key | Notes |
+|---------|----------|-----------------|-------|
+| Claude Max | P0 | No | Get LLM via Claude Code, suitable for Max members |
+| Claude API | P0 | Yes | Direct Anthropic API calls |
+| OpenAI | P0 | Yes | GPT-4o and other models |
+| DeepSeek | P1 | Yes | Users in China |
+| Ollama | P2 | No | Local models |
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    独立编排模式                              │
-│              Claude Max LLM 后端                             │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│   Plan Cascade                      Claude Code (后台)       │
-│   ┌────────────┐                   ┌────────────┐           │
-│   │ 编排引擎   │                   │            │           │
-│   │ ──────────│                   │ 只提供     │           │
-│   │ PRD 生成  │ ─── prompt ────→  │ LLM 思考   │           │
-│   │ 策略分析  │ ←── response ───  │            │           │
-│   │ 批次执行  │                   │ (禁用工具) │           │
-│   └────────────┘                   └────────────┘           │
-│        │                                                    │
-│        ▼                                                    │
-│   ┌────────────┐                                            │
-│   │ 工具执行   │  Plan Cascade 自己执行                     │
-│   │ ──────────│                                            │
-│   │ Read/Write │                                            │
-│   │ Edit/Bash  │                                            │
-│   │ Glob/Grep  │                                            │
-│   └────────────┘                                            │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+### 4.2 Multi-Agent Collaboration (P0)
 
-关键：Claude Code 只作为 LLM 后端，不执行工具
-```
+Plan Cascade supports multiple Agents working collaboratively, intelligently assigning different tasks to the most suitable Agent:
 
-#### 支持的 LLM 后端
+#### Supported Execution Agents
 
-| 后端 | 优先级 | 需要 API Key | 说明 |
-|------|--------|--------------|------|
-| Claude Max | P0 | 否 | 通过 Claude Code 获取 LLM，适合 Max 会员 |
-| Claude API | P0 | 是 | 直接调用 Anthropic API |
-| OpenAI | P0 | 是 | GPT-4o 等模型 |
-| DeepSeek | P1 | 是 | 国内用户 |
-| Ollama | P2 | 否 | 本地模型 |
-
-### 4.2 多 Agent 协同 (P0)
-
-Plan Cascade 支持多种 Agent 协同工作，智能分配不同任务给最适合的 Agent：
-
-#### 支持的执行 Agent
-
-| Agent | 类型 | 说明 |
-|-------|------|------|
-| claude-code | Task Tool / CLI | 默认 Agent，内置或通过 Claude Code CLI |
+| Agent | Type | Description |
+|-------|------|-------------|
+| claude-code | Task Tool / CLI | Default Agent, built-in or via Claude Code CLI |
 | codex | CLI | OpenAI Codex CLI |
-| aider | CLI | AI 结对编程助手 |
+| aider | CLI | AI pair programming assistant |
 | amp-code | CLI | Amp Code CLI |
 | cursor-cli | CLI | Cursor CLI |
 
-#### 基于阶段的 Agent 分配
+#### Phase-Based Agent Assignment
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    多 Agent 协同                             │
+│                    Multi-Agent Collaboration                 │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   执行阶段              默认 Agent        回退链             │
+│   Execution Phase           Default Agent    Fallback Chain  │
 │   ─────────────────────────────────────────────────────────  │
-│   Planning (规划)       codex           → claude-code        │
-│   Implementation (实现)  claude-code     → codex → aider     │
-│   Retry (重试)          claude-code     → aider              │
-│   Refactor (重构)       aider           → claude-code        │
-│   Review (审查)         claude-code     → codex              │
+│   Planning                  codex           → claude-code    │
+│   Implementation            claude-code     → codex → aider  │
+│   Retry                     claude-code     → aider          │
+│   Refactor                  aider           → claude-code    │
+│   Review                    claude-code     → codex          │
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   Story 类型            默认 Agent                           │
+│   Story Type                Default Agent                    │
 │   ─────────────────────────────────────────────────────────  │
-│   feature (功能)        claude-code                          │
-│   bugfix (修复)         codex                                │
-│   refactor (重构)       aider                                │
-│   test (测试)           claude-code                          │
+│   feature                   claude-code                      │
+│   bugfix                    codex                            │
+│   refactor                  aider                            │
+│   test                      claude-code                      │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-#### Agent 解析优先级
+#### Agent Resolution Priority
 
 ```
-1. --agent 命令参数 (显式覆盖)
-2. 阶段特定参数 (--impl-agent, --planning-agent)
-3. Story 中指定的 agent
-4. Story 类型覆盖 (bugfix → codex, refactor → aider)
-5. 阶段默认 Agent
-6. 回退链 (如果 Agent 不可用)
-7. claude-code (终极回退，始终可用)
+1. --agent command parameter (explicit override)
+2. Phase-specific parameters (--impl-agent, --planning-agent)
+3. Agent specified in Story
+4. Story type override (bugfix → codex, refactor → aider)
+5. Phase default Agent
+6. Fallback chain (if Agent unavailable)
+7. claude-code (ultimate fallback, always available)
 ```
 
-#### 配置文件 (agents.json)
+### 4.3 Simple Mode Features (P0)
 
-```json
-{
-  "default_agent": "claude-code",
-  "agents": {
-    "claude-code": {"type": "task-tool"},
-    "codex": {"type": "cli", "command": "codex"},
-    "aider": {"type": "cli", "command": "aider"}
-  },
-  "phase_defaults": {
-    "implementation": {
-      "default_agent": "claude-code",
-      "fallback_chain": ["codex", "aider"],
-      "story_type_overrides": {"refactor": "aider", "bugfix": "codex"}
-    }
-  }
-}
-```
-
-**两种模式下的多 Agent 支持**：
-
-| 模式 | Agent 类型 | 说明 |
-|------|-----------|------|
-| 独立编排模式 | 内置 ReAct + CLI Agents | 内置引擎作为默认，可调用外部 CLI Agent |
-| Claude Code GUI 模式 | Claude Code + CLI Agents | Claude Code 作为默认，可调用外部 CLI Agent |
-
-### 4.2 简单模式功能 (P0)
-
-#### 一键式工作流
+#### One-Click Workflow
 
 ```bash
 # CLI
-plan-cascade "实现用户登录功能，支持 OAuth"
-# 自动完成：分析 → 生成计划 → 执行 → 质量检查
+plan-cascade "Implement user login functionality, support OAuth"
+# Auto-completes: analyze → generate plan → execute → quality check
 
 # GUI
-# 输入描述 → 点击"开始" → 等待完成
+# Enter description → Click "Start" → Wait for completion
 ```
 
-#### 简化状态展示
+#### Simplified Status Display
 
 ```
-执行中...
+Executing...
 
 [████████████░░░░░░░░] 60%
 
-✓ 生成计划 (5 个任务)
-✓ 数据库 Schema
-✓ API 路由结构
-⟳ OAuth 登录 (执行中...)
-○ 手机验证码登录
-○ 集成测试
+✓ Generate plan (5 tasks)
+✓ Database Schema
+✓ API route structure
+⟳ OAuth login (in progress...)
+○ SMS verification login
+○ Integration tests
 ```
 
-### 4.3 专家模式功能 (P0)
+### 4.4 Expert Mode Features (P0)
 
-#### PRD 编辑器
+#### PRD Editor
 
-- 可视化编辑 Stories
-- 拖拽调整顺序
-- 设置依赖关系
-- 指定执行 Agent
+- Visually edit Stories
+- Drag-and-drop to adjust order
+- Set dependencies
+- Specify execution Agent
 
-#### 执行策略选择
-
-```
-执行策略:                           AI 建议: Hybrid Auto
-○ 直接执行（简单任务，无需 PRD）
-● Hybrid Auto（自动生成 PRD 并执行）
-○ Mega Plan（大型项目，多个 PRD）
-
-隔离选项:
-□ 使用 Git Worktree 隔离开发
-```
-
-#### Agent 指定
-
-每个 Story 可以指定不同的 Agent：
+#### Execution Strategy Selection
 
 ```
-┌─ Story: 实现 OAuth 登录 ─────────────────────────────────────┐
+Execution Strategy:                    AI Suggests: Hybrid Auto
+○ Direct Execute (simple task, no PRD needed)
+● Hybrid Auto (auto-generate PRD and execute)
+○ Mega Plan (large project, multiple PRDs)
+
+Isolation Options:
+□ Use Git Worktree for isolated development
+```
+
+#### Agent Specification
+
+Each Story can specify a different Agent:
+
+```
+┌─ Story: Implement OAuth login ───────────────────────────────┐
 │                                                              │
 │  Agent: [claude-code ▼]                                      │
-│         ├─ claude-code (推荐)                                │
+│         ├─ claude-code (recommended)                         │
 │         ├─ aider                                             │
 │         ├─ codex                                             │
 │         └─ builtin                                           │
@@ -648,16 +604,16 @@ plan-cascade "实现用户登录功能，支持 OAuth"
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### 4.4 设置页面 (P0)
+### 4.5 Settings Page (P0)
 
-#### Agent 配置
+#### Agent Configuration
 
 ```
-┌─ 设置 > Agent 配置 ─────────────────────────────────────────┐
+┌─ Settings > Agent Configuration ─────────────────────────────┐
 │                                                              │
-│  主后端（编排用）                                            │
+│  Primary Backend (for orchestration)                         │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ ● Claude Code（推荐，无需配置）                        │ │
+│  │ ● Claude Code (recommended, no configuration needed)   │ │
 │  │ ○ Claude API    [API Key: ••••••••••]                  │ │
 │  │ ○ OpenAI        [API Key: ••••••••••] [Model: gpt-4o ▼]│ │
 │  │ ○ DeepSeek      [API Key: ••••••••••]                  │ │
@@ -666,288 +622,245 @@ plan-cascade "实现用户登录功能，支持 OAuth"
 │                                                              │
 │  ───────────────────────────────────────────────────────────│
 │                                                              │
-│  执行 Agent（Story 执行用）                      [+ 添加]   │
+│  Execution Agents (for Story execution)           [+ Add]    │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ ✓ claude-code                              [默认]      │ │
-│  │   └─ 路径: claude                                      │ │
+│  │ ✓ claude-code                              [Default]   │ │
+│  │   └─ Path: claude                                      │ │
 │  ├────────────────────────────────────────────────────────┤ │
-│  │ ✓ aider                                    [配置]      │ │
-│  │   └─ 命令: aider --model gpt-4o                        │ │
+│  │ ✓ aider                                    [Configure] │ │
+│  │   └─ Command: aider --model gpt-4o                     │ │
 │  ├────────────────────────────────────────────────────────┤ │
-│  │ □ codex (未配置)                           [配置]      │ │
+│  │ □ codex (not configured)                   [Configure] │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                                                              │
-│  Agent 自动选择策略:                                         │
-│  ○ 智能匹配（根据任务类型自动选择）                          │
-│  ● 优先使用: [claude-code ▼]                                │
-│  ○ 手动指定（每个 Story 单独选择）                          │
+│  Agent Auto-Selection Strategy:                              │
+│  ○ Smart matching (auto-select based on task type)          │
+│  ● Prefer using: [claude-code ▼]                            │
+│  ○ Manual specification (select for each Story individually)│
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-#### 质量门控配置
+#### Quality Gate Configuration
 
 ```
-┌─ 设置 > 质量门控 ───────────────────────────────────────────┐
+┌─ Settings > Quality Gates ───────────────────────────────────┐
 │                                                              │
-│  默认启用的检查:                                             │
+│  Default enabled checks:                                     │
 │  [✓] TypeCheck (tsc / mypy / pyright)                       │
 │  [✓] Test (pytest / jest / npm test)                        │
 │  [✓] Lint (eslint / ruff)                                   │
 │  [ ] Custom                                                  │
 │                                                              │
-│  自定义脚本:                                                 │
+│  Custom script:                                              │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │ npm run validate                                        │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                                                              │
-│  重试设置:                                                   │
-│  最大重试次数: [3]                                           │
-│  重试间隔: [指数退避 ▼]                                     │
+│  Retry settings:                                             │
+│  Maximum retries: [3]                                        │
+│  Retry interval: [Exponential backoff ▼]                    │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### 4.5 CLI 功能 (P1)
+### 4.6 CLI Features (P1)
 
 ```bash
-# 简单模式（默认）
-plan-cascade "实现用户登录功能"
-# 自动完成全部流程
+# Simple mode (default)
+plan-cascade "Implement user login functionality"
+# Auto-completes entire flow
 
-# 专家模式
-plan-cascade --expert "实现用户登录功能"
+# Expert mode
+plan-cascade --expert "Implement user login functionality"
 
-# 专家模式交互
-$ plan-cascade --expert "实现用户登录"
-✓ 已生成 PRD (5 个 Stories)
+# Expert mode interaction
+$ plan-cascade --expert "Implement user login"
+✓ PRD generated (5 Stories)
 
-? 请选择操作:
-  > 查看/编辑 PRD
-    修改 Agent 分配
-    调整依赖关系
-    开始执行
-    保存草稿并退出
+? Select operation:
+  > View/Edit PRD
+    Modify Agent assignment
+    Adjust dependencies
+    Start execution
+    Save draft and exit
 
-# 分步命令
-plan-cascade generate "实现用户登录"  # 只生成 PRD
-plan-cascade review                    # 交互式编辑
-plan-cascade run                       # 执行
-plan-cascade status                    # 查看状态
+# Step-by-step commands
+plan-cascade generate "Implement user login"  # Only generate PRD
+plan-cascade review                           # Interactive editing
+plan-cascade run                              # Execute
+plan-cascade status                           # View status
 ```
 
-### 4.6 Claude Code GUI 模式 (P0)
+### 4.7 Interactive REPL Mode (P0)
 
-Claude Code GUI 模式下，Plan Cascade 控制编排流程，Claude Code 执行工具：
-
-```
-┌─ Plan Cascade (Claude Code GUI 模式) ───────────────────────┐
-│                                                              │
-│  ┌─ PRD 驱动开发 ───────────────────────────────────────┐   │
-│  │                                                      │   │
-│  │  ✓ Story 1: 创建数据库 Schema                        │   │
-│  │  ⟳ Story 2: 实现 API 端点 (执行中...)                │   │
-│  │  ○ Story 3: 添加前端表单 (等待依赖)                  │   │
-│  │                                                      │   │
-│  │  [Batch 1: 2/3] ████████░░░░ 66%                     │   │
-│  │                                                      │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                              │
-│  ┌─ Claude Code 执行 (可视化) ─────────────────────────┐    │
-│  │ ✓ Read src/auth/login.py                            │    │
-│  │ ✓ Read src/auth/oauth.py                            │    │
-│  │ ⟳ Edit src/auth/base.py                             │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                              │
-│  ┌─ 文件变更预览 ──────────────────────────────────────┐    │
-│  │ - old code                                          │    │
-│  │ + new code                                          │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**Claude Code GUI 模式特点**：
-- **完整支持 PRD 驱动开发**（Plan Cascade 编排，Claude Code 执行）
-- **完整支持批次执行**（依赖分析、并行执行）
-- 完整兼容 Claude Code 所有功能
-- 工具调用可视化（Claude Code 执行）
-- 文件变更实时预览
-- 质量门控和重试管理
-
-**适用场景**：
-- 有 Claude Max/Code 订阅
-- 需要 PRD 驱动的复杂任务分解
-- 希望可视化 Claude Code 的执行过程
-
-### 4.7 交互式 REPL 模式 (P0)
-
-CLI 和 Desktop 都支持交互式 REPL，实现连续对话：
+CLI and Desktop both support interactive REPL for continuous dialogue:
 
 ```
 ┌─ Plan Cascade REPL ─────────────────────────────────────────┐
 │                                                              │
-│  plan-cascade> 分析一下项目结构                              │
+│  plan-cascade> Analyze the project structure                 │
 │                                                              │
-│  [AI 分析并响应...]                                          │
+│  [AI analyzes and responds...]                               │
 │                                                              │
-│  plan-cascade> 基于上面的分析，实现用户登录功能              │
+│  plan-cascade> Based on the above analysis, implement user   │
+│                login functionality                           │
 │                                                              │
-│  [意图识别：TASK]                                            │
-│  [策略分析：hybrid_auto]                                     │
-│  [生成 PRD...]                                               │
-│  [执行中...]                                                 │
+│  [Intent recognition: TASK]                                  │
+│  [Strategy analysis: hybrid_auto]                            │
+│  [Generating PRD...]                                         │
+│  [Executing...]                                              │
 │                                                              │
 │  plan-cascade> /status                                       │
-│  当前会话：abc123                                            │
-│  模式：simple                                                │
-│  项目：/path/to/project                                      │
+│  Current session: abc123                                     │
+│  Mode: simple                                                │
+│  Project: /path/to/project                                   │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**REPL 特殊命令**：
-- `/exit`, `/quit` - 退出
-- `/clear` - 清空上下文
-- `/status` - 查看会话状态
-- `/mode [simple|expert]` - 切换模式
-- `/history` - 查看对话历史
-- `/config` - 配置管理
+**REPL Special Commands**:
+- `/exit`, `/quit` - Exit
+- `/clear` - Clear context
+- `/status` - View session status
+- `/mode [simple|expert]` - Switch mode
+- `/history` - View conversation history
+- `/config` - Configuration management
 
-**智能意图识别**：
-- 规则匹配 → LLM 分析 → 用户确认
-- 自动区分 TASK / QUERY / CHAT
+**Smart Intent Recognition**:
+- Rule matching → LLM analysis → User confirmation
+- Auto-distinguish TASK / QUERY / CHAT
 
 ---
 
-## 5. 非功能需求
+## 5. Non-Functional Requirements
 
-### 5.1 性能要求
+### 5.1 Performance Requirements
 
-| 指标 | 要求 |
-|------|------|
-| 启动时间 | < 3 秒 |
-| 内存占用 | < 500MB (空闲状态) |
-| 并行 Story 数 | 支持至少 5 个并行 |
-| API 超时 | 可配置，默认 5 分钟 |
+| Metric | Requirement |
+|--------|-------------|
+| Startup Time | < 3 seconds |
+| Memory Usage | < 500MB (idle state) |
+| Parallel Stories | Support at least 5 parallel |
+| API Timeout | Configurable, default 5 minutes |
 
-### 5.2 兼容性要求
+### 5.2 Compatibility Requirements
 
-| 平台 | 最低版本 |
-|------|----------|
+| Platform | Minimum Version |
+|----------|-----------------|
 | Windows | Windows 10 |
 | macOS | macOS 11 (Big Sur) |
-| Linux | Ubuntu 20.04 / 同等 |
+| Linux | Ubuntu 20.04 / equivalent |
 | Python | 3.10+ (CLI/Core) |
 
-### 5.3 安全要求
+### 5.3 Security Requirements
 
-- API Key 本地加密存储
-- 不上传用户代码到第三方服务（除 LLM API）
-- Shell 命令执行安全检查
-- 敏感文件保护（.env, credentials 等）
-
----
-
-## 6. 与竞品对比
-
-| 特性 | Plan Cascade | Claude Code CLI | Cursor | Aider |
-|------|--------------|-----------------|--------|-------|
-| **图形界面** | ✅ | ❌ | ✅ | ❌ |
-| **CLI 支持** | ✅ | ✅ | ❌ | ✅ |
-| **多 LLM 支持** | ✅ | ❌ | ❌ | ✅ |
-| **任务分解** | ✅ 自动 | ❌ 手动 | ❌ | ❌ |
-| **并行执行** | ✅ | ❌ | ❌ | ❌ |
-| **质量门控** | ✅ | ❌ | ❌ | ⚠️ |
-| **简单模式** | ✅ | ❌ | ✅ | ❌ |
-| **专家模式** | ✅ | ✅ | ❌ | ✅ |
-| **开箱即用** | ✅ | ⚠️ | ✅ | ⚠️ |
+- API Key local encrypted storage
+- Don't upload user code to third-party services (except LLM API)
+- Shell command execution safety checks
+- Sensitive file protection (.env, credentials, etc.)
 
 ---
 
-## 7. 里程碑计划
+## 6. Competitive Comparison
 
-### Phase 1: CLI + 双模式
-
-**目标**: 可独立运行的 CLI，支持简单/专家模式
-
-**功能范围**:
-- [ ] 核心包重构
-- [ ] LLM Provider 抽象层
-- [ ] 简单模式实现
-- [ ] 专家模式实现
-- [ ] AI 自动策略判断
-- [ ] 基础 CLI 命令
-
-### Phase 2: 桌面应用 Alpha
-
-**目标**: 图形化界面
-
-**功能范围**:
-- [ ] Tauri 桌面框架
-- [ ] 简单模式 UI
-- [ ] 专家模式 UI
-- [ ] 设置页面
-- [ ] Claude Code GUI 模式
-
-### Phase 3: 功能完善
-
-**目标**: 生产可用
-
-**功能范围**:
-- [ ] 完整 PRD 编辑器
-- [ ] 依赖关系可视化
-- [ ] 更多 LLM 后端
-- [ ] 自动更新
-
-### Phase 4: 高级功能
-
-**目标**: 差异化优势
-
-**功能范围**:
-- [ ] 多 Agent 协作
-- [ ] Git Worktree 集成
-- [ ] 团队协作
-- [ ] 插件系统
+| Feature | Plan Cascade | Claude Code CLI | Cursor | Aider |
+|---------|--------------|-----------------|--------|-------|
+| **GUI** | ✅ | ❌ | ✅ | ❌ |
+| **CLI Support** | ✅ | ✅ | ❌ | ✅ |
+| **Multi-LLM Support** | ✅ | ❌ | ❌ | ✅ |
+| **Task Decomposition** | ✅ Auto | ❌ Manual | ❌ | ❌ |
+| **Parallel Execution** | ✅ | ❌ | ❌ | ❌ |
+| **Quality Gates** | ✅ | ❌ | ❌ | ⚠️ |
+| **Simple Mode** | ✅ | ❌ | ✅ | ❌ |
+| **Expert Mode** | ✅ | ✅ | ❌ | ✅ |
+| **Out of Box** | ✅ | ⚠️ | ✅ | ⚠️ |
 
 ---
 
-## 8. 成功指标
+## 7. Milestone Plan
 
-| 指标 | 目标 |
-|------|------|
-| 用户上手时间 | < 5 分钟（简单模式） |
-| 任务完成率 | > 80%（简单任务） |
-| 用户留存 | 30% (月活跃) |
-| GitHub Stars | 1000+ (6个月内) |
+### Phase 1: CLI + Dual-Mode
+
+**Goal**: Independently runnable CLI, supporting simple/expert modes
+
+**Scope**:
+- [ ] Core package refactor
+- [ ] LLM Provider abstraction layer
+- [ ] Simple mode implementation
+- [ ] Expert mode implementation
+- [ ] AI auto strategy determination
+- [ ] Basic CLI commands
+
+### Phase 2: Desktop Application Alpha
+
+**Goal**: Graphical interface
+
+**Scope**:
+- [ ] Tauri desktop framework
+- [ ] Simple mode UI
+- [ ] Expert mode UI
+- [ ] Settings page
+- [ ] Claude Code GUI mode
+
+### Phase 3: Feature Completion
+
+**Goal**: Production ready
+
+**Scope**:
+- [ ] Complete PRD editor
+- [ ] Dependency visualization
+- [ ] More LLM backends
+- [ ] Auto-update
+
+### Phase 4: Advanced Features
+
+**Goal**: Differentiated advantages
+
+**Scope**:
+- [ ] Multi-Agent collaboration
+- [ ] Git Worktree integration
+- [ ] Team collaboration
+- [ ] Plugin system
 
 ---
 
-## 9. 附录
+## 8. Success Metrics
 
-### 9.1 术语表（用户手册中可隐藏）
+| Metric | Target |
+|--------|--------|
+| User Onboarding Time | < 5 minutes (simple mode) |
+| Task Completion Rate | > 80% (simple tasks) |
+| User Retention | 30% (monthly active) |
+| GitHub Stars | 1000+ (within 6 months) |
 
-| 术语 | 定义 | 用户是否需要理解 |
-|------|------|-----------------|
-| Mega Plan | 项目级别的规划 | 专家模式可选 |
-| Hybrid Ralph | PRD 驱动的开发模式 | 专家模式可选 |
-| Story | 最小可执行任务 | 专家模式需要 |
-| Batch | 可并行执行的任务集合 | 不需要 |
-| Quality Gate | 质量检查 | 设置中可配置 |
-| BuiltinAgent | 内置 Agent | 不需要 |
+---
 
-### 9.2 简单模式 vs 专家模式 快速参考
+## 9. Appendix
+
+### 9.1 Glossary (Can be hidden in user manual)
+
+| Term | Definition | User Needs to Understand |
+|------|------------|-------------------------|
+| Mega Plan | Project-level planning | Expert mode optional |
+| Hybrid Ralph | PRD-driven development mode | Expert mode optional |
+| Story | Minimum executable task | Expert mode required |
+| Batch | Set of tasks that can execute in parallel | Not needed |
+| Quality Gate | Quality check | Configurable in settings |
+| BuiltinAgent | Built-in Agent | Not needed |
+
+### 9.2 Simple Mode vs Expert Mode Quick Reference
 
 ```
-简单模式适合：
-✓ 新手用户
-✓ 快速原型
-✓ 单一功能开发
-✓ 不想配置的场景
+Simple Mode suitable for:
+✓ New users
+✓ Quick prototypes
+✓ Single feature development
+✓ Scenarios where configuration is unwanted
 
-专家模式适合：
-✓ 资深开发者
-✓ 复杂项目
-✓ 需要精细控制
-✓ 多人协作
+Expert Mode suitable for:
+✓ Senior developers
+✓ Complex projects
+✓ Need fine-grained control
+✓ Multi-person collaboration
 ```

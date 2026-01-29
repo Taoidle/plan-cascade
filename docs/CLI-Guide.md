@@ -1,160 +1,162 @@
+[中文版](CLI-Guide_zh.md)
+
 # Plan Cascade - CLI Guide
 
-**版本**: 4.0.0
-**最后更新**: 2026-01-29
+**Version**: 4.0.0
+**Last Updated**: 2026-01-29
 
-本文档详细介绍 Plan Cascade 独立 CLI 工具的使用方法。
+This document provides detailed instructions for using the Plan Cascade standalone CLI tool.
 
 ---
 
-## 安装
+## Installation
 
 ```bash
-# 从 PyPI 安装
+# Install from PyPI
 pip install plan-cascade
 
-# 安装带 LLM 支持
+# Install with LLM support
 pip install plan-cascade[llm]
 
-# 安装全部依赖
+# Install all dependencies
 pip install plan-cascade[all]
 ```
 
 ---
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 配置向导（首次使用）
+# Configuration wizard (first-time use)
 plan-cascade config --setup
 
-# 简单模式 - 一键执行
-plan-cascade run "实现用户登录功能"
+# Simple mode - one-click execution
+plan-cascade run "Implement user login functionality"
 
-# 专家模式 - 更多控制
-plan-cascade run "实现用户登录功能" --expert
+# Expert mode - more control
+plan-cascade run "Implement user login functionality" --expert
 
-# 交互式聊天模式
+# Interactive chat mode
 plan-cascade chat
 ```
 
 ---
 
-## 双模式设计
+## Dual-Mode Design
 
-### 简单模式（默认）
+### Simple Mode (Default)
 
-面向新手用户和快速任务，AI 自动判断策略并执行。
-
-```bash
-plan-cascade run "添加一个退出按钮"
-# → AI 判断：小任务 → 直接执行
-
-plan-cascade run "实现用户登录功能"
-# → AI 判断：中等功能 → 生成 PRD → 自动执行
-
-plan-cascade run "构建电商平台：用户、商品、订单"
-# → AI 判断：大型项目 → Mega Plan → 多 PRD 级联
-```
-
-### 专家模式
-
-面向资深用户，提供精细控制。
+Designed for new users and quick tasks, AI automatically determines strategy and executes.
 
 ```bash
-plan-cascade run "实现用户登录" --expert
+plan-cascade run "Add an exit button"
+# -> AI determines: Small task -> Direct execution
+
+plan-cascade run "Implement user login functionality"
+# -> AI determines: Medium feature -> Generate PRD -> Auto-execute
+
+plan-cascade run "Build e-commerce platform: users, products, orders"
+# -> AI determines: Large project -> Mega Plan -> Multi-PRD cascade
 ```
 
-专家模式支持：
-- 查看和编辑 PRD
-- 选择执行策略
-- 指定每个 Story 的 Agent
-- 调整依赖关系
-- 配置质量门控
+### Expert Mode
+
+Designed for experienced users, provides fine-grained control.
+
+```bash
+plan-cascade run "Implement user login" --expert
+```
+
+Expert mode supports:
+- View and edit PRD
+- Select execution strategy
+- Specify Agent for each Story
+- Adjust dependencies
+- Configure quality gates
 
 ---
 
-## 命令参考
+## Command Reference
 
-### run - 执行任务
+### run - Execute Tasks
 
 ```bash
 plan-cascade run <description> [options]
 
 Options:
-  -e, --expert           专家模式
-  -b, --backend <name>   后端选择 (claude-code|claude-api|openai|deepseek|ollama)
-  --model <name>         指定模型
-  --project <path>       项目路径
+  -e, --expert           Expert mode
+  -b, --backend <name>   Backend selection (claude-code|claude-api|openai|deepseek|ollama)
+  --model <name>         Specify model
+  --project <path>       Project path
 ```
 
-示例：
+Examples:
 
 ```bash
-# 简单模式
-plan-cascade run "添加搜索功能"
+# Simple mode
+plan-cascade run "Add search functionality"
 
-# 专家模式
-plan-cascade run "重构用户模块" --expert
+# Expert mode
+plan-cascade run "Refactor user module" --expert
 
-# 使用 OpenAI
-plan-cascade run "实现评论功能" --backend openai --model gpt-4o
+# Using OpenAI
+plan-cascade run "Implement comment feature" --backend openai --model gpt-4o
 ```
 
-### config - 配置管理
+### config - Configuration Management
 
 ```bash
 plan-cascade config [options]
 
 Options:
-  --show     显示当前配置
-  --setup    运行配置向导
+  --show     Display current configuration
+  --setup    Run configuration wizard
 ```
 
-示例：
+Examples:
 
 ```bash
-# 查看配置
+# View configuration
 plan-cascade config --show
 
-# 配置向导
+# Configuration wizard
 plan-cascade config --setup
 ```
 
-### chat - 交互式 REPL
+### chat - Interactive REPL
 
 ```bash
 plan-cascade chat [options]
 
 Options:
-  -p, --project <path>   项目路径
-  -b, --backend <name>   后端选择
+  -p, --project <path>   Project path
+  -b, --backend <name>   Backend selection
 ```
 
-REPL 特殊命令：
+REPL Special Commands:
 
-| 命令 | 说明 |
-|------|------|
-| `/exit`, `/quit` | 退出 |
-| `/clear` | 清空上下文 |
-| `/status` | 查看会话状态 |
-| `/mode [simple\|expert]` | 切换模式 |
-| `/history` | 查看对话历史 |
-| `/config` | 配置管理 |
-| `/help` | 帮助 |
+| Command | Description |
+|---------|-------------|
+| `/exit`, `/quit` | Exit |
+| `/clear` | Clear context |
+| `/status` | View session status |
+| `/mode [simple\|expert]` | Switch mode |
+| `/history` | View conversation history |
+| `/config` | Configuration management |
+| `/help` | Help |
 
-示例：
+Examples:
 
 ```bash
 plan-cascade chat
 
-> 分析一下项目结构
-(AI 分析并响应)
+> Analyze the project structure
+(AI analyzes and responds)
 
-> 基于上面的分析，实现用户登录功能
-(意图识别：TASK)
-(策略分析)
-(执行任务)
+> Based on the above analysis, implement user login functionality
+(Intent recognition: TASK)
+(Strategy analysis)
+(Execute task)
 
 > /status
 Session: abc123
@@ -167,22 +169,22 @@ Mode changed to: expert
 > /exit
 ```
 
-### status - 查看状态
+### status - View Status
 
 ```bash
 plan-cascade status
 
-# 输出示例：
-任务: 实现用户登录
-进度: 3/5
-  ✓ 设计数据库 Schema
-  ✓ 实现 API 路由
-  ✓ OAuth 登录
-  ⟳ 手机验证码登录 (执行中)
-  ○ 集成测试
+# Example output:
+Task: Implement user login
+Progress: 3/5
+  ✓ Design database Schema
+  ✓ Implement API routes
+  ✓ OAuth login
+  ⟳ SMS verification login (in progress)
+  ○ Integration tests
 ```
 
-### version - 版本信息
+### version - Version Information
 
 ```bash
 plan-cascade version
@@ -190,34 +192,34 @@ plan-cascade version
 
 ---
 
-## LLM 后端配置
+## LLM Backend Configuration
 
-### 支持的后端
+### Supported Backends
 
-| 后端 | 需要 API Key | 说明 |
-|------|-------------|------|
-| `claude-code` | 否 | 通过 Claude Code CLI（默认） |
-| `claude-max` | 否 | 通过 Claude Code 获取 LLM |
-| `claude-api` | 是 | 直接调用 Anthropic API |
-| `openai` | 是 | OpenAI GPT-4o 等 |
-| `deepseek` | 是 | DeepSeek Chat/Coder |
-| `ollama` | 否 | 本地模型 |
+| Backend | Requires API Key | Description |
+|---------|-----------------|-------------|
+| `claude-code` | No | Via Claude Code CLI (default) |
+| `claude-max` | No | Get LLM via Claude Code |
+| `claude-api` | Yes | Direct Anthropic API calls |
+| `openai` | Yes | OpenAI GPT-4o, etc. |
+| `deepseek` | Yes | DeepSeek Chat/Coder |
+| `ollama` | No | Local models |
 
-### 配置示例
+### Configuration Examples
 
 ```bash
-# 使用配置向导
+# Use configuration wizard
 plan-cascade config --setup
 
-# 选择后端:
-#   1. Claude Code (推荐，无需 API Key)
+# Select backend:
+#   1. Claude Code (recommended, no API Key required)
 #   2. Claude API
 #   3. OpenAI
 #   4. DeepSeek
-#   5. Ollama (本地)
+#   5. Ollama (local)
 ```
 
-### 环境变量
+### Environment Variables
 
 ```bash
 # Claude API
@@ -235,83 +237,83 @@ export OLLAMA_BASE_URL=http://localhost:11434
 
 ---
 
-## AI 自动策略判断
+## AI Automatic Strategy Determination
 
-简单模式下，AI 根据需求自动选择最佳执行策略：
+In simple mode, AI automatically selects the best execution strategy based on requirements:
 
-| 输入 | AI 判断 | 执行策略 |
-|------|---------|----------|
-| "添加一个退出按钮" | 小任务 | 直接执行（无 PRD） |
-| "实现用户登录功能" | 中等功能 | Hybrid Auto（自动生成 PRD） |
-| "开发博客系统，包含用户、文章、评论" | 大型项目 | Mega Plan（多 PRD 级联） |
-| "重构支付模块，不要影响现有功能" | 需要隔离 | Hybrid Worktree |
+| Input | AI Determination | Execution Strategy |
+|-------|-----------------|-------------------|
+| "Add an exit button" | Small task | Direct execution (no PRD) |
+| "Implement user login functionality" | Medium feature | Hybrid Auto (auto-generate PRD) |
+| "Develop a blog system with users, articles, comments" | Large project | Mega Plan (multi-PRD cascade) |
+| "Refactor payment module without affecting existing functionality" | Requires isolation | Hybrid Worktree |
 
-判断维度：
-1. **任务规模**：单一任务 / 多功能 / 完整项目
-2. **复杂度**：是否需要分解为多个 Stories
-3. **风险程度**：是否需要隔离开发
-4. **依赖关系**：是否有跨模块依赖
+Determination Dimensions:
+1. **Task Scale**: Single task / Multiple features / Complete project
+2. **Complexity**: Whether decomposition into multiple Stories is needed
+3. **Risk Level**: Whether isolated development is needed
+4. **Dependencies**: Whether there are cross-module dependencies
 
 ---
 
-## 专家模式详解
+## Expert Mode Details
 
-### 工作流
+### Workflow
 
 ```
-1. 输入需求描述
+1. Enter requirement description
        ↓
-2. 生成 PRD
+2. Generate PRD
        ↓
-3. 交互式菜单
-   ├── view    - 查看 PRD
-   ├── edit    - 编辑 PRD
-   ├── agent   - 指定 Agent
-   ├── run     - 执行
-   ├── save    - 保存草稿
-   └── quit    - 退出
+3. Interactive menu
+   ├── view    - View PRD
+   ├── edit    - Edit PRD
+   ├── agent   - Specify Agent
+   ├── run     - Execute
+   ├── save    - Save draft
+   └── quit    - Exit
        ↓
-4. 执行并监控
+4. Execute and monitor
 ```
 
-### 交互示例
+### Interactive Example
 
 ```bash
-$ plan-cascade run "实现用户登录" --expert
+$ plan-cascade run "Implement user login" --expert
 
-✓ 已生成 PRD (5 个 Stories)
+✓ PRD generated (5 Stories)
 
-? 请选择操作:
-  > view   - 查看 PRD
-    edit   - 编辑 PRD
-    agent  - 指定 Agent
-    run    - 开始执行
-    save   - 保存草稿
-    quit   - 退出
+? Select operation:
+  > view   - View PRD
+    edit   - Edit PRD
+    agent  - Specify Agent
+    run    - Start execution
+    save   - Save draft
+    quit   - Exit
 ```
 
-### PRD 编辑
+### PRD Editing
 
 ```bash
-? 选择要编辑的内容:
-  > 修改 Story
-    添加 Story
-    删除 Story
-    调整依赖
-    修改优先级
-    返回
+? Select content to edit:
+  > Modify Story
+    Add Story
+    Delete Story
+    Adjust dependencies
+    Modify priority
+    Return
 ```
 
-### Agent 分配
+### Agent Assignment
 
 ```bash
-? 为 Story 分配 Agent:
-  Story 1: 设计数据库 Schema
-  > claude-code (推荐)
+? Assign Agent for Story:
+  Story 1: Design database Schema
+  > claude-code (recommended)
     aider
     codex
 
-  Story 2: 实现 OAuth 登录
+  Story 2: Implement OAuth login
   > aider
     claude-code
     codex
@@ -319,17 +321,17 @@ $ plan-cascade run "实现用户登录" --expert
 
 ---
 
-## 配置文件
+## Configuration File
 
-配置文件位于 `~/.plan-cascade/config.yaml`：
+Configuration file located at `~/.plan-cascade/config.yaml`:
 
 ```yaml
-# 后端配置
+# Backend configuration
 backend: claude-code  # claude-code | claude-api | openai | deepseek | ollama
 provider: claude      # claude | openai | deepseek | ollama
-model: ""            # 留空使用默认
+model: ""            # Leave empty for default
 
-# 执行 Agent
+# Execution Agents
 agents:
   - name: claude-code
     enabled: true
@@ -342,11 +344,11 @@ agents:
     enabled: false
     command: codex
 
-# Agent 选择策略
+# Agent selection strategy
 agent_selection: prefer_default  # smart | prefer_default | manual
 default_agent: claude-code
 
-# 质量门控
+# Quality gates
 quality_gates:
   typecheck: true
   test: true
@@ -355,69 +357,69 @@ quality_gates:
   custom_script: ""
   max_retries: 3
 
-# 执行配置
+# Execution configuration
 max_parallel_stories: 3
 max_iterations: 50
 timeout_seconds: 300
 
-# UI 配置
+# UI configuration
 default_mode: simple  # simple | expert
 theme: system        # light | dark | system
 ```
 
 ---
 
-## 故障排除
+## Troubleshooting
 
-### API Key 未配置
+### API Key Not Configured
 
 ```
 Error: Claude API key is required
 ```
 
-解决：
+Solution:
 
 ```bash
 plan-cascade config --setup
-# 或设置环境变量
+# Or set environment variable
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### 后端不可用
+### Backend Unavailable
 
 ```
 Error: Backend 'ollama' not available
 ```
 
-解决：确保 Ollama 已启动并运行在正确端口。
+Solution: Ensure Ollama is started and running on the correct port.
 
-### 模型不支持
+### Model Not Supported
 
 ```
 Error: Model 'gpt-5' not found
 ```
 
-解决：检查模型名称是否正确，使用 `--model` 指定有效模型。
+Solution: Check if the model name is correct, use `--model` to specify a valid model.
 
 ---
 
-## 与 Claude Code Plugin 的区别
+## Differences from Claude Code Plugin
 
-| 特性 | CLI | Plugin |
-|------|-----|--------|
-| 安装方式 | pip install | claude plugins install |
-| 使用方式 | 命令行 | /slash 命令 |
-| 后端支持 | 多 LLM | Claude Code |
-| 工具执行 | 内置 ReAct | Claude Code |
-| 离线使用 | 支持（Ollama） | 不支持 |
+| Feature | CLI | Plugin |
+|---------|-----|--------|
+| Installation | pip install | claude plugins install |
+| Usage | Command line | /slash commands |
+| Backend support | Multiple LLMs | Claude Code |
+| Tool execution | Built-in ReAct | Claude Code |
+| Offline use | Supported (Ollama) | Not supported |
 
-CLI 适合：
-- 需要使用其他 LLM（OpenAI、DeepSeek 等）
-- 需要离线使用（Ollama）
-- 偏好命令行操作
-- 自动化脚本集成
+CLI is suitable for:
+- Need to use other LLMs (OpenAI, DeepSeek, etc.)
+- Need offline use (Ollama)
+- Prefer command line operations
+- Automation script integration
 
-Plugin 适合：
-- Claude Code 深度用户
-- 需要完整 Claude Code 功能
-- 偏好 /slash 命令交互
+Plugin is suitable for:
+- Claude Code power users
+- Need full Claude Code functionality
+- Prefer /slash command interaction
