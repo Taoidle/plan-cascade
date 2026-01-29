@@ -378,17 +378,30 @@ if HAS_TYPER:
 
                 field = Prompt.ask(
                     "Field to edit",
-                    choices=["title", "description", "priority", "dependencies"],
+                    choices=["title", "description", "priority", "dependencies", "agent"],
                 )
 
                 story = workflow.state.prd.get_story(story_id)
                 current = story.get(field, "")
                 output.print(f"Current {field}: {current}")
 
-                new_value = Prompt.ask(f"New {field}")
-
-                if field == "dependencies":
+                if field == "agent":
+                    # Show available agents and let user select
+                    available_agents = ["claude-code", "aider", "codex", "cursor-cli", "amp-code"]
+                    output.print("[dim]Available agents:[/dim]")
+                    for agent in available_agents:
+                        marker = "[green]*[/green]" if agent == current else " "
+                        output.print(f"  {marker} {agent}")
+                    new_value = Prompt.ask(
+                        f"Select agent",
+                        choices=available_agents,
+                        default=current if current in available_agents else "claude-code",
+                    )
+                elif field == "dependencies":
+                    new_value = Prompt.ask(f"New {field}")
                     new_value = [d.strip() for d in new_value.split(",") if d.strip()]
+                else:
+                    new_value = Prompt.ask(f"New {field}")
 
                 workflow.edit_story(story_id, {field: new_value})
                 output.print_success(f"Updated {story_id}.{field}")
@@ -498,6 +511,62 @@ if HAS_TYPER:
             else:
                 api_key = None
 
+        # Step 4: Quality Gate Configuration
+        output.print("\n[bold]Step 4: Quality Gate Configuration[/bold]")
+        output.print("Quality gates validate code after each story completion.")
+
+        configure_gates = Confirm.ask("Configure quality gates?", default=True)
+
+        if configure_gates:
+            from ..settings.models import QualityGateConfig
+            quality_gates = QualityGateConfig()
+
+            # Toggle typecheck
+            quality_gates.typecheck = Confirm.ask(
+                "  Enable type checking (mypy/pyright)?",
+                default=True
+            )
+
+            # Toggle test
+            quality_gates.test = Confirm.ask(
+                "  Enable test execution?",
+                default=True
+            )
+
+            # Toggle lint
+            quality_gates.lint = Confirm.ask(
+                "  Enable code linting (ruff/flake8)?",
+                default=True
+            )
+
+            # Custom validation script
+            use_custom = Confirm.ask(
+                "  Add custom validation script?",
+                default=False
+            )
+            if use_custom:
+                quality_gates.custom = True
+                quality_gates.custom_script = Prompt.ask(
+                    "    Script path",
+                    default=""
+                )
+            else:
+                quality_gates.custom = False
+                quality_gates.custom_script = ""
+
+            # Max retries
+            max_retries_str = Prompt.ask(
+                "  Max retry attempts on failure",
+                default="3"
+            )
+            try:
+                quality_gates.max_retries = int(max_retries_str)
+            except ValueError:
+                quality_gates.max_retries = 3
+                output.print_warning("    Invalid number, using default: 3")
+        else:
+            quality_gates = None
+
         # Save configuration
         try:
             from ..settings.storage import SettingsStorage
@@ -506,12 +575,24 @@ if HAS_TYPER:
             settings.backend = backend
             if provider:
                 settings.provider = provider
+            if quality_gates:
+                settings.quality_gates = quality_gates
             storage.save(settings)
 
             if api_key:
                 storage.set_api_key(provider, api_key)
 
             output.print_success("\nConfiguration saved!")
+
+            # Show quality gate summary if configured
+            if quality_gates:
+                output.print_info("Quality gates configured:")
+                output.print(f"  Typecheck: {'enabled' if quality_gates.typecheck else 'disabled'}")
+                output.print(f"  Test: {'enabled' if quality_gates.test else 'disabled'}")
+                output.print(f"  Lint: {'enabled' if quality_gates.lint else 'disabled'}")
+                if quality_gates.custom:
+                    output.print(f"  Custom script: {quality_gates.custom_script}")
+                output.print(f"  Max retries: {quality_gates.max_retries}")
 
         except ImportError:
             output.print_warning("\nSettings module not available - configuration not persisted")
@@ -617,6 +698,269 @@ if HAS_TYPER:
             status = story.get("status", "pending")
             icon = output.ICONS.get(status, "")
             output.print(f"  {icon} {story.get('id')}: {story.get('title')}")
+
+    @app.command()
+    def agents(
+        list_agents: bool = typer.Option(False, "--list", "-l", help="List all configured agents with status"),
+        add: str | None = typer.Option(None, "--add", "-a", help="Add a new agent by name"),
+        command: str | None = typer.Option(None, "--command", "-c", help="Command path for new agent (use with --add)"),
+        remove: str | None = typer.Option(None, "--remove", "-r", help="Remove an agent by name"),
+        default: str | None = typer.Option(None, "--default", "-d", help="Set default agent"),
+        test: str | None = typer.Option(None, "--test", "-t", help="Test if an agent is available"),
+    ):
+        """
+        Agent configuration management.
+
+        Manage execution agents - list, add, remove, set defaults, and test availability.
+
+        Examples:
+            plan-cascade agents --list
+            plan-cascade agents --add my-agent --command /path/to/agent
+            plan-cascade agents --remove my-agent
+            plan-cascade agents --default claude-code
+            plan-cascade agents --test aider
+        """
+        # Handle --list option
+        if list_agents:
+            _list_agents()
+            return
+
+        # Handle --add option (requires --command)
+        if add:
+            if not command:
+                output.print_error("--command is required when adding an agent")
+                output.print("[dim]Usage: plan-cascade agents --add <name> --command <path>[/dim]")
+                raise typer.Exit(1)
+            _add_agent(add, command)
+            return
+
+        # Handle --remove option
+        if remove:
+            _remove_agent(remove)
+            return
+
+        # Handle --default option
+        if default:
+            _set_default_agent(default)
+            return
+
+        # Handle --test option
+        if test:
+            _test_agent(test)
+            return
+
+        # No option provided - show usage hint
+        output.print("Agent management commands:")
+        output.print("  [cyan]--list[/cyan]                    List all agents with availability status")
+        output.print("  [cyan]--add <name> --command <path>[/cyan]  Add a new agent")
+        output.print("  [cyan]--remove <name>[/cyan]           Remove an agent")
+        output.print("  [cyan]--default <name>[/cyan]          Set the default agent")
+        output.print("  [cyan]--test <name>[/cyan]             Test agent availability")
+        output.print()
+        output.print("[dim]Example: plan-cascade agents --list[/dim]")
+
+    def _list_agents():
+        """List all configured agents with availability status."""
+        from rich.table import Table
+
+        try:
+            from ..backends.cross_platform_detector import CrossPlatformDetector
+            from ..settings.storage import SettingsStorage
+
+            storage = SettingsStorage()
+            settings = storage.load()
+
+            # Create detector for availability checks
+            detector = CrossPlatformDetector()
+
+            # Build table
+            table = Table(title="Configured Agents", show_header=True, header_style="bold cyan")
+            table.add_column("Name", style="cyan")
+            table.add_column("Command", style="white")
+            table.add_column("Enabled", justify="center")
+            table.add_column("Default", justify="center")
+            table.add_column("Available", justify="center")
+
+            for agent in settings.agents:
+                # Check availability using command or agent name
+                agent_info = detector.detect_agent(agent.command or agent.name)
+
+                enabled_icon = "[green]Yes[/green]" if agent.enabled else "[red]No[/red]"
+                default_icon = "[yellow]*[/yellow]" if agent.is_default else ""
+                available_icon = "[green]Yes[/green]" if agent_info.available else "[red]No[/red]"
+
+                table.add_row(
+                    agent.name,
+                    agent.command or "(not set)",
+                    enabled_icon,
+                    default_icon,
+                    available_icon,
+                )
+
+            console.print()
+            console.print(table)
+            console.print()
+
+            # Show summary
+            enabled_count = sum(1 for a in settings.agents if a.enabled)
+            output.print(f"[dim]Total: {len(settings.agents)} agents, {enabled_count} enabled[/dim]")
+            output.print(f"[dim]Default agent: {settings.default_agent}[/dim]")
+
+        except ImportError as e:
+            output.print_error(f"Required module not available: {e}")
+
+    def _add_agent(name: str, command: str):
+        """Add a new agent configuration."""
+        try:
+            from ..settings.models import AgentConfig
+            from ..settings.storage import SettingsStorage
+
+            storage = SettingsStorage()
+            settings = storage.load()
+
+            # Check if agent already exists
+            existing = settings.get_agent_by_name(name)
+            if existing:
+                output.print_error(f"Agent '{name}' already exists")
+                output.print("[dim]Use --remove first if you want to replace it[/dim]")
+                return
+
+            # Create new agent config
+            new_agent = AgentConfig(
+                name=name,
+                enabled=True,
+                command=command,
+                is_default=False,
+            )
+
+            # Add to settings
+            settings.agents.append(new_agent)
+            storage.save(settings)
+
+            output.print_success(f"Agent '{name}' added successfully")
+            output.print(f"  [dim]Command: {command}[/dim]")
+
+            # Test availability
+            try:
+                from ..backends.cross_platform_detector import CrossPlatformDetector
+                detector = CrossPlatformDetector()
+                agent_info = detector.detect_agent(command)
+                if agent_info.available:
+                    output.print_success(f"  Agent is available at: {agent_info.path}")
+                    if agent_info.version:
+                        output.print(f"  [dim]Version: {agent_info.version}[/dim]")
+                else:
+                    output.print_warning("  Agent command not found in PATH")
+            except ImportError:
+                pass
+
+        except ImportError as e:
+            output.print_error(f"Settings module not available: {e}")
+
+    def _remove_agent(name: str):
+        """Remove an agent configuration."""
+        try:
+            from ..settings.storage import SettingsStorage
+
+            storage = SettingsStorage()
+            settings = storage.load()
+
+            # Check if agent exists
+            existing = settings.get_agent_by_name(name)
+            if not existing:
+                output.print_error(f"Agent '{name}' not found")
+                output.print("[dim]Use --list to see available agents[/dim]")
+                return
+
+            # Prevent removing default agent
+            if existing.is_default:
+                output.print_error(f"Cannot remove default agent '{name}'")
+                output.print("[dim]Set a different default first with --default <name>[/dim]")
+                return
+
+            # Remove agent
+            settings.agents = [a for a in settings.agents if a.name != name]
+            storage.save(settings)
+
+            output.print_success(f"Agent '{name}' removed successfully")
+
+        except ImportError as e:
+            output.print_error(f"Settings module not available: {e}")
+
+    def _set_default_agent(name: str):
+        """Set the default agent."""
+        try:
+            from ..settings.storage import SettingsStorage
+
+            storage = SettingsStorage()
+            settings = storage.load()
+
+            # Check if agent exists
+            existing = settings.get_agent_by_name(name)
+            if not existing:
+                output.print_error(f"Agent '{name}' not found")
+                output.print("[dim]Use --list to see available agents, or --add to create one[/dim]")
+                return
+
+            # Check if agent is enabled
+            if not existing.enabled:
+                output.print_warning(f"Agent '{name}' is disabled. Enabling it...")
+                existing.enabled = True
+
+            # Update default flags
+            for agent in settings.agents:
+                agent.is_default = (agent.name == name)
+
+            # Update settings
+            settings.default_agent = name
+            storage.save(settings)
+
+            output.print_success(f"Default agent set to '{name}'")
+
+        except ImportError as e:
+            output.print_error(f"Settings module not available: {e}")
+
+    def _test_agent(name: str):
+        """Test if an agent is available and can be executed."""
+        try:
+            from ..backends.cross_platform_detector import CrossPlatformDetector
+            from ..settings.storage import SettingsStorage
+
+            storage = SettingsStorage()
+            settings = storage.load()
+
+            # Get agent config if it exists
+            agent_config = settings.get_agent_by_name(name)
+            command_to_test = agent_config.command if agent_config else name
+
+            output.print_info(f"Testing agent: {name}")
+            output.print(f"  [dim]Command: {command_to_test}[/dim]")
+
+            # Use detector to check availability
+            detector = CrossPlatformDetector()
+            agent_info = detector.detect_agent(command_to_test, force_refresh=True)
+
+            output.print()
+            if agent_info.available:
+                output.print_success("Agent is available!")
+                output.print(f"  [cyan]Path:[/cyan] {agent_info.path}")
+                if agent_info.version:
+                    output.print(f"  [cyan]Version:[/cyan] {agent_info.version}")
+                output.print(f"  [cyan]Platform:[/cyan] {agent_info.platform.value if agent_info.platform else 'unknown'}")
+                output.print(f"  [cyan]Detection method:[/cyan] {agent_info.detection_method}")
+            else:
+                output.print_error("Agent is NOT available")
+                output.print()
+                output.print("[dim]Possible reasons:[/dim]")
+                output.print("  - Command not found in PATH")
+                output.print("  - Agent not installed")
+                output.print("  - Incorrect command path")
+                output.print()
+                if not agent_config:
+                    output.print("[dim]Tip: Add the agent with --add to configure a custom path[/dim]")
+
+        except ImportError as e:
+            output.print_error(f"Detection module not available: {e}")
 
     @app.command()
     def version():
