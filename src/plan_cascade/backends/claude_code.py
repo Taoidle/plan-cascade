@@ -114,12 +114,12 @@ class ClaudeCodeBackend(AgentBackend):
         story_id = story.get("id", "unknown")
         prompt = self._build_prompt(story, context)
 
-        # Build command
+        # Build command - use -p for prompt via stdin on Windows
         cmd = [
             self.claude_path,
             "--output-format", self.output_format,
             "--print", self.print_mode,
-            "--prompt", prompt,
+            "-p", prompt,
         ]
 
         # Collect output
@@ -137,6 +137,18 @@ class ClaudeCodeBackend(AgentBackend):
 
             self._process = process
 
+            # Read stderr in background
+            stderr_lines: list[str] = []
+
+            async def read_stderr():
+                if process.stderr:
+                    async for line in process.stderr:
+                        text = line.decode().strip()
+                        if text:
+                            stderr_lines.append(text)
+
+            stderr_task = asyncio.create_task(read_stderr())
+
             # Read output stream
             if process.stdout:
                 async for line in process.stdout:
@@ -150,23 +162,33 @@ class ClaudeCodeBackend(AgentBackend):
                             output_lines.append(text)
                             await self._emit_text(text)
 
-            # Wait for completion
+            # Wait for stderr task and process completion
+            await stderr_task
             await process.wait()
+            stderr_text = "\n".join(stderr_lines)
 
             # Check result
             success = process.returncode == 0
+
+            # Build error message with stderr if available
+            error_msg = None
+            if not success:
+                error_msg = f"Claude Code exited with code {process.returncode}"
+                if stderr_text:
+                    error_msg += f"\nStderr: {stderr_text}"
 
             return ExecutionResult(
                 success=success,
                 output="\n".join(output_lines),
                 iterations=len(tool_calls),
-                error=None if success else f"Claude Code exited with code {process.returncode}",
+                error=error_msg,
                 story_id=story_id,
                 agent="claude-code",
                 tool_calls=tool_calls,
                 metadata={
                     "exit_code": process.returncode,
                     "output_format": self.output_format,
+                    "stderr": stderr_text,
                 }
             )
 
