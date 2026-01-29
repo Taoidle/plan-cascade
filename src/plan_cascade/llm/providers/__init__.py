@@ -8,8 +8,8 @@ Concrete implementations of LLMProvider for various LLM services:
 """
 
 from .claude import ClaudeProvider
-from .openai import OpenAIProvider
 from .ollama import OllamaProvider
+from .openai import OpenAIProvider
 
 __all__ = [
     "ClaudeProvider",

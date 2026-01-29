@@ -21,15 +21,15 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..state.state_manager import StateManager
-from .base import ExecutionResult
 
 if TYPE_CHECKING:
     from .cross_platform_detector import CrossPlatformDetector
-    from .phase_config import PhaseAgentManager, ExecutionPhase, AgentOverrides
+    from .phase_config import AgentOverrides, ExecutionPhase, PhaseAgentManager
 
 
 class AgentExecutor:
@@ -57,8 +57,8 @@ class AgentExecutor:
     def __init__(
         self,
         project_root: Path,
-        agents_config: Optional[Dict] = None,
-        config_path: Optional[Path] = None,
+        agents_config: dict | None = None,
+        config_path: Path | None = None,
         detector: Optional["CrossPlatformDetector"] = None,
         phase_manager: Optional["PhaseAgentManager"] = None
     ):
@@ -76,7 +76,7 @@ class AgentExecutor:
         self.default_agent = "claude-code"
         self.agents = self.DEFAULT_AGENTS.copy()
         self.state_manager = StateManager(project_root)
-        self._full_config: Dict[str, Any] = {}
+        self._full_config: dict[str, Any] = {}
 
         # Agent status tracking
         self.agent_status_path = self.project_root / ".agent-status.json"
@@ -108,7 +108,7 @@ class AgentExecutor:
         except ImportError:
             self.phase_manager = None
 
-    def _load_config(self, config: Dict) -> None:
+    def _load_config(self, config: dict) -> None:
         """Load configuration from a dictionary."""
         self._full_config = config
         if "default_agent" in config:
@@ -119,21 +119,21 @@ class AgentExecutor:
     def _load_config_file(self, config_path: Path) -> None:
         """Load configuration from a JSON file."""
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
                 self._load_config(config)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"[Warning] Could not load agent config from {config_path}: {e}")
 
     def _resolve_agent(
         self,
-        agent_name: Optional[str] = None,
-        story_agent: Optional[str] = None,
-        prd_agent: Optional[str] = None,
+        agent_name: str | None = None,
+        story_agent: str | None = None,
+        prd_agent: str | None = None,
         phase: Optional["ExecutionPhase"] = None,
-        story: Optional[Dict] = None,
+        story: dict | None = None,
         override: Optional["AgentOverrides"] = None
-    ) -> Tuple[str, Dict]:
+    ) -> tuple[str, dict]:
         """
         Resolve agent with automatic fallback to claude-code.
 
@@ -205,14 +205,14 @@ class AgentExecutor:
 
     def execute_story(
         self,
-        story: Dict,
-        context: Dict,
-        agent_name: Optional[str] = None,
-        prd_metadata: Optional[Dict] = None,
-        task_callback: Optional[Callable] = None,
+        story: dict,
+        context: dict,
+        agent_name: str | None = None,
+        prd_metadata: dict | None = None,
+        task_callback: Callable | None = None,
         phase: Optional["ExecutionPhase"] = None,
         override: Optional["AgentOverrides"] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute a story using the specified agent (with fallback).
 
@@ -269,7 +269,7 @@ class AgentExecutor:
                 "error": f"Unknown agent type: {agent_config.get('type')}"
             }
 
-    def _build_story_prompt(self, story: Dict, context: Dict) -> str:
+    def _build_story_prompt(self, story: dict, context: dict) -> str:
         """Build the execution prompt for a story."""
         story_id = story.get("id", "unknown")
         title = story.get("title", "")
@@ -316,9 +316,9 @@ Work methodically and document your progress.
         self,
         story_id: str,
         prompt: str,
-        agent_config: Dict,
-        task_callback: Optional[Callable] = None
-    ) -> Dict[str, Any]:
+        agent_config: dict,
+        task_callback: Callable | None = None
+    ) -> dict[str, Any]:
         """Execute via Claude Code's Task tool."""
         subagent_type = agent_config.get("subagent_type", "general-purpose")
 
@@ -350,9 +350,9 @@ Work methodically and document your progress.
         story_id: str,
         prompt: str,
         agent_name: str,
-        agent_config: Dict,
+        agent_config: dict,
         working_dir: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Execute via external CLI agent."""
         command = agent_config.get("command", "")
         args_template = agent_config.get("args", [])
@@ -388,7 +388,7 @@ Work methodically and document your progress.
                 log_file.write("-" * 60 + "\n\n")
 
             with open(output_file, "a", encoding="utf-8") as log_file:
-                kwargs: Dict[str, Any] = {
+                kwargs: dict[str, Any] = {
                     "cwd": working_dir,
                     "stdout": log_file,
                     "stderr": subprocess.STDOUT,
@@ -425,11 +425,11 @@ Work methodically and document your progress.
             self.state_manager.record_agent_failure(story_id, agent_name, error_msg)
             return {"success": False, "story_id": story_id, "agent": agent_name, "error": error_msg}
 
-    def get_agent_status(self, check_processes: bool = True) -> Dict[str, Any]:
+    def get_agent_status(self, check_processes: bool = True) -> dict[str, Any]:
         """Get current agent status."""
         return self.state_manager.read_agent_status()
 
-    def get_available_agents(self) -> Dict[str, Dict]:
+    def get_available_agents(self) -> dict[str, dict]:
         """Get all configured agents with availability status."""
         result = {}
         for name, config in self.agents.items():
@@ -444,7 +444,7 @@ Work methodically and document your progress.
             result[name] = agent_info
         return result
 
-    def stop_agent(self, story_id: str) -> Dict[str, Any]:
+    def stop_agent(self, story_id: str) -> dict[str, Any]:
         """Stop a running CLI agent."""
         status = self.state_manager.read_agent_status()
 

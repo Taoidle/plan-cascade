@@ -6,9 +6,10 @@ User input description -> AI analysis -> Auto strategy -> Auto execution -> Done
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .strategy_analyzer import (
     ExecutionStrategy,
@@ -26,14 +27,14 @@ class WorkflowResult:
     success: bool
     strategy: ExecutionStrategy
     output: str = ""
-    error: Optional[str] = None
+    error: str | None = None
     stories_completed: int = 0
     stories_total: int = 0
     iterations: int = 0
     duration_seconds: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "success": self.success,
@@ -52,7 +53,7 @@ class WorkflowResult:
 class ProgressEvent:
     """Progress event for UI updates."""
     type: str  # strategy_decided, story_started, story_completed, story_failed, etc.
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def strategy_decided(cls, decision: StrategyDecision) -> "ProgressEvent":
@@ -71,7 +72,7 @@ class ProgressEvent:
         return cls(type="story_failed", data={"story_id": story_id, "title": title, "error": error})
 
     @classmethod
-    def batch_started(cls, batch_num: int, total: int, stories: List[str]) -> "ProgressEvent":
+    def batch_started(cls, batch_num: int, total: int, stories: list[str]) -> "ProgressEvent":
         return cls(type="batch_started", data={"batch": batch_num, "total": total, "stories": stories})
 
     @classmethod
@@ -98,8 +99,8 @@ class SimpleWorkflow:
     def __init__(
         self,
         backend: "AgentBackend",
-        project_path: Optional[Path] = None,
-        on_progress: Optional[ProgressCallback] = None
+        project_path: Path | None = None,
+        on_progress: ProgressCallback | None = None
     ):
         """
         Initialize the simple workflow.
@@ -228,7 +229,7 @@ class SimpleWorkflow:
         class InternalResult:
             success: bool
             output: str
-            error: Optional[str]
+            error: str | None
             stories_completed: int
             stories_total: int
             iterations: int
@@ -265,7 +266,7 @@ class SimpleWorkflow:
         class InternalResult:
             success: bool
             output: str
-            error: Optional[str]
+            error: str | None
             stories_completed: int
             stories_total: int
             iterations: int
@@ -365,7 +366,7 @@ class SimpleWorkflow:
         class InternalResult:
             success: bool
             output: str
-            error: Optional[str]
+            error: str | None
             stories_completed: int
             stories_total: int
             iterations: int
@@ -439,7 +440,7 @@ class SimpleWorkflow:
         self,
         description: str,
         context: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate a PRD from the description using LLM.
 
@@ -507,7 +508,7 @@ Return ONLY the JSON, no additional text."""
         self,
         description: str,
         context: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate a mega plan for large projects.
 
@@ -570,7 +571,7 @@ Return ONLY the JSON, no additional text."""
 
         return json.loads(json_match.group())
 
-    def _generate_batches(self, stories: List[Dict]) -> List[List[Dict]]:
+    def _generate_batches(self, stories: list[dict]) -> list[list[dict]]:
         """
         Generate execution batches from stories based on dependencies.
 
@@ -629,8 +630,8 @@ Return ONLY the JSON, no additional text."""
 async def run_simple_workflow(
     description: str,
     backend: "AgentBackend",
-    project_path: Optional[Path] = None,
-    on_progress: Optional[ProgressCallback] = None
+    project_path: Path | None = None,
+    on_progress: ProgressCallback | None = None
 ) -> WorkflowResult:
     """
     Convenience function to run simple workflow.

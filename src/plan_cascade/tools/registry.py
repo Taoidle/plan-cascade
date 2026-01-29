@@ -4,10 +4,11 @@ Tool Registry
 Provides registration, management, and execution of tools for the builtin backend.
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Union
 import asyncio
 import traceback
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -23,8 +24,8 @@ class ToolResult:
     """
     success: bool
     output: Any = None
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_string(self) -> str:
         """Convert result to string for LLM consumption."""
@@ -56,11 +57,11 @@ class Tool:
     """
     name: str
     description: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     function: Callable
     is_async: bool = False
 
-    def get_definition(self) -> Dict[str, Any]:
+    def get_definition(self) -> dict[str, Any]:
         """Get tool definition for LLM."""
         return {
             "name": self.name,
@@ -104,16 +105,16 @@ class ToolRegistry:
         Args:
             include_defaults: Whether to include default file/shell tools
         """
-        self._tools: Dict[str, Tool] = {}
+        self._tools: dict[str, Tool] = {}
 
         if include_defaults:
             self._register_default_tools()
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        from .file_tools import READ_FILE_TOOL, WRITE_FILE_TOOL, EDIT_FILE_TOOL
+        from .file_tools import EDIT_FILE_TOOL, READ_FILE_TOOL, WRITE_FILE_TOOL
+        from .search_tools import GREP_CONTENT_TOOL, SEARCH_FILES_TOOL
         from .shell_tools import RUN_COMMAND_TOOL
-        from .search_tools import SEARCH_FILES_TOOL, GREP_CONTENT_TOOL
 
         for tool in [
             READ_FILE_TOOL,
@@ -152,7 +153,7 @@ class ToolRegistry:
         """
         self._tools.pop(name, None)
 
-    def get(self, name: str) -> Optional[Tool]:
+    def get(self, name: str) -> Tool | None:
         """
         Get a tool by name.
 
@@ -176,7 +177,7 @@ class ToolRegistry:
         """
         return name in self._tools
 
-    def list_tools(self) -> List[str]:
+    def list_tools(self) -> list[str]:
         """
         List all registered tool names.
 
@@ -235,7 +236,7 @@ class ToolRegistry:
                 metadata={"traceback": traceback.format_exc()}
             )
 
-    def get_definitions(self) -> List[Dict[str, Any]]:
+    def get_definitions(self) -> list[dict[str, Any]]:
         """
         Get tool definitions for LLM.
 
@@ -244,7 +245,7 @@ class ToolRegistry:
         """
         return [tool.get_definition() for tool in self._tools.values()]
 
-    def get_definition(self, name: str) -> Optional[Dict[str, Any]]:
+    def get_definition(self, name: str) -> dict[str, Any] | None:
         """
         Get a single tool definition.
 

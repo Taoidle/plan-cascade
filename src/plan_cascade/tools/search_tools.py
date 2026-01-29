@@ -4,18 +4,16 @@ Search Tools
 Tools for searching files and content.
 """
 
-import fnmatch
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from .registry import Tool, ToolResult
 
 
 def search_files(
     pattern: str,
-    path: Optional[str] = None,
+    path: str | None = None,
     max_results: int = 100,
     include_hidden: bool = False
 ) -> ToolResult:
@@ -101,7 +99,7 @@ def search_files(
 
 def grep_content(
     pattern: str,
-    path: Optional[str] = None,
+    path: str | None = None,
     file_pattern: str = "**/*",
     case_sensitive: bool = True,
     max_results: int = 100,
@@ -170,7 +168,7 @@ def grep_content(
                 if file_path.stat().st_size > 1_000_000:  # 1MB
                     continue
 
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                with open(file_path, encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()
                     files_searched += 1
 
@@ -210,7 +208,7 @@ def grep_content(
                 if truncated:
                     break
 
-            except (IOError, OSError):
+            except OSError:
                 continue
 
         if not matches:

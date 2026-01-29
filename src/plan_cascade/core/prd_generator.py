@@ -11,7 +11,6 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 
 class PRDGenerator:
@@ -28,7 +27,7 @@ class PRDGenerator:
         self.prd_path = self.project_root / "prd.json"
         self.story_counter = 0
 
-    def generate_prd(self, description: str, context: Optional[Dict] = None) -> Dict:
+    def generate_prd(self, description: str, context: dict | None = None) -> dict:
         """
         Generate a PRD from a task description.
 
@@ -57,15 +56,15 @@ class PRDGenerator:
 
     def add_story(
         self,
-        prd: Dict,
+        prd: dict,
         title: str,
         description: str,
         priority: str = "medium",
-        dependencies: Optional[List[str]] = None,
-        acceptance_criteria: Optional[List[str]] = None,
+        dependencies: list[str] | None = None,
+        acceptance_criteria: list[str] | None = None,
         context_estimate: str = "medium",
-        tags: Optional[List[str]] = None
-    ) -> Dict:
+        tags: list[str] | None = None
+    ) -> dict:
         """
         Add a user story to the PRD.
 
@@ -100,7 +99,7 @@ class PRDGenerator:
         prd["stories"].append(story)
         return prd
 
-    def estimate_context_size(self, story_description: str, codebase_info: Optional[Dict] = None) -> str:
+    def estimate_context_size(self, story_description: str, codebase_info: dict | None = None) -> str:
         """
         Estimate the context size needed for a story.
 
@@ -145,7 +144,7 @@ class PRDGenerator:
 
         return "medium"  # Default
 
-    def detect_dependencies(self, stories: List[Dict]) -> List[Dict]:
+    def detect_dependencies(self, stories: list[dict]) -> list[dict]:
         """
         Detect dependencies between stories automatically.
 
@@ -187,7 +186,7 @@ class PRDGenerator:
 
         return stories
 
-    def generate_execution_batches(self, prd: Dict) -> List[List[Dict]]:
+    def generate_execution_batches(self, prd: dict) -> list[list[dict]]:
         """
         Generate parallel execution batches from the PRD.
 
@@ -240,7 +239,7 @@ class PRDGenerator:
 
         return batches
 
-    def validate_prd(self, prd: Dict) -> Tuple[bool, List[str]]:
+    def validate_prd(self, prd: dict) -> tuple[bool, list[str]]:
         """
         Validate a PRD for correctness.
 
@@ -298,7 +297,7 @@ class PRDGenerator:
             return first_sentence
         return description[:200]
 
-    def _extract_objectives(self, description: str) -> List[str]:
+    def _extract_objectives(self, description: str) -> list[str]:
         """Extract objectives from the description."""
         # Look for bullet points or numbered lists
         objectives = []
@@ -321,7 +320,7 @@ class PRDGenerator:
         return objectives
 
 
-def create_sample_prd() -> Dict:
+def create_sample_prd() -> dict:
     """Create a sample PRD for demonstration."""
     prd = {
         "metadata": {

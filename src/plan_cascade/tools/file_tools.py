@@ -4,17 +4,15 @@ File Tools
 Tools for reading, writing, and editing files.
 """
 
-import os
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 from .registry import Tool, ToolResult
 
 
 def read_file(
     file_path: str,
-    offset: Optional[int] = None,
-    limit: Optional[int] = None,
+    offset: int | None = None,
+    limit: int | None = None,
     encoding: str = "utf-8"
 ) -> ToolResult:
     """
@@ -45,7 +43,7 @@ def read_file(
             )
 
         # Read file
-        with open(path, "r", encoding=encoding) as f:
+        with open(path, encoding=encoding) as f:
             if offset is not None or limit is not None:
                 lines = f.readlines()
                 start = offset or 0
@@ -184,7 +182,7 @@ def edit_file(
             )
 
         # Read current content
-        with open(path, "r", encoding=encoding) as f:
+        with open(path, encoding=encoding) as f:
             content = f.read()
 
         # Check if old_string exists

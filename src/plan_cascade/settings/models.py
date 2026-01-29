@@ -10,7 +10,6 @@ This module defines all configuration-related data classes including:
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
 
 
 class BackendType(Enum):
@@ -104,7 +103,7 @@ class Settings:
     model: str = ""
 
     # Execution agents
-    agents: List[AgentConfig] = field(
+    agents: list[AgentConfig] = field(
         default_factory=lambda: [
             AgentConfig(
                 name="claude-code", enabled=True, command="claude", is_default=True
@@ -130,18 +129,18 @@ class Settings:
     default_mode: str = "simple"
     theme: str = "system"
 
-    def get_enabled_agents(self) -> List[AgentConfig]:
+    def get_enabled_agents(self) -> list[AgentConfig]:
         """Return a list of all enabled agents."""
         return [agent for agent in self.agents if agent.enabled]
 
-    def get_default_agent(self) -> Optional[AgentConfig]:
+    def get_default_agent(self) -> AgentConfig | None:
         """Return the default agent configuration, if any."""
         for agent in self.agents:
             if agent.name == self.default_agent and agent.enabled:
                 return agent
         return None
 
-    def get_agent_by_name(self, name: str) -> Optional[AgentConfig]:
+    def get_agent_by_name(self, name: str) -> AgentConfig | None:
         """Return an agent configuration by name."""
         for agent in self.agents:
             if agent.name == name:

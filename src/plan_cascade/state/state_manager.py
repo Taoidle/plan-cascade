@@ -14,7 +14,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 # Platform-specific locking imports
 try:
@@ -79,7 +79,7 @@ class FileLock:
                     self.lock_fd.flush()
                     return True
 
-            except (IOError, OSError):
+            except OSError:
                 # Lock failed - file is locked
                 if self.lock_fd:
                     self.lock_fd.close()
@@ -90,7 +90,7 @@ class FileLock:
                     return False
 
                 # Exponential backoff
-                wait_time = min(0.1 * (2 ** int((time.time() - start_time))), 2.0)
+                wait_time = min(0.1 * (2 ** int(time.time() - start_time)), 2.0)
                 time.sleep(wait_time)
 
     def release(self):
@@ -150,7 +150,7 @@ class StateManager:
 
     # ========== PRD Operations ==========
 
-    def read_prd(self) -> Optional[Dict]:
+    def read_prd(self) -> dict | None:
         """
         Read the PRD file safely.
 
@@ -164,12 +164,12 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.prd_path, "r", encoding="utf-8") as f:
+                with open(self.prd_path, encoding="utf-8") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                raise IOError(f"Could not read PRD: {e}")
+            except (OSError, json.JSONDecodeError) as e:
+                raise OSError(f"Could not read PRD: {e}")
 
-    def write_prd(self, prd: Dict) -> None:
+    def write_prd(self, prd: dict) -> None:
         """
         Write the PRD file safely.
 
@@ -182,8 +182,8 @@ class StateManager:
             try:
                 with open(self.prd_path, "w", encoding="utf-8") as f:
                     json.dump(prd, f, indent=2)
-            except IOError as e:
-                raise IOError(f"Could not write PRD: {e}")
+            except OSError as e:
+                raise OSError(f"Could not write PRD: {e}")
 
     def update_story_status(self, story_id: str, status: str) -> None:
         """
@@ -206,7 +206,7 @@ class StateManager:
 
     # ========== Findings Operations ==========
 
-    def append_findings(self, content: str, tags: Optional[List[str]] = None) -> None:
+    def append_findings(self, content: str, tags: list[str] | None = None) -> None:
         """
         Append content to findings.md with optional tags.
 
@@ -229,8 +229,8 @@ class StateManager:
 
                     f.write(content)
                     f.write("\n\n")
-            except IOError as e:
-                raise IOError(f"Could not append to findings: {e}")
+            except OSError as e:
+                raise OSError(f"Could not append to findings: {e}")
 
     def read_findings(self) -> str:
         """
@@ -246,14 +246,14 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.findings_path, "r", encoding="utf-8") as f:
+                with open(self.findings_path, encoding="utf-8") as f:
                     return f.read()
-            except IOError as e:
-                raise IOError(f"Could not read findings: {e}")
+            except OSError as e:
+                raise OSError(f"Could not read findings: {e}")
 
     # ========== Progress Operations ==========
 
-    def append_progress(self, content: str, story_id: Optional[str] = None) -> None:
+    def append_progress(self, content: str, story_id: str | None = None) -> None:
         """
         Append content to progress.txt.
 
@@ -274,8 +274,8 @@ class StateManager:
                         f.write(f"[{timestamp}] {story_id}: {content}\n")
                     else:
                         f.write(content + "\n")
-            except IOError as e:
-                raise IOError(f"Could not append to progress: {e}")
+            except OSError as e:
+                raise OSError(f"Could not append to progress: {e}")
 
     def mark_story_complete(self, story_id: str) -> None:
         """
@@ -309,14 +309,14 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.progress_path, "r", encoding="utf-8") as f:
+                with open(self.progress_path, encoding="utf-8") as f:
                     return f.read()
-            except IOError as e:
-                raise IOError(f"Could not read progress: {e}")
+            except OSError as e:
+                raise OSError(f"Could not read progress: {e}")
 
     # ========== Utility Methods ==========
 
-    def get_all_story_statuses(self) -> Dict[str, str]:
+    def get_all_story_statuses(self) -> dict[str, str]:
         """
         Get the status of all stories from progress.txt.
 
@@ -327,7 +327,7 @@ class StateManager:
         if not content:
             return {}
 
-        statuses: Dict[str, str] = {}
+        statuses: dict[str, str] = {}
 
         for line in content.split("\n"):
             line = line.strip()
@@ -362,7 +362,7 @@ class StateManager:
 
     # ========== Agent Status Operations ==========
 
-    def read_agent_status(self) -> Dict:
+    def read_agent_status(self) -> dict:
         """
         Read .agent-status.json file safely.
 
@@ -381,9 +381,9 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.agent_status_path, "r", encoding="utf-8") as f:
+                with open(self.agent_status_path, encoding="utf-8") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 return {
                     "running": [],
                     "completed": [],
@@ -391,7 +391,7 @@ class StateManager:
                     "updated_at": None
                 }
 
-    def write_agent_status(self, status: Dict) -> None:
+    def write_agent_status(self, status: dict) -> None:
         """
         Write .agent-status.json file safely.
 
@@ -405,15 +405,15 @@ class StateManager:
             try:
                 with open(self.agent_status_path, "w", encoding="utf-8") as f:
                     json.dump(status, f, indent=2)
-            except IOError as e:
-                raise IOError(f"Could not write agent status: {e}")
+            except OSError as e:
+                raise OSError(f"Could not write agent status: {e}")
 
     def record_agent_start(
         self,
         story_id: str,
         agent_name: str,
-        pid: Optional[int] = None,
-        output_file: Optional[str] = None
+        pid: int | None = None,
+        output_file: str | None = None
     ) -> None:
         """
         Record agent start in .agent-status.json.
@@ -541,7 +541,7 @@ class StateManager:
         # Log to progress.txt
         self.append_progress(f"[FAILED] via {agent_name}: {error}", story_id=story_id)
 
-    def get_running_agents(self) -> List[Dict]:
+    def get_running_agents(self) -> list[dict]:
         """
         Get list of currently running agents.
 
@@ -551,7 +551,7 @@ class StateManager:
         status = self.read_agent_status()
         return status.get("running", [])
 
-    def get_agent_for_story(self, story_id: str) -> Optional[Dict]:
+    def get_agent_for_story(self, story_id: str) -> dict | None:
         """
         Get agent info for a specific story.
 
@@ -583,7 +583,7 @@ class StateManager:
 
         return None
 
-    def get_agent_summary(self) -> Dict[str, int]:
+    def get_agent_summary(self) -> dict[str, int]:
         """
         Get summary counts of agent statuses.
 
@@ -599,7 +599,7 @@ class StateManager:
 
     # ========== Iteration State Operations ==========
 
-    def read_iteration_state(self) -> Optional[Dict]:
+    def read_iteration_state(self) -> dict | None:
         """
         Read .iteration-state.json file safely.
 
@@ -613,12 +613,12 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.iteration_state_path, "r", encoding="utf-8") as f:
+                with open(self.iteration_state_path, encoding="utf-8") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 return None
 
-    def write_iteration_state(self, state: Dict) -> None:
+    def write_iteration_state(self, state: dict) -> None:
         """
         Write .iteration-state.json file safely.
 
@@ -632,8 +632,8 @@ class StateManager:
             try:
                 with open(self.iteration_state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, indent=2)
-            except IOError as e:
-                raise IOError(f"Could not write iteration state: {e}")
+            except OSError as e:
+                raise OSError(f"Could not write iteration state: {e}")
 
     def clear_iteration_state(self) -> None:
         """Clear the iteration state file."""
@@ -643,10 +643,10 @@ class StateManager:
             try:
                 if self.iteration_state_path.exists():
                     self.iteration_state_path.unlink()
-            except IOError:
+            except OSError:
                 pass
 
-    def get_iteration_progress(self) -> Optional[Dict[str, Any]]:
+    def get_iteration_progress(self) -> dict[str, Any] | None:
         """
         Get iteration progress summary.
 
@@ -669,7 +669,7 @@ class StateManager:
 
     # ========== Retry State Operations ==========
 
-    def read_retry_state(self) -> Optional[Dict]:
+    def read_retry_state(self) -> dict | None:
         """
         Read .retry-state.json file safely.
 
@@ -683,12 +683,12 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.retry_state_path, "r", encoding="utf-8") as f:
+                with open(self.retry_state_path, encoding="utf-8") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 return None
 
-    def write_retry_state(self, state: Dict) -> None:
+    def write_retry_state(self, state: dict) -> None:
         """
         Write .retry-state.json file safely.
 
@@ -702,8 +702,8 @@ class StateManager:
             try:
                 with open(self.retry_state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, indent=2)
-            except IOError as e:
-                raise IOError(f"Could not write retry state: {e}")
+            except OSError as e:
+                raise OSError(f"Could not write retry state: {e}")
 
     def clear_retry_state(self) -> None:
         """Clear the retry state file."""
@@ -713,10 +713,10 @@ class StateManager:
             try:
                 if self.retry_state_path.exists():
                     self.retry_state_path.unlink()
-            except IOError:
+            except OSError:
                 pass
 
-    def get_retry_summary(self, story_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_retry_summary(self, story_id: str | None = None) -> dict[str, Any]:
         """
         Get retry summary for all or a specific story.
 

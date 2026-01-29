@@ -15,7 +15,7 @@ import asyncio
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .base import AgentBackend, ExecutionResult
 
@@ -48,7 +48,7 @@ class ClaudeCodeBackend(AgentBackend):
     def __init__(
         self,
         claude_path: str = "claude",
-        project_root: Optional[Path] = None,
+        project_root: Path | None = None,
         output_format: str = "stream-json",
         print_mode: str = "tools"
     ):
@@ -67,15 +67,15 @@ class ClaudeCodeBackend(AgentBackend):
         self.output_format = output_format
         self.print_mode = print_mode
 
-        self._process: Optional[asyncio.subprocess.Process] = None
-        self._llm: Optional["LLMProvider"] = None
+        self._process: asyncio.subprocess.Process | None = None
+        self._llm: LLMProvider | None = None
         self._session_active = False
 
     def _check_claude_available(self) -> bool:
         """Check if claude CLI is available."""
         return shutil.which(self.claude_path) is not None
 
-    async def start_session(self, project_path: Optional[str] = None) -> None:
+    async def start_session(self, project_path: str | None = None) -> None:
         """
         Start a Claude Code session.
 
@@ -95,7 +95,7 @@ class ClaudeCodeBackend(AgentBackend):
 
     async def execute(
         self,
-        story: Dict[str, Any],
+        story: dict[str, Any],
         context: str = ""
     ) -> ExecutionResult:
         """
@@ -123,8 +123,8 @@ class ClaudeCodeBackend(AgentBackend):
         ]
 
         # Collect output
-        output_lines: List[str] = []
-        tool_calls: List[Dict[str, Any]] = []
+        output_lines: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
 
         try:
             # Start subprocess
@@ -186,9 +186,9 @@ class ClaudeCodeBackend(AgentBackend):
 
     async def _handle_stream_event(
         self,
-        data: Dict[str, Any],
-        output_lines: List[str],
-        tool_calls: List[Dict[str, Any]]
+        data: dict[str, Any],
+        output_lines: list[str],
+        tool_calls: list[dict[str, Any]]
     ) -> None:
         """
         Handle a stream event from Claude Code.
@@ -266,7 +266,7 @@ class ClaudeCodeBackend(AgentBackend):
         """Get the backend name."""
         return "claude-code"
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get current status."""
         return {
             "backend": self.get_name(),
@@ -296,8 +296,8 @@ class ClaudeCodeLLM:
 
     async def complete(
         self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
         **kwargs: Any
     ):
         """

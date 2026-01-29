@@ -13,13 +13,13 @@ Key features:
 
 import asyncio
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from .base import AgentBackend, ExecutionResult
 from ..tools.registry import ToolRegistry
+from .base import AgentBackend, ExecutionResult
 
 if TYPE_CHECKING:
-    from ..llm.base import LLMProvider, LLMResponse
+    from ..llm.base import LLMProvider
 
 
 class BuiltinBackend(AgentBackend):
@@ -70,12 +70,12 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
     def __init__(
         self,
         provider: str = "claude",
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         max_iterations: int = 50,
-        project_root: Optional[Path] = None,
-        config: Optional[Dict[str, Any]] = None
+        project_root: Path | None = None,
+        config: dict[str, Any] | None = None
     ):
         """
         Initialize the Builtin backend.
@@ -98,7 +98,7 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
         self.max_iterations = max_iterations
         self.config = config or {}
 
-        self._llm: Optional["LLMProvider"] = None
+        self._llm: LLMProvider | None = None
         self._tools = ToolRegistry()
         self._running = False
         self._should_stop = False
@@ -120,7 +120,7 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
 
     async def execute(
         self,
-        story: Dict[str, Any],
+        story: dict[str, Any],
         context: str = ""
     ) -> ExecutionResult:
         """
@@ -141,7 +141,7 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
         prompt = self._build_prompt(story, context)
 
         # Initialize messages
-        messages: List[Dict[str, Any]] = [
+        messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
         ]
@@ -150,7 +150,7 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
         tool_definitions = self._tools.get_definitions()
 
         # Track execution
-        all_tool_calls: List[Dict[str, Any]] = []
+        all_tool_calls: list[dict[str, Any]] = []
         output_text = ""
         iteration = 0
 
@@ -306,7 +306,7 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
         """Get the backend name."""
         return "builtin"
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get current status."""
         return {
             "backend": self.get_name(),
@@ -346,9 +346,9 @@ class AsyncBuiltinBackend(BuiltinBackend):
 
     async def execute_with_progress(
         self,
-        story: Dict[str, Any],
+        story: dict[str, Any],
         context: str = "",
-        progress_callback: Optional[Any] = None
+        progress_callback: Any | None = None
     ) -> ExecutionResult:
         """
         Execute with progress reporting.
@@ -369,7 +369,7 @@ class AsyncBuiltinBackend(BuiltinBackend):
         if progress_callback:
             iteration_count = [0]
 
-            async def wrapped_tool_callback(data: Dict[str, Any]) -> None:
+            async def wrapped_tool_callback(data: dict[str, Any]) -> None:
                 if original_tool_callback:
                     original_tool_callback(data)
                 if data.get("type") != "tool_result":
@@ -380,7 +380,7 @@ class AsyncBuiltinBackend(BuiltinBackend):
                     "data": data
                 })
 
-            def sync_tool_callback(data: Dict[str, Any]) -> None:
+            def sync_tool_callback(data: dict[str, Any]) -> None:
                 asyncio.create_task(wrapped_tool_callback(data))
 
             self.on_tool_call = sync_tool_callback

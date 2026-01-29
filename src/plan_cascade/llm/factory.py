@@ -5,13 +5,12 @@ Factory pattern for creating LLM provider instances based on configuration.
 Supports registration of custom providers and configuration validation.
 """
 
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any
 
-from .base import LLMProvider, LLMError
-
+from .base import LLMError, LLMProvider
 
 # Type alias for provider classes
-ProviderClass = Type[LLMProvider]
+ProviderClass = type[LLMProvider]
 
 
 class LLMFactory:
@@ -38,10 +37,10 @@ class LLMFactory:
     """
 
     # Registry of provider classes
-    _providers: Dict[str, ProviderClass] = {}
+    _providers: dict[str, ProviderClass] = {}
 
     # Default configuration for providers
-    _default_configs: Dict[str, Dict[str, Any]] = {
+    _default_configs: dict[str, dict[str, Any]] = {
         "claude": {
             "model": "claude-sonnet-4-20250514",
             "max_tokens": 8192,
@@ -81,8 +80,8 @@ class LLMFactory:
     def create(
         cls,
         provider: str,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
+        api_key: str | None = None,
+        model: str | None = None,
         **kwargs: Any
     ) -> LLMProvider:
         """
@@ -162,7 +161,7 @@ class LLMFactory:
             )
 
     @classmethod
-    def get_supported_providers(cls) -> List[str]:
+    def get_supported_providers(cls) -> list[str]:
         """
         Get list of supported provider names.
 
@@ -175,7 +174,7 @@ class LLMFactory:
         return list(set(built_in + registered))
 
     @classmethod
-    def get_default_config(cls, provider: str) -> Dict[str, Any]:
+    def get_default_config(cls, provider: str) -> dict[str, Any]:
         """
         Get the default configuration for a provider.
 
@@ -188,7 +187,7 @@ class LLMFactory:
         return cls._default_configs.get(provider.lower(), {}).copy()
 
     @classmethod
-    def set_default_config(cls, provider: str, config: Dict[str, Any]) -> None:
+    def set_default_config(cls, provider: str, config: dict[str, Any]) -> None:
         """
         Set the default configuration for a provider.
 

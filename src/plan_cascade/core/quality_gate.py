@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 class GateType(Enum):
@@ -45,7 +45,7 @@ class GateOutput:
     stderr: str
     duration_seconds: float
     command: str
-    error_summary: Optional[str] = None
+    error_summary: str | None = None
 
 
 @dataclass
@@ -55,13 +55,13 @@ class GateConfig:
     type: GateType
     enabled: bool = True
     required: bool = True  # If True, failure blocks progression
-    command: Optional[str] = None  # Custom command (for CUSTOM type)
-    args: List[str] = field(default_factory=list)
+    command: str | None = None  # Custom command (for CUSTOM type)
+    args: list[str] = field(default_factory=list)
     timeout_seconds: int = 300
-    working_dir: Optional[str] = None
-    env: Dict[str, str] = field(default_factory=dict)
+    working_dir: str | None = None
+    env: dict[str, str] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "name": self.name,
@@ -76,7 +76,7 @@ class GateConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "GateConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "GateConfig":
         """Create from dictionary."""
         return cls(
             name=data["name"],
@@ -106,17 +106,17 @@ class Gate(ABC):
         self.project_root = project_root
 
     @abstractmethod
-    def execute(self, story_id: str, context: Dict[str, Any]) -> GateOutput:
+    def execute(self, story_id: str, context: dict[str, Any]) -> GateOutput:
         """Execute the gate and return results."""
         pass
 
     def _run_command(
         self,
-        command: List[str],
-        timeout: Optional[int] = None,
-        env: Optional[Dict[str, str]] = None,
-        cwd: Optional[Path] = None,
-    ) -> Tuple[int, str, str, float]:
+        command: list[str],
+        timeout: int | None = None,
+        env: dict[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> tuple[int, str, str, float]:
         """
         Run a command and return (exit_code, stdout, stderr, duration).
         """
@@ -133,7 +133,7 @@ class Gate(ABC):
         start_time = datetime.now()
 
         try:
-            kwargs: Dict[str, Any] = {
+            kwargs: dict[str, Any] = {
                 "capture_output": True,
                 "text": True,
                 "timeout": timeout,
@@ -164,19 +164,19 @@ class TypeCheckGate(Gate):
     """Typecheck gate supporting tsc, mypy, pyright."""
 
     # Commands by project type
-    COMMANDS: Dict[ProjectType, List[str]] = {
+    COMMANDS: dict[ProjectType, list[str]] = {
         ProjectType.NODEJS: ["npx", "tsc", "--noEmit"],
         ProjectType.PYTHON: ["mypy", "."],
     }
 
-    FALLBACK_COMMANDS: Dict[ProjectType, List[List[str]]] = {
+    FALLBACK_COMMANDS: dict[ProjectType, list[list[str]]] = {
         ProjectType.PYTHON: [
             ["pyright"],
             ["python", "-m", "mypy", "."],
         ],
     }
 
-    def execute(self, story_id: str, context: Dict[str, Any]) -> GateOutput:
+    def execute(self, story_id: str, context: dict[str, Any]) -> GateOutput:
         """Execute typecheck."""
         project_type = context.get("project_type", ProjectType.UNKNOWN)
 
@@ -238,14 +238,14 @@ class TypeCheckGate(Gate):
 class TestGate(Gate):
     """Test gate supporting pytest, jest, npm test."""
 
-    COMMANDS: Dict[ProjectType, List[str]] = {
+    COMMANDS: dict[ProjectType, list[str]] = {
         ProjectType.NODEJS: ["npm", "test"],
         ProjectType.PYTHON: ["pytest", "-v"],
         ProjectType.RUST: ["cargo", "test"],
         ProjectType.GO: ["go", "test", "./..."],
     }
 
-    FALLBACK_COMMANDS: Dict[ProjectType, List[List[str]]] = {
+    FALLBACK_COMMANDS: dict[ProjectType, list[list[str]]] = {
         ProjectType.NODEJS: [
             ["npx", "jest"],
             ["yarn", "test"],
@@ -255,7 +255,7 @@ class TestGate(Gate):
         ],
     }
 
-    def execute(self, story_id: str, context: Dict[str, Any]) -> GateOutput:
+    def execute(self, story_id: str, context: dict[str, Any]) -> GateOutput:
         """Execute tests."""
         project_type = context.get("project_type", ProjectType.UNKNOWN)
 
@@ -313,7 +313,7 @@ class TestGate(Gate):
 
         # Generic summary
         lines = output.strip().split("\n")
-        failure_lines = [l for l in lines if "fail" in l.lower() or "error" in l.lower()][:5]
+        failure_lines = [line for line in lines if "fail" in line.lower() or "error" in line.lower()][:5]
         if failure_lines:
             return "Test failures:\n" + "\n".join(failure_lines)
 
@@ -323,14 +323,14 @@ class TestGate(Gate):
 class LintGate(Gate):
     """Lint gate supporting eslint, ruff, clippy."""
 
-    COMMANDS: Dict[ProjectType, List[str]] = {
+    COMMANDS: dict[ProjectType, list[str]] = {
         ProjectType.NODEJS: ["npx", "eslint", "."],
         ProjectType.PYTHON: ["ruff", "check", "."],
         ProjectType.RUST: ["cargo", "clippy"],
         ProjectType.GO: ["golangci-lint", "run"],
     }
 
-    FALLBACK_COMMANDS: Dict[ProjectType, List[List[str]]] = {
+    FALLBACK_COMMANDS: dict[ProjectType, list[list[str]]] = {
         ProjectType.PYTHON: [
             ["python", "-m", "ruff", "check", "."],
             ["flake8", "."],
@@ -340,7 +340,7 @@ class LintGate(Gate):
         ],
     }
 
-    def execute(self, story_id: str, context: Dict[str, Any]) -> GateOutput:
+    def execute(self, story_id: str, context: dict[str, Any]) -> GateOutput:
         """Execute linting."""
         project_type = context.get("project_type", ProjectType.UNKNOWN)
 
@@ -385,17 +385,17 @@ class LintGate(Gate):
         lines = output.strip().split("\n")
 
         # Count issues
-        error_lines = [l for l in lines if l.strip() and not l.startswith(" ")][:5]
+        error_lines = [line for line in lines if line.strip() and not line.startswith(" ")][:5]
 
         if error_lines:
-            return f"Lint issues found:\n" + "\n".join(error_lines)
+            return "Lint issues found:\n" + "\n".join(error_lines)
         return "Lint check failed"
 
 
 class CustomGate(Gate):
     """Custom gate for user-defined scripts."""
 
-    def execute(self, story_id: str, context: Dict[str, Any]) -> GateOutput:
+    def execute(self, story_id: str, context: dict[str, Any]) -> GateOutput:
         """Execute custom command."""
         if not self.config.command:
             return GateOutput(
@@ -443,7 +443,7 @@ class QualityGate:
     Supports auto-detection of project type and appropriate tools.
     """
 
-    GATE_CLASSES: Dict[GateType, type] = {
+    GATE_CLASSES: dict[GateType, type] = {
         GateType.TYPECHECK: TypeCheckGate,
         GateType.TEST: TestGate,
         GateType.LINT: LintGate,
@@ -453,7 +453,7 @@ class QualityGate:
     def __init__(
         self,
         project_root: Path,
-        gates: Optional[List[GateConfig]] = None,
+        gates: list[GateConfig] | None = None,
     ):
         """
         Initialize quality gate manager.
@@ -464,7 +464,7 @@ class QualityGate:
         """
         self.project_root = Path(project_root)
         self.gates = gates or []
-        self._project_type: Optional[ProjectType] = None
+        self._project_type: ProjectType | None = None
 
     def detect_project_type(self) -> ProjectType:
         """Auto-detect project type from configuration files."""
@@ -492,8 +492,8 @@ class QualityGate:
     def execute_all(
         self,
         story_id: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, GateOutput]:
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, GateOutput]:
         """
         Execute all enabled gates.
 
@@ -507,7 +507,7 @@ class QualityGate:
         context = context or {}
         context["project_type"] = self.detect_project_type()
 
-        results: Dict[str, GateOutput] = {}
+        results: dict[str, GateOutput] = {}
 
         for gate_config in self.gates:
             if not gate_config.enabled:
@@ -522,7 +522,7 @@ class QualityGate:
 
         return results
 
-    def should_allow_progression(self, outputs: Dict[str, GateOutput]) -> bool:
+    def should_allow_progression(self, outputs: dict[str, GateOutput]) -> bool:
         """
         Check if all required gates passed.
 
@@ -545,7 +545,7 @@ class QualityGate:
 
         return True
 
-    def get_failure_summary(self, outputs: Dict[str, GateOutput]) -> Optional[str]:
+    def get_failure_summary(self, outputs: dict[str, GateOutput]) -> str | None:
         """Get a summary of all gate failures."""
         failures = []
 
@@ -561,7 +561,7 @@ class QualityGate:
         return None
 
     @classmethod
-    def from_prd(cls, project_root: Path, prd: Dict[str, Any]) -> "QualityGate":
+    def from_prd(cls, project_root: Path, prd: dict[str, Any]) -> "QualityGate":
         """
         Create QualityGate from PRD configuration.
 
@@ -626,7 +626,7 @@ class QualityGate:
         instance.gates = default_gates
         return instance
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for PRD serialization."""
         return {
             "enabled": len(self.gates) > 0,

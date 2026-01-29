@@ -7,17 +7,16 @@ Uses the openai SDK for API communication.
 
 import asyncio
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from ..base import (
+    AuthenticationError,
+    LLMError,
     LLMProvider,
     LLMResponse,
-    ToolCall,
-    TokenUsage,
-    LLMError,
-    RateLimitError,
-    AuthenticationError,
     ModelNotFoundError,
+    TokenUsage,
+    ToolCall,
 )
 
 
@@ -52,10 +51,10 @@ class OpenAIProvider(LLMProvider):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        base_url: Optional[str] = None,
-        organization: Optional[str] = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        organization: str | None = None,
         max_retries: int = 3,
         timeout: float = 120.0,
         **kwargs: Any
@@ -105,11 +104,11 @@ class OpenAIProvider(LLMProvider):
 
     async def complete(
         self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         **kwargs: Any
     ) -> LLMResponse:
         """
@@ -184,7 +183,7 @@ class OpenAIProvider(LLMProvider):
 
         raise LLMError(f"Max retries exceeded: {last_error}", provider="openai")
 
-    def _format_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _format_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Format messages for the OpenAI API."""
         formatted = []
         for msg in messages:
@@ -224,12 +223,12 @@ class OpenAIProvider(LLMProvider):
 
         return formatted
 
-    def _dict_to_json(self, d: Dict[str, Any]) -> str:
+    def _dict_to_json(self, d: dict[str, Any]) -> str:
         """Convert dictionary to JSON string."""
         import json
         return json.dumps(d)
 
-    def _format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _format_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Format tool definitions for the OpenAI API."""
         formatted = []
         for tool in tools:
@@ -245,8 +244,8 @@ class OpenAIProvider(LLMProvider):
 
     def _format_tool_choice(
         self,
-        tool_choice: Union[str, Dict[str, Any]]
-    ) -> Union[str, Dict[str, Any]]:
+        tool_choice: str | dict[str, Any]
+    ) -> str | dict[str, Any]:
         """Format tool choice for the OpenAI API."""
         if isinstance(tool_choice, str):
             if tool_choice in ("auto", "none", "required"):
@@ -315,7 +314,7 @@ class OpenAIProvider(LLMProvider):
         """Get the default model."""
         return self.DEFAULT_MODEL
 
-    def get_supported_models(self) -> List[str]:
+    def get_supported_models(self) -> list[str]:
         """Get supported models."""
         return self.MODELS.copy()
 

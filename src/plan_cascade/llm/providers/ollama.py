@@ -6,16 +6,15 @@ Uses HTTP requests to communicate with the Ollama API.
 """
 
 import asyncio
-import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from ..base import (
+    LLMError,
     LLMProvider,
     LLMResponse,
-    ToolCall,
-    TokenUsage,
-    LLMError,
     ModelNotFoundError,
+    TokenUsage,
+    ToolCall,
 )
 
 
@@ -55,8 +54,8 @@ class OllamaProvider(LLMProvider):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        base_url: Optional[str] = None,
+        model: str | None = None,
+        base_url: str | None = None,
         timeout: float = 300.0,
         **kwargs: Any
     ):
@@ -96,11 +95,11 @@ class OllamaProvider(LLMProvider):
 
     async def complete(
         self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         **kwargs: Any
     ) -> LLMResponse:
         """
@@ -177,7 +176,7 @@ class OllamaProvider(LLMProvider):
                 provider="ollama"
             )
 
-    def _format_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _format_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Format messages for the Ollama API."""
         formatted = []
         for msg in messages:
@@ -210,7 +209,7 @@ class OllamaProvider(LLMProvider):
 
         return formatted
 
-    def _format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _format_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Format tool definitions for the Ollama API."""
         formatted = []
         for tool in tools:
@@ -224,7 +223,7 @@ class OllamaProvider(LLMProvider):
             })
         return formatted
 
-    def _parse_response(self, data: Dict[str, Any]) -> LLMResponse:
+    def _parse_response(self, data: dict[str, Any]) -> LLMResponse:
         """Parse the Ollama API response."""
         message = data.get("message", {})
         content = message.get("content", "")
@@ -277,11 +276,11 @@ class OllamaProvider(LLMProvider):
         """Get the default model."""
         return self.DEFAULT_MODEL
 
-    def get_supported_models(self) -> List[str]:
+    def get_supported_models(self) -> list[str]:
         """Get commonly used models."""
         return self.MODELS.copy()
 
-    async def list_local_models(self) -> List[str]:
+    async def list_local_models(self) -> list[str]:
         """
         List models available locally in Ollama.
 

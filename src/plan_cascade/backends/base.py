@@ -18,9 +18,10 @@ Both backends implement the same interface, allowing seamless switching.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..llm.base import LLMProvider
@@ -44,13 +45,13 @@ class ExecutionResult:
     success: bool
     output: str = ""
     iterations: int = 0
-    error: Optional[str] = None
-    story_id: Optional[str] = None
+    error: str | None = None
+    story_id: str | None = None
     agent: str = ""
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
             "success": self.success,
@@ -64,7 +65,7 @@ class ExecutionResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ExecutionResult":
+    def from_dict(cls, data: dict[str, Any]) -> "ExecutionResult":
         """Create from dictionary."""
         return cls(
             success=data.get("success", False),
@@ -89,7 +90,7 @@ class ExecutionResult:
 
 
 # Type alias for callbacks
-OnToolCallCallback = Callable[[Dict[str, Any]], None]
+OnToolCallCallback = Callable[[dict[str, Any]], None]
 OnTextCallback = Callable[[str], None]
 
 
@@ -112,7 +113,7 @@ class AgentBackend(ABC):
     - get_status(): Get execution status
     """
 
-    def __init__(self, project_root: Optional[Path] = None):
+    def __init__(self, project_root: Path | None = None):
         """
         Initialize the backend.
 
@@ -122,13 +123,13 @@ class AgentBackend(ABC):
         self.project_root = Path(project_root) if project_root else Path.cwd()
 
         # Callbacks for UI integration
-        self.on_tool_call: Optional[OnToolCallCallback] = None
-        self.on_text: Optional[OnTextCallback] = None
+        self.on_tool_call: OnToolCallCallback | None = None
+        self.on_text: OnTextCallback | None = None
 
     @abstractmethod
     async def execute(
         self,
-        story: Dict[str, Any],
+        story: dict[str, Any],
         context: str = ""
     ) -> ExecutionResult:
         """
@@ -170,7 +171,7 @@ class AgentBackend(ABC):
         """
         pass
 
-    async def start_session(self, project_path: Optional[str] = None) -> None:
+    async def start_session(self, project_path: str | None = None) -> None:
         """
         Start an execution session.
 
@@ -191,7 +192,7 @@ class AgentBackend(ABC):
         """
         pass
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """
         Get the current execution status.
 
@@ -203,7 +204,7 @@ class AgentBackend(ABC):
             "project_root": str(self.project_root),
         }
 
-    def _build_prompt(self, story: Dict[str, Any], context: str = "") -> str:
+    def _build_prompt(self, story: dict[str, Any], context: str = "") -> str:
         """
         Build the execution prompt for a story.
 
@@ -245,7 +246,7 @@ Instructions:
 """
         return prompt
 
-    async def _emit_tool_call(self, data: Dict[str, Any]) -> None:
+    async def _emit_tool_call(self, data: dict[str, Any]) -> None:
         """
         Emit a tool call event to the callback.
 

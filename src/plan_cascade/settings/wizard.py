@@ -5,7 +5,6 @@ This module provides a CLI-based setup wizard using the rich library
 for formatted output and user interaction.
 """
 
-from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -53,8 +52,8 @@ class SetupWizard:
 
     def __init__(
         self,
-        storage: Optional[SettingsStorage] = None,
-        console: Optional[Console] = None,
+        storage: SettingsStorage | None = None,
+        console: Console | None = None,
     ) -> None:
         """
         Initialize the setup wizard.
@@ -228,8 +227,8 @@ class SetupWizard:
 
 
 def run_setup_wizard(
-    storage: Optional[SettingsStorage] = None,
-    console: Optional[Console] = None,
+    storage: SettingsStorage | None = None,
+    console: Console | None = None,
 ) -> Settings:
     """
     Convenience function to run the setup wizard.

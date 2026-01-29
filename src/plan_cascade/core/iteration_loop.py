@@ -7,16 +7,17 @@ Provides hands-off execution of PRD stories across multiple batches.
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .orchestrator import Orchestrator
     from .quality_gate import QualityGate
-    from .retry_manager import RetryManager, ErrorType
+    from .retry_manager import RetryManager
 
 
 class IterationMode(Enum):
@@ -48,7 +49,7 @@ class IterationConfig:
     stop_on_first_failure: bool = False
     continue_on_optional_failure: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "mode": self.mode.value,
@@ -62,7 +63,7 @@ class IterationConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "IterationConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "IterationConfig":
         """Create from dictionary."""
         mode = data.get("mode", "until_complete")
         if isinstance(mode, str):
@@ -85,7 +86,7 @@ class BatchResult:
     """Result of executing a single batch."""
     batch_num: int
     started_at: str
-    completed_at: Optional[str] = None
+    completed_at: str | None = None
     stories_launched: int = 0
     stories_completed: int = 0
     stories_failed: int = 0
@@ -93,9 +94,9 @@ class BatchResult:
     quality_gate_failures: int = 0
     duration_seconds: float = 0.0
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "batch_num": self.batch_num,
@@ -112,7 +113,7 @@ class BatchResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BatchResult":
+    def from_dict(cls, data: dict[str, Any]) -> "BatchResult":
         """Create from dictionary."""
         return cls(
             batch_num=data["batch_num"],
@@ -133,20 +134,20 @@ class BatchResult:
 class IterationState:
     """State of the iteration loop."""
     status: IterationStatus = IterationStatus.NOT_STARTED
-    started_at: Optional[str] = None
-    updated_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    started_at: str | None = None
+    updated_at: str | None = None
+    completed_at: str | None = None
     current_batch: int = 0
     total_batches: int = 0
     current_iteration: int = 0
     total_stories: int = 0
     completed_stories: int = 0
     failed_stories: int = 0
-    batch_results: List[BatchResult] = field(default_factory=list)
-    error: Optional[str] = None
-    pause_reason: Optional[str] = None
+    batch_results: list[BatchResult] = field(default_factory=list)
+    error: str | None = None
+    pause_reason: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "status": self.status.value,
@@ -165,7 +166,7 @@ class IterationState:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "IterationState":
+    def from_dict(cls, data: dict[str, Any]) -> "IterationState":
         """Create from dictionary."""
         status = data.get("status", "not_started")
         if isinstance(status, str):
@@ -198,13 +199,13 @@ class IterationState:
 @dataclass
 class IterationCallbacks:
     """Callbacks for iteration events."""
-    on_batch_start: Optional[Callable[[int, List[Dict]], None]] = None
-    on_batch_complete: Optional[Callable[[BatchResult], None]] = None
-    on_story_complete: Optional[Callable[[str, bool], None]] = None
-    on_story_retry: Optional[Callable[[str, int], None]] = None
-    on_quality_gate_run: Optional[Callable[[str, Dict], None]] = None
-    on_iteration_complete: Optional[Callable[[IterationState], None]] = None
-    on_error: Optional[Callable[[str, Exception], None]] = None
+    on_batch_start: Callable[[int, list[dict]], None] | None = None
+    on_batch_complete: Callable[[BatchResult], None] | None = None
+    on_story_complete: Callable[[str, bool], None] | None = None
+    on_story_retry: Callable[[str, int], None] | None = None
+    on_quality_gate_run: Callable[[str, dict], None] | None = None
+    on_iteration_complete: Callable[[IterationState], None] | None = None
+    on_error: Callable[[str, Exception], None] | None = None
 
 
 class IterationLoop:
@@ -218,11 +219,11 @@ class IterationLoop:
     def __init__(
         self,
         project_root: Path,
-        config: Optional[IterationConfig] = None,
+        config: IterationConfig | None = None,
         orchestrator: Optional["Orchestrator"] = None,
         quality_gate: Optional["QualityGate"] = None,
         retry_manager: Optional["RetryManager"] = None,
-        state_file: Optional[Path] = None,
+        state_file: Path | None = None,
     ):
         """
         Initialize the iteration loop.
@@ -245,14 +246,14 @@ class IterationLoop:
         self._state = IterationState()
         self._stop_requested = False
         self._pause_requested = False
-        self._callbacks: Optional[IterationCallbacks] = None
+        self._callbacks: IterationCallbacks | None = None
 
         # Load existing state
         self._load_state()
 
     def start(
         self,
-        callbacks: Optional[IterationCallbacks] = None,
+        callbacks: IterationCallbacks | None = None,
         dry_run: bool = False,
     ) -> IterationState:
         """
@@ -306,7 +307,7 @@ class IterationLoop:
 
         return self._state
 
-    def pause(self, reason: Optional[str] = None) -> None:
+    def pause(self, reason: str | None = None) -> None:
         """Pause the iteration loop."""
         self._pause_requested = True
         self._state.pause_reason = reason
@@ -341,7 +342,7 @@ class IterationLoop:
         """Get the current iteration state."""
         return self._state
 
-    def _run_loop(self, batches: List[List[Dict]], dry_run: bool) -> None:
+    def _run_loop(self, batches: list[list[dict]], dry_run: bool) -> None:
         """Run the main iteration loop."""
         while self._should_continue(batches):
             self._state.current_iteration += 1
@@ -404,7 +405,7 @@ class IterationLoop:
     def _execute_batch(
         self,
         batch_num: int,
-        stories: List[Dict],
+        stories: list[dict],
         dry_run: bool,
     ) -> BatchResult:
         """Execute a single batch of stories."""
@@ -451,7 +452,7 @@ class IterationLoop:
     def _wait_for_batch_completion(
         self,
         batch_num: int,
-        stories: List[Dict],
+        stories: list[dict],
         result: BatchResult,
         start_time: datetime,
     ) -> None:
@@ -529,7 +530,7 @@ class IterationLoop:
 
             time.sleep(self.config.poll_interval_seconds)
 
-    def _run_quality_gates(self, story_id: str, story: Dict) -> bool:
+    def _run_quality_gates(self, story_id: str, story: dict) -> bool:
         """Run quality gates for a completed story."""
         if not self.quality_gate:
             return True
@@ -544,7 +545,7 @@ class IterationLoop:
     def _handle_retry(
         self,
         story_id: str,
-        story: Dict,
+        story: dict,
         failure_type: str,
     ) -> bool:
         """Handle retry for a failed story. Returns True if retry was initiated."""
@@ -581,7 +582,7 @@ class IterationLoop:
 
         return statuses.get(story_id, "pending")
 
-    def _get_pending_stories(self, batch: List[Dict]) -> List[Dict]:
+    def _get_pending_stories(self, batch: list[dict]) -> list[dict]:
         """Get stories in batch that are still pending."""
         from ..state.state_manager import StateManager
         state_manager = StateManager(self.project_root)
@@ -596,7 +597,7 @@ class IterationLoop:
 
         return pending
 
-    def _should_continue(self, batches: List[List[Dict]]) -> bool:
+    def _should_continue(self, batches: list[list[dict]]) -> bool:
         """Check if the iteration loop should continue."""
         if self._stop_requested:
             return False
@@ -619,7 +620,7 @@ class IterationLoop:
             return
 
         try:
-            with open(self.state_file, "r", encoding="utf-8") as f:
+            with open(self.state_file, encoding="utf-8") as f:
                 data = json.load(f)
             self._state = IterationState.from_dict(data)
         except (json.JSONDecodeError, KeyError, TypeError):
@@ -649,7 +650,7 @@ class IterationLoop:
             except OSError:
                 pass
 
-    def get_progress_summary(self) -> Dict[str, Any]:
+    def get_progress_summary(self) -> dict[str, Any]:
         """Get a summary of iteration progress."""
         return {
             "status": self._state.status.value,

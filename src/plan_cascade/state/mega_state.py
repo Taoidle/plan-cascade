@@ -10,7 +10,6 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Dict
 
 from .state_manager import FileLock
 
@@ -38,7 +37,7 @@ class MegaStateManager:
 
     # ========== Mega Plan Operations ==========
 
-    def read_mega_plan(self) -> Optional[Dict]:
+    def read_mega_plan(self) -> dict | None:
         """
         Read the mega-plan.json file safely.
 
@@ -52,12 +51,12 @@ class MegaStateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.mega_plan_path, "r", encoding="utf-8") as f:
+                with open(self.mega_plan_path, encoding="utf-8") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                raise IOError(f"Could not read mega-plan: {e}")
+            except (OSError, json.JSONDecodeError) as e:
+                raise OSError(f"Could not read mega-plan: {e}")
 
-    def write_mega_plan(self, plan: Dict) -> None:
+    def write_mega_plan(self, plan: dict) -> None:
         """
         Write the mega-plan.json file safely.
 
@@ -70,8 +69,8 @@ class MegaStateManager:
             try:
                 with open(self.mega_plan_path, "w", encoding="utf-8") as f:
                     json.dump(plan, f, indent=2)
-            except IOError as e:
-                raise IOError(f"Could not write mega-plan: {e}")
+            except OSError as e:
+                raise OSError(f"Could not write mega-plan: {e}")
 
     def update_feature_status(self, feature_id: str, status: str) -> None:
         """
@@ -95,7 +94,7 @@ class MegaStateManager:
 
     # ========== Status File Operations ==========
 
-    def read_status(self) -> Optional[Dict]:
+    def read_status(self) -> dict | None:
         """
         Read the .mega-status.json file.
 
@@ -109,12 +108,12 @@ class MegaStateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.mega_status_path, "r", encoding="utf-8") as f:
+                with open(self.mega_status_path, encoding="utf-8") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                raise IOError(f"Could not read mega-status: {e}")
+            except (OSError, json.JSONDecodeError) as e:
+                raise OSError(f"Could not read mega-status: {e}")
 
-    def write_status(self, status: Dict) -> None:
+    def write_status(self, status: dict) -> None:
         """
         Write the .mega-status.json file.
 
@@ -127,8 +126,8 @@ class MegaStateManager:
             try:
                 with open(self.mega_status_path, "w", encoding="utf-8") as f:
                     json.dump(status, f, indent=2)
-            except IOError as e:
-                raise IOError(f"Could not write mega-status: {e}")
+            except OSError as e:
+                raise OSError(f"Could not write mega-status: {e}")
 
     def _sync_status_file(self) -> None:
         """
@@ -156,7 +155,7 @@ class MegaStateManager:
 
         self.write_status(status)
 
-    def _get_current_batch_number(self, plan: Dict) -> int:
+    def _get_current_batch_number(self, plan: dict) -> int:
         """Determine current batch number based on feature statuses."""
         # Import here to avoid circular imports
         from ..core.mega_generator import MegaPlanGenerator
@@ -172,7 +171,7 @@ class MegaStateManager:
 
         return len(batches) + 1  # All complete
 
-    def sync_status_from_worktrees(self) -> Dict[str, Dict]:
+    def sync_status_from_worktrees(self) -> dict[str, dict]:
         """
         Sync status from worktree directories.
 
@@ -205,7 +204,7 @@ class MegaStateManager:
                 # Check PRD and stories if exists
                 if prd_path.exists():
                     try:
-                        with open(prd_path, "r", encoding="utf-8") as f:
+                        with open(prd_path, encoding="utf-8") as f:
                             prd = json.load(f)
                             stories = prd.get("stories", [])
                             all_complete = True
@@ -240,12 +239,12 @@ class MegaStateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.mega_findings_path, "r", encoding="utf-8") as f:
+                with open(self.mega_findings_path, encoding="utf-8") as f:
                     return f.read()
-            except IOError as e:
-                raise IOError(f"Could not read mega-findings: {e}")
+            except OSError as e:
+                raise OSError(f"Could not read mega-findings: {e}")
 
-    def append_mega_findings(self, content: str, feature_id: Optional[str] = None) -> None:
+    def append_mega_findings(self, content: str, feature_id: str | None = None) -> None:
         """
         Append content to mega-findings.md.
 
@@ -266,8 +265,8 @@ class MegaStateManager:
                     f.write(f"<!-- Added: {timestamp} -->\n")
                     f.write(content)
                     f.write("\n\n")
-            except IOError as e:
-                raise IOError(f"Could not append to mega-findings: {e}")
+            except OSError as e:
+                raise OSError(f"Could not append to mega-findings: {e}")
 
     def initialize_mega_findings(self) -> None:
         """
@@ -290,8 +289,8 @@ Feature-specific findings should be in their respective worktrees.
             try:
                 with open(self.mega_findings_path, "w", encoding="utf-8") as f:
                     f.write(content)
-            except IOError as e:
-                raise IOError(f"Could not initialize mega-findings: {e}")
+            except OSError as e:
+                raise OSError(f"Could not initialize mega-findings: {e}")
 
     def copy_mega_findings_to_worktree(self, feature_name: str) -> None:
         """

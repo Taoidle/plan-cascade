@@ -11,7 +11,6 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 
 class MegaPlanGenerator:
@@ -33,8 +32,8 @@ class MegaPlanGenerator:
         description: str,
         execution_mode: str = "auto",
         target_branch: str = "main",
-        context: Optional[Dict] = None
-    ) -> Dict:
+        context: dict | None = None
+    ) -> dict:
         """
         Generate a mega-plan from a project description.
 
@@ -66,13 +65,13 @@ class MegaPlanGenerator:
 
     def add_feature(
         self,
-        plan: Dict,
+        plan: dict,
         name: str,
         title: str,
         description: str,
         priority: str = "medium",
-        dependencies: Optional[List[str]] = None
-    ) -> Dict:
+        dependencies: list[str] | None = None
+    ) -> dict:
         """
         Add a feature to the mega-plan.
 
@@ -103,7 +102,7 @@ class MegaPlanGenerator:
         plan["features"].append(feature)
         return plan
 
-    def generate_feature_batches(self, plan: Dict) -> List[List[Dict]]:
+    def generate_feature_batches(self, plan: dict) -> list[list[dict]]:
         """
         Generate parallel execution batches from the mega-plan.
 
@@ -156,7 +155,7 @@ class MegaPlanGenerator:
 
         return batches
 
-    def validate_mega_plan(self, plan: Dict) -> Tuple[bool, List[str]]:
+    def validate_mega_plan(self, plan: dict) -> tuple[bool, list[str]]:
         """
         Validate a mega-plan for correctness.
 
@@ -241,7 +240,7 @@ class MegaPlanGenerator:
 
         return (len(errors) == 0, errors)
 
-    def _detect_dependency_cycle(self, plan: Dict) -> Optional[List[str]]:
+    def _detect_dependency_cycle(self, plan: dict) -> list[str] | None:
         """
         Detect circular dependencies in the feature graph.
 
@@ -297,7 +296,7 @@ class MegaPlanGenerator:
             return first_sentence
         return description[:200]
 
-    def get_feature_by_id(self, plan: Dict, feature_id: str) -> Optional[Dict]:
+    def get_feature_by_id(self, plan: dict, feature_id: str) -> dict | None:
         """
         Get a feature by its ID.
 
@@ -313,7 +312,7 @@ class MegaPlanGenerator:
                 return feature
         return None
 
-    def get_feature_by_name(self, plan: Dict, name: str) -> Optional[Dict]:
+    def get_feature_by_name(self, plan: dict, name: str) -> dict | None:
         """
         Get a feature by its name.
 
@@ -329,7 +328,7 @@ class MegaPlanGenerator:
                 return feature
         return None
 
-    def get_features_by_status(self, plan: Dict, status: str) -> List[Dict]:
+    def get_features_by_status(self, plan: dict, status: str) -> list[dict]:
         """
         Get all features with a specific status.
 
@@ -342,7 +341,7 @@ class MegaPlanGenerator:
         """
         return [f for f in plan.get("features", []) if f.get("status") == status]
 
-    def calculate_progress(self, plan: Dict) -> Dict:
+    def calculate_progress(self, plan: dict) -> dict:
         """
         Calculate overall progress of the mega-plan.
 
@@ -374,7 +373,7 @@ class MegaPlanGenerator:
         }
 
 
-def create_sample_mega_plan() -> Dict:
+def create_sample_mega_plan() -> dict:
     """Create a sample mega-plan for demonstration."""
     return {
         "metadata": {

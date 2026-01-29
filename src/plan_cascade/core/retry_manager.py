@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ErrorType(Enum):
@@ -31,12 +31,12 @@ class FailureRecord:
     error_type: ErrorType
     error_message: str
     timestamp: str
-    quality_gate_results: Optional[Dict[str, Any]] = None
-    exit_code: Optional[int] = None
-    output_excerpt: Optional[str] = None
-    suggested_fixes: List[str] = field(default_factory=list)
+    quality_gate_results: dict[str, Any] | None = None
+    exit_code: int | None = None
+    output_excerpt: str | None = None
+    suggested_fixes: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "story_id": self.story_id,
@@ -52,7 +52,7 @@ class FailureRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FailureRecord":
+    def from_dict(cls, data: dict[str, Any]) -> "FailureRecord":
         """Create from dictionary."""
         return cls(
             story_id=data["story_id"],
@@ -77,9 +77,9 @@ class RetryConfig:
     max_delay_seconds: float = 60.0
     inject_failure_context: bool = True
     switch_agent_on_retry: bool = False
-    retry_agent_chain: List[str] = field(default_factory=lambda: ["claude-code", "aider"])
+    retry_agent_chain: list[str] = field(default_factory=lambda: ["claude-code", "aider"])
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "max_retries": self.max_retries,
@@ -92,7 +92,7 @@ class RetryConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "RetryConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "RetryConfig":
         """Create from dictionary."""
         return cls(
             max_retries=data.get("max_retries", 3),
@@ -110,11 +110,11 @@ class RetryState:
     """State of retries for a story."""
     story_id: str
     current_attempt: int = 0
-    failures: List[FailureRecord] = field(default_factory=list)
-    last_agent: Optional[str] = None
+    failures: list[FailureRecord] = field(default_factory=list)
+    last_agent: str | None = None
     exhausted: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "story_id": self.story_id,
@@ -125,7 +125,7 @@ class RetryState:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "RetryState":
+    def from_dict(cls, data: dict[str, Any]) -> "RetryState":
         """Create from dictionary."""
         return cls(
             story_id=data["story_id"],
@@ -149,7 +149,7 @@ class RetryManager:
     """
 
     # Patterns for analyzing errors and suggesting fixes
-    ERROR_PATTERNS: Dict[str, Dict[str, Any]] = {
+    ERROR_PATTERNS: dict[str, dict[str, Any]] = {
         "import_error": {
             "patterns": ["ImportError", "ModuleNotFoundError", "Cannot find module"],
             "fixes": [
@@ -203,8 +203,8 @@ class RetryManager:
     def __init__(
         self,
         project_root: Path,
-        config: Optional[RetryConfig] = None,
-        state_file: Optional[Path] = None,
+        config: RetryConfig | None = None,
+        state_file: Path | None = None,
     ):
         """
         Initialize retry manager.
@@ -217,7 +217,7 @@ class RetryManager:
         self.project_root = Path(project_root)
         self.config = config or RetryConfig()
         self.state_file = state_file or (self.project_root / ".retry-state.json")
-        self._states: Dict[str, RetryState] = {}
+        self._states: dict[str, RetryState] = {}
 
         # Load existing state
         self._load_state()
@@ -228,9 +228,9 @@ class RetryManager:
         agent: str,
         error_type: ErrorType,
         error_message: str,
-        quality_gate_results: Optional[Dict[str, Any]] = None,
-        exit_code: Optional[int] = None,
-        output_excerpt: Optional[str] = None,
+        quality_gate_results: dict[str, Any] | None = None,
+        exit_code: int | None = None,
+        output_excerpt: str | None = None,
     ) -> FailureRecord:
         """
         Record a failure for a story.
@@ -293,7 +293,7 @@ class RetryManager:
         state = self._states.get(story_id)
         return state.current_attempt if state else 0
 
-    def get_last_failure(self, story_id: str) -> Optional[FailureRecord]:
+    def get_last_failure(self, story_id: str) -> FailureRecord | None:
         """Get the last failure record for a story."""
         state = self._states.get(story_id)
         if state and state.failures:
@@ -302,8 +302,8 @@ class RetryManager:
 
     def build_retry_prompt(
         self,
-        story: Dict[str, Any],
-        context: Dict[str, Any],
+        story: dict[str, Any],
+        context: dict[str, Any],
         base_prompt: str,
     ) -> str:
         """
@@ -392,7 +392,7 @@ class RetryManager:
             del self._states[story_id]
             self._save_state()
 
-    def get_failure_summary(self, story_id: str) -> Optional[str]:
+    def get_failure_summary(self, story_id: str) -> str | None:
         """Get a summary of all failures for a story."""
         state = self._states.get(story_id)
         if not state or not state.failures:
@@ -416,8 +416,8 @@ class RetryManager:
     def _analyze_error(
         self,
         error_message: str,
-        output_excerpt: Optional[str] = None,
-    ) -> List[str]:
+        output_excerpt: str | None = None,
+    ) -> list[str]:
         """Analyze error and generate suggested fixes."""
         fixes = []
         text = f"{error_message} {output_excerpt or ''}"
@@ -440,8 +440,8 @@ class RetryManager:
 
     def _analyze_quality_gate_failures(
         self,
-        results: Dict[str, Any],
-    ) -> List[str]:
+        results: dict[str, Any],
+    ) -> list[str]:
         """Analyze quality gate failures and generate suggestions."""
         fixes = []
 
@@ -522,7 +522,7 @@ class RetryManager:
             return
 
         try:
-            with open(self.state_file, "r", encoding="utf-8") as f:
+            with open(self.state_file, encoding="utf-8") as f:
                 data = json.load(f)
 
             for story_id, state_data in data.get("stories", {}).items():
@@ -548,7 +548,7 @@ class RetryManager:
         except OSError:
             pass  # State write failure is non-critical
 
-    def get_all_states(self) -> Dict[str, RetryState]:
+    def get_all_states(self) -> dict[str, RetryState]:
         """Get all retry states."""
         return dict(self._states)
 

@@ -9,7 +9,8 @@ This module provides version-aware configuration file handling:
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +34,14 @@ class ConfigMigration:
 
     # Migration registry: maps source version to (target_version, migration_function)
     # Each migration function takes a dict and returns a modified dict
-    MIGRATIONS: Dict[str, tuple[str, Callable[[Dict[str, Any]], Dict[str, Any]]]] = {}
+    MIGRATIONS: dict[str, tuple[str, Callable[[dict[str, Any]], dict[str, Any]]]] = {}
 
     @classmethod
     def register_migration(
         cls,
         from_version: str,
         to_version: str,
-        migration_func: Callable[[Dict[str, Any]], Dict[str, Any]],
+        migration_func: Callable[[dict[str, Any]], dict[str, Any]],
     ) -> None:
         """
         Register a migration function.
@@ -53,7 +54,7 @@ class ConfigMigration:
         cls.MIGRATIONS[from_version] = (to_version, migration_func)
 
     @classmethod
-    def get_version(cls, data: Dict[str, Any]) -> str:
+    def get_version(cls, data: dict[str, Any]) -> str:
         """
         Get the version of a configuration dictionary.
 
@@ -66,7 +67,7 @@ class ConfigMigration:
         return data.get("config_version", "0")
 
     @classmethod
-    def set_version(cls, data: Dict[str, Any], version: Optional[str] = None) -> Dict[str, Any]:
+    def set_version(cls, data: dict[str, Any], version: str | None = None) -> dict[str, Any]:
         """
         Set the version field in a configuration dictionary.
 
@@ -81,7 +82,7 @@ class ConfigMigration:
         return data
 
     @classmethod
-    def migrate(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+    def migrate(cls, data: dict[str, Any]) -> dict[str, Any]:
         """
         Migrate configuration data to the current version.
 
@@ -104,7 +105,7 @@ class ConfigMigration:
 
         # Apply migrations in chain
         migrated_data = data.copy()
-        migration_path: List[str] = []
+        migration_path: list[str] = []
 
         while current_version != cls.CURRENT_VERSION:
             if current_version not in cls.MIGRATIONS:
@@ -135,7 +136,7 @@ class ConfigMigration:
         return migrated_data
 
     @classmethod
-    def needs_migration(cls, data: Dict[str, Any]) -> bool:
+    def needs_migration(cls, data: dict[str, Any]) -> bool:
         """
         Check if configuration data needs migration.
 
@@ -148,7 +149,7 @@ class ConfigMigration:
         return cls.get_version(data) != cls.CURRENT_VERSION
 
     @classmethod
-    def _migrate_from_v0(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _migrate_from_v0(cls, data: dict[str, Any]) -> dict[str, Any]:
         """
         Migrate from v0 (legacy config without version) to v1.0.0.
 

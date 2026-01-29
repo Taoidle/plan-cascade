@@ -7,7 +7,7 @@ All LLM provider implementations must inherit from LLMProvider.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 
 @dataclass
@@ -22,9 +22,9 @@ class ToolCall:
     """
     id: str
     name: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
             "id": self.id,
@@ -33,7 +33,7 @@ class ToolCall:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ToolCall":
+    def from_dict(cls, data: dict[str, Any]) -> "ToolCall":
         """Create from dictionary."""
         return cls(
             id=data.get("id", ""),
@@ -56,7 +56,7 @@ class TokenUsage:
     output_tokens: int = 0
     total_tokens: int = 0
 
-    def to_dict(self) -> Dict[str, int]:
+    def to_dict(self) -> dict[str, int]:
         """Convert to dictionary."""
         return {
             "input_tokens": self.input_tokens,
@@ -79,17 +79,17 @@ class LLMResponse:
         metadata: Additional provider-specific metadata
     """
     content: str
-    tool_calls: List[ToolCall] = field(default_factory=list)
+    tool_calls: list[ToolCall] = field(default_factory=list)
     stop_reason: str = "end_turn"
-    usage: Optional[TokenUsage] = None
+    usage: TokenUsage | None = None
     model: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def has_tool_calls(self) -> bool:
         """Check if the response contains tool calls."""
         return len(self.tool_calls) > 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
             "content": self.content,
@@ -101,7 +101,7 @@ class LLMResponse:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "LLMResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "LLMResponse":
         """Create from dictionary."""
         usage_data = data.get("usage")
         usage = TokenUsage(**usage_data) if usage_data else None
@@ -135,9 +135,9 @@ class LLMProvider(ABC):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
         **kwargs: Any
     ):
         """
@@ -162,11 +162,11 @@ class LLMProvider(ABC):
     @abstractmethod
     async def complete(
         self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         **kwargs: Any
     ) -> LLMResponse:
         """
@@ -208,7 +208,7 @@ class LLMProvider(ABC):
         """
         pass
 
-    def get_supported_models(self) -> List[str]:
+    def get_supported_models(self) -> list[str]:
         """
         Get list of supported models for this provider.
 
@@ -236,9 +236,9 @@ class LLMError(Exception):
     def __init__(
         self,
         message: str,
-        provider: Optional[str] = None,
-        status_code: Optional[int] = None,
-        response: Optional[Dict[str, Any]] = None
+        provider: str | None = None,
+        status_code: int | None = None,
+        response: dict[str, Any] | None = None
     ):
         """
         Initialize LLM error.

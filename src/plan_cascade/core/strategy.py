@@ -9,7 +9,7 @@ Determines the appropriate execution strategy based on task complexity:
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ExecutionStrategy(Enum):
@@ -28,10 +28,10 @@ class StrategyDecision:
     estimated_stories: int
     estimated_features: int
     estimated_duration_hours: float
-    complexity_indicators: List[str]
-    recommendations: List[str]
+    complexity_indicators: list[str]
+    recommendations: list[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "strategy": self.strategy.value,
@@ -45,7 +45,7 @@ class StrategyDecision:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "StrategyDecision":
+    def from_dict(cls, data: dict[str, Any]) -> "StrategyDecision":
         """Create from dictionary."""
         strategy = data.get("strategy", "hybrid")
         if isinstance(strategy, str):
@@ -65,7 +65,7 @@ class StrategyDecision:
 
 def analyze_task_complexity(
     description: str,
-    context: Optional[Dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
 ) -> StrategyDecision:
     """
     Analyze task description to determine appropriate execution strategy.

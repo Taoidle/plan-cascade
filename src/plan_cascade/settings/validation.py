@@ -9,7 +9,7 @@ This module provides comprehensive validation of Settings objects:
 """
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from .models import BackendType, Settings
 
@@ -29,8 +29,8 @@ class ValidationResult:
     """
 
     valid: bool = True
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def add_error(self, message: str) -> None:
         """Add an error message and mark validation as failed."""

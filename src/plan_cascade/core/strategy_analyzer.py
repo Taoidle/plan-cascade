@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from ..llm.base import LLMProvider
@@ -35,8 +35,8 @@ class StrategyDecision:
     reasoning: str
     estimated_features: int = 1
     estimated_duration_hours: float = 1.0
-    complexity_indicators: List[str] = None
-    recommendations: List[str] = None
+    complexity_indicators: list[str] = None
+    recommendations: list[str] = None
 
     def __post_init__(self):
         if self.complexity_indicators is None:
@@ -44,7 +44,7 @@ class StrategyDecision:
         if self.recommendations is None:
             self.recommendations = []
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "strategy": self.strategy.value,
@@ -59,7 +59,7 @@ class StrategyDecision:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "StrategyDecision":
+    def from_dict(cls, data: dict[str, Any]) -> "StrategyDecision":
         """Create from dictionary."""
         strategy_value = data.get("strategy", "hybrid_auto")
         if isinstance(strategy_value, str):
@@ -148,7 +148,7 @@ Return ONLY the JSON object, no additional text."""
         self,
         description: str,
         context: str = "",
-        project_path: Optional[Path] = None
+        project_path: Path | None = None
     ) -> StrategyDecision:
         """
         Analyze a task description and determine the best strategy.
@@ -169,7 +169,7 @@ Return ONLY the JSON object, no additional text."""
         if self.llm:
             try:
                 return await self._analyze_with_llm(description, context)
-            except Exception as e:
+            except Exception:
                 if not self.fallback_to_heuristic:
                     raise
                 # Fall through to heuristic analysis

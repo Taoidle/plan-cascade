@@ -8,9 +8,9 @@ Contains state management and context filtering:
 - MegaStateManager: Mega-plan state management
 """
 
-from .state_manager import StateManager, FileLock
 from .context_filter import ContextFilter
 from .mega_state import MegaStateManager
+from .state_manager import FileLock, StateManager
 
 __all__ = [
     "StateManager",

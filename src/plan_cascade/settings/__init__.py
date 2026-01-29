@@ -10,14 +10,14 @@ This module provides configuration management including:
 - Configuration migration and versioning
 """
 
+from .migration import ConfigMigration
 from .models import (
-    BackendType,
     AgentConfig,
+    BackendType,
     QualityGateConfig,
     Settings,
 )
 from .storage import SettingsStorage
-from .migration import ConfigMigration
 from .validation import ConfigValidator, ValidationResult
 from .wizard import SetupWizard, run_setup_wizard
 

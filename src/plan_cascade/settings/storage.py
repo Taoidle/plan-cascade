@@ -11,14 +11,14 @@ This module provides YAML-based configuration file persistence with:
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import keyring
 import keyring.errors
 import yaml
 
-from .models import AgentConfig, BackendType, QualityGateConfig, Settings
 from .migration import ConfigMigration
+from .models import AgentConfig, BackendType, QualityGateConfig, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class SettingsStorage:
 
     KEYRING_SERVICE = "plan-cascade"
 
-    def __init__(self, config_dir: Optional[Path] = None) -> None:
+    def __init__(self, config_dir: Path | None = None) -> None:
         """
         Initialize the settings storage.
 
@@ -62,7 +62,7 @@ class SettingsStorage:
         if not self.config_file.exists():
             return Settings()
 
-        with open(self.config_file, "r", encoding="utf-8") as f:
+        with open(self.config_file, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
         # Check and perform migration if needed
@@ -92,7 +92,7 @@ class SettingsStorage:
 
         self._save_raw_data(data)
 
-    def _save_raw_data(self, data: Dict[str, Any]) -> None:
+    def _save_raw_data(self, data: dict[str, Any]) -> None:
         """
         Save raw dictionary data to the configuration file.
 
@@ -104,7 +104,7 @@ class SettingsStorage:
         with open(self.config_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
-    def _settings_to_dict(self, settings: Settings) -> Dict[str, Any]:
+    def _settings_to_dict(self, settings: Settings) -> dict[str, Any]:
         """
         Convert Settings object to a dictionary suitable for YAML serialization.
 
@@ -162,7 +162,7 @@ class SettingsStorage:
 
         return result
 
-    def _dict_to_settings(self, data: Dict[str, Any]) -> Settings:
+    def _dict_to_settings(self, data: dict[str, Any]) -> Settings:
         """
         Convert a dictionary to a Settings object.
 
@@ -231,7 +231,7 @@ class SettingsStorage:
     # API Key Management (using keyring for secure storage)
     # ========================================================================
 
-    def get_api_key(self, provider: str) -> Optional[str]:
+    def get_api_key(self, provider: str) -> str | None:
         """
         Get the API key for a provider from the system keyring.
 

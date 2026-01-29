@@ -5,11 +5,10 @@ Provides interactive PRD editing, strategy selection, and agent assignment.
 Gives users full control over the execution process.
 """
 
-import asyncio
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .strategy_analyzer import (
     ExecutionStrategy,
@@ -25,10 +24,10 @@ if TYPE_CHECKING:
 @dataclass
 class PRD:
     """Product Requirements Document."""
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     goal: str
-    objectives: List[str]
-    stories: List[Dict[str, Any]]
+    objectives: list[str]
+    stories: list[dict[str, Any]]
 
     def __post_init__(self):
         if self.metadata is None:
@@ -39,7 +38,7 @@ class PRD:
             self.stories = []
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PRD":
+    def from_dict(cls, data: dict[str, Any]) -> "PRD":
         """Create from dictionary."""
         return cls(
             metadata=data.get("metadata", {}),
@@ -48,7 +47,7 @@ class PRD:
             stories=data.get("stories", []),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "metadata": self.metadata,
@@ -57,14 +56,14 @@ class PRD:
             "stories": self.stories,
         }
 
-    def get_story(self, story_id: str) -> Optional[Dict[str, Any]]:
+    def get_story(self, story_id: str) -> dict[str, Any] | None:
         """Get a story by ID."""
         for story in self.stories:
             if story.get("id") == story_id:
                 return story
         return None
 
-    def update_story(self, story_id: str, updates: Dict[str, Any]) -> bool:
+    def update_story(self, story_id: str, updates: dict[str, Any]) -> bool:
         """Update a story by ID."""
         for story in self.stories:
             if story.get("id") == story_id:
@@ -72,7 +71,7 @@ class PRD:
                 return True
         return False
 
-    def add_story(self, story: Dict[str, Any]) -> None:
+    def add_story(self, story: dict[str, Any]) -> None:
         """Add a new story."""
         self.stories.append(story)
 
@@ -84,19 +83,19 @@ class PRD:
                 return True
         return False
 
-    def reorder_stories(self, story_ids: List[str]) -> None:
+    def reorder_stories(self, story_ids: list[str]) -> None:
         """Reorder stories based on ID list."""
         story_map = {s["id"]: s for s in self.stories}
         self.stories = [story_map[sid] for sid in story_ids if sid in story_map]
 
-    def get_dependency_graph(self) -> Dict[str, List[str]]:
+    def get_dependency_graph(self) -> dict[str, list[str]]:
         """Get dependency graph as adjacency list."""
         return {
             story["id"]: story.get("dependencies", [])
             for story in self.stories
         }
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate the PRD and return list of errors."""
         errors = []
 
@@ -131,14 +130,14 @@ class PRD:
 class ExpertWorkflowState:
     """State for expert workflow."""
     description: str
-    prd: Optional[PRD] = None
-    strategy_decision: Optional[StrategyDecision] = None
-    selected_strategy: Optional[ExecutionStrategy] = None
-    agent_assignments: Dict[str, str] = field(default_factory=dict)
+    prd: PRD | None = None
+    strategy_decision: StrategyDecision | None = None
+    selected_strategy: ExecutionStrategy | None = None
+    agent_assignments: dict[str, str] = field(default_factory=dict)
     execution_started: bool = False
     execution_completed: bool = False
-    completed_stories: List[str] = field(default_factory=list)
-    failed_stories: List[str] = field(default_factory=list)
+    completed_stories: list[str] = field(default_factory=list)
+    failed_stories: list[str] = field(default_factory=list)
 
 
 class ExpertWorkflow:
@@ -156,8 +155,8 @@ class ExpertWorkflow:
     def __init__(
         self,
         backend: "AgentBackend",
-        project_path: Optional[Path] = None,
-        available_agents: Optional[List[str]] = None
+        project_path: Path | None = None,
+        available_agents: list[str] | None = None
     ):
         """
         Initialize the expert workflow.
@@ -175,7 +174,7 @@ class ExpertWorkflow:
             llm=backend.get_llm() if hasattr(backend, 'get_llm') else None,
             fallback_to_heuristic=True
         )
-        self.state: Optional[ExpertWorkflowState] = None
+        self.state: ExpertWorkflowState | None = None
 
     async def start(self, description: str) -> ExpertWorkflowState:
         """
@@ -334,13 +333,13 @@ Return ONLY the JSON, no additional text."""
         if not self.state:
             raise ValueError("Workflow not started")
 
-        with open(prd_path, "r", encoding="utf-8") as f:
+        with open(prd_path, encoding="utf-8") as f:
             prd_data = json.load(f)
 
         self.state.prd = PRD.from_dict(prd_data)
         return self.state.prd
 
-    def save_prd(self, prd_path: Optional[Path] = None) -> Path:
+    def save_prd(self, prd_path: Path | None = None) -> Path:
         """
         Save the current PRD to file.
 
@@ -361,7 +360,7 @@ Return ONLY the JSON, no additional text."""
 
         return prd_path
 
-    def edit_story(self, story_id: str, updates: Dict[str, Any]) -> bool:
+    def edit_story(self, story_id: str, updates: dict[str, Any]) -> bool:
         """
         Edit a story in the PRD.
 
@@ -377,7 +376,7 @@ Return ONLY the JSON, no additional text."""
 
         return self.state.prd.update_story(story_id, updates)
 
-    def add_story(self, story: Dict[str, Any]) -> None:
+    def add_story(self, story: dict[str, Any]) -> None:
         """
         Add a new story to the PRD.
 
@@ -425,7 +424,7 @@ Return ONLY the JSON, no additional text."""
 
         return self.state.prd.remove_story(story_id)
 
-    def reorder_stories(self, story_ids: List[str]) -> None:
+    def reorder_stories(self, story_ids: list[str]) -> None:
         """
         Reorder stories in the PRD.
 
@@ -488,7 +487,7 @@ Return ONLY the JSON, no additional text."""
         roots = [sid for sid, deps in graph.items() if not deps]
 
         # Build reverse graph (dependents)
-        dependents: Dict[str, List[str]] = {sid: [] for sid in graph}
+        dependents: dict[str, list[str]] = {sid: [] for sid in graph}
         for sid, deps in graph.items():
             for dep in deps:
                 if dep in dependents:
@@ -531,7 +530,7 @@ Return ONLY the JSON, no additional text."""
 
         return "\n".join(lines)
 
-    def validate_prd(self) -> List[str]:
+    def validate_prd(self) -> list[str]:
         """
         Validate the current PRD.
 
@@ -543,7 +542,7 @@ Return ONLY the JSON, no additional text."""
 
         return self.state.prd.validate()
 
-    def get_execution_batches(self) -> List[List[Dict[str, Any]]]:
+    def get_execution_batches(self) -> list[list[dict[str, Any]]]:
         """
         Get execution batches based on dependencies.
 
@@ -624,10 +623,10 @@ Return ONLY the JSON, no additional text."""
 
     async def execute_batch(
         self,
-        batch: List[Dict[str, Any]],
+        batch: list[dict[str, Any]],
         context: str = "",
         parallel: bool = False
-    ) -> List["ExecutionResult"]:
+    ) -> list["ExecutionResult"]:
         """
         Execute a batch of stories.
 
@@ -650,7 +649,7 @@ Return ONLY the JSON, no additional text."""
     async def execute_all(
         self,
         context: str = ""
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute all stories in dependency order.
 
@@ -681,7 +680,7 @@ Return ONLY the JSON, no additional text."""
             "success": len(self.state.failed_stories) == 0,
         }
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """
         Get current workflow status.
 
@@ -718,7 +717,7 @@ class ExpertWorkflowInteractive:
         """
         self.workflow = workflow
 
-    def get_menu_options(self) -> List[str]:
+    def get_menu_options(self) -> list[str]:
         """
         Get available menu options based on current state.
 
@@ -741,7 +740,7 @@ class ExpertWorkflowInteractive:
         options.append("quit")
         return options
 
-    def get_menu_descriptions(self) -> Dict[str, str]:
+    def get_menu_descriptions(self) -> dict[str, str]:
         """
         Get descriptions for menu options.
 

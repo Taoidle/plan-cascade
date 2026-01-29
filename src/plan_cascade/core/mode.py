@@ -8,7 +8,7 @@ Expert mode: Interactive PRD editing and agent selection
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class UserMode(Enum):
@@ -42,10 +42,10 @@ class ModeConfig:
     max_retries: int = 3
 
     # Backend settings
-    preferred_backend: Optional[str] = None
-    fallback_backends: List[str] = field(default_factory=list)
+    preferred_backend: str | None = None
+    fallback_backends: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "mode": self.mode.value,
@@ -66,7 +66,7 @@ class ModeConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ModeConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "ModeConfig":
         """Create from dictionary."""
         mode = data.get("mode", "simple")
         if isinstance(mode, str):

@@ -15,17 +15,16 @@ Commands:
 import asyncio
 import sys
 from pathlib import Path
-from typing import Optional
 
 try:
     import typer
     from rich.console import Console
-    from rich.prompt import Prompt, Confirm
+    from rich.prompt import Confirm, Prompt
     HAS_TYPER = True
 except ImportError:
     HAS_TYPER = False
 
-from .output import OutputManager, get_output
+from .output import OutputManager
 
 if HAS_TYPER:
     app = typer.Typer(
@@ -41,10 +40,10 @@ if HAS_TYPER:
     def run(
         description: str = typer.Argument(..., help="Task description"),
         expert: bool = typer.Option(False, "--expert", "-e", help="Expert mode with PRD editing"),
-        backend: Optional[str] = typer.Option(None, "--backend", "-b", help="Backend selection (claude-code, builtin)"),
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
-        provider: Optional[str] = typer.Option(None, "--provider", help="LLM provider for builtin backend"),
-        model: Optional[str] = typer.Option(None, "--model", "-m", help="Model to use"),
+        backend: str | None = typer.Option(None, "--backend", "-b", help="Backend selection (claude-code, builtin)"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
+        provider: str | None = typer.Option(None, "--provider", help="LLM provider for builtin backend"),
+        model: str | None = typer.Option(None, "--model", "-m", help="Model to use"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     ):
         """
@@ -89,13 +88,13 @@ if HAS_TYPER:
     async def _run_simple(
         description: str,
         project: Path,
-        backend: Optional[str] = None,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
+        backend: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
         verbose: bool = False,
     ):
         """Execute in simple mode."""
-        from ..core.simple_workflow import SimpleWorkflow, ProgressEvent
+        from ..core.simple_workflow import ProgressEvent, SimpleWorkflow
 
         # Create backend
         backend_instance = _create_backend(backend, provider, model, project)
@@ -128,9 +127,9 @@ if HAS_TYPER:
     async def _run_expert(
         description: str,
         project: Path,
-        backend: Optional[str] = None,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
+        backend: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
         verbose: bool = False,
     ):
         """Execute in expert mode."""
@@ -228,9 +227,9 @@ if HAS_TYPER:
                 break
 
     def _create_backend(
-        backend: Optional[str],
-        provider: Optional[str],
-        model: Optional[str],
+        backend: str | None,
+        provider: str | None,
+        model: str | None,
         project: Path,
     ):
         """Create a backend instance based on options."""
@@ -269,14 +268,14 @@ if HAS_TYPER:
     def _create_mock_backend():
         """Create a mock backend for testing when real backends unavailable."""
         from dataclasses import dataclass
-        from typing import Any, Dict
+        from typing import Any
 
         @dataclass
         class MockResult:
             success: bool = True
             output: str = "Mock execution completed"
             iterations: int = 1
-            error: Optional[str] = None
+            error: str | None = None
 
         class MockLLM:
             async def complete(self, messages, **kwargs):
@@ -290,7 +289,7 @@ if HAS_TYPER:
             def __init__(self):
                 self._llm = MockLLM()
 
-            async def execute(self, story: Dict[str, Any], context: str = "") -> MockResult:
+            async def execute(self, story: dict[str, Any], context: str = "") -> MockResult:
                 return MockResult()
 
             def get_llm(self):
@@ -380,9 +379,9 @@ if HAS_TYPER:
     def config(
         show: bool = typer.Option(False, "--show", help="Show current configuration"),
         setup: bool = typer.Option(False, "--setup", help="Run configuration wizard"),
-        set_backend: Optional[str] = typer.Option(None, "--backend", help="Set backend"),
-        set_provider: Optional[str] = typer.Option(None, "--provider", help="Set provider"),
-        set_key: Optional[str] = typer.Option(None, "--api-key", help="Set API key"),
+        set_backend: str | None = typer.Option(None, "--backend", help="Set backend"),
+        set_provider: str | None = typer.Option(None, "--provider", help="Set provider"),
+        set_key: str | None = typer.Option(None, "--api-key", help="Set API key"),
     ):
         """
         Configuration management.
@@ -479,7 +478,7 @@ if HAS_TYPER:
             output.print_warning("\nSettings module not available - configuration not persisted")
             output.print_info(f"Selected: backend={backend}, provider={provider or 'N/A'}")
 
-    def _update_config(backend: Optional[str], provider: Optional[str], api_key: Optional[str]):
+    def _update_config(backend: str | None, provider: str | None, api_key: str | None):
         """Update specific configuration values."""
         try:
             from ..settings.storage import SettingsStorage
@@ -505,7 +504,7 @@ if HAS_TYPER:
 
     @app.command()
     def status(
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
     ):
         """
         View execution status.

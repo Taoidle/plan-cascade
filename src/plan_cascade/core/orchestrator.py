@@ -8,11 +8,12 @@ Handles parallel agent execution with automatic fallback and context injection.
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
-from ..state.state_manager import StateManager
 from ..state.context_filter import ContextFilter
+from ..state.state_manager import StateManager
 
 
 class StoryAgent:
@@ -22,7 +23,7 @@ class StoryAgent:
         self,
         name: str,
         command_template: str,
-        check_available: Optional[Callable[[], bool]] = None,
+        check_available: Callable[[], bool] | None = None,
         priority: int = 0,
     ):
         """
@@ -66,9 +67,9 @@ class Orchestrator:
     def __init__(
         self,
         project_root: Path,
-        agents: Optional[List[StoryAgent]] = None,
-        state_manager: Optional[StateManager] = None,
-        context_filter: Optional[ContextFilter] = None,
+        agents: list[StoryAgent] | None = None,
+        state_manager: StateManager | None = None,
+        context_filter: ContextFilter | None = None,
     ):
         """
         Initialize the orchestrator.
@@ -87,11 +88,11 @@ class Orchestrator:
         # Sort agents by priority (highest first)
         self.agents.sort(key=lambda a: a.priority, reverse=True)
 
-    def load_prd(self) -> Optional[Dict]:
+    def load_prd(self) -> dict | None:
         """Load the PRD from the state manager."""
         return self.state_manager.read_prd()
 
-    def analyze_dependencies(self) -> List[List[Dict]]:
+    def analyze_dependencies(self) -> list[list[dict]]:
         """
         Analyze story dependencies and create execution batches.
 
@@ -108,7 +109,7 @@ class Orchestrator:
 
         # Build dependency graph
         completed: set = set()
-        batches: List[List[Dict]] = []
+        batches: list[list[dict]] = []
         story_map = {s["id"]: s for s in stories}
 
         # Get already completed stories
@@ -149,14 +150,14 @@ class Orchestrator:
 
         return batches
 
-    def get_available_agent(self) -> Optional[StoryAgent]:
+    def get_available_agent(self) -> StoryAgent | None:
         """Get the highest priority available agent."""
         for agent in self.agents:
             if agent.is_available():
                 return agent
         return None
 
-    def build_story_prompt(self, story: Dict) -> str:
+    def build_story_prompt(self, story: dict) -> str:
         """
         Build the execution prompt for a story.
 
@@ -231,10 +232,10 @@ class Orchestrator:
 
     def execute_story(
         self,
-        story: Dict,
-        agent: Optional[StoryAgent] = None,
+        story: dict,
+        agent: StoryAgent | None = None,
         dry_run: bool = False,
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Execute a single story.
 
@@ -276,10 +277,10 @@ class Orchestrator:
 
     def execute_batch(
         self,
-        batch: List[Dict],
+        batch: list[dict],
         batch_num: int,
         dry_run: bool = False,
-    ) -> Dict[str, Tuple[bool, str]]:
+    ) -> dict[str, tuple[bool, str]]:
         """
         Execute a batch of stories.
 
@@ -291,7 +292,7 @@ class Orchestrator:
         Returns:
             Dictionary mapping story IDs to (success, message) tuples
         """
-        results: Dict[str, Tuple[bool, str]] = {}
+        results: dict[str, tuple[bool, str]] = {}
 
         print(f"\n{'='*60}")
         print(f"Batch {batch_num}: {len(batch)} stories")
@@ -311,7 +312,7 @@ class Orchestrator:
 
         return results
 
-    def check_batch_complete(self, batch: List[Dict]) -> bool:
+    def check_batch_complete(self, batch: list[dict]) -> bool:
         """
         Check if all stories in a batch are complete.
 
@@ -334,8 +335,8 @@ class Orchestrator:
     def execute_all(
         self,
         dry_run: bool = False,
-        callback: Optional[Callable[[int, List[Dict], Dict], None]] = None,
-    ) -> Dict[str, Any]:
+        callback: Callable[[int, list[dict], dict], None] | None = None,
+    ) -> dict[str, Any]:
         """
         Execute all stories in dependency order.
 
@@ -350,9 +351,9 @@ class Orchestrator:
         if not batches:
             return {"success": False, "error": "No batches to execute"}
 
-        all_results: Dict[str, Tuple[bool, str]] = {}
-        failed_stories: List[str] = []
-        completed_stories: List[str] = []
+        all_results: dict[str, tuple[bool, str]] = {}
+        failed_stories: list[str] = []
+        completed_stories: list[str] = []
 
         for batch_num, batch in enumerate(batches, 1):
             results = self.execute_batch(batch, batch_num, dry_run)
@@ -426,7 +427,7 @@ class Orchestrator:
         print("EXECUTION STATUS")
         print("=" * 60)
 
-        print(f"\nAgent Summary:")
+        print("\nAgent Summary:")
         print(f"  Running: {agent_summary['running']}")
         print(f"  Completed: {agent_summary['completed']}")
         print(f"  Failed: {agent_summary['failed']}")

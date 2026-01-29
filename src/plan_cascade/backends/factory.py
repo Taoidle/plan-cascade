@@ -6,13 +6,12 @@ Supports all backend types and provides configuration validation.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 from .base import AgentBackend, ExecutionResult
 
-
 # Type alias for backend classes
-BackendClass = Type[AgentBackend]
+BackendClass = type[AgentBackend]
 
 
 class BackendFactory:
@@ -40,10 +39,10 @@ class BackendFactory:
     """
 
     # Registry of backend classes
-    _backends: Dict[str, BackendClass] = {}
+    _backends: dict[str, BackendClass] = {}
 
     # Default configuration for backends
-    _default_configs: Dict[str, Dict[str, Any]] = {
+    _default_configs: dict[str, dict[str, Any]] = {
         "claude-code": {
             "claude_path": "claude",
             "output_format": "stream-json",
@@ -77,7 +76,7 @@ class BackendFactory:
         cls._backends.pop(name.lower(), None)
 
     @classmethod
-    def create(cls, config: Dict[str, Any]) -> AgentBackend:
+    def create(cls, config: dict[str, Any]) -> AgentBackend:
         """
         Create a backend instance from configuration.
 
@@ -183,7 +182,7 @@ class BackendFactory:
         raise ValueError(f"Unknown backend type: {backend_type}")
 
     @classmethod
-    def get_supported_backends(cls) -> List[str]:
+    def get_supported_backends(cls) -> list[str]:
         """
         Get list of supported backend types.
 
@@ -195,7 +194,7 @@ class BackendFactory:
         return list(set(built_in + registered))
 
     @classmethod
-    def get_default_config(cls, backend_type: str) -> Dict[str, Any]:
+    def get_default_config(cls, backend_type: str) -> dict[str, Any]:
         """
         Get default configuration for a backend.
 
@@ -208,7 +207,7 @@ class BackendFactory:
         return cls._default_configs.get(backend_type.lower(), {}).copy()
 
     @classmethod
-    def set_default_config(cls, backend_type: str, config: Dict[str, Any]) -> None:
+    def set_default_config(cls, backend_type: str, config: dict[str, Any]) -> None:
         """
         Set default configuration for a backend.
 
@@ -230,7 +229,7 @@ class BackendFactory:
             AgentBackend instance
         """
         # Build config from settings
-        config: Dict[str, Any] = {}
+        config: dict[str, Any] = {}
 
         # Get backend type
         backend = getattr(settings, "backend", "claude-code")
@@ -276,7 +275,7 @@ class BackendFactory:
         return cls.create(config)
 
     @classmethod
-    def validate_config(cls, config: Dict[str, Any]) -> List[str]:
+    def validate_config(cls, config: dict[str, Any]) -> list[str]:
         """
         Validate a configuration dictionary.
 
@@ -349,8 +348,8 @@ class ExternalCLIBackend(AgentBackend):
     def __init__(
         self,
         backend_type: str,
-        config: Optional[Dict[str, Any]] = None,
-        project_root: Optional[Path] = None
+        config: dict[str, Any] | None = None,
+        project_root: Path | None = None
     ):
         """
         Initialize external CLI backend.
@@ -374,7 +373,7 @@ class ExternalCLIBackend(AgentBackend):
 
     async def execute(
         self,
-        story: Dict[str, Any],
+        story: dict[str, Any],
         context: str = ""
     ) -> ExecutionResult:
         """Execute using external CLI tool."""

@@ -7,7 +7,7 @@ Implements a resolution priority chain for flexible agent assignment.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .cross_platform_detector import CrossPlatformDetector
@@ -36,14 +36,14 @@ class StoryType(Enum):
 @dataclass
 class AgentOverrides:
     """Command-line temporary overrides for agent selection."""
-    global_agent: Optional[str] = None
-    planning_agent: Optional[str] = None
-    impl_agent: Optional[str] = None
-    retry_agent: Optional[str] = None
-    review_agent: Optional[str] = None
+    global_agent: str | None = None
+    planning_agent: str | None = None
+    impl_agent: str | None = None
+    retry_agent: str | None = None
+    review_agent: str | None = None
     no_fallback: bool = False
 
-    def get_override_for_phase(self, phase: ExecutionPhase) -> Optional[str]:
+    def get_override_for_phase(self, phase: ExecutionPhase) -> str | None:
         """Get the override agent for a specific phase."""
         if self.global_agent:
             return self.global_agent
@@ -61,10 +61,10 @@ class AgentOverrides:
 class PhaseConfig:
     """Configuration for a single execution phase."""
     default_agent: str
-    fallback_chain: List[str] = field(default_factory=list)
-    story_type_overrides: Dict[str, str] = field(default_factory=dict)
+    fallback_chain: list[str] = field(default_factory=list)
+    story_type_overrides: dict[str, str] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "default_agent": self.default_agent,
@@ -73,7 +73,7 @@ class PhaseConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PhaseConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "PhaseConfig":
         """Create from dictionary."""
         return cls(
             default_agent=data.get("default_agent", "claude-code"),
@@ -96,7 +96,7 @@ class PhaseAgentManager:
     7. claude-code (always available)
     """
 
-    DEFAULT_PHASE_CONFIG: Dict[ExecutionPhase, PhaseConfig] = {
+    DEFAULT_PHASE_CONFIG: dict[ExecutionPhase, PhaseConfig] = {
         ExecutionPhase.PLANNING: PhaseConfig(
             default_agent="codex",
             fallback_chain=["claude-code"],
@@ -120,7 +120,7 @@ class PhaseAgentManager:
         ),
     }
 
-    DEFAULT_STORY_TYPE_AGENTS: Dict[StoryType, str] = {
+    DEFAULT_STORY_TYPE_AGENTS: dict[StoryType, str] = {
         StoryType.FEATURE: "claude-code",
         StoryType.BUGFIX: "codex",
         StoryType.REFACTOR: "aider",
@@ -130,7 +130,7 @@ class PhaseAgentManager:
         StoryType.UNKNOWN: "claude-code",
     }
 
-    STORY_TYPE_KEYWORDS: Dict[StoryType, List[str]] = {
+    STORY_TYPE_KEYWORDS: dict[StoryType, list[str]] = {
         StoryType.BUGFIX: ["fix", "bug", "error", "issue", "crash", "broken", "patch", "repair", "debug"],
         StoryType.REFACTOR: ["refactor", "restructure", "reorganize", "cleanup", "improve", "optimize"],
         StoryType.TEST: ["test", "spec", "unit test", "integration test", "e2e", "coverage"],
@@ -141,16 +141,16 @@ class PhaseAgentManager:
 
     def __init__(
         self,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
         detector: Optional["CrossPlatformDetector"] = None,
     ):
         """Initialize the phase agent manager."""
         self.detector = detector
-        self._phase_configs: Dict[ExecutionPhase, PhaseConfig] = {}
-        self._story_type_defaults: Dict[StoryType, str] = {}
+        self._phase_configs: dict[ExecutionPhase, PhaseConfig] = {}
+        self._story_type_defaults: dict[StoryType, str] = {}
         self._load_config(config or {})
 
-    def _load_config(self, config: Dict[str, Any]) -> None:
+    def _load_config(self, config: dict[str, Any]) -> None:
         """Load configuration from agents.json format."""
         phase_defaults = config.get("phase_defaults", {})
         for phase in ExecutionPhase:
@@ -174,9 +174,9 @@ class PhaseAgentManager:
 
     def get_agent_for_story(
         self,
-        story: Dict[str, Any],
+        story: dict[str, Any],
         phase: ExecutionPhase,
-        override: Optional[AgentOverrides] = None,
+        override: AgentOverrides | None = None,
     ) -> str:
         """Get the appropriate agent for a story in a given phase."""
         override = override or AgentOverrides()
@@ -215,7 +215,7 @@ class PhaseAgentManager:
         # Priority 7: Ultimate fallback
         return "claude-code"
 
-    def infer_story_type(self, story: Dict[str, Any]) -> StoryType:
+    def infer_story_type(self, story: dict[str, Any]) -> StoryType:
         """Infer the story type from title, description, and tags."""
         tags = story.get("tags", [])
         for tag in tags:
@@ -228,7 +228,7 @@ class PhaseAgentManager:
         description = story.get("description", "").lower()
         text = f"{title} {description}"
 
-        scores: Dict[StoryType, int] = {st: 0 for st in StoryType}
+        scores: dict[StoryType, int] = dict.fromkeys(StoryType, 0)
 
         for story_type, keywords in self.STORY_TYPE_KEYWORDS.items():
             for keyword in keywords:
@@ -264,16 +264,16 @@ class PhaseAgentManager:
         """Get default agent for a story type."""
         return self._story_type_defaults.get(story_type, "claude-code")
 
-    def get_all_phase_configs(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_phase_configs(self) -> dict[str, dict[str, Any]]:
         """Get all phase configurations as a dictionary."""
         return {phase.value: config.to_dict() for phase, config in self._phase_configs.items()}
 
     def get_resolution_chain(
         self,
-        story: Dict[str, Any],
+        story: dict[str, Any],
         phase: ExecutionPhase,
-        override: Optional[AgentOverrides] = None,
-    ) -> List[Dict[str, Any]]:
+        override: AgentOverrides | None = None,
+    ) -> list[dict[str, Any]]:
         """Get the full resolution chain for debugging/display."""
         override = override or AgentOverrides()
         phase_config = self._phase_configs.get(phase, PhaseConfig(default_agent="claude-code"))

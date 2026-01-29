@@ -10,7 +10,6 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
 
 
 class ContextFilter:
@@ -27,7 +26,7 @@ class ContextFilter:
         self.prd_path = self.project_root / "prd.json"
         self.findings_path = self.project_root / "findings.md"
 
-    def load_prd(self) -> Optional[Dict]:
+    def load_prd(self) -> dict | None:
         """
         Load the PRD JSON file.
 
@@ -38,13 +37,13 @@ class ContextFilter:
             return None
 
         try:
-            with open(self.prd_path, "r", encoding="utf-8") as f:
+            with open(self.prd_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load PRD: {e}")
             return None
 
-    def get_story(self, story_id: str) -> Optional[Dict]:
+    def get_story(self, story_id: str) -> dict | None:
         """
         Get a specific story from the PRD.
 
@@ -64,7 +63,7 @@ class ContextFilter:
 
         return None
 
-    def get_dependencies(self, story_id: str) -> List[str]:
+    def get_dependencies(self, story_id: str) -> list[str]:
         """
         Get the list of dependency story IDs for a story.
 
@@ -80,7 +79,7 @@ class ContextFilter:
 
         return story.get("dependencies", [])
 
-    def get_dependent_stories(self, story_id: str) -> List[str]:
+    def get_dependent_stories(self, story_id: str) -> list[str]:
         """
         Get all stories that depend on the given story.
 
@@ -101,7 +100,7 @@ class ContextFilter:
 
         return dependents
 
-    def parse_findings_tags(self, content: str) -> Dict[str, List[str]]:
+    def parse_findings_tags(self, content: str) -> dict[str, list[str]]:
         """
         Parse findings.md to extract tagged sections.
 
@@ -114,7 +113,7 @@ class ContextFilter:
         Returns:
             Dictionary mapping tag to list of section contents
         """
-        tagged_sections: Dict[str, List[str]] = {}
+        tagged_sections: dict[str, list[str]] = {}
 
         # Pattern to match tagged sections
         # Matches <!-- @tags: tag1,tag2 --> followed by content until next tag or end
@@ -141,7 +140,7 @@ class ContextFilter:
 
         return tagged_sections
 
-    def get_context_for_story(self, story_id: str) -> Dict:
+    def get_context_for_story(self, story_id: str) -> dict:
         """
         Get all relevant context for a specific story.
 
@@ -204,7 +203,7 @@ class ContextFilter:
             return "unknown"
 
         try:
-            with open(progress_path, "r", encoding="utf-8") as f:
+            with open(progress_path, encoding="utf-8") as f:
                 content = f.read()
 
             # Look for completion marker
@@ -216,10 +215,10 @@ class ContextFilter:
                 return "pending"
 
             return "unknown"
-        except IOError:
+        except OSError:
             return "unknown"
 
-    def _get_tagged_findings(self, story_id: str) -> List[str]:
+    def _get_tagged_findings(self, story_id: str) -> list[str]:
         """
         Get all findings sections tagged with this story ID.
 
@@ -233,9 +232,9 @@ class ContextFilter:
             return []
 
         try:
-            with open(self.findings_path, "r", encoding="utf-8") as f:
+            with open(self.findings_path, encoding="utf-8") as f:
                 content = f.read()
-        except IOError:
+        except OSError:
             return []
 
         tagged_sections = self.parse_findings_tags(content)
@@ -249,7 +248,7 @@ class ContextFilter:
 
         return relevant_sections
 
-    def get_execution_batch(self, batch_num: int) -> List[Dict]:
+    def get_execution_batch(self, batch_num: int) -> list[dict]:
         """
         Get all stories that can be executed in a given batch.
 
@@ -294,7 +293,7 @@ class ContextFilter:
 
         return ready_stories
 
-    def generate_batch_plan(self) -> List[List[Dict]]:
+    def generate_batch_plan(self) -> list[list[dict]]:
         """
         Generate the complete execution plan with all batches.
 

@@ -11,7 +11,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from ..state.mega_state import MegaStateManager
 from .mega_generator import MegaPlanGenerator
@@ -32,7 +31,7 @@ class FeatureOrchestrator:
         self.mega_generator = MegaPlanGenerator(project_root)
         self.worktree_dir = self.project_root / ".worktree"
 
-    def create_feature_worktrees(self, batch: List[Dict], target_branch: str) -> List[Tuple[str, Path]]:
+    def create_feature_worktrees(self, batch: list[dict], target_branch: str) -> list[tuple[str, Path]]:
         """
         Create worktrees for a batch of features.
 
@@ -82,7 +81,7 @@ class FeatureOrchestrator:
 
         return results
 
-    def generate_feature_prd(self, feature: Dict, worktree_path: Path) -> bool:
+    def generate_feature_prd(self, feature: dict, worktree_path: Path) -> bool:
         """
         Generate a PRD for a feature in its worktree.
 
@@ -146,7 +145,7 @@ class FeatureOrchestrator:
             print(f"Error generating PRD for {feature['name']}: {e}")
             return False
 
-    def generate_feature_prds(self, batch: List[Dict]) -> Dict[str, bool]:
+    def generate_feature_prds(self, batch: list[dict]) -> dict[str, bool]:
         """
         Generate PRDs for all features in a batch.
 
@@ -168,7 +167,7 @@ class FeatureOrchestrator:
 
         return results
 
-    def check_prd_approval(self, feature: Dict) -> bool:
+    def check_prd_approval(self, feature: dict) -> bool:
         """
         Check if a feature's PRD has been approved.
 
@@ -189,7 +188,7 @@ class FeatureOrchestrator:
             return False
 
         try:
-            with open(prd_path, "r", encoding="utf-8") as f:
+            with open(prd_path, encoding="utf-8") as f:
                 prd = json.load(f)
 
             # Check if stories exist
@@ -208,7 +207,7 @@ class FeatureOrchestrator:
         except Exception:
             return False
 
-    def wait_for_prd_approvals(self, batch: List[Dict], timeout: int = 3600) -> Dict[str, bool]:
+    def wait_for_prd_approvals(self, batch: list[dict], timeout: int = 3600) -> dict[str, bool]:
         """
         Wait for PRD approvals for all features in a batch.
 
@@ -242,7 +241,7 @@ class FeatureOrchestrator:
 
         return results
 
-    def auto_approve_prd(self, feature: Dict) -> bool:
+    def auto_approve_prd(self, feature: dict) -> bool:
         """
         Automatically approve a feature's PRD.
 
@@ -266,7 +265,7 @@ class FeatureOrchestrator:
             print(f"Error auto-approving PRD for {feature['name']}: {e}")
             return False
 
-    def execute_feature_batch(self, batch: List[Dict], auto_prd: bool = False) -> Dict[str, str]:
+    def execute_feature_batch(self, batch: list[dict], auto_prd: bool = False) -> dict[str, str]:
         """
         Execute a batch of features.
 
@@ -293,7 +292,7 @@ class FeatureOrchestrator:
 
         return results
 
-    def check_feature_complete(self, feature: Dict) -> bool:
+    def check_feature_complete(self, feature: dict) -> bool:
         """
         Check if a feature is complete.
 
@@ -312,7 +311,7 @@ class FeatureOrchestrator:
             return False
 
         try:
-            with open(prd_path, "r", encoding="utf-8") as f:
+            with open(prd_path, encoding="utf-8") as f:
                 prd = json.load(f)
 
             stories = prd.get("stories", [])
@@ -328,7 +327,7 @@ class FeatureOrchestrator:
         except Exception:
             return False
 
-    def check_batch_complete(self, batch: List[Dict]) -> bool:
+    def check_batch_complete(self, batch: list[dict]) -> bool:
         """
         Check if all features in a batch are complete.
 
@@ -343,7 +342,7 @@ class FeatureOrchestrator:
                 return False
         return True
 
-    def get_batch_status(self, batch: List[Dict]) -> Dict[str, Dict]:
+    def get_batch_status(self, batch: list[dict]) -> dict[str, dict]:
         """
         Get detailed status for all features in a batch.
 
@@ -371,7 +370,7 @@ class FeatureOrchestrator:
 
             if prd_path.exists():
                 try:
-                    with open(prd_path, "r", encoding="utf-8") as f:
+                    with open(prd_path, encoding="utf-8") as f:
                         prd = json.load(f)
                     stories = prd.get("stories", [])
                     status["stories_total"] = len(stories)
@@ -462,7 +461,7 @@ class FeatureOrchestrator:
                     prd_path = worktree_path / "prd.json"
                     if prd_path.exists():
                         try:
-                            with open(prd_path, "r", encoding="utf-8") as f:
+                            with open(prd_path, encoding="utf-8") as f:
                                 prd = json.load(f)
                             stories = prd.get("stories", [])
                             if stories:

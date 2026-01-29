@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 class AgentMonitor:
@@ -45,24 +45,24 @@ class AgentMonitor:
         """Get ISO timestamp."""
         return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    def _read_status(self) -> Dict:
+    def _read_status(self) -> dict:
         """Read .agent-status.json."""
         if not self.agent_status_path.exists():
             return {"running": [], "completed": [], "failed": []}
 
         try:
-            with open(self.agent_status_path, "r", encoding="utf-8") as f:
+            with open(self.agent_status_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return {"running": [], "completed": [], "failed": []}
 
-    def _write_status(self, status: Dict) -> None:
+    def _write_status(self, status: dict) -> None:
         """Write .agent-status.json."""
         status["updated_at"] = self._timestamp()
         try:
             with open(self.agent_status_path, "w", encoding="utf-8") as f:
                 json.dump(status, f, indent=2)
-        except IOError as e:
+        except OSError as e:
             print(f"[Warning] Could not write status: {e}", file=sys.stderr)
 
     def _append_progress(self, story_id: str, message: str) -> None:
@@ -71,7 +71,7 @@ class AgentMonitor:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             with open(self.progress_path, "a", encoding="utf-8") as f:
                 f.write(f"[{timestamp}] {story_id}: {message}\n")
-        except IOError:
+        except OSError:
             pass
 
     def _is_process_alive(self, pid: int) -> bool:
@@ -91,26 +91,26 @@ class AgentMonitor:
         except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
             return False
 
-    def _read_result_file(self, story_id: str) -> Optional[Dict]:
+    def _read_result_file(self, story_id: str) -> dict | None:
         """Read result file if it exists."""
         result_file = self.output_dir / f"{story_id}.result.json"
         if not result_file.exists():
             return None
 
         try:
-            with open(result_file, "r", encoding="utf-8") as f:
+            with open(result_file, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return None
 
-    def _check_output_for_completion(self, story_id: str) -> Optional[Tuple[bool, str]]:
+    def _check_output_for_completion(self, story_id: str) -> tuple[bool, str] | None:
         """Check output log for completion markers."""
         output_file = self.output_dir / f"{story_id}.log"
         if not output_file.exists():
             return None
 
         try:
-            with open(output_file, "r", encoding="utf-8") as f:
+            with open(output_file, encoding="utf-8") as f:
                 content = f.read()
 
             if "# Exit Code: 0" in content:
@@ -124,10 +124,10 @@ class AgentMonitor:
                 return (False, "Timeout")
 
             return None
-        except IOError:
+        except OSError:
             return None
 
-    def check_running_agents(self) -> Dict[str, Any]:
+    def check_running_agents(self) -> dict[str, Any]:
         """
         Check all running agents and update status.
 
@@ -214,7 +214,7 @@ class AgentMonitor:
             "total_failed": len(status.get("failed", []))
         }
 
-    def get_agent_result(self, story_id: str) -> Optional[Dict]:
+    def get_agent_result(self, story_id: str) -> dict | None:
         """Get the result of a completed agent."""
         result = self._read_result_file(story_id)
         if result:
@@ -245,14 +245,14 @@ class AgentMonitor:
 
         return None
 
-    def get_agent_output(self, story_id: str, tail_lines: int = 50) -> Optional[str]:
+    def get_agent_output(self, story_id: str, tail_lines: int = 50) -> str | None:
         """Get the output log of an agent."""
         output_file = self.output_dir / f"{story_id}.log"
         if not output_file.exists():
             return None
 
         try:
-            with open(output_file, "r", encoding="utf-8") as f:
+            with open(output_file, encoding="utf-8") as f:
                 content = f.read()
 
             if tail_lines > 0:
@@ -260,15 +260,15 @@ class AgentMonitor:
                 return "\n".join(lines[-tail_lines:])
 
             return content
-        except IOError:
+        except OSError:
             return None
 
     def wait_for_completion(
         self,
-        story_ids: Optional[List[str]] = None,
+        story_ids: list[str] | None = None,
         timeout: int = 3600,
         poll_interval: int = 5
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Wait for agents to complete."""
         start_time = time.time()
         completed = []
@@ -300,7 +300,7 @@ class AgentMonitor:
             "elapsed_seconds": time.time() - start_time
         }
 
-    def cleanup_stale(self, max_age_hours: int = 24) -> Dict[str, Any]:
+    def cleanup_stale(self, max_age_hours: int = 24) -> dict[str, Any]:
         """Clean up stale entries older than max_age_hours."""
         status = self._read_status()
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)

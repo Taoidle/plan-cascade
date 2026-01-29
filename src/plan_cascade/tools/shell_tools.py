@@ -9,14 +9,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 from .registry import Tool, ToolResult
 
 
 def run_command(
     command: str,
-    working_dir: Optional[str] = None,
+    working_dir: str | None = None,
     timeout: int = 120,
     shell: bool = True
 ) -> ToolResult:
@@ -123,7 +122,7 @@ def run_command(
     except PermissionError:
         return ToolResult(
             success=False,
-            error=f"Permission denied executing command"
+            error="Permission denied executing command"
         )
     except Exception as e:
         return ToolResult(
@@ -134,7 +133,7 @@ def run_command(
 
 async def run_command_async(
     command: str,
-    working_dir: Optional[str] = None,
+    working_dir: str | None = None,
     timeout: int = 120
 ) -> ToolResult:
     """
@@ -203,7 +202,7 @@ async def run_command_async(
         # Truncate if too long
         max_output = 50000
         if len(output) > max_output:
-            output = output[:max_output] + f"\n... (truncated)"
+            output = output[:max_output] + "\n... (truncated)"
 
         success = process.returncode == 0
 

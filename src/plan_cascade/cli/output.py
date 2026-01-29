@@ -6,33 +6,33 @@ Uses the Rich library for all formatting.
 """
 
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 try:
     from rich.console import Console
+    from rich.layout import Layout
+    from rich.live import Live
+    from rich.markup import escape
     from rich.panel import Panel
     from rich.progress import (
+        BarColumn,
         Progress,
         SpinnerColumn,
-        TextColumn,
-        BarColumn,
         TaskProgressColumn,
+        TextColumn,
         TimeElapsedColumn,
     )
-    from rich.table import Table
-    from rich.tree import Tree
-    from rich.live import Live
-    from rich.layout import Layout
-    from rich.text import Text
-    from rich.markup import escape
     from rich.status import Status
+    from rich.table import Table
+    from rich.text import Text
+    from rich.tree import Tree
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
 
 if TYPE_CHECKING:
-    from ..core.simple_workflow import ProgressEvent
     from ..core.expert_workflow import PRD
+    from ..core.simple_workflow import ProgressEvent
 
 
 class OutputManager:
@@ -74,8 +74,8 @@ class OutputManager:
         """
         if HAS_RICH:
             self.console = console or Console()
-            self._progress: Optional[Progress] = None
-            self._live: Optional[Live] = None
+            self._progress: Progress | None = None
+            self._live: Live | None = None
         else:
             self.console = None
             self._progress = None
@@ -88,7 +88,7 @@ class OutputManager:
 
     # ==================== Basic Output ====================
 
-    def print(self, message: str, style: Optional[str] = None) -> None:
+    def print(self, message: str, style: str | None = None) -> None:
         """
         Print a message with optional styling.
 
@@ -101,7 +101,7 @@ class OutputManager:
         else:
             print(message)
 
-    def print_header(self, title: str, subtitle: Optional[str] = None) -> None:
+    def print_header(self, title: str, subtitle: str | None = None) -> None:
         """
         Print a styled header.
 
@@ -154,7 +154,7 @@ class OutputManager:
     def panel(
         self,
         content: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         border_style: str = "blue"
     ) -> None:
         """
@@ -173,7 +173,7 @@ class OutputManager:
             print(content)
             print()
 
-    def status_panel(self, status: Dict[str, Any]) -> None:
+    def status_panel(self, status: dict[str, Any]) -> None:
         """
         Display a status panel.
 
@@ -247,7 +247,7 @@ class OutputManager:
                 print(f"    Priority: {story.get('priority')} | Status: {story.get('status')} | Deps: {deps}")
             print()
 
-    def stories_table(self, stories: List[Dict[str, Any]], title: str = "Stories") -> None:
+    def stories_table(self, stories: list[dict[str, Any]], title: str = "Stories") -> None:
         """
         Display stories as a table.
 
@@ -315,7 +315,7 @@ class OutputManager:
         self,
         description: str,
         total: int = 100
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Create a progress task.
 
@@ -332,9 +332,9 @@ class OutputManager:
 
     def update_progress(
         self,
-        task_id: Optional[int],
+        task_id: int | None,
         advance: int = 1,
-        description: Optional[str] = None
+        description: str | None = None
     ) -> None:
         """
         Update progress task.
@@ -388,7 +388,7 @@ class OutputManager:
             roots = [sid for sid, deps in graph.items() if not deps]
 
             # Build reverse graph
-            dependents: Dict[str, List[str]] = {sid: [] for sid in graph}
+            dependents: dict[str, list[str]] = {sid: [] for sid in graph}
             for sid, deps in graph.items():
                 for dep in deps:
                     if dep in dependents:
@@ -461,7 +461,7 @@ class OutputManager:
                 f"[bold]Estimated Stories:[/bold] {decision.estimated_stories}",
                 f"[bold]Use Worktree:[/bold] {'Yes' if decision.use_worktree else 'No'}",
                 "",
-                f"[bold]Reasoning:[/bold]",
+                "[bold]Reasoning:[/bold]",
                 f"  {decision.reasoning}",
             ]
 
@@ -531,7 +531,7 @@ class OutputManager:
 
     # ==================== Configuration Display ====================
 
-    def config_display(self, config: Dict[str, Any]) -> None:
+    def config_display(self, config: dict[str, Any]) -> None:
         """
         Display configuration.
 
@@ -604,7 +604,7 @@ class OutputManager:
 
 
 # Singleton instance for convenience
-_default_output: Optional[OutputManager] = None
+_default_output: OutputManager | None = None
 
 
 def get_output() -> OutputManager:

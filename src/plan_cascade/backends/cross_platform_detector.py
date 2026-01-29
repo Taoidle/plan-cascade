@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class Platform(Enum):
@@ -30,13 +30,13 @@ class AgentInfo:
     """Information about a detected agent."""
     name: str
     available: bool
-    path: Optional[str] = None
-    version: Optional[str] = None
-    platform: Optional[Platform] = None
-    detection_method: Optional[str] = None
-    last_checked: Optional[str] = None
+    path: str | None = None
+    version: str | None = None
+    platform: Platform | None = None
+    detection_method: str | None = None
+    last_checked: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "name": self.name,
@@ -49,7 +49,7 @@ class AgentInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentInfo":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentInfo":
         """Create from dictionary."""
         return cls(
             name=data["name"],
@@ -68,7 +68,7 @@ class DetectorConfig:
     cache_ttl_hours: float = 1.0
     check_versions: bool = True
     use_registry: bool = True
-    custom_paths: Dict[str, List[str]] = field(default_factory=dict)
+    custom_paths: dict[str, list[str]] = field(default_factory=dict)
 
 
 class CrossPlatformDetector:
@@ -82,7 +82,7 @@ class CrossPlatformDetector:
     4. Custom user-specified paths
     """
 
-    COMMON_LOCATIONS: Dict[Platform, Dict[str, List[str]]] = {
+    COMMON_LOCATIONS: dict[Platform, dict[str, list[str]]] = {
         Platform.WINDOWS: {
             "codex": [
                 "%LOCALAPPDATA%\\Programs\\codex\\codex.exe",
@@ -110,7 +110,7 @@ class CrossPlatformDetector:
         },
     }
 
-    VERSION_COMMANDS: Dict[str, List[str]] = {
+    VERSION_COMMANDS: dict[str, list[str]] = {
         "codex": ["--version"],
         "aider": ["--version"],
         "claude": ["--version"],
@@ -118,16 +118,16 @@ class CrossPlatformDetector:
 
     def __init__(
         self,
-        config: Optional[DetectorConfig] = None,
-        cache_path: Optional[Path] = None,
-        project_root: Optional[Path] = None,
+        config: DetectorConfig | None = None,
+        cache_path: Path | None = None,
+        project_root: Path | None = None,
     ):
         """Initialize the cross-platform detector."""
         self.config = config or DetectorConfig()
         self.project_root = Path(project_root) if project_root else Path.cwd()
         self.cache_path = cache_path or (self.project_root / ".agent-detection.json")
-        self._cache: Dict[str, AgentInfo] = {}
-        self._platform: Optional[Platform] = None
+        self._cache: dict[str, AgentInfo] = {}
+        self._platform: Platform | None = None
         self._load_cache()
 
     def detect_platform(self) -> Platform:
@@ -182,16 +182,16 @@ class CrossPlatformDetector:
 
     def detect_all_agents(
         self,
-        agent_names: Optional[List[str]] = None,
+        agent_names: list[str] | None = None,
         force_refresh: bool = False,
-    ) -> Dict[str, AgentInfo]:
+    ) -> dict[str, AgentInfo]:
         """Detect multiple agents."""
         if agent_names is None:
             agent_names = list(self.COMMON_LOCATIONS.get(self.detect_platform(), {}).keys())
 
         return {name: self.detect_agent(name, force_refresh) for name in agent_names}
 
-    def get_available_agents(self, force_refresh: bool = False) -> List[AgentInfo]:
+    def get_available_agents(self, force_refresh: bool = False) -> list[AgentInfo]:
         """Get list of all available agents."""
         all_agents = self.detect_all_agents(force_refresh=force_refresh)
         return [info for info in all_agents.values() if info.available]
@@ -200,7 +200,7 @@ class CrossPlatformDetector:
         self,
         agent_name: str,
         current_platform: Platform,
-    ) -> tuple[Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None]:
         """Detect agent path using multiple methods."""
         # Method 1: Check PATH
         path = shutil.which(agent_name)
@@ -225,12 +225,12 @@ class CrossPlatformDetector:
 
         return None, None
 
-    def _get_version(self, agent_name: str, path: str) -> Optional[str]:
+    def _get_version(self, agent_name: str, path: str) -> str | None:
         """Get the version of an agent."""
         version_args = self.VERSION_COMMANDS.get(agent_name, ["--version"])
 
         try:
-            kwargs: Dict[str, Any] = {"capture_output": True, "text": True, "timeout": 10}
+            kwargs: dict[str, Any] = {"capture_output": True, "text": True, "timeout": 10}
             if sys.platform == "win32":
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
@@ -246,7 +246,7 @@ class CrossPlatformDetector:
 
         return None
 
-    def _expand_path(self, path: str) -> Optional[str]:
+    def _expand_path(self, path: str) -> str | None:
         """Expand environment variables and user home in path."""
         try:
             expanded = os.path.expandvars(path)
@@ -272,7 +272,7 @@ class CrossPlatformDetector:
             return
 
         try:
-            with open(self.cache_path, "r", encoding="utf-8") as f:
+            with open(self.cache_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             for agent_name, info_data in data.get("agents", {}).items():
@@ -304,7 +304,7 @@ class CrossPlatformDetector:
             except OSError:
                 pass
 
-    def get_detection_summary(self) -> Dict[str, Any]:
+    def get_detection_summary(self) -> dict[str, Any]:
         """Get a summary of all detected agents."""
         all_agents = self.detect_all_agents()
         available = [info for info in all_agents.values() if info.available]
