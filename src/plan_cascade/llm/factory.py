@@ -45,9 +45,16 @@ class LLMFactory:
             "model": "claude-sonnet-4-20250514",
             "max_tokens": 8192,
         },
+        "claude-max": {
+            # Claude Max uses Claude Code CLI, no model override needed
+        },
         "openai": {
             "model": "gpt-4o",
             "max_tokens": 4096,
+        },
+        "deepseek": {
+            "model": "deepseek-chat",
+            "max_tokens": 8192,
         },
         "ollama": {
             "model": "llama3.2",
@@ -146,10 +153,18 @@ class LLMFactory:
             from .providers.claude import ClaudeProvider
             cls._providers["claude"] = ClaudeProvider
             return ClaudeProvider
+        elif provider_name == "claude-max":
+            from .providers.claude_max import ClaudeMaxProvider
+            cls._providers["claude-max"] = ClaudeMaxProvider
+            return ClaudeMaxProvider
         elif provider_name == "openai":
             from .providers.openai import OpenAIProvider
             cls._providers["openai"] = OpenAIProvider
             return OpenAIProvider
+        elif provider_name == "deepseek":
+            from .providers.deepseek import DeepSeekProvider
+            cls._providers["deepseek"] = DeepSeekProvider
+            return DeepSeekProvider
         elif provider_name == "ollama":
             from .providers.ollama import OllamaProvider
             cls._providers["ollama"] = OllamaProvider
@@ -169,7 +184,7 @@ class LLMFactory:
             List of provider names
         """
         # Built-in providers plus any registered
-        built_in = ["claude", "openai", "ollama"]
+        built_in = ["claude", "claude-max", "openai", "deepseek", "ollama"]
         registered = list(cls._providers.keys())
         return list(set(built_in + registered))
 

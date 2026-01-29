@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from .strategy_analyzer import (
     ExecutionStrategy,
+    OnTextCallback,
     StrategyAnalyzer,
     StrategyDecision,
 )
@@ -100,7 +101,9 @@ class SimpleWorkflow:
         self,
         backend: "AgentBackend",
         project_path: Path | None = None,
-        on_progress: ProgressCallback | None = None
+        on_progress: ProgressCallback | None = None,
+        on_strategy_text: OnTextCallback | None = None,
+        use_llm_strategy: bool = True
     ):
         """
         Initialize the simple workflow.
@@ -109,24 +112,27 @@ class SimpleWorkflow:
             backend: Backend for execution
             project_path: Project root path
             on_progress: Callback for progress updates
+            on_strategy_text: Callback for streaming strategy analysis output
+            use_llm_strategy: Whether to use LLM for strategy analysis (default True)
         """
         self.backend = backend
         self.project_path = Path(project_path) if project_path else Path.cwd()
         self.on_progress = on_progress
+        self.on_strategy_text = on_strategy_text
 
-        # For Claude Code backend, use fast heuristic analysis instead of LLM
-        # This avoids starting a separate Claude Code process just for strategy analysis
-        use_llm_for_strategy = False
-        if hasattr(backend, 'get_name') and backend.get_name() != "claude-code":
-            # Only use LLM for non-Claude-Code backends (builtin, etc.)
+        # Determine whether to use LLM for strategy analysis
+        use_llm_for_strategy = use_llm_strategy
+        llm = None
+
+        if use_llm_for_strategy:
             try:
                 llm = backend.get_llm() if hasattr(backend, 'get_llm') else None
-                use_llm_for_strategy = llm is not None
             except Exception:
+                llm = None
                 use_llm_for_strategy = False
 
         self.strategy_analyzer = StrategyAnalyzer(
-            llm=backend.get_llm() if use_llm_for_strategy else None,
+            llm=llm if use_llm_for_strategy else None,
             fallback_to_heuristic=True
         )
 
@@ -149,11 +155,12 @@ class SimpleWorkflow:
         start_time = time.time()
 
         try:
-            # 1. Analyze strategy
+            # 1. Analyze strategy (with optional streaming output)
             decision = await self.strategy_analyzer.analyze(
                 description=description,
                 context=context,
-                project_path=self.project_path
+                project_path=self.project_path,
+                on_text=self.on_strategy_text
             )
             await self._emit_progress(ProgressEvent.strategy_decided(decision))
 
@@ -643,7 +650,9 @@ async def run_simple_workflow(
     description: str,
     backend: "AgentBackend",
     project_path: Path | None = None,
-    on_progress: ProgressCallback | None = None
+    on_progress: ProgressCallback | None = None,
+    on_strategy_text: OnTextCallback | None = None,
+    use_llm_strategy: bool = True
 ) -> WorkflowResult:
     """
     Convenience function to run simple workflow.
@@ -653,6 +662,8 @@ async def run_simple_workflow(
         backend: Backend for execution
         project_path: Project root path
         on_progress: Progress callback
+        on_strategy_text: Callback for streaming strategy analysis output
+        use_llm_strategy: Whether to use LLM for strategy analysis
 
     Returns:
         WorkflowResult
@@ -660,6 +671,8 @@ async def run_simple_workflow(
     workflow = SimpleWorkflow(
         backend=backend,
         project_path=project_path,
-        on_progress=on_progress
+        on_progress=on_progress,
+        on_strategy_text=on_strategy_text,
+        use_llm_strategy=use_llm_strategy
     )
     return await workflow.run(description)

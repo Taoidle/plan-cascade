@@ -9,6 +9,7 @@ Analyzes task descriptions to determine the best execution strategy:
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -16,6 +17,9 @@ from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from ..llm.base import LLMProvider
+
+# Type alias for streaming callback
+OnTextCallback = Callable[[str], None]
 
 
 class ExecutionStrategy(Enum):
@@ -148,7 +152,8 @@ Return ONLY the JSON object, no additional text."""
         self,
         description: str,
         context: str = "",
-        project_path: Path | None = None
+        project_path: Path | None = None,
+        on_text: OnTextCallback | None = None
     ) -> StrategyDecision:
         """
         Analyze a task description and determine the best strategy.
@@ -157,6 +162,7 @@ Return ONLY the JSON object, no additional text."""
             description: Task description
             context: Additional context about the project
             project_path: Path to the project (for gathering context)
+            on_text: Optional callback for streaming LLM output during analysis
 
         Returns:
             StrategyDecision with recommended strategy
@@ -168,7 +174,7 @@ Return ONLY the JSON object, no additional text."""
         # Try LLM analysis first
         if self.llm:
             try:
-                return await self._analyze_with_llm(description, context)
+                return await self._analyze_with_llm(description, context, on_text)
             except Exception:
                 if not self.fallback_to_heuristic:
                     raise
@@ -180,14 +186,16 @@ Return ONLY the JSON object, no additional text."""
     async def _analyze_with_llm(
         self,
         description: str,
-        context: str
+        context: str,
+        on_text: OnTextCallback | None = None
     ) -> StrategyDecision:
         """
-        Analyze using LLM.
+        Analyze using LLM with optional streaming output.
 
         Args:
             description: Task description
             context: Project context
+            on_text: Optional callback for streaming LLM output
 
         Returns:
             StrategyDecision from LLM analysis
@@ -197,9 +205,11 @@ Return ONLY the JSON object, no additional text."""
             context=context or "No additional context provided."
         )
 
-        response = await self.llm.complete([
-            {"role": "user", "content": prompt}
-        ])
+        # Pass on_text callback to LLM for streaming support
+        response = await self.llm.complete(
+            [{"role": "user", "content": prompt}],
+            on_text=on_text
+        )
 
         return self._parse_llm_response(response.content)
 

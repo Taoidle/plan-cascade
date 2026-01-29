@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .base import AgentBackend, ExecutionResult
+from .base import AgentBackend, ExecutionResult, OnTextCallback
 
 if TYPE_CHECKING:
     from ..llm.base import LLMProvider
@@ -67,6 +67,10 @@ class ClaudeCodeBackend(AgentBackend):
         self._process: asyncio.subprocess.Process | None = None
         self._llm: LLMProvider | None = None
         self._session_active = False
+        self._session_id: str | None = None  # For REPL session continuity
+
+        # Additional callback for thinking stream
+        self.on_thinking: OnTextCallback | None = None
 
     def _check_claude_available(self) -> bool:
         """Check if claude CLI is available."""
@@ -117,8 +121,14 @@ class ClaudeCodeBackend(AgentBackend):
             "--print",
             "--output-format", self.output_format,
             "--verbose",
-            prompt,
+            "--include-partial-messages",  # Enable true streaming output
         ]
+
+        # Add session resume if we have a session_id
+        if self._session_id:
+            cmd.extend(["--resume", self._session_id])
+
+        cmd.append(prompt)
 
         # Collect output
         output_lines: list[str] = []
@@ -215,8 +225,9 @@ class ClaudeCodeBackend(AgentBackend):
         """
         Handle a stream event from Claude Code.
 
-        Claude CLI stream-json format:
-        - type="system": initialization info
+        Claude CLI stream-json format (with --include-partial-messages):
+        - type="stream_event": Real-time streaming with event.delta.text
+        - type="system": initialization info (may contain session_id)
         - type="assistant": AI response with message.content[]
         - type="user": user input echoed back
         - type="result": final result summary
@@ -228,7 +239,26 @@ class ClaudeCodeBackend(AgentBackend):
         """
         event_type = data.get("type", "")
 
-        if event_type == "assistant":
+        if event_type == "stream_event":
+            # Handle real-time streaming from --include-partial-messages
+            inner_event = data.get("event", {})
+            inner_type = inner_event.get("type", "")
+
+            if inner_type == "content_block_delta":
+                delta = inner_event.get("delta", {})
+                delta_type = delta.get("type", "")
+
+                if delta_type == "text_delta":
+                    text = delta.get("text", "")
+                    if text:
+                        await self._emit_text(text)
+                elif delta_type == "thinking_delta":
+                    # Handle thinking stream (extended thinking)
+                    thinking = delta.get("thinking", "")
+                    if thinking:
+                        await self._emit_thinking(thinking)
+
+        elif event_type == "assistant":
             # AI response - extract text from message.content
             message = data.get("message", {})
             content_blocks = message.get("content", [])
@@ -238,7 +268,7 @@ class ClaudeCodeBackend(AgentBackend):
                     text = block.get("text", "")
                     if text:
                         output_lines.append(text)
-                        await self._emit_text(text)
+                        # Don't emit here - already streamed via stream_event
                 elif block_type == "tool_use":
                     # Tool use within message
                     tool_data = {
@@ -286,7 +316,7 @@ class ClaudeCodeBackend(AgentBackend):
                 await self._emit_text(content)
 
         elif event_type == "content_block_delta":
-            # Streaming text delta
+            # Streaming text delta (legacy format)
             delta = data.get("delta", {})
             if delta.get("type") == "text_delta":
                 text = delta.get("text", "")
@@ -294,15 +324,39 @@ class ClaudeCodeBackend(AgentBackend):
                     await self._emit_text(text)
 
         elif event_type == "result":
-            # Final result - extract final text if available
+            # Final result - extract final text and session_id if available
             result_text = data.get("result", "")
             if result_text and not output_lines:
                 output_lines.append(result_text)
                 await self._emit_text(result_text)
 
-        elif event_type in ("system", "message_stop", "end", "user"):
-            # System messages, message complete, or user echo - ignore
+            # Save session_id for REPL continuity
+            session_id = data.get("session_id")
+            if session_id:
+                self._session_id = session_id
+
+        elif event_type == "system":
+            # System messages - may contain session_id
+            session_id = data.get("session_id")
+            if session_id:
+                self._session_id = session_id
+
+        elif event_type in ("message_stop", "end", "user"):
+            # Message complete or user echo - ignore
             pass
+
+    async def _emit_thinking(self, text: str) -> None:
+        """
+        Emit a thinking event to the callback.
+
+        Args:
+            text: Thinking content
+        """
+        if self.on_thinking:
+            try:
+                self.on_thinking(text)
+            except Exception:
+                pass  # Don't let callback errors break execution
 
     async def stop(self) -> None:
         """Stop the current execution."""
@@ -337,9 +391,18 @@ class ClaudeCodeBackend(AgentBackend):
             "backend": self.get_name(),
             "project_root": str(self.project_root),
             "session_active": self._session_active,
+            "session_id": self._session_id,
             "process_running": self._process is not None,
             "claude_available": self._check_claude_available(),
         }
+
+    def get_session_id(self) -> str | None:
+        """Get the current session ID for REPL continuity."""
+        return self._session_id
+
+    def clear_session(self) -> None:
+        """Clear the session ID to start a fresh conversation."""
+        self._session_id = None
 
 
 class ClaudeCodeLLM:
@@ -359,6 +422,9 @@ class ClaudeCodeLLM:
         """
         self.backend = backend
 
+        # Optional streaming callback for real-time output
+        self.on_text: OnTextCallback | None = None
+
     async def complete(
         self,
         messages: list[dict[str, Any]],
@@ -371,11 +437,14 @@ class ClaudeCodeLLM:
         Args:
             messages: List of message dictionaries
             tools: Optional tool definitions (ignored - uses Claude Code's tools)
-            **kwargs: Additional parameters (ignored)
+            **kwargs: Additional parameters (on_text callback for streaming)
 
         Returns:
             LLMResponse-like object
         """
+        # Get streaming callback from kwargs or instance
+        on_text = kwargs.get("on_text", self.on_text)
+
         # Extract the prompt from messages
         prompt_parts = []
         for msg in messages:
@@ -394,6 +463,7 @@ class ClaudeCodeLLM:
             "--print",
             "--output-format", "stream-json",
             "--verbose",
+            "--include-partial-messages",  # Enable true streaming
             prompt,
         ]
 
@@ -415,7 +485,20 @@ class ClaudeCodeLLM:
                         data = json.loads(line.decode().strip())
                         event_type = data.get("type", "")
 
-                        if event_type == "assistant":
+                        if event_type == "stream_event":
+                            # Handle real-time streaming
+                            inner_event = data.get("event", {})
+                            if inner_event.get("type") == "content_block_delta":
+                                delta = inner_event.get("delta", {})
+                                if delta.get("type") == "text_delta":
+                                    text = delta.get("text", "")
+                                    if text:
+                                        if on_text:
+                                            try:
+                                                on_text(text)
+                                            except Exception:
+                                                pass
+                        elif event_type == "assistant":
                             # AI response - extract text from message.content
                             message = data.get("message", {})
                             content_blocks = message.get("content", [])
@@ -425,9 +508,16 @@ class ClaudeCodeLLM:
                         elif event_type == "text":
                             output_text += data.get("content", "")
                         elif event_type == "content_block_delta":
+                            # Legacy format
                             delta = data.get("delta", {})
                             if delta.get("type") == "text_delta":
-                                output_text += delta.get("text", "")
+                                text = delta.get("text", "")
+                                output_text += text
+                                if on_text and text:
+                                    try:
+                                        on_text(text)
+                                    except Exception:
+                                        pass
                         elif event_type == "result":
                             # Fallback: use result text if no output captured
                             if not output_text:

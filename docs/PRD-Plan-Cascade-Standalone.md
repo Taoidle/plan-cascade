@@ -1,9 +1,71 @@
 # Plan Cascade Standalone - 产品需求文档 (PRD)
 
-**版本**: 2.0.0
-**日期**: 2026-01-28
+**版本**: 4.0.0
+**日期**: 2026-01-29
 **作者**: Plan Cascade Team
-**状态**: Draft
+**状态**: Implementation In Progress
+
+---
+
+## 实现状态总览
+
+> **当前进度**: ~98% 核心功能已实现
+> **最后更新**: 2026-01-29
+
+### 功能需求实现状态
+
+| 功能 (章节) | 优先级 | 状态 | 说明 |
+|-------------|--------|------|------|
+| **4.1 工作模式选择** | P0 | ✅ 已完成 | |
+| 独立编排模式 | P0 | ✅ 已完成 | ReAct 引擎 + 工具执行 |
+| Claude Max LLM 后端 | P0 | ✅ 已完成 | `llm/providers/claude_max.py` |
+| Claude API | P0 | ✅ 已完成 | `llm/providers/claude.py` |
+| OpenAI | P0 | ✅ 已完成 | `llm/providers/openai.py` |
+| DeepSeek | P1 | ✅ 已完成 | `llm/providers/deepseek.py` |
+| Ollama | P2 | ✅ 已完成 | `llm/providers/ollama.py` |
+| **4.2 多 Agent 协同** | P0 | ✅ 已完成 | |
+| 基于阶段的 Agent 分配 | P0 | ✅ 已完成 | `backends/phase_config.py` |
+| Agent 执行器 | P0 | ✅ 已完成 | `backends/agent_executor.py` |
+| **4.2 简单模式功能** | P0 | ✅ 已完成 | |
+| 一键式工作流 | P0 | ✅ 已完成 | `core/simple_workflow.py` |
+| AI 自动策略判断 | P0 | ✅ 已完成 | `core/strategy_analyzer.py` |
+| **4.3 专家模式功能** | P0 | ✅ 已完成 | |
+| PRD 编辑器 | P0 | ✅ 已完成 | `core/expert_workflow.py` |
+| 执行策略选择 | P0 | ✅ 已完成 | direct/hybrid/mega |
+| Agent 指定 | P0 | ✅ 已完成 | 每个 Story 可指定 Agent |
+| **4.4 设置页面** | P0 | ✅ 已完成 | |
+| Agent 配置 | P0 | ✅ 已完成 | `settings/models.py` |
+| 质量门控配置 | P0 | ✅ 已完成 | `core/quality_gate.py` |
+| API Key 安全存储 | P0 | ✅ 已完成 | Keyring 集成 |
+| **4.5 CLI 功能** | P1 | ✅ 已完成 | |
+| `plan-cascade run` | P0 | ✅ 已完成 | 简单/专家模式 |
+| `plan-cascade config` | P0 | ✅ 已完成 | 配置向导 |
+| `plan-cascade status` | P1 | ✅ 已完成 | 状态查看 |
+| **4.6 Claude Code GUI 模式** | P0 | ⚠️ 部分完成 | |
+| Claude Code CLI 集成 | P0 | ✅ 已完成 | `backends/claude_code.py` |
+| GUI 专用后端 | P2 | ⏳ 规划中 | `backends/claude_code_gui.py` |
+| 工具调用可视化 | P1 | ✅ 已完成 | 流式事件解析 |
+| **4.7 交互式 REPL 模式** | P0 | ✅ 已完成 | |
+| REPL 循环 | P0 | ✅ 已完成 | `plan-cascade chat` |
+| 特殊命令 | P0 | ✅ 已完成 | /exit, /clear, /status, /mode |
+| 智能意图识别 | P0 | ✅ 已完成 | `core/intent_classifier.py` |
+
+### 产品形态实现状态
+
+| 形态 | 状态 | 说明 |
+|------|------|------|
+| CLI | ✅ 已完成 | `pip install plan-cascade` |
+| Desktop (GUI) | ⏳ 规划中 | Tauri 实现，Phase 2 目标 |
+| Claude Code Plugin | ✅ 已完成 | 现有 Plugin 保持兼容 |
+
+### 里程碑进度
+
+| 阶段 | 状态 | 完成度 |
+|------|------|--------|
+| Phase 1: CLI + 双模式 | ✅ 已完成 | 100% |
+| Phase 2: 桌面应用 Alpha | ⏳ 规划中 | 0% |
+| Phase 3: 功能完善 | ⏳ 待开始 | - |
+| Phase 4: 高级功能 | ⏳ 待开始 | - |
 
 ---
 
@@ -11,52 +73,66 @@
 
 ### 1.1 产品愿景
 
-将 Plan Cascade 从 Claude Code Plugin 发展为一个**开箱即用的独立客户端**，让 AI 编程变得简单。
+将 Plan Cascade 发展为一个**完整的 AI 编程编排平台**，具备自主工具执行能力，让 AI 编程变得简单。
 
 **核心定位**：
-- 作为 **Claude Code 的图形化界面**（默认模式）
-- 作为 **独立的多 Agent 编排工具**（支持其他 LLM）
+- 作为 **完整的编排层**：自己执行工具，LLM 只提供思考（独立模式）
+- 作为 **Claude Code 的图形界面**：兼容 Claude Code 所有功能（GUI 模式）
+- 支持 **多种 LLM 后端**：Claude Max、Claude API、OpenAI、DeepSeek 等
 
 ### 1.2 核心价值主张
 
 | 价值点 | 描述 |
 |--------|------|
-| **易用性优先** | 描述需求即可，AI 自动处理一切 |
-| **开箱即用** | 下载安装即可使用，无需复杂配置 |
+| **完整编排能力** | 自主执行工具（Read/Write/Edit/Bash/Glob/Grep），不依赖外部 Agent |
+| **零门槛使用** | Claude Max 会员无需 API Key，直接通过 Claude Code 作为 LLM 后端 |
 | **双模式切换** | 简单模式快速上手，专家模式精细控制 |
-| **模型自由** | 支持 Claude Code、OpenAI、DeepSeek 等多种后端 |
+| **模型自由** | 支持 Claude Max、Claude API、OpenAI、DeepSeek、Ollama 等 |
 | **理念延续** | 完整保留 Plan Cascade 的核心设计理念 |
+| **Claude Code 兼容** | 可作为 Claude Code 的完整 GUI，兼容所有功能 |
 
 ### 1.3 产品定位
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                 Plan Cascade Desktop                         │
-│            让 AI 编程变得简单的客户端                         │
+│                    Plan Cascade                              │
+│          完整的 AI 编程编排平台 + Claude Code GUI             │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│                    ┌─────────────────┐                       │
-│                    │   选择后端       │                       │
-│                    └────────┬────────┘                       │
-│                             │                                │
-│          ┌──────────────────┼──────────────────┐             │
-│          ▼                  ▼                  ▼             │
-│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
-│   │ Claude Code │    │   OpenAI    │    │  DeepSeek   │     │
-│   │  (默认)     │    │ BuiltinAgent│    │ BuiltinAgent│     │
-│   │ 作为其 GUI  │    │             │    │             │     │
-│   └─────────────┘    └─────────────┘    └─────────────┘     │
+│   ┌─ 工作模式选择 ─────────────────────────────────────────┐│
+│   │                                                        ││
+│   │  ● 独立编排模式（推荐）                                ││
+│   │    └─ Plan Cascade 执行所有工具                       ││
+│   │    └─ LLM 只提供思考（支持 Claude Max/API/OpenAI 等）  ││
+│   │                                                        ││
+│   │  ○ Claude Code GUI 模式                                ││
+│   │    └─ 作为 Claude Code 的图形界面                      ││
+│   │    └─ Claude Code 执行工具，Plan Cascade 提供可视化    ││
+│   │                                                        ││
+│   └────────────────────────────────────────────────────────┘│
+│                                                              │
+│   ┌─ 独立编排模式：LLM 后端选择 ───────────────────────────┐│
+│   │                                                        ││
+│   │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   ││
+│   │   │ Claude Max  │  │ Claude API  │  │   OpenAI    │   ││
+│   │   │ (无需API Key)│  │ (需API Key) │  │ (需API Key) │   ││
+│   │   │ 通过Claude  │  │  直接调用   │  │  直接调用   │   ││
+│   │   │ Code获取LLM │  │             │  │             │   ││
+│   │   └─────────────┘  └─────────────┘  └─────────────┘   ││
+│   │                                                        ││
+│   └────────────────────────────────────────────────────────┘│
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 
-使用 Claude Code 时：Plan Cascade = Claude Code 的 GUI
-使用其他 LLM 时：Plan Cascade = 独立的编排工具
+独立编排模式：Plan Cascade = 完整编排 + 工具执行 + LLM 思考
+Claude Code GUI 模式：Plan Cascade = Claude Code 的可视化界面
 ```
 
 ### 1.4 目标用户
 
 | 用户群体 | 场景 | 痛点 | 解决方案 |
 |----------|------|------|----------|
+| **Claude Max 会员** | 有 Max 订阅但无 API Key | Claude Code Plugin 使用复杂 | 独立编排模式 + Claude Code LLM 后端 |
 | **新手开发者** | 想用 AI 辅助开发 | Claude Code CLI 学习成本高 | 简单模式一键完成 |
 | **资深开发者** | 需要精细控制 | 现有工具控制力不足 | 专家模式自定义 |
 | **小型团队** | 统一工具链 | 不同成员用不同 LLM | 多后端支持 |
@@ -257,49 +333,96 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                   Plan Cascade                               │
 ├───────────────────┬───────────────────┬─────────────────────┤
-│   桌面应用 (GUI)   │    CLI 工具       │  Claude Code Plugin │
+│   Desktop (GUI)   │      CLI          │  Claude Code Plugin │
 ├───────────────────┼───────────────────┼─────────────────────┤
-│ • 图形化界面      │ • 命令行操作      │ • 依赖 Claude Code   │
+│ • CLI 的图形版本  │ • 命令行操作      │ • 依赖 Claude Code   │
 │ • 简单/专家模式   │ • 简单/专家模式   │ • 作为插件运行       │
-│ • 可作为 Claude   │ • pip install     │ • Slash 命令调用     │
-│   Code 的 GUI     │   plan-cascade    │                     │
+│ • 交互式 REPL     │ • 交互式 REPL     │ • Slash 命令调用     │
+│ • Claude Code     │ • pip install     │                     │
+│   GUI 模式可选    │   plan-cascade    │                     │
 └───────────────────┴───────────────────┴─────────────────────┘
                            │
                            ▼
-                ┌─────────────────┐
-                │ Plan Cascade    │
-                │ Core (共享)     │
-                └─────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                   Plan Cascade Core                          │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ 工具执行引擎  │  │ ReAct 循环   │  │ PRD 生成器   │       │
+│  │ Read/Write   │  │ Think→Act   │  │ 策略分析     │       │
+│  │ Edit/Bash    │  │ →Observe    │  │ 批次编排     │       │
+│  │ Glob/Grep    │  │             │  │              │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+│                           │                                  │
+│                           ▼                                  │
+│           ┌─────────────────────────────┐                   │
+│           │      LLM 抽象层             │                   │
+│           │  Claude Max | API | OpenAI  │                   │
+│           └─────────────────────────────┘                   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 发布产物
+### 3.2 Desktop 定位
+
+**Desktop = CLI 的 GUI 版本**
+
+Desktop 提供与 CLI 完全相同的功能，以图形界面呈现：
+- 可视化的需求输入和执行监控
+- PRD 编辑器（拖拽、依赖关系可视化）
+- 实时工具调用展示
+- 文件变更预览
+
+**可选：Claude Code GUI 模式**
+
+Desktop 可作为 Claude Code 的完整图形界面：
+- 对话视图（与 Claude Code 交互）
+- 工具调用可视化
+- 兼容 Claude Code 所有功能
+
+### 3.3 发布产物
 
 | 产物 | 说明 | 目标用户 |
 |------|------|----------|
-| **桌面应用** | Windows/macOS/Linux 安装包 | 希望开箱即用的用户 |
-| **CLI 工具** | `pip install plan-cascade` | 喜欢命令行的开发者 |
-| **Claude Code Plugin** | 现有 Plugin (保持兼容) | Claude Code 用户 |
+| **Desktop** | Windows/macOS/Linux 安装包 | 希望图形界面的用户 |
+| **CLI** | `pip install plan-cascade` | 喜欢命令行的开发者 |
+| **Claude Code Plugin** | 现有 Plugin (保持兼容) | Claude Code 深度用户 |
 | **Python 包** | `plan-cascade-core` | 集成到其他工具的开发者 |
 
 ---
 
 ## 4. 功能需求
 
-### 4.1 后端选择 (P0)
+### 4.1 工作模式选择 (P0)
 
-#### Claude Code 模式（默认）
+#### 独立编排模式（推荐）
 
-Plan Cascade 作为 Claude Code 的图形化界面：
+Plan Cascade 作为完整的编排层，自己执行所有工具：
 
 ```
 ┌─ 设置 ──────────────────────────────────────────────────────┐
 │                                                              │
-│  后端选择：                                                  │
+│  工作模式：                                                  │
 │                                                              │
-│  ● Claude Code（推荐）                                       │
+│  ● 独立编排模式（推荐）                                      │
+│    └─ Plan Cascade 自己执行所有工具（Read/Write/Edit/Bash） │
+│    └─ LLM 只提供思考，Plan Cascade 执行动作                 │
+│    └─ 支持完整的 PRD 驱动开发流程                           │
+│                                                              │
+│  ○ Claude Code GUI 模式                                      │
 │    └─ Plan Cascade 作为 Claude Code 的图形界面              │
-│    └─ 完整复用 Claude Code 的所有能力                        │
-│    └─ 无需额外配置 API Key                                   │
+│    └─ Claude Code 执行工具，Plan Cascade 提供可视化         │
+│    └─ 兼容 Claude Code 所有功能                              │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### 独立编排模式：LLM 后端选择
+
+```
+┌─ LLM 后端选择 ───────────────────────────────────────────────┐
+│                                                              │
+│  ● Claude Max（无需 API Key）                                │
+│    └─ 通过本地 Claude Code 获取 LLM 能力                    │
+│    └─ 适合：已购买 Claude Max 但无 API Key 的用户           │
 │                                                              │
 │  ○ Claude API                                                │
 │    └─ 直接调用 Anthropic API                                 │
@@ -309,29 +432,156 @@ Plan Cascade 作为 Claude Code 的图形化界面：
 │    └─ 使用 GPT-4o 等模型                                     │
 │    └─ 需要配置 API Key                                       │
 │                                                              │
-│  ○ 其他...                                                   │
+│  ○ DeepSeek                                                  │
+│    └─ 国内用户推荐                                           │
+│    └─ 需要配置 API Key                                       │
+│                                                              │
+│  ○ Ollama                                                    │
+│    └─ 本地模型，完全离线                                     │
+│    └─ 需要配置 Ollama 地址                                   │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**两种模式的本质区别**：
+**两种工作模式的本质区别**：
 
-| | Claude Code 模式 | 其他 LLM 模式 |
+| | 独立编排模式 | Claude Code GUI 模式 |
 |---|---|---|
-| **主 Agent** | Claude Code 进程 | BuiltinAgent (自实现) |
-| **工具调用** | Claude Code 内置 | Plan Cascade 实现 |
-| **Plan Cascade 角色** | GUI 外壳 | 完整运行时 |
-| **配置** | 无需 API Key | 需要 API Key |
+| **编排层** | Plan Cascade | Plan Cascade |
+| **工具执行** | Plan Cascade 自己执行 | Claude Code 执行 |
+| **LLM 来源** | 多种（Claude Max/API/OpenAI 等） | Claude Code |
+| **PRD 驱动** | ✅ 支持 | ✅ 支持 |
+| **批次执行** | ✅ 支持 | ✅ 支持 |
+| **适用场景** | 需要其他 LLM 或离线使用 | 有 Claude Max/Code 订阅 |
 
-#### 支持的后端
+**核心理念：Plan Cascade = 大脑（编排），执行层 = 手（工具执行）**
 
-| 后端 | 优先级 | 说明 |
-|------|--------|------|
-| Claude Code | P0 | 默认选项，作为其 GUI |
-| Claude API | P0 | 直接调用 Anthropic API |
-| OpenAI | P0 | GPT-4o 等模型 |
-| DeepSeek | P1 | 国内用户 |
-| Ollama | P2 | 本地模型 |
+两种模式都由 Plan Cascade 控制编排流程（PRD 生成、依赖分析、批次调度），区别只在于谁执行工具：
+- 独立模式：Plan Cascade 内置工具引擎执行
+- GUI 模式：Claude Code CLI 执行
+
+#### 独立编排模式：Claude Max LLM 后端原理
+
+对于购买了 Claude Max 但没有 API Key 的用户：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    独立编排模式                              │
+│              Claude Max LLM 后端                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   Plan Cascade                      Claude Code (后台)       │
+│   ┌────────────┐                   ┌────────────┐           │
+│   │ 编排引擎   │                   │            │           │
+│   │ ──────────│                   │ 只提供     │           │
+│   │ PRD 生成  │ ─── prompt ────→  │ LLM 思考   │           │
+│   │ 策略分析  │ ←── response ───  │            │           │
+│   │ 批次执行  │                   │ (禁用工具) │           │
+│   └────────────┘                   └────────────┘           │
+│        │                                                    │
+│        ▼                                                    │
+│   ┌────────────┐                                            │
+│   │ 工具执行   │  Plan Cascade 自己执行                     │
+│   │ ──────────│                                            │
+│   │ Read/Write │                                            │
+│   │ Edit/Bash  │                                            │
+│   │ Glob/Grep  │                                            │
+│   └────────────┘                                            │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+
+关键：Claude Code 只作为 LLM 后端，不执行工具
+```
+
+#### 支持的 LLM 后端
+
+| 后端 | 优先级 | 需要 API Key | 说明 |
+|------|--------|--------------|------|
+| Claude Max | P0 | 否 | 通过 Claude Code 获取 LLM，适合 Max 会员 |
+| Claude API | P0 | 是 | 直接调用 Anthropic API |
+| OpenAI | P0 | 是 | GPT-4o 等模型 |
+| DeepSeek | P1 | 是 | 国内用户 |
+| Ollama | P2 | 否 | 本地模型 |
+
+### 4.2 多 Agent 协同 (P0)
+
+Plan Cascade 支持多种 Agent 协同工作，智能分配不同任务给最适合的 Agent：
+
+#### 支持的执行 Agent
+
+| Agent | 类型 | 说明 |
+|-------|------|------|
+| claude-code | Task Tool / CLI | 默认 Agent，内置或通过 Claude Code CLI |
+| codex | CLI | OpenAI Codex CLI |
+| aider | CLI | AI 结对编程助手 |
+| amp-code | CLI | Amp Code CLI |
+| cursor-cli | CLI | Cursor CLI |
+
+#### 基于阶段的 Agent 分配
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    多 Agent 协同                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   执行阶段              默认 Agent        回退链             │
+│   ─────────────────────────────────────────────────────────  │
+│   Planning (规划)       codex           → claude-code        │
+│   Implementation (实现)  claude-code     → codex → aider     │
+│   Retry (重试)          claude-code     → aider              │
+│   Refactor (重构)       aider           → claude-code        │
+│   Review (审查)         claude-code     → codex              │
+│                                                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   Story 类型            默认 Agent                           │
+│   ─────────────────────────────────────────────────────────  │
+│   feature (功能)        claude-code                          │
+│   bugfix (修复)         codex                                │
+│   refactor (重构)       aider                                │
+│   test (测试)           claude-code                          │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Agent 解析优先级
+
+```
+1. --agent 命令参数 (显式覆盖)
+2. 阶段特定参数 (--impl-agent, --planning-agent)
+3. Story 中指定的 agent
+4. Story 类型覆盖 (bugfix → codex, refactor → aider)
+5. 阶段默认 Agent
+6. 回退链 (如果 Agent 不可用)
+7. claude-code (终极回退，始终可用)
+```
+
+#### 配置文件 (agents.json)
+
+```json
+{
+  "default_agent": "claude-code",
+  "agents": {
+    "claude-code": {"type": "task-tool"},
+    "codex": {"type": "cli", "command": "codex"},
+    "aider": {"type": "cli", "command": "aider"}
+  },
+  "phase_defaults": {
+    "implementation": {
+      "default_agent": "claude-code",
+      "fallback_chain": ["codex", "aider"],
+      "story_type_overrides": {"refactor": "aider", "bugfix": "codex"}
+    }
+  }
+}
+```
+
+**两种模式下的多 Agent 支持**：
+
+| 模式 | Agent 类型 | 说明 |
+|------|-----------|------|
+| 独立编排模式 | 内置 ReAct + CLI Agents | 内置引擎作为默认，可调用外部 CLI Agent |
+| Claude Code GUI 模式 | Claude Code + CLI Agents | Claude Code 作为默认，可调用外部 CLI Agent |
 
 ### 4.2 简单模式功能 (P0)
 
@@ -486,22 +736,24 @@ plan-cascade run                       # 执行
 plan-cascade status                    # 查看状态
 ```
 
-### 4.6 作为 Claude Code GUI (P0)
+### 4.6 Claude Code GUI 模式 (P0)
 
-当选择 Claude Code 作为后端时，Plan Cascade 提供：
+Claude Code GUI 模式下，Plan Cascade 控制编排流程，Claude Code 执行工具：
 
 ```
-┌─ Plan Cascade (Claude Code Mode) ───────────────────────────┐
+┌─ Plan Cascade (Claude Code GUI 模式) ───────────────────────┐
 │                                                              │
-│  ┌─ 对话 ───────────────────────────────────────────────┐   │
+│  ┌─ PRD 驱动开发 ───────────────────────────────────────┐   │
 │  │                                                      │   │
-│  │  You: 帮我重构 auth 模块                             │   │
+│  │  ✓ Story 1: 创建数据库 Schema                        │   │
+│  │  ⟳ Story 2: 实现 API 端点 (执行中...)                │   │
+│  │  ○ Story 3: 添加前端表单 (等待依赖)                  │   │
 │  │                                                      │   │
-│  │  Claude: 正在分析...                                 │   │
+│  │  [Batch 1: 2/3] ████████░░░░ 66%                     │   │
 │  │                                                      │   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
-│  ┌─ 工具调用 (可视化) ─────────────────────────────────┐    │
+│  ┌─ Claude Code 执行 (可视化) ─────────────────────────┐    │
 │  │ ✓ Read src/auth/login.py                            │    │
 │  │ ✓ Read src/auth/oauth.py                            │    │
 │  │ ⟳ Edit src/auth/base.py                             │    │
@@ -515,11 +767,56 @@ plan-cascade status                    # 查看状态
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**比 CLI 更直观**：
-- 工具调用可视化
+**Claude Code GUI 模式特点**：
+- **完整支持 PRD 驱动开发**（Plan Cascade 编排，Claude Code 执行）
+- **完整支持批次执行**（依赖分析、并行执行）
+- 完整兼容 Claude Code 所有功能
+- 工具调用可视化（Claude Code 执行）
 - 文件变更实时预览
-- 执行历史可回溯
-- 错误信息清晰展示
+- 质量门控和重试管理
+
+**适用场景**：
+- 有 Claude Max/Code 订阅
+- 需要 PRD 驱动的复杂任务分解
+- 希望可视化 Claude Code 的执行过程
+
+### 4.7 交互式 REPL 模式 (P0)
+
+CLI 和 Desktop 都支持交互式 REPL，实现连续对话：
+
+```
+┌─ Plan Cascade REPL ─────────────────────────────────────────┐
+│                                                              │
+│  plan-cascade> 分析一下项目结构                              │
+│                                                              │
+│  [AI 分析并响应...]                                          │
+│                                                              │
+│  plan-cascade> 基于上面的分析，实现用户登录功能              │
+│                                                              │
+│  [意图识别：TASK]                                            │
+│  [策略分析：hybrid_auto]                                     │
+│  [生成 PRD...]                                               │
+│  [执行中...]                                                 │
+│                                                              │
+│  plan-cascade> /status                                       │
+│  当前会话：abc123                                            │
+│  模式：simple                                                │
+│  项目：/path/to/project                                      │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**REPL 特殊命令**：
+- `/exit`, `/quit` - 退出
+- `/clear` - 清空上下文
+- `/status` - 查看会话状态
+- `/mode [simple|expert]` - 切换模式
+- `/history` - 查看对话历史
+- `/config` - 配置管理
+
+**智能意图识别**：
+- 规则匹配 → LLM 分析 → 用户确认
+- 自动区分 TASK / QUERY / CHAT
 
 ---
 

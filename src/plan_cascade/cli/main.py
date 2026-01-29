@@ -110,6 +110,7 @@ if HAS_TYPER:
                 console.print()
                 streaming_started[0] = True
             console.print(text, end="", highlight=False)
+            sys.stdout.flush()  # Force flush for true real-time streaming
 
         def on_tool_call(data: dict):
             """Display tool calls when in verbose mode."""
@@ -121,6 +122,11 @@ if HAS_TYPER:
                         output.print_error(f"    Tool error")
                 else:
                     output.print(f"  [dim]> Tool: {tool_name}[/dim]")
+
+        def on_strategy_text(text: str):
+            """Stream strategy analysis output in real-time."""
+            console.print(text, end="", highlight=False)
+            sys.stdout.flush()
 
         # Attach streaming callbacks to backend
         backend_instance.on_text = on_text
@@ -139,6 +145,8 @@ if HAS_TYPER:
             backend=backend_instance,
             project_path=project,
             on_progress=on_progress,
+            on_strategy_text=on_strategy_text,
+            use_llm_strategy=True,  # Enable LLM-based strategy analysis
         )
 
         output.print_info(f"Processing: {description}")
@@ -621,6 +629,457 @@ if HAS_TYPER:
 
         output.print(f"Plan Cascade v{ver}")
         output.print("[dim]AI-driven development made simple[/dim]")
+
+    @app.command()
+    def chat(
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
+        backend: str | None = typer.Option(None, "--backend", "-b", help="Backend selection"),
+        provider: str | None = typer.Option(None, "--provider", help="LLM provider for builtin backend"),
+        model: str | None = typer.Option(None, "--model", "-m", help="Model to use"),
+        verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    ):
+        """
+        Interactive REPL mode with continuous conversation.
+
+        Start an interactive chat session that maintains context across messages.
+        Use special commands like /exit, /clear, /help, /status, etc.
+
+        Examples:
+            plan-cascade chat
+            plan-cascade chat --project ./my-project
+        """
+        project = Path(project_path) if project_path else Path.cwd()
+
+        # Print header
+        output.print_header(
+            f"Plan Cascade v{__version__} - Interactive Mode",
+            f"Project: {project}"
+        )
+        output.print("[dim]Type /help for available commands, /exit to quit[/dim]")
+        output.print()
+
+        asyncio.run(_run_chat(
+            project=project,
+            backend=backend,
+            provider=provider,
+            model=model,
+            verbose=verbose,
+        ))
+
+    async def _run_chat(
+        project: Path,
+        backend: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        verbose: bool = False,
+    ):
+        """Run the interactive REPL loop."""
+        from ..core.intent_classifier import Intent, IntentClassifier
+        from ..core.simple_workflow import SimpleWorkflow
+
+        # Create backend
+        backend_instance = _create_backend(backend, provider, model, project)
+
+        # Create intent classifier with LLM support
+        try:
+            llm = backend_instance.get_llm()
+        except Exception:
+            llm = None
+        intent_classifier = IntentClassifier(llm=llm)
+
+        # Current mode (simple or expert)
+        current_mode = "simple"
+
+        # Auto intent detection (can be toggled)
+        auto_intent = True
+
+        # Conversation history for context-aware execution
+        conversation_history: list[dict[str, str]] = []
+
+        # Display welcome info
+        output.print_info(f"Backend: {backend_instance.get_name()}")
+        output.print_info(f"Mode: {current_mode}")
+        output.print_info("Intent detection: [green]auto[/green]")
+        output.print()
+
+        while True:
+            try:
+                # Get user input
+                user_input = Prompt.ask("\n[cyan]>[/cyan]")
+            except (EOFError, KeyboardInterrupt):
+                output.print("\n[dim]Goodbye![/dim]")
+                break
+
+            user_input = user_input.strip()
+            if not user_input:
+                continue
+
+            # Handle special commands
+            if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
+                output.print("[dim]Goodbye![/dim]")
+                break
+
+            elif user_input.lower() == "/clear":
+                # Clear session context and conversation history
+                if hasattr(backend_instance, 'clear_session'):
+                    backend_instance.clear_session()
+                conversation_history.clear()
+                output.print_success("Session cleared, starting fresh conversation")
+                continue
+
+            elif user_input.lower() == "/help":
+                _show_repl_help()
+                continue
+
+            elif user_input.lower() == "/status":
+                status = backend_instance.get_status()
+                status["mode"] = current_mode
+                status["auto_intent"] = auto_intent
+                status["conversation_messages"] = len(conversation_history)
+                output.status_panel(status)
+                continue
+
+            elif user_input.lower() == "/history":
+                if not conversation_history:
+                    output.print_info("No conversation history yet")
+                else:
+                    output.print(f"[bold]Conversation History ({len(conversation_history)} messages):[/bold]\n")
+                    for i, msg in enumerate(conversation_history):
+                        role = "[cyan]You[/cyan]" if msg["role"] == "user" else "[green]AI[/green]"
+                        content = msg["content"][:100] + "..." if len(msg["content"]) > 100 else msg["content"]
+                        # Replace newlines with spaces for compact display
+                        content = content.replace("\n", " ")
+                        output.print(f"  {i+1}. {role}: {content}")
+                continue
+
+            elif user_input.lower() == "/version":
+                output.print(f"Plan Cascade v{__version__}")
+                continue
+
+            elif user_input.lower() == "/mode":
+                output.print(f"Current mode: {current_mode}")
+                continue
+
+            elif user_input.lower() == "/mode simple":
+                current_mode = "simple"
+                output.print_success("Switched to simple mode")
+                continue
+
+            elif user_input.lower() == "/mode expert":
+                current_mode = "expert"
+                output.print_success("Switched to expert mode")
+                continue
+
+            elif user_input.lower() == "/intent":
+                status = "[green]on[/green]" if auto_intent else "[red]off[/red]"
+                output.print(f"Auto intent detection: {status}")
+                continue
+
+            elif user_input.lower() == "/intent on":
+                auto_intent = True
+                output.print_success("Auto intent detection enabled")
+                continue
+
+            elif user_input.lower() == "/intent off":
+                auto_intent = False
+                output.print_success("Auto intent detection disabled (all inputs treated as tasks)")
+                continue
+
+            elif user_input.lower() == "/config":
+                _show_config()
+                continue
+
+            elif user_input.lower() == "/config setup":
+                _run_setup_wizard()
+                continue
+
+            elif user_input.lower() == "/project":
+                output.print(f"Current project: {project}")
+                continue
+
+            elif user_input.lower().startswith("/project "):
+                new_path = user_input[9:].strip()
+                new_project = Path(new_path)
+                if new_project.exists():
+                    project = new_project
+                    backend_instance.project_root = project
+                    output.print_success(f"Switched to project: {project}")
+                else:
+                    output.print_error(f"Path does not exist: {new_path}")
+                continue
+
+            elif user_input.lower().startswith("/config backend "):
+                new_backend = user_input[16:].strip()
+                backend_instance = _create_backend(new_backend, provider, model, project)
+                output.print_success(f"Backend changed to: {new_backend}")
+                continue
+
+            elif user_input.lower().startswith("/run "):
+                # Execute with full workflow
+                task = user_input[5:].strip()
+                if task:
+                    result = await _execute_in_repl(
+                        task, backend_instance, project, current_mode, verbose,
+                        conversation_history
+                    )
+                    if result:
+                        conversation_history.append({"role": "user", "content": task})
+                        conversation_history.append({"role": "assistant", "content": result})
+                continue
+
+            elif user_input.lower().startswith("/expert "):
+                # Execute in expert mode
+                task = user_input[8:].strip()
+                if task:
+                    result = await _execute_in_repl(
+                        task, backend_instance, project, "expert", verbose,
+                        conversation_history
+                    )
+                    if result:
+                        conversation_history.append({"role": "user", "content": task})
+                        conversation_history.append({"role": "assistant", "content": result})
+                continue
+
+            # Show command hints when just "/" is typed
+            elif user_input == "/":
+                _show_command_hints()
+                continue
+
+            # Unknown command
+            elif user_input.startswith("/"):
+                output.print_warning(f"Unknown command: {user_input}")
+                output.print("[dim]Type /help for available commands[/dim]")
+                continue
+
+            # Regular message - use intent classification
+            if auto_intent:
+                # Classify intent
+                intent_result = await intent_classifier.classify(
+                    user_input,
+                    conversation_history,
+                    confidence_threshold=0.7
+                )
+
+                if verbose:
+                    output.print(f"[dim]Intent: {intent_result.intent.value} "
+                               f"(confidence: {intent_result.confidence:.0%})[/dim]")
+
+                # Handle based on intent
+                if intent_result.intent == Intent.UNCLEAR or not intent_result.is_confident(0.5):
+                    # Ask user for clarification
+                    output.print("\n[yellow]I'm not sure what you'd like me to do.[/yellow]")
+                    choice = Prompt.ask(
+                        "What would you like",
+                        choices=["task", "query", "chat"],
+                        default="task"
+                    )
+                    if choice == "task":
+                        intent_result.intent = Intent.TASK
+                    elif choice == "query":
+                        intent_result.intent = Intent.QUERY
+                    else:
+                        intent_result.intent = Intent.CHAT
+
+                # Execute based on intent
+                if intent_result.intent == Intent.TASK:
+                    # Use suggested mode for tasks
+                    exec_mode = intent_result.suggested_mode if intent_result.suggested_mode else current_mode
+                    if intent_result.suggested_mode == "expert" and current_mode != "expert":
+                        output.print("[dim]This looks like a complex task, using expert mode[/dim]")
+
+                    result = await _execute_in_repl(
+                        user_input, backend_instance, project, exec_mode, verbose,
+                        conversation_history
+                    )
+                elif intent_result.intent == Intent.QUERY:
+                    # For queries, use simple mode (faster)
+                    result = await _execute_in_repl(
+                        user_input, backend_instance, project, "simple", verbose,
+                        conversation_history
+                    )
+                else:
+                    # For chat, just pass to AI without full workflow
+                    result = await _execute_in_repl(
+                        user_input, backend_instance, project, "simple", verbose,
+                        conversation_history
+                    )
+            else:
+                # Manual mode - always execute as task with current mode
+                result = await _execute_in_repl(
+                    user_input, backend_instance, project, current_mode, verbose,
+                    conversation_history
+                )
+
+            if result:
+                conversation_history.append({"role": "user", "content": user_input})
+                conversation_history.append({"role": "assistant", "content": result})
+
+    async def _execute_in_repl(
+        task: str,
+        backend,
+        project: Path,
+        mode: str,
+        verbose: bool,
+        conversation_history: list[dict[str, str]] | None = None
+    ) -> str | None:
+        """
+        Execute a task within the REPL with conversation context.
+
+        Args:
+            task: The task description
+            backend: Backend instance
+            project: Project path
+            mode: Execution mode (simple/expert)
+            verbose: Verbose output flag
+            conversation_history: Previous conversation for context
+
+        Returns:
+            The AI response text, or None if failed
+        """
+        from ..core.simple_workflow import SimpleWorkflow
+
+        streaming_started = [False]
+        collected_output: list[str] = []  # Collect output for history
+
+        def on_text(text: str):
+            """Stream AI text output to console in real-time."""
+            if not streaming_started[0]:
+                console.print()
+                streaming_started[0] = True
+            console.print(text, end="", highlight=False)
+            sys.stdout.flush()
+            collected_output.append(text)  # Collect for history
+
+        def on_tool_call(data: dict):
+            """Display tool calls when in verbose mode."""
+            if verbose:
+                tool_name = data.get("name", data.get("type", "unknown"))
+                if tool_name != "tool_result":
+                    output.print(f"  [dim]> Tool: {tool_name}[/dim]")
+
+        def on_strategy_text(text: str):
+            """Stream strategy analysis output."""
+            console.print(text, end="", highlight=False)
+            sys.stdout.flush()
+
+        # Attach callbacks
+        backend.on_text = on_text
+        backend.on_tool_call = on_tool_call
+
+        # Progress callback
+        def on_progress(event):
+            if event.type in ("story_completed", "story_failed") and streaming_started[0]:
+                console.print()
+                streaming_started[0] = False
+            output.handle_progress_event(event)
+
+        # Build context from conversation history
+        context = ""
+        if conversation_history:
+            context_parts = ["## Previous Conversation Context"]
+            for msg in conversation_history[-10:]:  # Last 10 messages for context
+                role = "User" if msg["role"] == "user" else "Assistant"
+                # Truncate long messages in context
+                content = msg["content"][:500] + "..." if len(msg["content"]) > 500 else msg["content"]
+                context_parts.append(f"**{role}:** {content}")
+            context = "\n\n".join(context_parts)
+
+            if verbose:
+                output.print(f"[dim]Using {len(conversation_history)} messages as context[/dim]")
+
+        # Create and run workflow
+        workflow = SimpleWorkflow(
+            backend=backend,
+            project_path=project,
+            on_progress=on_progress,
+            on_strategy_text=on_strategy_text,
+            use_llm_strategy=(mode == "expert"),  # Only use LLM strategy in expert mode
+        )
+
+        try:
+            result = await workflow.run(task, context=context)
+            if streaming_started[0]:
+                console.print()  # End streaming with newline
+
+            # Return collected output for history
+            return "".join(collected_output) if collected_output else result.output
+
+        except Exception as e:
+            output.print_error(f"Error: {e}")
+            return None
+
+    def _show_repl_help():
+        """Display REPL help information."""
+        help_text = """
+[bold cyan]Session Commands[/bold cyan]
+  [cyan]exit[/cyan], [cyan]quit[/cyan], [cyan]/exit[/cyan]  Exit the REPL
+  [cyan]/clear[/cyan]              Clear session context, start fresh
+  [cyan]/help[/cyan]               Show this help message
+
+[bold cyan]Status Commands[/bold cyan]
+  [cyan]/status[/cyan]             Show current session status
+  [cyan]/history[/cyan]            Show conversation history summary
+  [cyan]/version[/cyan]            Show version information
+
+[bold cyan]Mode Commands[/bold cyan]
+  [cyan]/mode[/cyan]               Show current mode
+  [cyan]/mode simple[/cyan]        Switch to simple mode
+  [cyan]/mode expert[/cyan]        Switch to expert mode
+  [cyan]/intent[/cyan]             Show/toggle auto intent detection
+  [cyan]/intent on|off[/cyan]      Enable/disable smart intent detection
+
+[bold cyan]Configuration Commands[/bold cyan]
+  [cyan]/config[/cyan]             Show current configuration
+  [cyan]/config setup[/cyan]       Run configuration wizard
+  [cyan]/config backend <name>[/cyan]  Set backend (claude-code, builtin)
+
+[bold cyan]Project Commands[/bold cyan]
+  [cyan]/project[/cyan]            Show current project path
+  [cyan]/project <path>[/cyan]     Switch to a different project
+
+[bold cyan]Task Execution[/bold cyan]
+  [cyan]/run <description>[/cyan]  Execute task with full workflow
+  [cyan]/expert <description>[/cyan]  Execute in expert mode
+
+[bold cyan]Regular Usage[/bold cyan]
+  Just type your message to chat with the AI.
+  The AI will analyze and respond to your request.
+"""
+        console.print(help_text)
+
+    def _show_command_hints():
+        """Display command hints with descriptions when '/' is typed."""
+        hints = """[bold]Available Commands:[/bold]
+
+[cyan]/exit[/cyan]                  Exit the REPL
+[cyan]/clear[/cyan]                 Clear conversation context, start fresh
+[cyan]/help[/cyan]                  Show full help with all details
+
+[cyan]/status[/cyan]                Show session status (backend, mode, history count)
+[cyan]/history[/cyan]               Show conversation history summary
+[cyan]/version[/cyan]               Show Plan Cascade version
+
+[cyan]/mode[/cyan]                  Show current mode (simple/expert)
+[cyan]/mode simple[/cyan]           Switch to simple mode (fast heuristic analysis)
+[cyan]/mode expert[/cyan]           Switch to expert mode (LLM strategy analysis)
+
+[cyan]/intent[/cyan]                Show auto intent detection status
+[cyan]/intent on[/cyan]             Enable auto intent detection (smart mode)
+[cyan]/intent off[/cyan]            Disable auto intent (treat all as tasks)
+
+[cyan]/config[/cyan]                Show current configuration
+[cyan]/config setup[/cyan]          Run interactive configuration wizard
+[cyan]/config backend[/cyan] <name> Change backend [dim](claude-code, builtin)[/dim]
+
+[cyan]/project[/cyan]               Show current project path
+[cyan]/project[/cyan] <path>        Switch to a different project directory
+
+[cyan]/run[/cyan] <description>     Execute task with full workflow
+[cyan]/expert[/cyan] <description>  Execute task in expert mode (with LLM analysis)
+
+[dim]Conversation history is automatically used as context for each request.[/dim]
+"""
+        console.print(hints)
 
 else:
     # Fallback when typer is not installed

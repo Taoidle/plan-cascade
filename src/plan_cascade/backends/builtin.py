@@ -5,7 +5,7 @@ Implementation of AgentBackend that uses LLM APIs directly with a ReAct loop.
 Enables Plan Cascade to run independently without Claude Code.
 
 Key features:
-- Direct LLM API calls (Claude, OpenAI, Ollama)
+- Direct LLM API calls (Claude, OpenAI, Ollama, DeepSeek)
 - ReAct (Reasoning + Acting) loop for autonomous task execution
 - Tool registry integration for file/shell operations
 - Configurable iteration limits and timeouts
@@ -15,6 +15,7 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..core.react_engine import ReActConfig, ReActEngine
 from ..tools.registry import ToolRegistry
 from .base import AgentBackend, ExecutionResult
 
@@ -81,7 +82,7 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
         Initialize the Builtin backend.
 
         Args:
-            provider: LLM provider name ("claude", "openai", "ollama")
+            provider: LLM provider name ("claude", "openai", "ollama", "deepseek")
             model: Model identifier (uses provider default if not specified)
             api_key: API key for the provider
             base_url: Custom API base URL
@@ -100,6 +101,7 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
 
         self._llm: LLMProvider | None = None
         self._tools = ToolRegistry()
+        self._react_engine: ReActEngine | None = None
         self._running = False
         self._should_stop = False
 
@@ -117,6 +119,24 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
             )
 
         return self._llm
+
+    def _get_react_engine(self) -> ReActEngine:
+        """Get or create the ReAct engine."""
+        if self._react_engine is None:
+            config = ReActConfig(
+                max_iterations=self.max_iterations,
+                temperature=0.7,
+                max_tokens=self.config.get("max_tokens", 8192),
+            )
+
+            self._react_engine = ReActEngine(
+                llm=self._get_llm(),
+                tools=self._tools,
+                config=config,
+                system_prompt=self.SYSTEM_PROMPT,
+            )
+
+        return self._react_engine
 
     async def execute(
         self,
@@ -137,157 +157,40 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
         self._running = True
         self._should_stop = False
 
-        # Build initial prompt
-        prompt = self._build_prompt(story, context)
+        # Build task description from story
+        task = self._build_prompt(story, context)
 
-        # Initialize messages
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-            {"role": "user", "content": prompt}
-        ]
+        # Get or create ReAct engine
+        engine = self._get_react_engine()
 
-        # Get tool definitions
-        tool_definitions = self._tools.get_definitions()
-
-        # Track execution
-        all_tool_calls: list[dict[str, Any]] = []
-        output_text = ""
-        iteration = 0
+        # Wire up callbacks
+        engine.on_text = self.on_text
+        engine.on_tool_call = self.on_tool_call
+        engine.on_thinking = self.on_thinking
 
         try:
-            llm = self._get_llm()
+            # Execute using ReAct engine
+            result = await engine.execute(task=task, context="")
 
-            for iteration in range(self.max_iterations):
-                if self._should_stop:
-                    return ExecutionResult(
-                        success=False,
-                        output=output_text,
-                        iterations=iteration,
-                        error="Execution stopped by user",
-                        story_id=story_id,
-                        agent=f"builtin-{self.provider_name}",
-                        tool_calls=all_tool_calls,
-                    )
-
-                # Get LLM response
-                response = await llm.complete(
-                    messages=messages,
-                    tools=tool_definitions,
-                    temperature=0.7,
-                    max_tokens=self.config.get("max_tokens", 8192),
-                )
-
-                # Handle text output
-                if response.content:
-                    output_text += response.content + "\n"
-                    await self._emit_text(response.content)
-
-                    # Check for completion markers
-                    if "TASK_COMPLETE" in response.content:
-                        return ExecutionResult(
-                            success=True,
-                            output=output_text,
-                            iterations=iteration + 1,
-                            story_id=story_id,
-                            agent=f"builtin-{self.provider_name}",
-                            tool_calls=all_tool_calls,
-                        )
-
-                    if "TASK_FAILED:" in response.content:
-                        error_msg = response.content.split("TASK_FAILED:")[-1].strip()
-                        return ExecutionResult(
-                            success=False,
-                            output=output_text,
-                            iterations=iteration + 1,
-                            error=error_msg,
-                            story_id=story_id,
-                            agent=f"builtin-{self.provider_name}",
-                            tool_calls=all_tool_calls,
-                        )
-
-                # Check if we should stop (no tool calls and end_turn)
-                if response.stop_reason == "end_turn" and not response.tool_calls:
-                    return ExecutionResult(
-                        success=True,
-                        output=output_text,
-                        iterations=iteration + 1,
-                        story_id=story_id,
-                        agent=f"builtin-{self.provider_name}",
-                        tool_calls=all_tool_calls,
-                    )
-
-                # Execute tool calls
-                if response.tool_calls:
-                    # Add assistant message with tool calls
-                    messages.append({
-                        "role": "assistant",
-                        "content": response.content,
-                        "tool_calls": [tc.to_dict() for tc in response.tool_calls],
-                    })
-
-                    # Execute each tool call
-                    tool_results = []
-                    for tc in response.tool_calls:
-                        # Record tool call
-                        tool_data = {
-                            "name": tc.name,
-                            "arguments": tc.arguments,
-                            "id": tc.id,
-                            "iteration": iteration,
-                        }
-                        all_tool_calls.append(tool_data)
-                        await self._emit_tool_call(tool_data)
-
-                        # Execute tool
-                        result = await self._tools.execute(tc.name, **tc.arguments)
-
-                        # Record result
-                        result_data = {
-                            "tool_call_id": tc.id,
-                            "name": tc.name,
-                            "success": result.success,
-                            "output": result.to_string()[:2000],  # Truncate for context window
-                        }
-                        await self._emit_tool_call({
-                            "type": "tool_result",
-                            **result_data
-                        })
-
-                        tool_results.append(result_data)
-
-                    # Add tool results to messages
-                    for tr in tool_results:
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tr["tool_call_id"],
-                            "content": tr["output"],
-                        })
-
-                else:
-                    # No tool calls but stop_reason was not end_turn
-                    # This shouldn't normally happen, but handle it
-                    break
-
-            # Max iterations reached
             return ExecutionResult(
-                success=False,
-                output=output_text,
-                iterations=self.max_iterations,
-                error="Maximum iterations reached without completion",
+                success=result.success,
+                output=result.output,
+                iterations=result.iterations,
+                error=result.error,
                 story_id=story_id,
                 agent=f"builtin-{self.provider_name}",
-                tool_calls=all_tool_calls,
+                tool_calls=result.tool_calls,
+                metadata=result.metadata,
             )
 
         except Exception as e:
             return ExecutionResult(
                 success=False,
-                output=output_text,
-                iterations=iteration,
+                output="",
+                iterations=0,
                 error=str(e),
                 story_id=story_id,
                 agent=f"builtin-{self.provider_name}",
-                tool_calls=all_tool_calls,
             )
         finally:
             self._running = False
@@ -295,6 +198,8 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
     async def stop(self) -> None:
         """Stop the current execution."""
         self._should_stop = True
+        if self._react_engine:
+            self._react_engine.stop()
         # Wait a bit for the loop to notice
         await asyncio.sleep(0.1)
 
@@ -325,6 +230,8 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
             tools: ToolRegistry instance
         """
         self._tools = tools
+        # Reset ReAct engine so it picks up new tools
+        self._react_engine = None
 
     def register_tool(self, tool: Any) -> None:
         """
@@ -334,6 +241,8 @@ If you encounter an unrecoverable error, output "TASK_FAILED: <reason>".
             tool: Tool to register
         """
         self._tools.register(tool)
+        # Reset ReAct engine so it picks up new tools
+        self._react_engine = None
 
 
 class AsyncBuiltinBackend(BuiltinBackend):

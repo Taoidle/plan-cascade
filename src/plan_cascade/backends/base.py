@@ -92,6 +92,7 @@ class ExecutionResult:
 # Type alias for callbacks
 OnToolCallCallback = Callable[[dict[str, Any]], None]
 OnTextCallback = Callable[[str], None]
+OnThinkingCallback = Callable[[str], None]
 
 
 class AgentBackend(ABC):
@@ -125,6 +126,7 @@ class AgentBackend(ABC):
         # Callbacks for UI integration
         self.on_tool_call: OnToolCallCallback | None = None
         self.on_text: OnTextCallback | None = None
+        self.on_thinking: OnThinkingCallback | None = None
 
     @abstractmethod
     async def execute(
@@ -269,5 +271,18 @@ Instructions:
         if self.on_text:
             try:
                 self.on_text(text)
+            except Exception:
+                pass  # Don't let callback errors break execution
+
+    async def _emit_thinking(self, text: str) -> None:
+        """
+        Emit a thinking event to the callback.
+
+        Args:
+            text: Thinking content
+        """
+        if self.on_thinking:
+            try:
+                self.on_thinking(text)
             except Exception:
                 pass  # Don't let callback errors break execution

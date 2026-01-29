@@ -1,9 +1,81 @@
 # Plan Cascade Standalone - 技术设计文档
 
-**版本**: 2.0.0
-**日期**: 2026-01-28
+**版本**: 4.0.0
+**日期**: 2026-01-29
 **作者**: Plan Cascade Team
-**状态**: Draft
+**状态**: Implementation In Progress
+
+---
+
+## 实现状态总览
+
+> **当前进度**: ~98% 核心功能已实现
+> **最后更新**: 2026-01-29
+
+### 模块实现状态
+
+| 模块 | 状态 | 文件 | 说明 |
+|------|------|------|------|
+| **核心编排层** | | | |
+| 意图分类器 | ✅ 已完成 | `core/intent_classifier.py` | 区分 TASK/QUERY/CHAT |
+| 策略分析器 | ✅ 已完成 | `core/strategy_analyzer.py` | AI 自动判断执行策略 |
+| PRD 生成器 | ✅ 已完成 | `core/prd_generator.py` | 从需求生成 PRD |
+| Mega 生成器 | ✅ 已完成 | `core/mega_generator.py` | 大型项目多 PRD 级联 |
+| 编排器 | ✅ 已完成 | `core/orchestrator.py` | 批次依赖分析和调度 |
+| 简单模式工作流 | ✅ 已完成 | `core/simple_workflow.py` | 一键式执行 |
+| 专家模式工作流 | ✅ 已完成 | `core/expert_workflow.py` | 精细控制 |
+| 质量门控 | ✅ 已完成 | `core/quality_gate.py` | typecheck/test/lint |
+| 重试管理 | ✅ 已完成 | `core/retry_manager.py` | 智能重试 |
+| 迭代循环 | ✅ 已完成 | `core/iteration_loop.py` | 迭代执行 |
+| **ReAct 执行引擎** | | | |
+| ReAct 引擎 | ✅ 已完成 | `core/react_engine.py` | 独立 Think→Act→Observe 引擎 |
+| **后端抽象层** | | | |
+| 后端基类 | ✅ 已完成 | `backends/base.py` | AgentBackend 抽象 |
+| 后端工厂 | ✅ 已完成 | `backends/factory.py` | 动态创建后端 |
+| 内置后端 | ✅ 已完成 | `backends/builtin.py` | ReAct + 工具执行 |
+| Claude Code 后端 | ✅ 已完成 | `backends/claude_code.py` | CLI 集成 |
+| Agent 执行器 | ✅ 已完成 | `backends/agent_executor.py` | 多 Agent 协同 |
+| 阶段配置 | ✅ 已完成 | `backends/phase_config.py` | 阶段/类型 Agent 映射 |
+| Claude Code GUI 后端 | ⚠️ 待实现 | `backends/claude_code_gui.py` | P2 优先级 |
+| **LLM 抽象层** | | | |
+| LLM 基类 | ✅ 已完成 | `llm/base.py` | LLMProvider 抽象 |
+| LLM 工厂 | ✅ 已完成 | `llm/factory.py` | 支持 5 种 Provider |
+| Claude Provider | ✅ 已完成 | `llm/providers/claude.py` | Anthropic API |
+| Claude Max Provider | ✅ 已完成 | `llm/providers/claude_max.py` | 通过 Claude Code 获取 LLM |
+| OpenAI Provider | ✅ 已完成 | `llm/providers/openai.py` | OpenAI API |
+| DeepSeek Provider | ✅ 已完成 | `llm/providers/deepseek.py` | DeepSeek API |
+| Ollama Provider | ✅ 已完成 | `llm/providers/ollama.py` | 本地模型 |
+| **工具执行层** | | | |
+| 工具注册表 | ✅ 已完成 | `tools/registry.py` | 工具管理 |
+| 文件工具 | ✅ 已完成 | `tools/file_tools.py` | Read/Write/Edit |
+| 搜索工具 | ✅ 已完成 | `tools/search_tools.py` | Glob/Grep |
+| Shell 工具 | ✅ 已完成 | `tools/shell_tools.py` | Bash 执行 |
+| **设置与状态** | | | |
+| 设置模型 | ✅ 已完成 | `settings/models.py` | 配置数据结构 |
+| 设置存储 | ✅ 已完成 | `settings/storage.py` | YAML + Keyring |
+| 状态管理 | ✅ 已完成 | `state/state_manager.py` | 状态追踪 |
+| 上下文过滤 | ✅ 已完成 | `state/context_filter.py` | 上下文管理 |
+| **CLI** | | | |
+| CLI 主入口 | ✅ 已完成 | `cli/main.py` | run/config/status/chat |
+| 交互式 REPL | ✅ 已完成 | `cli/main.py` | chat 命令 |
+| 输出格式化 | ✅ 已完成 | `cli/output.py` | Rich 输出 |
+| **桌面应用** | | | |
+| Tauri Desktop | ⏳ 规划中 | `desktop/` | Phase 2 目标 |
+
+### 功能实现状态
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| 简单模式 | ✅ 已完成 | 一键执行，AI 自动判断策略 |
+| 专家模式 | ✅ 已完成 | PRD 编辑，策略选择，Agent 指定 |
+| 交互式 REPL | ✅ 已完成 | `plan-cascade chat` 命令 |
+| 流式输出 | ✅ 已完成 | `--include-partial-messages` |
+| 多 LLM 后端 | ✅ 已完成 | Claude Max/API, OpenAI, DeepSeek, Ollama |
+| 多 Agent 协同 | ✅ 已完成 | 基于阶段/类型的 Agent 选择 |
+| 质量门控 | ✅ 已完成 | typecheck/test/lint/custom |
+| Git Worktree | ✅ 已完成 | 隔离开发支持 |
+| Claude Code GUI 模式 | ⚠️ 待完善 | 基础功能可用，GUI 专用后端待实现 |
+| 桌面应用 | ⏳ 规划中 | Tauri 实现，Phase 2 目标 |
 
 ---
 
@@ -11,18 +83,20 @@
 
 ### 1.1 核心目标
 
-1. **易用性优先**: 简单模式一键完成，专家模式精细控制
-2. **双后端支持**: Claude Code GUI 模式 + 独立 LLM 模式
-3. **保留核心理念**: 层层分解、并行执行、多 Agent 协作、质量保障、状态追踪
-4. **三形态统一**: 同一套代码支持 CLI、桌面应用、Claude Code Plugin
+1. **完整编排能力**: Plan Cascade 自己执行工具（Read/Write/Edit/Bash/Glob/Grep）
+2. **多 LLM 支持**: Claude Max（无 API Key）、Claude API、OpenAI、DeepSeek、Ollama
+3. **双工作模式**: 独立编排模式（推荐）+ Claude Code GUI 模式
+4. **三形态统一**: CLI、Desktop（CLI 的 GUI 版）、Claude Code Plugin
+5. **保留核心理念**: 层层分解、并行执行、质量保障、状态追踪
 
 ### 1.2 设计约束
 
 | 约束 | 说明 |
 |------|------|
-| 默认零配置 | 选择 Claude Code 后端时无需 API Key |
+| 零 API Key 选项 | Claude Max 用户可通过 Claude Code 获取 LLM 能力 |
+| 完整工具执行 | 独立编排模式下自己执行所有工具，不依赖外部 Agent |
 | 渐进式披露 | 简单模式隐藏复杂概念，专家模式完全开放 |
-| 保持兼容 | Claude Code Plugin 功能完整保留 |
+| Claude Code 兼容 | GUI 模式完整兼容 Claude Code 所有功能 |
 | 跨平台 | 支持 Windows、macOS、Linux |
 
 ---
@@ -299,101 +373,693 @@ class SimpleWorkflow:
 
 ---
 
-## 4. 后端抽象层
+## 4. 核心架构
 
-### 4.1 双后端架构
+### 4.1 双工作模式架构
+
+**核心理念：Plan Cascade = 大脑（编排），执行层 = 手（工具执行）**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           Plan Cascade                                   │
+│                    (编排层 - 两种模式共享)                                │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│                         Backend Abstraction                              │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │                     AgentBackend (ABC)                           │   │
-│   │   + execute(story, context) -> Result                           │   │
-│   │   + get_llm() -> LLMProvider                                    │   │
+│   │                    编排引擎 (共享)                                │   │
+│   │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │   │
+│   │  │ PRD 生成器  │  │ 依赖分析器  │  │  批次调度器 │              │   │
+│   │  └─────────────┘  └─────────────┘  └─────────────┘              │   │
+│   │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │   │
+│   │  │ 状态管理器  │  │ 质量门控    │  │  重试管理   │              │   │
+│   │  └─────────────┘  └─────────────┘  └─────────────┘              │   │
 │   └─────────────────────────────────────────────────────────────────┘   │
 │                              │                                           │
-│              ┌───────────────┼───────────────┐                          │
-│              ▼               ▼               ▼                          │
-│   ┌─────────────────┐ ┌─────────────┐ ┌─────────────────┐              │
-│   │ ClaudeCodeBackend│ │BuiltinBackend│ │ ExternalBackend │              │
-│   │                 │ │             │ │                 │              │
-│   │ Plan Cascade    │ │ 独立运行    │ │ aider/codex等  │              │
-│   │ = Claude Code   │ │ 调用 LLM API│ │                 │              │
-│   │   的 GUI        │ │             │ │                 │              │
-│   └─────────────────┘ └─────────────┘ └─────────────────┘              │
+│                    ┌─────────┴─────────┐                                │
+│                    │  执行层选择        │                                │
+│                    └─────────┬─────────┘                                │
+│              ┌───────────────┴───────────────┐                          │
+│              ▼                               ▼                          │
+│   ┌─────────────────────────┐    ┌─────────────────────────┐           │
+│   │    独立编排模式          │    │  Claude Code GUI 模式   │           │
+│   ├─────────────────────────┤    ├─────────────────────────┤           │
+│   │                         │    │                         │           │
+│   │   内置工具执行引擎       │    │   Claude Code CLI       │           │
+│   │   ┌───────────────┐     │    │   ┌───────────────┐     │           │
+│   │   │ Read/Write    │     │    │   │ Claude Code   │     │           │
+│   │   │ Edit/Bash     │     │    │   │ 执行工具      │     │           │
+│   │   │ Glob/Grep     │     │    │   │ (stream-json) │     │           │
+│   │   └───────────────┘     │    │   └───────────────┘     │           │
+│   │          │              │    │          │              │           │
+│   │          ▼              │    │          ▼              │           │
+│   │   ┌───────────────┐     │    │   ┌───────────────┐     │           │
+│   │   │ LLM 抽象层    │     │    │   │ Plan Cascade  │     │           │
+│   │   │ (多种选择)    │     │    │   │ 可视化界面    │     │           │
+│   │   └───────────────┘     │    │   └───────────────┘     │           │
+│   │          │              │    │                         │           │
+│   │   ┌──────┴──────┐       │    │                         │           │
+│   │   ▼      ▼      ▼       │    │                         │           │
+│   │ Claude Claude OpenAI    │    │                         │           │
+│   │ Max    API    etc.      │    │                         │           │
+│   │                         │    │                         │           │
+│   └─────────────────────────┘    └─────────────────────────┘           │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+两种模式都支持：PRD 驱动开发、批次执行、质量门控、状态追踪
+```
+
+### 4.2 独立编排模式架构详解
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       独立编排模式                                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─ 编排层 ─────────────────────────────────────────────────────────┐   │
+│  │                                                                    │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                │   │
+│  │  │ 意图分类器  │  │ 策略分析器  │  │  PRD 生成器 │                │   │
+│  │  │ Intent     │  │ Strategy   │  │ PRDGenerator│                │   │
+│  │  │ Classifier │  │ Analyzer   │  │             │                │   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘                │   │
+│  │         │               │               │                          │   │
+│  │         └───────────────┴───────────────┘                          │   │
+│  │                         │                                          │   │
+│  │                         ▼                                          │   │
+│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
+│  │  │                   Orchestrator                               │  │   │
+│  │  │  • 批次依赖分析                                              │  │   │
+│  │  │  • 并行执行协调                                              │  │   │
+│  │  │  • 质量门控检查                                              │  │   │
+│  │  │  • 重试管理                                                  │  │   │
+│  │  └─────────────────────────────────────────────────────────────┘  │   │
+│  │                         │                                          │   │
+│  └─────────────────────────┼──────────────────────────────────────────┘   │
+│                            ▼                                              │
+│  ┌─ 执行层 ─────────────────────────────────────────────────────────┐   │
+│  │                                                                    │   │
+│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
+│  │  │                   ReAct 执行引擎                             │  │   │
+│  │  │                                                              │  │   │
+│  │  │   ┌─────────┐     ┌─────────┐     ┌─────────┐               │  │   │
+│  │  │   │  Think  │ ──→ │   Act   │ ──→ │ Observe │ ──→ (循环)    │  │   │
+│  │  │   │  (LLM)  │     │ (工具)  │     │ (结果)  │               │  │   │
+│  │  │   └─────────┘     └─────────┘     └─────────┘               │  │   │
+│  │  │                                                              │  │   │
+│  │  └─────────────────────────────────────────────────────────────┘  │   │
+│  │                         │                                          │   │
+│  │                         ▼                                          │   │
+│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
+│  │  │                   工具执行引擎                               │  │   │
+│  │  │                                                              │  │   │
+│  │  │   ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐   │  │   │
+│  │  │   │  Read  │ │ Write  │ │  Edit  │ │  Bash  │ │  Glob  │   │  │   │
+│  │  │   └────────┘ └────────┘ └────────┘ └────────┘ └────────┘   │  │   │
+│  │  │   ┌────────┐ ┌────────┐                                     │  │   │
+│  │  │   │  Grep  │ │   LS   │                                     │  │   │
+│  │  │   └────────┘ └────────┘                                     │  │   │
+│  │  │                                                              │  │   │
+│  │  └─────────────────────────────────────────────────────────────┘  │   │
+│  │                                                                    │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
+│                            │                                              │
+│                            ▼                                              │
+│  ┌─ LLM 层 ─────────────────────────────────────────────────────────┐   │
+│  │                                                                    │   │
+│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
+│  │  │                   LLM 抽象层                                 │  │   │
+│  │  │              (只提供思考，不执行工具)                        │  │   │
+│  │  └─────────────────────────────────────────────────────────────┘  │   │
+│  │                         │                                          │   │
+│  │       ┌─────────────────┼─────────────────┐                       │   │
+│  │       ▼                 ▼                 ▼                       │   │
+│  │  ┌─────────┐       ┌─────────┐       ┌─────────┐                 │   │
+│  │  │ Claude  │       │ Claude  │       │ OpenAI  │                 │   │
+│  │  │   Max   │       │   API   │       │ DeepSeek│                 │   │
+│  │  │(via CC) │       │         │       │ Ollama  │                 │   │
+│  │  └─────────┘       └─────────┘       └─────────┘                 │   │
+│  │                                                                    │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 后端实现
+### 4.3 工具执行引擎
+
+独立编排模式下，Plan Cascade 自己执行所有工具：
 
 ```python
-# src/plan_cascade/backends/base.py
+# src/plan_cascade/tools/registry.py
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any
+from pathlib import Path
 
 @dataclass
-class ExecutionResult:
-    """执行结果"""
+class ToolResult:
+    """工具执行结果"""
     success: bool
     output: str
-    iterations: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
-class AgentBackend(ABC):
-    """Agent 后端抽象基类"""
+class Tool(ABC):
+    """工具基类"""
 
+    @property
     @abstractmethod
-    async def execute(self, story: dict, context: str) -> ExecutionResult:
-        """执行单个 Story"""
+    def name(self) -> str:
+        """工具名称"""
+        pass
+
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        """工具描述"""
+        pass
+
+    @property
+    @abstractmethod
+    def parameters(self) -> dict:
+        """参数定义（JSON Schema）"""
         pass
 
     @abstractmethod
-    def get_llm(self):
-        """获取 LLM Provider（用于 PRD 生成等）"""
+    async def execute(self, **kwargs) -> ToolResult:
+        """执行工具"""
         pass
 
-    @abstractmethod
-    def get_name(self) -> str:
-        """后端名称"""
-        pass
+class ToolRegistry:
+    """工具注册表"""
+
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+        self.tools: dict[str, Tool] = {}
+        self._register_builtin_tools()
+
+    def _register_builtin_tools(self):
+        """注册内置工具"""
+        from .file_tools import ReadTool, WriteTool, EditTool, GlobTool, GrepTool
+        from .shell_tools import BashTool
+
+        for tool_class in [ReadTool, WriteTool, EditTool, GlobTool, GrepTool, BashTool]:
+            tool = tool_class(self.project_root)
+            self.tools[tool.name] = tool
+
+    def get_definitions(self) -> list[dict]:
+        """获取所有工具定义（用于 LLM）"""
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            }
+            for tool in self.tools.values()
+        ]
+
+    async def execute(self, name: str, **kwargs) -> ToolResult:
+        """执行工具"""
+        if name not in self.tools:
+            return ToolResult(success=False, output="", error=f"Unknown tool: {name}")
+
+        try:
+            return await self.tools[name].execute(**kwargs)
+        except Exception as e:
+            return ToolResult(success=False, output="", error=str(e))
 ```
 
-### 4.3 Claude Code 后端（GUI 模式）
+### 4.4 内置工具实现
 
 ```python
-# src/plan_cascade/backends/claude_code.py
+# src/plan_cascade/tools/file_tools.py
+
+from pathlib import Path
+from .registry import Tool, ToolResult
+
+class ReadTool(Tool):
+    """读取文件内容"""
+
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+
+    @property
+    def name(self) -> str:
+        return "read"
+
+    @property
+    def description(self) -> str:
+        return "Read file contents. Returns the content with line numbers."
+
+    @property
+    def parameters(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to the file"},
+                "offset": {"type": "integer", "description": "Start line (optional)"},
+                "limit": {"type": "integer", "description": "Number of lines (optional)"},
+            },
+            "required": ["file_path"],
+        }
+
+    async def execute(self, file_path: str, offset: int = 0, limit: int = 2000) -> ToolResult:
+        try:
+            path = self._resolve_path(file_path)
+            content = path.read_text(encoding="utf-8")
+            lines = content.splitlines()
+
+            # Apply offset and limit
+            selected = lines[offset:offset + limit]
+
+            # Add line numbers
+            numbered = [f"{i + offset + 1:6d}→{line}" for i, line in enumerate(selected)]
+
+            return ToolResult(success=True, output="\n".join(numbered))
+        except Exception as e:
+            return ToolResult(success=False, output="", error=str(e))
+
+    def _resolve_path(self, file_path: str) -> Path:
+        """Resolve path relative to project root"""
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path
+
+
+class WriteTool(Tool):
+    """写入文件内容"""
+
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+
+    @property
+    def name(self) -> str:
+        return "write"
+
+    @property
+    def description(self) -> str:
+        return "Write content to a file. Creates directories if needed."
+
+    @property
+    def parameters(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to the file"},
+                "content": {"type": "string", "description": "Content to write"},
+            },
+            "required": ["file_path", "content"],
+        }
+
+    async def execute(self, file_path: str, content: str) -> ToolResult:
+        try:
+            path = self._resolve_path(file_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            return ToolResult(success=True, output=f"Wrote {len(content)} bytes to {path}")
+        except Exception as e:
+            return ToolResult(success=False, output="", error=str(e))
+
+    def _resolve_path(self, file_path: str) -> Path:
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path
+
+
+class EditTool(Tool):
+    """编辑文件（查找替换）"""
+
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+
+    @property
+    def name(self) -> str:
+        return "edit"
+
+    @property
+    def description(self) -> str:
+        return "Edit a file by replacing old_string with new_string."
+
+    @property
+    def parameters(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to the file"},
+                "old_string": {"type": "string", "description": "String to replace"},
+                "new_string": {"type": "string", "description": "Replacement string"},
+                "replace_all": {"type": "boolean", "description": "Replace all occurrences"},
+            },
+            "required": ["file_path", "old_string", "new_string"],
+        }
+
+    async def execute(
+        self,
+        file_path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool = False
+    ) -> ToolResult:
+        try:
+            path = self._resolve_path(file_path)
+            content = path.read_text(encoding="utf-8")
+
+            if old_string not in content:
+                return ToolResult(success=False, output="", error="old_string not found")
+
+            if replace_all:
+                new_content = content.replace(old_string, new_string)
+                count = content.count(old_string)
+            else:
+                # Ensure uniqueness
+                if content.count(old_string) > 1:
+                    return ToolResult(
+                        success=False,
+                        output="",
+                        error="old_string is not unique. Use replace_all or provide more context."
+                    )
+                new_content = content.replace(old_string, new_string, 1)
+                count = 1
+
+            path.write_text(new_content, encoding="utf-8")
+            return ToolResult(success=True, output=f"Replaced {count} occurrence(s)")
+        except Exception as e:
+            return ToolResult(success=False, output="", error=str(e))
+
+    def _resolve_path(self, file_path: str) -> Path:
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path
+```
+
+### 4.5 ReAct 执行引擎
+
+```python
+# src/plan_cascade/core/react_engine.py
+
+from dataclasses import dataclass
+from typing import Any
+from ..tools.registry import ToolRegistry, ToolResult
+from ..llm.base import LLMProvider
+
+@dataclass
+class ReActResult:
+    """ReAct 执行结果"""
+    success: bool
+    output: str
+    iterations: int
+    tool_calls: list[dict]
+    error: str | None = None
+
+class ReActEngine:
+    """
+    ReAct 执行引擎
+
+    实现 Think → Act → Observe 循环：
+    1. Think: LLM 思考下一步行动
+    2. Act: 执行工具
+    3. Observe: 观察结果，回到 Think
+    """
+
+    SYSTEM_PROMPT = """你是一个专业的软件开发 Agent。
+
+你有以下工具可用：
+{tools}
+
+工作原则：
+1. 先阅读相关代码，理解现有结构
+2. 遵循项目的代码风格和约定
+3. 完成后验证代码可以正常运行
+4. 当任务完成时，回复 "TASK_COMPLETE" 并总结完成的工作
+
+重要：你只能通过调用工具来执行操作，不能直接输出代码让用户执行。
+"""
+
+    def __init__(
+        self,
+        llm: LLMProvider,
+        tools: ToolRegistry,
+        max_iterations: int = 50,
+        on_tool_call: callable = None,
+        on_text: callable = None,
+    ):
+        self.llm = llm
+        self.tools = tools
+        self.max_iterations = max_iterations
+        self.on_tool_call = on_tool_call
+        self.on_text = on_text
+
+    async def execute(self, task: str, context: str = "") -> ReActResult:
+        """执行任务"""
+        # 构建系统提示
+        tools_desc = self._format_tools_description()
+        system_prompt = self.SYSTEM_PROMPT.format(tools=tools_desc)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"{context}\n\n任务：{task}"},
+        ]
+
+        tool_calls_history = []
+
+        for iteration in range(self.max_iterations):
+            # Think: LLM 决定下一步
+            response = await self.llm.complete(
+                messages=messages,
+                tools=self.tools.get_definitions(),
+            )
+
+            # 发送文本到回调
+            if self.on_text and response.content:
+                self.on_text(response.content)
+
+            # 检查是否完成
+            if "TASK_COMPLETE" in (response.content or ""):
+                return ReActResult(
+                    success=True,
+                    output=response.content,
+                    iterations=iteration + 1,
+                    tool_calls=tool_calls_history,
+                )
+
+            # 没有工具调用则继续等待
+            if not response.tool_calls:
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({
+                    "role": "user",
+                    "content": "请继续工作。如果任务已完成，请回复 TASK_COMPLETE 并总结。"
+                })
+                continue
+
+            # Act: 执行工具
+            tool_results = []
+            for tool_call in response.tool_calls:
+                result = await self.tools.execute(
+                    tool_call.name,
+                    **tool_call.arguments
+                )
+
+                tool_calls_history.append({
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                    "result": result.output if result.success else result.error,
+                    "success": result.success,
+                })
+
+                # 回调
+                if self.on_tool_call:
+                    self.on_tool_call(tool_calls_history[-1])
+
+                tool_results.append({
+                    "tool_call_id": tool_call.id,
+                    "result": result.output if result.success else f"Error: {result.error}",
+                })
+
+            # Observe: 添加结果到消息历史
+            messages.append({
+                "role": "assistant",
+                "content": response.content,
+                "tool_calls": response.tool_calls,
+            })
+            messages.append({
+                "role": "user",
+                "content": self._format_tool_results(tool_results),
+            })
+
+        return ReActResult(
+            success=False,
+            output="",
+            iterations=self.max_iterations,
+            tool_calls=tool_calls_history,
+            error="Max iterations reached",
+        )
+
+    def _format_tools_description(self) -> str:
+        """格式化工具描述"""
+        lines = []
+        for tool_def in self.tools.get_definitions():
+            lines.append(f"- {tool_def['name']}: {tool_def['description']}")
+        return "\n".join(lines)
+
+    def _format_tool_results(self, results: list) -> str:
+        """格式化工具结果"""
+        parts = []
+        for r in results:
+            parts.append(f"工具执行结果：\n{r['result']}")
+        return "\n\n".join(parts)
+```
+
+### 4.6 Claude Max LLM 后端
+
+```python
+# src/plan_cascade/llm/claude_max.py
+
+import asyncio
+import json
+from .base import LLMProvider, LLMResponse
+
+class ClaudeMaxLLM(LLMProvider):
+    """
+    Claude Max LLM 后端
+
+    通过本地 Claude Code 获取 LLM 能力：
+    - 发送 prompt 给 Claude Code
+    - 禁用 Claude Code 的工具执行（只要思考）
+    - 解析响应返回
+    """
+
+    def __init__(self, claude_path: str = "claude"):
+        self.claude_path = claude_path
+
+    async def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        on_text: callable = None,
+    ) -> LLMResponse:
+        """调用 Claude Code 获取 LLM 响应"""
+
+        # 构建 prompt
+        prompt = self._build_prompt(messages, tools)
+
+        # 调用 Claude Code（禁用工具执行）
+        process = await asyncio.create_subprocess_exec(
+            self.claude_path,
+            "--print",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--no-tools",  # 关键：禁用工具执行
+            prompt,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        content_parts = []
+        tool_calls = []
+
+        async for line in process.stdout:
+            try:
+                data = json.loads(line.decode())
+                event_type = data.get("type", "")
+
+                if event_type == "stream_event":
+                    inner_event = data.get("event", {})
+                    if inner_event.get("type") == "content_block_delta":
+                        delta = inner_event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text", "")
+                            if text:
+                                content_parts.append(text)
+                                if on_text:
+                                    on_text(text)
+
+                elif event_type == "assistant":
+                    # 解析工具调用请求（如果 LLM 返回）
+                    message = data.get("message", {})
+                    for block in message.get("content", []):
+                        if block.get("type") == "tool_use":
+                            tool_calls.append(ToolCall(
+                                id=block.get("id"),
+                                name=block.get("name"),
+                                arguments=block.get("input", {}),
+                            ))
+
+            except json.JSONDecodeError:
+                continue
+
+        await process.wait()
+
+        return LLMResponse(
+            content="".join(content_parts),
+            tool_calls=tool_calls if tool_calls else None,
+            stop_reason="end_turn" if not tool_calls else "tool_use",
+        )
+
+    def _build_prompt(self, messages: list[dict], tools: list[dict] | None) -> str:
+        """构建发送给 Claude Code 的 prompt"""
+        parts = []
+
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            parts.append(f"[{role}]\n{content}")
+
+        # 如果有工具定义，添加到 prompt 中让 LLM 知道可以调用
+        if tools:
+            tools_desc = "\n".join(
+                f"- {t['name']}: {t['description']}"
+                for t in tools
+            )
+            parts.append(f"\n可用工具：\n{tools_desc}")
+            parts.append("\n如需使用工具，请以 JSON 格式回复：{\"tool\": \"name\", \"args\": {...}}")
+
+        return "\n\n".join(parts)
+```
+
+### 4.7 Claude Code GUI 模式后端
+
+Claude Code GUI 模式下，Plan Cascade 仍然控制完整的编排流程，只是 Story 执行由 Claude Code 完成。
+
+```python
+# src/plan_cascade/backends/claude_code_gui.py
 
 import asyncio
 import json
 from .base import AgentBackend, ExecutionResult
 
-class ClaudeCodeBackend(AgentBackend):
+class ClaudeCodeGUIBackend(AgentBackend):
     """
-    Claude Code 后端
+    Claude Code GUI 模式后端
 
-    Plan Cascade 作为 Claude Code 的 GUI：
-    - 通过子进程与 Claude Code 通信
-    - 解析 Claude Code 的输出用于可视化
-    - 不需要用户配置 API Key
+    核心理念：Plan Cascade = 大脑，Claude Code = 手
+
+    Plan Cascade 控制：
+    - PRD 生成和 Story 分解
+    - 依赖分析和批次调度
+    - 状态追踪和质量门控
+    - 重试管理
+
+    Claude Code 负责：
+    - 执行单个 Story 的工具调用
+    - Read/Write/Edit/Bash 等操作
     """
 
     def __init__(self, claude_path: str = "claude"):
         self.claude_path = claude_path
         self.process = None
-        self._llm = None  # 延迟初始化
+        self._session_id = None
 
     async def start_session(self, project_path: str):
         """启动 Claude Code 会话"""
         self.process = await asyncio.create_subprocess_exec(
             self.claude_path,
             "--output-format", "stream-json",
-            "--print", "tools",  # 输出工具调用信息
+            "--verbose",
+            "--include-partial-messages",
             cwd=project_path,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -401,221 +1067,213 @@ class ClaudeCodeBackend(AgentBackend):
         )
 
     async def execute(self, story: dict, context: str) -> ExecutionResult:
-        """执行 Story"""
+        """
+        执行 Story（由 Claude Code 完成工具调用）
+
+        这个方法由 Orchestrator 调用，Orchestrator 负责：
+        - 根据依赖关系决定执行顺序
+        - 过滤上下文（只提供相关的 findings）
+        - 记录状态和进度
+        """
         prompt = self._build_prompt(story, context)
 
         # 发送给 Claude Code
         self.process.stdin.write(f"{prompt}\n".encode())
         await self.process.stdin.drain()
 
-        # 收集输出
         output_lines = []
         tool_calls = []
 
         async for line in self.process.stdout:
-            data = json.loads(line.decode())
+            try:
+                data = json.loads(line.decode())
+                event_type = data.get("type", "")
 
-            if data.get("type") == "tool_use":
-                tool_calls.append(data)
-                # 触发回调用于 UI 更新
-                if self.on_tool_call:
-                    await self.on_tool_call(data)
+                if event_type == "stream_event":
+                    inner_event = data.get("event", {})
+                    if inner_event.get("type") == "content_block_delta":
+                        delta = inner_event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text", "")
+                            if text:
+                                output_lines.append(text)
+                                if self.on_text:
+                                    self.on_text(text)
 
-            elif data.get("type") == "text":
-                output_lines.append(data.get("content", ""))
+                elif event_type == "tool_use":
+                    tool_calls.append(data)
+                    if self.on_tool_call:
+                        await self.on_tool_call(data)
 
-            elif data.get("type") == "end":
-                break
+                elif event_type == "result":
+                    self._session_id = data.get("session_id")
+                    break
+
+            except json.JSONDecodeError:
+                continue
 
         return ExecutionResult(
             success=True,
-            output="\n".join(output_lines),
-            iterations=len(tool_calls)
+            output="".join(output_lines),
+            iterations=len(tool_calls),
+            tool_calls=tool_calls,
         )
 
-    def get_llm(self):
-        """获取 LLM（用于 PRD 生成）"""
-        # Claude Code 模式下，PRD 生成也通过 Claude Code
-        if self._llm is None:
-            from .claude_code_llm import ClaudeCodeLLM
-            self._llm = ClaudeCodeLLM(self)
-        return self._llm
-
     def get_name(self) -> str:
-        return "claude-code"
+        return "claude-code-gui"
 
-    def _build_prompt(self, story: dict, context: str) -> str:
-        """构建 prompt"""
-        return f"""
-请完成以下开发任务：
-
-## Story: {story.get('title', story.get('id'))}
-{story.get('description', '')}
-
-## 验收标准
-{self._format_acceptance_criteria(story)}
-
-## 上下文
-{context}
-
-完成后请告诉我结果。
-"""
-
-    def _format_acceptance_criteria(self, story: dict) -> str:
-        ac = story.get("acceptance_criteria", [])
-        if isinstance(ac, list):
-            return "\n".join(f"- {item}" for item in ac)
-        return str(ac)
-
-    # 回调函数，用于 UI 更新
+    # 回调（用于 UI 更新）
     on_tool_call = None
     on_text = None
 ```
 
-### 4.4 内置后端（独立 LLM 模式）
+**与独立编排模式的对比**：
+
+| 组件 | 独立编排模式 | Claude Code GUI 模式 |
+|------|--------------|----------------------|
+| PRD 生成 | Plan Cascade (LLM) | Plan Cascade (Claude Code) |
+| 依赖分析 | Plan Cascade | Plan Cascade |
+| 批次调度 | Plan Cascade | Plan Cascade |
+| Story 执行 | Plan Cascade (ReAct) | Claude Code CLI |
+| 工具调用 | 内置工具引擎 | Claude Code |
+| 状态追踪 | Plan Cascade | Plan Cascade |
+| 质量门控 | Plan Cascade | Plan Cascade |
+
+### 4.8 多 Agent 协同执行
+
+Plan Cascade 支持多种 Agent 协同工作，可根据执行阶段、Story 类型智能选择最适合的 Agent。
 
 ```python
-# src/plan_cascade/backends/builtin.py
+# src/plan_cascade/backends/agent_executor.py
 
-from .base import AgentBackend, ExecutionResult
-from ..llm.base import LLMProvider
-from ..llm.factory import LLMFactory
-from ..tools.registry import ToolRegistry
-
-class BuiltinBackend(AgentBackend):
+class AgentExecutor:
     """
-    内置后端
+    Agent 执行抽象层，支持多种 Agent 类型：
+    - task-tool: 内置 ReAct 引擎或 Claude Code Task tool
+    - cli: 外部 CLI 工具 (codex, aider, amp-code, etc.)
 
-    使用用户配置的 LLM API 独立运行
-    - 需要用户配置 API Key
-    - 自己实现工具调用循环
+    特性：
+    - 自动回退：如果 CLI Agent 不可用，回退到 claude-code
+    - 基于阶段的 Agent 选择
+    - Story 类型智能匹配
+    - 进程管理和状态追踪
     """
 
-    SYSTEM_PROMPT = """你是一个专业的软件开发 Agent。
-
-你有以下工具可用：
-- read_file: 读取文件内容
-- write_file: 创建或覆盖文件
-- edit_file: 编辑文件的特定部分
-- run_command: 执行 Shell 命令
-- search_files: 搜索文件
-- grep: 在文件中搜索内容
-
-工作原则：
-1. 先阅读相关代码，理解现有结构
-2. 遵循项目的代码风格和约定
-3. 完成后验证代码可以正常运行
-"""
-
-    def __init__(
+    def _resolve_agent(
         self,
-        provider: str = "claude",
-        model: str = None,
-        api_key: str = None,
-        config: dict = None
-    ):
-        config = config or {}
-        self.llm = LLMFactory.create(
-            provider=provider or config.get("provider", "claude"),
-            model=model or config.get("model"),
-            api_key=api_key or config.get("api_key")
-        )
-        self.tools = ToolRegistry()
-        self.max_iterations = config.get("max_iterations", 50)
+        agent_name: str | None = None,
+        phase: ExecutionPhase | None = None,
+        story: dict | None = None,
+        override: AgentOverrides | None = None
+    ) -> tuple[str, dict]:
+        """
+        解析 Agent，带自动回退。
 
-    async def execute(self, story: dict, context: str) -> ExecutionResult:
-        """执行 Story（ReAct 循环）"""
-        messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-            {"role": "user", "content": self._build_prompt(story, context)}
-        ]
+        优先级：
+        1. agent_name 参数 (显式覆盖)
+        2. 基于阶段的解析 (PhaseAgentManager)
+        3. story.agent 元数据
+        4. Story 类型覆盖
+        5. 阶段默认 Agent
+        6. 回退链
+        7. claude-code (终极回退)
+        """
+        pass
 
-        tool_calls_count = 0
+    def execute_story(
+        self,
+        story: dict,
+        context: dict,
+        phase: ExecutionPhase,
+        task_callback: Callable | None = None
+    ) -> dict:
+        """执行 Story，自动选择合适的 Agent。"""
+        resolved_name, agent_config = self._resolve_agent(phase=phase, story=story)
 
-        for iteration in range(self.max_iterations):
-            response = await self.llm.complete(
-                messages=messages,
-                tools=self.tools.get_definitions()
-            )
+        if agent_config.get("type") == "task-tool":
+            return self._execute_via_task_tool(story, context, task_callback)
+        elif agent_config.get("type") == "cli":
+            return self._execute_via_cli(story, context, agent_config)
+```
 
-            # 检查是否完成
-            if response.stop_reason == "end_turn" or not response.tool_calls:
-                return ExecutionResult(
-                    success=True,
-                    output=response.content,
-                    iterations=iteration + 1
-                )
+```python
+# src/plan_cascade/backends/phase_config.py
 
-            # 执行工具调用
-            tool_results = []
-            for tool_call in response.tool_calls:
-                tool_calls_count += 1
-                result = await self.tools.execute(
-                    tool_call.name,
-                    **tool_call.arguments
-                )
-                tool_results.append({
-                    "tool_call_id": tool_call.id,
-                    "result": result
-                })
+class ExecutionPhase(Enum):
+    """执行阶段"""
+    PLANNING = "planning"
+    IMPLEMENTATION = "implementation"
+    RETRY = "retry"
+    REFACTOR = "refactor"
+    REVIEW = "review"
 
-                # 触发回调
-                if self.on_tool_call:
-                    await self.on_tool_call({
-                        "name": tool_call.name,
-                        "arguments": tool_call.arguments,
-                        "result": result
-                    })
+class StoryType(Enum):
+    """Story 类型"""
+    FEATURE = "feature"
+    BUGFIX = "bugfix"
+    REFACTOR = "refactor"
+    TEST = "test"
+    DOCUMENTATION = "documentation"
+    INFRASTRUCTURE = "infrastructure"
 
-            # 添加到消息历史
-            messages.append({
-                "role": "assistant",
-                "content": response.content,
-                "tool_calls": response.tool_calls
-            })
-            messages.append({
-                "role": "user",
-                "content": self._format_tool_results(tool_results)
-            })
+class PhaseAgentManager:
+    """
+    基于阶段的 Agent 选择管理器。
 
-        return ExecutionResult(
-            success=False,
-            output="",
-            iterations=self.max_iterations,
-            error="Max iterations reached"
-        )
+    默认配置：
+    - Planning: codex → claude-code
+    - Implementation: claude-code → codex → aider
+      - bugfix 类型覆盖: codex
+      - refactor 类型覆盖: aider
+    - Retry: claude-code → aider
+    - Refactor: aider → claude-code
+    - Review: claude-code → codex
+    """
 
-    def get_llm(self):
-        return self.llm
+    def get_agent_for_story(
+        self,
+        story: dict,
+        phase: ExecutionPhase,
+        override: AgentOverrides | None = None
+    ) -> str:
+        """获取适合指定 Story 和阶段的 Agent。"""
+        pass
 
-    def get_name(self) -> str:
-        return "builtin"
+    def infer_story_type(self, story: dict) -> StoryType:
+        """从 title、description、tags 推断 Story 类型。"""
+        pass
+```
 
-    def _build_prompt(self, story: dict, context: str) -> str:
-        """构建 prompt"""
-        ac = story.get("acceptance_criteria", [])
-        ac_text = "\n".join(f"- {item}" for item in ac) if isinstance(ac, list) else str(ac)
+**两种模式下的多 Agent 支持**：
 
-        return f"""
-请完成以下开发任务：
-
-## Story: {story.get('title', story.get('id'))}
-{story.get('description', '')}
-
-## 验收标准
-{ac_text}
-
-## 项目上下文
-{context}
-
-请开始工作。
-"""
-
-    def _format_tool_results(self, results: list) -> str:
-        return "\n\n".join(f"Tool result:\n{r['result']}" for r in results)
-
-    # 回调
-    on_tool_call = None
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       多 Agent 协同架构                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   Plan Cascade 编排层                                                    │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │  Orchestrator → AgentExecutor → PhaseAgentManager               │   │
+│   │       │              │               │                           │   │
+│   │       │              │               └─ 阶段/类型 → Agent 映射   │   │
+│   │       │              └─ 解析最佳 Agent                           │   │
+│   │       └─ 调度 Story 执行                                        │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│                              │                                           │
+│              ┌───────────────┴───────────────┐                          │
+│              ▼                               ▼                          │
+│   ┌─────────────────────────┐    ┌─────────────────────────┐           │
+│   │    独立编排模式          │    │  Claude Code GUI 模式   │           │
+│   │                         │    │                         │           │
+│   │   默认 Agent:            │    │   默认 Agent:            │           │
+│   │   内置 ReAct 引擎        │    │   Claude Code CLI       │           │
+│   │                         │    │                         │           │
+│   │   可选 CLI Agents:       │    │   可选 CLI Agents:       │           │
+│   │   codex, aider, amp...  │    │   codex, aider, amp...  │           │
+│   │                         │    │                         │           │
+│   └─────────────────────────┘    └─────────────────────────┘           │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 4.5 后端工厂
@@ -1207,33 +1865,38 @@ plan-cascade/
 │   │   ├── mode.py                # 模式定义
 │   │   ├── strategy.py            # 策略定义
 │   │   ├── strategy_analyzer.py   # AI 策略分析
+│   │   ├── intent_classifier.py   # 意图分类器
 │   │   ├── simple_workflow.py     # 简单模式工作流
 │   │   ├── expert_workflow.py     # 专家模式工作流
 │   │   ├── orchestrator.py        # 批次编排器
 │   │   ├── prd_generator.py       # PRD 生成
 │   │   ├── mega_generator.py      # Mega Plan 生成
+│   │   ├── react_engine.py        # ReAct 执行引擎
 │   │   ├── quality_gate.py        # 质量门控
 │   │   └── retry_manager.py       # 重试管理
 │   │
 │   ├── backends/                  # 后端抽象
 │   │   ├── base.py                # 后端基类
 │   │   ├── factory.py             # 后端工厂
-│   │   ├── claude_code.py         # Claude Code 后端
-│   │   ├── builtin.py             # 内置后端
-│   │   └── external.py            # 外部 CLI 后端
+│   │   ├── builtin.py             # 独立编排后端（执行工具）
+│   │   └── claude_code_gui.py     # Claude Code GUI 后端
 │   │
 │   ├── llm/                       # LLM 抽象层
 │   │   ├── base.py                # Provider 基类
 │   │   ├── factory.py             # Provider 工厂
 │   │   └── providers/
-│   │       ├── claude.py
-│   │       ├── openai.py
-│   │       └── ollama.py
+│   │       ├── claude_max.py      # Claude Max (通过 Claude Code)
+│   │       ├── claude_api.py      # Claude API (直接调用)
+│   │       ├── openai.py          # OpenAI API
+│   │       ├── deepseek.py        # DeepSeek API
+│   │       └── ollama.py          # Ollama (本地)
 │   │
-│   ├── tools/                     # 工具层
-│   │   ├── registry.py            # 工具注册
-│   │   ├── file_tools.py          # 文件操作
-│   │   └── shell_tools.py         # Shell 执行
+│   ├── tools/                     # 工具执行层
+│   │   ├── registry.py            # 工具注册表
+│   │   ├── base.py                # 工具基类
+│   │   ├── file_tools.py          # Read/Write/Edit
+│   │   ├── search_tools.py        # Glob/Grep
+│   │   └── shell_tools.py         # Bash 执行
 │   │
 │   ├── settings/                  # 设置管理
 │   │   ├── models.py              # 设置模型
@@ -1244,31 +1907,51 @@ plan-cascade/
 │   │   └── context_filter.py
 │   │
 │   └── cli/                       # CLI 入口
-│       └── main.py
+│       ├── main.py                # CLI 主入口
+│       ├── repl.py                # 交互式 REPL
+│       └── output.py              # 输出格式化
 │
-├── server/                        # FastAPI 服务
+├── server/                        # FastAPI 服务 (Desktop 后端)
 │   └── plan_cascade_server/
 │       ├── main.py
 │       ├── routes/
 │       └── websocket.py
 │
-├── desktop/                       # Tauri 桌面应用
+├── desktop/                       # Desktop (CLI 的 GUI 版)
 │   ├── src/
 │   │   ├── components/
+│   │   │   ├── ModeSwitch.tsx     # 简单/专家模式切换
+│   │   │   ├── SimpleMode/        # 简单模式 UI
+│   │   │   ├── ExpertMode/        # 专家模式 UI
+│   │   │   ├── ClaudeCodeGUI/     # Claude Code GUI 模式
+│   │   │   └── Settings/          # 设置页面
 │   │   ├── store/
 │   │   └── App.tsx
 │   └── src-tauri/
 │
-├── plugin/                        # Claude Code Plugin
+├── plugin/                        # Claude Code Plugin (保持兼容)
 │   ├── .claude-plugin/
 │   ├── commands/
 │   └── skills/
 │
 ├── tests/
 ├── docs/
+│   ├── PRD-Plan-Cascade-Standalone.md
+│   └── Design-Plan-Cascade-Standalone.md
 ├── pyproject.toml
 └── README.md
 ```
+
+### 8.1 关键模块说明
+
+| 模块 | 说明 |
+|------|------|
+| `core/react_engine.py` | ReAct 执行引擎，实现 Think→Act→Observe 循环 |
+| `core/intent_classifier.py` | 意图分类器，区分 TASK/QUERY/CHAT |
+| `tools/` | 工具执行层，Plan Cascade 自己执行的工具 |
+| `llm/providers/claude_max.py` | 通过 Claude Code 获取 LLM 能力（无需 API Key） |
+| `backends/builtin.py` | 独立编排后端，使用 ReAct + 工具执行 |
+| `backends/claude_code_gui.py` | Claude Code GUI 后端，提供可视化 |
 
 ---
 
@@ -1401,8 +2084,35 @@ theme: system        # light | dark | system
 
 | 术语 | 定义 |
 |------|------|
+| 独立编排模式 | Plan Cascade 自己执行工具，LLM 只提供思考 |
+| Claude Code GUI 模式 | Plan Cascade 作为 Claude Code 的图形界面 |
 | 简单模式 | 一键完成，AI 自动处理一切 |
 | 专家模式 | 可编辑 PRD、选择策略、指定 Agent |
-| Claude Code 后端 | Plan Cascade 作为 Claude Code 的 GUI |
-| Builtin 后端 | 使用 LLM API 独立运行 |
+| Claude Max LLM | 通过 Claude Code 获取 LLM 能力（无需 API Key） |
+| ReAct 引擎 | Think→Act→Observe 循环执行引擎 |
+| 工具执行层 | Plan Cascade 自己实现的工具（Read/Write/Edit/Bash/Glob/Grep） |
 | Strategy | 执行策略 (Direct/Hybrid/Mega) |
+| 意图分类 | 区分用户意图：TASK/QUERY/CHAT |
+| REPL | 交互式命令行，支持连续对话 |
+
+### 10.3 两种工作模式对比
+
+| 特性 | 独立编排模式 | Claude Code GUI 模式 |
+|------|--------------|----------------------|
+| 编排层 | Plan Cascade | Plan Cascade |
+| 工具执行 | Plan Cascade 自己执行 | Claude Code CLI 执行 |
+| LLM 来源 | Claude Max/API, OpenAI, DeepSeek, Ollama | Claude Code |
+| PRD 驱动 | ✅ 完整支持 | ✅ 完整支持 |
+| 批次执行 | ✅ 完整支持 | ✅ 完整支持 |
+| 离线可用 | ✅ (使用 Ollama) | ❌ |
+| 适用场景 | 需要其他 LLM 或离线使用 | 有 Claude Max/Code 订阅 |
+
+**核心理念：Plan Cascade = 大脑（编排），执行层 = 手（工具执行）**
+
+两种模式都由 Plan Cascade 控制完整的编排流程：
+- PRD 生成和 Story 分解
+- 依赖分析和批次调度
+- 状态追踪和质量门控
+- 重试管理
+
+区别只在于 Story 执行时的工具调用由谁完成。
