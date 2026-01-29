@@ -17,3 +17,15 @@ export type {
 
 export { useSettingsStore } from './settings';
 export type { Backend, Theme } from './settings';
+
+export { usePRDStore } from './prd';
+export type {
+  AgentType,
+  StoryStatus,
+  ExecutionStrategy,
+  PRDStory,
+  QualityGate,
+  WorktreeConfig,
+  PRDDraft,
+  PRD,
+} from './prd';
