@@ -67,3 +67,15 @@ htmlcov/
 # Deprecated tool configs (not supported)
 .cursor/skills/
 .agent/
+
+# Desktop app (Tauri + React)
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+
+# Rust
+Cargo.lock
+
+# Server
+server/plan_cascade_server/__pycache__/
