@@ -2,12 +2,12 @@
  * InputBox Component
  *
  * Text input with submit button for task descriptions.
- * Supports multiline input and keyboard shortcuts.
+ * Supports multiline input, keyboard shortcuts, and loading state.
  */
 
 import { clsx } from 'clsx';
 import { KeyboardEvent, useRef } from 'react';
-import { PaperPlaneIcon } from '@radix-ui/react-icons';
+import { PaperPlaneIcon, UpdateIcon } from '@radix-ui/react-icons';
 
 interface InputBoxProps {
   value: string;
@@ -15,6 +15,7 @@ interface InputBoxProps {
   onSubmit: () => void;
   disabled?: boolean;
   placeholder?: string;
+  isLoading?: boolean;
 }
 
 export function InputBox({
@@ -23,6 +24,7 @@ export function InputBox({
   onSubmit,
   disabled = false,
   placeholder = 'Describe your task...',
+  isLoading = false,
 }: InputBoxProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -30,7 +32,9 @@ export function InputBox({
     // Submit on Cmd/Ctrl + Enter
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      onSubmit();
+      if (!disabled && !isLoading && value.trim()) {
+        onSubmit();
+      }
     }
   };
 
@@ -42,6 +46,8 @@ export function InputBox({
       textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
     }
   };
+
+  const canSubmit = !disabled && !isLoading && value.trim();
 
   return (
     <div
@@ -77,7 +83,7 @@ export function InputBox({
 
       <button
         onClick={onSubmit}
-        disabled={disabled || !value.trim()}
+        disabled={!canSubmit}
         className={clsx(
           'flex items-center justify-center',
           'w-10 h-10 rounded-lg',
@@ -89,7 +95,11 @@ export function InputBox({
         )}
         title="Submit (Cmd+Enter)"
       >
-        <PaperPlaneIcon className="w-5 h-5" />
+        {isLoading ? (
+          <UpdateIcon className="w-5 h-5 animate-spin" />
+        ) : (
+          <PaperPlaneIcon className="w-5 h-5" />
+        )}
       </button>
     </div>
   );

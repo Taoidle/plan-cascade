@@ -12,7 +12,9 @@ export type {
   ExecutionStatus,
   Strategy,
   Story,
+  Batch,
   ExecutionResult,
+  ExecutionHistoryItem,
 } from './execution';
 
 export { useSettingsStore } from './settings';
