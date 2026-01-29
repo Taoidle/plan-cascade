@@ -101,8 +101,14 @@ if HAS_TYPER:
         backend_instance = _create_backend(backend, provider, model, project)
 
         # Set up streaming output callback for real-time AI response display
+        streaming_started = [False]  # Use list to allow mutation in closure
+
         def on_text(text: str):
             """Stream AI text output to console in real-time."""
+            if not streaming_started[0]:
+                # Add newline before first streaming output
+                console.print()
+                streaming_started[0] = True
             console.print(text, end="", highlight=False)
 
         def on_tool_call(data: dict):
@@ -122,6 +128,10 @@ if HAS_TYPER:
 
         # Progress callback
         def on_progress(event: ProgressEvent):
+            # Add newline after streaming output ends (before story_completed)
+            if event.type in ("story_completed", "story_failed") and streaming_started[0]:
+                console.print()  # End streaming output with newline
+                streaming_started[0] = False  # Reset for next story
             output.handle_progress_event(event)
 
         # Create and run workflow

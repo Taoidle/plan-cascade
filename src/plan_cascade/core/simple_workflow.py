@@ -113,8 +113,20 @@ class SimpleWorkflow:
         self.backend = backend
         self.project_path = Path(project_path) if project_path else Path.cwd()
         self.on_progress = on_progress
+
+        # For Claude Code backend, use fast heuristic analysis instead of LLM
+        # This avoids starting a separate Claude Code process just for strategy analysis
+        use_llm_for_strategy = False
+        if hasattr(backend, 'get_name') and backend.get_name() != "claude-code":
+            # Only use LLM for non-Claude-Code backends (builtin, etc.)
+            try:
+                llm = backend.get_llm() if hasattr(backend, 'get_llm') else None
+                use_llm_for_strategy = llm is not None
+            except Exception:
+                use_llm_for_strategy = False
+
         self.strategy_analyzer = StrategyAnalyzer(
-            llm=backend.get_llm() if hasattr(backend, 'get_llm') else None,
+            llm=backend.get_llm() if use_llm_for_strategy else None,
             fallback_to_heuristic=True
         )
 

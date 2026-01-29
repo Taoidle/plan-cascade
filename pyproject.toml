@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plan-cascade"
-version = "3.3.12"
+version = "3.3.13"
 description = "Plan Cascade - Three-layer parallel development framework for AI coding tools"
 readme = "README.md"
 license = {text = "MIT"}

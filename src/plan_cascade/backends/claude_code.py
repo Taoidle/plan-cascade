@@ -215,6 +215,12 @@ class ClaudeCodeBackend(AgentBackend):
         """
         Handle a stream event from Claude Code.
 
+        Claude CLI stream-json format:
+        - type="system": initialization info
+        - type="assistant": AI response with message.content[]
+        - type="user": user input echoed back
+        - type="result": final result summary
+
         Args:
             data: Event data
             output_lines: List to append text output
@@ -222,8 +228,38 @@ class ClaudeCodeBackend(AgentBackend):
         """
         event_type = data.get("type", "")
 
-        if event_type == "tool_use":
-            # Tool use event
+        if event_type == "assistant":
+            # AI response - extract text from message.content
+            message = data.get("message", {})
+            content_blocks = message.get("content", [])
+            for block in content_blocks:
+                block_type = block.get("type", "")
+                if block_type == "text":
+                    text = block.get("text", "")
+                    if text:
+                        output_lines.append(text)
+                        await self._emit_text(text)
+                elif block_type == "tool_use":
+                    # Tool use within message
+                    tool_data = {
+                        "name": block.get("name", ""),
+                        "arguments": block.get("input", {}),
+                        "id": block.get("id", ""),
+                    }
+                    tool_calls.append(tool_data)
+                    await self._emit_tool_call(tool_data)
+                elif block_type == "tool_result":
+                    # Tool result within message
+                    tool_data = {
+                        "type": "tool_result",
+                        "tool_use_id": block.get("tool_use_id", ""),
+                        "content": block.get("content", ""),
+                        "is_error": block.get("is_error", False),
+                    }
+                    await self._emit_tool_call(tool_data)
+
+        elif event_type == "tool_use":
+            # Standalone tool use event
             tool_data = {
                 "name": data.get("name", ""),
                 "arguments": data.get("input", {}),
@@ -233,7 +269,7 @@ class ClaudeCodeBackend(AgentBackend):
             await self._emit_tool_call(tool_data)
 
         elif event_type == "tool_result":
-            # Tool result
+            # Standalone tool result
             tool_data = {
                 "type": "tool_result",
                 "tool_use_id": data.get("tool_use_id", ""),
@@ -243,7 +279,7 @@ class ClaudeCodeBackend(AgentBackend):
             await self._emit_tool_call(tool_data)
 
         elif event_type == "text":
-            # Text output
+            # Direct text output
             content = data.get("content", "")
             if content:
                 output_lines.append(content)
@@ -257,8 +293,15 @@ class ClaudeCodeBackend(AgentBackend):
                 if text:
                     await self._emit_text(text)
 
-        elif event_type == "message_stop" or event_type == "end":
-            # Message complete
+        elif event_type == "result":
+            # Final result - extract final text if available
+            result_text = data.get("result", "")
+            if result_text and not output_lines:
+                output_lines.append(result_text)
+                await self._emit_text(result_text)
+
+        elif event_type in ("system", "message_stop", "end", "user"):
+            # System messages, message complete, or user echo - ignore
             pass
 
     async def stop(self) -> None:
@@ -370,12 +413,25 @@ class ClaudeCodeLLM:
                 async for line in process.stdout:
                     try:
                         data = json.loads(line.decode().strip())
-                        if data.get("type") == "text":
+                        event_type = data.get("type", "")
+
+                        if event_type == "assistant":
+                            # AI response - extract text from message.content
+                            message = data.get("message", {})
+                            content_blocks = message.get("content", [])
+                            for block in content_blocks:
+                                if block.get("type") == "text":
+                                    output_text += block.get("text", "")
+                        elif event_type == "text":
                             output_text += data.get("content", "")
-                        elif data.get("type") == "content_block_delta":
+                        elif event_type == "content_block_delta":
                             delta = data.get("delta", {})
                             if delta.get("type") == "text_delta":
                                 output_text += delta.get("text", "")
+                        elif event_type == "result":
+                            # Fallback: use result text if no output captured
+                            if not output_text:
+                                output_text = data.get("result", "")
                     except json.JSONDecodeError:
                         pass
 
