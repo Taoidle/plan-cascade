@@ -18,7 +18,9 @@ keywords = [
     "ai",
     "mcp",
     "claude",
-    "cursor"
+    "cursor",
+    "orchestration",
+    "multi-agent"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -39,9 +41,19 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+cli = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+]
+all = [
+    "plan-cascade[dev,cli]",
 ]
 
 [project.scripts]
+plan-cascade = "plan_cascade.cli.main:main"
 plan-cascade-mcp = "mcp_server.server:main"
 
 [project.urls]
@@ -50,7 +62,11 @@ Documentation = "https://github.com/anthropics/plan-cascade/blob/main/docs/MCP-S
 Repository = "https://github.com/anthropics/plan-cascade"
 
 [tool.setuptools.packages.find]
-include = ["mcp_server*", "skills*"]
+where = ["src"]
+include = ["plan_cascade*"]
+
+[tool.setuptools.package-dir]
+"" = "src"
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.md"]
@@ -58,3 +74,15 @@ include = ["mcp_server*", "skills*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+select = ["E", "F", "W", "I", "N", "D", "UP", "B", "C4"]
+ignore = ["D100", "D104", "D107"]
