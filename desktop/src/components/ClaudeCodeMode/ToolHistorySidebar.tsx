@@ -7,6 +7,7 @@
 
 import { useMemo } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   FileTextIcon,
   Pencil1Icon,
@@ -32,6 +33,7 @@ interface ToolHistorySidebarProps {
 }
 
 export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarProps) {
+  const { t } = useTranslation('claudeCode');
   const { toolCallHistory, toolFilter, setToolFilter } = useClaudeCodeStore();
 
   // Calculate statistics
@@ -73,7 +75,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
         <div className="flex items-center gap-2">
           <MixerHorizontalIcon className="w-4 h-4 text-gray-500" />
           <h3 className="font-semibold text-gray-900 dark:text-white">
-            Tool History
+            {t('sidebar.title')}
           </h3>
         </div>
         {onClose && (
@@ -91,22 +93,22 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
         <div className="grid grid-cols-4 gap-2 text-center">
           <StatItem
             value={stats.counts.all}
-            label="Total"
+            label={t('sidebar.stats.total')}
             color="text-gray-600 dark:text-gray-400"
           />
           <StatItem
             value={stats.statusCounts.completed}
-            label="Done"
+            label={t('sidebar.stats.done')}
             color="text-green-600 dark:text-green-400"
           />
           <StatItem
             value={stats.statusCounts.failed}
-            label="Failed"
+            label={t('sidebar.stats.failed')}
             color="text-red-600 dark:text-red-400"
           />
           <StatItem
             value={stats.statusCounts.executing}
-            label="Running"
+            label={t('sidebar.stats.running')}
             color="text-blue-600 dark:text-blue-400"
           />
         </div>
@@ -137,7 +139,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
         {filteredToolCalls.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 p-4">
             <MagnifyingGlassIcon className="w-8 h-8 mb-2 opacity-50" />
-            <p className="text-sm">No tool calls yet</p>
+            <p className="text-sm">{t('sidebar.empty')}</p>
           </div>
         ) : (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -187,6 +189,7 @@ interface FilterPillProps {
 }
 
 function FilterPill({ type, count, isActive, onClick }: FilterPillProps) {
+  const { t } = useTranslation('claudeCode');
   const config = getToolConfig(type);
 
   return (
@@ -200,7 +203,7 @@ function FilterPill({ type, count, isActive, onClick }: FilterPillProps) {
       )}
     >
       {type !== 'all' && <config.Icon className="w-3 h-3" />}
-      <span>{type === 'all' ? 'All' : type}</span>
+      <span>{type === 'all' ? t('sidebar.filter.all') : type}</span>
       <span className="text-gray-400 dark:text-gray-500">({count})</span>
     </button>
   );

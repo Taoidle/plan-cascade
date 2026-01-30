@@ -7,6 +7,7 @@
 
 import { clsx } from 'clsx';
 import { KeyboardEvent, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { PaperPlaneIcon, UpdateIcon } from '@radix-ui/react-icons';
 
 interface InputBoxProps {
@@ -23,10 +24,12 @@ export function InputBox({
   onChange,
   onSubmit,
   disabled = false,
-  placeholder = 'Describe your task...',
+  placeholder,
   isLoading = false,
 }: InputBoxProps) {
+  const { t } = useTranslation('simpleMode');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const defaultPlaceholder = placeholder || t('input.placeholder');
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Submit on Cmd/Ctrl + Enter
@@ -69,7 +72,7 @@ export function InputBox({
         }}
         onKeyDown={handleKeyDown}
         disabled={disabled}
-        placeholder={placeholder}
+        placeholder={defaultPlaceholder}
         rows={1}
         className={clsx(
           'flex-1 resize-none bg-transparent',
@@ -93,7 +96,7 @@ export function InputBox({
           'disabled:opacity-50 disabled:cursor-not-allowed',
           'transition-colors'
         )}
-        title="Submit (Cmd+Enter)"
+        title={t('input.submitTitle')}
       >
         {isLoading ? (
           <UpdateIcon className="w-5 h-5 animate-spin" />

@@ -6,6 +6,7 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './i18n'; // Initialize i18n before App
 import App from './App';
 import './styles/globals.css';
 

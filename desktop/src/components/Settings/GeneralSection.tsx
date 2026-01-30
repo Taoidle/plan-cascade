@@ -5,9 +5,12 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
+import { LanguageSelector } from './LanguageSelector';
 
 export function GeneralSection() {
+  const { t } = useTranslation('settings');
   const {
     defaultMode,
     setDefaultMode,
@@ -19,17 +22,17 @@ export function GeneralSection() {
     <div className="space-y-8">
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          General Settings
+          {t('general.title')}
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Configure general application preferences.
+          {t('general.description')}
         </p>
       </div>
 
       {/* Working Mode Section */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Working Mode
+          {t('general.workingMode.title')}
         </h3>
         <div className="space-y-3">
           <label
@@ -51,11 +54,10 @@ export function GeneralSection() {
             />
             <div>
               <div className="font-medium text-gray-900 dark:text-white">
-                Claude Code GUI Mode
+                {t('general.workingMode.simple.name')}
               </div>
               <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Operates as a graphical interface for Claude Code. Uses Claude Code
-                as the execution backend with simplified task input.
+                {t('general.workingMode.simple.description')}
               </div>
             </div>
           </label>
@@ -79,21 +81,23 @@ export function GeneralSection() {
             />
             <div>
               <div className="font-medium text-gray-900 dark:text-white">
-                Standalone Orchestration Mode
+                {t('general.workingMode.expert.name')}
               </div>
               <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Full orchestration with PRD generation, multi-agent coordination,
-                and advanced execution strategies. Requires LLM API configuration.
+                {t('general.workingMode.expert.description')}
               </div>
             </div>
           </label>
         </div>
       </section>
 
+      {/* Language Section */}
+      <LanguageSelector />
+
       {/* Theme Section */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Theme
+          {t('general.theme.title')}
         </h3>
         <select
           value={theme}
@@ -106,24 +110,24 @@ export function GeneralSection() {
             'focus:outline-none focus:ring-2 focus:ring-primary-500'
           )}
         >
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
+          <option value="system">{t('general.theme.system')}</option>
+          <option value="light">{t('general.theme.light')}</option>
+          <option value="dark">{t('general.theme.dark')}</option>
         </select>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Choose your preferred color scheme. System follows your OS preference.
+          {t('general.theme.description')}
         </p>
       </section>
 
       {/* Execution Limits */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Execution Limits
+          {t('general.executionLimits.title')}
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-              Max Parallel Stories
+              {t('general.executionLimits.maxParallelStories')}
             </label>
             <input
               type="number"
@@ -147,7 +151,7 @@ export function GeneralSection() {
           </div>
           <div>
             <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-              Max Iterations
+              {t('general.executionLimits.maxIterations')}
             </label>
             <input
               type="number"
@@ -171,7 +175,7 @@ export function GeneralSection() {
           </div>
           <div>
             <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-              Timeout (seconds)
+              {t('general.executionLimits.timeout')}
             </label>
             <input
               type="number"

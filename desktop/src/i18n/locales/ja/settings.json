@@ -1,0 +1,161 @@
+{
+  "title": "設定",
+
+  "tabs": {
+    "general": "一般",
+    "llm": "LLMバックエンド",
+    "agents": "エージェント",
+    "quality": "品質ゲート",
+    "phases": "フェーズエージェント",
+    "importExport": "インポート/エクスポート"
+  },
+
+  "general": {
+    "title": "一般設定",
+    "description": "一般的なアプリケーション設定を構成します。",
+
+    "workingMode": {
+      "title": "動作モード",
+      "simple": {
+        "name": "Claude Code GUIモード",
+        "description": "Claude Code のグラフィカルインターフェースとして動作します。Claude Code を実行バックエンドとして使用し、タスク入力を簡素化します。"
+      },
+      "expert": {
+        "name": "スタンドアロン編成モード",
+        "description": "PRD生成、マルチエージェント調整、高度な実行戦略を備えた完全な編成。LLM API設定が必要です。"
+      }
+    },
+
+    "theme": {
+      "title": "テーマ",
+      "system": "システム",
+      "light": "ライト",
+      "dark": "ダーク",
+      "description": "お好みの配色を選択してください。システムはOSの設定に従います。"
+    },
+
+    "language": {
+      "title": "言語",
+      "description": "お好みの言語を選択してください。"
+    },
+
+    "executionLimits": {
+      "title": "実行制限",
+      "maxParallelStories": "最大並列ストーリー数",
+      "maxIterations": "最大イテレーション数",
+      "timeout": "タイムアウト（秒）"
+    }
+  },
+
+  "llm": {
+    "title": "LLMバックエンド設定",
+    "description": "コード生成用のAIプロバイダーを設定します。",
+
+    "backend": {
+      "label": "バックエンド",
+      "claudeCode": "Claude Code（推奨）",
+      "claudeApi": "Claude API",
+      "openai": "OpenAI",
+      "deepseek": "DeepSeek",
+      "ollama": "Ollama（ローカル）"
+    },
+
+    "provider": {
+      "label": "プロバイダー"
+    },
+
+    "model": {
+      "label": "モデル",
+      "placeholder": "モデル名を選択または入力"
+    },
+
+    "apiKey": {
+      "label": "APIキー",
+      "placeholder": "APIキーを入力",
+      "description": "APIキーは安全に保存され、共有されることはありません。"
+    }
+  },
+
+  "agents": {
+    "title": "エージェント設定",
+    "description": "コード生成用の実行エージェントを設定します。",
+
+    "name": "エージェント名",
+    "command": "コマンド",
+    "enabled": "有効",
+    "default": "デフォルト",
+    "addAgent": "エージェントを追加",
+    "removeAgent": "エージェントを削除",
+
+    "selection": {
+      "title": "エージェント選択モード",
+      "smart": "スマート選択",
+      "smartDescription": "各タスクに最適なエージェントを自動選択",
+      "preferDefault": "デフォルト優先",
+      "preferDefaultDescription": "オーバーライドしない限りデフォルトエージェントを使用",
+      "manual": "手動",
+      "manualDescription": "各ストーリーのエージェントを手動で選択"
+    }
+  },
+
+  "quality": {
+    "title": "品質ゲート設定",
+    "description": "各ストーリー完了後に実行する品質チェックを設定します。",
+
+    "typecheck": {
+      "label": "型チェック",
+      "description": "TypeScript型チェックを実行"
+    },
+    "test": {
+      "label": "テスト",
+      "description": "テストスイートを実行"
+    },
+    "lint": {
+      "label": "リント",
+      "description": "コードリンターを実行"
+    },
+    "custom": {
+      "label": "カスタムスクリプト",
+      "description": "カスタム検証スクリプトを実行"
+    },
+    "customScript": {
+      "label": "カスタムスクリプトコマンド",
+      "placeholder": "npm run validate"
+    },
+    "maxRetries": {
+      "label": "最大リトライ回数",
+      "description": "品質ゲート失敗時の最大リトライ回数"
+    }
+  },
+
+  "phases": {
+    "title": "フェーズエージェント設定",
+    "description": "異なる実行フェーズを担当するエージェントを設定します。",
+
+    "planning": "計画フェーズ",
+    "implementation": "実装フェーズ",
+    "review": "レビューフェーズ"
+  },
+
+  "importExport": {
+    "title": "インポート/エクスポート設定",
+    "description": "設定のバックアップまたは復元。",
+
+    "export": {
+      "title": "設定をエクスポート",
+      "button": "エクスポート",
+      "description": "現在の設定をJSONファイルとしてダウンロード。"
+    },
+    "import": {
+      "title": "設定をインポート",
+      "button": "インポート",
+      "description": "設定ファイルをアップロードして設定を復元。"
+    },
+    "reset": {
+      "title": "デフォルトにリセット",
+      "button": "リセット",
+      "description": "すべての設定をデフォルト値にリセット。",
+      "confirm": "すべての設定をデフォルトにリセットしますか？"
+    }
+  }
+}

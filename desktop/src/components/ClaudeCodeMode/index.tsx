@@ -7,6 +7,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   ViewVerticalIcon,
   TrashIcon,
@@ -28,6 +29,7 @@ import { ExportDialog } from './ExportDialog';
 // ============================================================================
 
 export function ClaudeCodeMode() {
+  const { t } = useTranslation('claudeCode');
   const {
     connectionStatus,
     initialize,
@@ -55,7 +57,7 @@ export function ClaudeCodeMode() {
       // Ctrl/Cmd + L to clear chat
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
         e.preventDefault();
-        if (messages.length > 0 && confirm('Clear the conversation?')) {
+        if (messages.length > 0 && confirm(t('chat.clearConfirm'))) {
           clearConversation();
         }
       }
@@ -99,7 +101,7 @@ export function ClaudeCodeMode() {
       >
         <div className="flex items-center gap-3">
           <h2 className="font-semibold text-gray-900 dark:text-white">
-            Claude Code
+            {t('title')}
           </h2>
           <ConnectionBadge status={connectionStatus} />
         </div>
@@ -114,7 +116,7 @@ export function ClaudeCodeMode() {
                 ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
                 : 'bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
             )}
-            title="Toggle tool history (Ctrl+B)"
+            title={t('actions.toggleSidebar')}
           >
             <ViewVerticalIcon className="w-4 h-4" />
           </button>
@@ -155,7 +157,7 @@ export function ClaudeCodeMode() {
                   )}
                 >
                   <DownloadIcon className="w-4 h-4" />
-                  Export Conversation
+                  {t('actions.exportConversation')}
                   <span className="ml-auto text-xs text-gray-400">Ctrl+E</span>
                 </DropdownMenu.Item>
 
@@ -163,7 +165,7 @@ export function ClaudeCodeMode() {
 
                 <DropdownMenu.Item
                   onClick={() => {
-                    if (messages.length > 0 && confirm('Clear the conversation?')) {
+                    if (messages.length > 0 && confirm(t('chat.clearConfirm'))) {
                       clearConversation();
                     }
                   }}
@@ -177,7 +179,7 @@ export function ClaudeCodeMode() {
                   )}
                 >
                   <TrashIcon className="w-4 h-4" />
-                  Clear Chat
+                  {t('actions.clearChat')}
                   <span className="ml-auto text-xs text-gray-400">Ctrl+L</span>
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
@@ -251,31 +253,33 @@ interface ConnectionBadgeProps {
 }
 
 function ConnectionBadge({ status }: ConnectionBadgeProps) {
+  const { t } = useTranslation();
+
   const config = {
     connected: {
       icon: CheckCircledIcon,
-      text: 'Connected',
+      text: t('connection.connected'),
       bgColor: 'bg-green-100 dark:bg-green-900/50',
       textColor: 'text-green-700 dark:text-green-400',
       dotColor: 'bg-green-500',
     },
     connecting: {
       icon: ReloadIcon,
-      text: 'Connecting',
+      text: t('connection.connecting'),
       bgColor: 'bg-blue-100 dark:bg-blue-900/50',
       textColor: 'text-blue-700 dark:text-blue-400',
       dotColor: 'bg-blue-500 animate-pulse',
     },
     reconnecting: {
       icon: ReloadIcon,
-      text: 'Reconnecting',
+      text: t('connection.reconnecting'),
       bgColor: 'bg-yellow-100 dark:bg-yellow-900/50',
       textColor: 'text-yellow-700 dark:text-yellow-400',
       dotColor: 'bg-yellow-500 animate-pulse',
     },
     disconnected: {
       icon: CrossCircledIcon,
-      text: 'Disconnected',
+      text: t('connection.disconnected'),
       bgColor: 'bg-red-100 dark:bg-red-900/50',
       textColor: 'text-red-700 dark:text-red-400',
       dotColor: 'bg-red-500',

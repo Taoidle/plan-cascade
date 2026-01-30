@@ -9,6 +9,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { Cross2Icon } from '@radix-ui/react-icons';
 import { clsx } from 'clsx';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
 
 // Section components (to be implemented)
@@ -26,18 +27,19 @@ interface SettingsDialogProps {
 
 type SettingsTab = 'general' | 'llm' | 'agents' | 'quality' | 'phases' | 'import-export';
 
-const tabs: { id: SettingsTab; label: string }[] = [
-  { id: 'general', label: 'General' },
-  { id: 'llm', label: 'LLM Backend' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'quality', label: 'Quality Gates' },
-  { id: 'phases', label: 'Phase Agents' },
-  { id: 'import-export', label: 'Import/Export' },
-];
-
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+  const { t } = useTranslation('settings');
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [isSaving, setIsSaving] = useState(false);
+
+  const tabs: { id: SettingsTab; label: string }[] = [
+    { id: 'general', label: t('tabs.general') },
+    { id: 'llm', label: t('tabs.llm') },
+    { id: 'agents', label: t('tabs.agents') },
+    { id: 'quality', label: t('tabs.quality') },
+    { id: 'phases', label: t('tabs.phases') },
+    { id: 'import-export', label: t('tabs.importExport') },
+  ];
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -68,7 +70,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
             <Dialog.Title className="text-xl font-semibold text-gray-900 dark:text-white">
-              Settings
+              {t('title')}
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
@@ -151,7 +153,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   'focus:outline-none focus:ring-2 focus:ring-primary-500'
                 )}
               >
-                Cancel
+                {t('buttons.cancel', { ns: 'common' })}
               </button>
             </Dialog.Close>
             <button
@@ -165,7 +167,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 'disabled:opacity-50 disabled:cursor-not-allowed'
               )}
             >
-              {isSaving ? 'Saving...' : 'Save'}
+              {isSaving ? t('buttons.saving', { ns: 'common' }) : t('buttons.save', { ns: 'common' })}
             </button>
           </div>
         </Dialog.Content>

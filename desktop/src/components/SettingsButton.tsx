@@ -9,6 +9,7 @@ import * as Tooltip from '@radix-ui/react-tooltip';
 import { GearIcon } from '@radix-ui/react-icons';
 import { clsx } from 'clsx';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SettingsDialog } from './Settings';
 
 interface SettingsButtonProps {
@@ -16,6 +17,7 @@ interface SettingsButtonProps {
 }
 
 export function SettingsButton({ className }: SettingsButtonProps) {
+  const { t } = useTranslation('settings');
   const [open, setOpen] = useState(false);
 
   return (
@@ -31,7 +33,7 @@ export function SettingsButton({ className }: SettingsButtonProps) {
                 'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 className
               )}
-              aria-label="Settings"
+              aria-label={t('title')}
             >
               <GearIcon className="w-5 h-5 text-gray-600 dark:text-gray-300" />
             </button>
@@ -47,7 +49,7 @@ export function SettingsButton({ className }: SettingsButtonProps) {
               )}
               sideOffset={5}
             >
-              Settings
+              {t('title')}
               <Tooltip.Arrow className="fill-gray-900 dark:fill-gray-100" />
             </Tooltip.Content>
           </Tooltip.Portal>

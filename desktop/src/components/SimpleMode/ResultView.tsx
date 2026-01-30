@@ -7,6 +7,7 @@
 
 import { useState } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   CheckCircledIcon,
   CrossCircledIcon,
@@ -31,6 +32,7 @@ interface ResultViewProps {
 }
 
 export function ResultView({ result }: ResultViewProps) {
+  const { t } = useTranslation('simpleMode');
   const { stories } = useExecutionStore();
   const [expandedStories, setExpandedStories] = useState<Set<string>>(new Set());
 
@@ -82,7 +84,7 @@ export function ResultView({ result }: ResultViewProps) {
             success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
           )}
         >
-          {success ? 'Completed Successfully' : 'Execution Failed'}
+          {success ? t('result.completedSuccessfully') : t('result.executionFailed')}
         </h2>
 
         <p className="text-center text-gray-600 dark:text-gray-400 mb-6">
@@ -96,7 +98,7 @@ export function ResultView({ result }: ResultViewProps) {
               {completedStories}/{totalStories}
             </div>
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              Stories
+              {t('labels.stories', { ns: 'common' })}
             </div>
           </div>
           <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
@@ -104,7 +106,7 @@ export function ResultView({ result }: ResultViewProps) {
               {formatDuration(duration)}
             </div>
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              Duration
+              {t('labels.duration', { ns: 'common' })}
             </div>
           </div>
           <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
@@ -119,7 +121,7 @@ export function ResultView({ result }: ResultViewProps) {
               {successRate}%
             </div>
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              Success Rate
+              {t('labels.successRate', { ns: 'common' })}
             </div>
           </div>
         </div>
@@ -128,7 +130,7 @@ export function ResultView({ result }: ResultViewProps) {
         {error && (
           <div className="mt-4 p-4 rounded-lg bg-red-50 dark:bg-red-900/20">
             <h3 className="font-medium text-red-600 dark:text-red-400 mb-1">
-              Error Details
+              {t('result.errorDetails')}
             </h3>
             <pre className="text-sm text-red-500 dark:text-red-300 whitespace-pre-wrap font-mono">
               {error}
@@ -141,7 +143,7 @@ export function ResultView({ result }: ResultViewProps) {
       {stories.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Story Breakdown
+            {t('result.storyBreakdown')}
           </h3>
 
           {stories.map((story) => (
@@ -159,7 +161,7 @@ export function ResultView({ result }: ResultViewProps) {
       {failedStories.length > 0 && (
         <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
           <h3 className="font-medium text-red-600 dark:text-red-400 mb-2">
-            Failed Stories ({failedStories.length})
+            {t('result.failedStories', { count: failedStories.length })}
           </h3>
           <ul className="space-y-1">
             {failedStories.map((story) => (

@@ -1,0 +1,128 @@
+{
+  "title": "Claude Code",
+
+  "chat": {
+    "empty": {
+      "title": "Claude Code 模式",
+      "description": "与 Claude Code 开始对话。你可以提问、请求代码修改、浏览文件和执行命令。",
+      "tryAsking": "试试问：",
+      "examples": {
+        "structure": "展示项目结构",
+        "readme": "读取 README 文件",
+        "component": "创建一个新组件"
+      }
+    },
+    "clearConfirm": "确定要清除对话吗？"
+  },
+
+  "input": {
+    "placeholder": "输入消息... (Ctrl+Enter 发送)",
+    "placeholderDisconnected": "等待连接...",
+    "sendTitle": "发送消息 (Ctrl+Enter)"
+  },
+
+  "connection": {
+    "connected": "已连接",
+    "connecting": "正在连接 Claude Code...",
+    "reconnecting": "正在重新连接 Claude Code...",
+    "disconnected": "已断开与 Claude Code 的连接。请检查网络。"
+  },
+
+  "actions": {
+    "toggleSidebar": "切换工具历史 (Ctrl+B)",
+    "exportConversation": "导出对话",
+    "clearChat": "清除聊天",
+    "cancel": "取消"
+  },
+
+  "shortcuts": {
+    "title": "键盘快捷键",
+    "send": "发送消息",
+    "clear": "清除聊天",
+    "export": "导出对话"
+  },
+
+  "sidebar": {
+    "title": "工具历史",
+    "empty": "暂无工具调用",
+    "description": "Claude Code 使用的工具调用将显示在这里。",
+    "stats": {
+      "total": "总计",
+      "done": "完成",
+      "failed": "失败",
+      "running": "运行中"
+    },
+    "filter": {
+      "all": "全部"
+    }
+  },
+
+  "toolCall": {
+    "status": {
+      "pending": "等待中",
+      "executing": "运行中",
+      "completed": "完成",
+      "failed": "失败"
+    },
+    "labels": {
+      "filePath": "文件路径",
+      "content": "内容",
+      "command": "命令",
+      "output": "输出",
+      "pattern": "模式",
+      "path": "路径",
+      "matchedFiles": "匹配的文件",
+      "matches": "匹配项",
+      "filesWithMatches": "包含匹配的文件",
+      "url": "URL",
+      "query": "查询",
+      "result": "结果",
+      "parameters": "参数",
+      "oldString": "旧字符串",
+      "newString": "新字符串",
+      "offset": "偏移",
+      "limit": "限制",
+      "replaceAll": "替换所有匹配项"
+    },
+    "messages": {
+      "noContent": "无内容",
+      "noOutput": "无输出",
+      "noFilesMatched": "无匹配文件",
+      "noMatchesFound": "未找到匹配项",
+      "fileWritten": "文件写入成功",
+      "writeFailed": "写入失败",
+      "editApplied": "编辑应用成功",
+      "editFailed": "编辑失败"
+    },
+    "copy": "复制",
+    "copied": "已复制！"
+  },
+
+  "export": {
+    "title": "导出对话",
+    "formatLabel": "导出格式",
+    "formats": {
+      "json": {
+        "name": "JSON",
+        "description": "包含所有元数据的完整数据导出"
+      },
+      "markdown": {
+        "name": "Markdown",
+        "description": "用于文档的格式化文本"
+      },
+      "html": {
+        "name": "HTML",
+        "description": "用于浏览器查看的样式化HTML"
+      }
+    },
+    "messagesCount": "要导出的消息：",
+    "empty": {
+      "title": "没有可导出的消息",
+      "description": "请先开始对话"
+    },
+    "copy": "复制",
+    "copied": "已复制！",
+    "download": "下载",
+    "downloaded": "已下载！"
+  }
+}

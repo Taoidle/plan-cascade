@@ -1,0 +1,80 @@
+{
+  "steps": {
+    "welcome": "Welcome",
+    "mode": "Working Mode",
+    "backend": "LLM Backend",
+    "agents": "Agents",
+    "complete": "Complete"
+  },
+
+  "welcome": {
+    "title": "Welcome to Plan Cascade",
+    "description": "Let's set up your development orchestration environment. This wizard will guide you through the essential configuration steps."
+  },
+
+  "mode": {
+    "title": "Choose Your Working Mode",
+    "description": "Select how you want to use Plan Cascade.",
+    "simple": {
+      "name": "Claude Code GUI Mode",
+      "description": "Simple interface for Claude Code. Just describe your task and let it execute. Best for quick tasks and getting started."
+    },
+    "expert": {
+      "name": "Standalone Orchestration Mode",
+      "description": "Full PRD generation, multi-agent coordination, and execution strategies. Best for complex projects requiring multiple agents."
+    }
+  },
+
+  "backend": {
+    "title": "Select LLM Backend",
+    "description": "Choose the AI provider for code generation.",
+    "options": {
+      "claudeCode": {
+        "name": "Claude Code (Recommended)",
+        "description": "Uses your existing Claude Code subscription. No additional API key needed."
+      },
+      "claudeApi": {
+        "name": "Claude API",
+        "description": "Direct Anthropic API access. Requires an API key."
+      },
+      "openai": {
+        "name": "OpenAI",
+        "description": "Use OpenAI GPT models. Requires an API key."
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "description": "DeepSeek coding models. Requires an API key."
+      },
+      "ollama": {
+        "name": "Ollama (Local)",
+        "description": "Run models locally with Ollama. No API key needed."
+      }
+    },
+    "apiKey": {
+      "label": "API Key",
+      "placeholder": "Enter your {{provider}} API key",
+      "description": "Your API key will be stored securely and never shared."
+    }
+  },
+
+  "agents": {
+    "title": "Execution Agents",
+    "description": "Plan Cascade can use multiple AI agents for different tasks. Here are the pre-configured agents.",
+    "command": "Command: {{command}}",
+    "default": "Default",
+    "hint": "You can add, remove, or configure agents later in Settings."
+  },
+
+  "complete": {
+    "title": "You're All Set!",
+    "description": "Plan Cascade is configured and ready to use. You can always adjust these settings later by clicking the gear icon in the header."
+  },
+
+  "actions": {
+    "skipSetup": "Skip setup",
+    "back": "Back",
+    "next": "Next",
+    "getStarted": "Get Started",
+    "finishing": "Finishing..."
+  }
+}

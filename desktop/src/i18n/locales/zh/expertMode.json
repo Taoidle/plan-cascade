@@ -1,0 +1,191 @@
+{
+  "title": "专家模式",
+
+  "tabs": {
+    "generate": "生成",
+    "prdEditor": "PRD编辑器",
+    "preview": "预览",
+    "execution": "执行",
+    "logs": "日志"
+  },
+
+  "generate": {
+    "title": "生成PRD",
+    "description": "描述你的需求，我们将生成结构化的PRD和故事。",
+    "requirements": {
+      "label": "任务需求",
+      "placeholder": "详细描述你想要构建的内容。包括功能、需求和任何特定约束...",
+      "characters": "{{count}} 个字符"
+    },
+    "strategy": {
+      "label": "建议策略",
+      "recommended": "推荐",
+      "direct": {
+        "name": "直接",
+        "description": "简单的单步任务",
+        "details": "适合简单的单步任务，可以一次完成。AI将立即执行任务，无需创建中间故事。"
+      },
+      "hybridAuto": {
+        "name": "混合自动",
+        "description": "具有依赖关系的多步任务",
+        "details": "适合中等规模的任务。系统生成包含多个故事的PRD，并按依赖顺序执行。在结构和效率之间取得良好平衡。"
+      },
+      "megaPlan": {
+        "name": "大型计划",
+        "description": "包含多个功能的复杂项目",
+        "details": "适合复杂的多功能项目。创建包含功能、故事和依赖关系的全面计划。使用Git工作树进行并行执行以实现隔离。"
+      }
+    },
+    "button": "生成PRD",
+    "generating": "正在生成PRD...",
+    "hint": "按 <kbd>Cmd+Enter</kbd> 生成"
+  },
+
+  "prdEditor": {
+    "title": "PRD编辑器",
+    "description": "拖拽排序，点击展开编辑",
+    "storyCount": "({{count}})"
+  },
+
+  "execution": {
+    "title": "执行进度",
+    "noExecution": "没有正在执行的任务",
+    "complete": "完成"
+  },
+
+  "logs": {
+    "title": "执行日志",
+    "entries": "{{count}} 条记录",
+    "empty": "暂无日志..."
+  },
+
+  "settings": {
+    "title": "执行设置"
+  },
+
+  "actions": {
+    "resetConfirm": "确定要重置吗？这将清除所有故事。",
+    "resetTitle": "重置PRD",
+    "reset": "重置",
+    "execute": "执行",
+    "save": "保存",
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除"
+  },
+
+  "story": {
+    "title": "故事标题",
+    "description": "描述",
+    "descriptionOptional": "描述（可选）",
+    "noDescription": "无描述",
+    "priority": "优先级",
+    "dependencies": "依赖",
+    "acceptanceCriteria": "验收标准",
+    "agent": "代理",
+    "blockedBy": "被阻塞：",
+    "status": {
+      "pending": "待处理",
+      "inProgress": "进行中",
+      "completed": "已完成",
+      "failed": "失败"
+    },
+    "empty": {
+      "title": "暂无故事",
+      "description": "从需求生成PRD或手动添加故事。"
+    },
+    "add": "添加故事",
+    "enterTitle": "输入故事标题...",
+    "enterDescription": "输入故事描述..."
+  },
+
+  "qualityGates": {
+    "title": "质量门禁",
+    "enableAll": "全部启用",
+    "disableAll": "全部禁用",
+    "typecheck": "类型检查",
+    "test": "测试",
+    "lint": "代码检查",
+    "custom": "自定义脚本",
+    "customScript": "自定义脚本",
+    "maxRetries": "最大重试次数",
+    "addCustom": "添加自定义门禁",
+    "gateName": "门禁名称",
+    "gateNamePlaceholder": "例如：构建检查",
+    "command": "命令",
+    "commandPlaceholder": "例如：npm run build",
+    "addGate": "添加门禁",
+    "removeGate": "移除门禁"
+  },
+
+  "worktree": {
+    "title": "Git 工作树",
+    "enable": "启用工作树隔离",
+    "description": "在隔离的git工作树中运行每个故事",
+    "tooltip": "Git工作树允许隔离开发而无需切换分支。每个功能都有自己的工作目录，防止冲突并支持并行开发。",
+    "branchName": "分支名称",
+    "branchPlaceholder": "feature/my-feature",
+    "baseBranch": "基础分支",
+    "suggestFromTitle": "从标题建议",
+    "worktreePath": "工作树将创建在：",
+    "disabledHint": "启用以在隔离的Git工作树分支中开发",
+    "errors": {
+      "invalidBranchName": "分支名必须以字母开头，只能包含字母、数字、连字符、下划线或斜杠",
+      "branchTooLong": "分支名必须少于100个字符"
+    }
+  },
+
+  "agentSelector": {
+    "title": "执行代理",
+    "bulkTitle": "默认代理",
+    "appliesToAll": "应用于所有故事",
+    "smart": "智能选择",
+    "preferDefault": "优先默认",
+    "manual": "手动",
+    "agents": {
+      "claudeCode": {
+        "name": "Claude Code",
+        "description": "Anthropic Claude 代码任务"
+      },
+      "aider": {
+        "name": "Aider",
+        "description": "Aider AI 配对编程"
+      },
+      "codex": {
+        "name": "Codex",
+        "description": "OpenAI Codex 代理"
+      }
+    }
+  },
+
+  "strategySelector": {
+    "title": "执行策略",
+    "storyCount": "{{count}} 个故事",
+    "storyCountPlural": "{{count}} 个故事"
+  },
+
+  "draftManager": {
+    "title": "草稿",
+    "save": "保存",
+    "load": "加载",
+    "delete": "删除草稿",
+    "saveDraft": "保存草稿",
+    "draftName": "草稿名称（可选）",
+    "draftNamePlaceholder": "草稿 {{date}}",
+    "autoSaved": "自动保存",
+    "savedDrafts": "已保存的草稿",
+    "noDrafts": "没有已保存的草稿",
+    "stories": "个故事",
+    "saved": "已保存"
+  },
+
+  "dependencyGraph": {
+    "title": "依赖图"
+  },
+
+  "dependencyEditor": {
+    "title": "编辑依赖",
+    "blockedBy": "被阻塞",
+    "blocks": "阻塞"
+  }
+}

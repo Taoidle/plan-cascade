@@ -1,0 +1,82 @@
+{
+  "appName": "Plan Cascade",
+  "version": "v0.1.0",
+  "ready": "就绪",
+
+  "buttons": {
+    "save": "保存",
+    "saving": "保存中...",
+    "cancel": "取消",
+    "close": "关闭",
+    "reset": "重置",
+    "clear": "清除",
+    "submit": "提交",
+    "back": "返回",
+    "next": "下一步",
+    "skip": "跳过",
+    "execute": "执行",
+    "pause": "暂停",
+    "resume": "继续",
+    "stop": "取消",
+    "export": "导出",
+    "startNewTask": "开始新任务",
+    "getStarted": "开始使用"
+  },
+
+  "status": {
+    "idle": "空闲",
+    "running": "运行中",
+    "paused": "已暂停",
+    "completed": "已完成",
+    "failed": "失败",
+    "pending": "等待中",
+    "inProgress": "进行中"
+  },
+
+  "connection": {
+    "connected": "已连接",
+    "connecting": "连接中...",
+    "reconnecting": "重新连接中...",
+    "disconnected": "已断开"
+  },
+
+  "modeSwitch": {
+    "label": "选择模式",
+    "simple": {
+      "name": "简单",
+      "description": "AI驱动的一键执行自动化"
+    },
+    "expert": {
+      "name": "专家",
+      "description": "完全控制PRD编辑、代理和执行"
+    },
+    "claudeCode": {
+      "name": "Claude Code",
+      "description": "与Claude Code CLI交互式对话"
+    }
+  },
+
+  "errors": {
+    "generic": "发生错误",
+    "connectionFailed": "连接失败",
+    "saveFailed": "保存失败",
+    "loadFailed": "加载失败"
+  },
+
+  "time": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}}分钟前",
+    "hoursAgo": "{{count}}小时前",
+    "daysAgo": "{{count}}天前"
+  },
+
+  "labels": {
+    "stories": "故事",
+    "duration": "耗时",
+    "successRate": "成功率",
+    "status": "状态",
+    "description": "描述",
+    "error": "错误",
+    "retryAttempts": "重试次数"
+  }
+}

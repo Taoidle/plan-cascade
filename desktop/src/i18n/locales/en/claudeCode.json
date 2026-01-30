@@ -1,0 +1,128 @@
+{
+  "title": "Claude Code",
+
+  "chat": {
+    "empty": {
+      "title": "Claude Code Mode",
+      "description": "Start a conversation with Claude Code. You can ask questions, request code changes, explore files, and execute commands.",
+      "tryAsking": "Try asking:",
+      "examples": {
+        "structure": "Show me the project structure",
+        "readme": "Read the README file",
+        "component": "Create a new component"
+      }
+    },
+    "clearConfirm": "Clear the conversation?"
+  },
+
+  "input": {
+    "placeholder": "Type a message... (Ctrl+Enter to send)",
+    "placeholderDisconnected": "Waiting for connection...",
+    "sendTitle": "Send message (Ctrl+Enter)"
+  },
+
+  "connection": {
+    "connected": "Connected",
+    "connecting": "Connecting to Claude Code...",
+    "reconnecting": "Reconnecting to Claude Code...",
+    "disconnected": "Disconnected from Claude Code. Check your connection."
+  },
+
+  "actions": {
+    "toggleSidebar": "Toggle tool history (Ctrl+B)",
+    "exportConversation": "Export Conversation",
+    "clearChat": "Clear Chat",
+    "cancel": "Cancel"
+  },
+
+  "shortcuts": {
+    "title": "Keyboard shortcuts",
+    "send": "Send message",
+    "clear": "Clear chat",
+    "export": "Export conversation"
+  },
+
+  "sidebar": {
+    "title": "Tool History",
+    "empty": "No tool calls yet",
+    "description": "Tool calls will appear here as Claude Code uses them.",
+    "stats": {
+      "total": "Total",
+      "done": "Done",
+      "failed": "Failed",
+      "running": "Running"
+    },
+    "filter": {
+      "all": "All"
+    }
+  },
+
+  "toolCall": {
+    "status": {
+      "pending": "Pending",
+      "executing": "Running",
+      "completed": "Done",
+      "failed": "Failed"
+    },
+    "labels": {
+      "filePath": "File Path",
+      "content": "Content",
+      "command": "Command",
+      "output": "Output",
+      "pattern": "Pattern",
+      "path": "Path",
+      "matchedFiles": "Matched Files",
+      "matches": "Matches",
+      "filesWithMatches": "Files with Matches",
+      "url": "URL",
+      "query": "Query",
+      "result": "Result",
+      "parameters": "Parameters",
+      "oldString": "Old String",
+      "newString": "New String",
+      "offset": "Offset",
+      "limit": "Limit",
+      "replaceAll": "Replace all occurrences"
+    },
+    "messages": {
+      "noContent": "No content",
+      "noOutput": "No output",
+      "noFilesMatched": "No files matched",
+      "noMatchesFound": "No matches found",
+      "fileWritten": "File written successfully",
+      "writeFailed": "Write failed",
+      "editApplied": "Edit applied successfully",
+      "editFailed": "Edit failed"
+    },
+    "copy": "Copy",
+    "copied": "Copied!"
+  },
+
+  "export": {
+    "title": "Export Conversation",
+    "formatLabel": "Export Format",
+    "formats": {
+      "json": {
+        "name": "JSON",
+        "description": "Full data export with all metadata"
+      },
+      "markdown": {
+        "name": "Markdown",
+        "description": "Formatted text for documentation"
+      },
+      "html": {
+        "name": "HTML",
+        "description": "Styled HTML for viewing in browser"
+      }
+    },
+    "messagesCount": "Messages to export:",
+    "empty": {
+      "title": "No messages to export",
+      "description": "Start a conversation first"
+    },
+    "copy": "Copy",
+    "copied": "Copied!",
+    "download": "Download",
+    "downloaded": "Downloaded!"
+  }
+}

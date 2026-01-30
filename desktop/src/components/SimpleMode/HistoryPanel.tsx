@@ -6,6 +6,7 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   Cross1Icon,
   TrashIcon,
@@ -21,6 +22,7 @@ interface HistoryPanelProps {
 }
 
 export function HistoryPanel({ onClose }: HistoryPanelProps) {
+  const { t } = useTranslation('simpleMode');
   const { history, clearHistory } = useExecutionStore();
 
   return (
@@ -28,7 +30,7 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          Execution History
+          {t('history.title')}
         </h2>
         <div className="flex items-center gap-2">
           {history.length > 0 && (
@@ -42,7 +44,7 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
               )}
             >
               <TrashIcon className="w-4 h-4" />
-              Clear
+              {t('buttons.clear', { ns: 'common' })}
             </button>
           )}
           <button
@@ -64,10 +66,10 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
         <div className="text-center py-12">
           <ClockIcon className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
           <p className="text-gray-500 dark:text-gray-400">
-            No execution history yet
+            {t('history.empty.title')}
           </p>
           <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            Your completed tasks will appear here
+            {t('history.empty.subtitle')}
           </p>
         </div>
       ) : (
@@ -86,6 +88,8 @@ interface HistoryItemProps {
 }
 
 function HistoryItem({ item }: HistoryItemProps) {
+  const { t } = useTranslation('simpleMode');
+
   const getStatusIcon = () => {
     if (item.success) {
       return <CheckCircledIcon className="w-5 h-5 text-green-500" />;
@@ -144,14 +148,14 @@ function HistoryItem({ item }: HistoryItemProps) {
   };
 
   const formatStrategy = (strategy: string | null): string => {
-    if (!strategy) return 'Auto';
+    if (!strategy) return t('strategies.auto');
     switch (strategy) {
       case 'direct':
-        return 'Direct';
+        return t('strategies.direct');
       case 'hybrid_auto':
-        return 'Hybrid';
+        return t('strategies.hybrid');
       case 'mega_plan':
-        return 'Mega';
+        return t('strategies.mega');
       default:
         return strategy;
     }
@@ -186,11 +190,11 @@ function HistoryItem({ item }: HistoryItemProps) {
           {/* Story counts */}
           <div className="flex items-center gap-2 mt-2 text-sm">
             <span className="text-green-600 dark:text-green-400">
-              {item.completedStories} completed
+              {item.completedStories} {t('history.completed')}
             </span>
             {item.totalStories > item.completedStories && (
               <span className="text-red-600 dark:text-red-400">
-                {item.totalStories - item.completedStories} failed
+                {item.totalStories - item.completedStories} {t('history.failed')}
               </span>
             )}
           </div>

@@ -1,0 +1,128 @@
+{
+  "title": "Claude Code",
+
+  "chat": {
+    "empty": {
+      "title": "Claude Code モード",
+      "description": "Claude Code との会話を始めましょう。質問したり、コードの変更を依頼したり、ファイルを探索したり、コマンドを実行したりできます。",
+      "tryAsking": "試しに聞いてみてください：",
+      "examples": {
+        "structure": "プロジェクト構造を見せて",
+        "readme": "READMEファイルを読んで",
+        "component": "新しいコンポーネントを作成して"
+      }
+    },
+    "clearConfirm": "会話をクリアしますか？"
+  },
+
+  "input": {
+    "placeholder": "メッセージを入力... (Ctrl+Enter で送信)",
+    "placeholderDisconnected": "接続を待っています...",
+    "sendTitle": "メッセージを送信 (Ctrl+Enter)"
+  },
+
+  "connection": {
+    "connected": "接続済み",
+    "connecting": "Claude Code に接続中...",
+    "reconnecting": "Claude Code に再接続中...",
+    "disconnected": "Claude Code から切断されました。接続を確認してください。"
+  },
+
+  "actions": {
+    "toggleSidebar": "ツール履歴を切り替え (Ctrl+B)",
+    "exportConversation": "会話をエクスポート",
+    "clearChat": "チャットをクリア",
+    "cancel": "キャンセル"
+  },
+
+  "shortcuts": {
+    "title": "キーボードショートカット",
+    "send": "メッセージを送信",
+    "clear": "チャットをクリア",
+    "export": "会話をエクスポート"
+  },
+
+  "sidebar": {
+    "title": "ツール履歴",
+    "empty": "ツール呼び出しがありません",
+    "description": "Claude Code が使用したツール呼び出しがここに表示されます。",
+    "stats": {
+      "total": "合計",
+      "done": "完了",
+      "failed": "失敗",
+      "running": "実行中"
+    },
+    "filter": {
+      "all": "すべて"
+    }
+  },
+
+  "toolCall": {
+    "status": {
+      "pending": "保留中",
+      "executing": "実行中",
+      "completed": "完了",
+      "failed": "失敗"
+    },
+    "labels": {
+      "filePath": "ファイルパス",
+      "content": "内容",
+      "command": "コマンド",
+      "output": "出力",
+      "pattern": "パターン",
+      "path": "パス",
+      "matchedFiles": "マッチしたファイル",
+      "matches": "マッチ",
+      "filesWithMatches": "マッチを含むファイル",
+      "url": "URL",
+      "query": "クエリ",
+      "result": "結果",
+      "parameters": "パラメータ",
+      "oldString": "旧文字列",
+      "newString": "新文字列",
+      "offset": "オフセット",
+      "limit": "リミット",
+      "replaceAll": "すべて置換"
+    },
+    "messages": {
+      "noContent": "内容なし",
+      "noOutput": "出力なし",
+      "noFilesMatched": "マッチするファイルがありません",
+      "noMatchesFound": "マッチが見つかりません",
+      "fileWritten": "ファイルが正常に書き込まれました",
+      "writeFailed": "書き込みに失敗しました",
+      "editApplied": "編集が正常に適用されました",
+      "editFailed": "編集に失敗しました"
+    },
+    "copy": "コピー",
+    "copied": "コピーしました！"
+  },
+
+  "export": {
+    "title": "会話をエクスポート",
+    "formatLabel": "エクスポート形式",
+    "formats": {
+      "json": {
+        "name": "JSON",
+        "description": "すべてのメタデータを含む完全なデータエクスポート"
+      },
+      "markdown": {
+        "name": "Markdown",
+        "description": "ドキュメント用のフォーマットされたテキスト"
+      },
+      "html": {
+        "name": "HTML",
+        "description": "ブラウザで表示するためのスタイル付きHTML"
+      }
+    },
+    "messagesCount": "エクスポートするメッセージ：",
+    "empty": {
+      "title": "エクスポートするメッセージがありません",
+      "description": "まず会話を始めてください"
+    },
+    "copy": "コピー",
+    "copied": "コピーしました！",
+    "download": "ダウンロード",
+    "downloaded": "ダウンロードしました！"
+  }
+}

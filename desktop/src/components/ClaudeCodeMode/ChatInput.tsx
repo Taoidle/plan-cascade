@@ -6,6 +6,7 @@
 
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   PaperPlaneIcon,
   StopIcon,
@@ -23,6 +24,7 @@ interface ChatInputProps {
 }
 
 export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
+  const { t } = useTranslation('claudeCode');
   const {
     sendMessage,
     isSending,
@@ -96,19 +98,19 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
               <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Ctrl</kbd>
               <span>+</span>
               <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Enter</kbd>
-              <span>Send message</span>
+              <span>{t('shortcuts.send')}</span>
             </div>
             <div className="flex items-center gap-2">
               <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Ctrl</kbd>
               <span>+</span>
               <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">L</kbd>
-              <span>Clear chat</span>
+              <span>{t('shortcuts.clear')}</span>
             </div>
             <div className="flex items-center gap-2">
               <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Ctrl</kbd>
               <span>+</span>
               <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">E</kbd>
-              <span>Export conversation</span>
+              <span>{t('shortcuts.export')}</span>
             </div>
           </div>
         </div>
@@ -117,9 +119,9 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
       {/* Connection status warning */}
       {!isConnected && (
         <div className="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 text-sm">
-          {connectionStatus === 'connecting' && 'Connecting to Claude Code...'}
-          {connectionStatus === 'reconnecting' && 'Reconnecting to Claude Code...'}
-          {connectionStatus === 'disconnected' && 'Disconnected from Claude Code. Check your connection.'}
+          {connectionStatus === 'connecting' && t('connection.connecting')}
+          {connectionStatus === 'reconnecting' && t('connection.reconnecting')}
+          {connectionStatus === 'disconnected' && t('connection.disconnected')}
         </div>
       )}
 
@@ -131,7 +133,7 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isConnected ? 'Type a message... (Ctrl+Enter to send)' : 'Waiting for connection...'}
+            placeholder={isConnected ? t('input.placeholder') : t('input.placeholderDisconnected')}
             disabled={isDisabled}
             rows={1}
             className={clsx(
@@ -159,7 +161,7 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
                 ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
                 : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
             )}
-            title="Keyboard shortcuts"
+            title={t('shortcuts.title')}
           >
             <KeyboardIcon className="w-5 h-5" />
           </button>
@@ -172,7 +174,7 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
                 'p-3 rounded-lg transition-colors',
                 'bg-red-500 text-white hover:bg-red-600'
               )}
-              title="Cancel"
+              title={t('actions.cancel')}
             >
               <StopIcon className="w-5 h-5" />
             </button>
@@ -186,7 +188,7 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
                   ? 'bg-primary-600 text-white hover:bg-primary-700'
                   : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed'
               )}
-              title="Send message (Ctrl+Enter)"
+              title={t('input.sendTitle')}
             >
               <PaperPlaneIcon className="w-5 h-5" />
             </button>

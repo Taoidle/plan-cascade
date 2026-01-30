@@ -1,0 +1,82 @@
+{
+  "appName": "Plan Cascade",
+  "version": "v0.1.0",
+  "ready": "準備完了",
+
+  "buttons": {
+    "save": "保存",
+    "saving": "保存中...",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "reset": "リセット",
+    "clear": "クリア",
+    "submit": "送信",
+    "back": "戻る",
+    "next": "次へ",
+    "skip": "スキップ",
+    "execute": "実行",
+    "pause": "一時停止",
+    "resume": "再開",
+    "stop": "キャンセル",
+    "export": "エクスポート",
+    "startNewTask": "新しいタスクを開始",
+    "getStarted": "始める"
+  },
+
+  "status": {
+    "idle": "待機中",
+    "running": "実行中",
+    "paused": "一時停止中",
+    "completed": "完了",
+    "failed": "失敗",
+    "pending": "保留中",
+    "inProgress": "進行中"
+  },
+
+  "connection": {
+    "connected": "接続済み",
+    "connecting": "接続中...",
+    "reconnecting": "再接続中...",
+    "disconnected": "切断済み"
+  },
+
+  "modeSwitch": {
+    "label": "モードを選択",
+    "simple": {
+      "name": "シンプル",
+      "description": "AIによるワンクリック自動実行"
+    },
+    "expert": {
+      "name": "エキスパート",
+      "description": "PRD編集、エージェント、実行を完全制御"
+    },
+    "claudeCode": {
+      "name": "Claude Code",
+      "description": "Claude Code CLIとの対話式チャット"
+    }
+  },
+
+  "errors": {
+    "generic": "エラーが発生しました",
+    "connectionFailed": "接続に失敗しました",
+    "saveFailed": "保存に失敗しました",
+    "loadFailed": "読み込みに失敗しました"
+  },
+
+  "time": {
+    "justNow": "たった今",
+    "minutesAgo": "{{count}}分前",
+    "hoursAgo": "{{count}}時間前",
+    "daysAgo": "{{count}}日前"
+  },
+
+  "labels": {
+    "stories": "ストーリー",
+    "duration": "所要時間",
+    "successRate": "成功率",
+    "status": "ステータス",
+    "description": "説明",
+    "error": "エラー",
+    "retryAttempts": "リトライ回数"
+  }
+}

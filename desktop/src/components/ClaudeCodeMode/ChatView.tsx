@@ -7,6 +7,7 @@
 
 import { useEffect, useRef } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useClaudeCodeStore, Message } from '../../store/claudeCode';
 import { ToolCallCard } from './ToolCallCard';
 
@@ -15,6 +16,7 @@ import { ToolCallCard } from './ToolCallCard';
 // ============================================================================
 
 export function ChatView() {
+  const { t } = useTranslation('claudeCode');
   const { messages, isStreaming, streamingContent } = useClaudeCodeStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -33,18 +35,17 @@ export function ChatView() {
           <span role="img" aria-label="robot">&#129302;</span>
         </div>
         <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">
-          Claude Code Mode
+          {t('chat.empty.title')}
         </h2>
         <p className="text-gray-500 dark:text-gray-400 max-w-md">
-          Start a conversation with Claude Code. You can ask questions, request code changes,
-          explore files, and execute commands.
+          {t('chat.empty.description')}
         </p>
         <div className="mt-6 text-sm text-gray-400 dark:text-gray-500">
-          <p>Try asking:</p>
+          <p>{t('chat.empty.tryAsking')}</p>
           <ul className="mt-2 space-y-1">
-            <li>"Show me the project structure"</li>
-            <li>"Read the README file"</li>
-            <li>"Create a new component"</li>
+            <li>"{t('chat.empty.examples.structure')}"</li>
+            <li>"{t('chat.empty.examples.readme')}"</li>
+            <li>"{t('chat.empty.examples.component')}"</li>
           </ul>
         </div>
       </div>

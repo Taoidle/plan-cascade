@@ -1,0 +1,191 @@
+{
+  "title": "Expert Mode",
+
+  "tabs": {
+    "generate": "Generate",
+    "prdEditor": "PRD Editor",
+    "preview": "Preview",
+    "execution": "Execution",
+    "logs": "Logs"
+  },
+
+  "generate": {
+    "title": "Generate PRD",
+    "description": "Describe your requirements and we'll generate a structured PRD with stories.",
+    "requirements": {
+      "label": "Task Requirements",
+      "placeholder": "Describe what you want to build in detail. Include features, requirements, and any specific constraints...",
+      "characters": "{{count}} characters"
+    },
+    "strategy": {
+      "label": "Suggested Strategy",
+      "recommended": "Recommended",
+      "direct": {
+        "name": "Direct",
+        "description": "Simple, single-step task",
+        "details": "Best for simple, single-step tasks that can be completed in one pass. The AI will execute the task immediately without creating intermediate stories."
+      },
+      "hybridAuto": {
+        "name": "Hybrid Auto",
+        "description": "Multi-step task with dependencies",
+        "details": "Ideal for medium-sized tasks. The system generates a PRD with multiple stories and executes them in dependency order. Provides good balance of structure and efficiency."
+      },
+      "megaPlan": {
+        "name": "Mega Plan",
+        "description": "Complex project with multiple features",
+        "details": "For complex, multi-feature projects. Creates a comprehensive plan with features, stories, and dependencies. Uses parallel execution with Git worktrees for isolation."
+      }
+    },
+    "button": "Generate PRD",
+    "generating": "Generating PRD...",
+    "hint": "Press <kbd>Cmd+Enter</kbd> to generate"
+  },
+
+  "prdEditor": {
+    "title": "PRD Editor",
+    "description": "Drag to reorder, click to expand and edit",
+    "storyCount": "({{count}})"
+  },
+
+  "execution": {
+    "title": "Execution Progress",
+    "noExecution": "No execution in progress",
+    "complete": "complete"
+  },
+
+  "logs": {
+    "title": "Execution Logs",
+    "entries": "{{count}} entries",
+    "empty": "No logs yet..."
+  },
+
+  "settings": {
+    "title": "Execution Settings"
+  },
+
+  "actions": {
+    "resetConfirm": "Are you sure you want to reset? This will clear all stories.",
+    "resetTitle": "Reset PRD",
+    "reset": "Reset",
+    "execute": "Execute",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete"
+  },
+
+  "story": {
+    "title": "Story Title",
+    "description": "Description",
+    "descriptionOptional": "Description (optional)",
+    "noDescription": "No description",
+    "priority": "Priority",
+    "dependencies": "Dependencies",
+    "acceptanceCriteria": "Acceptance Criteria",
+    "agent": "Agent",
+    "blockedBy": "Blocked by:",
+    "status": {
+      "pending": "Pending",
+      "inProgress": "In Progress",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "empty": {
+      "title": "No stories yet",
+      "description": "Generate a PRD from your requirements or add stories manually."
+    },
+    "add": "Add Story",
+    "enterTitle": "Enter story title...",
+    "enterDescription": "Enter story description..."
+  },
+
+  "qualityGates": {
+    "title": "Quality Gates",
+    "enableAll": "Enable All",
+    "disableAll": "Disable All",
+    "typecheck": "Type Check",
+    "test": "Tests",
+    "lint": "Linting",
+    "custom": "Custom Script",
+    "customScript": "Custom Script",
+    "maxRetries": "Max Retries",
+    "addCustom": "Add Custom Gate",
+    "gateName": "Gate Name",
+    "gateNamePlaceholder": "e.g., Build Check",
+    "command": "Command",
+    "commandPlaceholder": "e.g., npm run build",
+    "addGate": "Add Gate",
+    "removeGate": "Remove gate"
+  },
+
+  "worktree": {
+    "title": "Git Worktree",
+    "enable": "Enable worktree isolation",
+    "description": "Run each story in an isolated git worktree",
+    "tooltip": "Git worktrees allow isolated development without switching branches. Each feature gets its own working directory, preventing conflicts and enabling parallel development.",
+    "branchName": "Branch Name",
+    "branchPlaceholder": "feature/my-feature",
+    "baseBranch": "Base Branch",
+    "suggestFromTitle": "Suggest from title",
+    "worktreePath": "Worktree will be created at:",
+    "disabledHint": "Enable to develop in an isolated Git worktree branch",
+    "errors": {
+      "invalidBranchName": "Branch name must start with a letter and contain only letters, numbers, hyphens, underscores, or slashes",
+      "branchTooLong": "Branch name must be less than 100 characters"
+    }
+  },
+
+  "agentSelector": {
+    "title": "Execution Agent",
+    "bulkTitle": "Default Agent",
+    "appliesToAll": "Applies to all stories",
+    "smart": "Smart Selection",
+    "preferDefault": "Prefer Default",
+    "manual": "Manual",
+    "agents": {
+      "claudeCode": {
+        "name": "Claude Code",
+        "description": "Anthropic Claude for code tasks"
+      },
+      "aider": {
+        "name": "Aider",
+        "description": "Aider AI pair programmer"
+      },
+      "codex": {
+        "name": "Codex",
+        "description": "OpenAI Codex agent"
+      }
+    }
+  },
+
+  "strategySelector": {
+    "title": "Execution Strategy",
+    "storyCount": "{{count}} story",
+    "storyCountPlural": "{{count}} stories"
+  },
+
+  "draftManager": {
+    "title": "Drafts",
+    "save": "Save",
+    "load": "Load",
+    "delete": "Delete Draft",
+    "saveDraft": "Save Draft",
+    "draftName": "Draft Name (optional)",
+    "draftNamePlaceholder": "Draft {{date}}",
+    "autoSaved": "Auto-saved",
+    "savedDrafts": "Saved Drafts",
+    "noDrafts": "No saved drafts",
+    "stories": "stories",
+    "saved": "Saved"
+  },
+
+  "dependencyGraph": {
+    "title": "Dependency Graph"
+  },
+
+  "dependencyEditor": {
+    "title": "Edit Dependencies",
+    "blockedBy": "Blocked By",
+    "blocks": "Blocks"
+  }
+}

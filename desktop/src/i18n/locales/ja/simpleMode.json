@@ -1,0 +1,49 @@
+{
+  "title": "シンプルモード",
+
+  "input": {
+    "placeholder": "作りたいものを説明してください...",
+    "submitTitle": "送信 (Cmd+Enter)"
+  },
+
+  "history": {
+    "title": "実行履歴",
+    "button": "履歴",
+    "empty": {
+      "title": "実行履歴がありません",
+      "subtitle": "完了したタスクがここに表示されます"
+    },
+    "completed": "完了",
+    "failed": "失敗"
+  },
+
+  "progress": {
+    "overallProgress": "全体の進捗",
+    "batch": "バッチ {{current}} / {{total}}",
+    "strategy": "戦略: {{strategy}}",
+    "executionLog": "実行ログ",
+    "retryAttempt": "リトライ {{count}} 回目"
+  },
+
+  "result": {
+    "completedSuccessfully": "正常に完了しました",
+    "executionFailed": "実行に失敗しました",
+    "storyBreakdown": "ストーリー内訳",
+    "failedStories": "失敗したストーリー ({{count}})",
+    "errorDetails": "エラー詳細"
+  },
+
+  "empty": {
+    "title": "準備完了",
+    "description": "上のボックスにタスクを入力すると、Plan Cascade が自動的にタスクを分解し、計画を作成して段階的に実行します。"
+  },
+
+  "strategies": {
+    "direct": "直接実行",
+    "hybridAuto": "ハイブリッド自動",
+    "megaPlan": "メガプラン",
+    "auto": "自動",
+    "hybrid": "ハイブリッド",
+    "mega": "メガ"
+  }
+}

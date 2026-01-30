@@ -1,0 +1,49 @@
+{
+  "title": "简单模式",
+
+  "input": {
+    "placeholder": "描述你想要构建的内容...",
+    "submitTitle": "提交 (Cmd+Enter)"
+  },
+
+  "history": {
+    "title": "执行历史",
+    "button": "历史",
+    "empty": {
+      "title": "暂无执行历史",
+      "subtitle": "已完成的任务将显示在这里"
+    },
+    "completed": "已完成",
+    "failed": "失败"
+  },
+
+  "progress": {
+    "overallProgress": "总体进度",
+    "batch": "批次 {{current}} / {{total}}",
+    "strategy": "策略: {{strategy}}",
+    "executionLog": "执行日志",
+    "retryAttempt": "第 {{count}} 次重试"
+  },
+
+  "result": {
+    "completedSuccessfully": "执行成功",
+    "executionFailed": "执行失败",
+    "storyBreakdown": "故事分解",
+    "failedStories": "失败的故事 ({{count}})",
+    "errorDetails": "错误详情"
+  },
+
+  "empty": {
+    "title": "准备就绪",
+    "description": "在上方描述你的任务，Plan Cascade 将自动分解任务、创建计划并逐步执行。"
+  },
+
+  "strategies": {
+    "direct": "直接执行",
+    "hybridAuto": "混合自动",
+    "megaPlan": "大型计划",
+    "auto": "自动",
+    "hybrid": "混合",
+    "mega": "大型"
+  }
+}

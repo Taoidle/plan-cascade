@@ -1,0 +1,49 @@
+{
+  "title": "Simple Mode",
+
+  "input": {
+    "placeholder": "Describe what you want to build...",
+    "submitTitle": "Submit (Cmd+Enter)"
+  },
+
+  "history": {
+    "title": "Execution History",
+    "button": "History",
+    "empty": {
+      "title": "No execution history yet",
+      "subtitle": "Your completed tasks will appear here"
+    },
+    "completed": "completed",
+    "failed": "failed"
+  },
+
+  "progress": {
+    "overallProgress": "Overall Progress",
+    "batch": "Batch {{current}} of {{total}}",
+    "strategy": "Strategy: {{strategy}}",
+    "executionLog": "Execution Log",
+    "retryAttempt": "Retry attempt {{count}}"
+  },
+
+  "result": {
+    "completedSuccessfully": "Completed Successfully",
+    "executionFailed": "Execution Failed",
+    "storyBreakdown": "Story Breakdown",
+    "failedStories": "Failed Stories ({{count}})",
+    "errorDetails": "Error Details"
+  },
+
+  "empty": {
+    "title": "Ready to build",
+    "description": "Describe your task above and Plan Cascade will automatically break it down, create a plan, and execute it step by step."
+  },
+
+  "strategies": {
+    "direct": "Direct Execution",
+    "hybridAuto": "Hybrid Auto",
+    "megaPlan": "Mega Plan",
+    "auto": "Auto",
+    "hybrid": "Hybrid",
+    "mega": "Mega"
+  }
+}

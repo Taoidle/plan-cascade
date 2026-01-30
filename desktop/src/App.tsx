@@ -5,6 +5,7 @@
  * Supports Simple, Expert, and Claude Code modes.
  */
 
+import { useTranslation } from 'react-i18next';
 import { ModeSwitch } from './components/ModeSwitch';
 import { SettingsButton } from './components/SettingsButton';
 import { SimpleMode } from './components/SimpleMode';
@@ -16,6 +17,7 @@ import { useExecutionStore } from './store/execution';
 import { clsx } from 'clsx';
 
 export function App() {
+  const { t } = useTranslation();
   const { mode, setMode } = useModeStore();
   const { status } = useExecutionStore();
 
@@ -39,7 +41,7 @@ export function App() {
         <div className="flex items-center gap-3">
           <Logo />
           <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Plan Cascade
+            {t('appName')}
           </h1>
 
           {/* Status Badge */}
@@ -76,8 +78,8 @@ export function App() {
           'shrink-0'
         )}
       >
-        <span>v0.1.0</span>
-        <span>Ready</span>
+        <span>{t('version')}</span>
+        <span>{t('ready')}</span>
       </footer>
     </div>
   );
@@ -125,29 +127,31 @@ interface StatusBadgeProps {
 }
 
 function StatusBadge({ status }: StatusBadgeProps) {
+  const { t } = useTranslation();
+
   const config = {
     running: {
       bg: 'bg-blue-100 dark:bg-blue-900',
       text: 'text-blue-700 dark:text-blue-300',
-      label: 'Running',
+      label: t('status.running'),
       dot: 'bg-blue-500 animate-pulse',
     },
     paused: {
       bg: 'bg-yellow-100 dark:bg-yellow-900',
       text: 'text-yellow-700 dark:text-yellow-300',
-      label: 'Paused',
+      label: t('status.paused'),
       dot: 'bg-yellow-500',
     },
     completed: {
       bg: 'bg-green-100 dark:bg-green-900',
       text: 'text-green-700 dark:text-green-300',
-      label: 'Completed',
+      label: t('status.completed'),
       dot: 'bg-green-500',
     },
     failed: {
       bg: 'bg-red-100 dark:bg-red-900',
       text: 'text-red-700 dark:text-red-300',
-      label: 'Failed',
+      label: t('status.failed'),
       dot: 'bg-red-500',
     },
   }[status] || {

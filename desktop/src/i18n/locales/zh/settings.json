@@ -1,0 +1,161 @@
+{
+  "title": "设置",
+
+  "tabs": {
+    "general": "通用",
+    "llm": "LLM后端",
+    "agents": "代理",
+    "quality": "质量门禁",
+    "phases": "阶段代理",
+    "importExport": "导入/导出"
+  },
+
+  "general": {
+    "title": "通用设置",
+    "description": "配置通用应用程序偏好。",
+
+    "workingMode": {
+      "title": "工作模式",
+      "simple": {
+        "name": "Claude Code GUI 模式",
+        "description": "作为 Claude Code 的图形界面运行。使用 Claude Code 作为执行后端，简化任务输入。"
+      },
+      "expert": {
+        "name": "独立编排模式",
+        "description": "完整的 PRD 生成、多代理协调和高级执行策略。需要配置 LLM API。"
+      }
+    },
+
+    "theme": {
+      "title": "主题",
+      "system": "跟随系统",
+      "light": "浅色",
+      "dark": "深色",
+      "description": "选择你偏好的配色方案。跟随系统将使用操作系统设置。"
+    },
+
+    "language": {
+      "title": "语言",
+      "description": "选择你偏好的语言。"
+    },
+
+    "executionLimits": {
+      "title": "执行限制",
+      "maxParallelStories": "最大并行故事数",
+      "maxIterations": "最大迭代次数",
+      "timeout": "超时时间（秒）"
+    }
+  },
+
+  "llm": {
+    "title": "LLM后端配置",
+    "description": "配置用于代码生成的AI提供商。",
+
+    "backend": {
+      "label": "后端",
+      "claudeCode": "Claude Code（推荐）",
+      "claudeApi": "Claude API",
+      "openai": "OpenAI",
+      "deepseek": "DeepSeek",
+      "ollama": "Ollama（本地）"
+    },
+
+    "provider": {
+      "label": "提供商"
+    },
+
+    "model": {
+      "label": "模型",
+      "placeholder": "选择或输入模型名称"
+    },
+
+    "apiKey": {
+      "label": "API密钥",
+      "placeholder": "输入你的API密钥",
+      "description": "你的API密钥将被安全存储，绝不会被共享。"
+    }
+  },
+
+  "agents": {
+    "title": "代理配置",
+    "description": "配置用于代码生成的执行代理。",
+
+    "name": "代理名称",
+    "command": "命令",
+    "enabled": "启用",
+    "default": "默认",
+    "addAgent": "添加代理",
+    "removeAgent": "移除代理",
+
+    "selection": {
+      "title": "代理选择模式",
+      "smart": "智能选择",
+      "smartDescription": "自动为每个任务选择最佳代理",
+      "preferDefault": "优先默认",
+      "preferDefaultDescription": "除非覆盖，否则使用默认代理",
+      "manual": "手动",
+      "manualDescription": "为每个故事手动选择代理"
+    }
+  },
+
+  "quality": {
+    "title": "质量门禁配置",
+    "description": "配置每个故事完成后运行的质量检查。",
+
+    "typecheck": {
+      "label": "类型检查",
+      "description": "运行TypeScript类型检查"
+    },
+    "test": {
+      "label": "测试",
+      "description": "运行测试套件"
+    },
+    "lint": {
+      "label": "代码检查",
+      "description": "运行代码检查工具"
+    },
+    "custom": {
+      "label": "自定义脚本",
+      "description": "运行自定义验证脚本"
+    },
+    "customScript": {
+      "label": "自定义脚本命令",
+      "placeholder": "npm run validate"
+    },
+    "maxRetries": {
+      "label": "最大重试次数",
+      "description": "质量门禁失败时的最大重试次数"
+    }
+  },
+
+  "phases": {
+    "title": "阶段代理配置",
+    "description": "配置不同执行阶段使用的代理。",
+
+    "planning": "规划阶段",
+    "implementation": "实现阶段",
+    "review": "审查阶段"
+  },
+
+  "importExport": {
+    "title": "导入/导出设置",
+    "description": "备份或恢复你的设置。",
+
+    "export": {
+      "title": "导出设置",
+      "button": "导出",
+      "description": "将当前设置下载为JSON文件。"
+    },
+    "import": {
+      "title": "导入设置",
+      "button": "导入",
+      "description": "上传设置文件以恢复配置。"
+    },
+    "reset": {
+      "title": "重置为默认",
+      "button": "重置",
+      "description": "将所有设置重置为默认值。",
+      "confirm": "确定要将所有设置重置为默认值吗？"
+    }
+  }
+}

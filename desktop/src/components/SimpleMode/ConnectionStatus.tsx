@@ -5,6 +5,7 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import type { ConnectionStatus as ConnectionStatusType } from '../../lib/websocket';
 
 interface ConnectionStatusProps {
@@ -12,31 +13,33 @@ interface ConnectionStatusProps {
 }
 
 export function ConnectionStatus({ status }: ConnectionStatusProps) {
+  const { t } = useTranslation();
+
   const getStatusInfo = () => {
     switch (status) {
       case 'connected':
         return {
           color: 'bg-green-500',
-          text: 'Connected',
+          text: t('connection.connected'),
           textColor: 'text-green-600 dark:text-green-400',
         };
       case 'connecting':
         return {
           color: 'bg-yellow-500 animate-pulse',
-          text: 'Connecting...',
+          text: t('connection.connecting'),
           textColor: 'text-yellow-600 dark:text-yellow-400',
         };
       case 'reconnecting':
         return {
           color: 'bg-yellow-500 animate-pulse',
-          text: 'Reconnecting...',
+          text: t('connection.reconnecting'),
           textColor: 'text-yellow-600 dark:text-yellow-400',
         };
       case 'disconnected':
       default:
         return {
           color: 'bg-red-500',
-          text: 'Disconnected',
+          text: t('connection.disconnected'),
           textColor: 'text-red-600 dark:text-red-400',
         };
     }

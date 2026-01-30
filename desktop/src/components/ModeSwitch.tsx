@@ -8,6 +8,7 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   ChevronDownIcon,
@@ -16,7 +17,7 @@ import {
   MixerHorizontalIcon,
   ChatBubbleIcon,
 } from '@radix-ui/react-icons';
-import { Mode, MODES, MODE_LABELS, MODE_DESCRIPTIONS } from '../store/mode';
+import { Mode, MODES } from '../store/mode';
 
 // Re-export Mode type for backwards compatibility
 export type { Mode };
@@ -34,7 +35,26 @@ const MODE_ICONS: Record<Mode, typeof LightningBoltIcon> = {
 };
 
 export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps) {
+  const { t } = useTranslation();
   const CurrentIcon = MODE_ICONS[mode];
+
+  const getModeLabel = (m: Mode) => {
+    const labels: Record<Mode, string> = {
+      simple: t('modeSwitch.simple.name'),
+      expert: t('modeSwitch.expert.name'),
+      'claude-code': t('modeSwitch.claudeCode.name'),
+    };
+    return labels[m];
+  };
+
+  const getModeDescription = (m: Mode) => {
+    const descriptions: Record<Mode, string> = {
+      simple: t('modeSwitch.simple.description'),
+      expert: t('modeSwitch.expert.description'),
+      'claude-code': t('modeSwitch.claudeCode.description'),
+    };
+    return descriptions[m];
+  };
 
   return (
     <DropdownMenu.Root>
@@ -51,7 +71,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
           )}
         >
           <CurrentIcon className="w-4 h-4" />
-          <span>{MODE_LABELS[mode]}</span>
+          <span>{getModeLabel(mode)}</span>
           <ChevronDownIcon className="w-4 h-4 text-gray-500" />
         </button>
       </DropdownMenu.Trigger>
@@ -71,7 +91,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
           align="end"
         >
           <DropdownMenu.Label className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-            Select Mode
+            {t('modeSwitch.label')}
           </DropdownMenu.Label>
 
           {MODES.map((modeOption) => {
@@ -117,10 +137,10 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
                         : 'text-gray-900 dark:text-white'
                     )}
                   >
-                    {MODE_LABELS[modeOption]}
+                    {getModeLabel(modeOption)}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {MODE_DESCRIPTIONS[modeOption]}
+                    {getModeDescription(modeOption)}
                   </div>
                 </div>
 
@@ -147,6 +167,26 @@ interface ModeTabsProps {
 }
 
 export function ModeTabs({ mode, onChange, disabled = false }: ModeTabsProps) {
+  const { t } = useTranslation();
+
+  const getModeLabel = (m: Mode) => {
+    const labels: Record<Mode, string> = {
+      simple: t('modeSwitch.simple.name'),
+      expert: t('modeSwitch.expert.name'),
+      'claude-code': t('modeSwitch.claudeCode.name'),
+    };
+    return labels[m];
+  };
+
+  const getModeDescription = (m: Mode) => {
+    const descriptions: Record<Mode, string> = {
+      simple: t('modeSwitch.simple.description'),
+      expert: t('modeSwitch.expert.description'),
+      'claude-code': t('modeSwitch.claudeCode.description'),
+    };
+    return descriptions[m];
+  };
+
   return (
     <div
       className={clsx(
@@ -170,10 +210,10 @@ export function ModeTabs({ mode, onChange, disabled = false }: ModeTabsProps) {
                 ? 'bg-white dark:bg-gray-700 text-primary-600 dark:text-primary-400 shadow-sm'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
             )}
-            title={MODE_DESCRIPTIONS[modeOption]}
+            title={getModeDescription(modeOption)}
           >
             <Icon className="w-4 h-4" />
-            <span className="hidden sm:inline">{MODE_LABELS[modeOption]}</span>
+            <span className="hidden sm:inline">{getModeLabel(modeOption)}</span>
           </button>
         );
       })}

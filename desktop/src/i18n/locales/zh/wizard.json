@@ -1,0 +1,80 @@
+{
+  "steps": {
+    "welcome": "欢迎",
+    "mode": "工作模式",
+    "backend": "LLM后端",
+    "agents": "代理",
+    "complete": "完成"
+  },
+
+  "welcome": {
+    "title": "欢迎使用 Plan Cascade",
+    "description": "让我们设置你的开发编排环境。此向导将引导你完成基本配置步骤。"
+  },
+
+  "mode": {
+    "title": "选择工作模式",
+    "description": "选择你想要如何使用 Plan Cascade。",
+    "simple": {
+      "name": "Claude Code GUI 模式",
+      "description": "Claude Code 的简单界面。只需描述任务并让它执行。最适合快速任务和入门使用。"
+    },
+    "expert": {
+      "name": "独立编排模式",
+      "description": "完整的 PRD 生成、多代理协调和执行策略。最适合需要多个代理的复杂项目。"
+    }
+  },
+
+  "backend": {
+    "title": "选择LLM后端",
+    "description": "选择用于代码生成的AI提供商。",
+    "options": {
+      "claudeCode": {
+        "name": "Claude Code（推荐）",
+        "description": "使用你现有的 Claude Code 订阅。无需额外的API密钥。"
+      },
+      "claudeApi": {
+        "name": "Claude API",
+        "description": "直接访问 Anthropic API。需要API密钥。"
+      },
+      "openai": {
+        "name": "OpenAI",
+        "description": "使用 OpenAI GPT 模型。需要API密钥。"
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "description": "DeepSeek 编程模型。需要API密钥。"
+      },
+      "ollama": {
+        "name": "Ollama（本地）",
+        "description": "使用 Ollama 在本地运行模型。无需API密钥。"
+      }
+    },
+    "apiKey": {
+      "label": "API密钥",
+      "placeholder": "输入你的 {{provider}} API密钥",
+      "description": "你的API密钥将被安全存储，绝不会被共享。"
+    }
+  },
+
+  "agents": {
+    "title": "执行代理",
+    "description": "Plan Cascade 可以使用多个AI代理执行不同任务。以下是预配置的代理。",
+    "command": "命令：{{command}}",
+    "default": "默认",
+    "hint": "你可以稍后在设置中添加、删除或配置代理。"
+  },
+
+  "complete": {
+    "title": "全部设置完成！",
+    "description": "Plan Cascade 已配置完成，可以使用了。你随时可以通过点击页头的齿轮图标调整这些设置。"
+  },
+
+  "actions": {
+    "skipSetup": "跳过设置",
+    "back": "返回",
+    "next": "下一步",
+    "getStarted": "开始使用",
+    "finishing": "正在完成..."
+  }
+}

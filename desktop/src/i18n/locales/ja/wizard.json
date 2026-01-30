@@ -1,0 +1,80 @@
+{
+  "steps": {
+    "welcome": "ようこそ",
+    "mode": "動作モード",
+    "backend": "LLMバックエンド",
+    "agents": "エージェント",
+    "complete": "完了"
+  },
+
+  "welcome": {
+    "title": "Plan Cascade へようこそ",
+    "description": "開発オーケストレーション環境をセットアップしましょう。このウィザードが基本的な設定手順をご案内します。"
+  },
+
+  "mode": {
+    "title": "動作モードを選択",
+    "description": "Plan Cascade の使用方法を選択してください。",
+    "simple": {
+      "name": "Claude Code GUIモード",
+      "description": "Claude Code のシンプルなインターフェース。タスクを説明するだけで実行されます。素早いタスクや入門に最適です。"
+    },
+    "expert": {
+      "name": "スタンドアロン編成モード",
+      "description": "完全なPRD生成、マルチエージェント調整、実行戦略。複数のエージェントを必要とする複雑なプロジェクトに最適です。"
+    }
+  },
+
+  "backend": {
+    "title": "LLMバックエンドを選択",
+    "description": "コード生成用のAIプロバイダーを選択してください。",
+    "options": {
+      "claudeCode": {
+        "name": "Claude Code（推奨）",
+        "description": "既存の Claude Code サブスクリプションを使用。追加のAPIキーは不要です。"
+      },
+      "claudeApi": {
+        "name": "Claude API",
+        "description": "Anthropic APIに直接アクセス。APIキーが必要です。"
+      },
+      "openai": {
+        "name": "OpenAI",
+        "description": "OpenAI GPTモデルを使用。APIキーが必要です。"
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "description": "DeepSeekコーディングモデル。APIキーが必要です。"
+      },
+      "ollama": {
+        "name": "Ollama（ローカル）",
+        "description": "Ollamaでモデルをローカル実行。APIキーは不要です。"
+      }
+    },
+    "apiKey": {
+      "label": "APIキー",
+      "placeholder": "{{provider}} のAPIキーを入力",
+      "description": "APIキーは安全に保存され、共有されることはありません。"
+    }
+  },
+
+  "agents": {
+    "title": "実行エージェント",
+    "description": "Plan Cascade は異なるタスクに複数のAIエージェントを使用できます。以下は事前設定されたエージェントです。",
+    "command": "コマンド：{{command}}",
+    "default": "デフォルト",
+    "hint": "エージェントの追加、削除、設定は後で設定から行えます。"
+  },
+
+  "complete": {
+    "title": "準備完了！",
+    "description": "Plan Cascade の設定が完了し、使用できる状態になりました。ヘッダーの歯車アイコンをクリックすれば、いつでもこれらの設定を調整できます。"
+  },
+
+  "actions": {
+    "skipSetup": "セットアップをスキップ",
+    "back": "戻る",
+    "next": "次へ",
+    "getStarted": "始める",
+    "finishing": "完了中..."
+  }
+}

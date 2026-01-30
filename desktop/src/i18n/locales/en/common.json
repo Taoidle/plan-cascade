@@ -1,0 +1,82 @@
+{
+  "appName": "Plan Cascade",
+  "version": "v0.1.0",
+  "ready": "Ready",
+
+  "buttons": {
+    "save": "Save",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "close": "Close",
+    "reset": "Reset",
+    "clear": "Clear",
+    "submit": "Submit",
+    "back": "Back",
+    "next": "Next",
+    "skip": "Skip",
+    "execute": "Execute",
+    "pause": "Pause",
+    "resume": "Resume",
+    "stop": "Cancel",
+    "export": "Export",
+    "startNewTask": "Start New Task",
+    "getStarted": "Get Started"
+  },
+
+  "status": {
+    "idle": "Idle",
+    "running": "Running",
+    "paused": "Paused",
+    "completed": "Completed",
+    "failed": "Failed",
+    "pending": "Pending",
+    "inProgress": "In Progress"
+  },
+
+  "connection": {
+    "connected": "Connected",
+    "connecting": "Connecting...",
+    "reconnecting": "Reconnecting...",
+    "disconnected": "Disconnected"
+  },
+
+  "modeSwitch": {
+    "label": "Select Mode",
+    "simple": {
+      "name": "Simple",
+      "description": "One-click execution with AI-driven automation"
+    },
+    "expert": {
+      "name": "Expert",
+      "description": "Full control over PRD editing, agents, and execution"
+    },
+    "claudeCode": {
+      "name": "Claude Code",
+      "description": "Interactive chat with Claude Code CLI"
+    }
+  },
+
+  "errors": {
+    "generic": "An error occurred",
+    "connectionFailed": "Connection failed",
+    "saveFailed": "Failed to save",
+    "loadFailed": "Failed to load"
+  },
+
+  "time": {
+    "justNow": "Just now",
+    "minutesAgo": "{{count}}m ago",
+    "hoursAgo": "{{count}}h ago",
+    "daysAgo": "{{count}}d ago"
+  },
+
+  "labels": {
+    "stories": "Stories",
+    "duration": "Duration",
+    "successRate": "Success Rate",
+    "status": "Status",
+    "description": "Description",
+    "error": "Error",
+    "retryAttempts": "Retry Attempts"
+  }
+}

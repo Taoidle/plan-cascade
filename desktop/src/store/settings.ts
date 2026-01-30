@@ -6,9 +6,11 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import i18n from '../i18n';
 
 export type Backend = 'claude-code' | 'claude-api' | 'openai' | 'deepseek' | 'ollama';
 export type Theme = 'system' | 'light' | 'dark';
+export type Language = 'en' | 'zh' | 'ja';
 
 interface Agent {
   name: string;
@@ -49,6 +51,7 @@ interface SettingsState {
   // UI settings
   defaultMode: 'simple' | 'expert';
   theme: Theme;
+  language: Language;
 
   // Actions
   setBackend: (backend: Backend) => void;
@@ -56,6 +59,7 @@ interface SettingsState {
   setModel: (model: string) => void;
   setApiKey: (apiKey: string) => void;
   setTheme: (theme: Theme) => void;
+  setLanguage: (language: Language) => void;
   setDefaultMode: (mode: 'simple' | 'expert') => void;
   updateAgent: (name: string, updates: Partial<Agent>) => void;
   updateQualityGates: (updates: Partial<QualityGates>) => void;
@@ -96,6 +100,7 @@ const defaultSettings = {
   // UI
   defaultMode: 'simple' as const,
   theme: 'system' as Theme,
+  language: 'en' as Language,
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -115,6 +120,13 @@ export const useSettingsStore = create<SettingsState>()(
         set({ theme });
         // Apply theme to document
         applyTheme(theme);
+      },
+
+      setLanguage: (language) => {
+        set({ language });
+        // Apply language to i18n
+        i18n.changeLanguage(language);
+        localStorage.setItem('plan-cascade-language', language);
       },
 
       setDefaultMode: (defaultMode) => set({ defaultMode }),
@@ -139,6 +151,10 @@ export const useSettingsStore = create<SettingsState>()(
         // Apply theme on rehydration
         if (state?.theme) {
           applyTheme(state.theme);
+        }
+        // Apply language on rehydration
+        if (state?.language) {
+          i18n.changeLanguage(state.language);
         }
       },
     }

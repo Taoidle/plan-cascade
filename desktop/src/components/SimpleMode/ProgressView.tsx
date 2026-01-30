@@ -6,6 +6,7 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   CheckIcon,
   Cross2Icon,
@@ -17,6 +18,7 @@ import {
 import { useExecutionStore } from '../../store/execution';
 
 export function ProgressView() {
+  const { t } = useTranslation('simpleMode');
   const {
     stories,
     batches,
@@ -34,6 +36,19 @@ export function ProgressView() {
   const isPaused = status === 'paused';
   const totalBatches = batches.length > 0 ? batches[batches.length - 1]?.totalBatches || 1 : 1;
 
+  const formatStrategy = (s: string): string => {
+    switch (s) {
+      case 'direct':
+        return t('strategies.direct');
+      case 'hybrid_auto':
+        return t('strategies.hybridAuto');
+      case 'mega_plan':
+        return t('strategies.megaPlan');
+      default:
+        return s;
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto w-full space-y-6">
       {/* Strategy Badge */}
@@ -47,7 +62,7 @@ export function ProgressView() {
               'animate-fade-in'
             )}
           >
-            Strategy: {formatStrategy(strategy)}
+            {t('progress.strategy', { strategy: formatStrategy(strategy) })}
           </span>
         </div>
       )}
@@ -55,7 +70,7 @@ export function ProgressView() {
       {/* Overall Progress Bar */}
       <div className="space-y-2">
         <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
-          <span>Overall Progress</span>
+          <span>{t('progress.overallProgress')}</span>
           <span>{Math.round(progress)}%</span>
         </div>
         <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
@@ -74,7 +89,7 @@ export function ProgressView() {
       {batches.length > 0 && totalBatches > 1 && (
         <div className="flex items-center justify-center gap-2">
           <span className="text-sm text-gray-600 dark:text-gray-400">
-            Batch {currentBatch} of {totalBatches}
+            {t('progress.batch', { current: currentBatch, total: totalBatches })}
           </span>
           <div className="flex gap-1">
             {Array.from({ length: totalBatches }).map((_, idx) => {
@@ -114,7 +129,7 @@ export function ProgressView() {
             )}
           >
             <PauseIcon className="w-4 h-4" />
-            Pause
+            {t('buttons.pause', { ns: 'common' })}
           </button>
         )}
         {isPaused && (
@@ -128,7 +143,7 @@ export function ProgressView() {
             )}
           >
             <PlayIcon className="w-4 h-4" />
-            Resume
+            {t('buttons.resume', { ns: 'common' })}
           </button>
         )}
         <button
@@ -142,7 +157,7 @@ export function ProgressView() {
           )}
         >
           <StopIcon className="w-4 h-4" />
-          Cancel
+          {t('buttons.stop', { ns: 'common' })}
         </button>
       </div>
 
@@ -162,7 +177,7 @@ export function ProgressView() {
       {logs.length > 0 && (
         <div className="mt-6">
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Execution Log
+            {t('progress.executionLog')}
           </h3>
           <div
             className={clsx(
@@ -201,6 +216,8 @@ interface StoryItemProps {
 }
 
 function StoryItem({ story, isCurrent, index }: StoryItemProps) {
+  const { t } = useTranslation('simpleMode');
+
   const getStatusIcon = () => {
     switch (story.status) {
       case 'completed':
@@ -237,7 +254,7 @@ function StoryItem({ story, isCurrent, index }: StoryItemProps) {
         {/* Retry indicator */}
         {story.retryCount && story.retryCount > 0 && (
           <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-0.5">
-            Retry attempt {story.retryCount}
+            {t('progress.retryAttempt', { count: story.retryCount })}
           </div>
         )}
 
@@ -270,19 +287,6 @@ function StoryItem({ story, isCurrent, index }: StoryItemProps) {
       )}
     </div>
   );
-}
-
-function formatStrategy(strategy: string): string {
-  switch (strategy) {
-    case 'direct':
-      return 'Direct Execution';
-    case 'hybrid_auto':
-      return 'Hybrid Auto';
-    case 'mega_plan':
-      return 'Mega Plan';
-    default:
-      return strategy;
-  }
 }
 
 export default ProgressView;

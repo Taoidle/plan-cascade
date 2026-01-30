@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { InputBox } from './InputBox';
 import { ProgressView } from './ProgressView';
 import { ResultView } from './ResultView';
@@ -20,6 +21,7 @@ import { ConnectionStatus } from './ConnectionStatus';
 import { useExecutionStore } from '../../store/execution';
 
 export function SimpleMode() {
+  const { t } = useTranslation('simpleMode');
   const {
     status,
     connectionStatus,
@@ -70,7 +72,7 @@ export function SimpleMode() {
             showHistory && 'bg-gray-100 dark:bg-gray-800'
           )}
         >
-          History
+          {t('history.button')}
         </button>
       </div>
 
@@ -81,7 +83,7 @@ export function SimpleMode() {
           onChange={setDescription}
           onSubmit={handleStart}
           disabled={isDisabled}
-          placeholder="Describe what you want to build..."
+          placeholder={t('input.placeholder')}
           isLoading={isSubmitting}
         />
 
@@ -115,7 +117,7 @@ export function SimpleMode() {
                       'transition-colors'
                     )}
                   >
-                    Start New Task
+                    {t('buttons.startNewTask', { ns: 'common' })}
                   </button>
                 </div>
               </div>
@@ -128,11 +130,10 @@ export function SimpleMode() {
                   <span role="img" aria-label="rocket">&#128640;</span>
                 </div>
                 <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                  Ready to build
+                  {t('empty.title')}
                 </h2>
                 <p className="text-gray-500 dark:text-gray-400 max-w-md">
-                  Describe your task above and Plan Cascade will automatically
-                  break it down, create a plan, and execute it step by step.
+                  {t('empty.description')}
                 </p>
               </div>
             )}

@@ -1,0 +1,191 @@
+{
+  "title": "エキスパートモード",
+
+  "tabs": {
+    "generate": "生成",
+    "prdEditor": "PRDエディタ",
+    "preview": "プレビュー",
+    "execution": "実行",
+    "logs": "ログ"
+  },
+
+  "generate": {
+    "title": "PRDを生成",
+    "description": "要件を説明すると、構造化されたPRDとストーリーを生成します。",
+    "requirements": {
+      "label": "タスク要件",
+      "placeholder": "作りたいものを詳しく説明してください。機能、要件、制約などを含めてください...",
+      "characters": "{{count}} 文字"
+    },
+    "strategy": {
+      "label": "推奨戦略",
+      "recommended": "推奨",
+      "direct": {
+        "name": "直接",
+        "description": "シンプルな単一ステップのタスク",
+        "details": "シンプルな単一ステップのタスクに最適です。AIは中間ストーリーを作成せずにタスクを即座に実行します。"
+      },
+      "hybridAuto": {
+        "name": "ハイブリッド自動",
+        "description": "依存関係のある複数ステップのタスク",
+        "details": "中規模のタスクに最適です。システムは複数のストーリーを持つPRDを生成し、依存関係の順序で実行します。構造と効率のバランスが取れています。"
+      },
+      "megaPlan": {
+        "name": "メガプラン",
+        "description": "複数の機能を持つ複雑なプロジェクト",
+        "details": "複雑な複数機能プロジェクト向けです。機能、ストーリー、依存関係を含む包括的な計画を作成します。分離のためにGitワークツリーを使用した並列実行を行います。"
+      }
+    },
+    "button": "PRDを生成",
+    "generating": "PRDを生成中...",
+    "hint": "<kbd>Cmd+Enter</kbd> で生成"
+  },
+
+  "prdEditor": {
+    "title": "PRDエディタ",
+    "description": "ドラッグで並べ替え、クリックで展開・編集",
+    "storyCount": "({{count}})"
+  },
+
+  "execution": {
+    "title": "実行進捗",
+    "noExecution": "実行中のタスクはありません",
+    "complete": "完了"
+  },
+
+  "logs": {
+    "title": "実行ログ",
+    "entries": "{{count}} 件",
+    "empty": "ログがありません..."
+  },
+
+  "settings": {
+    "title": "実行設定"
+  },
+
+  "actions": {
+    "resetConfirm": "リセットしますか？すべてのストーリーがクリアされます。",
+    "resetTitle": "PRDをリセット",
+    "reset": "リセット",
+    "execute": "実行",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "confirm": "確認",
+    "delete": "削除"
+  },
+
+  "story": {
+    "title": "ストーリータイトル",
+    "description": "説明",
+    "descriptionOptional": "説明（任意）",
+    "noDescription": "説明なし",
+    "priority": "優先度",
+    "dependencies": "依存関係",
+    "acceptanceCriteria": "受け入れ基準",
+    "agent": "エージェント",
+    "blockedBy": "ブロック元：",
+    "status": {
+      "pending": "保留中",
+      "inProgress": "進行中",
+      "completed": "完了",
+      "failed": "失敗"
+    },
+    "empty": {
+      "title": "ストーリーがありません",
+      "description": "要件からPRDを生成するか、手動でストーリーを追加してください。"
+    },
+    "add": "ストーリーを追加",
+    "enterTitle": "ストーリータイトルを入力...",
+    "enterDescription": "ストーリーの説明を入力..."
+  },
+
+  "qualityGates": {
+    "title": "品質ゲート",
+    "enableAll": "すべて有効",
+    "disableAll": "すべて無効",
+    "typecheck": "型チェック",
+    "test": "テスト",
+    "lint": "リント",
+    "custom": "カスタムスクリプト",
+    "customScript": "カスタムスクリプト",
+    "maxRetries": "最大リトライ回数",
+    "addCustom": "カスタムゲートを追加",
+    "gateName": "ゲート名",
+    "gateNamePlaceholder": "例：ビルドチェック",
+    "command": "コマンド",
+    "commandPlaceholder": "例：npm run build",
+    "addGate": "ゲートを追加",
+    "removeGate": "ゲートを削除"
+  },
+
+  "worktree": {
+    "title": "Git ワークツリー",
+    "enable": "ワークツリー分離を有効化",
+    "description": "各ストーリーを分離されたgitワークツリーで実行",
+    "tooltip": "Gitワークツリーは、ブランチを切り替えずに分離された開発を可能にします。各機能は独自の作業ディレクトリを持ち、競合を防ぎ、並列開発を可能にします。",
+    "branchName": "ブランチ名",
+    "branchPlaceholder": "feature/my-feature",
+    "baseBranch": "ベースブランチ",
+    "suggestFromTitle": "タイトルから提案",
+    "worktreePath": "ワークツリーは以下に作成されます：",
+    "disabledHint": "分離されたGitワークツリーブランチで開発するには有効にしてください",
+    "errors": {
+      "invalidBranchName": "ブランチ名は文字で始まり、文字、数字、ハイフン、アンダースコア、スラッシュのみを含む必要があります",
+      "branchTooLong": "ブランチ名は100文字未満である必要があります"
+    }
+  },
+
+  "agentSelector": {
+    "title": "実行エージェント",
+    "bulkTitle": "デフォルトエージェント",
+    "appliesToAll": "すべてのストーリーに適用",
+    "smart": "スマート選択",
+    "preferDefault": "デフォルト優先",
+    "manual": "手動",
+    "agents": {
+      "claudeCode": {
+        "name": "Claude Code",
+        "description": "Anthropic Claude コードタスク用"
+      },
+      "aider": {
+        "name": "Aider",
+        "description": "Aider AI ペアプログラマー"
+      },
+      "codex": {
+        "name": "Codex",
+        "description": "OpenAI Codex エージェント"
+      }
+    }
+  },
+
+  "strategySelector": {
+    "title": "実行戦略",
+    "storyCount": "{{count}} ストーリー",
+    "storyCountPlural": "{{count}} ストーリー"
+  },
+
+  "draftManager": {
+    "title": "下書き",
+    "save": "保存",
+    "load": "読み込み",
+    "delete": "下書きを削除",
+    "saveDraft": "下書きを保存",
+    "draftName": "下書き名（任意）",
+    "draftNamePlaceholder": "下書き {{date}}",
+    "autoSaved": "自動保存",
+    "savedDrafts": "保存された下書き",
+    "noDrafts": "保存された下書きがありません",
+    "stories": "ストーリー",
+    "saved": "保存済み"
+  },
+
+  "dependencyGraph": {
+    "title": "依存関係グラフ"
+  },
+
+  "dependencyEditor": {
+    "title": "依存関係を編集",
+    "blockedBy": "ブロック元",
+    "blocks": "ブロック先"
+  }
+}

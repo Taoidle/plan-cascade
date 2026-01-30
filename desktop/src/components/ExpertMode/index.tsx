@@ -11,6 +11,7 @@
 
 import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import * as Tabs from '@radix-ui/react-tabs';
 import { useExecutionStore } from '../../store/execution';
 import { usePRDStore } from '../../store/prd';
@@ -40,6 +41,7 @@ try {
 }
 
 export function ExpertMode() {
+  const { t } = useTranslation('expertMode');
   const { status, start, logs } = useExecutionStore();
   const { prd, reset: resetPRD } = usePRDStore();
   const [activeTab, setActiveTab] = useState('generate');
@@ -65,7 +67,7 @@ export function ExpertMode() {
   };
 
   const handleReset = () => {
-    if (confirm('Are you sure you want to reset? This will clear all stories.')) {
+    if (confirm(t('actions.resetConfirm'))) {
       resetPRD();
       setActiveTab('generate');
     }
@@ -84,18 +86,18 @@ export function ExpertMode() {
           'border-b border-gray-200 dark:border-gray-700'
         )}>
           <Tabs.List className="flex gap-1">
-            <TabTrigger value="generate">Generate</TabTrigger>
+            <TabTrigger value="generate">{t('tabs.generate')}</TabTrigger>
             <TabTrigger value="prd" disabled={!hasStories}>
-              PRD Editor {hasStories && `(${prd.stories.length})`}
+              {t('tabs.prdEditor')} {hasStories && t('prdEditor.storyCount', { count: prd.stories.length })}
             </TabTrigger>
             <TabTrigger value="preview" disabled={!hasStories}>
-              Preview
+              {t('tabs.preview')}
             </TabTrigger>
             <TabTrigger value="execution" disabled={status === 'idle'}>
-              Execution
+              {t('tabs.execution')}
             </TabTrigger>
             <TabTrigger value="logs" disabled={logs.length === 0}>
-              Logs
+              {t('tabs.logs')}
             </TabTrigger>
           </Tabs.List>
 
@@ -114,7 +116,7 @@ export function ExpertMode() {
                     'hover:bg-gray-200 dark:hover:bg-gray-600',
                     'transition-colors'
                   )}
-                  title="Settings"
+                  title={t('settings.title')}
                 >
                   <GearIcon className="w-4 h-4" />
                 </button>
@@ -129,10 +131,10 @@ export function ExpertMode() {
                     'disabled:opacity-50 disabled:cursor-not-allowed',
                     'transition-colors'
                   )}
-                  title="Reset PRD"
+                  title={t('actions.resetTitle')}
                 >
                   <ResetIcon className="w-4 h-4" />
-                  Reset
+                  {t('actions.reset')}
                 </button>
                 <button
                   onClick={handleStartExecution}
@@ -146,7 +148,7 @@ export function ExpertMode() {
                   )}
                 >
                   <PlayIcon className="w-4 h-4" />
-                  Execute
+                  {t('actions.execute')}
                 </button>
               </>
             )}
@@ -164,10 +166,10 @@ export function ExpertMode() {
               <div className="max-w-2xl mx-auto">
                 <div className="mb-6">
                   <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                    Generate PRD
+                    {t('generate.title')}
                   </h2>
                   <p className="text-gray-600 dark:text-gray-400">
-                    Describe your requirements and we'll generate a structured PRD with stories.
+                    {t('generate.description')}
                   </p>
                 </div>
                 <PRDGenerationForm />
@@ -179,10 +181,10 @@ export function ExpertMode() {
                 <div className="mb-6 flex items-center justify-between">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">
-                      PRD Editor
+                      {t('prdEditor.title')}
                     </h2>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Drag to reorder, click to expand and edit
+                      {t('prdEditor.description')}
                     </p>
                   </div>
                 </div>
@@ -213,7 +215,7 @@ export function ExpertMode() {
               'bg-gray-50 dark:bg-gray-900'
             )}>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-                Execution Settings
+                {t('settings.title')}
               </h3>
 
               <div className="space-y-6">
@@ -256,12 +258,13 @@ function TabTrigger({ value, children, disabled = false }: TabTriggerProps) {
 }
 
 function ExecutionView() {
+  const { t } = useTranslation('expertMode');
   const { stories, progress, currentStoryId } = useExecutionStore();
 
   if (stories.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
-        No execution in progress
+        {t('execution.noExecution')}
       </div>
     );
   }
@@ -270,7 +273,7 @@ function ExecutionView() {
     <div className="max-w-3xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-          Execution Progress
+          {t('execution.title')}
         </h2>
         <span className="text-2xl font-bold text-primary-600">
           {Math.round(progress)}%
@@ -332,16 +335,17 @@ function ExecutionView() {
 }
 
 function LogsView() {
+  const { t } = useTranslation('expertMode');
   const { logs } = useExecutionStore();
 
   return (
     <div className="h-full flex flex-col">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          Execution Logs
+          {t('logs.title')}
         </h2>
         <span className="text-sm text-gray-500 dark:text-gray-400">
-          {logs.length} entries
+          {t('logs.entries', { count: logs.length })}
         </span>
       </div>
       <div
@@ -352,7 +356,7 @@ function LogsView() {
         )}
       >
         {logs.length === 0 ? (
-          <span className="text-gray-500">No logs yet...</span>
+          <span className="text-gray-500">{t('logs.empty')}</span>
         ) : (
           <pre className="whitespace-pre-wrap">
             {logs.join('\n')}

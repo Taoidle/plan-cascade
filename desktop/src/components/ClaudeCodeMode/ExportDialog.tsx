@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   Cross2Icon,
   DownloadIcon,
@@ -30,6 +31,7 @@ interface ExportDialogProps {
 type ExportFormat = 'json' | 'markdown' | 'html';
 
 export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
+  const { t } = useTranslation('claudeCode');
   const { exportConversation, messages } = useClaudeCodeStore();
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('markdown');
   const [copied, setCopied] = useState(false);
@@ -74,21 +76,21 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
   const formats: { id: ExportFormat; name: string; icon: typeof FileTextIcon; description: string }[] = [
     {
       id: 'json',
-      name: 'JSON',
+      name: t('export.formats.json.name'),
       icon: CodeIcon,
-      description: 'Full data export with all metadata',
+      description: t('export.formats.json.description'),
     },
     {
       id: 'markdown',
-      name: 'Markdown',
+      name: t('export.formats.markdown.name'),
       icon: FileTextIcon,
-      description: 'Formatted text for documentation',
+      description: t('export.formats.markdown.description'),
     },
     {
       id: 'html',
-      name: 'HTML',
+      name: t('export.formats.html.name'),
       icon: FileIcon,
-      description: 'Styled HTML for viewing in browser',
+      description: t('export.formats.html.description'),
     },
   ];
 
@@ -114,7 +116,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
-              Export Conversation
+              {t('export.title')}
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
@@ -131,15 +133,15 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
             {isEmpty ? (
               <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                 <FileTextIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>No messages to export</p>
-                <p className="text-sm mt-1">Start a conversation first</p>
+                <p>{t('export.empty.title')}</p>
+                <p className="text-sm mt-1">{t('export.empty.description')}</p>
               </div>
             ) : (
               <>
                 {/* Format Selection */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                    Export Format
+                    {t('export.formatLabel')}
                   </label>
                   <div className="space-y-2">
                     {formats.map((format) => (
@@ -195,7 +197,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
 
                 {/* Message Count */}
                 <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
-                  <span>Messages to export:</span>
+                  <span>{t('export.messagesCount')}</span>
                   <span className="font-medium text-gray-900 dark:text-white">{messages.length}</span>
                 </div>
               </>
@@ -216,12 +218,12 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                 {copied ? (
                   <>
                     <CheckIcon className="w-4 h-4" />
-                    Copied!
+                    {t('export.copied')}
                   </>
                 ) : (
                   <>
                     <CopyIcon className="w-4 h-4" />
-                    Copy
+                    {t('export.copy')}
                   </>
                 )}
               </button>
@@ -235,12 +237,12 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                 {downloaded ? (
                   <>
                     <CheckIcon className="w-4 h-4" />
-                    Downloaded!
+                    {t('export.downloaded')}
                   </>
                 ) : (
                   <>
                     <DownloadIcon className="w-4 h-4" />
-                    Download
+                    {t('export.download')}
                   </>
                 )}
               </button>
