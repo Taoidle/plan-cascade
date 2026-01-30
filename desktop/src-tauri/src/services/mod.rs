@@ -3,6 +3,8 @@
 //! Business logic services for the application.
 //! Services handle the core functionality and are called by commands.
 
+pub mod streaming;
+
 // Service modules will be added as they are implemented
 // pub mod project;
 // pub mod agent;
