@@ -18,7 +18,8 @@
   "input": {
     "placeholder": "Type a message... (Ctrl+Enter to send)",
     "placeholderDisconnected": "Waiting for connection...",
-    "sendTitle": "Send message (Ctrl+Enter)"
+    "sendTitle": "Send message (Ctrl+Enter)",
+    "attachFile": "Attach file"
   },
 
   "connection": {
@@ -36,10 +37,72 @@
   },
 
   "shortcuts": {
-    "title": "Keyboard shortcuts",
+    "title": "Keyboard Shortcuts",
     "send": "Send message",
     "clear": "Clear chat",
-    "export": "Export conversation"
+    "export": "Export conversation",
+    "cancel": "Cancel/Clear",
+    "editLast": "Edit last message",
+    "commandPalette": "Open command palette"
+  },
+
+  "messageActions": {
+    "copy": "Copy",
+    "copied": "Copied!",
+    "regenerate": "Regenerate",
+    "edit": "Edit",
+    "fork": "Fork conversation",
+    "editHint": "Ctrl+Enter to save, Escape to cancel",
+    "cancel": "Cancel",
+    "saveAndResend": "Save & Resend"
+  },
+
+  "sessionControl": {
+    "stop": "Stop",
+    "pause": "Pause",
+    "resume": "Resume",
+    "retry": "Retry",
+    "states": {
+      "idle": "Ready",
+      "generating": "Generating...",
+      "paused": "Paused",
+      "stopped": "Stopped",
+      "error": "Error"
+    }
+  },
+
+  "commandPalette": {
+    "hint": "Command Palette",
+    "placeholder": "Type a command or search...",
+    "noResults": "No commands found",
+    "recent": "Recent",
+    "allCommands": "All Commands",
+    "navigate": "Navigate",
+    "select": "Select",
+    "close": "Close",
+    "categories": {
+      "chat": "Chat",
+      "navigation": "Navigation",
+      "settings": "Settings",
+      "file": "File",
+      "help": "Help"
+    },
+    "commands": {
+      "clearChat": "Clear Chat",
+      "clearChatDesc": "Clear all messages from the current conversation",
+      "newConversation": "New Conversation",
+      "newConversationDesc": "Start a fresh conversation",
+      "export": "Export Conversation",
+      "exportDesc": "Export the conversation to a file",
+      "toggleSidebar": "Toggle Sidebar",
+      "toggleSidebarDesc": "Show or hide the tool history sidebar",
+      "openSettings": "Open Settings",
+      "openSettingsDesc": "Open application settings",
+      "showShortcuts": "Show Keyboard Shortcuts",
+      "showShortcutsDesc": "Display all available keyboard shortcuts",
+      "focusInput": "Focus Input",
+      "focusInputDesc": "Move focus to the chat input field"
+    }
   },
 
   "sidebar": {

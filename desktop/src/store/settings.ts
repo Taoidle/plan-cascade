@@ -53,6 +53,12 @@ interface SettingsState {
   theme: Theme;
   language: Language;
 
+  // Chat UI settings
+  showLineNumbers: boolean;
+  maxFileAttachmentSize: number; // in bytes
+  enableMarkdownMath: boolean;
+  enableCodeBlockCopy: boolean;
+
   // Actions
   setBackend: (backend: Backend) => void;
   setProvider: (provider: string) => void;
@@ -64,6 +70,12 @@ interface SettingsState {
   updateAgent: (name: string, updates: Partial<Agent>) => void;
   updateQualityGates: (updates: Partial<QualityGates>) => void;
   resetToDefaults: () => void;
+
+  // Chat UI actions
+  setShowLineNumbers: (show: boolean) => void;
+  setMaxFileAttachmentSize: (size: number) => void;
+  setEnableMarkdownMath: (enable: boolean) => void;
+  setEnableCodeBlockCopy: (enable: boolean) => void;
 }
 
 const defaultSettings = {
@@ -101,6 +113,12 @@ const defaultSettings = {
   defaultMode: 'simple' as const,
   theme: 'system' as Theme,
   language: 'en' as Language,
+
+  // Chat UI
+  showLineNumbers: true,
+  maxFileAttachmentSize: 10 * 1024 * 1024, // 10MB
+  enableMarkdownMath: true,
+  enableCodeBlockCopy: true,
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -144,6 +162,11 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       resetToDefaults: () => set(defaultSettings),
+
+      setShowLineNumbers: (showLineNumbers) => set({ showLineNumbers }),
+      setMaxFileAttachmentSize: (maxFileAttachmentSize) => set({ maxFileAttachmentSize }),
+      setEnableMarkdownMath: (enableMarkdownMath) => set({ enableMarkdownMath }),
+      setEnableCodeBlockCopy: (enableCodeBlockCopy) => set({ enableCodeBlockCopy }),
     }),
     {
       name: 'plan-cascade-settings',
