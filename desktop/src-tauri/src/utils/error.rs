@@ -44,6 +44,10 @@ pub enum AppError {
     #[error("Not found: {0}")]
     NotFound(String),
 
+    /// Parse errors
+    #[error("Parse error: {0}")]
+    Parse(String),
+
     /// Generic internal errors
     #[error("Internal error: {0}")]
     Internal(String),
@@ -81,6 +85,11 @@ impl AppError {
     /// Create a not found error
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self::NotFound(msg.into())
+    }
+
+    /// Create a parse error
+    pub fn parse(msg: impl Into<String>) -> Self {
+        Self::Parse(msg.into())
     }
 
     /// Create an internal error

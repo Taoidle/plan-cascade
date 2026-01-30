@@ -85,7 +85,10 @@
   },
 
   "common": {
-    "retry": "Retry"
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "done": "Done",
+    "adding": "Adding..."
   },
 
   "projects": {
@@ -118,5 +121,38 @@
       "toolCall": "Tool Call",
       "toolResult": "Tool Result"
     }
+  },
+
+  "mcp": {
+    "title": "MCP Servers",
+    "description": "Manage Model Context Protocol servers for extended AI capabilities",
+    "refresh": "Refresh",
+    "import": "Import",
+    "addServer": "Add Server",
+    "noServers": "No MCP Servers",
+    "noServersDescription": "Add MCP servers to extend Claude's capabilities with external tools and data",
+    "importFromClaude": "Import from Claude Desktop",
+    "addManually": "Add Manually",
+    "test": "Test",
+    "edit": "Edit",
+    "confirmDelete": "Are you sure you want to delete this server?",
+    "addServerTitle": "Add MCP Server",
+    "serverType": "Server Type",
+    "serverName": "Server Name",
+    "command": "Command",
+    "arguments": "Arguments",
+    "envVariables": "Environment Variables",
+    "addEnvVar": "Add Variable",
+    "serverUrl": "Server URL",
+    "importTitle": "Import from Claude Desktop",
+    "importDescription": "Import MCP server configurations from your Claude Desktop installation",
+    "configPath": "Config Path",
+    "importing": "Importing...",
+    "importNow": "Import Now",
+    "added": "Added",
+    "skipped": "Skipped",
+    "failed": "Failed",
+    "importedServers": "Imported Servers",
+    "importErrors": "Errors"
   }
 }
