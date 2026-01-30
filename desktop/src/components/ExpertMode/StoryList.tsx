@@ -21,11 +21,11 @@ import {
 interface StoryCardProps {
   story: PRDStory;
   index: number;
-  onEdit: (story: PRDStory) => void;
+  onEdit?: (story: PRDStory) => void;
   onDelete: (id: string) => void;
 }
 
-function StoryCard({ story, index, onEdit, onDelete }: StoryCardProps) {
+function StoryCard({ story, index, onDelete }: StoryCardProps) {
   const { updateStory } = usePRDStore();
   const [isEditing, setIsEditing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);

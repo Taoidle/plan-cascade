@@ -536,34 +536,37 @@ function handleWebSocketEvent(
         startedAt: new Date().toISOString(),
       };
 
-      set((state) => ({
-        batches: [...state.batches, batch],
+      const currentBatches = get().batches;
+      set({
+        batches: [...currentBatches, batch],
         currentBatch: data.batch_num as number,
-      }));
+      });
       get().addLog(`Batch ${data.batch_num} of ${data.total_batches} started`);
       break;
     }
 
     case 'batch_completed': {
-      set((state) => ({
-        batches: state.batches.map((b) =>
+      const currentBatches = get().batches;
+      set({
+        batches: currentBatches.map((b: Batch) =>
           b.batchNum === data.batch_num
-            ? { ...b, status: 'completed', completedAt: new Date().toISOString() }
+            ? { ...b, status: 'completed' as const, completedAt: new Date().toISOString() }
             : b
         ),
-      }));
+      });
       get().addLog(`Batch ${data.batch_num} completed`);
       break;
     }
 
     case 'batch_failed': {
-      set((state) => ({
-        batches: state.batches.map((b) =>
+      const currentBatches = get().batches;
+      set({
+        batches: currentBatches.map((b: Batch) =>
           b.batchNum === data.batch_num
-            ? { ...b, status: 'failed', completedAt: new Date().toISOString() }
+            ? { ...b, status: 'failed' as const, completedAt: new Date().toISOString() }
             : b
         ),
-      }));
+      });
       get().addLog(`Batch ${data.batch_num} failed`);
       break;
     }
@@ -576,18 +579,19 @@ function handleWebSocketEvent(
       // Check if story already exists
       const existingStory = get().stories.find((s) => s.id === storyId);
       if (!existingStory) {
-        set((state) => ({
+        const currentStories = get().stories;
+        set({
           stories: [
-            ...state.stories,
+            ...currentStories,
             {
               id: storyId,
               title: title || storyId,
-              status: 'in_progress',
+              status: 'in_progress' as const,
               progress: 0,
               startedAt: new Date().toISOString(),
             },
           ],
-        }));
+        });
       } else {
         get().updateStory(storyId, {
           status: 'in_progress',
@@ -700,7 +704,7 @@ function handleWebSocketEvent(
 
 function syncStateFromServer(
   data: Record<string, unknown>,
-  get: () => ExecutionState,
+  _get: () => ExecutionState,
   set: (partial: Partial<ExecutionState>) => void
 ) {
   const updates: Partial<ExecutionState> = {};

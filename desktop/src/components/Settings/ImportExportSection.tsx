@@ -108,7 +108,7 @@ export function ImportExportSection() {
         throw new Error('Failed to import settings');
       }
 
-      const data = await response.json();
+      await response.json();
 
       // Update frontend store with imported settings
       const { settings } = importPreview as { settings: Record<string, unknown> };

@@ -7,7 +7,7 @@
 
 import { useEffect, useRef } from 'react';
 import { clsx } from 'clsx';
-import { useClaudeCodeStore, Message, ToolCall } from '../../store/claudeCode';
+import { useClaudeCodeStore, Message } from '../../store/claudeCode';
 import { ToolCallCard } from './ToolCallCard';
 
 // ============================================================================
@@ -182,7 +182,6 @@ function MarkdownContent({ content }: MarkdownContentProps) {
   const elements: JSX.Element[] = [];
   let codeBlock: string[] = [];
   let inCodeBlock = false;
-  let codeLanguage = '';
 
   lines.forEach((line, i) => {
     // Code block start/end
@@ -195,10 +194,8 @@ function MarkdownContent({ content }: MarkdownContentProps) {
         );
         codeBlock = [];
         inCodeBlock = false;
-        codeLanguage = '';
       } else {
         inCodeBlock = true;
-        codeLanguage = line.slice(3).trim();
       }
       return;
     }

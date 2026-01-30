@@ -40,7 +40,7 @@ try {
 }
 
 export function ExpertMode() {
-  const { status, start, stories: executionStories, logs } = useExecutionStore();
+  const { status, start, logs } = useExecutionStore();
   const { prd, reset: resetPRD } = usePRDStore();
   const [activeTab, setActiveTab] = useState('generate');
   const [showSettings, setShowSettings] = useState(false);
@@ -256,7 +256,7 @@ function TabTrigger({ value, children, disabled = false }: TabTriggerProps) {
 }
 
 function ExecutionView() {
-  const { stories, status, progress, currentStoryId } = useExecutionStore();
+  const { stories, progress, currentStoryId } = useExecutionStore();
 
   if (stories.length === 0) {
     return (

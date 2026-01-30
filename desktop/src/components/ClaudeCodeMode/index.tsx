@@ -8,7 +8,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { clsx } from 'clsx';
 import {
-  SidebarIcon,
+  ViewVerticalIcon,
   TrashIcon,
   DownloadIcon,
   ReloadIcon,
@@ -116,7 +116,7 @@ export function ClaudeCodeMode() {
             )}
             title="Toggle tool history (Ctrl+B)"
           >
-            <SidebarIcon className="w-4 h-4" />
+            <ViewVerticalIcon className="w-4 h-4" />
           </button>
 
           {/* More actions dropdown */}

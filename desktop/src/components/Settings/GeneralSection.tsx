@@ -4,7 +4,6 @@
  * General settings including working mode and UI preferences.
  */
 
-import * as Switch from '@radix-ui/react-switch';
 import { clsx } from 'clsx';
 import { useSettingsStore } from '../../store/settings';
 

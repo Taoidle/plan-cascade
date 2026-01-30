@@ -4,9 +4,9 @@
  * Configure agent assignments for different execution phases.
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { clsx } from 'clsx';
-import { ChevronDownIcon, PlusIcon, Cross2Icon } from '@radix-ui/react-icons';
+import { ChevronDownIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { useSettingsStore } from '../../store/settings';
 
 interface PhaseConfig {

@@ -32,7 +32,6 @@ export function QualityGates() {
   const [customCommand, setCustomCommand] = useState('');
 
   const allEnabled = prd.qualityGates.every((g) => g.enabled);
-  const someEnabled = prd.qualityGates.some((g) => g.enabled);
 
   const handleToggleAll = () => {
     const newState = !allEnabled;

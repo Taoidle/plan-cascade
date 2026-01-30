@@ -10,7 +10,7 @@ import { clsx } from 'clsx';
 import {
   FileTextIcon,
   Pencil1Icon,
-  TerminalIcon,
+  CodeIcon,
   MagnifyingGlassIcon,
   FileIcon,
   CheckCircledIcon,
@@ -505,13 +505,13 @@ function WebToolContent({ toolCall }: ToolCallContentProps) {
   return (
     <div className="p-3 space-y-3">
       {/* Parameters */}
-      {toolCall.parameters.url && (
+      {!!toolCall.parameters.url && (
         <div className="space-y-1">
           <Label>URL</Label>
           <CodeBlock>{toolCall.parameters.url as string}</CodeBlock>
         </div>
       )}
-      {toolCall.parameters.query && (
+      {!!toolCall.parameters.query && (
         <div className="space-y-1">
           <Label>Query</Label>
           <CodeBlock>{toolCall.parameters.query as string}</CodeBlock>
@@ -664,7 +664,7 @@ function getToolConfig(name: ToolType) {
       };
     case 'Bash':
       return {
-        Icon: TerminalIcon,
+        Icon: CodeIcon,
         iconBg: 'bg-purple-100 dark:bg-purple-900/50',
         iconColor: 'text-purple-600 dark:text-purple-400',
       };

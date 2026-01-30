@@ -10,7 +10,7 @@ import { clsx } from 'clsx';
 import { usePRDStore } from '../../store/prd';
 import * as Switch from '@radix-ui/react-switch';
 import {
-  GitBranchIcon,
+  Share1Icon,
   InfoCircledIcon,
   ExclamationTriangleIcon,
 } from '@radix-ui/react-icons';
@@ -129,7 +129,7 @@ export function WorktreeToggle() {
               )}
             </div>
             <div className="relative">
-              <GitBranchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Share1Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
                 value={worktree.branchName}

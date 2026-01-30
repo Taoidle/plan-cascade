@@ -10,7 +10,7 @@ import { clsx } from 'clsx';
 import {
   FileTextIcon,
   Pencil1Icon,
-  TerminalIcon,
+  CodeIcon,
   MagnifyingGlassIcon,
   FileIcon,
   CheckCircledIcon,
@@ -294,7 +294,7 @@ function getToolConfig(name: ToolType | 'all') {
       };
     case 'Bash':
       return {
-        Icon: TerminalIcon,
+        Icon: CodeIcon,
         iconBg: 'bg-purple-100 dark:bg-purple-900/50',
         iconColor: 'text-purple-600 dark:text-purple-400',
       };

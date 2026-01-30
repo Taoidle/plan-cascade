@@ -123,7 +123,7 @@ export function DependencyEditor({ story }: DependencyEditorProps) {
                 )}
                 sideOffset={5}
               >
-                {availableStories.map((s, index) => (
+                {availableStories.map((s) => (
                   <DropdownMenu.Item
                     key={s.id}
                     onClick={() => handleAddDependency(s.id)}

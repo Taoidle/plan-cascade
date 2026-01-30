@@ -5,8 +5,7 @@
  * Shows nodes for each story with arrows indicating dependencies.
  */
 
-import { useMemo, useRef, useEffect, useState } from 'react';
-import { clsx } from 'clsx';
+import { useMemo, useRef, useState } from 'react';
 import { usePRDStore, PRDStory, StoryStatus } from '../../store/prd';
 
 interface NodePosition {
@@ -97,7 +96,7 @@ export function DependencyGraph() {
     const nodeMap = new Map<string, NodePosition>();
 
     let maxLayerWidth = 0;
-    layers.forEach((layer, layerIndex) => {
+    layers.forEach((layer) => {
       maxLayerWidth = Math.max(maxLayerWidth, layer.length);
     });
 

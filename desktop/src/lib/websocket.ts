@@ -53,6 +53,12 @@ export type ServerEventType =
   | 'prd_updated'
   // Log events
   | 'log_entry'
+  // Claude Code events
+  | 'claude_code_response'
+  | 'claude_code_complete'
+  | 'claude_code_tool_call'
+  | 'claude_code_tool_result'
+  | 'claude_code_error'
   // Connection events
   | 'connected'
   | 'ping'
