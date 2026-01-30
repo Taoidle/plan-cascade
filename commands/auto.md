@@ -245,6 +245,20 @@ Then invoke:
 **Detected**: "platform" + 4 modules listed -> MEGA_PLAN
 **Action**: Route to `/plan-cascade:mega-plan`
 
+## Recovery
+
+If execution is interrupted at any point:
+
+```bash
+# Universal resume - auto-detects which strategy was used and resumes
+/plan-cascade:resume
+```
+
+This will:
+- Auto-detect whether it was mega-plan, hybrid-worktree, or hybrid-auto
+- Route to the appropriate resume command
+- Continue from where execution stopped
+
 ## Notes
 
 - Strategy selection is fully automatic - no user confirmation required

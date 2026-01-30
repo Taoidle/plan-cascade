@@ -1,6 +1,6 @@
 {
   "name": "plan-cascade",
-  "version": "4.1.3",
+  "version": "4.1.4",
   "description": "Three-layer cascaded parallel development framework with multi-agent collaboration. Breaks down projects into Features (Mega Plan), Features into Stories (Hybrid Ralph), with dependency-driven batch execution, Git Worktree isolation, and support for multiple AI agents (Codex, Amp, Aider, etc.).",
   "author": {
     "name": "Taoidle",
