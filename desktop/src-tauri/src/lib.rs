@@ -29,6 +29,9 @@ pub use commands::{
     // MCP commands
     list_mcp_servers, add_mcp_server, update_mcp_server, remove_mcp_server,
     test_mcp_server, toggle_mcp_server, import_from_claude_desktop,
+    // Standalone LLM commands
+    list_providers, configure_provider, check_provider_health,
+    execute_standalone, get_usage_stats,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;
