@@ -33,6 +33,9 @@ pub use commands::{
     start_chat, send_message, cancel_execution, get_session_history,
     list_active_sessions, remove_session, get_session_info,
     ClaudeCodeState,
+    // Standalone LLM commands
+    list_providers, configure_provider, check_provider_health,
+    execute_standalone, get_usage_stats,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;

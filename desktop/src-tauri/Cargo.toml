@@ -29,9 +29,10 @@ serde_json = "1"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
 
 # HTTP client (kept for future external API calls, not for sidecar)
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 
 # WebSocket (for future use)
 futures-util = "0.3"
@@ -47,6 +48,18 @@ keyring = "3"
 
 # Error handling
 thiserror = "2"
+
+# Async trait support
+async-trait = "0.1"
+
+# UUID generation
+uuid = { version = "1", features = ["v4"] }
+
+# Glob pattern matching
+glob = "0.3"
+
+# Regex for grep
+regex = "1"
 
 # Cross-platform directories
 dirs = "6"
