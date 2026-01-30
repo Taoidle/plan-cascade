@@ -42,6 +42,14 @@ pub use commands::{
     switch_branch, delete_branch, rename_branch, get_checkpoint_diff, get_diff_from_current,
     // Markdown commands
     scan_claude_md, read_claude_md, save_claude_md, create_claude_md, get_claude_md_metadata,
+    // Analytics commands
+    AnalyticsState, init_analytics, track_usage, get_tracking_session, set_tracking_session,
+    get_usage_statistics, list_usage_records, count_usage_records,
+    aggregate_by_model, aggregate_by_project, get_time_series, get_dashboard_summary,
+    get_summary_statistics, calculate_usage_cost, get_model_pricing, list_model_pricing,
+    set_custom_pricing, remove_custom_pricing, export_usage, export_by_model,
+    export_by_project, export_time_series, export_pricing, delete_usage_records,
+    check_analytics_health,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;

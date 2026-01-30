@@ -1,0 +1,87 @@
+{
+  "title": "使用状況分析",
+  "subtitle": "API使用量とコストを追跡",
+  "export": "エクスポート",
+  "retry": "再試行",
+  "tabs": {
+    "overview": "概要",
+    "details": "詳細レコード"
+  },
+  "cards": {
+    "totalCost": "合計コスト",
+    "totalTokens": "合計トークン",
+    "totalRequests": "合計リクエスト",
+    "avgCostPerRequest": "平均コスト/リクエスト"
+  },
+  "periods": {
+    "last7days": "過去7日間",
+    "last30days": "過去30日間",
+    "last90days": "過去90日間",
+    "custom": "カスタム範囲"
+  },
+  "aggregation": {
+    "hourly": "時間別",
+    "daily": "日別",
+    "weekly": "週別",
+    "monthly": "月別"
+  },
+  "customRange": {
+    "title": "日付範囲を選択",
+    "startDate": "開始日",
+    "endDate": "終了日",
+    "cancel": "キャンセル",
+    "apply": "適用"
+  },
+  "charts": {
+    "costOverTime": "時系列コスト",
+    "tokenBreakdown": "モデル別使用量",
+    "noData": "この期間のデータがありません"
+  },
+  "tooltip": {
+    "cost": "コスト",
+    "tokens": "トークン",
+    "requests": "リクエスト"
+  },
+  "legend": {
+    "cost": "コスト"
+  },
+  "breakdown": {
+    "byModel": "モデル別",
+    "byProject": "プロジェクト別",
+    "total": "合計",
+    "noData": "データがありません",
+    "noProjectData": "プロジェクトデータがありません"
+  },
+  "tables": {
+    "topModels": "コスト上位モデル"
+  },
+  "table": {
+    "title": "使用レコード",
+    "timestamp": "タイムスタンプ",
+    "model": "モデル",
+    "provider": "プロバイダー",
+    "inputTokens": "入力",
+    "outputTokens": "出力",
+    "cost": "コスト",
+    "session": "セッション",
+    "noRecords": "使用レコードが見つかりません",
+    "showing": "表示中",
+    "records": "件",
+    "previous": "前へ",
+    "next": "次へ"
+  },
+  "exportDialog": {
+    "title": "使用データをエクスポート",
+    "exportType": "エクスポートタイプ",
+    "types": {
+      "all": "全レコード",
+      "byModel": "モデル別集計",
+      "byProject": "プロジェクト別集計"
+    },
+    "format": "フォーマット",
+    "includeSummary": "サマリー統計を含める",
+    "cancel": "キャンセル",
+    "export": "エクスポート",
+    "exporting": "エクスポート中..."
+  }
+}

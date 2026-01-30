@@ -57,6 +57,10 @@
     "projects": {
       "name": "Projects",
       "description": "Browse and resume Claude Code sessions"
+    },
+    "analytics": {
+      "name": "Analytics",
+      "description": "Track usage, costs, and API analytics"
     }
   },
 

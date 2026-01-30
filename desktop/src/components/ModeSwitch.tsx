@@ -17,6 +17,7 @@ import {
   MixerHorizontalIcon,
   ChatBubbleIcon,
   FileIcon,
+  BarChartIcon,
 } from '@radix-ui/react-icons';
 import { Mode, MODES } from '../store/mode';
 
@@ -34,6 +35,7 @@ const MODE_ICONS: Record<Mode, typeof LightningBoltIcon> = {
   expert: MixerHorizontalIcon,
   'claude-code': ChatBubbleIcon,
   projects: FileIcon,
+  analytics: BarChartIcon,
 };
 
 export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps) {
@@ -46,6 +48,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
       expert: t('modeSwitch.expert.name'),
       'claude-code': t('modeSwitch.claudeCode.name'),
       projects: t('modeSwitch.projects.name'),
+      analytics: t('modeSwitch.analytics.name'),
     };
     return labels[m];
   };
@@ -56,6 +59,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
       expert: t('modeSwitch.expert.description'),
       'claude-code': t('modeSwitch.claudeCode.description'),
       projects: t('modeSwitch.projects.description'),
+      analytics: t('modeSwitch.analytics.description'),
     };
     return descriptions[m];
   };
@@ -179,6 +183,7 @@ export function ModeTabs({ mode, onChange, disabled = false }: ModeTabsProps) {
       expert: t('modeSwitch.expert.name'),
       'claude-code': t('modeSwitch.claudeCode.name'),
       projects: t('modeSwitch.projects.name'),
+      analytics: t('modeSwitch.analytics.name'),
     };
     return labels[m];
   };
@@ -189,6 +194,7 @@ export function ModeTabs({ mode, onChange, disabled = false }: ModeTabsProps) {
       expert: t('modeSwitch.expert.description'),
       'claude-code': t('modeSwitch.claudeCode.description'),
       projects: t('modeSwitch.projects.description'),
+      analytics: t('modeSwitch.analytics.description'),
     };
     return descriptions[m];
   };

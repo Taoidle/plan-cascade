@@ -15,6 +15,7 @@ import enExpertMode from './locales/en/expertMode.json';
 import enClaudeCode from './locales/en/claudeCode.json';
 import enSettings from './locales/en/settings.json';
 import enWizard from './locales/en/wizard.json';
+import enAnalytics from './locales/en/analytics.json';
 
 // Chinese translations
 import zhCommon from './locales/zh/common.json';
@@ -23,6 +24,7 @@ import zhExpertMode from './locales/zh/expertMode.json';
 import zhClaudeCode from './locales/zh/claudeCode.json';
 import zhSettings from './locales/zh/settings.json';
 import zhWizard from './locales/zh/wizard.json';
+import zhAnalytics from './locales/zh/analytics.json';
 
 // Japanese translations
 import jaCommon from './locales/ja/common.json';
@@ -31,6 +33,7 @@ import jaExpertMode from './locales/ja/expertMode.json';
 import jaClaudeCode from './locales/ja/claudeCode.json';
 import jaSettings from './locales/ja/settings.json';
 import jaWizard from './locales/ja/wizard.json';
+import jaAnalytics from './locales/ja/analytics.json';
 
 export const resources = {
   en: {
@@ -40,6 +43,7 @@ export const resources = {
     claudeCode: enClaudeCode,
     settings: enSettings,
     wizard: enWizard,
+    analytics: enAnalytics,
   },
   zh: {
     common: zhCommon,
@@ -48,6 +52,7 @@ export const resources = {
     claudeCode: zhClaudeCode,
     settings: zhSettings,
     wizard: zhWizard,
+    analytics: zhAnalytics,
   },
   ja: {
     common: jaCommon,
@@ -56,6 +61,7 @@ export const resources = {
     claudeCode: jaClaudeCode,
     settings: jaSettings,
     wizard: jaWizard,
+    analytics: jaAnalytics,
   },
 } as const;
 
@@ -75,7 +81,7 @@ i18n
     resources,
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard'],
+    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics'],
     interpolation: {
       escapeValue: false, // React already handles escaping
     },

@@ -12,6 +12,7 @@ import { SimpleMode } from './components/SimpleMode';
 import { ExpertMode } from './components/ExpertMode';
 import { ClaudeCodeMode } from './components/ClaudeCodeMode';
 import { Projects } from './components/Projects';
+import { Dashboard } from './components/Analytics';
 import { SetupWizard } from './components/Settings';
 import { useModeStore } from './store/mode';
 import { useExecutionStore } from './store/execution';
@@ -68,6 +69,7 @@ export function App() {
         {mode === 'expert' && <ExpertMode />}
         {mode === 'claude-code' && <ClaudeCodeMode />}
         {mode === 'projects' && <Projects />}
+        {mode === 'analytics' && <Dashboard />}
       </main>
 
       {/* Footer (optional status bar) */}

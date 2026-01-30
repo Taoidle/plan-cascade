@@ -53,6 +53,14 @@
     "claudeCode": {
       "name": "Claude Code",
       "description": "Claude Code CLIとの対話式チャット"
+    },
+    "projects": {
+      "name": "プロジェクト",
+      "description": "Claude Codeセッションの閲覧と再開"
+    },
+    "analytics": {
+      "name": "アナリティクス",
+      "description": "使用量、コスト、API分析の追跡"
     }
   },
 

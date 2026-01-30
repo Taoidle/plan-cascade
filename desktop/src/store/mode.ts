@@ -8,10 +8,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type Mode = 'simple' | 'expert' | 'claude-code' | 'projects';
+export type Mode = 'simple' | 'expert' | 'claude-code' | 'projects' | 'analytics';
 
 /** All available modes in order */
-export const MODES: Mode[] = ['simple', 'expert', 'claude-code', 'projects'];
+export const MODES: Mode[] = ['simple', 'expert', 'claude-code', 'projects', 'analytics'];
 
 /** Mode display names */
 export const MODE_LABELS: Record<Mode, string> = {
@@ -19,6 +19,7 @@ export const MODE_LABELS: Record<Mode, string> = {
   expert: 'Expert',
   'claude-code': 'Claude Code',
   projects: 'Projects',
+  analytics: 'Analytics',
 };
 
 /** Mode descriptions */
@@ -27,6 +28,7 @@ export const MODE_DESCRIPTIONS: Record<Mode, string> = {
   expert: 'Full control over PRD editing, agents, and execution',
   'claude-code': 'Interactive chat with Claude Code CLI',
   projects: 'Browse and resume Claude Code sessions',
+  analytics: 'Track usage, costs, and API analytics',
 };
 
 interface ModeState {

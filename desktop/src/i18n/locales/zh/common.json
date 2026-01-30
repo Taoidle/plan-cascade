@@ -53,6 +53,14 @@
     "claudeCode": {
       "name": "Claude Code",
       "description": "与Claude Code CLI交互式对话"
+    },
+    "projects": {
+      "name": "项目",
+      "description": "浏览和恢复Claude Code会话"
+    },
+    "analytics": {
+      "name": "分析",
+      "description": "追踪使用量、成本和API分析"
     }
   },
 

@@ -4,6 +4,7 @@
 
 use plan_cascade_desktop::state::AppState;
 use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
+use plan_cascade_desktop::commands::analytics::AnalyticsState;
 
 use tauri::Manager;
 
@@ -12,6 +13,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::new())
         .manage(ClaudeCodeState::new())
+        .manage(AnalyticsState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -67,6 +69,31 @@ fn main() {
             plan_cascade_desktop::commands::markdown::save_claude_md,
             plan_cascade_desktop::commands::markdown::create_claude_md,
             plan_cascade_desktop::commands::markdown::get_claude_md_metadata,
+            // Analytics commands
+            plan_cascade_desktop::commands::analytics::init_analytics,
+            plan_cascade_desktop::commands::analytics::track_usage,
+            plan_cascade_desktop::commands::analytics::get_tracking_session,
+            plan_cascade_desktop::commands::analytics::set_tracking_session,
+            plan_cascade_desktop::commands::analytics::get_usage_statistics,
+            plan_cascade_desktop::commands::analytics::list_usage_records,
+            plan_cascade_desktop::commands::analytics::count_usage_records,
+            plan_cascade_desktop::commands::analytics::aggregate_by_model,
+            plan_cascade_desktop::commands::analytics::aggregate_by_project,
+            plan_cascade_desktop::commands::analytics::get_time_series,
+            plan_cascade_desktop::commands::analytics::get_dashboard_summary,
+            plan_cascade_desktop::commands::analytics::get_summary_statistics,
+            plan_cascade_desktop::commands::analytics::calculate_usage_cost,
+            plan_cascade_desktop::commands::analytics::get_model_pricing,
+            plan_cascade_desktop::commands::analytics::list_model_pricing,
+            plan_cascade_desktop::commands::analytics::set_custom_pricing,
+            plan_cascade_desktop::commands::analytics::remove_custom_pricing,
+            plan_cascade_desktop::commands::analytics::export_usage,
+            plan_cascade_desktop::commands::analytics::export_by_model,
+            plan_cascade_desktop::commands::analytics::export_by_project,
+            plan_cascade_desktop::commands::analytics::export_time_series,
+            plan_cascade_desktop::commands::analytics::export_pricing,
+            plan_cascade_desktop::commands::analytics::delete_usage_records,
+            plan_cascade_desktop::commands::analytics::check_analytics_health,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

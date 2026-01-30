@@ -1,0 +1,87 @@
+{
+  "title": "使用分析",
+  "subtitle": "跟踪您的API使用情况和成本",
+  "export": "导出",
+  "retry": "重试",
+  "tabs": {
+    "overview": "概览",
+    "details": "详细记录"
+  },
+  "cards": {
+    "totalCost": "总成本",
+    "totalTokens": "总令牌数",
+    "totalRequests": "总请求数",
+    "avgCostPerRequest": "平均成本/请求"
+  },
+  "periods": {
+    "last7days": "过去7天",
+    "last30days": "过去30天",
+    "last90days": "过去90天",
+    "custom": "自定义范围"
+  },
+  "aggregation": {
+    "hourly": "按小时",
+    "daily": "按天",
+    "weekly": "按周",
+    "monthly": "按月"
+  },
+  "customRange": {
+    "title": "选择日期范围",
+    "startDate": "开始日期",
+    "endDate": "结束日期",
+    "cancel": "取消",
+    "apply": "应用"
+  },
+  "charts": {
+    "costOverTime": "成本趋势",
+    "tokenBreakdown": "模型使用分布",
+    "noData": "该时段无数据"
+  },
+  "tooltip": {
+    "cost": "成本",
+    "tokens": "令牌",
+    "requests": "请求"
+  },
+  "legend": {
+    "cost": "成本"
+  },
+  "breakdown": {
+    "byModel": "按模型",
+    "byProject": "按项目",
+    "total": "总计",
+    "noData": "无数据",
+    "noProjectData": "无项目数据"
+  },
+  "tables": {
+    "topModels": "成本最高的模型"
+  },
+  "table": {
+    "title": "使用记录",
+    "timestamp": "时间戳",
+    "model": "模型",
+    "provider": "提供商",
+    "inputTokens": "输入",
+    "outputTokens": "输出",
+    "cost": "成本",
+    "session": "会话",
+    "noRecords": "未找到使用记录",
+    "showing": "显示",
+    "records": "条记录",
+    "previous": "上一页",
+    "next": "下一页"
+  },
+  "exportDialog": {
+    "title": "导出使用数据",
+    "exportType": "导出类型",
+    "types": {
+      "all": "所有记录",
+      "byModel": "按模型汇总",
+      "byProject": "按项目汇总"
+    },
+    "format": "格式",
+    "includeSummary": "包含统计摘要",
+    "cancel": "取消",
+    "export": "导出",
+    "exporting": "导出中..."
+  }
+}

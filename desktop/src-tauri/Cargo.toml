@@ -76,6 +76,9 @@ sha2 = "0.10"
 # Diff calculation
 similar = "2"
 
+# Logging
+tracing = "0.1"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

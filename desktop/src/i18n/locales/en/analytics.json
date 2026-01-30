@@ -1,0 +1,87 @@
+{
+  "title": "Usage Analytics",
+  "subtitle": "Track your API usage and costs",
+  "export": "Export",
+  "retry": "Retry",
+  "tabs": {
+    "overview": "Overview",
+    "details": "Detailed Records"
+  },
+  "cards": {
+    "totalCost": "Total Cost",
+    "totalTokens": "Total Tokens",
+    "totalRequests": "Total Requests",
+    "avgCostPerRequest": "Avg Cost/Request"
+  },
+  "periods": {
+    "last7days": "Last 7 Days",
+    "last30days": "Last 30 Days",
+    "last90days": "Last 90 Days",
+    "custom": "Custom Range"
+  },
+  "aggregation": {
+    "hourly": "Hourly",
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "monthly": "Monthly"
+  },
+  "customRange": {
+    "title": "Select Date Range",
+    "startDate": "Start Date",
+    "endDate": "End Date",
+    "cancel": "Cancel",
+    "apply": "Apply"
+  },
+  "charts": {
+    "costOverTime": "Cost Over Time",
+    "tokenBreakdown": "Usage by Model",
+    "noData": "No data available for this period"
+  },
+  "tooltip": {
+    "cost": "Cost",
+    "tokens": "Tokens",
+    "requests": "Requests"
+  },
+  "legend": {
+    "cost": "Cost"
+  },
+  "breakdown": {
+    "byModel": "By Model",
+    "byProject": "By Project",
+    "total": "Total",
+    "noData": "No data available",
+    "noProjectData": "No project data available"
+  },
+  "tables": {
+    "topModels": "Top Models by Cost"
+  },
+  "table": {
+    "title": "Usage Records",
+    "timestamp": "Timestamp",
+    "model": "Model",
+    "provider": "Provider",
+    "inputTokens": "Input",
+    "outputTokens": "Output",
+    "cost": "Cost",
+    "session": "Session",
+    "noRecords": "No usage records found",
+    "showing": "Showing",
+    "records": "records",
+    "previous": "Previous",
+    "next": "Next"
+  },
+  "exportDialog": {
+    "title": "Export Usage Data",
+    "exportType": "Export Type",
+    "types": {
+      "all": "All Records",
+      "byModel": "Aggregated by Model",
+      "byProject": "Aggregated by Project"
+    },
+    "format": "Format",
+    "includeSummary": "Include summary statistics",
+    "cancel": "Cancel",
+    "export": "Export",
+    "exporting": "Exporting..."
+  }
+}
