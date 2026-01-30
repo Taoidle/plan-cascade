@@ -25,7 +25,7 @@ export function AgentCard({
   onDelete,
   isSelected = false,
 }: AgentCardProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation(['agents', 'common']);
   const { stats } = agent;
 
   return (
@@ -77,7 +77,7 @@ export function AgentCard({
         {/* Tools Count */}
         {agent.allowed_tools.length > 0 && (
           <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-            {agent.allowed_tools.length} {t('agents.tools', { count: agent.allowed_tools.length })}
+            {agent.allowed_tools.length} {t('tools', { count: agent.allowed_tools.length })}
           </span>
         )}
       </div>
@@ -91,7 +91,7 @@ export function AgentCard({
 
       {/* Stats Row */}
       <div className="flex items-center gap-4 mb-3 text-xs text-gray-500 dark:text-gray-400">
-        <span>{stats.total_runs} {t('agents.runs', { count: stats.total_runs })}</span>
+        <span>{stats.total_runs} {t('runs', { count: stats.total_runs })}</span>
         {stats.avg_duration_ms > 0 && (
           <span className="flex items-center gap-1">
             <ClockIcon className="w-3 h-3" />
@@ -100,7 +100,7 @@ export function AgentCard({
         )}
         {stats.last_run_at && (
           <span className="truncate">
-            {t('agents.lastRun')}: {new Date(stats.last_run_at).toLocaleDateString()}
+            {t('lastRun')}: {new Date(stats.last_run_at).toLocaleDateString()}
           </span>
         )}
       </div>
@@ -121,7 +121,7 @@ export function AgentCard({
           )}
         >
           <PlayIcon className="w-3 h-3" />
-          <span>{t('agents.run')}</span>
+          <span>{t('run')}</span>
         </button>
 
         <button
@@ -138,7 +138,7 @@ export function AgentCard({
           )}
         >
           <Pencil1Icon className="w-3 h-3" />
-          <span>{t('agents.edit')}</span>
+          <span>{t('edit')}</span>
         </button>
 
         <button

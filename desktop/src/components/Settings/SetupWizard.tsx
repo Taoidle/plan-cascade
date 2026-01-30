@@ -86,19 +86,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
     setIsSaving(true);
 
     try {
-      // Save API key if provided and backend requires it
-      if (apiKey && needsApiKey(backend)) {
-        await fetch('http://127.0.0.1:8765/api/settings/api-key', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            provider: getProviderFromBackend(backend),
-            api_key: apiKey,
-          }),
-        });
-      }
-
-      // Save settings
+      // Save settings to Tauri backend and localStorage
       await saveSettings();
 
       markComplete();
@@ -118,23 +106,31 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
   const saveSettings = async () => {
     const settings = useSettingsStore.getState();
 
-    const payload = {
-      backend: settings.backend,
-      provider: settings.provider,
-      default_mode: settings.defaultMode,
-      agents: settings.agents.map((a) => ({
-        name: a.name,
-        enabled: a.enabled,
-        command: a.command,
-        is_default: a.isDefault,
-      })),
-    };
+    // Try to save to Tauri backend
+    try {
+      const { updateSettings, isTauriAvailable } = await import('../../lib/settingsApi');
 
-    await fetch('http://127.0.0.1:8765/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+      if (isTauriAvailable()) {
+        await updateSettings({
+          theme: settings.theme,
+          default_provider: settings.provider,
+          default_model: settings.model,
+        });
+      }
+    } catch (error) {
+      console.warn('Tauri settings save failed:', error);
+    }
+
+    // Always save to localStorage as backup
+    localStorage.setItem(
+      'plan-cascade-settings',
+      JSON.stringify({
+        backend: settings.backend,
+        provider: settings.provider,
+        defaultMode: settings.defaultMode,
+        theme: settings.theme,
+      })
+    );
   };
 
   return (
@@ -583,10 +579,6 @@ function CompleteStep() {
 }
 
 // Helper functions
-
-function needsApiKey(backend: Backend): boolean {
-  return backend === 'claude-api' || backend === 'openai' || backend === 'deepseek';
-}
 
 function getProviderFromBackend(backend: Backend): string {
   switch (backend) {

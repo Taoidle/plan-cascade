@@ -30,16 +30,29 @@ export function ImportExportSection() {
     setMessage(null);
 
     try {
-      // Fetch settings from backend to get the complete config
-      const response = await fetch('http://127.0.0.1:8765/api/settings/export');
-      if (!response.ok) {
-        throw new Error('Failed to export settings');
-      }
-
-      const data = await response.json();
+      // Export settings from store (v5.0 - Pure Rust backend)
+      const settings = useSettingsStore.getState();
+      const exportData = {
+        version: '5.0',
+        exported_at: new Date().toISOString(),
+        settings: {
+          backend: settings.backend,
+          provider: settings.provider,
+          model: settings.model,
+          theme: settings.theme,
+          default_mode: settings.defaultMode,
+          agents: settings.agents,
+          quality_gates: settings.qualityGates,
+          agent_selection: settings.agentSelection,
+          default_agent: settings.defaultAgent,
+          max_parallel_stories: settings.maxParallelStories,
+          max_iterations: settings.maxIterations,
+          timeout_seconds: settings.timeoutSeconds,
+        },
+      };
 
       // Create blob and download
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -98,19 +111,7 @@ export function ImportExportSection() {
     setMessage(null);
 
     try {
-      const response = await fetch('http://127.0.0.1:8765/api/settings/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(importPreview),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to import settings');
-      }
-
-      await response.json();
-
-      // Update frontend store with imported settings
+      // Update frontend store with imported settings (v5.0 - Pure Rust backend)
       const { settings } = importPreview as { settings: Record<string, unknown> };
       syncSettingsToStore(settings);
 
@@ -129,15 +130,7 @@ export function ImportExportSection() {
     setMessage(null);
 
     try {
-      const response = await fetch('http://127.0.0.1:8765/api/settings/reset', {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to reset settings');
-      }
-
-      // Reset frontend store
+      // Reset frontend store (v5.0 - Pure Rust backend)
       useSettingsStore.getState().resetToDefaults();
 
       setMessage({ type: 'success', text: 'Settings reset to defaults' });

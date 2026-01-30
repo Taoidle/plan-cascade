@@ -26,6 +26,7 @@ import zhClaudeCode from './locales/zh/claudeCode.json';
 import zhSettings from './locales/zh/settings.json';
 import zhWizard from './locales/zh/wizard.json';
 import zhAnalytics from './locales/zh/analytics.json';
+import zhAgents from './locales/zh/agents.json';
 
 // Japanese translations
 import jaCommon from './locales/ja/common.json';
@@ -35,6 +36,7 @@ import jaClaudeCode from './locales/ja/claudeCode.json';
 import jaSettings from './locales/ja/settings.json';
 import jaWizard from './locales/ja/wizard.json';
 import jaAnalytics from './locales/ja/analytics.json';
+import jaAgents from './locales/ja/agents.json';
 
 export const resources = {
   en: {
@@ -55,6 +57,7 @@ export const resources = {
     settings: zhSettings,
     wizard: zhWizard,
     analytics: zhAnalytics,
+    agents: zhAgents,
   },
   ja: {
     common: jaCommon,
@@ -64,6 +67,7 @@ export const resources = {
     settings: jaSettings,
     wizard: jaWizard,
     analytics: jaAnalytics,
+    agents: jaAgents,
   },
 } as const;
 

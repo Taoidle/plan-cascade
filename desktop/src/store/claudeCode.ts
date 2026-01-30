@@ -1,13 +1,24 @@
 /**
- * Claude Code Store
+ * Claude Code Store (v5.0 Pure Rust Backend)
  *
  * Manages the Claude Code mode state including messages, tool calls,
  * connection status, and conversation history.
+ *
+ * Uses Tauri IPC instead of WebSocket for communication with Rust backend.
  */
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { getWebSocketManager, initWebSocket, ConnectionStatus } from '../lib/websocket';
+import {
+  getClaudeCodeClient,
+  initClaudeCodeClient,
+  closeClaudeCodeClient,
+  type ConnectionStatus,
+  type StreamEventPayload,
+  type ToolUpdateEvent,
+  type SessionUpdateEvent,
+  type UnifiedStreamEvent,
+} from '../lib/claudeCodeClient';
 
 // ============================================================================
 // Types
@@ -89,6 +100,7 @@ export interface Message {
   references?: FileReference[];
   parentId?: string; // For conversation branching
   branchId?: string; // Branch identifier
+  thinkingContent?: string; // Extended thinking content
 }
 
 export interface Conversation {
@@ -116,6 +128,9 @@ interface ClaudeCodeState {
   /** Current streaming message content */
   streamingContent: string;
 
+  /** Current thinking content (extended thinking) */
+  thinkingContent: string;
+
   /** Active tool calls being executed */
   activeToolCalls: ToolCall[];
 
@@ -127,6 +142,9 @@ interface ClaudeCodeState {
 
   /** Active conversation ID */
   activeConversationId: string | null;
+
+  /** Current session ID (from Rust backend) */
+  currentSessionId: string | null;
 
   /** Is sending a message */
   isSending: boolean;
@@ -147,11 +165,11 @@ interface ClaudeCodeState {
   workspaceFiles: FileReference[];
 
   // Actions
-  /** Initialize WebSocket connection */
-  initialize: () => void;
+  /** Initialize Tauri event listeners */
+  initialize: (projectPath?: string) => Promise<void>;
 
-  /** Cleanup WebSocket connection */
-  cleanup: () => void;
+  /** Cleanup event listeners */
+  cleanup: () => Promise<void>;
 
   /** Send a user message */
   sendMessage: (content: string) => Promise<void>;
@@ -161,6 +179,9 @@ interface ClaudeCodeState {
 
   /** Update streaming content */
   updateStreamingContent: (content: string) => void;
+
+  /** Update thinking content */
+  updateThinkingContent: (content: string) => void;
 
   /** Complete streaming */
   completeStreaming: () => void;
@@ -228,6 +249,34 @@ function parseToolType(name: string): ToolType {
   return found || 'Unknown';
 }
 
+function parseStreamEvent(event: UnifiedStreamEvent): { type: string; data: Record<string, unknown> } {
+  if ('TextDelta' in event) {
+    return { type: 'text_delta', data: { content: event.TextDelta.content } };
+  }
+  if ('ThinkingDelta' in event) {
+    return { type: 'thinking_delta', data: { content: event.ThinkingDelta.content } };
+  }
+  if ('ToolUse' in event) {
+    return { type: 'tool_use', data: event.ToolUse };
+  }
+  if ('ToolResult' in event) {
+    return { type: 'tool_result', data: event.ToolResult };
+  }
+  if ('InputTokens' in event) {
+    return { type: 'input_tokens', data: { count: event.InputTokens.count } };
+  }
+  if ('OutputTokens' in event) {
+    return { type: 'output_tokens', data: { count: event.OutputTokens.count } };
+  }
+  if ('Error' in event) {
+    return { type: 'error', data: { message: event.Error.message } };
+  }
+  if ('Done' in event) {
+    return { type: 'done', data: {} };
+  }
+  return { type: 'unknown', data: {} };
+}
+
 // ============================================================================
 // Store Implementation
 // ============================================================================
@@ -241,10 +290,12 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
       connectionStatus: 'disconnected',
       isStreaming: false,
       streamingContent: '',
+      thinkingContent: '',
       activeToolCalls: [],
       toolCallHistory: [],
       conversations: [],
       activeConversationId: null,
+      currentSessionId: null,
       isSending: false,
       error: null,
       toolFilter: 'all',
@@ -252,110 +303,182 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
       bufferedContent: [],
       workspaceFiles: [],
 
-      initialize: () => {
-        const wsManager = initWebSocket();
+      initialize: async (projectPath?: string) => {
+        try {
+          const client = await initClaudeCodeClient();
 
-        // Subscribe to connection status changes
-        wsManager.onStatusChange((status) => {
-          set({ connectionStatus: status });
-        });
+          // Subscribe to connection status changes
+          client.onStatusChange((status) => {
+            set({ connectionStatus: status });
+          });
 
-        // Subscribe to Claude Code specific events
-        wsManager.on('claude_code_response', (data) => {
-          const content = data.content as string;
-          if (data.streaming) {
-            set((state) => {
-              // If paused, buffer the content instead of appending
-              if (state.sessionState === 'paused') {
-                return {
-                  bufferedContent: [...state.bufferedContent, content],
-                  isStreaming: true,
-                  sessionState: 'paused',
-                };
+          // Subscribe to stream events
+          await client.onStreamEvent((payload: StreamEventPayload) => {
+            const { event, session_id } = payload;
+            const state = get();
+
+            // Only process events for current session
+            if (state.currentSessionId && state.currentSessionId !== session_id) {
+              return;
+            }
+
+            const parsed = parseStreamEvent(event);
+
+            switch (parsed.type) {
+              case 'text_delta': {
+                const content = parsed.data.content as string;
+                set((state) => {
+                  if (state.sessionState === 'paused') {
+                    return {
+                      bufferedContent: [...state.bufferedContent, content],
+                      isStreaming: true,
+                      sessionState: 'paused',
+                    };
+                  }
+                  return {
+                    streamingContent: state.streamingContent + content,
+                    isStreaming: true,
+                    sessionState: 'generating',
+                  };
+                });
+                break;
               }
-              return {
-                streamingContent: state.streamingContent + content,
-                isStreaming: true,
-                sessionState: 'generating',
+              case 'thinking_delta': {
+                const content = parsed.data.content as string;
+                set((state) => ({
+                  thinkingContent: state.thinkingContent + content,
+                }));
+                break;
+              }
+              case 'error': {
+                set({
+                  error: parsed.data.message as string || 'An error occurred',
+                  isStreaming: false,
+                  isSending: false,
+                  sessionState: 'idle',
+                });
+                break;
+              }
+              case 'done': {
+                const { completeStreaming, addMessage } = get();
+                const content = get().streamingContent;
+                const thinking = get().thinkingContent;
+
+                completeStreaming();
+
+                if (content || thinking) {
+                  const assistantMessage: Message = {
+                    id: generateId(),
+                    role: 'assistant',
+                    content,
+                    timestamp: new Date().toISOString(),
+                    toolCalls: get().activeToolCalls,
+                    thinkingContent: thinking || undefined,
+                  };
+
+                  addMessage(assistantMessage);
+                }
+
+                set({
+                  activeToolCalls: [],
+                  isSending: false,
+                  sessionState: 'idle',
+                  thinkingContent: '',
+                });
+                break;
+              }
+            }
+          });
+
+          // Subscribe to tool events
+          await client.onToolEvent((payload: ToolUpdateEvent) => {
+            const { execution, update_type, session_id } = payload;
+            const state = get();
+
+            if (state.currentSessionId && state.currentSessionId !== session_id) {
+              return;
+            }
+
+            if (update_type === 'started') {
+              const toolCall: ToolCall = {
+                id: execution.id,
+                name: parseToolType(execution.tool_name),
+                parameters: execution.input as ToolCallParameters,
+                status: 'executing',
+                startedAt: execution.started_at,
               };
-            });
+              get().addToolCall(toolCall);
+            } else if (update_type === 'completed') {
+              get().updateToolCall(execution.id, {
+                result: {
+                  success: execution.success ?? false,
+                  output: execution.output ?? undefined,
+                },
+                status: execution.success ? 'completed' : 'failed',
+                completedAt: execution.completed_at ?? new Date().toISOString(),
+              });
+            }
+          });
+
+          // Subscribe to session events
+          await client.onSessionEvent((payload: SessionUpdateEvent) => {
+            const { session, update_type } = payload;
+
+            if (update_type === 'state_changed') {
+              if (session.state === 'error') {
+                set({
+                  error: session.error_message || 'Session error',
+                  isStreaming: false,
+                  isSending: false,
+                  sessionState: 'idle',
+                });
+              } else if (session.state === 'cancelled') {
+                set({
+                  isStreaming: false,
+                  isSending: false,
+                  sessionState: 'stopped',
+                });
+              }
+            }
+          });
+
+          // Start a chat session if project path is provided
+          if (projectPath) {
+            try {
+              const response = await client.startChat({ project_path: projectPath });
+              set({ currentSessionId: response.session_id });
+            } catch (err) {
+              console.error('Failed to start chat session:', err);
+            }
           }
-        });
-
-        wsManager.on('claude_code_complete', (data) => {
-          const { completeStreaming, addMessage } = get();
-          const content = data.content as string || get().streamingContent;
-
-          completeStreaming();
-
-          const assistantMessage: Message = {
-            id: generateId(),
-            role: 'assistant',
-            content,
-            timestamp: new Date().toISOString(),
-            toolCalls: get().activeToolCalls,
-          };
-
-          addMessage(assistantMessage);
+        } catch (err) {
+          console.error('Failed to initialize Claude Code client:', err);
           set({
-            activeToolCalls: [],
-            isSending: false,
+            connectionStatus: 'disconnected',
+            error: err instanceof Error ? err.message : 'Failed to connect',
           });
-        });
-
-        wsManager.on('claude_code_tool_call', (data) => {
-          const toolCall: ToolCall = {
-            id: data.id as string || generateId(),
-            name: parseToolType(data.name as string),
-            parameters: data.parameters as ToolCallParameters,
-            status: 'executing',
-            startedAt: new Date().toISOString(),
-          };
-
-          get().addToolCall(toolCall);
-        });
-
-        wsManager.on('claude_code_tool_result', (data) => {
-          const id = data.id as string;
-          const result: ToolCallResult = {
-            success: data.success as boolean,
-            output: data.output as string,
-            error: data.error as string,
-            files: data.files as string[],
-            content: data.content as string,
-            matches: data.matches as Array<{ file: string; line: number; content: string }>,
-          };
-
-          get().updateToolCall(id, {
-            result,
-            status: result.success ? 'completed' : 'failed',
-            completedAt: new Date().toISOString(),
-          });
-        });
-
-        wsManager.on('claude_code_error', (data) => {
-          set({
-            error: data.message as string || 'An error occurred',
-            isStreaming: false,
-            isSending: false,
-          });
-        });
+        }
       },
 
-      cleanup: () => {
-        const wsManager = getWebSocketManager();
-        wsManager.disconnect();
+      cleanup: async () => {
+        await closeClaudeCodeClient();
+        set({ connectionStatus: 'disconnected', currentSessionId: null });
       },
 
       sendMessage: async (content: string) => {
-        const { addMessage, connectionStatus } = get();
+        const { connectionStatus, currentSessionId } = get();
 
         if (connectionStatus !== 'connected') {
           set({ error: 'Not connected to Claude Code backend' });
           return;
         }
 
-        set({ isSending: true, error: null, streamingContent: '' });
+        if (!currentSessionId) {
+          set({ error: 'No active session' });
+          return;
+        }
+
+        set({ isSending: true, error: null, streamingContent: '', thinkingContent: '' });
 
         // Add user message
         const userMessage: Message = {
@@ -365,17 +488,18 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
           timestamp: new Date().toISOString(),
         };
 
-        addMessage(userMessage);
+        get().addMessage(userMessage);
 
-        // Send to backend via WebSocket
-        const wsManager = getWebSocketManager();
-        wsManager.send({
-          type: 'claude_code_message',
-          data: {
-            content,
-            conversation_id: get().activeConversationId,
-          },
-        });
+        // Send to backend via Tauri IPC
+        try {
+          const client = getClaudeCodeClient();
+          await client.sendMessage(currentSessionId, content);
+        } catch (err) {
+          set({
+            error: err instanceof Error ? err.message : 'Failed to send message',
+            isSending: false,
+          });
+        }
       },
 
       addMessage: (message: Message) => {
@@ -386,6 +510,10 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
 
       updateStreamingContent: (content: string) => {
         set({ streamingContent: content });
+      },
+
+      updateThinkingContent: (content: string) => {
+        set({ thinkingContent: content });
       },
 
       completeStreaming: () => {
@@ -419,6 +547,7 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
           toolCallHistory: [],
           activeToolCalls: [],
           streamingContent: '',
+          thinkingContent: '',
           isStreaming: false,
           error: null,
           activeConversationId: null,
@@ -481,6 +610,7 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
           toolCallHistory,
           activeToolCalls: [],
           streamingContent: '',
+          thinkingContent: '',
           isStreaming: false,
           error: null,
         });
@@ -499,16 +629,21 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
       },
 
       cancelRequest: async () => {
-        const wsManager = getWebSocketManager();
-        wsManager.send({
-          type: 'claude_code_cancel',
-          data: {},
-        });
+        const { currentSessionId } = get();
+        if (!currentSessionId) return;
+
+        try {
+          const client = getClaudeCodeClient();
+          await client.cancelExecution(currentSessionId);
+        } catch (err) {
+          console.error('Failed to cancel execution:', err);
+        }
 
         set({
           isStreaming: false,
           isSending: false,
           streamingContent: '',
+          sessionState: 'stopped',
         });
       },
 
@@ -539,6 +674,11 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
             const roleLabel = msg.role === 'user' ? 'User' : 'Claude';
             md += `## ${roleLabel}\n\n`;
             md += `${msg.content}\n\n`;
+
+            if (msg.thinkingContent) {
+              md += '### Thinking\n\n';
+              md += `> ${msg.thinkingContent.replace(/\n/g, '\n> ')}\n\n`;
+            }
 
             if (msg.toolCalls && msg.toolCalls.length > 0) {
               md += '### Tool Calls\n\n';
@@ -571,7 +711,8 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
     .user { background: #e3f2fd; }
     .assistant { background: #f5f5f5; }
     .role { font-weight: bold; margin-bottom: 10px; }
-    .tool-call { background: #fff3e0; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: monospace; font-size: 12px; }
+    .thinking { background: #fff3e0; padding: 10px; margin: 10px 0; border-radius: 4px; font-style: italic; }
+    .tool-call { background: #e8f5e9; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: monospace; font-size: 12px; }
     pre { background: #263238; color: #fff; padding: 10px; border-radius: 4px; overflow-x: auto; }
   </style>
 </head>
@@ -587,6 +728,13 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
     <div class="role">${roleLabel}</div>
     <div class="content">${msg.content.replace(/\n/g, '<br>')}</div>
 `;
+
+            if (msg.thinkingContent) {
+              html += `    <div class="thinking">
+      <strong>Thinking:</strong><br>
+      ${msg.thinkingContent.replace(/\n/g, '<br>')}
+    </div>\n`;
+            }
 
             if (msg.toolCalls && msg.toolCalls.length > 0) {
               html += '    <div class="tool-calls">\n';
@@ -676,5 +824,8 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
     }
   )
 );
+
+// Re-export ConnectionStatus for backwards compatibility
+export type { ConnectionStatus };
 
 export default useClaudeCodeStore;

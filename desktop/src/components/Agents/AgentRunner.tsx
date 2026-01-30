@@ -23,7 +23,7 @@ interface AgentRunnerProps {
 }
 
 export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation(['agents', 'common']);
   const { runAgent, loading } = useAgentsStore();
 
   const [input, setInput] = useState('');
@@ -62,7 +62,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
 
     if (run) {
       setCurrentRun(run);
-      setOutput(run.output || t('agents.runPending'));
+      setOutput(run.output || t('runPending'));
     }
 
     setIsRunning(false);
@@ -98,7 +98,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
           <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
             <div>
               <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
-                {t('agents.runAgent')}: {agent.name}
+                {t('runAgent')}: {agent.name}
               </Dialog.Title>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                 {agent.model}
@@ -107,7 +107,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
             <Dialog.Close asChild>
               <button
                 className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
-                aria-label={t('common.close')}
+                aria-label={t('common:close')}
               >
                 <Cross2Icon className="w-5 h-5" />
               </button>
@@ -117,14 +117,14 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
           {/* Input Area */}
           <div className="p-4 border-b border-gray-200 dark:border-gray-700">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              {t('agents.input')}
+              {t('input')}
             </label>
             <div className="relative">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={t('agents.inputPlaceholder')}
+                placeholder={t('inputPlaceholder')}
                 rows={4}
                 disabled={isRunning}
                 className={clsx(
@@ -140,7 +140,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
             </div>
             <div className="flex items-center justify-between mt-2">
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t('agents.runShortcut')}
+                {t('runShortcut')}
               </p>
               <div className="flex items-center gap-2">
                 {isRunning ? (
@@ -155,7 +155,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
                     )}
                   >
                     <StopIcon className="w-4 h-4" />
-                    {t('common.cancel')}
+                    {t('common:cancel')}
                   </button>
                 ) : (
                   <button
@@ -170,7 +170,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
                     )}
                   >
                     <PlayIcon className="w-4 h-4" />
-                    {t('agents.run')}
+                    {t('run')}
                   </button>
                 )}
               </div>
@@ -181,7 +181,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
           <div className="flex-1 flex flex-col min-h-0 p-4">
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {t('agents.output')}
+                {t('output')}
               </label>
               {currentRun && (
                 <div className="flex items-center gap-2">
@@ -215,13 +215,13 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
               {isRunning ? (
                 <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
                   <ReloadIcon className="w-4 h-4 animate-spin" />
-                  {t('agents.running')}
+                  {t('running')}
                 </div>
               ) : output ? (
                 <div className="text-gray-900 dark:text-white">{output}</div>
               ) : (
                 <div className="text-gray-400 dark:text-gray-500 italic">
-                  {t('agents.outputPlaceholder')}
+                  {t('outputPlaceholder')}
                 </div>
               )}
             </div>
@@ -230,10 +230,10 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
             {currentRun && (currentRun.input_tokens || currentRun.output_tokens) && (
               <div className="flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400">
                 <span>
-                  {t('agents.inputTokens')}: {currentRun.input_tokens?.toLocaleString() || 0}
+                  {t('inputTokens')}: {currentRun.input_tokens?.toLocaleString() || 0}
                 </span>
                 <span>
-                  {t('agents.outputTokens')}: {currentRun.output_tokens?.toLocaleString() || 0}
+                  {t('outputTokens')}: {currentRun.output_tokens?.toLocaleString() || 0}
                 </span>
               </div>
             )}

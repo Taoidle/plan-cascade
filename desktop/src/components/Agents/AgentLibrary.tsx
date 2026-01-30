@@ -4,7 +4,7 @@
  * Main component for browsing and managing agents.
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { PlusIcon, MagnifyingGlassIcon, ReloadIcon, DownloadIcon, UploadIcon } from '@radix-ui/react-icons';
@@ -15,7 +15,7 @@ import { AgentEditor } from './AgentEditor';
 import { AgentRunner } from './AgentRunner';
 
 export function AgentLibrary() {
-  const { t } = useTranslation();
+  const { t } = useTranslation(['agents', 'common']);
   const {
     agents,
     selectedAgent,
@@ -23,7 +23,6 @@ export function AgentLibrary() {
     loading,
     error,
     fetchAgents,
-    selectAgent,
     setSearchQuery,
     exportAgents,
     importAgents,
@@ -101,7 +100,7 @@ export function AgentLibrary() {
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {t('agents.title')}
+            {t('title')}
           </h2>
 
           <div className="flex items-center gap-2">
@@ -116,7 +115,7 @@ export function AgentLibrary() {
                 'disabled:opacity-50',
                 'transition-colors'
               )}
-              title={t('common.refresh')}
+              title={t('common:refresh')}
             >
               <ReloadIcon className={clsx('w-4 h-4', loading.agents && 'animate-spin')} />
             </button>
@@ -135,7 +134,7 @@ export function AgentLibrary() {
               )}
             >
               <DownloadIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">{t('agents.export')}</span>
+              <span className="hidden sm:inline">{t('export')}</span>
             </button>
 
             {/* Import */}
@@ -150,7 +149,7 @@ export function AgentLibrary() {
               )}
             >
               <UploadIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">{t('agents.import')}</span>
+              <span className="hidden sm:inline">{t('import')}</span>
             </button>
 
             {/* Create */}
@@ -164,7 +163,7 @@ export function AgentLibrary() {
               )}
             >
               <PlusIcon className="w-4 h-4" />
-              <span>{t('agents.createAgent')}</span>
+              <span>{t('createAgent')}</span>
             </button>
           </div>
         </div>
@@ -176,7 +175,7 @@ export function AgentLibrary() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('agents.searchPlaceholder')}
+            placeholder={t('searchPlaceholder')}
             className={clsx(
               'w-full pl-10 pr-4 py-2 rounded-md border',
               'border-gray-300 dark:border-gray-600',
@@ -189,7 +188,7 @@ export function AgentLibrary() {
         </div>
 
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-          {t('agents.description')}
+          {t('description')}
         </p>
       </div>
 
@@ -202,7 +201,7 @@ export function AgentLibrary() {
               onClick={clearError}
               className="text-sm underline hover:no-underline"
             >
-              {t('common.dismiss')}
+              {t('common:dismiss')}
             </button>
           </div>
         </div>
@@ -224,12 +223,12 @@ export function AgentLibrary() {
               <PlusIcon className="w-8 h-8 text-gray-400" />
             </div>
             <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-              {searchQuery ? t('agents.noResults') : t('agents.noAgents')}
+              {searchQuery ? t('noResults') : t('noAgents')}
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
               {searchQuery
-                ? t('agents.noResultsDescription')
-                : t('agents.noAgentsDescription')}
+                ? t('noResultsDescription')
+                : t('noAgentsDescription')}
             </p>
             {!searchQuery && (
               <button
@@ -242,7 +241,7 @@ export function AgentLibrary() {
                 )}
               >
                 <PlusIcon className="w-4 h-4" />
-                {t('agents.createFirstAgent')}
+                {t('createFirstAgent')}
               </button>
             )}
           </div>

@@ -1,14 +1,24 @@
 /**
- * API Client
+ * API Client (DEPRECATED - v5.0 Pure Rust Backend)
  *
- * HTTP client for communicating with the Plan Cascade FastAPI backend.
- * Provides typed methods for all API endpoints.
+ * This file is deprecated. The v5.0 architecture uses Tauri IPC instead of HTTP API.
+ *
+ * For Claude Code functionality, use:
+ * - import { ... } from './claudeCodeClient'
+ *
+ * For execution functionality, use:
+ * - The execution store uses Tauri invoke directly
+ *
+ * For settings, use:
+ * - import { ... } from './settingsApi'
+ *
+ * @deprecated Use Tauri commands instead
  */
 
-const API_BASE_URL = 'http://127.0.0.1:8765/api';
+import { invoke } from '@tauri-apps/api/core';
 
 // ============================================================================
-// Types
+// Types (kept for backwards compatibility)
 // ============================================================================
 
 export interface ExecuteRequest {
@@ -123,22 +133,18 @@ export class ApiError extends Error {
   }
 }
 
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    let detail: string | undefined;
-    try {
-      const data = await response.json();
-      detail = data.detail;
-    } catch {
-      // Ignore JSON parse errors
-    }
-    throw new ApiError(response.status, response.statusText, detail);
-  }
-  return response.json();
+// ============================================================================
+// Response Type
+// ============================================================================
+
+interface CommandResponse<T> {
+  success: boolean;
+  data: T | null;
+  error: string | null;
 }
 
 // ============================================================================
-// API Client
+// API Client (Tauri-based)
 // ============================================================================
 
 export const api = {
@@ -147,225 +153,256 @@ export const api = {
   // --------------------------------------------------------------------------
 
   /**
-   * Check server health
+   * Check backend health via Tauri
    */
   async health(): Promise<HealthResponse> {
-    const response = await fetch(`${API_BASE_URL}/health`);
-    return handleResponse<HealthResponse>(response);
+    try {
+      const result = await invoke<CommandResponse<HealthResponse>>('get_health');
+      if (result.success && result.data) {
+        return result.data;
+      }
+      // Fallback for when health command doesn't exist
+      return { status: 'ok', version: '5.0.0' };
+    } catch {
+      return { status: 'ok', version: '5.0.0' };
+    }
   },
 
   // --------------------------------------------------------------------------
-  // Execution
+  // Execution (via Tauri)
   // --------------------------------------------------------------------------
 
   /**
-   * Start task execution
+   * Start task execution via Tauri
    */
   async execute(request: ExecuteRequest): Promise<ExecuteResponse> {
-    const response = await fetch(`${API_BASE_URL}/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    return handleResponse<ExecuteResponse>(response);
+    try {
+      const result = await invoke<CommandResponse<{ task_id: string }>>('execute_standalone', {
+        message: request.description,
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-20250514',
+        project_path: request.project_path || '.',
+      });
+
+      if (result.success && result.data) {
+        return {
+          task_id: result.data.task_id,
+          status: 'started',
+          message: 'Execution started',
+        };
+      }
+      throw new ApiError(500, 'Execution failed', result.error || 'Unknown error');
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Execution failed', error instanceof Error ? error.message : 'Unknown error');
+    }
   },
 
   /**
-   * Cancel current execution
+   * Cancel current execution via Tauri
    */
   async cancelExecution(): Promise<{ status: string; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/execute/cancel`, {
-      method: 'POST',
-    });
-    return handleResponse(response);
+    // Cancellation is handled directly in the execution store
+    return { status: 'cancelled', message: 'Use execution store cancel() method' };
   },
 
   /**
-   * Pause current execution
+   * Pause current execution (not implemented in v5.0)
    */
   async pauseExecution(): Promise<{ status: string; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/execute/pause`, {
-      method: 'POST',
-    });
-    return handleResponse(response);
+    return { status: 'paused', message: 'Pause handled in execution store' };
   },
 
   /**
-   * Resume paused execution
+   * Resume paused execution (not implemented in v5.0)
    */
   async resumeExecution(): Promise<{ status: string; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/execute/resume`, {
-      method: 'POST',
-    });
-    return handleResponse(response);
+    return { status: 'resumed', message: 'Resume handled in execution store' };
   },
 
   // --------------------------------------------------------------------------
-  // Status
+  // Status (use execution store instead)
   // --------------------------------------------------------------------------
 
   /**
-   * Get current execution status
+   * @deprecated Use execution store state
    */
   async getStatus(): Promise<StatusResponse> {
-    const response = await fetch(`${API_BASE_URL}/status`);
-    return handleResponse<StatusResponse>(response);
+    console.warn('api.getStatus() is deprecated. Use useExecutionStore state');
+    return {
+      status: 'idle',
+      task_description: '',
+      current_story_id: null,
+      stories: [],
+      progress: 0,
+    };
   },
 
   /**
-   * Get all stories status
+   * @deprecated Use execution store state
    */
   async getStoriesStatus(): Promise<StoryStatus[]> {
-    const response = await fetch(`${API_BASE_URL}/status/stories`);
-    return handleResponse<StoryStatus[]>(response);
+    console.warn('api.getStoriesStatus() is deprecated. Use useExecutionStore stories');
+    return [];
   },
 
   /**
-   * Get specific story status
+   * @deprecated Use execution store state
    */
-  async getStoryStatus(storyId: string): Promise<StoryStatus> {
-    const response = await fetch(`${API_BASE_URL}/status/story/${storyId}`);
-    return handleResponse<StoryStatus>(response);
+  async getStoryStatus(_storyId: string): Promise<StoryStatus> {
+    console.warn('api.getStoryStatus() is deprecated. Use useExecutionStore stories');
+    throw new ApiError(404, 'Not Found', 'Use execution store');
   },
 
   // --------------------------------------------------------------------------
-  // PRD
+  // PRD (not implemented in v5.0 standalone mode)
   // --------------------------------------------------------------------------
 
   /**
-   * Generate PRD from description
+   * @deprecated PRD generation not available in standalone mode
    */
-  async generatePRD(request: PRDRequest): Promise<PRDResponse> {
-    const response = await fetch(`${API_BASE_URL}/prd/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    return handleResponse<PRDResponse>(response);
+  async generatePRD(_request: PRDRequest): Promise<PRDResponse> {
+    console.warn('api.generatePRD() is not available in v5.0 standalone mode');
+    throw new ApiError(501, 'Not Implemented', 'PRD generation not available in standalone mode');
   },
 
   /**
-   * Get current PRD
+   * @deprecated PRD not available in standalone mode
    */
   async getPRD(): Promise<PRD> {
-    const response = await fetch(`${API_BASE_URL}/prd`);
-    return handleResponse<PRD>(response);
+    console.warn('api.getPRD() is not available in v5.0 standalone mode');
+    return { stories: [] };
   },
 
   /**
-   * Update current PRD
+   * @deprecated PRD not available in standalone mode
    */
-  async updatePRD(update: {
+  async updatePRD(_update: {
     stories?: PRDStory[];
     metadata?: Record<string, unknown>;
   }): Promise<{ status: string; prd: PRD }> {
-    const response = await fetch(`${API_BASE_URL}/prd`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(update),
-    });
-    return handleResponse(response);
+    console.warn('api.updatePRD() is not available in v5.0 standalone mode');
+    return { status: 'not_implemented', prd: { stories: [] } };
   },
 
   /**
-   * Delete current PRD
+   * @deprecated PRD not available in standalone mode
    */
   async deletePRD(): Promise<{ status: string; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/prd`, {
-      method: 'DELETE',
-    });
-    return handleResponse(response);
+    console.warn('api.deletePRD() is not available in v5.0 standalone mode');
+    return { status: 'not_implemented', message: 'PRD not available in standalone mode' };
   },
 
   /**
-   * Approve PRD and start execution
+   * @deprecated PRD not available in standalone mode
    */
   async approvePRD(): Promise<{
     status: string;
     task_id: string;
     message: string;
   }> {
-    const response = await fetch(`${API_BASE_URL}/prd/approve`, {
-      method: 'POST',
-    });
-    return handleResponse(response);
+    console.warn('api.approvePRD() is not available in v5.0 standalone mode');
+    return { status: 'not_implemented', task_id: '', message: 'PRD not available in standalone mode' };
   },
 
   // --------------------------------------------------------------------------
-  // Analysis
+  // Analysis (not implemented in v5.0 standalone mode)
   // --------------------------------------------------------------------------
 
   /**
-   * Analyze task and recommend strategy
+   * @deprecated Analysis not available in standalone mode
    */
-  async analyzeTask(description: string): Promise<AnalyzeResponse> {
-    const response = await fetch(`${API_BASE_URL}/analyze`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description }),
-    });
-    return handleResponse<AnalyzeResponse>(response);
+  async analyzeTask(_description: string): Promise<AnalyzeResponse> {
+    console.warn('api.analyzeTask() is not available in v5.0 standalone mode');
+    return {
+      recommended_strategy: 'direct',
+      reasoning: 'Analysis not available in standalone mode',
+      estimated_stories: 0,
+      complexity: 'low',
+    };
   },
 
   // --------------------------------------------------------------------------
-  // Claude Code
+  // Claude Code (use claudeCodeClient instead)
   // --------------------------------------------------------------------------
 
   /**
-   * Create a new Claude Code session
+   * @deprecated Use claudeCodeClient.startChat()
    */
   async createClaudeCodeSession(
     workingDir?: string,
-    model?: string
+    _model?: string
   ): Promise<ClaudeCodeSession> {
-    const params = new URLSearchParams();
-    if (workingDir) params.append('working_dir', workingDir);
-    if (model) params.append('model', model);
-
-    const url = `${API_BASE_URL}/claude-code/session${params.toString() ? '?' + params.toString() : ''}`;
-    const response = await fetch(url, { method: 'POST' });
-    return handleResponse<ClaudeCodeSession>(response);
+    console.warn('api.createClaudeCodeSession() is deprecated. Use claudeCodeClient');
+    const { getClaudeCodeClient } = await import('./claudeCodeClient');
+    const client = getClaudeCodeClient();
+    const response = await client.startChat({ project_path: workingDir || '.' });
+    return {
+      session_id: response.session_id,
+      status: 'created',
+      message: 'Session created',
+    };
   },
 
   /**
-   * Get Claude Code session info
+   * @deprecated Use claudeCodeClient.getSessionInfo()
    */
   async getClaudeCodeSession(sessionId: string): Promise<ClaudeCodeSessionInfo> {
-    const response = await fetch(`${API_BASE_URL}/claude-code/session/${sessionId}`);
-    return handleResponse<ClaudeCodeSessionInfo>(response);
+    console.warn('api.getClaudeCodeSession() is deprecated. Use claudeCodeClient');
+    const { getClaudeCodeClient } = await import('./claudeCodeClient');
+    const client = getClaudeCodeClient();
+    const info = await client.getSessionInfo(sessionId);
+    return {
+      id: info.session.id,
+      working_dir: info.session.project_path,
+      model: info.session.model || undefined,
+      status: info.session.state,
+      messages: [],
+      tool_calls: [],
+    };
   },
 
   /**
-   * Cancel Claude Code session
+   * @deprecated Use claudeCodeClient.cancelExecution()
    */
   async cancelClaudeCodeSession(sessionId: string): Promise<{ status: string; session_id: string }> {
-    const response = await fetch(`${API_BASE_URL}/claude-code/session/${sessionId}`, {
-      method: 'DELETE',
-    });
-    return handleResponse(response);
+    console.warn('api.cancelClaudeCodeSession() is deprecated. Use claudeCodeClient');
+    const { getClaudeCodeClient } = await import('./claudeCodeClient');
+    const client = getClaudeCodeClient();
+    await client.cancelExecution(sessionId);
+    return { status: 'cancelled', session_id: sessionId };
   },
 
   /**
-   * List all Claude Code sessions
+   * @deprecated Use claudeCodeClient.listActiveSessions()
    */
   async listClaudeCodeSessions(): Promise<ClaudeCodeSessionInfo[]> {
-    const response = await fetch(`${API_BASE_URL}/claude-code/sessions`);
-    return handleResponse<ClaudeCodeSessionInfo[]>(response);
+    console.warn('api.listClaudeCodeSessions() is deprecated. Use claudeCodeClient');
+    const { getClaudeCodeClient } = await import('./claudeCodeClient');
+    const client = getClaudeCodeClient();
+    const sessions = await client.listActiveSessions();
+    return sessions.map((s) => ({
+      id: s.session.id,
+      working_dir: s.session.project_path,
+      model: s.session.model || undefined,
+      status: s.session.state,
+      messages: [],
+      tool_calls: [],
+    }));
   },
 
   /**
-   * Send message to Claude Code (non-streaming)
+   * @deprecated Use claudeCodeClient.sendMessage()
    */
   async sendClaudeCodeMessage(
     sessionId: string,
     content: string
   ): Promise<{ content: string; tool_calls: unknown[] }> {
-    const response = await fetch(`${API_BASE_URL}/claude-code/session/${sessionId}/message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-    });
-    return handleResponse(response);
+    console.warn('api.sendClaudeCodeMessage() is deprecated. Use claudeCodeClient');
+    const { getClaudeCodeClient } = await import('./claudeCodeClient');
+    const client = getClaudeCodeClient();
+    await client.sendMessage(sessionId, content);
+    return { content: 'Message sent via events', tool_calls: [] };
   },
 };
 

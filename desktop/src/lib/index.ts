@@ -1,9 +1,10 @@
 /**
- * Library Module Exports
+ * Library Module Exports (v5.0 Pure Rust Backend)
  *
- * Central export point for API and WebSocket utilities.
+ * Central export point for API and Tauri utilities.
  */
 
+// Legacy API (deprecated - use Tauri commands)
 export { api, ApiError } from './api';
 export type {
   ExecuteRequest,
@@ -18,6 +19,7 @@ export type {
   AnalyzeResponse,
 } from './api';
 
+// Deprecated WebSocket (kept for backwards compatibility)
 export {
   WebSocketManager,
   getWebSocketManager,
@@ -26,7 +28,54 @@ export {
 } from './websocket';
 export type {
   ConnectionStatus,
-  WebSocketMessage,
   ServerEventType,
   EventHandler,
 } from './websocket';
+
+// New v5.0 Tauri-based Claude Code client
+export {
+  ClaudeCodeClient,
+  getClaudeCodeClient,
+  initClaudeCodeClient,
+  closeClaudeCodeClient,
+  EventChannels,
+} from './claudeCodeClient';
+export type {
+  ClaudeCodeSession,
+  ActiveSessionInfo,
+  StartChatRequest,
+  StartChatResponse,
+  SendMessageRequest,
+  StreamEventPayload,
+  ThinkingUpdateEvent,
+  ToolUpdateEvent,
+  SessionUpdateEvent,
+  UnifiedStreamEvent,
+  ThinkingBlock,
+  ToolExecution,
+  SessionState,
+  StreamEventHandler,
+  ThinkingEventHandler,
+  ToolEventHandler,
+  SessionEventHandler,
+  StatusHandler,
+} from './claudeCodeClient';
+
+// Settings API (v5.0)
+export {
+  getSettings,
+  updateSettings,
+  exportSettingsToJson,
+  parseImportedSettings,
+  isTauriAvailable,
+} from './settingsApi';
+export type {
+  AppConfig,
+  SettingsUpdate,
+} from './settingsApi';
+
+// Tauri utilities
+export {
+  getHealth,
+  isTauri,
+} from './tauri';

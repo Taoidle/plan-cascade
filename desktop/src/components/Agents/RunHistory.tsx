@@ -23,7 +23,7 @@ interface RunHistoryProps {
 }
 
 export function RunHistory({ history, loading, onLoadMore, onExport }: RunHistoryProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation(['agents', 'common']);
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
 
   const toggleRun = (runId: string) => {
@@ -53,7 +53,7 @@ export function RunHistory({ history, loading, onLoadMore, onExport }: RunHistor
       <div className="text-center py-8">
         <ClockIcon className="w-8 h-8 mx-auto mb-2 text-gray-400" />
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('agents.noRunHistory')}
+          {t('noRunHistory')}
         </p>
       </div>
     );
@@ -66,7 +66,7 @@ export function RunHistory({ history, loading, onLoadMore, onExport }: RunHistor
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('agents.runHistory')} ({history.total})
+          {t('runHistory')} ({history.total})
         </h3>
         {onExport && (
           <button
@@ -78,7 +78,7 @@ export function RunHistory({ history, loading, onLoadMore, onExport }: RunHistor
             )}
           >
             <DownloadIcon className="w-3 h-3" />
-            {t('agents.exportHistory')}
+            {t('exportHistory')}
           </button>
         )}
       </div>
@@ -106,7 +106,7 @@ export function RunHistory({ history, loading, onLoadMore, onExport }: RunHistor
             'disabled:opacity-50'
           )}
         >
-          {loading ? t('common.loading') : t('common.loadMore')}
+          {loading ? t('common:loading') : t('common:loadMore')}
         </button>
       )}
     </div>
@@ -120,7 +120,7 @@ interface RunHistoryItemProps {
 }
 
 function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation(['agents', 'common']);
 
   const timestamp = run.created_at
     ? new Date(run.created_at).toLocaleString()
@@ -186,7 +186,7 @@ function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
           {/* Input */}
           <div className="mt-3">
             <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
-              {t('agents.input')}
+              {t('input')}
             </label>
             <div
               className={clsx(
@@ -203,7 +203,7 @@ function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
           {run.output && (
             <div className="mt-3">
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                {t('agents.output')}
+                {t('output')}
               </label>
               <div
                 className={clsx(
@@ -221,7 +221,7 @@ function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
           {run.error && (
             <div className="mt-3">
               <label className="text-xs font-medium text-red-500 dark:text-red-400">
-                {t('agents.error')}
+                {t('error')}
               </label>
               <div
                 className={clsx(
@@ -239,10 +239,10 @@ function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
           {(run.input_tokens || run.output_tokens) && (
             <div className="mt-3 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
               <span>
-                {t('agents.inputTokens')}: {formatTokens(run.input_tokens)}
+                {t('inputTokens')}: {formatTokens(run.input_tokens)}
               </span>
               <span>
-                {t('agents.outputTokens')}: {formatTokens(run.output_tokens)}
+                {t('outputTokens')}: {formatTokens(run.output_tokens)}
               </span>
             </div>
           )}

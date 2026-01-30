@@ -180,45 +180,32 @@ async function saveSettingsToBackend() {
   // Get settings from store
   const settings = useSettingsStore.getState();
 
-  // Prepare payload for backend
-  const payload = {
-    backend: settings.backend,
-    provider: settings.provider,
-    model: settings.model,
-    agents: settings.agents.map((a) => ({
-      name: a.name,
-      enabled: a.enabled,
-      command: a.command,
-      is_default: a.isDefault,
-    })),
-    agent_selection: settings.agentSelection,
-    default_agent: settings.defaultAgent,
-    quality_gates: {
-      typecheck: settings.qualityGates.typecheck,
-      test: settings.qualityGates.test,
-      lint: settings.qualityGates.lint,
-      custom: settings.qualityGates.custom,
-      custom_script: settings.qualityGates.customScript,
-      max_retries: settings.qualityGates.maxRetries,
-    },
-    max_parallel_stories: settings.maxParallelStories,
-    max_iterations: settings.maxIterations,
-    timeout_seconds: settings.timeoutSeconds,
-    default_mode: settings.defaultMode,
-    theme: settings.theme,
-  };
+  // Save to Tauri backend using invoke
+  try {
+    const { updateSettings, isTauriAvailable } = await import('../../lib/settingsApi');
 
-  const response = await fetch('http://127.0.0.1:8765/api/settings', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to save settings');
+    if (isTauriAvailable()) {
+      await updateSettings({
+        theme: settings.theme,
+        default_provider: settings.provider,
+        default_model: settings.model,
+      });
+    }
+  } catch (error) {
+    console.warn('Tauri settings save failed, settings saved locally:', error);
   }
 
-  return response.json();
+  // Always save to local storage as backup
+  localStorage.setItem(
+    'plan-cascade-settings',
+    JSON.stringify({
+      backend: settings.backend,
+      provider: settings.provider,
+      model: settings.model,
+      defaultMode: settings.defaultMode,
+      theme: settings.theme,
+    })
+  );
 }
 
 export default SettingsDialog;

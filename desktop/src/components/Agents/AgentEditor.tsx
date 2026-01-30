@@ -25,7 +25,7 @@ interface AgentEditorProps {
 }
 
 export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation(['agents', 'common']);
   const { createAgent, updateAgent, deleteAgent, loading } = useAgentsStore();
 
   const isEditMode = agent !== null;
@@ -62,19 +62,19 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
     const newErrors: Record<string, string> = {};
 
     if (!name.trim()) {
-      newErrors.name = t('agents.errors.nameRequired');
+      newErrors.name = t('errors.nameRequired');
     } else if (name.length > 100) {
-      newErrors.name = t('agents.errors.nameTooLong');
+      newErrors.name = t('errors.nameTooLong');
     }
 
     if (!systemPrompt.trim()) {
-      newErrors.systemPrompt = t('agents.errors.promptRequired');
+      newErrors.systemPrompt = t('errors.promptRequired');
     } else if (systemPrompt.length > 100000) {
-      newErrors.systemPrompt = t('agents.errors.promptTooLong');
+      newErrors.systemPrompt = t('errors.promptTooLong');
     }
 
     if (!model) {
-      newErrors.model = t('agents.errors.modelRequired');
+      newErrors.model = t('errors.modelRequired');
     }
 
     setErrors(newErrors);
@@ -117,7 +117,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
   const handleDelete = async () => {
     if (!agent) return;
 
-    if (!confirm(t('agents.confirmDelete', { name: agent.name }))) {
+    if (!confirm(t('confirmDelete', { name: agent.name }))) {
       return;
     }
 
@@ -136,7 +136,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
   };
 
   const toggleCategory = (category: string) => {
-    const categoryTools = AVAILABLE_TOOLS.filter((t) => t.category === category).map(
+    const categoryTools: string[] = AVAILABLE_TOOLS.filter((t) => t.category === category).map(
       (t) => t.name
     );
     const allSelected = categoryTools.every((t) => allowedTools.includes(t));
@@ -165,12 +165,12 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
-              {isEditMode ? t('agents.editAgent') : t('agents.createAgent')}
+              {isEditMode ? t('editAgent') : t('createAgent')}
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
                 className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
-                aria-label={t('common.close')}
+                aria-label={t('common:close')}
               >
                 <Cross2Icon className="w-5 h-5" />
               </button>
@@ -182,13 +182,13 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
             {/* Name */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('agents.name')} *
+                {t('name')} *
               </label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={t('agents.namePlaceholder')}
+                placeholder={t('namePlaceholder')}
                 className={clsx(
                   'w-full px-3 py-2 rounded-md border',
                   errors.name
@@ -207,13 +207,13 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
             {/* Description */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('agents.description')}
+                {t('description')}
               </label>
               <input
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder={t('agents.descriptionPlaceholder')}
+                placeholder={t('descriptionPlaceholder')}
                 className={clsx(
                   'w-full px-3 py-2 rounded-md border',
                   'border-gray-300 dark:border-gray-600 focus:ring-primary-500',
@@ -227,7 +227,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
             {/* Model */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('agents.model')} *
+                {t('model')} *
               </label>
               <select
                 value={model}
@@ -256,12 +256,12 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
             {/* System Prompt */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('agents.systemPrompt')} *
+                {t('systemPrompt')} *
               </label>
               <textarea
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
-                placeholder={t('agents.systemPromptPlaceholder')}
+                placeholder={t('systemPromptPlaceholder')}
                 rows={6}
                 className={clsx(
                   'w-full px-3 py-2 rounded-md border font-mono text-sm',
@@ -277,18 +277,18 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                 <p className="mt-1 text-sm text-red-500">{errors.systemPrompt}</p>
               )}
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {systemPrompt.length.toLocaleString()} / 100,000 {t('agents.characters')}
+                {systemPrompt.length.toLocaleString()} / 100,000 {t('characters')}
               </p>
             </div>
 
             {/* Allowed Tools */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                {t('agents.allowedTools')}
+                {t('allowedTools')}
                 <span className="ml-2 text-xs text-gray-500">
                   ({allowedTools.length === 0
-                    ? t('agents.allToolsAllowed')
-                    : t('agents.toolsSelected', { count: allowedTools.length })})
+                    ? t('allToolsAllowed')
+                    : t('toolsSelected', { count: allowedTools.length })})
                 </span>
               </label>
 
@@ -374,7 +374,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                 )}
               >
                 <TrashIcon className="w-4 h-4" />
-                {t('common.delete')}
+                {t('common:delete')}
               </button>
             ) : (
               <div />
@@ -391,7 +391,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                     'text-sm font-medium transition-colors'
                   )}
                 >
-                  {t('common.cancel')}
+                  {t('common:cancel')}
                 </button>
               </Dialog.Close>
 
@@ -407,10 +407,10 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                 )}
               >
                 {loading.creating || loading.updating
-                  ? t('common.saving')
+                  ? t('common:saving')
                   : isEditMode
-                  ? t('common.save')
-                  : t('common.create')}
+                  ? t('common:save')
+                  : t('common:create')}
               </button>
             </div>
           </div>

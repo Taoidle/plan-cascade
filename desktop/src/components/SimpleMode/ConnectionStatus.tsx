@@ -1,12 +1,12 @@
 /**
  * ConnectionStatus Component
  *
- * Displays the current WebSocket connection status.
+ * Displays the current backend connection status (Tauri IPC).
  */
 
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import type { ConnectionStatus as ConnectionStatusType } from '../../lib/websocket';
+import type { ConnectionStatus as ConnectionStatusType } from '../../lib/claudeCodeClient';
 
 interface ConnectionStatusProps {
   status: ConnectionStatusType;
