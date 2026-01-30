@@ -63,6 +63,21 @@ export interface ToolCall {
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
+export interface FileAttachment {
+  id: string;
+  name: string;
+  path: string;
+  size: number;
+  type: 'text' | 'image' | 'pdf' | 'unknown';
+  content?: string;
+}
+
+export interface FileReference {
+  id: string;
+  path: string;
+  name: string;
+}
+
 export interface Message {
   id: string;
   role: MessageRole;
@@ -70,6 +85,10 @@ export interface Message {
   timestamp: string;
   toolCalls?: ToolCall[];
   isStreaming?: boolean;
+  attachments?: FileAttachment[];
+  references?: FileReference[];
+  parentId?: string; // For conversation branching
+  branchId?: string; // Branch identifier
 }
 
 export interface Conversation {
@@ -117,6 +136,15 @@ interface ClaudeCodeState {
 
   /** Filter for tool history sidebar */
   toolFilter: ToolType | 'all';
+
+  /** Session control state */
+  sessionState: 'idle' | 'generating' | 'paused' | 'stopped';
+
+  /** Buffered content when paused */
+  bufferedContent: string[];
+
+  /** Workspace files for @ references */
+  workspaceFiles: FileReference[];
 
   // Actions
   /** Initialize WebSocket connection */
@@ -166,6 +194,24 @@ interface ClaudeCodeState {
 
   /** Export conversation */
   exportConversation: (format: 'json' | 'markdown' | 'html') => string;
+
+  /** Update messages (for edit/regenerate) */
+  updateMessages: (messages: Message[]) => void;
+
+  /** Pause streaming */
+  pauseStreaming: () => void;
+
+  /** Resume streaming */
+  resumeStreaming: () => void;
+
+  /** Update a message */
+  updateMessage: (id: string, updates: Partial<Message>) => void;
+
+  /** Set workspace files */
+  setWorkspaceFiles: (files: FileReference[]) => void;
+
+  /** Fork conversation from a message */
+  forkConversation: (messageId: string) => string | null;
 }
 
 // ============================================================================
@@ -202,6 +248,9 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
       isSending: false,
       error: null,
       toolFilter: 'all',
+      sessionState: 'idle',
+      bufferedContent: [],
+      workspaceFiles: [],
 
       initialize: () => {
         const wsManager = initWebSocket();
@@ -215,10 +264,21 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
         wsManager.on('claude_code_response', (data) => {
           const content = data.content as string;
           if (data.streaming) {
-            set((state) => ({
-              streamingContent: state.streamingContent + content,
-              isStreaming: true,
-            }));
+            set((state) => {
+              // If paused, buffer the content instead of appending
+              if (state.sessionState === 'paused') {
+                return {
+                  bufferedContent: [...state.bufferedContent, content],
+                  isStreaming: true,
+                  sessionState: 'paused',
+                };
+              }
+              return {
+                streamingContent: state.streamingContent + content,
+                isStreaming: true,
+                sessionState: 'generating',
+              };
+            });
           }
         });
 
@@ -550,6 +610,62 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
         }
 
         return '';
+      },
+
+      updateMessages: (messages: Message[]) => {
+        set({ messages });
+      },
+
+      pauseStreaming: () => {
+        set({ sessionState: 'paused' });
+      },
+
+      resumeStreaming: () => {
+        set((state) => ({
+          sessionState: 'generating',
+          streamingContent: state.streamingContent + state.bufferedContent.join(''),
+          bufferedContent: [],
+        }));
+      },
+
+      updateMessage: (id: string, updates: Partial<Message>) => {
+        set((state) => ({
+          messages: state.messages.map((msg) =>
+            msg.id === id ? { ...msg, ...updates } : msg
+          ),
+        }));
+      },
+
+      setWorkspaceFiles: (files: FileReference[]) => {
+        set({ workspaceFiles: files });
+      },
+
+      forkConversation: (messageId: string) => {
+        const state = get();
+        const messageIndex = state.messages.findIndex((m) => m.id === messageId);
+        if (messageIndex === -1) return null;
+
+        // Create a new branch with messages up to this point
+        const branchId = generateId();
+        const branchMessages = state.messages.slice(0, messageIndex + 1).map((m) => ({
+          ...m,
+          branchId,
+        }));
+
+        // Create a new conversation for the branch
+        const conversation: Conversation = {
+          id: branchId,
+          title: `Branch from: ${branchMessages[0]?.content.slice(0, 30) || 'Conversation'}...`,
+          messages: branchMessages,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        set((prevState) => ({
+          conversations: [conversation, ...prevState.conversations],
+        }));
+
+        return branchId;
       },
     }),
     {

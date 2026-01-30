@@ -2,10 +2,13 @@
  * ClaudeCodeMode Component
  *
  * Main container for Claude Code mode that assembles chat view,
- * tool history sidebar, and input components.
+ * tool history sidebar, input components, and command palette.
+ *
+ * Story 011-5: Keyboard Shortcuts Implementation
+ * Story 011-7: Command Palette with Fuzzy Search
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import {
@@ -16,6 +19,7 @@ import {
   CheckCircledIcon,
   CrossCircledIcon,
   DotsHorizontalIcon,
+  KeyboardIcon,
 } from '@radix-ui/react-icons';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useClaudeCodeStore } from '../../store/claudeCode';
@@ -23,12 +27,15 @@ import { ChatView } from './ChatView';
 import { ChatInput } from './ChatInput';
 import { ToolHistorySidebar } from './ToolHistorySidebar';
 import { ExportDialog } from './ExportDialog';
+import { CommandPaletteProvider, createDefaultCommands, useCommandPalette } from './CommandPalette';
+import { ShortcutsHelpDialog, useChatShortcuts } from './KeyboardShortcuts';
+import { SessionControlProvider } from './SessionControl';
 
 // ============================================================================
-// ClaudeCodeMode Component
+// ClaudeCodeMode Component (Inner)
 // ============================================================================
 
-export function ClaudeCodeMode() {
+function ClaudeCodeModeInner() {
   const { t } = useTranslation('claudeCode');
   const {
     connectionStatus,
@@ -40,8 +47,11 @@ export function ClaudeCodeMode() {
     clearError,
   } = useClaudeCodeStore();
 
+  const { open: openCommandPalette } = useCommandPalette();
+
   const [showSidebar, setShowSidebar] = useState(true);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
 
   // Initialize WebSocket connection on mount
   useEffect(() => {
@@ -51,33 +61,34 @@ export function ClaudeCodeMode() {
     };
   }, [initialize, cleanup]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + L to clear chat
-      if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
-        e.preventDefault();
-        if (messages.length > 0 && confirm(t('chat.clearConfirm'))) {
-          clearConversation();
-        }
-      }
+  const handleClearChat = useCallback(() => {
+    if (messages.length > 0 && confirm(t('chat.clearConfirm'))) {
+      clearConversation();
+    }
+  }, [messages.length, clearConversation, t]);
 
-      // Ctrl/Cmd + E to export
-      if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
-        e.preventDefault();
-        setShowExportDialog(true);
-      }
+  const handleExport = useCallback(() => {
+    setShowExportDialog(true);
+  }, []);
 
-      // Ctrl/Cmd + B to toggle sidebar
-      if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
-        e.preventDefault();
-        setShowSidebar((prev) => !prev);
-      }
-    };
+  const handleToggleSidebar = useCallback(() => {
+    setShowSidebar((prev) => !prev);
+  }, []);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [messages.length, clearConversation]);
+  const handleShowShortcuts = useCallback(() => {
+    setShowShortcutsDialog(true);
+  }, []);
+
+  // Chat shortcuts using the centralized hook
+  useChatShortcuts(
+    {
+      onClearChat: handleClearChat,
+      onExportConversation: handleExport,
+      onToggleSidebar: handleToggleSidebar,
+      onOpenCommandPalette: openCommandPalette,
+    },
+    { enabled: true }
+  );
 
   const handleToolClick = useCallback((toolCallId: string) => {
     // Scroll to tool call in chat view
@@ -107,9 +118,39 @@ export function ClaudeCodeMode() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Command palette hint */}
+          <button
+            onClick={openCommandPalette}
+            className={clsx(
+              'hidden sm:flex items-center gap-2 px-2 py-1 rounded',
+              'bg-gray-100 dark:bg-gray-800',
+              'text-gray-500 dark:text-gray-400',
+              'hover:bg-gray-200 dark:hover:bg-gray-700',
+              'text-xs transition-colors'
+            )}
+          >
+            <span>{t('commandPalette.hint')}</span>
+            <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">
+              Ctrl+/
+            </kbd>
+          </button>
+
+          {/* Keyboard shortcuts */}
+          <button
+            onClick={handleShowShortcuts}
+            className={clsx(
+              'p-2 rounded-lg transition-colors',
+              'bg-gray-100 dark:bg-gray-800 text-gray-500',
+              'hover:bg-gray-200 dark:hover:bg-gray-700'
+            )}
+            title={t('shortcuts.title')}
+          >
+            <KeyboardIcon className="w-4 h-4" />
+          </button>
+
           {/* Toggle sidebar */}
           <button
-            onClick={() => setShowSidebar(!showSidebar)}
+            onClick={handleToggleSidebar}
             className={clsx(
               'p-2 rounded-lg transition-colors',
               showSidebar
@@ -148,7 +189,7 @@ export function ClaudeCodeMode() {
                 align="end"
               >
                 <DropdownMenu.Item
-                  onClick={() => setShowExportDialog(true)}
+                  onClick={handleExport}
                   className={clsx(
                     'flex items-center gap-2 px-3 py-2 rounded-md text-sm',
                     'text-gray-700 dark:text-gray-300',
@@ -164,11 +205,7 @@ export function ClaudeCodeMode() {
                 <DropdownMenu.Separator className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
 
                 <DropdownMenu.Item
-                  onClick={() => {
-                    if (messages.length > 0 && confirm(t('chat.clearConfirm'))) {
-                      clearConversation();
-                    }
-                  }}
+                  onClick={handleClearChat}
                   disabled={messages.length === 0}
                   className={clsx(
                     'flex items-center gap-2 px-3 py-2 rounded-md text-sm',
@@ -213,7 +250,7 @@ export function ClaudeCodeMode() {
         {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0">
           <ChatView />
-          <ChatInput />
+          <ChatInput onOpenCommandPalette={openCommandPalette} />
         </div>
 
         {/* Sidebar */}
@@ -230,6 +267,12 @@ export function ClaudeCodeMode() {
       {/* Export dialog */}
       <ExportDialog open={showExportDialog} onOpenChange={setShowExportDialog} />
 
+      {/* Keyboard shortcuts help dialog */}
+      <ShortcutsHelpDialog
+        isOpen={showShortcutsDialog}
+        onClose={() => setShowShortcutsDialog(false)}
+      />
+
       {/* CSS for highlight flash animation */}
       <style>{`
         @keyframes highlight-flash {
@@ -245,6 +288,42 @@ export function ClaudeCodeMode() {
 }
 
 // ============================================================================
+// ClaudeCodeMode Component (Outer with Providers)
+// ============================================================================
+
+export function ClaudeCodeMode() {
+  const { t } = useTranslation('claudeCode');
+  const { clearConversation, messages } = useClaudeCodeStore();
+
+  // Create default commands
+  const defaultCommands = useMemo(
+    () =>
+      createDefaultCommands(
+        {
+          onClearChat: () => {
+            if (messages.length > 0 && confirm(t('chat.clearConfirm'))) {
+              clearConversation();
+            }
+          },
+          onNewConversation: () => {
+            clearConversation();
+          },
+        },
+        t
+      ),
+    [clearConversation, messages.length, t]
+  );
+
+  return (
+    <SessionControlProvider>
+      <CommandPaletteProvider defaultCommands={defaultCommands}>
+        <ClaudeCodeModeInner />
+      </CommandPaletteProvider>
+    </SessionControlProvider>
+  );
+}
+
+// ============================================================================
 // ConnectionBadge Component
 // ============================================================================
 
@@ -253,7 +332,7 @@ interface ConnectionBadgeProps {
 }
 
 function ConnectionBadge({ status }: ConnectionBadgeProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation('claudeCode');
 
   const config = {
     connected: {

@@ -2,14 +2,21 @@
  * ChatView Component
  *
  * Displays conversation messages with user/assistant bubbles.
- * Supports markdown rendering and auto-scrolling.
+ * Supports enhanced markdown rendering, message actions, and auto-scrolling.
+ *
+ * Story 011-1: Enhanced Markdown Rendering with Syntax Highlighting
+ * Story 011-4: Message Actions (Copy, Regenerate, Edit & Resend)
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useClaudeCodeStore, Message } from '../../store/claudeCode';
 import { ToolCallCard } from './ToolCallCard';
+import { MarkdownRenderer } from './MarkdownRenderer';
+import { MessageActions, useMessageActions } from './MessageActions';
+import { SessionStateIndicator } from './SessionControl';
+import { FileChip } from './FileAttachment';
 
 // ============================================================================
 // ChatView Component
@@ -17,9 +24,43 @@ import { ToolCallCard } from './ToolCallCard';
 
 export function ChatView() {
   const { t } = useTranslation('claudeCode');
-  const { messages, isStreaming, streamingContent } = useClaudeCodeStore();
+  const {
+    messages,
+    isStreaming,
+    streamingContent,
+    sessionState,
+    sendMessage,
+    updateMessages,
+  } = useClaudeCodeStore();
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isDarkMode, setIsDarkMode] = useState(true);
+
+  // Detect dark mode
+  useEffect(() => {
+    const checkDarkMode = () => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'));
+    };
+    checkDarkMode();
+
+    const observer = new MutationObserver(checkDarkMode);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
+  // Message actions hook
+  const {
+    copyMessage,
+    regenerateMessage,
+    editMessage,
+    forkConversation,
+    regeneratingMessageId,
+  } = useMessageActions(messages, sendMessage, updateMessages);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -55,7 +96,24 @@ export function ChatView() {
   return (
     <div ref={containerRef} className="flex-1 overflow-auto p-4 space-y-4">
       {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+        <MessageBubble
+          key={message.id}
+          message={message}
+          isDarkMode={isDarkMode}
+          onCopy={() => copyMessage(message)}
+          onRegenerate={
+            message.role === 'assistant'
+              ? () => regenerateMessage(message.id)
+              : undefined
+          }
+          onEdit={
+            message.role === 'user'
+              ? (newContent) => editMessage(message.id, newContent)
+              : undefined
+          }
+          onFork={() => forkConversation(message.id)}
+          isRegenerating={regeneratingMessageId === message.id}
+        />
       ))}
 
       {/* Streaming message indicator */}
@@ -74,10 +132,16 @@ export function ChatView() {
           >
             {streamingContent ? (
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <MarkdownContent content={streamingContent} />
+                <MarkdownRenderer
+                  content={streamingContent}
+                  isDarkMode={isDarkMode}
+                />
               </div>
             ) : (
-              <TypingIndicator />
+              <div className="flex items-center gap-2">
+                <TypingIndicator />
+                <SessionStateIndicator state={sessionState} size="sm" />
+              </div>
             )}
           </div>
         </div>
@@ -94,9 +158,23 @@ export function ChatView() {
 
 interface MessageBubbleProps {
   message: Message;
+  isDarkMode: boolean;
+  onCopy: () => Promise<void>;
+  onRegenerate?: () => Promise<void>;
+  onEdit?: (newContent: string) => Promise<void>;
+  onFork?: () => void;
+  isRegenerating?: boolean;
 }
 
-function MessageBubble({ message }: MessageBubbleProps) {
+function MessageBubble({
+  message,
+  isDarkMode,
+  onCopy,
+  onRegenerate,
+  onEdit,
+  onFork,
+  isRegenerating,
+}: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
@@ -117,7 +195,10 @@ function MessageBubble({ message }: MessageBubbleProps) {
   }
 
   return (
-    <div className={clsx('flex gap-3', isUser && 'flex-row-reverse')}>
+    <div
+      className={clsx('flex gap-3 group', isUser && 'flex-row-reverse')}
+      id={`message-${message.id}`}
+    >
       {/* Avatar */}
       <div
         className={clsx(
@@ -141,20 +222,53 @@ function MessageBubble({ message }: MessageBubbleProps) {
             'shadow-sm'
           )}
         >
+          {/* File attachments */}
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
+              {message.attachments.map((file) => (
+                <FileChip key={file.id} file={file} />
+              ))}
+            </div>
+          )}
+
+          {/* File references */}
+          {message.references && message.references.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
+              {message.references.map((ref) => (
+                <FileChip key={ref.id} file={ref} isReference />
+              ))}
+            </div>
+          )}
+
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none">
-              <MarkdownContent content={message.content} />
+              <MarkdownRenderer
+                content={message.content}
+                isDarkMode={isDarkMode}
+              />
             </div>
           )}
         </div>
+
+        {/* Message actions */}
+        <MessageActions
+          message={message}
+          onCopy={onCopy}
+          onRegenerate={onRegenerate}
+          onEdit={onEdit}
+          onFork={onFork}
+          isRegenerating={isRegenerating}
+        />
 
         {/* Tool calls */}
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="w-full max-w-[90%] space-y-2">
             {message.toolCalls.map((toolCall) => (
-              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+              <div key={toolCall.id} id={`tool-call-${toolCall.id}`}>
+                <ToolCallCard toolCall={toolCall} />
+              </div>
             ))}
           </div>
         )}
@@ -165,148 +279,6 @@ function MessageBubble({ message }: MessageBubbleProps) {
         </span>
       </div>
     </div>
-  );
-}
-
-// ============================================================================
-// MarkdownContent Component
-// ============================================================================
-
-interface MarkdownContentProps {
-  content: string;
-}
-
-function MarkdownContent({ content }: MarkdownContentProps) {
-  // Simple markdown-like rendering
-  // For production, consider using react-markdown
-  const lines = content.split('\n');
-  const elements: JSX.Element[] = [];
-  let codeBlock: string[] = [];
-  let inCodeBlock = false;
-
-  lines.forEach((line, i) => {
-    // Code block start/end
-    if (line.startsWith('```')) {
-      if (inCodeBlock) {
-        elements.push(
-          <pre key={`code-${i}`} className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-sm">
-            <code>{codeBlock.join('\n')}</code>
-          </pre>
-        );
-        codeBlock = [];
-        inCodeBlock = false;
-      } else {
-        inCodeBlock = true;
-      }
-      return;
-    }
-
-    if (inCodeBlock) {
-      codeBlock.push(line);
-      return;
-    }
-
-    // Headers
-    if (line.startsWith('### ')) {
-      elements.push(
-        <h3 key={i} className="text-lg font-semibold mt-4 mb-2">
-          {line.slice(4)}
-        </h3>
-      );
-      return;
-    }
-    if (line.startsWith('## ')) {
-      elements.push(
-        <h2 key={i} className="text-xl font-semibold mt-4 mb-2">
-          {line.slice(3)}
-        </h2>
-      );
-      return;
-    }
-    if (line.startsWith('# ')) {
-      elements.push(
-        <h1 key={i} className="text-2xl font-bold mt-4 mb-2">
-          {line.slice(2)}
-        </h1>
-      );
-      return;
-    }
-
-    // Bullet points
-    if (line.startsWith('- ') || line.startsWith('* ')) {
-      elements.push(
-        <li key={i} className="ml-4">
-          {renderInlineMarkdown(line.slice(2))}
-        </li>
-      );
-      return;
-    }
-
-    // Numbered lists
-    const numberedMatch = line.match(/^\d+\. /);
-    if (numberedMatch) {
-      elements.push(
-        <li key={i} className="ml-4 list-decimal">
-          {renderInlineMarkdown(line.slice(numberedMatch[0].length))}
-        </li>
-      );
-      return;
-    }
-
-    // Empty lines
-    if (line.trim() === '') {
-      elements.push(<br key={i} />);
-      return;
-    }
-
-    // Regular paragraph
-    elements.push(
-      <p key={i} className="my-1">
-        {renderInlineMarkdown(line)}
-      </p>
-    );
-  });
-
-  // Handle unclosed code block
-  if (inCodeBlock && codeBlock.length > 0) {
-    elements.push(
-      <pre key="code-final" className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-sm">
-        <code>{codeBlock.join('\n')}</code>
-      </pre>
-    );
-  }
-
-  return <>{elements}</>;
-}
-
-function renderInlineMarkdown(text: string): JSX.Element {
-  // Handle inline code
-  const parts = text.split(/(`[^`]+`)/g);
-
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith('`') && part.endsWith('`')) {
-          return (
-            <code
-              key={i}
-              className="bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded text-sm font-mono"
-            >
-              {part.slice(1, -1)}
-            </code>
-          );
-        }
-
-        // Handle bold
-        const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
-        return boldParts.map((boldPart, j) => {
-          if (boldPart.startsWith('**') && boldPart.endsWith('**')) {
-            return <strong key={`${i}-${j}`}>{boldPart.slice(2, -2)}</strong>;
-          }
-          return <span key={`${i}-${j}`}>{boldPart}</span>;
-        });
-      })}
-    </>
   );
 }
 

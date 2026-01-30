@@ -1,29 +1,48 @@
 /**
  * ChatInput Component
  *
- * Multi-line chat input with send button and keyboard shortcuts.
+ * Multi-line chat input with file attachments, @ references,
+ * keyboard shortcuts, and session control.
+ *
+ * Story 011-3: File Attachment and @ File References
+ * Story 011-5: Keyboard Shortcuts Implementation
+ * Story 011-6: Session Control (Interrupt, Pause, Resume)
  */
 
-import { useState, useRef, useEffect, KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import {
   PaperPlaneIcon,
   StopIcon,
   KeyboardIcon,
+  PlusIcon,
 } from '@radix-ui/react-icons';
-import { useClaudeCodeStore } from '../../store/claudeCode';
+import { useClaudeCodeStore, FileAttachment as FileAttachmentData, FileReference } from '../../store/claudeCode';
+import { useSettingsStore } from '../../store/settings';
+import {
+  FileAttachmentDropZone,
+  FileReferenceAutocomplete,
+  useFileReferences,
+} from './FileAttachment';
+import { InlineSessionControl } from './SessionControl';
+import { useChatShortcuts, KeyboardShortcutHint } from './KeyboardShortcuts';
 
 // ============================================================================
 // ChatInput Component
 // ============================================================================
 
 interface ChatInputProps {
-  onSend?: (message: string) => void;
+  onSend?: (message: string, attachments?: FileAttachmentData[], references?: FileReference[]) => void;
   disabled?: boolean;
+  onOpenCommandPalette?: () => void;
 }
 
-export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
+export function ChatInput({
+  onSend,
+  disabled = false,
+  onOpenCommandPalette,
+}: ChatInputProps) {
   const { t } = useTranslation('claudeCode');
   const {
     sendMessage,
@@ -31,15 +50,35 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
     isStreaming,
     cancelRequest,
     connectionStatus,
+    sessionState,
+    pauseStreaming,
+    resumeStreaming,
+    workspaceFiles,
+    messages,
   } = useClaudeCodeStore();
+
+  const { maxFileAttachmentSize } = useSettingsStore();
 
   const [value, setValue] = useState('');
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [attachments, setAttachments] = useState<FileAttachmentData[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // File references hook
+  const {
+    references,
+    isAutocompleteOpen,
+    autocompleteQuery,
+    autocompletePosition,
+    handleInputChange,
+    handleSelectFile,
+    closeAutocomplete,
+  } = useFileReferences(workspaceFiles);
 
   const isConnected = connectionStatus === 'connected';
   const isDisabled = disabled || !isConnected || isSending;
   const canSend = value.trim().length > 0 && !isDisabled;
+  const isActive = sessionState === 'generating' || sessionState === 'paused';
 
   // Auto-resize textarea
   useEffect(() => {
@@ -54,14 +93,15 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
     textareaRef.current?.focus();
   }, []);
 
-  const handleSend = async () => {
+  const handleSend = useCallback(async () => {
     if (!canSend) return;
 
     const message = value.trim();
     setValue('');
+    setAttachments([]);
 
     if (onSend) {
-      onSend(message);
+      onSend(message, attachments, references);
     } else {
       await sendMessage(message);
     }
@@ -70,7 +110,58 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  };
+  }, [canSend, value, attachments, references, onSend, sendMessage]);
+
+  const handleCancel = useCallback(() => {
+    cancelRequest();
+  }, [cancelRequest]);
+
+  const handlePause = useCallback(() => {
+    pauseStreaming();
+  }, [pauseStreaming]);
+
+  const handleResume = useCallback(() => {
+    resumeStreaming();
+  }, [resumeStreaming]);
+
+  const handleClearInput = useCallback(() => {
+    if (isAutocompleteOpen) {
+      closeAutocomplete();
+    } else {
+      setValue('');
+      setAttachments([]);
+    }
+  }, [isAutocompleteOpen, closeAutocomplete]);
+
+  const handleEditLastMessage = useCallback(() => {
+    // Find last user message
+    const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
+    if (lastUserMessage) {
+      setValue(lastUserMessage.content);
+      textareaRef.current?.focus();
+    }
+  }, [messages]);
+
+  const focusInput = useCallback(() => {
+    textareaRef.current?.focus();
+  }, []);
+
+  // Keyboard shortcuts
+  useChatShortcuts(
+    {
+      onSendMessage: handleSend,
+      onCancelGeneration: handleCancel,
+      onClearInput: handleClearInput,
+      onEditLastMessage: handleEditLastMessage,
+      onOpenCommandPalette,
+      onFocusInput: focusInput,
+    },
+    {
+      enabled: true,
+      inputEmpty: value.trim().length === 0,
+      isStreaming,
+    }
+  );
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Ctrl/Cmd + Enter to send
@@ -80,37 +171,98 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
       return;
     }
 
-    // Enter without modifier for newline (default behavior)
-    // Shift + Enter also for newline (default behavior)
+    // Handle @ mention detection
+    if (e.key === '@') {
+      const cursorPosition = e.currentTarget.selectionStart || 0;
+      handleInputChange(value + '@', cursorPosition + 1);
+    }
+
+    // Up arrow when input is empty to edit last message
+    if (e.key === 'ArrowUp' && value.trim().length === 0) {
+      e.preventDefault();
+      handleEditLastMessage();
+    }
   };
 
-  const handleCancel = () => {
-    cancelRequest();
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    setValue(newValue);
+
+    // Check for @ mention
+    const cursorPosition = e.target.selectionStart || 0;
+    handleInputChange(newValue, cursorPosition);
   };
+
+  const handleFileAttach = useCallback((files: FileAttachmentData[]) => {
+    setAttachments((prev) => [...prev, ...files]);
+  }, []);
+
+  const handleFileRemove = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
+  const handleFileSelect = useCallback(
+    (file: FileReference) => {
+      const replacement = handleSelectFile(file);
+      // Replace the @query with the selected file reference
+      const cursorPosition = textareaRef.current?.selectionStart || value.length;
+      const beforeCursor = value.slice(0, cursorPosition);
+      const afterCursor = value.slice(cursorPosition);
+
+      // Find the @ symbol position
+      const atIndex = beforeCursor.lastIndexOf('@');
+      if (atIndex >= 0) {
+        const newValue = beforeCursor.slice(0, atIndex) + replacement + afterCursor;
+        setValue(newValue);
+      }
+    },
+    [handleSelectFile, value]
+  );
 
   return (
     <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+      {/* File attachment drop zone */}
+      <FileAttachmentDropZone
+        attachments={attachments}
+        onAttach={handleFileAttach}
+        onRemove={handleFileRemove}
+        maxSize={maxFileAttachmentSize}
+        disabled={isDisabled}
+      />
+
+      {/* File reference autocomplete */}
+      <FileReferenceAutocomplete
+        isOpen={isAutocompleteOpen}
+        searchQuery={autocompleteQuery}
+        files={workspaceFiles}
+        onSelect={handleFileSelect}
+        onClose={closeAutocomplete}
+        position={autocompletePosition}
+      />
+
       {/* Keyboard shortcuts hint */}
       {showShortcuts && (
         <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
           <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
-            <div className="flex items-center gap-2">
-              <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Ctrl</kbd>
-              <span>+</span>
-              <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Enter</kbd>
-              <span>{t('shortcuts.send')}</span>
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-2">
+                <KeyboardShortcutHint shortcut="mod+enter" />
+                <span>{t('shortcuts.send')}</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <KeyboardShortcutHint shortcut="mod+/" />
+                <span>{t('shortcuts.commandPalette')}</span>
+              </span>
             </div>
-            <div className="flex items-center gap-2">
-              <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Ctrl</kbd>
-              <span>+</span>
-              <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">L</kbd>
-              <span>{t('shortcuts.clear')}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Ctrl</kbd>
-              <span>+</span>
-              <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">E</kbd>
-              <span>{t('shortcuts.export')}</span>
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-2">
+                <KeyboardShortcutHint shortcut="escape" />
+                <span>{t('shortcuts.cancel')}</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <KeyboardShortcutHint shortcut="up" />
+                <span>{t('shortcuts.editLast')}</span>
+              </span>
             </div>
           </div>
         </div>
@@ -127,11 +279,50 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
 
       {/* Input area */}
       <div className="flex items-end gap-2 p-4">
+        {/* Attach file button */}
+        <button
+          onClick={() => {
+            // Trigger file input
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            input.onchange = async (e) => {
+              const files = (e.target as HTMLInputElement).files;
+              if (files) {
+                // Process files - simplified version
+                const newAttachments: FileAttachmentData[] = [];
+                for (const file of Array.from(files)) {
+                  newAttachments.push({
+                    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    name: file.name,
+                    path: file.name,
+                    size: file.size,
+                    type: 'text',
+                  });
+                }
+                handleFileAttach(newAttachments);
+              }
+            };
+            input.click();
+          }}
+          disabled={isDisabled}
+          className={clsx(
+            'p-3 rounded-lg transition-colors',
+            'bg-gray-100 dark:bg-gray-800',
+            'text-gray-500 dark:text-gray-400',
+            'hover:bg-gray-200 dark:hover:bg-gray-700',
+            'disabled:opacity-50 disabled:cursor-not-allowed'
+          )}
+          title={t('input.attachFile')}
+        >
+          <PlusIcon className="w-5 h-5" />
+        </button>
+
         <div className="flex-1 relative">
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder={isConnected ? t('input.placeholder') : t('input.placeholderDisconnected')}
             disabled={isDisabled}
@@ -166,8 +357,15 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
             <KeyboardIcon className="w-5 h-5" />
           </button>
 
-          {/* Send/Cancel button */}
-          {isStreaming || isSending ? (
+          {/* Session control or Send button */}
+          {isActive ? (
+            <InlineSessionControl
+              state={sessionState}
+              onStop={handleCancel}
+              onPause={handlePause}
+              onResume={handleResume}
+            />
+          ) : isStreaming || isSending ? (
             <button
               onClick={handleCancel}
               className={clsx(
