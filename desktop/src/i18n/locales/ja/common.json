@@ -78,5 +78,36 @@
     "description": "説明",
     "error": "エラー",
     "retryAttempts": "リトライ回数"
+  },
+
+  "timeline": {
+    "title": "タイムライン",
+    "noCheckpoints": "チェックポイントがありません",
+    "createFirstCheckpoint": "最初のチェックポイントを作成して、セッション状態の追跡を開始しましょう。",
+    "createCheckpoint": "チェックポイントを作成",
+    "checkpointLabel": "チェックポイントのラベルを入力...",
+    "current": "現在",
+    "files": "ファイル",
+    "trackedFiles": "追跡ファイル",
+    "moreFiles": "他のファイル",
+    "restore": "復元",
+    "fork": "フォーク",
+    "compare": "比較",
+    "noBranch": "ブランチなし",
+    "enterBranchName": "ブランチ名を入力：",
+    "restoreConfirm": "チェックポイントに復元しますか？",
+    "restoreWarning": "セッションをこのチェックポイントの状態に復元します。それ以降の変更は失われる可能性があります。",
+    "createBackup": "復元前にバックアップを作成",
+    "filesWillChange": "変更されるファイル：",
+    "confirmRestore": "復元",
+    "cancelRestore": "キャンセル",
+    "diffTitle": "変更",
+    "added": "追加",
+    "modified": "変更",
+    "deleted": "削除",
+    "linesAdded": "行追加",
+    "linesRemoved": "行削除",
+    "noDiff": "差分がありません",
+    "selectCheckpointsToCompare": "比較する2つのチェックポイントを選択してください"
   }
 }
