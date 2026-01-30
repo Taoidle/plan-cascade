@@ -50,6 +50,10 @@ pub use commands::{
     set_custom_pricing, remove_custom_pricing, export_usage, export_by_model,
     export_by_project, export_time_series, export_pricing, delete_usage_records,
     check_analytics_health,
+    // Agent commands
+    list_agents, list_agents_with_stats, get_agent, create_agent, update_agent, delete_agent,
+    get_agent_history, get_agent_stats, get_agent_run, prune_agent_runs, run_agent,
+    export_agents, import_agents,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;

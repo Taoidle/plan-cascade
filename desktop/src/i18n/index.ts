@@ -16,6 +16,7 @@ import enClaudeCode from './locales/en/claudeCode.json';
 import enSettings from './locales/en/settings.json';
 import enWizard from './locales/en/wizard.json';
 import enAnalytics from './locales/en/analytics.json';
+import enAgents from './locales/en/agents.json';
 
 // Chinese translations
 import zhCommon from './locales/zh/common.json';
@@ -44,6 +45,7 @@ export const resources = {
     settings: enSettings,
     wizard: enWizard,
     analytics: enAnalytics,
+    agents: enAgents,
   },
   zh: {
     common: zhCommon,
@@ -81,7 +83,7 @@ i18n
     resources,
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics'],
+    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics', 'agents'],
     interpolation: {
       escapeValue: false, // React already handles escaping
     },

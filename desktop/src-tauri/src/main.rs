@@ -94,6 +94,20 @@ fn main() {
             plan_cascade_desktop::commands::analytics::export_pricing,
             plan_cascade_desktop::commands::analytics::delete_usage_records,
             plan_cascade_desktop::commands::analytics::check_analytics_health,
+            // Agent commands
+            plan_cascade_desktop::commands::agents::list_agents,
+            plan_cascade_desktop::commands::agents::list_agents_with_stats,
+            plan_cascade_desktop::commands::agents::get_agent,
+            plan_cascade_desktop::commands::agents::create_agent,
+            plan_cascade_desktop::commands::agents::update_agent,
+            plan_cascade_desktop::commands::agents::delete_agent,
+            plan_cascade_desktop::commands::agents::get_agent_history,
+            plan_cascade_desktop::commands::agents::get_agent_stats,
+            plan_cascade_desktop::commands::agents::get_agent_run,
+            plan_cascade_desktop::commands::agents::prune_agent_runs,
+            plan_cascade_desktop::commands::agents::run_agent,
+            plan_cascade_desktop::commands::agents::export_agents,
+            plan_cascade_desktop::commands::agents::import_agents,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
