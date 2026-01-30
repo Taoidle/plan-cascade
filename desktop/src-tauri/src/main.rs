@@ -2,7 +2,6 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use plan_cascade_desktop::commands::{get_health, get_settings, get_version, init_app, update_settings};
 use plan_cascade_desktop::state::AppState;
 
 use tauri::Manager;
@@ -13,13 +12,30 @@ fn main() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
-            init_app,
-            get_version,
+            plan_cascade_desktop::commands::init::init_app,
+            plan_cascade_desktop::commands::init::get_version,
             // Health commands
-            get_health,
+            plan_cascade_desktop::commands::health::get_health,
             // Settings commands
-            get_settings,
-            update_settings,
+            plan_cascade_desktop::commands::settings::get_settings,
+            plan_cascade_desktop::commands::settings::update_settings,
+            // Project commands
+            plan_cascade_desktop::commands::projects::list_projects,
+            plan_cascade_desktop::commands::projects::get_project,
+            plan_cascade_desktop::commands::projects::search_projects,
+            // Session commands
+            plan_cascade_desktop::commands::sessions::list_sessions,
+            plan_cascade_desktop::commands::sessions::get_session,
+            plan_cascade_desktop::commands::sessions::resume_session,
+            plan_cascade_desktop::commands::sessions::search_sessions,
+            // MCP commands
+            plan_cascade_desktop::commands::mcp::list_mcp_servers,
+            plan_cascade_desktop::commands::mcp::add_mcp_server,
+            plan_cascade_desktop::commands::mcp::update_mcp_server,
+            plan_cascade_desktop::commands::mcp::remove_mcp_server,
+            plan_cascade_desktop::commands::mcp::test_mcp_server,
+            plan_cascade_desktop::commands::mcp::toggle_mcp_server,
+            plan_cascade_desktop::commands::mcp::import_from_claude_desktop,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

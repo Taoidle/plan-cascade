@@ -15,7 +15,21 @@ pub mod storage;
 pub mod utils;
 
 // Re-export commonly used items from commands
-pub use commands::{get_health, get_settings, get_version, init_app, update_settings};
+pub use commands::{
+    // Init commands
+    init_app, get_version,
+    // Health commands
+    get_health,
+    // Settings commands
+    get_settings, update_settings,
+    // Project commands
+    list_projects, get_project, search_projects,
+    // Session commands
+    list_sessions, get_session, resume_session, search_sessions,
+    // MCP commands
+    list_mcp_servers, add_mcp_server, update_mcp_server, remove_mcp_server,
+    test_mcp_server, toggle_mcp_server, import_from_claude_desktop,
+};
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;
 pub use models::settings::{AppConfig, SettingsUpdate};
