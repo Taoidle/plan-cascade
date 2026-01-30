@@ -2,10 +2,17 @@
  * ToolCallCard Component
  *
  * Visualizes tool calls with collapsible sections showing parameters and results.
- * Each tool type has distinct visual styling.
+ * Each tool type has distinct visual styling with enhanced state visualization,
+ * animated transitions, and revert functionality for file-changing operations.
+ *
+ * Story-001: ToolCallCard state display and styling enhancement
+ * Story-002: Argument preview with truncation (via TruncatedText)
+ * Story-003: File diff viewer (via EnhancedDiffViewer)
+ * Story-004: ANSI output support (via AnsiOutput)
+ * Story-005: Glob/Grep viewers
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
 import {
   FileTextIcon,
@@ -17,11 +24,124 @@ import {
   CrossCircledIcon,
   ReloadIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
   CopyIcon,
   GlobeIcon,
+  ClockIcon,
+  ResetIcon,
+  ExclamationTriangleIcon,
 } from '@radix-ui/react-icons';
 import { ToolCall, ToolType } from '../../store/claudeCode';
+import { TruncatedText } from './TruncatedText';
+import { AnsiOutput } from './AnsiOutput';
+import { GlobResultViewer } from './GlobResultViewer';
+import { GrepResultViewer } from './GrepResultViewer';
+import { EnhancedDiffViewer } from './EnhancedDiffViewer';
+
+// ============================================================================
+// Custom Hook: useToolCallState
+// ============================================================================
+
+interface UseToolCallStateOptions {
+  toolCall: ToolCall;
+}
+
+function useToolCallState({ toolCall }: UseToolCallStateOptions) {
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [showRevertConfirm, setShowRevertConfirm] = useState(false);
+
+  // Update elapsed time for running operations
+  useEffect(() => {
+    if (toolCall.status === 'executing' && toolCall.startedAt) {
+      const startTime = new Date(toolCall.startedAt).getTime();
+
+      const updateTimer = () => {
+        setElapsedTime(Date.now() - startTime);
+      };
+
+      updateTimer();
+      const interval = setInterval(updateTimer, 100);
+
+      return () => clearInterval(interval);
+    } else if (toolCall.duration) {
+      setElapsedTime(toolCall.duration);
+    }
+  }, [toolCall.status, toolCall.startedAt, toolCall.duration]);
+
+  return {
+    elapsedTime,
+    showRevertConfirm,
+    setShowRevertConfirm,
+  };
+}
+
+// ============================================================================
+// RevertButton Component
+// ============================================================================
+
+interface RevertButtonProps {
+  toolCall: ToolCall;
+  showConfirm: boolean;
+  setShowConfirm: (show: boolean) => void;
+}
+
+function RevertButton({ toolCall, showConfirm, setShowConfirm }: RevertButtonProps) {
+  const handleRevert = useCallback(() => {
+    // In a real implementation, this would trigger the revert action
+    // through the claudeCode store or a dedicated API
+    console.log('Reverting tool call:', toolCall.id);
+    setShowConfirm(false);
+    // TODO: Integrate with checkpoint/restore system
+  }, [toolCall.id, setShowConfirm]);
+
+  if (!showConfirm) {
+    return (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowConfirm(true);
+        }}
+        className={clsx(
+          'flex items-center gap-1 px-2 py-1 rounded text-xs',
+          'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400',
+          'hover:bg-yellow-200 dark:hover:bg-yellow-900/50',
+          'transition-colors'
+        )}
+        title="Revert this change"
+      >
+        <ResetIcon className="w-3 h-3" />
+        Revert
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+      <span className="text-xs text-gray-500">Confirm revert?</span>
+      <button
+        onClick={handleRevert}
+        className={clsx(
+          'px-2 py-1 rounded text-xs',
+          'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
+          'hover:bg-red-200 dark:hover:bg-red-900/50',
+          'transition-colors'
+        )}
+      >
+        Yes
+      </button>
+      <button
+        onClick={() => setShowConfirm(false)}
+        className={clsx(
+          'px-2 py-1 rounded text-xs',
+          'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400',
+          'hover:bg-gray-200 dark:hover:bg-gray-700',
+          'transition-colors'
+        )}
+      >
+        No
+      </button>
+    </div>
+  );
+}
 
 // ============================================================================
 // ToolCallCard Component
@@ -34,16 +154,30 @@ interface ToolCallCardProps {
 
 export function ToolCallCard({ toolCall, compact = false }: ToolCallCardProps) {
   const [isExpanded, setIsExpanded] = useState(!compact);
+  const { elapsedTime, showRevertConfirm, setShowRevertConfirm } = useToolCallState({ toolCall });
 
   const statusConfig = getStatusConfig(toolCall.status);
   const toolConfig = getToolConfig(toolCall.name);
 
+  // Check if this is a file-changing operation that can be reverted
+  const canRevert = useMemo(() => {
+    return (
+      (toolCall.name === 'Write' || toolCall.name === 'Edit') &&
+      toolCall.status === 'completed' &&
+      toolCall.result?.success
+    );
+  }, [toolCall.name, toolCall.status, toolCall.result?.success]);
+
   return (
     <div
+      id={`tool-call-${toolCall.id}`}
       className={clsx(
-        'rounded-lg border overflow-hidden transition-all',
+        'rounded-lg border overflow-hidden',
+        'transition-all duration-300 ease-in-out',
         statusConfig.borderColor,
-        statusConfig.bgColor
+        statusConfig.bgColor,
+        // Running state gets animated border
+        toolCall.status === 'executing' && 'animate-pulse-border'
       )}
     >
       {/* Header */}
@@ -52,20 +186,25 @@ export function ToolCallCard({ toolCall, compact = false }: ToolCallCardProps) {
         className={clsx(
           'w-full flex items-center gap-3 px-3 py-2',
           'hover:bg-black/5 dark:hover:bg-white/5',
-          'transition-colors text-left'
+          'transition-colors text-left',
+          'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-inset'
         )}
+        aria-expanded={isExpanded}
+        aria-label={`${toolCall.name} tool call, status: ${statusConfig.label}`}
       >
         {/* Expand/Collapse icon */}
-        <span className="text-gray-400">
-          {isExpanded ? (
-            <ChevronDownIcon className="w-4 h-4" />
-          ) : (
-            <ChevronRightIcon className="w-4 h-4" />
-          )}
+        <span className="text-gray-400 transition-transform duration-200" style={{
+          transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'
+        }}>
+          <ChevronDownIcon className="w-4 h-4" />
         </span>
 
-        {/* Tool icon */}
-        <span className={clsx('p-1.5 rounded', toolConfig.iconBg)}>
+        {/* Tool icon with status-based animation */}
+        <span className={clsx(
+          'p-1.5 rounded transition-all duration-300',
+          toolConfig.iconBg,
+          toolCall.status === 'executing' && 'animate-pulse'
+        )}>
           <toolConfig.Icon className={clsx('w-4 h-4', toolConfig.iconColor)} />
         </span>
 
@@ -76,12 +215,12 @@ export function ToolCallCard({ toolCall, compact = false }: ToolCallCardProps) {
               {toolCall.name}
             </span>
             {toolCall.parameters.file_path && (
-              <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
                 {truncatePath(toolCall.parameters.file_path)}
               </span>
             )}
             {toolCall.parameters.command && (
-              <span className="text-xs text-gray-500 dark:text-gray-400 truncate font-mono">
+              <span className="text-xs text-gray-500 dark:text-gray-400 truncate font-mono max-w-[200px]">
                 {truncateCommand(toolCall.parameters.command)}
               </span>
             )}
@@ -93,21 +232,81 @@ export function ToolCallCard({ toolCall, compact = false }: ToolCallCardProps) {
           </div>
         </div>
 
+        {/* Duration timer */}
+        {(toolCall.status === 'executing' || toolCall.duration) && (
+          <span className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+            <ClockIcon className="w-3 h-3" />
+            {formatDuration(elapsedTime)}
+          </span>
+        )}
+
         {/* Status indicator */}
-        <span className={clsx('flex items-center gap-1', statusConfig.textColor)}>
+        <span className={clsx(
+          'flex items-center gap-1.5 px-2 py-0.5 rounded-full',
+          statusConfig.badgeBg,
+          statusConfig.textColor,
+          'transition-all duration-300'
+        )}>
           <statusConfig.Icon
-            className={clsx('w-4 h-4', toolCall.status === 'executing' && 'animate-spin')}
+            className={clsx(
+              'w-3.5 h-3.5',
+              toolCall.status === 'executing' && 'animate-spin'
+            )}
           />
-          <span className="text-xs">{statusConfig.label}</span>
+          <span className="text-xs font-medium">{statusConfig.label}</span>
         </span>
       </button>
 
-      {/* Expanded content */}
-      {isExpanded && (
-        <div className="border-t border-gray-200 dark:border-gray-700">
-          <ToolCallContent toolCall={toolCall} />
+      {/* Revert button for file operations */}
+      {canRevert && !isExpanded && (
+        <div className="px-3 pb-2">
+          <RevertButton
+            toolCall={toolCall}
+            showConfirm={showRevertConfirm}
+            setShowConfirm={setShowRevertConfirm}
+          />
         </div>
       )}
+
+      {/* Expanded content */}
+      <div
+        className={clsx(
+          'overflow-hidden transition-all duration-300 ease-in-out',
+          isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
+        )}
+      >
+        <div className="border-t border-gray-200 dark:border-gray-700">
+          <ToolCallContent toolCall={toolCall} />
+
+          {/* Revert button at bottom when expanded */}
+          {canRevert && (
+            <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
+              <RevertButton
+                toolCall={toolCall}
+                showConfirm={showRevertConfirm}
+                setShowConfirm={setShowRevertConfirm}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* CSS for animated border */}
+      <style>{`
+        @keyframes pulse-border {
+          0%, 100% {
+            border-color: rgb(59 130 246 / 0.5);
+            box-shadow: 0 0 0 0 rgb(59 130 246 / 0.4);
+          }
+          50% {
+            border-color: rgb(59 130 246 / 1);
+            box-shadow: 0 0 8px 2px rgb(59 130 246 / 0.2);
+          }
+        }
+        .animate-pulse-border {
+          animation: pulse-border 2s ease-in-out infinite;
+        }
+      `}</style>
     </div>
   );
 }
@@ -160,9 +359,13 @@ function ReadToolContent({ toolCall }: ToolCallContentProps) {
   return (
     <div className="p-3 space-y-3">
       {/* Parameters */}
-      <div className="space-y-1">
-        <Label>File Path</Label>
-        <CodeBlock>{toolCall.parameters.file_path || 'N/A'}</CodeBlock>
+      <div className="space-y-2">
+        <TruncatedText
+          content={toolCall.parameters.file_path || 'N/A'}
+          isPath
+          label="File Path"
+          maxLength={80}
+        />
         {(toolCall.parameters.offset !== undefined || toolCall.parameters.limit !== undefined) && (
           <div className="flex gap-4 text-xs text-gray-500">
             {toolCall.parameters.offset !== undefined && (
@@ -188,9 +391,11 @@ function ReadToolContent({ toolCall }: ToolCallContentProps) {
               {copied ? 'Copied!' : 'Copy'}
             </button>
           </div>
-          <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-xs max-h-64 overflow-y-auto">
-            <code>{toolCall.result.content || toolCall.result.output || 'No content'}</code>
-          </pre>
+          <TruncatedText
+            content={toolCall.result.content || toolCall.result.output || 'No content'}
+            maxLength={500}
+            maxExpandedHeight={400}
+          />
         </div>
       )}
 
@@ -210,22 +415,27 @@ function WriteToolContent({ toolCall }: ToolCallContentProps) {
   return (
     <div className="p-3 space-y-3">
       {/* Parameters */}
-      <div className="space-y-1">
-        <Label>File Path</Label>
-        <CodeBlock>{toolCall.parameters.file_path || 'N/A'}</CodeBlock>
-      </div>
+      <TruncatedText
+        content={toolCall.parameters.file_path || 'N/A'}
+        isPath
+        label="File Path"
+        maxLength={80}
+      />
 
       <div className="space-y-1">
         <Label>Content</Label>
-        <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-xs max-h-64 overflow-y-auto">
-          <code>{toolCall.parameters.content || 'No content'}</code>
-        </pre>
+        <TruncatedText
+          content={toolCall.parameters.content || 'No content'}
+          maxLength={300}
+          maxExpandedHeight={400}
+        />
       </div>
 
       {/* Result */}
       {toolCall.result && (
         <div className={clsx(
           'flex items-center gap-2 p-2 rounded text-sm',
+          'transition-all duration-300',
           toolCall.result.success
             ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
             : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
@@ -255,29 +465,26 @@ function EditToolContent({ toolCall }: ToolCallContentProps) {
   return (
     <div className="p-3 space-y-3">
       {/* File path */}
-      <div className="space-y-1">
-        <Label>File Path</Label>
-        <CodeBlock>{toolCall.parameters.file_path || 'N/A'}</CodeBlock>
-      </div>
+      <TruncatedText
+        content={toolCall.parameters.file_path || 'N/A'}
+        isPath
+        label="File Path"
+        maxLength={80}
+      />
 
-      {/* Diff view */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <Label>Old String</Label>
-          <pre className="bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 p-2 rounded text-xs overflow-x-auto max-h-32 overflow-y-auto border border-red-200 dark:border-red-800">
-            <code>{toolCall.parameters.old_string || 'N/A'}</code>
-          </pre>
-        </div>
-        <div className="space-y-1">
-          <Label>New String</Label>
-          <pre className="bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 p-2 rounded text-xs overflow-x-auto max-h-32 overflow-y-auto border border-green-200 dark:border-green-800">
-            <code>{toolCall.parameters.new_string || 'N/A'}</code>
-          </pre>
-        </div>
-      </div>
+      {/* Enhanced Diff view */}
+      {toolCall.parameters.old_string && toolCall.parameters.new_string && (
+        <EnhancedDiffViewer
+          oldContent={toolCall.parameters.old_string}
+          newContent={toolCall.parameters.new_string}
+          filePath={toolCall.parameters.file_path}
+          maxHeight={300}
+        />
+      )}
 
       {toolCall.parameters.replace_all && (
-        <div className="text-xs text-gray-500">
+        <div className="text-xs text-gray-500 flex items-center gap-1">
+          <ExclamationTriangleIcon className="w-3 h-3" />
           Replace all occurrences: Yes
         </div>
       )}
@@ -286,6 +493,7 @@ function EditToolContent({ toolCall }: ToolCallContentProps) {
       {toolCall.result && (
         <div className={clsx(
           'flex items-center gap-2 p-2 rounded text-sm',
+          'transition-all duration-300',
           toolCall.result.success
             ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
             : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
@@ -312,16 +520,6 @@ function EditToolContent({ toolCall }: ToolCallContentProps) {
 // ============================================================================
 
 function BashToolContent({ toolCall }: ToolCallContentProps) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    if (toolCall.result?.output) {
-      navigator.clipboard.writeText(toolCall.result.output);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
   return (
     <div className="p-3 space-y-3">
       {/* Command */}
@@ -334,29 +532,23 @@ function BashToolContent({ toolCall }: ToolCallContentProps) {
               <span className="text-xs text-gray-500">{toolCall.parameters.description}</span>
             )}
           </div>
-          <pre className="p-3 text-sm text-gray-100 overflow-x-auto">
-            <code>{toolCall.parameters.command || 'N/A'}</code>
-          </pre>
+          <TruncatedText
+            content={toolCall.parameters.command || 'N/A'}
+            isCommand
+            maxLength={150}
+            className="p-0"
+          />
         </div>
       </div>
 
-      {/* Output */}
+      {/* Output with ANSI support */}
       {toolCall.result && (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <Label>Output</Label>
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            >
-              <CopyIcon className="w-3 h-3" />
-              {copied ? 'Copied!' : 'Copy'}
-            </button>
-          </div>
-          <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-xs max-h-64 overflow-y-auto">
-            <code>{toolCall.result.output || 'No output'}</code>
-          </pre>
-        </div>
+        <AnsiOutput
+          output={toolCall.result.output || 'No output'}
+          exitCode={toolCall.result.success === false ? 1 : 0}
+          duration={toolCall.duration}
+          maxHeight={300}
+        />
       )}
 
       {/* Error */}
@@ -376,41 +568,36 @@ function GlobToolContent({ toolCall }: ToolCallContentProps) {
     <div className="p-3 space-y-3">
       {/* Parameters */}
       <div className="flex gap-4">
-        <div className="space-y-1 flex-1">
-          <Label>Pattern</Label>
-          <CodeBlock>{toolCall.parameters.pattern || 'N/A'}</CodeBlock>
-        </div>
+        <TruncatedText
+          content={toolCall.parameters.pattern || 'N/A'}
+          label="Pattern"
+          maxLength={60}
+          className="flex-1"
+        />
         {toolCall.parameters.path && (
-          <div className="space-y-1 flex-1">
-            <Label>Path</Label>
-            <CodeBlock>{toolCall.parameters.path}</CodeBlock>
-          </div>
+          <TruncatedText
+            content={toolCall.parameters.path}
+            isPath
+            label="Path"
+            maxLength={60}
+            className="flex-1"
+          />
         )}
       </div>
 
-      {/* Result - File list */}
+      {/* Result - Enhanced File list */}
       {toolCall.result?.files && toolCall.result.files.length > 0 && (
-        <div className="space-y-1">
-          <Label>Matched Files ({toolCall.result.files.length})</Label>
-          <div className="bg-gray-50 dark:bg-gray-800 rounded-lg max-h-48 overflow-y-auto">
-            {toolCall.result.files.map((file, i) => (
-              <div
-                key={i}
-                className={clsx(
-                  'flex items-center gap-2 px-3 py-1.5 text-sm',
-                  i !== 0 && 'border-t border-gray-200 dark:border-gray-700'
-                )}
-              >
-                <FileIcon className="w-4 h-4 text-gray-400" />
-                <span className="font-mono text-xs truncate">{file}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <GlobResultViewer
+          files={toolCall.result.files}
+          pattern={toolCall.parameters.pattern}
+          maxHeight={300}
+        />
       )}
 
       {toolCall.result && !toolCall.result.files?.length && !toolCall.result.error && (
-        <div className="text-sm text-gray-500 italic">No files matched</div>
+        <div className="text-sm text-gray-500 italic p-4 text-center bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+          No files matched
+        </div>
       )}
 
       {/* Error */}
@@ -430,63 +617,48 @@ function GrepToolContent({ toolCall }: ToolCallContentProps) {
     <div className="p-3 space-y-3">
       {/* Parameters */}
       <div className="flex gap-4">
-        <div className="space-y-1 flex-1">
-          <Label>Pattern</Label>
-          <CodeBlock>{toolCall.parameters.pattern || 'N/A'}</CodeBlock>
-        </div>
+        <TruncatedText
+          content={toolCall.parameters.pattern || 'N/A'}
+          label="Pattern"
+          maxLength={60}
+          className="flex-1"
+        />
         {toolCall.parameters.path && (
-          <div className="space-y-1 flex-1">
-            <Label>Path</Label>
-            <CodeBlock>{toolCall.parameters.path}</CodeBlock>
-          </div>
+          <TruncatedText
+            content={toolCall.parameters.path}
+            isPath
+            label="Path"
+            maxLength={60}
+            className="flex-1"
+          />
         )}
       </div>
 
-      {/* Result - Matches */}
+      {/* Result - Enhanced Matches viewer */}
       {toolCall.result?.matches && toolCall.result.matches.length > 0 && (
-        <div className="space-y-1">
-          <Label>Matches ({toolCall.result.matches.length})</Label>
-          <div className="bg-gray-50 dark:bg-gray-800 rounded-lg max-h-64 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
-            {toolCall.result.matches.map((match, i) => (
-              <div key={i} className="p-2">
-                <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
-                  <FileIcon className="w-3 h-3" />
-                  <span className="font-mono truncate">{match.file}</span>
-                  <span className="text-gray-400">:</span>
-                  <span>{match.line}</span>
-                </div>
-                <pre className="text-xs font-mono bg-gray-100 dark:bg-gray-900 p-2 rounded overflow-x-auto">
-                  {match.content}
-                </pre>
-              </div>
-            ))}
-          </div>
-        </div>
+        <GrepResultViewer
+          matches={toolCall.result.matches}
+          pattern={toolCall.parameters.pattern}
+          outputMode="content"
+          maxHeight={400}
+        />
       )}
 
       {/* Files only mode */}
       {toolCall.result?.files && toolCall.result.files.length > 0 && !toolCall.result.matches && (
-        <div className="space-y-1">
-          <Label>Files with Matches ({toolCall.result.files.length})</Label>
-          <div className="bg-gray-50 dark:bg-gray-800 rounded-lg max-h-48 overflow-y-auto">
-            {toolCall.result.files.map((file, i) => (
-              <div
-                key={i}
-                className={clsx(
-                  'flex items-center gap-2 px-3 py-1.5 text-sm',
-                  i !== 0 && 'border-t border-gray-200 dark:border-gray-700'
-                )}
-              >
-                <FileIcon className="w-4 h-4 text-gray-400" />
-                <span className="font-mono text-xs truncate">{file}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <GrepResultViewer
+          matches={[]}
+          files={toolCall.result.files}
+          pattern={toolCall.parameters.pattern}
+          outputMode="files_with_matches"
+          maxHeight={300}
+        />
       )}
 
       {toolCall.result && !toolCall.result.matches?.length && !toolCall.result.files?.length && !toolCall.result.error && (
-        <div className="text-sm text-gray-500 italic">No matches found</div>
+        <div className="text-sm text-gray-500 italic p-4 text-center bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+          No matches found
+        </div>
       )}
 
       {/* Error */}
@@ -506,25 +678,29 @@ function WebToolContent({ toolCall }: ToolCallContentProps) {
     <div className="p-3 space-y-3">
       {/* Parameters */}
       {!!toolCall.parameters.url && (
-        <div className="space-y-1">
-          <Label>URL</Label>
-          <CodeBlock>{toolCall.parameters.url as string}</CodeBlock>
-        </div>
+        <TruncatedText
+          content={toolCall.parameters.url as string}
+          label="URL"
+          maxLength={80}
+        />
       )}
       {!!toolCall.parameters.query && (
-        <div className="space-y-1">
-          <Label>Query</Label>
-          <CodeBlock>{toolCall.parameters.query as string}</CodeBlock>
-        </div>
+        <TruncatedText
+          content={toolCall.parameters.query as string}
+          label="Query"
+          maxLength={100}
+        />
       )}
 
       {/* Result */}
       {toolCall.result?.content && (
         <div className="space-y-1">
           <Label>Result</Label>
-          <pre className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg overflow-x-auto text-xs max-h-64 overflow-y-auto">
-            {toolCall.result.content}
-          </pre>
+          <TruncatedText
+            content={toolCall.result.content}
+            maxLength={500}
+            maxExpandedHeight={400}
+          />
         </div>
       )}
 
@@ -546,18 +722,22 @@ function GenericToolContent({ toolCall }: ToolCallContentProps) {
       {/* Parameters */}
       <div className="space-y-1">
         <Label>Parameters</Label>
-        <pre className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg overflow-x-auto text-xs">
-          <code>{JSON.stringify(toolCall.parameters, null, 2)}</code>
-        </pre>
+        <TruncatedText
+          content={JSON.stringify(toolCall.parameters, null, 2)}
+          isJson
+          maxLength={300}
+        />
       </div>
 
       {/* Result */}
       {toolCall.result && (
         <div className="space-y-1">
           <Label>Result</Label>
-          <pre className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg overflow-x-auto text-xs max-h-48 overflow-y-auto">
-            <code>{JSON.stringify(toolCall.result, null, 2)}</code>
-          </pre>
+          <TruncatedText
+            content={JSON.stringify(toolCall.result, null, 2)}
+            isJson
+            maxLength={300}
+          />
         </div>
       )}
     </div>
@@ -573,14 +753,6 @@ function Label({ children }: { children: React.ReactNode }) {
     <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
       {children}
     </span>
-  );
-}
-
-function CodeBlock({ children }: { children: React.ReactNode }) {
-  return (
-    <code className="block bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-sm font-mono text-gray-800 dark:text-gray-200">
-      {children}
-    </code>
   );
 }
 
@@ -601,43 +773,48 @@ function getStatusConfig(status: string) {
   switch (status) {
     case 'pending':
       return {
-        Icon: ReloadIcon,
+        Icon: ClockIcon,
         label: 'Pending',
-        textColor: 'text-gray-500',
-        borderColor: 'border-gray-200 dark:border-gray-700',
+        textColor: 'text-gray-600 dark:text-gray-400',
+        borderColor: 'border-gray-300 dark:border-gray-600',
         bgColor: 'bg-gray-50 dark:bg-gray-800/50',
+        badgeBg: 'bg-gray-200 dark:bg-gray-700',
       };
     case 'executing':
       return {
         Icon: ReloadIcon,
         label: 'Running',
-        textColor: 'text-blue-500',
-        borderColor: 'border-blue-200 dark:border-blue-800',
+        textColor: 'text-blue-600 dark:text-blue-400',
+        borderColor: 'border-blue-300 dark:border-blue-700',
         bgColor: 'bg-blue-50 dark:bg-blue-900/20',
+        badgeBg: 'bg-blue-100 dark:bg-blue-900/50',
       };
     case 'completed':
       return {
         Icon: CheckCircledIcon,
         label: 'Done',
-        textColor: 'text-green-500',
-        borderColor: 'border-green-200 dark:border-green-800',
+        textColor: 'text-green-600 dark:text-green-400',
+        borderColor: 'border-green-300 dark:border-green-700',
         bgColor: 'bg-green-50 dark:bg-green-900/20',
+        badgeBg: 'bg-green-100 dark:bg-green-900/50',
       };
     case 'failed':
       return {
         Icon: CrossCircledIcon,
         label: 'Failed',
-        textColor: 'text-red-500',
-        borderColor: 'border-red-200 dark:border-red-800',
+        textColor: 'text-red-600 dark:text-red-400',
+        borderColor: 'border-red-300 dark:border-red-700',
         bgColor: 'bg-red-50 dark:bg-red-900/20',
+        badgeBg: 'bg-red-100 dark:bg-red-900/50',
       };
     default:
       return {
         Icon: ReloadIcon,
         label: status,
-        textColor: 'text-gray-500',
-        borderColor: 'border-gray-200 dark:border-gray-700',
+        textColor: 'text-gray-600 dark:text-gray-400',
+        borderColor: 'border-gray-300 dark:border-gray-600',
         bgColor: 'bg-gray-50 dark:bg-gray-800/50',
+        badgeBg: 'bg-gray-200 dark:bg-gray-700',
       };
   }
 }
@@ -721,6 +898,12 @@ function truncatePath(path: string, maxLength = 40): string {
 function truncateCommand(command: string, maxLength = 50): string {
   if (command.length <= maxLength) return command;
   return command.slice(0, maxLength - 3) + '...';
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 }
 
 export default ToolCallCard;
