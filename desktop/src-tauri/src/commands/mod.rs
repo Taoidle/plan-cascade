@@ -5,6 +5,7 @@
 
 pub mod health;
 pub mod init;
+pub mod markdown;
 pub mod mcp;
 pub mod projects;
 pub mod sessions;
@@ -12,6 +13,7 @@ pub mod settings;
 
 pub use health::*;
 pub use init::*;
+pub use markdown::*;
 pub use mcp::*;
 pub use projects::*;
 pub use sessions::*;

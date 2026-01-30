@@ -29,6 +29,8 @@ pub use commands::{
     // MCP commands
     list_mcp_servers, add_mcp_server, update_mcp_server, remove_mcp_server,
     test_mcp_server, toggle_mcp_server, import_from_claude_desktop,
+    // Markdown commands
+    scan_claude_md, read_claude_md, save_claude_md, create_claude_md, get_claude_md_metadata,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;
