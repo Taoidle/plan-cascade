@@ -5,8 +5,10 @@
 
 pub mod health;
 pub mod init;
+pub mod mcp;
 pub mod settings;
 
 pub use health::*;
 pub use init::*;
+pub use mcp::*;
 pub use settings::*;

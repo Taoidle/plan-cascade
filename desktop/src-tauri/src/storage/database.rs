@@ -106,10 +106,15 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS mcp_servers (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                command TEXT NOT NULL,
+                server_type TEXT NOT NULL DEFAULT 'stdio',
+                command TEXT,
                 args TEXT,
                 env TEXT,
+                url TEXT,
+                headers TEXT,
                 enabled INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'unknown',
+                last_checked TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )",
@@ -185,6 +190,220 @@ impl Database {
         let conn = self.get_connection()?;
         conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
         Ok(())
+    }
+
+    // ========================================================================
+    // MCP Server Operations
+    // ========================================================================
+
+    /// Insert a new MCP server
+    pub fn insert_mcp_server(&self, server: &crate::models::McpServer) -> AppResult<()> {
+        let conn = self.get_connection()?;
+
+        let args_json = serde_json::to_string(&server.args).unwrap_or_default();
+        let env_json = serde_json::to_string(&server.env).unwrap_or_default();
+        let headers_json = serde_json::to_string(&server.headers).unwrap_or_default();
+        let server_type = match server.server_type {
+            crate::models::McpServerType::Stdio => "stdio",
+            crate::models::McpServerType::Sse => "sse",
+        };
+
+        conn.execute(
+            "INSERT INTO mcp_servers (id, name, server_type, command, args, env, url, headers, enabled, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            params![
+                server.id,
+                server.name,
+                server_type,
+                server.command,
+                args_json,
+                env_json,
+                server.url,
+                headers_json,
+                server.enabled as i32,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get an MCP server by ID
+    pub fn get_mcp_server(&self, id: &str) -> AppResult<Option<crate::models::McpServer>> {
+        let conn = self.get_connection()?;
+
+        let result = conn.query_row(
+            "SELECT id, name, server_type, command, args, env, url, headers, enabled, status, last_checked, created_at, updated_at
+             FROM mcp_servers WHERE id = ?1",
+            params![id],
+            |row| Self::row_to_mcp_server(row),
+        );
+
+        match result {
+            Ok(server) => Ok(Some(server)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// List all MCP servers
+    pub fn list_mcp_servers(&self) -> AppResult<Vec<crate::models::McpServer>> {
+        let conn = self.get_connection()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, name, server_type, command, args, env, url, headers, enabled, status, last_checked, created_at, updated_at
+             FROM mcp_servers ORDER BY name ASC"
+        )?;
+
+        let servers = stmt.query_map([], |row| Self::row_to_mcp_server(row))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(servers)
+    }
+
+    /// Update an MCP server
+    pub fn update_mcp_server(&self, server: &crate::models::McpServer) -> AppResult<()> {
+        let conn = self.get_connection()?;
+
+        let args_json = serde_json::to_string(&server.args).unwrap_or_default();
+        let env_json = serde_json::to_string(&server.env).unwrap_or_default();
+        let headers_json = serde_json::to_string(&server.headers).unwrap_or_default();
+        let server_type = match server.server_type {
+            crate::models::McpServerType::Stdio => "stdio",
+            crate::models::McpServerType::Sse => "sse",
+        };
+        let status = match &server.status {
+            crate::models::McpServerStatus::Connected => "connected".to_string(),
+            crate::models::McpServerStatus::Disconnected => "disconnected".to_string(),
+            crate::models::McpServerStatus::Error(msg) => format!("error:{}", msg),
+            crate::models::McpServerStatus::Unknown => "unknown".to_string(),
+        };
+
+        conn.execute(
+            "UPDATE mcp_servers SET name = ?2, server_type = ?3, command = ?4, args = ?5, env = ?6,
+             url = ?7, headers = ?8, enabled = ?9, status = ?10, last_checked = ?11, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![
+                server.id,
+                server.name,
+                server_type,
+                server.command,
+                args_json,
+                env_json,
+                server.url,
+                headers_json,
+                server.enabled as i32,
+                status,
+                server.last_checked,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Delete an MCP server
+    pub fn delete_mcp_server(&self, id: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute("DELETE FROM mcp_servers WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Toggle MCP server enabled status
+    pub fn toggle_mcp_server_enabled(&self, id: &str, enabled: bool) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE mcp_servers SET enabled = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![id, enabled as i32],
+        )?;
+        Ok(())
+    }
+
+    /// Update MCP server status after health check
+    pub fn update_mcp_server_status(&self, id: &str, status: &crate::models::McpServerStatus) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        let status_str = match status {
+            crate::models::McpServerStatus::Connected => "connected".to_string(),
+            crate::models::McpServerStatus::Disconnected => "disconnected".to_string(),
+            crate::models::McpServerStatus::Error(msg) => format!("error:{}", msg),
+            crate::models::McpServerStatus::Unknown => "unknown".to_string(),
+        };
+
+        conn.execute(
+            "UPDATE mcp_servers SET status = ?2, last_checked = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![id, status_str],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get MCP server by name (for duplicate detection)
+    pub fn get_mcp_server_by_name(&self, name: &str) -> AppResult<Option<crate::models::McpServer>> {
+        let conn = self.get_connection()?;
+
+        let result = conn.query_row(
+            "SELECT id, name, server_type, command, args, env, url, headers, enabled, status, last_checked, created_at, updated_at
+             FROM mcp_servers WHERE name = ?1",
+            params![name],
+            |row| Self::row_to_mcp_server(row),
+        );
+
+        match result {
+            Ok(server) => Ok(Some(server)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// Helper function to convert a database row to McpServer
+    fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<crate::models::McpServer> {
+        let id: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let server_type_str: String = row.get(2)?;
+        let command: Option<String> = row.get(3)?;
+        let args_json: String = row.get::<_, String>(4).unwrap_or_default();
+        let env_json: String = row.get::<_, String>(5).unwrap_or_default();
+        let url: Option<String> = row.get(6)?;
+        let headers_json: String = row.get::<_, String>(7).unwrap_or_default();
+        let enabled: i32 = row.get(8)?;
+        let status_str: String = row.get::<_, String>(9).unwrap_or_else(|_| "unknown".to_string());
+        let last_checked: Option<String> = row.get(10)?;
+        let created_at: Option<String> = row.get(11)?;
+        let updated_at: Option<String> = row.get(12)?;
+
+        let server_type = match server_type_str.as_str() {
+            "sse" => crate::models::McpServerType::Sse,
+            _ => crate::models::McpServerType::Stdio,
+        };
+
+        let args: Vec<String> = serde_json::from_str(&args_json).unwrap_or_default();
+        let env: std::collections::HashMap<String, String> = serde_json::from_str(&env_json).unwrap_or_default();
+        let headers: std::collections::HashMap<String, String> = serde_json::from_str(&headers_json).unwrap_or_default();
+
+        let status = if status_str.starts_with("error:") {
+            crate::models::McpServerStatus::Error(status_str[6..].to_string())
+        } else {
+            match status_str.as_str() {
+                "connected" => crate::models::McpServerStatus::Connected,
+                "disconnected" => crate::models::McpServerStatus::Disconnected,
+                _ => crate::models::McpServerStatus::Unknown,
+            }
+        };
+
+        Ok(crate::models::McpServer {
+            id,
+            name,
+            server_type,
+            command,
+            args,
+            env,
+            url,
+            headers,
+            enabled: enabled != 0,
+            status,
+            last_checked,
+            created_at,
+            updated_at,
+        })
     }
 }
 
