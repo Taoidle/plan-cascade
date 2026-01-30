@@ -1,63 +1,107 @@
 [中文版](PRD-Plan-Cascade-Standalone_zh.md)
 
-# Plan Cascade Standalone - Product Requirements Document (PRD)
+# Plan Cascade Desktop - Product Requirements Document (PRD)
 
-**Version**: 4.0.0
-**Date**: 2026-01-29
+**Version**: 5.0.0
+**Date**: 2026-01-30
 **Author**: Plan Cascade Team
-**Status**: Implementation In Progress
+**Status**: Architecture Redesign
 
 ---
 
 ## Implementation Status Overview
 
-> **Current Progress**: ~98% core functionality implemented
-> **Last Updated**: 2026-01-29
+> **Current Progress**: Architecture redesign in progress
+> **Last Updated**: 2026-01-30
+
+### Architecture Changes (v5.0)
+
+| Change | Previous | New |
+|--------|----------|-----|
+| **Desktop Backend** | Python Sidecar (FastAPI) | Pure Rust Backend |
+| **Dependency** | Requires Python 3.10+ | No Python required |
+| **Distribution** | Complex (Python + Tauri) | Single executable |
 
 ### Feature Requirements Implementation Status
 
 | Feature (Section) | Priority | Status | Notes |
 |-------------------|----------|--------|-------|
 | **4.1 Working Mode Selection** | P0 | ✅ Complete | |
-| Standalone Orchestration Mode | P0 | ✅ Complete | ReAct engine + tool execution |
-| Claude Max LLM Backend | P0 | ✅ Complete | `llm/providers/claude_max.py` |
-| Claude API | P0 | ✅ Complete | `llm/providers/claude.py` |
-| OpenAI | P0 | ✅ Complete | `llm/providers/openai.py` |
-| DeepSeek | P1 | ✅ Complete | `llm/providers/deepseek.py` |
-| Ollama | P2 | ✅ Complete | `llm/providers/ollama.py` |
+| Standalone Orchestration Mode | P0 | 🔄 Redesign | Rust implementation |
+| Claude Code GUI Mode | P0 | 🔄 Redesign | Rust CLI integration |
 | **4.2 Multi-Agent Collaboration** | P0 | ✅ Complete | |
 | Phase-based Agent Assignment | P0 | ✅ Complete | `backends/phase_config.py` |
 | Agent Executor | P0 | ✅ Complete | `backends/agent_executor.py` |
-| **4.2 Simple Mode Features** | P0 | ✅ Complete | |
+| **4.3 Simple Mode Features** | P0 | ✅ Complete | |
 | One-click Workflow | P0 | ✅ Complete | `core/simple_workflow.py` |
 | AI Auto Strategy Determination | P0 | ✅ Complete | `core/strategy_analyzer.py` |
-| **4.3 Expert Mode Features** | P0 | ✅ Complete | |
+| **4.4 Expert Mode Features** | P0 | ✅ Complete | |
 | PRD Editor | P0 | ✅ Complete | `core/expert_workflow.py` |
 | Execution Strategy Selection | P0 | ✅ Complete | direct/hybrid/mega |
 | Agent Specification | P0 | ✅ Complete | Each Story can specify Agent |
-| **4.4 Settings Page** | P0 | ✅ Complete | |
+| **4.5 Settings Page** | P0 | ✅ Complete | |
 | Agent Configuration | P0 | ✅ Complete | `settings/models.py` |
 | Quality Gate Configuration | P0 | ✅ Complete | `core/quality_gate.py` |
 | API Key Secure Storage | P0 | ✅ Complete | Keyring integration |
-| **4.5 CLI Features** | P1 | ✅ Complete | |
+| **4.6 CLI Features** | P1 | ✅ Complete | |
 | `plan-cascade run` | P0 | ✅ Complete | Simple/expert mode |
 | `plan-cascade config` | P0 | ✅ Complete | Configuration wizard |
 | `plan-cascade status` | P1 | ✅ Complete | Status viewing |
-| **4.6 Claude Code GUI Mode** | P0 | ⚠️ Partial | |
-| Claude Code CLI Integration | P0 | ✅ Complete | `backends/claude_code.py` |
-| GUI-specific Backend | P2 | ⏳ Planning | `backends/claude_code_gui.py` |
-| Tool Call Visualization | P1 | ✅ Complete | Streaming event parsing |
 | **4.7 Interactive REPL Mode** | P0 | ✅ Complete | |
 | REPL Loop | P0 | ✅ Complete | `plan-cascade chat` |
 | Special Commands | P0 | ✅ Complete | /exit, /clear, /status, /mode |
-| Smart Intent Recognition | P0 | ✅ Complete | `core/intent_classifier.py` |
+| **NEW: 4.8 Project & Session Management** | P0 | ⏳ Planning | |
+| Visual Project Browser | P0 | ⏳ Planning | Navigate ~/.claude/projects/ |
+| Session History | P0 | ⏳ Planning | View/resume past sessions |
+| Smart Search | P1 | ⏳ Planning | Quick search |
+| **NEW: 4.9 CC Agents** | P1 | ⏳ Planning | |
+| Custom AI Agents | P1 | ⏳ Planning | Custom system prompts |
+| Agent Library | P1 | ⏳ Planning | Purpose-built agents |
+| Background Execution | P1 | ⏳ Planning | Non-blocking operations |
+| **NEW: 4.10 Usage Analytics Dashboard** | P1 | ⏳ Planning | |
+| Cost Tracking | P1 | ⏳ Planning | Real-time monitoring |
+| Token Analytics | P1 | ⏳ Planning | By model/project/time |
+| Visual Charts | P2 | ⏳ Planning | Usage trends |
+| **NEW: 4.11 MCP Server Management** | P1 | ⏳ Planning | |
+| Server Registry | P1 | ⏳ Planning | Central UI management |
+| Connection Testing | P1 | ⏳ Planning | Verify connectivity |
+| Claude Desktop Import | P2 | ⏳ Planning | Import configs |
+| **NEW: 4.12 Timeline & Checkpoints** | P2 | ⏳ Planning | |
+| Session Versioning | P2 | ⏳ Planning | Create checkpoints |
+| Visual Timeline | P2 | ⏳ Planning | Branching timeline |
+| Diff Viewer | P2 | ⏳ Planning | Compare checkpoints |
+| **NEW: 4.13 CLAUDE.md Management** | P1 | ⏳ Planning | |
+| Built-in Editor | P1 | ⏳ Planning | Direct editing |
+| Live Preview | P1 | ⏳ Planning | Real-time render |
+| Project Scanner | P1 | ⏳ Planning | Find all CLAUDE.md |
+| **NEW: 4.14 Real-time Streaming Chat** | P0 | ⏳ Planning | |
+| Streaming Response | P0 | ⏳ Planning | Real-time text display |
+| Thinking Display | P0 | ⏳ Planning | Extended thinking blocks |
+| Typing Animation | P1 | ⏳ Planning | Visual feedback |
+| **NEW: 4.15 Tool Call Visualization** | P0 | ⏳ Planning | |
+| Tool State Display | P0 | ⏳ Planning | Running/complete/failed |
+| File Change Preview | P0 | ⏳ Planning | Diff view |
+| Tool History | P1 | ⏳ Planning | Execution log |
+| **NEW: 4.16 Chat Interaction Features** | P0 | ⏳ Planning | |
+| Markdown Rendering | P0 | ⏳ Planning | GFM + syntax highlight |
+| Code Block Actions | P0 | ⏳ Planning | Copy, line numbers |
+| Drag & Drop Files | P1 | ⏳ Planning | File attachment |
+| @ File Reference | P1 | ⏳ Planning | Quick file mention |
+| **NEW: 4.17 Session Control** | P0 | ⏳ Planning | |
+| Interrupt/Cancel | P0 | ⏳ Planning | Stop running tasks |
+| Regenerate Response | P0 | ⏳ Planning | Retry generation |
+| Edit & Resend | P1 | ⏳ Planning | Modify sent messages |
+| Branch Conversation | P2 | ⏳ Planning | Fork from any point |
+| **NEW: 4.18 Command Palette** | P1 | ⏳ Planning | |
+| Quick Commands | P1 | ⏳ Planning | Keyboard-first UX |
+| Fuzzy Search | P1 | ⏳ Planning | Filter commands |
 
 ### Product Form Implementation Status
 
 | Form | Status | Notes |
 |------|--------|-------|
 | CLI | ✅ Complete | `pip install plan-cascade` |
-| Desktop (GUI) | ⏳ Planning | Tauri implementation, Phase 2 target |
+| Desktop (GUI) | 🔄 Redesign | Pure Rust backend (no Python) |
 | Claude Code Plugin | ✅ Complete | Existing Plugin maintains compatibility |
 
 ### Milestone Progress
@@ -65,8 +109,8 @@
 | Phase | Status | Completion |
 |-------|--------|------------|
 | Phase 1: CLI + Dual-Mode | ✅ Complete | 100% |
-| Phase 2: Desktop Application Alpha | ⏳ Planning | 0% |
-| Phase 3: Feature Completion | ⏳ Pending | - |
+| Phase 2: Desktop Rust Backend | 🔄 In Progress | 0% |
+| Phase 3: Core Desktop Features | ⏳ Pending | - |
 | Phase 4: Advanced Features | ⏳ Pending | - |
 
 ---
@@ -75,330 +119,242 @@
 
 ### 1.1 Product Vision
 
-Develop Plan Cascade into a **complete AI programming orchestration platform** with autonomous tool execution capabilities, making AI programming simple.
+Develop Plan Cascade Desktop into a **complete AI programming orchestration platform** with:
+- **Pure Rust backend** for optimal performance and easy distribution
+- **Comprehensive project management** for Claude Code workflows
+- **Advanced analytics and monitoring** capabilities
 
 **Core Positioning**:
 - As a **complete orchestration layer**: Execute tools itself, LLM only provides thinking (standalone mode)
 - As a **graphical interface for Claude Code**: Compatible with all Claude Code features (GUI mode)
+- As a **project management hub**: Manage projects, sessions, agents, and MCP servers
 - Support **multiple LLM backends**: Claude Max, Claude API, OpenAI, DeepSeek, etc.
 
 ### 1.2 Core Value Propositions
 
 | Value Point | Description |
 |-------------|-------------|
-| **Complete Orchestration Capability** | Autonomously executes tools (Read/Write/Edit/Bash/Glob/Grep), no external Agent dependency |
-| **Zero Barrier Entry** | Claude Max members need no API Key, directly use Claude Code as LLM backend |
-| **Dual-Mode Switching** | Simple mode for quick start, expert mode for fine-grained control |
-| **Model Freedom** | Supports Claude Max, Claude API, OpenAI, DeepSeek, Ollama, etc. |
-| **Philosophy Continuation** | Fully preserves Plan Cascade's core design philosophy |
-| **Claude Code Compatible** | Can serve as complete GUI for Claude Code, compatible with all features |
+| **Zero Dependencies** | Single executable, no Python or other runtime required |
+| **Complete Orchestration** | Autonomously executes tools (Read/Write/Edit/Bash/Glob/Grep) |
+| **Project Hub** | Central management for all Claude Code projects and sessions |
+| **Agent Library** | Create and manage custom AI agents for different tasks |
+| **Usage Insights** | Track costs, tokens, and usage patterns across projects |
+| **MCP Integration** | Manage Model Context Protocol servers from a unified UI |
+| **Session Timeline** | Version control for coding sessions with checkpoints |
+| **Claude Code Compatible** | Serves as complete GUI for Claude Code |
 
 ### 1.3 Product Positioning
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Plan Cascade                              │
-│          Complete AI Programming Orchestration Platform      │
-│                    + Claude Code GUI                         │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│   ┌─ Working Mode Selection ─────────────────────────────────┐│
-│   │                                                        ││
-│   │  ● Standalone Orchestration Mode (Recommended)         ││
-│   │    └─ Plan Cascade executes all tools                  ││
-│   │    └─ LLM only provides thinking (Claude Max/API/      ││
-│   │       OpenAI etc.)                                     ││
-│   │                                                        ││
-│   │  ○ Claude Code GUI Mode                                ││
-│   │    └─ Serves as graphical interface for Claude Code    ││
-│   │    └─ Claude Code executes tools, Plan Cascade         ││
-│   │       provides visualization                           ││
-│   │                                                        ││
-│   └────────────────────────────────────────────────────────┘│
-│                                                              │
-│   ┌─ Standalone Mode: LLM Backend Selection ─────────────────┐│
-│   │                                                        ││
-│   │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   ││
-│   │   │ Claude Max  │  │ Claude API  │  │   OpenAI    │   ││
-│   │   │(No API Key) │  │(API Key Req)│  │(API Key Req)│   ││
-│   │   │ Get LLM via │  │  Direct     │  │  Direct     │   ││
-│   │   │ Claude Code │  │  Calling    │  │  Calling    │   ││
-│   │   └─────────────┘  └─────────────┘  └─────────────┘   ││
-│   │                                                        ││
-│   └────────────────────────────────────────────────────────┘│
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-
-Standalone Orchestration Mode: Plan Cascade = Complete orchestration + Tool execution + LLM thinking
-Claude Code GUI Mode: Plan Cascade = Visual interface for Claude Code
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Plan Cascade Desktop v5.0                           │
+│              Complete AI Programming Orchestration Platform              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ┌─ Core Modules ──────────────────────────────────────────────────────┐│
+│   │                                                                    ││
+│   │  📁 Projects    🤖 Agents    📊 Analytics    🔌 MCP    ⏰ Timeline ││
+│   │  └─ Browser     └─ Library   └─ Dashboard    └─ Servers └─ Checkpoints│
+│   │  └─ Sessions    └─ Runner    └─ Cost Track   └─ Config  └─ Branches ││
+│   │  └─ Search      └─ History   └─ Export       └─ Health  └─ Diff     ││
+│   │                                                                    ││
+│   └────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│   ┌─ Working Mode Selection ────────────────────────────────────────────┐│
+│   │                                                                    ││
+│   │  ● Claude Code GUI Mode (Recommended)                              ││
+│   │    └─ Plan Cascade as graphical interface for Claude Code          ││
+│   │    └─ Claude Code CLI executes tools                               ││
+│   │    └─ Full compatibility with Claude Code features                 ││
+│   │                                                                    ││
+│   │  ○ Standalone Orchestration Mode                                   ││
+│   │    └─ Plan Cascade executes all tools itself                       ││
+│   │    └─ Direct LLM API calls (Claude/OpenAI/DeepSeek/Ollama)        ││
+│   │    └─ No Claude Code dependency                                    ││
+│   │                                                                    ││
+│   └────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│   ┌─ Architecture ──────────────────────────────────────────────────────┐│
+│   │                                                                    ││
+│   │   React Frontend (TypeScript)                                      ││
+│   │         │                                                          ││
+│   │         ▼                                                          ││
+│   │   Tauri IPC                                                        ││
+│   │         │                                                          ││
+│   │         ▼                                                          ││
+│   │   Rust Backend ─────────────────────────────────────────────────── ││
+│   │   │ • Project Manager    • Analytics Tracker   • Timeline Manager │││
+│   │   │ • Agent Executor     • MCP Registry        • Markdown Editor  │││
+│   │   │ • Claude Code CLI    • LLM Providers       • Tool Execution   │││
+│   │   └─────────────────────────────────────────────────────────────── ││
+│   │         │                                                          ││
+│   │         ▼                                                          ││
+│   │   Storage Layer                                                    ││
+│   │   │ • SQLite (history, analytics)  • Keyring (secrets)            │││
+│   │   │ • File System (projects)       • JSON Config                  │││
+│   │   └─────────────────────────────────────────────────────────────── ││
+│   │                                                                    ││
+│   └────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 1.4 Target Users
 
 | User Group | Scenario | Pain Point | Solution |
 |------------|----------|------------|----------|
-| **Claude Max Members** | Have Max subscription but no API Key | Claude Code Plugin is complex to use | Standalone orchestration mode + Claude Code LLM backend |
-| **New Developers** | Want AI-assisted development | Claude Code CLI has high learning curve | Simple mode one-click completion |
-| **Senior Developers** | Need fine-grained control | Existing tools lack control | Expert mode customization |
-| **Small Teams** | Unified toolchain | Different members use different LLMs | Multi-backend support |
-| **Enterprise Users** | Data security requirements | Need private deployment | Local model support |
+| **Claude Code Users** | Have Claude Code installed | CLI is powerful but lacks visual management | Desktop GUI with project browser |
+| **Claude Max Members** | Have Max subscription | Want visual interface without API costs | Claude Code GUI mode |
+| **Power Users** | Multiple projects, heavy usage | Need usage tracking and cost analysis | Analytics dashboard |
+| **Team Leads** | Manage multiple agents/workflows | No central management for agents | Agent library |
+| **MCP Users** | Use multiple MCP servers | Configuration scattered, hard to manage | MCP server registry |
 
 ---
 
 ## 2. Core Design Philosophy
 
-### 2.1 Usability First
+### 2.1 Pure Rust Architecture
 
-**Design Principle**: Users only need to describe what they want to do, the system automatically handles everything.
+**Design Principle**: Single executable, zero runtime dependencies.
 
 ```
-User Input
-   │
-   ▼
-"Help me implement user login functionality, supporting OAuth and SMS verification"
-   │
-   ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Plan Cascade Auto-Processing              │
-│                                                              │
-│   ✓ Determine task scale → Auto-select execution strategy   │
-│   ✓ Generate PRD and Stories                                 │
-│   ✓ Analyze dependencies → Arrange execution batches         │
-│   ✓ Select appropriate Agent                                 │
-│   ✓ Execute tasks in parallel                                │
-│   ✓ Auto quality check and retry                             │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-   │
-   ▼
-Complete
+Previous Architecture (v4.x):
+┌─────────────────┐     HTTP/WS      ┌─────────────────┐
+│  Tauri + React  │ ◄──────────────► │  Python Sidecar │
+│   (Frontend)    │                  │   (FastAPI)     │
+└─────────────────┘                  └─────────────────┘
+       │                                    │
+       │                                    ▼
+       │                             Python 3.10+ required
+       ▼                             pip install dependencies
+  Single binary                      Complex distribution
+
+New Architecture (v5.0):
+┌─────────────────────────────────────────────────────┐
+│              Tauri Desktop Application               │
+├─────────────────────────────────────────────────────┤
+│  React Frontend  │      Rust Backend                │
+│  (TypeScript)    │      (Native Code)               │
+│                  │      • All business logic        │
+│                  │      • SQLite embedded           │
+│                  │      • HTTP client for LLM APIs  │
+│                  │      • Process spawning for CLI  │
+└─────────────────────────────────────────────────────┘
+                    │
+                    ▼
+              Single executable
+              No Python required
+              Easy distribution
 ```
 
-**Users don't need to understand**: Mega Plan, Hybrid Ralph, Worktree, batch dependencies, and other internal concepts.
+**Benefits**:
+- Users download one file, run immediately
+- No dependency conflicts
+- Better performance (native code)
+- Smaller distribution size
+- Easier auto-update
 
 ### 2.2 Dual-Mode Design
 
-#### Simple Mode (Default)
+Both modes share the same core features (Projects, Agents, Analytics, MCP, Timeline, CLAUDE.md).
 
-For: New users, quick tasks
+#### Claude Code GUI Mode (Recommended)
 
-```
-┌─ Simple Mode ────────────────────────────────────────────────┐
-│                                                              │
-│   Describe the functionality you want to implement:          │
-│   ┌────────────────────────────────────────────────────────┐│
-│   │ Implement user login functionality, support OAuth and   ││
-│   │ SMS verification                                        ││
-│   └────────────────────────────────────────────────────────┘│
-│                                                              │
-│                              [Start] ← One-click, auto-      │
-│                                        completes everything  │
-│                                                              │
-│  ────────────────────────────────────────────────────────── │
-│                                                              │
-│   Executing...                                               │
-│   ┌────────────────────────────────────────────────────────┐│
-│   │ ✓ Generate plan (5 tasks)                              ││
-│   │ ✓ Batch 1: Database Schema, API routes (2/2)           ││
-│   │ ⟳ Batch 2: OAuth login, SMS verification (1/2)         ││
-│   │ ○ Batch 3: Integration tests                           ││
-│   └────────────────────────────────────────────────────────┘│
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-#### Expert Mode
-
-For: Senior users, needs fine-grained control
+For: Users with Claude Code installed
 
 ```
-┌─ Expert Mode ────────────────────────────────────────────────┐
-│                                                              │
-│  ┌─ Step 1: Requirement Input ───────────────────────────────┐│
-│  │ Implement user login functionality, support OAuth and SMS ││
-│  └────────────────────────────────────────────────────────┘│
-│                                            [Generate PRD]    │
-│                                                              │
-│  ┌─ Step 2: Review PRD ──────────────────────────────────────┐│
-│  │                                                          ││
-│  │  Execution Strategy:              AI Suggests: Hybrid Auto ││
-│  │  ○ Direct Execute   ● Hybrid Auto   ○ Mega Plan          ││
-│  │                                                          ││
-│  │  □ Use Git Worktree for isolated development             ││
-│  │                                                          ││
-│  │  Stories:                                    [+ Add]     ││
-│  │  ┌────────────────────────────────────────────────────┐ ││
-│  │  │ □ Design database Schema                            │ ││
-│  │  │   Priority: high  │  Agent: [claude-code ▼]         │ ││
-│  │  │   Dependencies: none                    [Edit][Delete]│ ││
-│  │  ├────────────────────────────────────────────────────┤ ││
-│  │  │ □ Implement OAuth login                              │ ││
-│  │  │   Priority: medium │  Agent: [aider ▼]               │ ││
-│  │  │   Dependencies: [Schema ▼]              [Edit][Delete]│ ││
-│  │  └────────────────────────────────────────────────────┘ ││
-│  │                                                          ││
-│  │  Quality Gates: [✓] TypeCheck  [✓] Test  [✓] Lint  [ ] Custom ││
-│  │                                                          ││
-│  └──────────────────────────────────────────────────────────┘│
-│                                                              │
-│                              [Save Draft]  [Start Execution] │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+┌─ Claude Code GUI Mode ──────────────────────────────────────────────────┐
+│                                                                          │
+│   Plan Cascade Desktop                                                   │
+│   ┌────────────────────────────────────────────────────────────────┐    │
+│   │  📁 Projects │ 🤖 Agents │ 📊 Analytics │ 🔌 MCP │ ⏰ Timeline │    │
+│   └────────────────────────────────────────────────────────────────┘    │
+│                              │                                           │
+│                              ▼                                           │
+│   ┌────────────────────────────────────────────────────────────────┐    │
+│   │                     Chat Interface                              │    │
+│   │   ┌──────────────────────────────────────────────────────────┐ │    │
+│   │   │ User: Help me implement user authentication               │ │    │
+│   │   │                                                          │ │    │
+│   │   │ Claude: I'll help you implement authentication...        │ │    │
+│   │   │ [Tool Call: Read src/auth.ts]                            │ │    │
+│   │   │ [Tool Call: Edit src/auth.ts]                            │ │    │
+│   │   └──────────────────────────────────────────────────────────┘ │    │
+│   │                                                                 │    │
+│   │   [Type your message...]                          [Send]        │    │
+│   └────────────────────────────────────────────────────────────────┘    │
+│                              │                                           │
+│                              ▼                                           │
+│                    Claude Code CLI                                       │
+│                    (claude --output-format stream-json)                  │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Mode Comparison
+#### Standalone Orchestration Mode
 
-| Feature | Simple Mode | Expert Mode |
-|---------|-------------|-------------|
-| Requirement Input | ✓ | ✓ |
-| Auto-generate PRD | ✓ (direct execute) | ✓ (editable) |
-| Review/Edit PRD | ✗ | ✓ |
-| Select Execution Strategy | ✗ (AI auto) | ✓ |
-| Specify Agent | ✗ (auto) | ✓ |
-| Adjust Dependencies | ✗ | ✓ |
-| Custom Quality Gates | ✗ (use default) | ✓ |
-| Execution Monitoring | Simplified view | Detailed view |
-| Log Viewing | Errors only | Full logs |
-
-### 2.3 AI Automatic Strategy Determination
-
-In simple mode, AI automatically selects the best execution strategy based on user requirements:
+For: Users without Claude Code or wanting to use other LLMs
 
 ```
-User Input                            AI Determination           Internal Execution
-───────────────────────────────────────────────────────────────────────────
-"Add an exit button"              →   Small task            →   Direct execution (no PRD)
-
-"Implement user login             →   Medium feature        →   Hybrid Auto
- functionality"                                                  (auto-generate PRD)
-
-"Develop a blog system            →   Large project         →   Mega Plan
- with users, articles, comments"                                 (multi-PRD cascade)
-
-"Refactor payment module,         →   Requires isolation    →   Hybrid Worktree
- don't affect existing                                          (Git isolated development)
- functionality"
+┌─ Standalone Mode ───────────────────────────────────────────────────────┐
+│                                                                          │
+│   LLM Backend:  [Claude API ▼]  Model: [claude-sonnet-4-20250514 ▼]      │
+│                                                                          │
+│   ┌────────────────────────────────────────────────────────────────┐    │
+│   │                     Execution Interface                         │    │
+│   │                                                                 │    │
+│   │   Describe your task:                                           │    │
+│   │   ┌──────────────────────────────────────────────────────────┐ │    │
+│   │   │ Implement user authentication with OAuth support          │ │    │
+│   │   └──────────────────────────────────────────────────────────┘ │    │
+│   │                                                                 │    │
+│   │   [████████████░░░░░░░░] 60%                                   │    │
+│   │                                                                 │    │
+│   │   ✓ Analyzed project structure                                  │    │
+│   │   ✓ Generated PRD (5 stories)                                   │    │
+│   │   ⟳ Executing: Implement OAuth provider                         │    │
+│   │   ○ Pending: Add session management                             │    │
+│   │                                                                 │    │
+│   └────────────────────────────────────────────────────────────────┘    │
+│                              │                                           │
+│                              ▼                                           │
+│                    Direct LLM API Calls                                  │
+│                    Built-in Tool Execution                               │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
-
-**Determination Dimensions**:
-1. **Task Scale**: Single task / Multiple features / Complete project
-2. **Complexity**: Whether decomposition into multiple Stories is needed
-3. **Risk Level**: Whether isolated development is needed
-4. **Dependencies**: Whether there are cross-module dependencies
-
-### 2.4 Core Architecture Philosophy (Must Preserve)
-
-#### Hierarchical Decomposition
-
-```
-Project (Mega Plan)
-   │
-   ├── Feature 1 (Hybrid Ralph / PRD)
-   │      ├── Story 1.1
-   │      ├── Story 1.2
-   │      └── Story 1.3
-   │
-   └── Feature 2 (Hybrid Ralph / PRD)
-          ├── Story 2.1
-          └── Story 2.2
-```
-
-#### Parallel Execution
-
-```
-Batch 1: [Story A, Story B, Story C]  ← No dependencies, parallel execution
-           ↓ All complete
-Batch 2: [Story D, Story E]           ← Depends on Batch 1, parallel execution
-           ↓ All complete
-Batch 3: [Story F]                    ← Depends on Batch 2
-```
-
-#### Multi-Agent Collaboration
-
-- Auto-select optimal Agent based on task type
-- Support Agent fallback chain (auto-switch when primary Agent unavailable)
-- Support phased Agent configuration
-
-#### Quality Assurance
-
-- **Quality Gates**: typecheck, test, lint, custom
-- **Smart Retry**: Auto-retry on failure, inject failure context
-- **Configurable**: Gate types, retry counts all configurable
-
-#### State Tracking
-
-- **File-based State Sharing**: prd.json, .agent-status.json
-- **Finding Sharing**: findings.md records discoveries during development
-- **Checkpoint Recovery**: Can resume from last state after interruption
 
 ---
 
 ## 3. Product Forms
 
-### 3.1 Three Forms Unified Architecture
+### 3.1 Unified Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   Plan Cascade                               │
-├───────────────────┬───────────────────┬─────────────────────┤
-│   Desktop (GUI)   │      CLI          │  Claude Code Plugin │
-├───────────────────┼───────────────────┼─────────────────────┤
-│ • GUI version of  │ • Command line    │ • Depends on Claude │
-│   CLI             │   operation       │   Code              │
-│ • Simple/Expert   │ • Simple/Expert   │ • Runs as plugin    │
-│   modes           │   modes           │ • Slash command     │
-│ • Interactive     │ • Interactive     │   invocation        │
-│   REPL            │   REPL            │                     │
-│ • Optional        │ • pip install     │                     │
-│   Claude Code     │   plan-cascade    │                     │
-│   GUI mode        │                   │                     │
-└───────────────────┴───────────────────┴─────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Plan Cascade Core                          │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │ Tool Execution│  │ ReAct Loop   │  │ PRD Generator│       │
-│  │ Engine       │  │ Think→Act    │  │ Strategy     │       │
-│  │ Read/Write   │  │ →Observe     │  │ Analysis     │       │
-│  │ Edit/Bash    │  │             │  │ Batch        │       │
-│  │ Glob/Grep    │  │             │  │ Orchestration│       │
-│  └──────────────┘  └──────────────┘  └──────────────┘       │
-│                           │                                  │
-│                           ▼                                  │
-│           ┌─────────────────────────────┐                   │
-│           │      LLM Abstraction Layer  │                   │
-│           │  Claude Max | API | OpenAI  │                   │
-│           └─────────────────────────────┘                   │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Plan Cascade                                     │
+├───────────────────┬───────────────────┬─────────────────────────────────┤
+│   Desktop (GUI)   │      CLI          │      Claude Code Plugin         │
+├───────────────────┼───────────────────┼─────────────────────────────────┤
+│ • Pure Rust       │ • Python package  │ • Depends on Claude Code        │
+│   backend         │ • pip install     │ • Runs as plugin                │
+│ • Single exe      │   plan-cascade    │ • Slash command invocation      │
+│ • All features    │ • Simple/Expert   │                                 │
+│   included        │   modes           │                                 │
+│ • No dependencies │ • Interactive     │                                 │
+│                   │   REPL            │                                 │
+└───────────────────┴───────────────────┴─────────────────────────────────┘
 ```
 
-### 3.2 Desktop Positioning
-
-**Desktop = GUI Version of CLI**
-
-Desktop provides the same functionality as CLI, presented in a graphical interface:
-- Visual requirement input and execution monitoring
-- PRD editor (drag-and-drop, dependency visualization)
-- Real-time tool call display
-- File change preview
-
-**Optional: Claude Code GUI Mode**
-
-Desktop can serve as complete graphical interface for Claude Code:
-- Chat view (interact with Claude Code)
-- Tool call visualization
-- Compatible with all Claude Code features
-
-### 3.3 Release Artifacts
+### 3.2 Release Artifacts
 
 | Artifact | Description | Target Users |
 |----------|-------------|--------------|
-| **Desktop** | Windows/macOS/Linux installers | Users wanting graphical interface |
-| **CLI** | `pip install plan-cascade` | Developers preferring command line |
-| **Claude Code Plugin** | Existing Plugin (maintain compatibility) | Claude Code power users |
-| **Python Package** | `plan-cascade-core` | Developers integrating into other tools |
+| **Desktop (Windows)** | `.msi` / `.exe` installer | Windows users |
+| **Desktop (macOS)** | `.dmg` / `.app` bundle | macOS users |
+| **Desktop (Linux)** | `.AppImage` / `.deb` | Linux users |
+| **CLI** | `pip install plan-cascade` | Developers preferring CLI |
+| **Claude Code Plugin** | Existing Plugin | Claude Code power users |
 
 ---
 
@@ -406,27 +362,25 @@ Desktop can serve as complete graphical interface for Claude Code:
 
 ### 4.1 Working Mode Selection (P0)
 
-#### Standalone Orchestration Mode (Recommended)
+#### Claude Code GUI Mode (Recommended)
 
-Plan Cascade as complete orchestration layer, executing all tools itself:
+Plan Cascade as graphical interface for Claude Code:
 
 ```
 ┌─ Settings ───────────────────────────────────────────────────┐
 │                                                              │
 │  Working Mode:                                               │
 │                                                              │
-│  ● Standalone Orchestration Mode (Recommended)               │
-│    └─ Plan Cascade executes all tools itself                │
-│       (Read/Write/Edit/Bash)                                │
-│    └─ LLM only provides thinking, Plan Cascade executes     │
-│       actions                                               │
-│    └─ Supports complete PRD-driven development flow         │
+│  ● Claude Code GUI Mode (Recommended)                        │
+│    └─ Requires Claude Code CLI installed                     │
+│    └─ Claude Code executes all tools                         │
+│    └─ Full compatibility with Claude Code features           │
+│    └─ Automatic session tracking                             │
 │                                                              │
-│  ○ Claude Code GUI Mode                                      │
-│    └─ Plan Cascade as graphical interface for Claude Code   │
-│    └─ Claude Code executes tools, Plan Cascade provides     │
-│       visualization                                         │
-│    └─ Compatible with all Claude Code features              │
+│  ○ Standalone Orchestration Mode                             │
+│    └─ No Claude Code required                                │
+│    └─ Plan Cascade executes tools directly                   │
+│    └─ Requires LLM API key configuration                     │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -436,65 +390,34 @@ Plan Cascade as complete orchestration layer, executing all tools itself:
 ```
 ┌─ LLM Backend Selection ───────────────────────────────────────┐
 │                                                              │
-│  ● Claude Max (No API Key Required)                          │
-│    └─ Get LLM capability through local Claude Code           │
-│    └─ Suitable for: Users with Claude Max but no API Key     │
-│                                                              │
-│  ○ Claude API                                                │
+│  ● Claude API                                                │
 │    └─ Direct Anthropic API calls                             │
-│    └─ Requires API Key configuration                         │
+│    └─ Requires API Key                          [Configure]  │
 │                                                              │
 │  ○ OpenAI                                                    │
-│    └─ Use GPT-4o and other models                           │
-│    └─ Requires API Key configuration                         │
+│    └─ GPT-4o and other models                               │
+│    └─ Requires API Key                          [Configure]  │
 │                                                              │
 │  ○ DeepSeek                                                  │
-│    └─ Recommended for users in China                         │
-│    └─ Requires API Key configuration                         │
+│    └─ Cost-effective alternative                            │
+│    └─ Requires API Key                          [Configure]  │
 │                                                              │
 │  ○ Ollama                                                    │
 │    └─ Local models, completely offline                       │
-│    └─ Requires Ollama address configuration                  │
+│    └─ Requires Ollama running locally           [Configure]  │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Essential Difference Between Two Working Modes**:
-
-| | Standalone Orchestration Mode | Claude Code GUI Mode |
-|---|---|---|
-| **Orchestration Layer** | Plan Cascade | Plan Cascade |
-| **Tool Execution** | Plan Cascade executes itself | Claude Code executes |
-| **LLM Source** | Multiple (Claude Max/API/OpenAI etc.) | Claude Code |
-| **PRD-Driven** | ✅ Supported | ✅ Supported |
-| **Batch Execution** | ✅ Supported | ✅ Supported |
-| **Use Case** | Need other LLMs or offline use | Have Claude Max/Code subscription |
-
-**Core Philosophy: Plan Cascade = Brain (Orchestration), Execution Layer = Hands (Tool Execution)**
-
-Both modes are controlled by Plan Cascade for the orchestration workflow (PRD generation, dependency analysis, batch scheduling), the difference is only who executes tools:
-- Standalone mode: Plan Cascade built-in tool engine executes
-- GUI mode: Claude Code CLI executes
-
-#### Supported LLM Backends
-
-| Backend | Priority | Requires API Key | Notes |
-|---------|----------|-----------------|-------|
-| Claude Max | P0 | No | Get LLM via Claude Code, suitable for Max members |
-| Claude API | P0 | Yes | Direct Anthropic API calls |
-| OpenAI | P0 | Yes | GPT-4o and other models |
-| DeepSeek | P1 | Yes | Users in China |
-| Ollama | P2 | No | Local models |
-
 ### 4.2 Multi-Agent Collaboration (P0)
 
-Plan Cascade supports multiple Agents working collaboratively, intelligently assigning different tasks to the most suitable Agent:
+Plan Cascade supports multiple agents working together, intelligently assigning different tasks to the most suitable agent.
 
 #### Supported Execution Agents
 
 | Agent | Type | Description |
 |-------|------|-------------|
-| claude-code | Task Tool / CLI | Default Agent, built-in or via Claude Code CLI |
+| claude-code | Task Tool / CLI | Default agent, built-in or via Claude Code CLI |
 | codex | CLI | OpenAI Codex CLI |
 | aider | CLI | AI pair programming assistant |
 | amp-code | CLI | Amp Code CLI |
@@ -502,40 +425,23 @@ Plan Cascade supports multiple Agents working collaboratively, intelligently ass
 
 #### Phase-Based Agent Assignment
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Multi-Agent Collaboration                 │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│   Execution Phase           Default Agent    Fallback Chain  │
-│   ─────────────────────────────────────────────────────────  │
-│   Planning                  codex           → claude-code    │
-│   Implementation            claude-code     → codex → aider  │
-│   Retry                     claude-code     → aider          │
-│   Refactor                  aider           → claude-code    │
-│   Review                    claude-code     → codex          │
-│                                                              │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│   Story Type                Default Agent                    │
-│   ─────────────────────────────────────────────────────────  │
-│   feature                   claude-code                      │
-│   bugfix                    codex                            │
-│   refactor                  aider                            │
-│   test                      claude-code                      │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
+| Phase | Default Agent | Fallback Chain | Story Type Override |
+|-------|--------------|----------------|---------------------|
+| Planning | codex | claude-code | - |
+| Implementation | claude-code | codex, aider | bugfix→codex, refactor→aider |
+| Retry | claude-code | aider | - |
+| Refactor | aider | claude-code | - |
+| Review | claude-code | codex | - |
 
 #### Agent Resolution Priority
 
 ```
 1. --agent command parameter (explicit override)
 2. Phase-specific parameters (--impl-agent, --planning-agent)
-3. Agent specified in Story
+3. Story-level agent field in PRD
 4. Story type override (bugfix → codex, refactor → aider)
-5. Phase default Agent
-6. Fallback chain (if Agent unavailable)
+5. Phase default agent
+6. Fallback chain (if agent unavailable)
 7. claude-code (ultimate fallback, always available)
 ```
 
@@ -545,24 +451,24 @@ Plan Cascade supports multiple Agents working collaboratively, intelligently ass
 
 ```bash
 # CLI
-plan-cascade "Implement user login functionality, support OAuth"
-# Auto-completes: analyze → generate plan → execute → quality check
+plan-cascade "Implement user login with OAuth"
+# Auto: analyze → generate plan → execute → quality check
 
 # GUI
 # Enter description → Click "Start" → Wait for completion
 ```
 
-#### Simplified Status Display
+#### Simplified Progress Display
 
 ```
 Executing...
 
 [████████████░░░░░░░░] 60%
 
-✓ Generate plan (5 tasks)
+✓ Generated plan (5 tasks)
 ✓ Database Schema
 ✓ API route structure
-⟳ OAuth login (in progress...)
+⟳ OAuth login (executing...)
 ○ SMS verification login
 ○ Integration tests
 ```
@@ -571,16 +477,16 @@ Executing...
 
 #### PRD Editor
 
-- Visually edit Stories
-- Drag-and-drop to adjust order
-- Set dependencies
-- Specify execution Agent
+- Visual editing of Stories
+- Drag-and-drop reordering
+- Set dependency relationships
+- Specify execution Agent per Story
 
 #### Execution Strategy Selection
 
 ```
-Execution Strategy:                    AI Suggests: Hybrid Auto
-○ Direct Execute (simple task, no PRD needed)
+Execution Strategy:                    AI Suggestion: Hybrid Auto
+○ Direct (simple task, no PRD)
 ● Hybrid Auto (auto-generate PRD and execute)
 ○ Mega Plan (large project, multiple PRDs)
 
@@ -593,130 +499,453 @@ Isolation Options:
 Each Story can specify a different Agent:
 
 ```
-┌─ Story: Implement OAuth login ───────────────────────────────┐
-│                                                              │
-│  Agent: [claude-code ▼]                                      │
-│         ├─ claude-code (recommended)                         │
-│         ├─ aider                                             │
-│         ├─ codex                                             │
-│         └─ builtin                                           │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+┌─ Story: Implement OAuth Login ───────────────────────────────────┐
+│                                                                  │
+│  Agent: [claude-code ▼]                                          │
+│         ├─ claude-code (recommended)                             │
+│         ├─ aider                                                 │
+│         ├─ codex                                                 │
+│         └─ builtin                                               │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.5 Settings Page (P0)
+### 4.5 Git Worktree Support (P0) - CORE FEATURE
+
+Git Worktree provides isolated development environments for features, preventing interference with main codebase.
+
+#### Hybrid Worktree Workflow
+
+```
+┌─ Hybrid Worktree Mode ───────────────────────────────────────────┐
+│                                                                  │
+│  /plan-cascade:hybrid-worktree feature-auth main "User auth"    │
+│                                                                  │
+│  Actions:                                                        │
+│  1. Create Git branch: feature-auth                             │
+│  2. Create Worktree: .worktrees/feature-auth/                   │
+│  3. Initialize: .planning-config.json                           │
+│  4. Generate/Load PRD                                           │
+│  5. Execute Stories (parallel agents)                           │
+│  6. On completion:                                               │
+│     - Commit code (exclude planning files)                      │
+│     - Merge to target branch (main)                             │
+│     - Remove Worktree                                           │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+#### Worktree Configuration File
+
+```json
+// .planning-config.json
+{
+  "mode": "hybrid",
+  "task_name": "feature-auth",
+  "task_branch": "feature-auth",
+  "target_branch": "main",
+  "created_at": "2026-01-30T10:00:00Z"
+}
+```
+
+#### Use Cases
+
+| Type | Scenario | Example |
+|------|----------|---------|
+| ✅ Suitable | Feature with multiple subtasks | User auth (register + login + reset) |
+| ✅ Suitable | Experimental feature requiring isolation | New payment integration test |
+| ✅ Suitable | Medium-scale refactoring (5-20 files) | API layer unified error handling |
+| ❌ Not suitable | Simple single-file modification | Modify a component's style |
+| ❌ Not suitable | Quick prototype validation | Verify if a library works |
+
+### 4.6 Mega Plan Execution (P0) - CORE FEATURE
+
+Mega Plan orchestrates large projects with multiple related feature modules.
+
+#### Sequential Batch Execution
+
+```
+mega-approve (1st) → Start Batch 1
+    ├─ Create Worktrees from current branch
+    ├─ Generate PRDs for each feature (Task agents)
+    ├─ Execute all stories (Task agents)
+    ↓ Batch 1 complete
+mega-approve (2nd) → Merge Batch 1 → Create Batch 2 from updated branch
+    ↓ Batch 2 complete
+mega-approve (3rd) → Merge Batch 2 → ...
+    ↓ All batches complete
+mega-complete → Clean up planning files
+```
+
+#### Mega Plan Structure
+
+```json
+// mega-plan.json
+{
+  "metadata": {
+    "version": "1.0",
+    "created_at": "2026-01-30T10:00:00Z"
+  },
+  "goal": "Build e-commerce platform",
+  "description": "Complete platform with users, products, cart, orders",
+  "target_branch": "main",
+  "execution_mode": "auto",
+  "features": [
+    {
+      "id": "feature-users",
+      "name": "User System",
+      "description": "User registration, login, profile management",
+      "priority": 1,
+      "dependencies": [],
+      "status": "pending"
+    },
+    {
+      "id": "feature-products",
+      "name": "Product System",
+      "description": "Product CRUD, categories, search",
+      "priority": 1,
+      "dependencies": [],
+      "status": "pending"
+    },
+    {
+      "id": "feature-orders",
+      "name": "Order System",
+      "description": "Shopping cart, checkout, order management",
+      "priority": 2,
+      "dependencies": ["feature-users", "feature-products"],
+      "status": "pending"
+    }
+  ]
+}
+```
+
+#### Full Automation with --auto-prd
+
+With `--auto-prd`, mega-approve runs the ENTIRE mega-plan automatically:
+1. Creates worktrees for current batch
+2. Generates PRDs for each feature (via Task agents)
+3. Executes all stories (via Task agents)
+4. Monitors until batch complete
+5. Merges batch to target branch
+6. Automatically continues to next batch
+7. Only pauses on errors or merge conflicts
+
+### 4.7 Dependency Analysis & Visualization (P0)
+
+#### Automatic Batch Generation
+
+Stories are automatically grouped into batches based on dependencies:
+
+```
+Batch 1: [Story A, Story B, Story C]  ← No dependencies, parallel execution
+           ↓ All complete
+Batch 2: [Story D, Story E]           ← Depend on Batch 1, parallel execution
+           ↓ All complete
+Batch 3: [Story F]                    ← Depends on Batch 2
+```
+
+#### Dependency Graph Visualization
+
+```
+/plan-cascade:show-dependencies
+
+┌─ Dependency Graph ─────────────────────────────────────────────────┐
+│                                                                    │
+│   story-001 (Database Schema)                                      │
+│       │                                                            │
+│       ├──→ story-002 (API Routes)                                  │
+│       │        │                                                   │
+│       │        └──→ story-004 (Frontend Forms)                     │
+│       │                                                            │
+│       └──→ story-003 (Email Service)                               │
+│                │                                                   │
+│                └──→ story-005 (Integration Tests)                  │
+│                                                                    │
+│   Execution Batches:                                               │
+│   Batch 1: story-001                                               │
+│   Batch 2: story-002, story-003                                    │
+│   Batch 3: story-004, story-005                                    │
+│                                                                    │
+│   ⚠️ Issues Detected:                                              │
+│   • None                                                           │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+#### Circular Dependency Detection
+
+The system automatically detects and reports circular dependencies:
+
+```
+⚠️ Circular Dependency Detected!
+
+story-002 → story-004 → story-005 → story-002
+
+Please edit the PRD to resolve this issue.
+```
+
+### 4.8 Auto-Iteration System (P0)
+
+#### Iteration Modes
+
+| Mode | Description |
+|------|-------------|
+| `until_complete` | Continue until all Stories complete (default) |
+| `max_iterations` | Stop after at most N iterations |
+| `batch_complete` | Stop after completing current batch only |
+
+#### Iteration Configuration
+
+```json
+// In prd.json
+{
+  "iteration_config": {
+    "mode": "until_complete",
+    "max_iterations": 50,
+    "poll_interval_seconds": 10,
+    "batch_timeout_seconds": 3600,
+    "quality_gates_enabled": true,
+    "auto_retry_enabled": true
+  }
+}
+```
+
+#### Iteration Flow
+
+```
+Start Auto-Iteration
+    │
+    ├─→ Initialize iteration state
+    │
+    ├─→ Main Loop:
+    │       │
+    │       ├─ Get current batch stories
+    │       ├─ Start agents in parallel
+    │       ├─ Poll for completion (10s intervals)
+    │       ├─ Run quality gates (if enabled)
+    │       ├─ Handle failures + retries
+    │       ├─ Check completion condition
+    │       └─ Advance to next batch
+    │
+    ├─→ Save final state
+    │
+    └─→ Generate execution report
+```
+
+### 4.9 Quality Gates with Auto-Detection (P0)
+
+#### Automatic Project Type Detection
+
+Quality gates automatically detect project type and select appropriate tools:
+
+| Project Type | Detection | TypeCheck | Test | Lint |
+|--------------|-----------|-----------|------|------|
+| Node.js | package.json | tsc | jest, npm test | eslint |
+| Python | pyproject.toml, setup.py | mypy, pyright | pytest | ruff, flake8 |
+| Rust | Cargo.toml | cargo check | cargo test | clippy |
+| Go | go.mod | go vet | go test | golangci-lint |
+
+#### Quality Gate Configuration
+
+```json
+// In prd.json
+{
+  "quality_gates": {
+    "enabled": true,
+    "gates": [
+      {
+        "name": "typecheck",
+        "type": "typecheck",
+        "enabled": true,
+        "required": true,
+        "timeout_seconds": 300
+      },
+      {
+        "name": "tests",
+        "type": "test",
+        "enabled": true,
+        "required": true,
+        "command_override": "npm test -- --coverage"
+      },
+      {
+        "name": "lint",
+        "type": "lint",
+        "enabled": true,
+        "required": false
+      },
+      {
+        "name": "custom",
+        "type": "custom",
+        "enabled": false,
+        "script": "./scripts/validate.sh"
+      }
+    ]
+  }
+}
+```
+
+#### Retry Management
+
+```json
+// In prd.json
+{
+  "retry_config": {
+    "max_retries": 3,
+    "exponential_backoff": true,
+    "base_delay_seconds": 5,
+    "inject_failure_context": true,
+    "switch_agent_on_retry": false
+  }
+}
+```
+
+### 4.10 State File System (P1)
+
+#### State Files Overview
+
+| File | Type | Description |
+|------|------|-------------|
+| `prd.json` | Planning | PRD document with goals, stories, dependencies |
+| `mega-plan.json` | Planning | Project-level plan managing multiple features |
+| `agents.json` | Config | Agent configuration with phase defaults |
+| `findings.md` | Shared | Agent findings record, supports tag filtering |
+| `progress.txt` | Shared | Progress timeline with agent execution info |
+| `.agent-status.json` | State | Agent running/completed/failed status |
+| `.iteration-state.json` | State | Auto-iteration progress and batch results |
+| `.retry-state.json` | State | Retry history and failure records |
+| `.mega-status.json` | State | Mega-plan execution state |
+| `.planning-config.json` | Config | Worktree task configuration |
+
+#### Progress Markers
+
+```
+# progress.txt markers
+[COMPLETE] story-001          # Story completed (Hybrid mode)
+[STORY_COMPLETE] story-001    # Story completed (Mega mode)
+[FEATURE_COMPLETE] feature-1  # Feature completed
+[PRD_COMPLETE] feature-1      # PRD generation completed
+[FAILED] story-001            # Story failed
+```
+
+#### Mega-Status Structure
+
+```json
+// .mega-status.json
+{
+  "current_batch": 2,
+  "completed_batches": [1],
+  "features": {
+    "feature-users": {
+      "status": "completed",
+      "worktree": ".worktrees/feature-users",
+      "prd_generated": true,
+      "stories_completed": 5,
+      "stories_total": 5
+    },
+    "feature-orders": {
+      "status": "in_progress",
+      "worktree": ".worktrees/feature-orders",
+      "prd_generated": true,
+      "stories_completed": 2,
+      "stories_total": 4
+    }
+  }
+}
+```
+
+### 4.11 Settings Page (P0)
 
 #### Agent Configuration
 
 ```
-┌─ Settings > Agent Configuration ─────────────────────────────┐
-│                                                              │
-│  Primary Backend (for orchestration)                         │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ ● Claude Code (recommended, no configuration needed)   │ │
-│  │ ○ Claude API    [API Key: ••••••••••]                  │ │
-│  │ ○ OpenAI        [API Key: ••••••••••] [Model: gpt-4o ▼]│ │
-│  │ ○ DeepSeek      [API Key: ••••••••••]                  │ │
-│  │ ○ Ollama        [URL: http://localhost:11434]          │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  ───────────────────────────────────────────────────────────│
-│                                                              │
-│  Execution Agents (for Story execution)           [+ Add]    │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ ✓ claude-code                              [Default]   │ │
-│  │   └─ Path: claude                                      │ │
-│  ├────────────────────────────────────────────────────────┤ │
-│  │ ✓ aider                                    [Configure] │ │
-│  │   └─ Command: aider --model gpt-4o                     │ │
-│  ├────────────────────────────────────────────────────────┤ │
-│  │ □ codex (not configured)                   [Configure] │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  Agent Auto-Selection Strategy:                              │
-│  ○ Smart matching (auto-select based on task type)          │
-│  ● Prefer using: [claude-code ▼]                            │
-│  ○ Manual specification (select for each Story individually)│
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+┌─ Settings > Agent Configuration ─────────────────────────────────┐
+│                                                                  │
+│  Main Backend (for orchestration)                                │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ ● Claude Code (recommended, no config needed)              │ │
+│  │ ○ Claude API    [API Key: ••••••••••]                      │ │
+│  │ ○ OpenAI        [API Key: ••••••••••] [Model: gpt-4o ▼]    │ │
+│  │ ○ DeepSeek      [API Key: ••••••••••]                      │ │
+│  │ ○ Ollama        [URL: http://localhost:11434]              │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│  ─────────────────────────────────────────────────────────────── │
+│                                                                  │
+│  Execution Agents (for Story execution)             [+ Add]      │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ ✓ claude-code                              [Default]       │ │
+│  │   └─ Path: claude                                          │ │
+│  ├────────────────────────────────────────────────────────────┤ │
+│  │ ✓ aider                                    [Configure]     │ │
+│  │   └─ Command: aider --model gpt-4o                         │ │
+│  ├────────────────────────────────────────────────────────────┤ │
+│  │ □ codex (not configured)                   [Configure]     │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│  Agent Selection Strategy:                                       │
+│  ○ Smart matching (auto-select based on task type)              │
+│  ● Prefer: [claude-code ▼]                                      │
+│  ○ Manual (select for each Story)                               │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-#### Quality Gate Configuration
-
-```
-┌─ Settings > Quality Gates ───────────────────────────────────┐
-│                                                              │
-│  Default enabled checks:                                     │
-│  [✓] TypeCheck (tsc / mypy / pyright)                       │
-│  [✓] Test (pytest / jest / npm test)                        │
-│  [✓] Lint (eslint / ruff)                                   │
-│  [ ] Custom                                                  │
-│                                                              │
-│  Custom script:                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ npm run validate                                        │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  Retry settings:                                             │
-│  Maximum retries: [3]                                        │
-│  Retry interval: [Exponential backoff ▼]                    │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### 4.6 CLI Features (P1)
+### 4.12 CLI Features (P1)
 
 ```bash
 # Simple mode (default)
-plan-cascade "Implement user login functionality"
+plan-cascade "Implement user login"
 # Auto-completes entire flow
 
 # Expert mode
-plan-cascade --expert "Implement user login functionality"
+plan-cascade --expert "Implement user login"
 
 # Expert mode interaction
 $ plan-cascade --expert "Implement user login"
-✓ PRD generated (5 Stories)
+✓ Generated PRD (5 Stories)
 
 ? Select operation:
-  > View/Edit PRD
-    Modify Agent assignment
-    Adjust dependencies
-    Start execution
-    Save draft and exit
+  > view    - View PRD
+    edit    - Edit PRD
+    agent   - Specify Agent
+    run     - Start execution
+    save    - Save draft
+    quit    - Exit
 
 # Step-by-step commands
-plan-cascade generate "Implement user login"  # Only generate PRD
-plan-cascade review                           # Interactive editing
+plan-cascade generate "Implement user login"  # Generate PRD only
+plan-cascade review                           # Interactive edit
 plan-cascade run                              # Execute
 plan-cascade status                           # View status
+
+# Resume commands
+plan-cascade resume                           # Auto-detect and resume
 ```
 
-### 4.7 Interactive REPL Mode (P0)
+### 4.13 Interactive REPL Mode (P0)
 
-CLI and Desktop both support interactive REPL for continuous dialogue:
+CLI and Desktop both support interactive REPL for continuous conversation:
 
 ```
-┌─ Plan Cascade REPL ─────────────────────────────────────────┐
-│                                                              │
-│  plan-cascade> Analyze the project structure                 │
-│                                                              │
-│  [AI analyzes and responds...]                               │
-│                                                              │
-│  plan-cascade> Based on the above analysis, implement user   │
-│                login functionality                           │
-│                                                              │
-│  [Intent recognition: TASK]                                  │
-│  [Strategy analysis: hybrid_auto]                            │
-│  [Generating PRD...]                                         │
-│  [Executing...]                                              │
-│                                                              │
-│  plan-cascade> /status                                       │
-│  Current session: abc123                                     │
-│  Mode: simple                                                │
-│  Project: /path/to/project                                   │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+┌─ Plan Cascade REPL ──────────────────────────────────────────────┐
+│                                                                  │
+│  plan-cascade> Analyze the project structure                     │
+│                                                                  │
+│  [AI analyzes and responds...]                                   │
+│                                                                  │
+│  plan-cascade> Based on above analysis, implement user login     │
+│                                                                  │
+│  [Intent recognition: TASK]                                      │
+│  [Strategy analysis: hybrid_auto]                                │
+│  [Generating PRD...]                                             │
+│  [Executing...]                                                  │
+│                                                                  │
+│  plan-cascade> /status                                           │
+│  Session: abc123                                                 │
+│  Mode: simple                                                    │
+│  Project: /path/to/project                                       │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 **REPL Special Commands**:
@@ -727,9 +956,693 @@ CLI and Desktop both support interactive REPL for continuous dialogue:
 - `/history` - View conversation history
 - `/config` - Configuration management
 
-**Smart Intent Recognition**:
-- Rule matching → LLM analysis → User confirmation
-- Auto-distinguish TASK / QUERY / CHAT
+### 4.8 Project & Session Management (P0) - NEW
+
+Visual management for Claude Code projects and sessions.
+
+```
+┌─ Projects ───────────────────────────────────────────────────────────────┐
+│                                                                          │
+│  🔍 Search projects...                              [⚙️] [➕ New Project] │
+│                                                                          │
+│  ┌─ Recent Projects ────────────────────────────────────────────────────┐│
+│  │                                                                      ││
+│  │  📁 my-web-app                                    Last: 2h ago       ││
+│  │     /Users/dev/projects/my-web-app                                   ││
+│  │     12 sessions • 1,234 messages                                     ││
+│  │                                                      [Open] [⋮]      ││
+│  │  ────────────────────────────────────────────────────────────────── ││
+│  │  📁 api-service                                   Last: Yesterday    ││
+│  │     /Users/dev/projects/api-service                                  ││
+│  │     8 sessions • 567 messages                                        ││
+│  │                                                      [Open] [⋮]      ││
+│  │  ────────────────────────────────────────────────────────────────── ││
+│  │  📁 mobile-app                                    Last: 3 days ago   ││
+│  │     /Users/dev/projects/mobile-app                                   ││
+│  │     5 sessions • 234 messages                                        ││
+│  │                                                      [Open] [⋮]      ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ┌─ Session History (my-web-app) ───────────────────────────────────────┐│
+│  │                                                                      ││
+│  │  💬 "Help me implement user authentication"       Jan 30, 14:23     ││
+│  │     45 messages • 3 checkpoints                    [Resume] [⋮]     ││
+│  │                                                                      ││
+│  │  💬 "Fix the login bug on mobile"                 Jan 29, 10:15     ││
+│  │     23 messages • 1 checkpoint                     [Resume] [⋮]     ││
+│  │                                                                      ││
+│  │  💬 "Add dark mode support"                       Jan 28, 16:45     ││
+│  │     67 messages • 5 checkpoints                    [Resume] [⋮]     ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Features**:
+- Browse all projects in `~/.claude/projects/`
+- View session history with first message preview
+- Resume past sessions with full context
+- Search across projects and sessions
+- Session metadata (timestamps, message counts)
+
+### 4.9 CC Agents (P1) - NEW
+
+Create and manage custom AI agents with specialized behaviors.
+
+```
+┌─ Agent Library ──────────────────────────────────────────────────────────┐
+│                                                                          │
+│  [➕ Create Agent]                        🔍 Search agents...            │
+│                                                                          │
+│  ┌─ My Agents ──────────────────────────────────────────────────────────┐│
+│  │                                                                      ││
+│  │  🤖 Code Reviewer                                                    ││
+│  │     Reviews code for bugs, security issues, and best practices       ││
+│  │     Model: claude-sonnet-4-20250514 • Runs: 45                                   ││
+│  │                                              [Run] [Edit] [⋮]        ││
+│  │  ────────────────────────────────────────────────────────────────── ││
+│  │  🤖 Test Writer                                                      ││
+│  │     Generates comprehensive unit tests for your code                 ││
+│  │     Model: claude-sonnet-4-20250514 • Runs: 23                                   ││
+│  │                                              [Run] [Edit] [⋮]        ││
+│  │  ────────────────────────────────────────────────────────────────── ││
+│  │  🤖 Documentation Generator                                          ││
+│  │     Creates documentation from code and comments                     ││
+│  │     Model: claude-haiku • Runs: 78                                   ││
+│  │                                              [Run] [Edit] [⋮]        ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ┌─ Agent Editor ───────────────────────────────────────────────────────┐│
+│  │                                                                      ││
+│  │  Name: [Code Reviewer                                    ]           ││
+│  │  Description: [Reviews code for bugs and security issues ]           ││
+│  │                                                                      ││
+│  │  Model: [claude-sonnet-4-20250514 ▼]                                             ││
+│  │                                                                      ││
+│  │  System Prompt:                                                      ││
+│  │  ┌──────────────────────────────────────────────────────────────┐   ││
+│  │  │ You are an expert code reviewer. Focus on:                   │   ││
+│  │  │ 1. Security vulnerabilities                                  │   ││
+│  │  │ 2. Performance issues                                        │   ││
+│  │  │ 3. Code style and best practices                             │   ││
+│  │  │ 4. Potential bugs and edge cases                             │   ││
+│  │  └──────────────────────────────────────────────────────────────┘   ││
+│  │                                                                      ││
+│  │  Tools: [✓] Read [✓] Glob [✓] Grep [ ] Write [ ] Edit [ ] Bash      ││
+│  │                                                                      ││
+│  │                                        [Cancel] [Save]               ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Features**:
+- Create agents with custom system prompts
+- Select model and allowed tools per agent
+- Run agents in background (non-blocking)
+- View execution history with logs
+- Import/export agent configurations
+
+### 4.10 Usage Analytics Dashboard (P1) - NEW
+
+Track API usage, costs, and patterns.
+
+```
+┌─ Analytics Dashboard ────────────────────────────────────────────────────┐
+│                                                                          │
+│  Period: [Last 30 days ▼]                              [Export CSV]      │
+│                                                                          │
+│  ┌─ Overview ───────────────────────────────────────────────────────────┐│
+│  │                                                                      ││
+│  │   Total Cost        Total Tokens       Requests       Avg/Day       ││
+│  │   $127.45           2.4M               1,234          $4.25         ││
+│  │   ↑ 12% vs prev     ↑ 8% vs prev       ↓ 3%           ↑ 15%         ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ┌─ Cost Over Time ─────────────────────────────────────────────────────┐│
+│  │                                                                      ││
+│  │  $8 │                              ╭─╮                               ││
+│  │     │                           ╭──╯ ╰──╮    ╭──╮                   ││
+│  │  $6 │        ╭──╮    ╭──╮    ╭──╯       ╰────╯  ╰──╮               ││
+│  │     │     ╭──╯  ╰────╯  ╰────╯                      ╰──╮           ││
+│  │  $4 │  ╭──╯                                            ╰──╮        ││
+│  │     │──╯                                                  ╰──      ││
+│  │  $2 │                                                              ││
+│  │     └────────────────────────────────────────────────────────────  ││
+│  │      Jan 1    Jan 8    Jan 15    Jan 22    Jan 29                  ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ┌─ By Model ────────────────┐  ┌─ By Project ──────────────────────────┐│
+│  │                           │  │                                       ││
+│  │  claude-sonnet-4-20250514        │  │  my-web-app          $45.20 (35%)     ││
+│  │  ████████████████ $89.20  │  │  ████████████████                     ││
+│  │                           │  │                                       ││
+│  │  claude-haiku             │  │  api-service          $32.10 (25%)    ││
+│  │  ████████ $32.15          │  │  ████████████                         ││
+│  │                           │  │                                       ││
+│  │  gpt-4o                   │  │  mobile-app           $28.50 (22%)    ││
+│  │  ██ $6.10                 │  │  ██████████                           ││
+│  │                           │  │                                       ││
+│  └───────────────────────────┘  └───────────────────────────────────────┘│
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Features**:
+- Real-time cost tracking
+- Token breakdown by model, project, time period
+- Visual charts for usage trends
+- Export data for accounting
+- Budget alerts (optional)
+
+### 4.11 MCP Server Management (P1) - NEW
+
+Manage Model Context Protocol servers.
+
+```
+┌─ MCP Servers ────────────────────────────────────────────────────────────┐
+│                                                                          │
+│  [➕ Add Server]  [📥 Import from Claude Desktop]                        │
+│                                                                          │
+│  ┌─ Configured Servers ─────────────────────────────────────────────────┐│
+│  │                                                                      ││
+│  │  🟢 filesystem                                          [Enabled]   ││
+│  │     stdio • @anthropic/mcp-server-filesystem                         ││
+│  │     Paths: /Users/dev/projects                                       ││
+│  │                                    [Test] [Configure] [Disable]      ││
+│  │  ────────────────────────────────────────────────────────────────── ││
+│  │  🟢 github                                              [Enabled]   ││
+│  │     stdio • @anthropic/mcp-server-github                            ││
+│  │     Token: ghp_****...                                               ││
+│  │                                    [Test] [Configure] [Disable]      ││
+│  │  ────────────────────────────────────────────────────────────────── ││
+│  │  🔴 postgres                                           [Disabled]   ││
+│  │     stdio • @anthropic/mcp-server-postgres                          ││
+│  │     Connection: postgresql://...                                     ││
+│  │                                    [Test] [Configure] [Enable]       ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ┌─ Add Server ─────────────────────────────────────────────────────────┐│
+│  │                                                                      ││
+│  │  Server Type: [stdio ▼]                                              ││
+│  │                                                                      ││
+│  │  Name:    [my-server                                    ]            ││
+│  │  Command: [npx                                          ]            ││
+│  │  Args:    [-y @anthropic/mcp-server-filesystem          ]            ││
+│  │                                                                      ││
+│  │  Environment Variables:                                              ││
+│  │  ┌──────────────────────────────────────────────────────────────┐   ││
+│  │  │ ALLOWED_PATHS=/Users/dev/projects                            │   ││
+│  │  └──────────────────────────────────────────────────────────────┘   ││
+│  │                                                                      ││
+│  │                              [Test Connection] [Cancel] [Save]       ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Features**:
+- Central registry for MCP servers
+- Add servers via UI (stdio, SSE types)
+- Import from Claude Desktop config
+- Test server connectivity
+- Enable/disable servers easily
+
+### 4.12 Timeline & Checkpoints (P2) - NEW
+
+Session versioning with visual timeline.
+
+```
+┌─ Timeline ───────────────────────────────────────────────────────────────┐
+│                                                                          │
+│  Session: "Implement user authentication"                                │
+│                                                                          │
+│  ┌─ Timeline View ──────────────────────────────────────────────────────┐│
+│  │                                                                      ││
+│  │   ○ Start                                              Jan 30, 14:23 ││
+│  │   │                                                                  ││
+│  │   │  "Help me implement user authentication"                         ││
+│  │   │                                                                  ││
+│  │   ◆ Checkpoint: "Basic auth setup"                     Jan 30, 14:45 ││
+│  │   │  └─ 12 messages • 3 files changed                                ││
+│  │   │                                                                  ││
+│  │   │  "Add OAuth provider support"                                    ││
+│  │   │                                                                  ││
+│  │   ├──◇ Branch: "Try JWT approach"                      Jan 30, 15:10 ││
+│  │   │  │  └─ 8 messages • 2 files changed                              ││
+│  │   │  │                                                               ││
+│  │   │  ○ (abandoned)                                                   ││
+│  │   │                                                                  ││
+│  │   ◆ Checkpoint: "OAuth complete"                       Jan 30, 15:30 ││
+│  │   │  └─ 25 messages • 7 files changed                                ││
+│  │   │                                                                  ││
+│  │   ● Current                                            Jan 30, 16:00 ││
+│  │      └─ 45 messages • 12 files changed                               ││
+│  │                                                                      ││
+│  │                                    [Create Checkpoint] [Fork Branch] ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ┌─ Diff Viewer (Basic auth setup → OAuth complete) ────────────────────┐│
+│  │                                                                      ││
+│  │  src/auth/provider.ts                                    [+45 -12]  ││
+│  │  ┌──────────────────────────────────────────────────────────────┐   ││
+│  │  │  15  │ - const auth = basicAuth();                           │   ││
+│  │  │  15  │ + const auth = oauthProvider({                        │   ││
+│  │  │  16  │ +   clientId: process.env.OAUTH_CLIENT_ID,            │   ││
+│  │  │  17  │ +   clientSecret: process.env.OAUTH_SECRET,           │   ││
+│  │  │  18  │ + });                                                 │   ││
+│  │  └──────────────────────────────────────────────────────────────┘   ││
+│  │                                                                      ││
+│  │  src/auth/middleware.ts                                  [+23 -5]   ││
+│  │  src/routes/login.ts                                     [+67 -0]   ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Features**:
+- Create checkpoints at any point
+- Visual branching timeline
+- Restore to any checkpoint instantly
+- Fork sessions from checkpoints
+- Diff viewer between checkpoints
+
+### 4.13 CLAUDE.md Management (P1) - NEW
+
+Edit and manage CLAUDE.md files.
+
+```
+┌─ CLAUDE.md Editor ───────────────────────────────────────────────────────┐
+│                                                                          │
+│  ┌─ Files ──────────┐  ┌─ Editor ────────────────────────────────────────┐│
+│  │                  │  │                                                ││
+│  │  📁 Projects     │  │  /Users/dev/my-web-app/CLAUDE.md               ││
+│  │  ├─ my-web-app   │  │                                                ││
+│  │  │  └─ CLAUDE.md │  │  ┌──────────────────────────────────────────┐  ││
+│  │  ├─ api-service  │  │  │ # My Web App                              │  ││
+│  │  │  └─ CLAUDE.md │  │  │                                          │  ││
+│  │  └─ mobile-app   │  │  │ ## Project Overview                       │  ││
+│  │     ├─ CLAUDE.md │  │  │ This is a Next.js web application...     │  ││
+│  │     └─ src/      │  │  │                                          │  ││
+│  │        └─ ...    │  │  │ ## Code Style                             │  ││
+│  │                  │  │  │ - Use TypeScript for all files           │  ││
+│  │  ─────────────── │  │  │ - Follow ESLint configuration            │  ││
+│  │                  │  │  │ - Use Prettier for formatting            │  ││
+│  │  🔍 Scan for     │  │  │                                          │  ││
+│  │  CLAUDE.md files │  │  │ ## Architecture                          │  ││
+│  │                  │  │  │ ```                                      │  ││
+│  │                  │  │  │ src/                                     │  ││
+│  │                  │  │  │ ├── components/                          │  ││
+│  │                  │  │  │ ├── pages/                               │  ││
+│  │                  │  │  │ └── utils/                               │  ││
+│  │                  │  │  │ ```                                      │  ││
+│  │                  │  │  └──────────────────────────────────────────┘  ││
+│  │                  │  │                                                ││
+│  └──────────────────┘  │                                    [Save]      ││
+│                        │                                                ││
+│  ┌─ Preview ───────────────────────────────────────────────────────────┐││
+│  │                                                                     │││
+│  │  # My Web App                                                       │││
+│  │                                                                     │││
+│  │  ## Project Overview                                                │││
+│  │  This is a Next.js web application...                               │││
+│  │                                                                     │││
+│  │  ## Code Style                                                      │││
+│  │  • Use TypeScript for all files                                     │││
+│  │  • Follow ESLint configuration                                      │││
+│  │  • Use Prettier for formatting                                      │││
+│  │                                                                     │││
+│  └─────────────────────────────────────────────────────────────────────┘││
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Features**:
+- Browse all CLAUDE.md files
+- Built-in markdown editor
+- Live preview with syntax highlighting
+- Quick scan to find all CLAUDE.md files
+- Templates for common configurations
+
+### 4.14 Real-time Streaming Chat (P0) - NEW
+
+Desktop provides real-time streaming conversation experience with AI responses and thinking display.
+
+#### Streaming Response Display
+
+```
+┌─ Chat View ───────────────────────────────────────────────────────────────┐
+│                                                                           │
+│  ┌─ User ─────────────────────────────────────────────────────────────┐   │
+│  │ Implement a user authentication system with OAuth support          │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
+│                                                                           │
+│  ┌─ Assistant ────────────────────────────────────────────────────────┐   │
+│  │                                                                    │   │
+│  │  ┌─ 💭 Thinking ──────────────────────────────────────── [▼] ──┐  │   │
+│  │  │ I need to analyze the project structure first to understand │  │   │
+│  │  │ the existing authentication patterns. Let me check the      │  │   │
+│  │  │ current codebase for any auth-related files...              │  │   │
+│  │  │                                                              │  │   │
+│  │  │ Key considerations:                                          │  │   │
+│  │  │ 1. Check for existing auth middleware                        │  │   │
+│  │  │ 2. Identify the database schema for users                    │  │   │
+│  │  │ 3. Look for OAuth provider configurations                    │  │   │
+│  │  └──────────────────────────────────────────────────────────────┘  │   │
+│  │                                                                    │   │
+│  │  I'll implement the authentication system. Let me start by        │   │
+│  │  examining the existing project structure.█                       │   │
+│  │                                        ↑ cursor (streaming)       │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
+│                                                                           │
+│  ┌─ Tool Calls ───────────────────────────────────────────────────────┐   │
+│  │  ✓ Glob  **/*.{ts,js}                    42 files     0.3s        │   │
+│  │  ✓ Read  src/middleware/auth.ts          128 lines    0.1s        │   │
+│  │  ⟳ Read  src/config/oauth.ts             reading...               │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Thinking Display Features
+
+| Feature | Description |
+|---------|-------------|
+| **Collapsible** | Thinking blocks can be collapsed/expanded |
+| **Real-time Streaming** | Thinking content streams in real-time |
+| **Visual Distinction** | Different styling from regular response |
+| **Time Indicator** | Shows thinking duration |
+| **Auto-collapse** | Option to auto-collapse when response starts |
+
+#### Streaming Configuration
+
+```
+┌─ Settings > Chat ─────────────────────────────────────────────────────────┐
+│                                                                           │
+│  Streaming Display                                                        │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ [✓] Enable streaming display (show text as it arrives)            │  │
+│  │ [✓] Show typing animation                                          │  │
+│  │ [ ] Auto-scroll to bottom                                          │  │
+│  │                                                                     │  │
+│  │ Streaming speed: [Normal ▼]                                        │  │
+│  │                   ├─ Instant (no animation)                        │  │
+│  │                   ├─ Fast                                          │  │
+│  │                   └─ Normal                                        │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+│  Thinking Display                                                         │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ [✓] Show thinking blocks (extended thinking)                      │  │
+│  │ [✓] Stream thinking content                                        │  │
+│  │ [ ] Auto-collapse thinking when response starts                    │  │
+│  │ [ ] Hide thinking blocks by default                                │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Unified Streaming Abstraction Layer (P0)
+
+Both working modes (Claude Code GUI + Standalone Multi-LLM) must support streaming through a unified abstraction layer:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                  Unified Stream Event Interface                              │
+│                     (Frontend consumes this)                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  TextDelta { content }           - Incremental text                         │
+│  ThinkingStart { id }            - Thinking block start (Claude only)       │
+│  ThinkingDelta { id, content }   - Thinking incremental (Claude only)       │
+│  ThinkingEnd { id, duration }    - Thinking block end (Claude only)         │
+│  ToolStart { id, name, args }    - Tool execution start                     │
+│  ToolResult { id, success, output } - Tool execution result                 │
+│  Usage { tokens_in, tokens_out, cost } - Token usage stats                  │
+│  Error { message }               - Error occurred                           │
+│  Complete { session_id, stats }  - Stream complete                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ▲
+                                    │ Adapts to unified format
+        ┌───────────────┬───────────┴───────────┬───────────────┐
+        │               │                       │               │
+┌───────┴───────┐ ┌─────┴─────┐ ┌───────────────┴───────────────┐
+│  Claude Code  │ │  Claude   │ │     OpenAI-Compatible         │
+│  CLI Adapter  │ │API Adapter│ │  (OpenAI/DeepSeek/Ollama)     │
+├───────────────┤ ├───────────┤ ├───────────────────────────────┤
+│ stream-json   │ │ SSE with  │ │ SSE with tool_calls           │
+│ format        │ │ thinking  │ │ (no thinking support)         │
+│ + thinking    │ │ blocks    │ │                               │
+│ + tool_use    │ │           │ │                               │
+└───────────────┘ └───────────┘ └───────────────────────────────┘
+```
+
+**Provider Feature Matrix**:
+
+| Provider | Streaming | Thinking | Tool Calls | Format | Thinking Format |
+|----------|-----------|----------|------------|--------|-----------------|
+| Claude Code CLI | ✅ | ✅ | ✅ | `stream-json` | `thinking` block |
+| Claude API | ✅ | ✅ | ✅ | SSE `content_block_delta` | `thinking` block |
+| OpenAI | ✅ | ⚠️ Conditional | ✅ | SSE `chat.completion.chunk` | `reasoning_content` (o1/o3 only) |
+| DeepSeek | ✅ | ⚠️ Conditional | ✅ | SSE (OpenAI-compatible) | `<think>...</think>` tags (R1 only) |
+| Ollama | ✅ | ⚠️ Model-dependent | ⚠️ Limited | JSON stream | Follows hosted model format |
+
+**Thinking Support Details**:
+
+| Provider | Model Requirements | API Parameter | Output Format |
+|----------|-------------------|---------------|---------------|
+| Claude | All models with extended thinking | `anthropic-beta: interleaved-thinking` | Dedicated `thinking` content block |
+| OpenAI | o1, o1-mini, o1-pro, o3-mini | `reasoning_effort: "medium"` | `reasoning_content` field in response |
+| DeepSeek | DeepSeek-R1, DeepSeek-R1-Distill | Default enabled | `<think>...</think>` XML tags in content |
+| Ollama | DeepSeek-R1, QwQ, etc. | Depends on model | Follows original model format |
+
+**Notes**:
+- Thinking display adapts based on provider and model capabilities
+- Frontend checks `supports_thinking()` and conditionally shows/hides Thinking UI
+- When model doesn't support thinking, the section is gracefully hidden
+- Tool call format varies by provider but unified by adapter layer
+
+### 4.15 Tool Call Visualization (P0) - NEW
+
+Real-time visualization of tool execution with detailed feedback.
+
+#### Tool Call States
+
+```
+┌─ Tool Execution Panel ────────────────────────────────────────────────────┐
+│                                                                           │
+│  ┌─ Current Execution ────────────────────────────────────────────────┐  │
+│  │                                                                    │  │
+│  │  ⟳ Edit  src/auth/handler.ts                                      │  │
+│  │    ├─ old_string: "function login(..."  (42 chars)                │  │
+│  │    ├─ new_string: "async function login(..."  (48 chars)          │  │
+│  │    └─ Status: Writing...                                          │  │
+│  │                                                                    │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+│  ┌─ History ──────────────────────────────────────────────────────────┐  │
+│  │                                                                    │  │
+│  │  ✓ Glob   **/*.ts                    0.3s   42 matches            │  │
+│  │    └─ [View Results]                                              │  │
+│  │                                                                    │  │
+│  │  ✓ Read   src/auth/handler.ts        0.1s   128 lines             │  │
+│  │    └─ [View Content]                                              │  │
+│  │                                                                    │  │
+│  │  ✓ Read   src/config/database.ts     0.1s   64 lines              │  │
+│  │    └─ [View Content]                                              │  │
+│  │                                                                    │  │
+│  │  ✗ Bash   npm test                   2.3s   Exit code: 1          │  │
+│  │    └─ [View Error] [Retry]                                        │  │
+│  │                                                                    │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+│  Statistics: 4 calls │ 3 success │ 1 failed │ Total: 2.8s               │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+#### File Change Preview
+
+```
+┌─ File Changes ────────────────────────────────────────────────────────────┐
+│                                                                           │
+│  src/auth/handler.ts                                    [Revert] [Accept] │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │  @@ -15,7 +15,7 @@                                                 │  │
+│  │   import { validateToken } from './utils';                         │  │
+│  │                                                                    │  │
+│  │ - function login(username: string, password: string) {            │  │
+│  │ + async function login(username: string, password: string) {      │  │
+│  │     const user = await findUser(username);                         │  │
+│  │     if (!user) {                                                   │  │
+│  │       throw new AuthError('User not found');                       │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+│  src/config/oauth.ts                                    [Revert] [Accept] │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │  + // OAuth provider configuration                                 │  │
+│  │  + export const oauthConfig = {                                    │  │
+│  │  +   google: {                                                     │  │
+│  │  +     clientId: process.env.GOOGLE_CLIENT_ID,                     │  │
+│  │  +     ...                                                         │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+│  Changes: 2 files │ +45 lines │ -3 lines          [Revert All] [Accept All]│
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.16 Chat Interaction Features (P0) - NEW
+
+#### Message Features
+
+| Feature | Description |
+|---------|-------------|
+| **Markdown Rendering** | Full GFM support with syntax highlighting |
+| **Code Blocks** | Syntax highlighting, copy button, line numbers |
+| **Image Display** | Inline image preview (screenshots, diagrams) |
+| **Message Actions** | Copy, regenerate, edit & resend |
+| **Branch Conversations** | Create conversation branches from any message |
+
+#### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Enter` | Send message |
+| `Shift+Enter` | New line |
+| `Ctrl+C` | Cancel current operation |
+| `Ctrl+/` | Open command palette |
+| `Ctrl+K` | Clear conversation |
+| `Ctrl+Shift+C` | Copy last response |
+| `↑` (in empty input) | Edit last message |
+
+#### Drag & Drop Support
+
+```
+┌─ Chat Input ──────────────────────────────────────────────────────────────┐
+│                                                                           │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │                                                                    │  │
+│  │  ┌─────────────┐  ┌─────────────┐                                 │  │
+│  │  │ 📄 app.ts   │  │ 🖼️ error.png │  Drop files here or @mention   │  │
+│  │  │  (attached) │  │  (attached) │                                 │  │
+│  │  └─────────────┘  └─────────────┘                                 │  │
+│  │                                                                    │  │
+│  │  Fix the error shown in the screenshot. The relevant code is in   │  │
+│  │  @src/components/Button.tsx                                        │  │
+│  │                                                                    │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+│  [📎 Attach] [@] [/]                                          [Send ➤]   │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+#### @ File Reference
+
+```
+┌─ File Reference ──────────────────────────────────────────────────────────┐
+│                                                                           │
+│  Type @ to reference files:                                              │
+│                                                                           │
+│  @src/                                                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │  📁 src/components/                                                │  │
+│  │  📁 src/utils/                                                     │  │
+│  │  📄 src/app.ts                          Modified 2 hours ago      │  │
+│  │  📄 src/config.ts                       Modified yesterday        │  │
+│  │  📄 src/index.ts                        Modified 3 days ago       │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+│  Recent files:                                                            │
+│  📄 src/auth/handler.ts  │  📄 src/api/routes.ts  │  📄 package.json    │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.17 Session Control (P0) - NEW
+
+#### Interrupt & Cancel
+
+```
+┌─ Execution Control ───────────────────────────────────────────────────────┐
+│                                                                           │
+│  ┌─ Running Task ─────────────────────────────────────────────────────┐  │
+│  │                                                                    │  │
+│  │  ⟳ Implementing user authentication...                            │  │
+│  │                                                                    │  │
+│  │  Current: Reading src/middleware/auth.ts                          │  │
+│  │  Progress: 3/7 tool calls                                         │  │
+│  │  Duration: 00:01:23                                               │  │
+│  │                                                                    │  │
+│  │                    [⏸️ Pause]  [⏹️ Stop]  [🔄 Restart]             │  │
+│  │                                                                    │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+│  ⚠️ Stopping will cancel the current operation. Changes already made    │
+│     will not be automatically reverted.                                  │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Regenerate & Edit
+
+```
+┌─ Message Actions ─────────────────────────────────────────────────────────┐
+│                                                                           │
+│  ┌─ Assistant ────────────────────────────────────────────────────────┐  │
+│  │                                                                    │  │
+│  │  I've implemented the login function with basic validation...     │  │
+│  │                                                                    │  │
+│  │  ┌───────────────────────────────────────────────────────────────┐│  │
+│  │  │ // Code block...                                              ││  │
+│  │  └───────────────────────────────────────────────────────────────┘│  │
+│  │                                                                    │  │
+│  │  ───────────────────────────────────────────────────────────────  │  │
+│  │  [📋 Copy] [🔄 Regenerate] [✏️ Edit & Resend] [🌿 Branch Here]    │  │
+│  │                                                                    │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.18 Command Palette (P1) - NEW
+
+Quick access to all features via keyboard.
+
+```
+┌─ Command Palette (Ctrl+/) ────────────────────────────────────────────────┐
+│                                                                           │
+│  > new session                                                            │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │                                                                    │  │
+│  │  📝 New Session                          Start a new chat session │  │
+│  │  📁 Open Project...                      Switch to another project │  │
+│  │  🔍 Search Sessions...                   Search past conversations │  │
+│  │  ───────────────────────────────────────────────────────────────  │  │
+│  │  ⚙️ Settings                             Open settings panel       │  │
+│  │  🎨 Toggle Theme                         Switch light/dark mode    │  │
+│  │  📊 Usage Dashboard                      View usage statistics     │  │
+│  │  ───────────────────────────────────────────────────────────────  │  │
+│  │  🔌 MCP Servers                          Manage MCP connections   │  │
+│  │  🤖 Agent Library                        Browse custom agents      │  │
+│  │  📋 CLAUDE.md                            Edit project config       │  │
+│  │                                                                    │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+│  Type to filter • ↑↓ to navigate • Enter to select • Esc to close       │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -739,10 +1652,11 @@ CLI and Desktop both support interactive REPL for continuous dialogue:
 
 | Metric | Requirement |
 |--------|-------------|
-| Startup Time | < 3 seconds |
-| Memory Usage | < 500MB (idle state) |
-| Parallel Stories | Support at least 5 parallel |
-| API Timeout | Configurable, default 5 minutes |
+| Startup Time | < 2 seconds |
+| Memory Usage | < 200MB (idle state) |
+| Binary Size | < 50MB (compressed) |
+| Project Scan | < 1 second for 100 projects |
+| Search Response | < 100ms |
 
 ### 5.2 Compatibility Requirements
 
@@ -751,116 +1665,96 @@ CLI and Desktop both support interactive REPL for continuous dialogue:
 | Windows | Windows 10 |
 | macOS | macOS 11 (Big Sur) |
 | Linux | Ubuntu 20.04 / equivalent |
-| Python | 3.10+ (CLI/Core) |
+| Claude Code | v1.0+ (for GUI mode) |
 
 ### 5.3 Security Requirements
 
-- API Key local encrypted storage
-- Don't upload user code to third-party services (except LLM API)
-- Shell command execution safety checks
-- Sensitive file protection (.env, credentials, etc.)
+- API Keys stored in OS keychain (not config files)
+- No telemetry without explicit consent
+- All network requests use HTTPS
+- Local SQLite database encrypted at rest
+- Sensitive data never logged
 
 ---
 
-## 6. Competitive Comparison
+## 6. Milestone Plan
 
-| Feature | Plan Cascade | Claude Code CLI | Cursor | Aider |
-|---------|--------------|-----------------|--------|-------|
-| **GUI** | ✅ | ❌ | ✅ | ❌ |
-| **CLI Support** | ✅ | ✅ | ❌ | ✅ |
-| **Multi-LLM Support** | ✅ | ❌ | ❌ | ✅ |
-| **Task Decomposition** | ✅ Auto | ❌ Manual | ❌ | ❌ |
-| **Parallel Execution** | ✅ | ❌ | ❌ | ❌ |
-| **Quality Gates** | ✅ | ❌ | ❌ | ⚠️ |
-| **Simple Mode** | ✅ | ❌ | ✅ | ❌ |
-| **Expert Mode** | ✅ | ✅ | ❌ | ✅ |
-| **Out of Box** | ✅ | ⚠️ | ✅ | ⚠️ |
+### Phase 1: Rust Backend Foundation (2 weeks)
 
----
-
-## 7. Milestone Plan
-
-### Phase 1: CLI + Dual-Mode
-
-**Goal**: Independently runnable CLI, supporting simple/expert modes
+**Goal**: Replace Python sidecar with pure Rust backend
 
 **Scope**:
-- [ ] Core package refactor
-- [ ] LLM Provider abstraction layer
-- [ ] Simple mode implementation
-- [ ] Expert mode implementation
-- [ ] AI auto strategy determination
-- [ ] Basic CLI commands
+- [ ] Rust backend architecture setup
+- [ ] Claude Code CLI integration
+- [ ] Basic Tauri commands
+- [ ] Settings management (Rust)
+- [ ] SQLite database setup
 
-### Phase 2: Desktop Application Alpha
+### Phase 2: Core Desktop Features (3 weeks)
 
-**Goal**: Graphical interface
+**Goal**: Essential management features
 
 **Scope**:
-- [ ] Tauri desktop framework
-- [ ] Simple mode UI
-- [ ] Expert mode UI
-- [ ] Settings page
-- [ ] Claude Code GUI mode
+- [ ] Project & Session Browser
+- [ ] CLAUDE.md Editor
+- [ ] MCP Server Management
+- [ ] Basic Analytics
 
-### Phase 3: Feature Completion
+### Phase 3: Advanced Features (3 weeks)
+
+**Goal**: Complete feature set
+
+**Scope**:
+- [ ] CC Agents
+- [ ] Timeline & Checkpoints
+- [ ] Advanced Analytics
+- [ ] Standalone Mode (LLM direct)
+
+### Phase 4: Polish & Release (2 weeks)
 
 **Goal**: Production ready
 
 **Scope**:
-- [ ] Complete PRD editor
-- [ ] Dependency visualization
-- [ ] More LLM backends
-- [ ] Auto-update
-
-### Phase 4: Advanced Features
-
-**Goal**: Differentiated advantages
-
-**Scope**:
-- [ ] Multi-Agent collaboration
-- [ ] Git Worktree integration
-- [ ] Team collaboration
-- [ ] Plugin system
+- [ ] UI/UX polish
+- [ ] Performance optimization
+- [ ] Documentation
+- [ ] Auto-update system
+- [ ] Release builds for all platforms
 
 ---
 
-## 8. Success Metrics
+## 7. Success Metrics
 
 | Metric | Target |
 |--------|--------|
-| User Onboarding Time | < 5 minutes (simple mode) |
-| Task Completion Rate | > 80% (simple tasks) |
-| User Retention | 30% (monthly active) |
-| GitHub Stars | 1000+ (within 6 months) |
+| App Startup Time | < 2 seconds |
+| Binary Size | < 50MB |
+| User Onboarding | < 2 minutes |
+| Feature Adoption | > 50% use Projects browser |
+| User Satisfaction | > 4.0/5.0 rating |
 
 ---
 
-## 9. Appendix
+## 8. Appendix
 
-### 9.1 Glossary (Can be hidden in user manual)
+### 8.1 Glossary
 
 | Term | Definition | User Needs to Understand |
-|------|------------|-------------------------|
-| Mega Plan | Project-level planning | Expert mode optional |
-| Hybrid Ralph | PRD-driven development mode | Expert mode optional |
-| Story | Minimum executable task | Expert mode required |
-| Batch | Set of tasks that can execute in parallel | Not needed |
-| Quality Gate | Quality check | Configurable in settings |
-| BuiltinAgent | Built-in Agent | Not needed |
+|------|------------|--------------------------|
+| Claude Code GUI Mode | Desktop serves as visual interface for Claude Code | Yes |
+| Standalone Mode | Desktop operates independently with direct LLM API | Yes |
+| CC Agent | Custom AI agent with specific system prompt | Yes |
+| Checkpoint | Saved snapshot of a session state | Yes |
+| MCP Server | Model Context Protocol server for extended capabilities | Advanced users |
 
-### 9.2 Simple Mode vs Expert Mode Quick Reference
+### 8.2 File Locations
 
-```
-Simple Mode suitable for:
-✓ New users
-✓ Quick prototypes
-✓ Single feature development
-✓ Scenarios where configuration is unwanted
+| Data | Location |
+|------|----------|
+| Projects | `~/.claude/projects/` |
+| Sessions | `~/.claude/projects/{project-id}/sessions/` |
+| Desktop Config | `~/.plan-cascade/config.json` |
+| Desktop Database | `~/.plan-cascade/data.db` |
+| Agent Library | `~/.plan-cascade/agents/` |
+| MCP Config | `~/.plan-cascade/mcp-servers.json` |
 
-Expert Mode suitable for:
-✓ Senior developers
-✓ Complex projects
-✓ Need fine-grained control
-✓ Multi-person collaboration
-```

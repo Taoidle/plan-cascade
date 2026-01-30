@@ -1,18 +1,26 @@
 [English](Design-Plan-Cascade-Standalone.md)
 
-# Plan Cascade Standalone - 技术设计文档
+# Plan Cascade Desktop - 技术设计文档
 
-**版本**: 4.0.0
-**日期**: 2026-01-29
+**版本**: 5.0.0
+**日期**: 2026-01-30
 **作者**: Plan Cascade Team
-**状态**: Implementation In Progress
+**状态**: 架构重设计中
 
 ---
 
 ## 实现状态总览
 
-> **当前进度**: ~98% 核心功能已实现
-> **最后更新**: 2026-01-29
+> **当前进度**: 架构重设计中 - 纯 Rust 后端
+> **最后更新**: 2026-01-30
+
+### 架构变更 (v5.0)
+
+| 变更 | 旧版 | 新版 |
+|------|------|------|
+| **桌面后端** | Python Sidecar (FastAPI) | 纯 Rust 后端 |
+| **依赖** | 需要 Python 3.10+ | 无需 Python |
+| **分发** | 复杂 (Python + Tauri) | 单一可执行文件 |
 
 ### 模块实现状态
 
@@ -1337,7 +1345,1720 @@ class BackendFactory:
 
 ---
 
-## 5. 设置管理
+## 5. Worktree 管理服务 (新增)
+
+### 5.1 Worktree 管理器
+
+Desktop 后端使用 Rust 实现 Git Worktree 管理：
+
+```rust
+// src-tauri/src/services/worktree.rs
+
+use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use tokio::process::Command;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorktreeInfo {
+    pub path: PathBuf,
+    pub branch: String,
+    pub commit: String,
+    pub is_bare: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorktreeConfig {
+    pub task_name: String,
+    pub target_branch: String,
+    pub description: String,
+    pub created_at: String,
+}
+
+pub struct WorktreeManager {
+    repo_root: PathBuf,
+    worktrees_dir: PathBuf,
+}
+
+impl WorktreeManager {
+    pub fn new(repo_root: PathBuf) -> Self {
+        let worktrees_dir = repo_root.join(".worktrees");
+        Self { repo_root, worktrees_dir }
+    }
+
+    /// 创建新的 worktree 用于功能开发
+    pub async fn create_worktree(
+        &self,
+        task_name: &str,
+        target_branch: &str,
+        description: &str,
+    ) -> Result<WorktreeInfo, WorktreeError> {
+        let branch_name = format!("feature/{}", task_name);
+        let worktree_path = self.worktrees_dir.join(task_name);
+
+        // 1. 创建分支
+        self.create_branch(&branch_name, target_branch).await?;
+
+        // 2. 创建 worktree
+        let output = Command::new("git")
+            .args(["worktree", "add"])
+            .arg(&worktree_path)
+            .arg(&branch_name)
+            .current_dir(&self.repo_root)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(WorktreeError::GitError(
+                String::from_utf8_lossy(&output.stderr).to_string()
+            ));
+        }
+
+        // 3. 初始化规划配置
+        let config = WorktreeConfig {
+            task_name: task_name.to_string(),
+            target_branch: target_branch.to_string(),
+            description: description.to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        let config_path = worktree_path.join(".planning-config.json");
+        let config_json = serde_json::to_string_pretty(&config)?;
+        tokio::fs::write(&config_path, config_json).await?;
+
+        Ok(WorktreeInfo {
+            path: worktree_path,
+            branch: branch_name,
+            commit: self.get_head_commit(&worktree_path).await?,
+            is_bare: false,
+        })
+    }
+
+    /// 完成任务：提交、合并、清理
+    pub async fn complete_worktree(
+        &self,
+        task_name: &str,
+        target_branch: &str,
+    ) -> Result<(), WorktreeError> {
+        let worktree_path = self.worktrees_dir.join(task_name);
+        let branch_name = format!("feature/{}", task_name);
+
+        // 1. 检查工作目录是否干净
+        if !self.is_clean(&worktree_path).await? {
+            // 提交剩余更改（排除规划文件）
+            self.commit_changes(&worktree_path, "Complete feature").await?;
+        }
+
+        // 2. 切换到目标分支并合并
+        self.merge_branch(&branch_name, target_branch).await?;
+
+        // 3. 删除 worktree 和分支
+        self.remove_worktree(task_name).await?;
+        self.delete_branch(&branch_name).await?;
+
+        Ok(())
+    }
+
+    /// 列出所有活跃的 worktrees
+    pub async fn list_worktrees(&self) -> Result<Vec<WorktreeInfo>, WorktreeError> {
+        let output = Command::new("git")
+            .args(["worktree", "list", "--porcelain"])
+            .current_dir(&self.repo_root)
+            .output()
+            .await?;
+
+        // 解析输出...
+        self.parse_worktree_list(&output.stdout)
+    }
+}
+```
+
+### 5.2 Mega Plan 编排器
+
+```rust
+// src-tauri/src/services/mega_orchestrator.rs
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MegaPlan {
+    pub metadata: Metadata,
+    pub goal: String,
+    pub description: String,
+    pub target_branch: String,
+    pub features: Vec<Feature>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Feature {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub priority: u32,
+    pub dependencies: Vec<String>,
+    pub status: FeatureStatus,
+    pub worktree_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum FeatureStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+pub struct MegaOrchestrator {
+    worktree_manager: WorktreeManager,
+    plan: MegaPlan,
+    status: MegaStatus,
+}
+
+impl MegaOrchestrator {
+    /// 执行当前批次
+    pub async fn execute_batch(&mut self) -> Result<BatchResult, OrchestratorError> {
+        let batch = self.get_current_batch()?;
+
+        // 为每个功能创建 worktree 并启动 Task agent
+        let mut handles = Vec::new();
+
+        for feature_id in &batch {
+            let feature = self.get_feature_mut(feature_id)?;
+            feature.status = FeatureStatus::InProgress;
+
+            // 创建 worktree
+            let worktree = self.worktree_manager.create_worktree(
+                feature_id,
+                &self.plan.target_branch,
+                &feature.description,
+            ).await?;
+
+            feature.worktree_path = Some(worktree.path.to_string_lossy().to_string());
+
+            // 启动 Task agent 执行功能
+            let handle = self.spawn_feature_agent(feature_id.clone(), worktree);
+            handles.push(handle);
+        }
+
+        // 等待所有 agents 完成
+        let results = futures::future::join_all(handles).await;
+
+        // 处理结果
+        for (feature_id, result) in batch.iter().zip(results) {
+            match result {
+                Ok(_) => {
+                    let feature = self.get_feature_mut(feature_id)?;
+                    feature.status = FeatureStatus::Completed;
+                }
+                Err(e) => {
+                    let feature = self.get_feature_mut(feature_id)?;
+                    feature.status = FeatureStatus::Failed;
+                    return Err(OrchestratorError::FeatureFailed(feature_id.clone(), e));
+                }
+            }
+        }
+
+        Ok(BatchResult {
+            batch_number: self.status.current_batch,
+            completed: batch,
+            failed: Vec::new(),
+        })
+    }
+
+    /// 获取当前批次（基于依赖分析）
+    fn get_current_batch(&self) -> Result<Vec<String>, OrchestratorError> {
+        let completed: HashSet<_> = self.plan.features.iter()
+            .filter(|f| f.status == FeatureStatus::Completed)
+            .map(|f| f.id.clone())
+            .collect();
+
+        let ready: Vec<_> = self.plan.features.iter()
+            .filter(|f| {
+                f.status == FeatureStatus::Pending &&
+                f.dependencies.iter().all(|dep| completed.contains(dep))
+            })
+            .map(|f| f.id.clone())
+            .collect();
+
+        Ok(ready)
+    }
+}
+```
+
+---
+
+## 6. 依赖分析 (新增)
+
+### 6.1 批次生成算法
+
+```rust
+// src-tauri/src/services/dependency_analyzer.rs
+
+use std::collections::{HashMap, HashSet, VecDeque};
+
+#[derive(Debug)]
+pub struct DependencyAnalyzer {
+    stories: Vec<Story>,
+}
+
+impl DependencyAnalyzer {
+    /// 生成执行批次
+    pub fn generate_batches(&self) -> Result<Vec<Batch>, DependencyError> {
+        // 1. 构建依赖图
+        let graph = self.build_dependency_graph()?;
+
+        // 2. 检测循环依赖
+        if let Some(cycle) = self.detect_cycle(&graph) {
+            return Err(DependencyError::CyclicDependency(cycle));
+        }
+
+        // 3. 拓扑排序生成批次
+        let batches = self.topological_batch_sort(&graph)?;
+
+        Ok(batches)
+    }
+
+    /// 拓扑排序，按层分组
+    fn topological_batch_sort(&self, graph: &DependencyGraph) -> Result<Vec<Batch>, DependencyError> {
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        let mut batches: Vec<Batch> = Vec::new();
+
+        // 计算入度
+        for story in &self.stories {
+            in_degree.entry(story.id.clone()).or_insert(0);
+            for dep in &story.dependencies {
+                *in_degree.entry(dep.clone()).or_insert(0) += 1;
+            }
+        }
+
+        // 逐层处理
+        while !in_degree.is_empty() {
+            // 收集入度为 0 的节点（当前批次）
+            let ready: Vec<String> = in_degree.iter()
+                .filter(|(_, &deg)| deg == 0)
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            if ready.is_empty() && !in_degree.is_empty() {
+                return Err(DependencyError::UnresolvedDependencies);
+            }
+
+            // 创建批次
+            let batch = Batch {
+                number: batches.len() + 1,
+                stories: ready.clone(),
+            };
+            batches.push(batch);
+
+            // 更新入度
+            for id in &ready {
+                in_degree.remove(id);
+                // 减少依赖此节点的其他节点的入度
+                for story in &self.stories {
+                    if story.dependencies.contains(id) {
+                        if let Some(deg) = in_degree.get_mut(&story.id) {
+                            *deg = deg.saturating_sub(1);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(batches)
+    }
+
+    /// 检测循环依赖
+    fn detect_cycle(&self, graph: &DependencyGraph) -> Option<Vec<String>> {
+        let mut visited = HashSet::new();
+        let mut rec_stack = HashSet::new();
+        let mut path = Vec::new();
+
+        for story in &self.stories {
+            if self.dfs_detect_cycle(&story.id, graph, &mut visited, &mut rec_stack, &mut path) {
+                return Some(path);
+            }
+        }
+
+        None
+    }
+}
+```
+
+---
+
+## 7. 自动迭代系统 (新增)
+
+### 7.1 迭代循环
+
+```rust
+// src-tauri/src/services/iteration_loop.rs
+
+use serde::{Deserialize, Serialize};
+use tokio::time::{sleep, Duration};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IterationMode {
+    UntilComplete,           // 持续执行直到所有 stories 完成
+    MaxIterations(u32),      // 最多 N 次迭代
+    BatchComplete,           // 完成当前批次后停止
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IterationConfig {
+    pub mode: IterationMode,
+    pub poll_interval_seconds: u64,
+    pub batch_timeout_seconds: u64,
+    pub quality_gates_enabled: bool,
+    pub auto_retry_enabled: bool,
+    pub max_retries: u32,
+}
+
+pub struct IterationLoop {
+    config: IterationConfig,
+    orchestrator: Orchestrator,
+    quality_gates: QualityGateRunner,
+    state: IterationState,
+}
+
+impl IterationLoop {
+    /// 运行迭代循环
+    pub async fn run(&mut self) -> Result<IterationResult, IterationError> {
+        let mut iteration = 0;
+
+        loop {
+            iteration += 1;
+            self.state.current_iteration = iteration;
+
+            // 1. 检查停止条件
+            if self.should_stop(iteration) {
+                break;
+            }
+
+            // 2. 获取可执行的 stories
+            let ready_stories = self.orchestrator.get_ready_stories()?;
+            if ready_stories.is_empty() {
+                if self.orchestrator.all_complete() {
+                    self.state.status = IterationStatus::Completed;
+                    break;
+                }
+                // 等待正在执行的 stories
+                sleep(Duration::from_secs(self.config.poll_interval_seconds)).await;
+                continue;
+            }
+
+            // 3. 执行 stories
+            for story_id in ready_stories {
+                self.execute_story(&story_id).await?;
+            }
+
+            // 4. 运行质量门控（如果启用）
+            if self.config.quality_gates_enabled {
+                let gate_result = self.quality_gates.run_all().await?;
+                if !gate_result.passed {
+                    self.handle_quality_gate_failure(gate_result).await?;
+                }
+            }
+
+            // 5. 保存状态
+            self.save_state().await?;
+        }
+
+        Ok(self.build_result())
+    }
+
+    fn should_stop(&self, iteration: u32) -> bool {
+        match self.config.mode {
+            IterationMode::UntilComplete => false,
+            IterationMode::MaxIterations(max) => iteration >= max,
+            IterationMode::BatchComplete => {
+                self.state.batch_completed
+            }
+        }
+    }
+}
+```
+
+---
+
+## 8. 带自动检测的质量门控 (新增)
+
+### 8.1 质量门控运行器
+
+```rust
+// src-tauri/src/services/quality_gate.rs
+
+use std::process::Command;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GateType {
+    TypeCheck,
+    Test,
+    Lint,
+    Custom(String),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QualityGate {
+    pub name: String,
+    pub gate_type: GateType,
+    pub enabled: bool,
+    pub required: bool,
+    pub command_override: Option<String>,
+    pub timeout_seconds: u64,
+}
+
+pub struct QualityGateRunner {
+    project_root: PathBuf,
+    gates: Vec<QualityGate>,
+    project_type: ProjectType,
+}
+
+impl QualityGateRunner {
+    /// 自动检测项目类型
+    pub fn detect_project_type(root: &Path) -> ProjectType {
+        if root.join("package.json").exists() {
+            ProjectType::NodeJs
+        } else if root.join("Cargo.toml").exists() {
+            ProjectType::Rust
+        } else if root.join("pyproject.toml").exists() || root.join("setup.py").exists() {
+            ProjectType::Python
+        } else if root.join("go.mod").exists() {
+            ProjectType::Go
+        } else {
+            ProjectType::Unknown
+        }
+    }
+
+    /// 获取门控的默认命令
+    fn get_default_command(&self, gate_type: &GateType) -> Option<String> {
+        match (&self.project_type, gate_type) {
+            // Node.js
+            (ProjectType::NodeJs, GateType::TypeCheck) => Some("npx tsc --noEmit".to_string()),
+            (ProjectType::NodeJs, GateType::Test) => Some("npm test".to_string()),
+            (ProjectType::NodeJs, GateType::Lint) => Some("npx eslint .".to_string()),
+
+            // Python
+            (ProjectType::Python, GateType::TypeCheck) => Some("mypy .".to_string()),
+            (ProjectType::Python, GateType::Test) => Some("pytest".to_string()),
+            (ProjectType::Python, GateType::Lint) => Some("ruff check .".to_string()),
+
+            // Rust
+            (ProjectType::Rust, GateType::TypeCheck) => Some("cargo check".to_string()),
+            (ProjectType::Rust, GateType::Test) => Some("cargo test".to_string()),
+            (ProjectType::Rust, GateType::Lint) => Some("cargo clippy".to_string()),
+
+            // Go
+            (ProjectType::Go, GateType::TypeCheck) => Some("go vet ./...".to_string()),
+            (ProjectType::Go, GateType::Test) => Some("go test ./...".to_string()),
+            (ProjectType::Go, GateType::Lint) => Some("golangci-lint run".to_string()),
+
+            _ => None,
+        }
+    }
+
+    /// 运行所有质量门控
+    pub async fn run_all(&self) -> Result<GateResults, GateError> {
+        let mut results = Vec::new();
+
+        for gate in &self.gates {
+            if !gate.enabled {
+                continue;
+            }
+
+            let result = self.run_gate(gate).await?;
+            results.push(result);
+
+            // 如果必需的门控失败，提前退出
+            if gate.required && !results.last().unwrap().passed {
+                break;
+            }
+        }
+
+        Ok(GateResults {
+            passed: results.iter().filter(|r| r.gate.required).all(|r| r.passed),
+            results,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProjectType {
+    NodeJs,
+    Python,
+    Rust,
+    Go,
+    Unknown,
+}
+```
+
+---
+
+## 9. 实时流式对话实现 (新增)
+
+### 9.1 统一流式事件接口
+
+统一流式抽象层为所有 LLM 提供商提供通用接口：
+
+```rust
+// src-tauri/src/services/streaming/unified.rs
+
+use serde::{Deserialize, Serialize};
+
+/// 前端消费的统一流式事件
+/// 所有提供商特定格式都转换为此格式
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UnifiedStreamEvent {
+    /// 增量文本内容
+    TextDelta {
+        content: String,
+    },
+
+    /// Thinking 块开始 (仅 Claude)
+    ThinkingStart {
+        id: String,
+    },
+
+    /// Thinking 内容增量 (仅 Claude)
+    ThinkingDelta {
+        id: String,
+        content: String,
+    },
+
+    /// Thinking 块结束 (仅 Claude)
+    ThinkingEnd {
+        id: String,
+        duration_ms: u64,
+    },
+
+    /// 工具执行开始
+    ToolStart {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+
+    /// 工具执行完成
+    ToolResult {
+        id: String,
+        success: bool,
+        output: String,
+        duration_ms: u64,
+    },
+
+    /// Token 用量更新
+    Usage {
+        input_tokens: u64,
+        output_tokens: u64,
+        cost_usd: Option<f64>,
+    },
+
+    /// 错误发生
+    Error {
+        message: String,
+        recoverable: bool,
+    },
+
+    /// 流完成
+    Complete {
+        session_id: String,
+        total_duration_ms: u64,
+    },
+}
+
+/// 将提供商特定事件转换为统一格式的 trait
+pub trait StreamAdapter: Send + Sync {
+    /// 提供商名称（用于日志）
+    fn provider_name(&self) -> &'static str;
+
+    /// 此提供商是否支持 thinking 块
+    fn supports_thinking(&self) -> bool;
+
+    /// 此提供商是否支持工具调用
+    fn supports_tools(&self) -> bool;
+
+    /// 将提供商特定行/事件转换为统一事件
+    fn adapt(&self, raw: &str) -> Result<Vec<UnifiedStreamEvent>, AdapterError>;
+}
+```
+
+### 9.2 各提供商适配器
+
+#### Claude Code CLI 适配器
+
+```rust
+// src-tauri/src/services/streaming/adapters/claude_code.rs
+
+use super::{StreamAdapter, UnifiedStreamEvent};
+
+/// 适配 Claude Code CLI 的 `stream-json` 格式
+pub struct ClaudeCodeAdapter;
+
+impl StreamAdapter for ClaudeCodeAdapter {
+    fn provider_name(&self) -> &'static str { "claude-code" }
+    fn supports_thinking(&self) -> bool { true }
+    fn supports_tools(&self) -> bool { true }
+
+    fn adapt(&self, raw: &str) -> Result<Vec<UnifiedStreamEvent>, AdapterError> {
+        let event: ClaudeCodeEvent = serde_json::from_str(raw)?;
+
+        Ok(match event {
+            ClaudeCodeEvent::Assistant { content } => {
+                vec![UnifiedStreamEvent::TextDelta { content }]
+            }
+            ClaudeCodeEvent::Thinking { id } => {
+                vec![UnifiedStreamEvent::ThinkingStart { id }]
+            }
+            ClaudeCodeEvent::ThinkingDelta { id, content } => {
+                vec![UnifiedStreamEvent::ThinkingDelta { id, content }]
+            }
+            ClaudeCodeEvent::ThinkingEnd { id, duration_ms } => {
+                vec![UnifiedStreamEvent::ThinkingEnd { id, duration_ms }]
+            }
+            ClaudeCodeEvent::ToolUse { id, name, input } => {
+                vec![UnifiedStreamEvent::ToolStart {
+                    id, name, arguments: input
+                }]
+            }
+            ClaudeCodeEvent::ToolResult { id, success, output, duration_ms } => {
+                vec![UnifiedStreamEvent::ToolResult {
+                    id, success, output, duration_ms
+                }]
+            }
+            // ... 其他事件处理
+        })
+    }
+}
+```
+
+#### Claude API 适配器
+
+```rust
+// src-tauri/src/services/streaming/adapters/claude_api.rs
+
+/// 适配 Claude API SSE 格式
+pub struct ClaudeApiAdapter {
+    current_thinking_id: Option<String>,
+}
+
+impl StreamAdapter for ClaudeApiAdapter {
+    fn provider_name(&self) -> &'static str { "claude-api" }
+    fn supports_thinking(&self) -> bool { true }
+    fn supports_tools(&self) -> bool { true }
+
+    fn adapt(&self, raw: &str) -> Result<Vec<UnifiedStreamEvent>, AdapterError> {
+        // 解析 SSE 格式: "data: {...}"
+        let data = raw.strip_prefix("data: ").ok_or(AdapterError::InvalidFormat)?;
+        if data == "[DONE]" {
+            return Ok(vec![]);
+        }
+
+        let event: ClaudeApiEvent = serde_json::from_str(data)?;
+
+        Ok(match event {
+            ClaudeApiEvent::ContentBlockStart { index, content_block } => {
+                match content_block.block_type.as_str() {
+                    "thinking" => {
+                        let id = format!("thinking_{}", index);
+                        vec![UnifiedStreamEvent::ThinkingStart { id }]
+                    }
+                    "tool_use" => {
+                        vec![UnifiedStreamEvent::ToolStart {
+                            id: content_block.id.unwrap_or_default(),
+                            name: content_block.name.unwrap_or_default(),
+                            arguments: serde_json::Value::Object(Default::default()),
+                        }]
+                    }
+                    _ => vec![]
+                }
+            }
+            ClaudeApiEvent::ContentBlockDelta { index, delta } => {
+                match delta.delta_type.as_str() {
+                    "thinking_delta" => {
+                        vec![UnifiedStreamEvent::ThinkingDelta {
+                            id: format!("thinking_{}", index),
+                            content: delta.thinking.unwrap_or_default(),
+                        }]
+                    }
+                    "text_delta" => {
+                        vec![UnifiedStreamEvent::TextDelta {
+                            content: delta.text.unwrap_or_default(),
+                        }]
+                    }
+                    _ => vec![]
+                }
+            }
+            // ... 其他事件处理
+        })
+    }
+}
+```
+
+#### OpenAI 适配器 (支持 o1/o3 推理)
+
+```rust
+// src-tauri/src/services/streaming/adapters/openai.rs
+
+use super::{StreamAdapter, UnifiedStreamEvent};
+
+/// 适配 OpenAI SSE 格式，支持 o1/o3 模型的 reasoning
+pub struct OpenAIAdapter {
+    model: String,
+    thinking_id: Option<String>,
+}
+
+impl OpenAIAdapter {
+    pub fn new(model: &str) -> Self {
+        Self {
+            model: model.to_string(),
+            thinking_id: None,
+        }
+    }
+
+    /// 检查模型是否支持推理 (o1, o1-mini, o1-pro, o3-mini, o3)
+    fn is_reasoning_model(&self) -> bool {
+        self.model.starts_with("o1") || self.model.starts_with("o3")
+    }
+}
+
+impl StreamAdapter for OpenAIAdapter {
+    fn provider_name(&self) -> &'static str { "openai" }
+
+    fn supports_thinking(&self) -> bool {
+        self.is_reasoning_model()
+    }
+
+    fn supports_tools(&self) -> bool { true }
+
+    fn adapt(&self, raw: &str) -> Result<Vec<UnifiedStreamEvent>, AdapterError> {
+        let data = raw.strip_prefix("data: ").ok_or(AdapterError::InvalidFormat)?;
+        if data == "[DONE]" {
+            return Ok(vec![UnifiedStreamEvent::Complete {
+                session_id: String::new(),
+                total_duration_ms: 0,
+            }]);
+        }
+
+        let event: OpenAIStreamChunk = serde_json::from_str(data)?;
+        let mut events = Vec::new();
+
+        for choice in event.choices {
+            if let Some(delta) = choice.delta {
+                // 推理内容 (o1/o3 模型)
+                if let Some(reasoning) = delta.reasoning_content {
+                    if !reasoning.is_empty() {
+                        let id = format!("reasoning_{}", choice.index);
+                        events.push(UnifiedStreamEvent::ThinkingDelta {
+                            id,
+                            content: reasoning,
+                        });
+                    }
+                }
+
+                // 文本内容
+                if let Some(content) = delta.content {
+                    if !content.is_empty() {
+                        events.push(UnifiedStreamEvent::TextDelta { content });
+                    }
+                }
+
+                // 工具调用
+                if let Some(tool_calls) = delta.tool_calls {
+                    for tc in tool_calls {
+                        if let Some(function) = tc.function {
+                            events.push(UnifiedStreamEvent::ToolStart {
+                                id: tc.id.unwrap_or_default(),
+                                name: function.name.unwrap_or_default(),
+                                arguments: serde_json::from_str(
+                                    &function.arguments.unwrap_or_default()
+                                ).unwrap_or_default(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 用量信息 (如果存在)
+        if let Some(usage) = event.usage {
+            events.push(UnifiedStreamEvent::Usage {
+                input_tokens: usage.prompt_tokens,
+                output_tokens: usage.completion_tokens,
+                cost_usd: None,
+            });
+        }
+
+        Ok(events)
+    }
+}
+
+/// 支持 reasoning 的 OpenAI 流式块
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamChunk {
+    choices: Vec<OpenAIChoice>,
+    usage: Option<OpenAIUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIChoice {
+    index: u32,
+    delta: Option<OpenAIDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIDelta {
+    content: Option<String>,
+    reasoning_content: Option<String>,  // o1/o3 推理内容
+    tool_calls: Option<Vec<OpenAIToolCall>>,
+}
+```
+
+#### DeepSeek 适配器 (支持 R1 思考)
+
+```rust
+// src-tauri/src/services/streaming/adapters/deepseek.rs
+
+use super::{StreamAdapter, UnifiedStreamEvent};
+
+/// 适配 DeepSeek SSE 格式，解析 R1 模型的 <think> 标签
+pub struct DeepSeekAdapter {
+    model: String,
+    think_buffer: String,
+    in_think_block: bool,
+    thinking_id: Option<String>,
+}
+
+impl DeepSeekAdapter {
+    pub fn new(model: &str) -> Self {
+        Self {
+            model: model.to_string(),
+            think_buffer: String::new(),
+            in_think_block: false,
+            thinking_id: None,
+        }
+    }
+
+    /// 检查模型是否支持思考 (R1 系列)
+    fn is_r1_model(&self) -> bool {
+        self.model.contains("r1") || self.model.contains("R1")
+    }
+
+    /// 解析内容中的 <think> 标签
+    fn parse_think_tags(&mut self, content: &str) -> Vec<UnifiedStreamEvent> {
+        let mut events = Vec::new();
+        let mut remaining = content.to_string();
+
+        // 处理 <think> 标签开始
+        if let Some(pos) = remaining.find("<think>") {
+            if pos > 0 {
+                events.push(UnifiedStreamEvent::TextDelta {
+                    content: remaining[..pos].to_string(),
+                });
+            }
+            remaining = remaining[pos + 7..].to_string();
+            self.in_think_block = true;
+            let id = format!("think_{}", uuid::Uuid::new_v4());
+            self.thinking_id = Some(id.clone());
+            events.push(UnifiedStreamEvent::ThinkingStart { id });
+        }
+
+        // 处理 </think> 标签结束
+        if let Some(pos) = remaining.find("</think>") {
+            if self.in_think_block {
+                if pos > 0 {
+                    events.push(UnifiedStreamEvent::ThinkingDelta {
+                        id: self.thinking_id.clone().unwrap_or_default(),
+                        content: remaining[..pos].to_string(),
+                    });
+                }
+                events.push(UnifiedStreamEvent::ThinkingEnd {
+                    id: self.thinking_id.take().unwrap_or_default(),
+                    duration_ms: 0,
+                });
+                self.in_think_block = false;
+            }
+            remaining = remaining[pos + 8..].to_string();
+        }
+
+        // 处理剩余内容
+        if !remaining.is_empty() {
+            if self.in_think_block {
+                events.push(UnifiedStreamEvent::ThinkingDelta {
+                    id: self.thinking_id.clone().unwrap_or_default(),
+                    content: remaining,
+                });
+            } else {
+                events.push(UnifiedStreamEvent::TextDelta { content: remaining });
+            }
+        }
+
+        events
+    }
+}
+
+impl StreamAdapter for DeepSeekAdapter {
+    fn provider_name(&self) -> &'static str { "deepseek" }
+
+    fn supports_thinking(&self) -> bool {
+        self.is_r1_model()
+    }
+
+    fn supports_tools(&self) -> bool { true }
+
+    fn adapt(&self, raw: &str) -> Result<Vec<UnifiedStreamEvent>, AdapterError> {
+        let data = raw.strip_prefix("data: ").ok_or(AdapterError::InvalidFormat)?;
+        if data == "[DONE]" {
+            return Ok(vec![UnifiedStreamEvent::Complete {
+                session_id: String::new(),
+                total_duration_ms: 0,
+            }]);
+        }
+
+        let event: OpenAIStreamChunk = serde_json::from_str(data)?;
+        let mut events = Vec::new();
+
+        for choice in event.choices {
+            if let Some(delta) = choice.delta {
+                if let Some(content) = delta.content {
+                    if !content.is_empty() {
+                        if self.is_r1_model() {
+                            // 为 R1 模型解析 <think> 标签
+                            events.extend(self.parse_think_tags(&content));
+                        } else {
+                            events.push(UnifiedStreamEvent::TextDelta { content });
+                        }
+                    }
+                }
+
+                // 工具调用 (与 OpenAI 格式相同)
+                if let Some(tool_calls) = delta.tool_calls {
+                    for tc in tool_calls {
+                        if let Some(function) = tc.function {
+                            events.push(UnifiedStreamEvent::ToolStart {
+                                id: tc.id.unwrap_or_default(),
+                                name: function.name.unwrap_or_default(),
+                                arguments: serde_json::from_str(
+                                    &function.arguments.unwrap_or_default()
+                                ).unwrap_or_default(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(events)
+    }
+}
+```
+
+#### Ollama 适配器 (模型相关思考支持)
+
+```rust
+// src-tauri/src/services/streaming/adapters/ollama.rs
+
+use super::{StreamAdapter, UnifiedStreamEvent};
+
+/// 已知支持思考的 Ollama 模型
+const THINKING_MODELS: &[&str] = &[
+    "deepseek-r1", "deepseek-r1:latest", "deepseek-r1:7b", "deepseek-r1:14b",
+    "qwq", "qwq:latest", "qwq:32b",
+];
+
+/// 适配 Ollama JSON 流格式，支持模型相关的思考功能
+pub struct OllamaAdapter {
+    model: String,
+    in_think_block: bool,
+    thinking_id: Option<String>,
+}
+
+impl OllamaAdapter {
+    pub fn new(model: &str) -> Self {
+        Self {
+            model: model.to_lowercase(),
+            in_think_block: false,
+            thinking_id: None,
+        }
+    }
+
+    /// 检查托管模型是否支持思考
+    fn model_supports_thinking(&self) -> bool {
+        THINKING_MODELS.iter().any(|m| self.model.starts_with(m))
+            || self.model.contains("r1")
+            || self.model.contains("qwq")
+    }
+
+    /// 解析 <think> 标签 (与 DeepSeek R1 格式相同)
+    fn parse_think_tags(&mut self, content: &str) -> Vec<UnifiedStreamEvent> {
+        let mut events = Vec::new();
+        let mut remaining = content.to_string();
+
+        if let Some(pos) = remaining.find("<think>") {
+            if pos > 0 {
+                events.push(UnifiedStreamEvent::TextDelta {
+                    content: remaining[..pos].to_string(),
+                });
+            }
+            remaining = remaining[pos + 7..].to_string();
+            self.in_think_block = true;
+            let id = format!("think_{}", uuid::Uuid::new_v4());
+            self.thinking_id = Some(id.clone());
+            events.push(UnifiedStreamEvent::ThinkingStart { id });
+        }
+
+        if let Some(pos) = remaining.find("</think>") {
+            if self.in_think_block {
+                if pos > 0 {
+                    events.push(UnifiedStreamEvent::ThinkingDelta {
+                        id: self.thinking_id.clone().unwrap_or_default(),
+                        content: remaining[..pos].to_string(),
+                    });
+                }
+                events.push(UnifiedStreamEvent::ThinkingEnd {
+                    id: self.thinking_id.take().unwrap_or_default(),
+                    duration_ms: 0,
+                });
+                self.in_think_block = false;
+            }
+            remaining = remaining[pos + 8..].to_string();
+        }
+
+        if !remaining.is_empty() {
+            if self.in_think_block {
+                events.push(UnifiedStreamEvent::ThinkingDelta {
+                    id: self.thinking_id.clone().unwrap_or_default(),
+                    content: remaining,
+                });
+            } else {
+                events.push(UnifiedStreamEvent::TextDelta { content: remaining });
+            }
+        }
+
+        events
+    }
+}
+
+impl StreamAdapter for OllamaAdapter {
+    fn provider_name(&self) -> &'static str { "ollama" }
+
+    fn supports_thinking(&self) -> bool {
+        self.model_supports_thinking()
+    }
+
+    fn supports_tools(&self) -> bool { true }  // Ollama 0.4+ 支持工具
+
+    fn adapt(&self, raw: &str) -> Result<Vec<UnifiedStreamEvent>, AdapterError> {
+        let event: OllamaResponse = serde_json::from_str(raw)?;
+        let mut events = Vec::new();
+
+        if !event.response.is_empty() {
+            if self.model_supports_thinking() {
+                // 为推理模型解析 <think> 标签
+                events.extend(self.parse_think_tags(&event.response));
+            } else {
+                events.push(UnifiedStreamEvent::TextDelta {
+                    content: event.response,
+                });
+            }
+        }
+
+        if event.done {
+            if let Some(total_duration) = event.total_duration {
+                events.push(UnifiedStreamEvent::Complete {
+                    session_id: String::new(),
+                    total_duration_ms: total_duration / 1_000_000, // ns 转 ms
+                });
+            }
+
+            if let (Some(prompt_tokens), Some(eval_tokens)) =
+                (event.prompt_eval_count, event.eval_count)
+            {
+                events.push(UnifiedStreamEvent::Usage {
+                    input_tokens: prompt_tokens,
+                    output_tokens: eval_tokens,
+                    cost_usd: None,  // Ollama 免费
+                });
+            }
+        }
+
+        Ok(events)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaResponse {
+    response: String,
+    done: bool,
+    total_duration: Option<u64>,
+    prompt_eval_count: Option<u64>,
+    eval_count: Option<u64>,
+}
+```
+
+### 9.3 适配器工厂
+
+```rust
+// src-tauri/src/services/streaming/factory.rs
+
+use super::adapters::*;
+use super::StreamAdapter;
+
+pub struct AdapterFactory;
+
+impl AdapterFactory {
+    /// 根据提供商和模型创建适配器
+    /// 需要模型信息来判断思考支持 (如 o1 vs gpt-4)
+    pub fn create(provider: &str, model: &str) -> Box<dyn StreamAdapter> {
+        match provider {
+            "claude-code" => Box::new(ClaudeCodeAdapter),
+            "claude-api" | "claude" => Box::new(ClaudeApiAdapter::new()),
+            "openai" => Box::new(OpenAIAdapter::new(model)),
+            "deepseek" => Box::new(DeepSeekAdapter::new(model)),
+            "ollama" => Box::new(OllamaAdapter::new(model)),
+            _ => Box::new(OpenAIAdapter::new(model)),  // 默认回退
+        }
+    }
+}
+```
+
+### 9.4 统一流式服务
+
+```rust
+// src-tauri/src/services/streaming/service.rs
+
+use super::{AdapterFactory, StreamAdapter, UnifiedStreamEvent};
+use tokio::sync::mpsc;
+
+pub struct UnifiedStreamingService {
+    adapter: Box<dyn StreamAdapter>,
+    event_tx: mpsc::Sender<UnifiedStreamEvent>,
+    provider: String,
+    model: String,
+}
+
+impl UnifiedStreamingService {
+    /// 创建带有提供商和模型信息的流式服务
+    /// 需要模型信息来判断思考支持 (如 OpenAI 的 o1/o3)
+    pub fn new(
+        provider: &str,
+        model: &str,
+        event_tx: mpsc::Sender<UnifiedStreamEvent>,
+    ) -> Self {
+        Self {
+            adapter: AdapterFactory::create(provider, model),
+            event_tx,
+            provider: provider.to_string(),
+            model: model.to_string(),
+        }
+    }
+
+    /// 处理来自任何提供商的原始行
+    pub async fn process_line(&self, line: &str) -> Result<(), StreamError> {
+        let events = self.adapter.adapt(line)?;
+        for event in events {
+            self.event_tx.send(event).await?;
+        }
+        Ok(())
+    }
+
+    /// 检查当前提供商/模型是否支持思考
+    pub fn supports_thinking(&self) -> bool {
+        self.adapter.supports_thinking()
+    }
+
+    /// 获取思考格式描述 (用于 UI 提示)
+    pub fn thinking_format(&self) -> &'static str {
+        match self.provider.as_str() {
+            "claude-code" | "claude-api" | "claude" => "Extended Thinking",
+            "openai" => if self.model.starts_with("o1") || self.model.starts_with("o3") {
+                "Reasoning"
+            } else {
+                "不支持"
+            },
+            "deepseek" => if self.model.contains("r1") || self.model.contains("R1") {
+                "DeepThink"
+            } else {
+                "不支持"
+            },
+            "ollama" => "取决于模型",
+            _ => "不支持",
+        }
+    }
+}
+```
+
+### 9.5 Claude Code CLI 流式处理器 (原始)
+
+```rust
+// src-tauri/src/services/chat/streaming.rs
+
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
+
+/// Claude Code CLI 的流式消息类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum StreamEvent {
+    /// 助手文本内容（流式）
+    #[serde(rename = "assistant")]
+    AssistantText { content: String },
+
+    /// Thinking 块开始
+    #[serde(rename = "thinking")]
+    ThinkingStart { id: String },
+
+    /// Thinking 内容（流式）
+    #[serde(rename = "thinking_delta")]
+    ThinkingDelta { id: String, content: String },
+
+    /// Thinking 块结束
+    #[serde(rename = "thinking_end")]
+    ThinkingEnd { id: String, duration_ms: u64 },
+
+    /// 工具调用开始
+    #[serde(rename = "tool_use")]
+    ToolStart {
+        id: String,
+        name: String,
+        #[serde(rename = "input")]
+        arguments: serde_json::Value,
+    },
+
+    /// 工具调用完成
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        id: String,
+        success: bool,
+        output: String,
+        duration_ms: u64,
+    },
+
+    /// 消息完成
+    #[serde(rename = "result")]
+    Complete {
+        session_id: String,
+        cost_usd: Option<f64>,
+        duration_ms: u64,
+    },
+
+    /// 错误发生
+    #[serde(rename = "error")]
+    Error { message: String },
+}
+
+pub struct StreamingChatService {
+    claude_path: String,
+    event_sender: mpsc::Sender<StreamEvent>,
+}
+
+impl StreamingChatService {
+    /// 执行 Claude Code 并流式输出
+    pub async fn execute_streaming(
+        &self,
+        prompt: &str,
+        project_path: &str,
+    ) -> Result<(), ChatError> {
+        use tokio::process::Command;
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let mut child = Command::new(&self.claude_path)
+            .args([
+                "--print", prompt,
+                "--output-format", "stream-json",
+                "--include-partial-messages",
+                "--project-root", project_path,
+            ])
+            .stdout(std::process::Stdio::piped())
+            .spawn()?;
+
+        let stdout = child.stdout.take().unwrap();
+        let mut reader = BufReader::new(stdout).lines();
+
+        while let Some(line) = reader.next_line().await? {
+            if let Ok(event) = serde_json::from_str::<StreamEvent>(&line) {
+                self.event_sender.send(event).await?;
+            }
+        }
+
+        Ok(())
+    }
+}
+```
+
+### 9.2 Thinking 显示处理器
+
+```rust
+// src-tauri/src/services/chat/thinking.rs
+
+use std::collections::HashMap;
+use chrono::{DateTime, Utc};
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThinkingBlock {
+    pub id: String,
+    pub content: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+    pub duration_ms: Option<u64>,
+    pub collapsed: bool,
+}
+
+pub struct ThinkingManager {
+    blocks: HashMap<String, ThinkingBlock>,
+    auto_collapse: bool,
+}
+
+impl ThinkingManager {
+    pub fn start_thinking(&mut self, id: String) -> ThinkingBlock {
+        let block = ThinkingBlock {
+            id: id.clone(),
+            content: String::new(),
+            started_at: Utc::now(),
+            ended_at: None,
+            duration_ms: None,
+            collapsed: false,
+        };
+        self.blocks.insert(id, block.clone());
+        block
+    }
+
+    pub fn append_thinking(&mut self, id: &str, content: &str) -> Option<&ThinkingBlock> {
+        if let Some(block) = self.blocks.get_mut(id) {
+            block.content.push_str(content);
+            Some(block)
+        } else {
+            None
+        }
+    }
+
+    pub fn end_thinking(&mut self, id: &str, duration_ms: u64) -> Option<ThinkingBlock> {
+        if let Some(block) = self.blocks.get_mut(id) {
+            block.ended_at = Some(Utc::now());
+            block.duration_ms = Some(duration_ms);
+            if self.auto_collapse {
+                block.collapsed = true;
+            }
+            Some(block.clone())
+        } else {
+            None
+        }
+    }
+}
+```
+
+### 9.3 工具执行可视化
+
+```rust
+// src-tauri/src/services/chat/tool_tracker.rs
+
+use std::collections::VecDeque;
+use chrono::{DateTime, Utc};
+
+#[derive(Debug, Clone, Serialize)]
+pub enum ToolStatus {
+    Pending,
+    Running,
+    Success,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    pub arguments_preview: String,  // UI 用的截断预览
+    pub status: ToolStatus,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+    pub duration_ms: Option<u64>,
+    pub output: Option<String>,
+    pub output_preview: Option<String>,  // UI 用的截断版本
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FileChange {
+    pub path: String,
+    pub change_type: FileChangeType,
+    pub diff: String,
+    pub lines_added: u32,
+    pub lines_removed: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum FileChangeType {
+    Created,
+    Modified,
+    Deleted,
+}
+
+pub struct ToolTracker {
+    history: VecDeque<ToolCall>,
+    current: Option<ToolCall>,
+    file_changes: Vec<FileChange>,
+    max_history: usize,
+}
+
+impl ToolTracker {
+    pub fn start_tool(&mut self, id: String, name: String, arguments: serde_json::Value) {
+        let preview = self.format_arguments_preview(&name, &arguments);
+
+        let tool = ToolCall {
+            id,
+            name,
+            arguments,
+            arguments_preview: preview,
+            status: ToolStatus::Running,
+            started_at: Utc::now(),
+            ended_at: None,
+            duration_ms: None,
+            output: None,
+            output_preview: None,
+            error: None,
+        };
+
+        self.current = Some(tool);
+    }
+
+    pub fn complete_tool(&mut self, id: &str, success: bool, output: String, duration_ms: u64) {
+        if let Some(ref mut tool) = self.current {
+            if tool.id == id {
+                tool.status = if success { ToolStatus::Success } else { ToolStatus::Failed };
+                tool.ended_at = Some(Utc::now());
+                tool.duration_ms = Some(duration_ms);
+                tool.output_preview = Some(self.truncate_output(&output, 200));
+                tool.output = Some(output);
+
+                // 跟踪 Edit/Write 工具的文件变更
+                if tool.name == "edit" || tool.name == "write" {
+                    self.track_file_change(&tool);
+                }
+
+                // 移动到历史记录
+                if let Some(completed) = self.current.take() {
+                    self.history.push_front(completed);
+                    if self.history.len() > self.max_history {
+                        self.history.pop_back();
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+### 9.4 对话交互管理器
+
+```rust
+// src-tauri/src/services/chat/interaction.rs
+
+use tokio::sync::watch;
+
+#[derive(Debug, Clone)]
+pub enum ChatState {
+    Idle,
+    Streaming { can_interrupt: bool },
+    WaitingForTool { tool_id: String },
+    Interrupted,
+    Error { message: String },
+}
+
+pub struct ChatInteractionManager {
+    state: watch::Sender<ChatState>,
+    interrupt_flag: std::sync::atomic::AtomicBool,
+}
+
+impl ChatInteractionManager {
+    /// 中断当前操作
+    pub fn interrupt(&self) -> Result<(), InterruptError> {
+        if let ChatState::Streaming { can_interrupt: true } = *self.state.borrow() {
+            self.interrupt_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.state.send(ChatState::Interrupted)?;
+            Ok(())
+        } else {
+            Err(InterruptError::NotInterruptible)
+        }
+    }
+
+    /// 检查是否被中断
+    pub fn is_interrupted(&self) -> bool {
+        self.interrupt_flag.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// 重置状态以进行新操作
+    pub fn reset(&self) {
+        self.interrupt_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        let _ = self.state.send(ChatState::Idle);
+    }
+}
+```
+
+### 9.5 前端 Tauri 命令
+
+```rust
+// src-tauri/src/commands/chat.rs
+
+use tauri::{command, State, Window};
+
+/// 启动流式对话
+#[command]
+pub async fn start_chat(
+    window: Window,
+    prompt: String,
+    project_path: String,
+    state: State<'_, ChatState>,
+) -> Result<String, String> {
+    let session_id = uuid::Uuid::new_v4().to_string();
+
+    // 在后台启动流式处理
+    tokio::spawn(async move {
+        let service = StreamingChatService::new();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+
+        // 将事件转发到前端
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                window.emit("chat-event", &event).ok();
+            }
+        });
+
+        service.execute_streaming(&prompt, &project_path, tx).await
+    });
+
+    Ok(session_id)
+}
+
+/// 中断当前操作
+#[command]
+pub async fn interrupt_chat(
+    state: State<'_, ChatInteractionManager>,
+) -> Result<(), String> {
+    state.interrupt().map_err(|e| e.to_string())
+}
+
+/// 获取工具调用详情
+#[command]
+pub async fn get_tool_details(
+    tool_id: String,
+    state: State<'_, ToolTracker>,
+) -> Result<ToolCall, String> {
+    state.get_tool(&tool_id)
+        .ok_or_else(|| "Tool not found".to_string())
+}
+
+/// 获取文件变更
+#[command]
+pub async fn get_file_changes(
+    state: State<'_, ToolTracker>,
+) -> Result<Vec<FileChange>, String> {
+    Ok(state.get_file_changes().clone())
+}
+
+/// 撤销文件变更
+#[command]
+pub async fn revert_file_change(
+    path: String,
+    state: State<'_, ToolTracker>,
+) -> Result<(), String> {
+    state.revert_change(&path).map_err(|e| e.to_string())
+}
+```
+
+### 9.6 前端 React 组件
+
+```typescript
+// src/components/Chat/StreamingMessage.tsx
+
+interface StreamingMessageProps {
+  content: string;
+  isStreaming: boolean;
+  thinking?: ThinkingBlock;
+  toolCalls: ToolCall[];
+}
+
+export function StreamingMessage({
+  content,
+  isStreaming,
+  thinking,
+  toolCalls
+}: StreamingMessageProps) {
+  return (
+    <div className="message assistant">
+      {/* Thinking 块 */}
+      {thinking && (
+        <ThinkingDisplay
+          thinking={thinking}
+          collapsible={true}
+          defaultCollapsed={thinking.ended_at != null}
+        />
+      )}
+
+      {/* 主要内容 */}
+      <div className="message-content">
+        <MarkdownRenderer content={content} />
+        {isStreaming && <span className="cursor blink">█</span>}
+      </div>
+
+      {/* 工具调用 */}
+      {toolCalls.length > 0 && (
+        <ToolCallPanel tools={toolCalls} />
+      )}
+    </div>
+  );
+}
+
+// src/components/Chat/ThinkingDisplay.tsx
+
+interface ThinkingDisplayProps {
+  thinking: ThinkingBlock;
+  collapsible: boolean;
+  defaultCollapsed: boolean;
+}
+
+export function ThinkingDisplay({
+  thinking,
+  collapsible,
+  defaultCollapsed
+}: ThinkingDisplayProps) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+
+  return (
+    <div className="thinking-block">
+      <div
+        className="thinking-header"
+        onClick={() => collapsible && setCollapsed(!collapsed)}
+      >
+        <span className="thinking-icon">💭</span>
+        <span className="thinking-label">Thinking</span>
+        {thinking.duration_ms && (
+          <span className="thinking-duration">
+            {(thinking.duration_ms / 1000).toFixed(1)}s
+          </span>
+        )}
+        {collapsible && (
+          <span className="collapse-icon">
+            {collapsed ? '▶' : '▼'}
+          </span>
+        )}
+      </div>
+
+      {!collapsed && (
+        <div className="thinking-content">
+          {thinking.content}
+          {!thinking.ended_at && <span className="cursor blink">█</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 10. 设置管理
 
 ### 5.1 设置结构
 
