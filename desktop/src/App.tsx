@@ -11,6 +11,7 @@ import { SettingsButton } from './components/SettingsButton';
 import { SimpleMode } from './components/SimpleMode';
 import { ExpertMode } from './components/ExpertMode';
 import { ClaudeCodeMode } from './components/ClaudeCodeMode';
+import { Projects } from './components/Projects';
 import { SetupWizard } from './components/Settings';
 import { useModeStore } from './store/mode';
 import { useExecutionStore } from './store/execution';
@@ -66,6 +67,7 @@ export function App() {
         {mode === 'simple' && <SimpleMode />}
         {mode === 'expert' && <ExpertMode />}
         {mode === 'claude-code' && <ClaudeCodeMode />}
+        {mode === 'projects' && <Projects />}
       </main>
 
       {/* Footer (optional status bar) */}

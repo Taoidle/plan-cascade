@@ -51,6 +51,9 @@ thiserror = "2"
 # Cross-platform directories
 dirs = "6"
 
+# Date/time handling
+chrono = "0.4"
+
 # Temporary files (for testing)
 tempfile = "3"
 
