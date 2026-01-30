@@ -53,6 +53,10 @@
     "claudeCode": {
       "name": "Claude Code",
       "description": "Interactive chat with Claude Code CLI"
+    },
+    "projects": {
+      "name": "Projects",
+      "description": "Browse and resume Claude Code sessions"
     }
   },
 
@@ -78,5 +82,41 @@
     "description": "Description",
     "error": "Error",
     "retryAttempts": "Retry Attempts"
+  },
+
+  "common": {
+    "retry": "Retry"
+  },
+
+  "projects": {
+    "title": "Projects",
+    "searchPlaceholder": "Search projects...",
+    "sortBy": "Sort by",
+    "sort": {
+      "recentActivity": "Recent Activity",
+      "name": "Name A-Z",
+      "sessionCount": "Most Sessions"
+    },
+    "sessions": "session",
+    "sessions_plural": "sessions",
+    "messages": "message",
+    "messages_plural": "messages",
+    "checkpoints": "checkpoint",
+    "checkpoints_plural": "checkpoints",
+    "noProjects": "No projects found",
+    "noSearchResults": "No results found",
+    "noSessions": "No sessions in this project",
+    "noPreview": "No preview available",
+    "noDetails": "Could not load session details",
+    "selectProject": "Select a project to view sessions",
+    "searchSessions": "Search sessions...",
+    "resume": "Resume",
+    "sessionDetails": "Session Details",
+    "messageType": {
+      "user": "User",
+      "assistant": "Assistant",
+      "toolCall": "Tool Call",
+      "toolResult": "Tool Result"
+    }
   }
 }

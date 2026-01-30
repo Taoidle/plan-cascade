@@ -8,16 +8,17 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type Mode = 'simple' | 'expert' | 'claude-code';
+export type Mode = 'simple' | 'expert' | 'claude-code' | 'projects';
 
 /** All available modes in order */
-export const MODES: Mode[] = ['simple', 'expert', 'claude-code'];
+export const MODES: Mode[] = ['simple', 'expert', 'claude-code', 'projects'];
 
 /** Mode display names */
 export const MODE_LABELS: Record<Mode, string> = {
   simple: 'Simple',
   expert: 'Expert',
   'claude-code': 'Claude Code',
+  projects: 'Projects',
 };
 
 /** Mode descriptions */
@@ -25,6 +26,7 @@ export const MODE_DESCRIPTIONS: Record<Mode, string> = {
   simple: 'One-click execution with AI-driven automation',
   expert: 'Full control over PRD editing, agents, and execution',
   'claude-code': 'Interactive chat with Claude Code CLI',
+  projects: 'Browse and resume Claude Code sessions',
 };
 
 interface ModeState {

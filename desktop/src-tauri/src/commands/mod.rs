@@ -5,8 +5,12 @@
 
 pub mod health;
 pub mod init;
+pub mod projects;
+pub mod sessions;
 pub mod settings;
 
 pub use health::*;
 pub use init::*;
+pub use projects::*;
+pub use sessions::*;
 pub use settings::*;

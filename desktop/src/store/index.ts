@@ -43,3 +43,14 @@ export type {
   Message,
   Conversation,
 } from './claudeCode';
+
+export { useProjectsStore } from './projects';
+export type {
+  Project,
+  Session,
+  SessionDetails,
+  MessageSummary,
+  ResumeResult,
+  ProjectSortBy,
+  CommandResponse,
+} from '../types/project';
