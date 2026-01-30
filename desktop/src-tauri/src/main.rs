@@ -2,19 +2,24 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod commands;
+use plan_cascade_desktop::commands::{get_health, get_settings, get_version, init_app, update_settings};
+use plan_cascade_desktop::state::AppState;
 
 use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
-            commands::start_sidecar,
-            commands::stop_sidecar,
-            commands::execute_task,
-            commands::get_status,
-            commands::get_health,
+            // Initialization commands
+            init_app,
+            get_version,
+            // Health commands
+            get_health,
+            // Settings commands
+            get_settings,
+            update_settings,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

@@ -7,18 +7,52 @@ license = "MIT"
 repository = "https://github.com/plan-cascade/plan-cascade"
 edition = "2021"
 
+[lib]
+name = "plan_cascade_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "plan-cascade-desktop"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Tauri
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Async runtime
 tokio = { version = "1", features = ["full"] }
+
+# HTTP client (kept for future external API calls, not for sidecar)
 reqwest = { version = "0.12", features = ["json"] }
+
+# WebSocket (for future use)
 futures-util = "0.3"
 tokio-tungstenite = "0.24"
+
+# SQLite database with connection pooling
+rusqlite = { version = "0.32", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+
+# Secure secret storage
+keyring = "3"
+
+# Error handling
+thiserror = "2"
+
+# Cross-platform directories
+dirs = "6"
+
+# Temporary files (for testing)
+tempfile = "3"
 
 [features]
 default = ["custom-protocol"]
