@@ -75,6 +75,50 @@ pub enum UnifiedStreamEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
     },
+
+    // ========================================================================
+    // Session-based execution events (for standalone mode)
+    // ========================================================================
+
+    /// Session progress update
+    SessionProgress {
+        session_id: String,
+        progress: serde_json::Value,
+    },
+
+    /// Session execution complete
+    SessionComplete {
+        session_id: String,
+        success: bool,
+        completed_stories: usize,
+        total_stories: usize,
+    },
+
+    /// Story execution started
+    StoryStart {
+        session_id: String,
+        story_id: String,
+        story_title: String,
+        story_index: usize,
+        total_stories: usize,
+    },
+
+    /// Story execution complete
+    StoryComplete {
+        session_id: String,
+        story_id: String,
+        success: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Quality gates execution result
+    QualityGatesResult {
+        session_id: String,
+        story_id: String,
+        passed: bool,
+        summary: serde_json::Value,
+    },
 }
 
 /// Errors that can occur during stream adaptation

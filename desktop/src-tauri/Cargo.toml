@@ -76,8 +76,19 @@ sha2 = "0.10"
 # Diff calculation
 similar = "2"
 
+# File system watching
+notify = "6"
+notify-debouncer-mini = "0.4"
+
+# TOML parsing (for quality gates)
+toml = "0.8"
+
 # Logging
 tracing = "0.1"
+
+[dev-dependencies]
+# Testing
+tempfile = "3"
 
 [features]
 default = ["custom-protocol"]
@@ -89,3 +100,7 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+[[test]]
+name = "integration"
+path = "tests/integration/mod.rs"

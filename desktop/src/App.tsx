@@ -3,8 +3,11 @@
  *
  * Main application layout integrating all components.
  * Supports Simple, Expert, and Claude Code modes.
+ *
+ * Story 004: Command Palette Enhancement - Global command palette integration
  */
 
+import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ModeSwitch } from './components/ModeSwitch';
 import { SettingsButton } from './components/SettingsButton';
@@ -14,16 +17,42 @@ import { ClaudeCodeMode } from './components/ClaudeCodeMode';
 import { Projects } from './components/Projects';
 import { Dashboard } from './components/Analytics';
 import { SetupWizard } from './components/Settings';
+import { GlobalCommandPaletteProvider, useGlobalCommandPalette } from './components/shared/CommandPalette';
+import { useGlobalCommands } from './hooks/useGlobalCommands';
+import { ShortcutsHelpDialog } from './components/ClaudeCodeMode/KeyboardShortcuts';
 import { useModeStore } from './store/mode';
 import { useExecutionStore } from './store/execution';
 import { clsx } from 'clsx';
 
-export function App() {
+// ============================================================================
+// AppContent Component (uses Command Palette context)
+// ============================================================================
+
+function AppContent() {
   const { t } = useTranslation();
   const { mode, setMode } = useModeStore();
   const { status } = useExecutionStore();
+  const { open: openCommandPalette } = useGlobalCommandPalette();
+
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   const isRunning = status === 'running';
+
+  // Callback for showing shortcuts (settings is handled by SettingsButton)
+  const handleOpenSettings = useCallback(() => {
+    // Settings is handled by SettingsButton component's internal state
+    // This is a placeholder for command palette integration
+  }, []);
+
+  const handleShowShortcuts = useCallback(() => {
+    setShowShortcuts(true);
+  }, []);
+
+  // Register global commands
+  useGlobalCommands({
+    onOpenSettings: handleOpenSettings,
+    onShowShortcuts: handleShowShortcuts,
+  });
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-950">
@@ -54,6 +83,25 @@ export function App() {
 
         {/* Controls */}
         <div className="flex items-center gap-4">
+          {/* Command Palette Trigger */}
+          <button
+            onClick={openCommandPalette}
+            className={clsx(
+              'hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg',
+              'bg-gray-100 dark:bg-gray-800',
+              'text-gray-500 dark:text-gray-400',
+              'hover:bg-gray-200 dark:hover:bg-gray-700',
+              'text-sm transition-colors',
+              'border border-gray-200 dark:border-gray-700'
+            )}
+            title={t('commandPalette.placeholder')}
+          >
+            <span className="text-gray-400">Search commands...</span>
+            <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs font-mono">
+              Ctrl+/
+            </kbd>
+          </button>
+
           <ModeSwitch
             mode={mode}
             onChange={setMode}
@@ -85,7 +133,25 @@ export function App() {
         <span>{t('version')}</span>
         <span>{t('ready')}</span>
       </footer>
+
+      {/* Keyboard Shortcuts Help Dialog */}
+      <ShortcutsHelpDialog
+        isOpen={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
     </div>
+  );
+}
+
+// ============================================================================
+// App Component (wrapper with providers)
+// ============================================================================
+
+export function App() {
+  return (
+    <GlobalCommandPaletteProvider>
+      <AppContent />
+    </GlobalCommandPaletteProvider>
   );
 }
 

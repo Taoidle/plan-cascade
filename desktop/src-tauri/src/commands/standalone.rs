@@ -1,24 +1,64 @@
 //! Standalone Mode Commands
 //!
 //! Tauri commands for standalone LLM execution without Claude Code CLI.
+//! Includes session-based execution with persistence, cancellation, and progress tracking.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 
 use crate::models::CommandResponse;
+use crate::models::orchestrator::{
+    ExecuteWithSessionRequest, ExecutionProgress, ExecutionSession, ExecutionSessionSummary,
+    ExecutionStatus, ResumeExecutionRequest, StandaloneStatus,
+};
 use crate::services::llm::{ProviderConfig, ProviderType};
-use crate::services::orchestrator::{ExecutionResult, OrchestratorConfig, OrchestratorService};
+use crate::services::orchestrator::{
+    ExecutionResult, OrchestratorConfig, OrchestratorService, SessionExecutionResult,
+};
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::state::AppState;
 use crate::storage::KeyringService;
 
-/// Stored provider configurations
-#[derive(Default)]
+/// State for standalone execution management
 pub struct StandaloneState {
-    /// Active orchestrator (if any)
-    pub orchestrator: Option<Arc<OrchestratorService>>,
+    /// Active orchestrators by session ID
+    pub orchestrators: Arc<RwLock<HashMap<String, Arc<OrchestratorService>>>>,
+}
+
+impl Default for StandaloneState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StandaloneState {
+    /// Create a new standalone state
+    pub fn new() -> Self {
+        Self {
+            orchestrators: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Get an orchestrator by session ID
+    pub async fn get_orchestrator(&self, session_id: &str) -> Option<Arc<OrchestratorService>> {
+        let orchestrators = self.orchestrators.read().await;
+        orchestrators.get(session_id).cloned()
+    }
+
+    /// Store an orchestrator for a session
+    pub async fn set_orchestrator(&self, session_id: String, orchestrator: Arc<OrchestratorService>) {
+        let mut orchestrators = self.orchestrators.write().await;
+        orchestrators.insert(session_id, orchestrator);
+    }
+
+    /// Remove an orchestrator
+    pub async fn remove_orchestrator(&self, session_id: &str) {
+        let mut orchestrators = self.orchestrators.write().await;
+        orchestrators.remove(session_id);
+    }
 }
 
 /// Provider information returned to frontend
@@ -483,6 +523,572 @@ pub async fn record_usage(
         )?;
         Ok(())
     }).await.map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Session-based execution commands
+// ============================================================================
+
+/// Execute a PRD with session tracking for crash recovery
+#[tauri::command]
+pub async fn execute_standalone_with_session(
+    request: ExecuteWithSessionRequest,
+    app: AppHandle,
+    app_state: State<'_, AppState>,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<SessionExecutionResult>, String> {
+    let keyring = KeyringService::new();
+
+    // Get API key
+    let api_key = match keyring.get_api_key(&request.provider) {
+        Ok(key) => key,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Failed to get API key: {}", e)));
+        }
+    };
+
+    // Parse provider type
+    let provider_type = match request.provider.as_str() {
+        "anthropic" => ProviderType::Anthropic,
+        "openai" => ProviderType::OpenAI,
+        "deepseek" => ProviderType::DeepSeek,
+        "ollama" => ProviderType::Ollama,
+        _ => {
+            return Ok(CommandResponse::err(format!("Unknown provider: {}", request.provider)));
+        }
+    };
+
+    // Validate API key for non-Ollama providers
+    if provider_type != ProviderType::Ollama && api_key.is_none() {
+        return Ok(CommandResponse::err("API key not configured for this provider"));
+    }
+
+    let config = ProviderConfig {
+        provider: provider_type,
+        api_key,
+        base_url: None,
+        model: request.model.clone(),
+        ..Default::default()
+    };
+
+    let orchestrator_config = OrchestratorConfig {
+        provider: config,
+        system_prompt: request.system_prompt.clone(),
+        max_iterations: 50,
+        max_total_tokens: 100_000,
+        project_root: PathBuf::from(&request.project_path),
+        streaming: true,
+    };
+
+    // Get database pool for session persistence
+    let pool = app_state.with_database(|db| {
+        Ok(db.pool().clone())
+    }).await.map_err(|e| e.to_string())?;
+
+    // Create orchestrator with database
+    let orchestrator = OrchestratorService::new(orchestrator_config)
+        .with_database(pool);
+    let orchestrator = Arc::new(orchestrator);
+
+    // Generate session ID
+    let session_id = uuid::Uuid::new_v4().to_string();
+
+    // Create execution session
+    let mut session = ExecutionSession::new(
+        session_id.clone(),
+        &request.project_path,
+        &request.provider,
+        &request.model,
+    );
+
+    if let Some(prd_path) = &request.prd_path {
+        session = session.with_prd(prd_path);
+    }
+
+    if let Some(prompt) = &request.system_prompt {
+        session = session.with_system_prompt(prompt);
+    }
+
+    // Load stories from PRD if provided
+    if let Some(prd_path) = &request.prd_path {
+        let prd_content = std::fs::read_to_string(prd_path)
+            .map_err(|e| format!("Failed to read PRD file: {}", e))?;
+
+        // Try to parse as JSON PRD
+        if let Ok(prd) = serde_json::from_str::<serde_json::Value>(&prd_content) {
+            if let Some(stories) = prd.get("stories").and_then(|s| s.as_array()) {
+                for story in stories {
+                    let story_id = story.get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let title = story.get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Untitled Story");
+
+                    // Filter by story_ids if provided
+                    if let Some(ref filter_ids) = request.story_ids {
+                        if !filter_ids.contains(&story_id.to_string()) {
+                            continue;
+                        }
+                    }
+
+                    session.add_story(story_id, title);
+                }
+            }
+        }
+    }
+
+    // If no stories found, add a default story with the project description
+    if session.stories.is_empty() {
+        session.add_story("story-001", "Execute project task");
+    }
+
+    // Store orchestrator for potential cancellation
+    standalone_state.set_orchestrator(session_id.clone(), orchestrator.clone()).await;
+
+    // Create channel for streaming events
+    let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
+
+    // Spawn task to forward events to frontend
+    let app_clone = app.clone();
+    let session_id_clone = session_id.clone();
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            let _ = app_clone.emit(&format!("session-event-{}", session_id_clone), &event);
+            // Also emit to general channel for dashboard
+            let _ = app_clone.emit("standalone-session-event", &event);
+        }
+    });
+
+    // Execute the session
+    let result = orchestrator.execute_session(
+        &mut session,
+        tx,
+        request.run_quality_gates,
+    ).await;
+
+    // Clean up orchestrator
+    standalone_state.remove_orchestrator(&session_id).await;
+
+    Ok(CommandResponse::ok(result))
+}
+
+/// Cancel a running standalone execution
+#[tauri::command]
+pub async fn cancel_standalone_execution(
+    session_id: String,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<bool>, String> {
+    if let Some(orchestrator) = standalone_state.get_orchestrator(&session_id).await {
+        orchestrator.cancel();
+        Ok(CommandResponse::ok(true))
+    } else {
+        Ok(CommandResponse::err(format!("Session not found: {}", session_id)))
+    }
+}
+
+/// Get status of all standalone executions
+#[tauri::command]
+pub async fn get_standalone_status(
+    app_state: State<'_, AppState>,
+) -> Result<CommandResponse<StandaloneStatus>, String> {
+    // Get database pool
+    let pool = match app_state.with_database(|db| {
+        Ok(db.pool().clone())
+    }).await {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+        }
+    };
+
+    // Create a temporary orchestrator to query sessions
+    let temp_config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: None,
+            base_url: None,
+            model: "temp".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 1,
+        max_total_tokens: 1,
+        project_root: PathBuf::from("."),
+        streaming: false,
+    };
+
+    let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
+
+    // Get active sessions (running or paused)
+    let active = orchestrator.list_sessions(Some(ExecutionStatus::Running), Some(50)).await
+        .unwrap_or_default();
+
+    let paused = orchestrator.list_sessions(Some(ExecutionStatus::Paused), Some(50)).await
+        .unwrap_or_default();
+
+    let active_sessions: Vec<ExecutionSessionSummary> = active.into_iter()
+        .chain(paused.into_iter())
+        .collect();
+
+    // Get recent completed sessions
+    let recent_sessions = orchestrator.list_sessions(Some(ExecutionStatus::Completed), Some(10)).await
+        .unwrap_or_default();
+
+    // Get total count
+    let total = orchestrator.list_sessions(None, Some(1000)).await
+        .unwrap_or_default()
+        .len();
+
+    Ok(CommandResponse::ok(StandaloneStatus {
+        active_sessions,
+        recent_sessions,
+        total_sessions: total,
+    }))
+}
+
+/// Get detailed progress for a specific session
+#[tauri::command]
+pub async fn get_standalone_progress(
+    session_id: String,
+    app_state: State<'_, AppState>,
+) -> Result<CommandResponse<ExecutionProgress>, String> {
+    // Get database pool
+    let pool = match app_state.with_database(|db| {
+        Ok(db.pool().clone())
+    }).await {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+        }
+    };
+
+    // Create a temporary orchestrator to query the session
+    let temp_config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: None,
+            base_url: None,
+            model: "temp".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 1,
+        max_total_tokens: 1,
+        project_root: PathBuf::from("."),
+        streaming: false,
+    };
+
+    let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
+
+    match orchestrator.get_progress(&session_id).await {
+        Ok(Some(progress)) => Ok(CommandResponse::ok(progress)),
+        Ok(None) => Ok(CommandResponse::err(format!("Session not found: {}", session_id))),
+        Err(e) => Ok(CommandResponse::err(format!("Failed to get progress: {}", e))),
+    }
+}
+
+/// Resume a paused or failed execution
+#[tauri::command]
+pub async fn resume_standalone_execution(
+    request: ResumeExecutionRequest,
+    app: AppHandle,
+    app_state: State<'_, AppState>,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<SessionExecutionResult>, String> {
+    // Get database pool
+    let pool = match app_state.with_database(|db| {
+        Ok(db.pool().clone())
+    }).await {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+        }
+    };
+
+    // Load the session from database
+    let temp_config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: None,
+            base_url: None,
+            model: "temp".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 1,
+        max_total_tokens: 1,
+        project_root: PathBuf::from("."),
+        streaming: false,
+    };
+
+    let temp_orchestrator = OrchestratorService::new(temp_config).with_database(pool.clone());
+
+    let mut session = match temp_orchestrator.load_session(&request.session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return Ok(CommandResponse::err(format!("Session not found: {}", request.session_id)));
+        }
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Failed to load session: {}", e)));
+        }
+    };
+
+    // Check if session can be resumed
+    if !session.status.can_resume() {
+        return Ok(CommandResponse::err(format!(
+            "Session cannot be resumed (status: {})",
+            session.status
+        )));
+    }
+
+    // Handle skip_current option
+    if request.skip_current {
+        if !session.advance_to_next_story() {
+            return Ok(CommandResponse::err("No more stories to execute"));
+        }
+    }
+
+    // Handle retry_failed option - reset failed story status
+    if request.retry_failed {
+        if let Some(story) = session.current_story_mut() {
+            if story.status == ExecutionStatus::Failed {
+                story.status = ExecutionStatus::Pending;
+                story.error = None;
+            }
+        }
+    }
+
+    // Get keyring to retrieve API key
+    let keyring = KeyringService::new();
+    let api_key = match keyring.get_api_key(&session.provider) {
+        Ok(key) => key,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Failed to get API key: {}", e)));
+        }
+    };
+
+    // Parse provider type
+    let provider_type = match session.provider.as_str() {
+        "anthropic" => ProviderType::Anthropic,
+        "openai" => ProviderType::OpenAI,
+        "deepseek" => ProviderType::DeepSeek,
+        "ollama" => ProviderType::Ollama,
+        _ => {
+            return Ok(CommandResponse::err(format!("Unknown provider: {}", session.provider)));
+        }
+    };
+
+    // Create new orchestrator with the session's config
+    let config = ProviderConfig {
+        provider: provider_type,
+        api_key,
+        base_url: None,
+        model: session.model.clone(),
+        ..Default::default()
+    };
+
+    let orchestrator_config = OrchestratorConfig {
+        provider: config,
+        system_prompt: session.system_prompt.clone(),
+        max_iterations: 50,
+        max_total_tokens: 100_000,
+        project_root: PathBuf::from(&session.project_path),
+        streaming: true,
+    };
+
+    let orchestrator = OrchestratorService::new(orchestrator_config)
+        .with_database(pool);
+    let orchestrator = Arc::new(orchestrator);
+
+    // Store orchestrator for potential cancellation
+    standalone_state.set_orchestrator(request.session_id.clone(), orchestrator.clone()).await;
+
+    // Create channel for streaming events
+    let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
+
+    // Spawn task to forward events to frontend
+    let app_clone = app.clone();
+    let session_id = request.session_id.clone();
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            let _ = app_clone.emit(&format!("session-event-{}", session_id), &event);
+            let _ = app_clone.emit("standalone-session-event", &event);
+        }
+    });
+
+    // Resume execution
+    let result = orchestrator.execute_session(&mut session, tx, true).await;
+
+    // Clean up orchestrator
+    standalone_state.remove_orchestrator(&request.session_id).await;
+
+    Ok(CommandResponse::ok(result))
+}
+
+/// Get a specific execution session by ID
+#[tauri::command]
+pub async fn get_standalone_session(
+    session_id: String,
+    app_state: State<'_, AppState>,
+) -> Result<CommandResponse<ExecutionSession>, String> {
+    // Get database pool
+    let pool = match app_state.with_database(|db| {
+        Ok(db.pool().clone())
+    }).await {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+        }
+    };
+
+    // Create temporary orchestrator
+    let temp_config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: None,
+            base_url: None,
+            model: "temp".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 1,
+        max_total_tokens: 1,
+        project_root: PathBuf::from("."),
+        streaming: false,
+    };
+
+    let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
+
+    match orchestrator.load_session(&session_id).await {
+        Ok(Some(session)) => Ok(CommandResponse::ok(session)),
+        Ok(None) => Ok(CommandResponse::err(format!("Session not found: {}", session_id))),
+        Err(e) => Ok(CommandResponse::err(format!("Failed to load session: {}", e))),
+    }
+}
+
+/// List all execution sessions with optional status filter
+#[tauri::command]
+pub async fn list_standalone_sessions(
+    status: Option<String>,
+    limit: Option<usize>,
+    app_state: State<'_, AppState>,
+) -> Result<CommandResponse<Vec<ExecutionSessionSummary>>, String> {
+    // Get database pool
+    let pool = match app_state.with_database(|db| {
+        Ok(db.pool().clone())
+    }).await {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+        }
+    };
+
+    // Parse status filter
+    let status_filter = status.and_then(|s| s.parse().ok());
+
+    // Create temporary orchestrator
+    let temp_config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: None,
+            base_url: None,
+            model: "temp".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 1,
+        max_total_tokens: 1,
+        project_root: PathBuf::from("."),
+        streaming: false,
+    };
+
+    let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
+
+    match orchestrator.list_sessions(status_filter, limit).await {
+        Ok(sessions) => Ok(CommandResponse::ok(sessions)),
+        Err(e) => Ok(CommandResponse::err(format!("Failed to list sessions: {}", e))),
+    }
+}
+
+/// Delete an execution session
+#[tauri::command]
+pub async fn delete_standalone_session(
+    session_id: String,
+    app_state: State<'_, AppState>,
+) -> Result<CommandResponse<bool>, String> {
+    // Get database pool
+    let pool = match app_state.with_database(|db| {
+        Ok(db.pool().clone())
+    }).await {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+        }
+    };
+
+    // Create temporary orchestrator
+    let temp_config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: None,
+            base_url: None,
+            model: "temp".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 1,
+        max_total_tokens: 1,
+        project_root: PathBuf::from("."),
+        streaming: false,
+    };
+
+    let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
+
+    match orchestrator.delete_session(&session_id).await {
+        Ok(()) => Ok(CommandResponse::ok(true)),
+        Err(e) => Ok(CommandResponse::err(format!("Failed to delete session: {}", e))),
+    }
+}
+
+/// Cleanup old completed sessions
+#[tauri::command]
+pub async fn cleanup_standalone_sessions(
+    days: i64,
+    app_state: State<'_, AppState>,
+) -> Result<CommandResponse<usize>, String> {
+    // Get database pool
+    let pool = match app_state.with_database(|db| {
+        Ok(db.pool().clone())
+    }).await {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+        }
+    };
+
+    // Create temporary orchestrator
+    let temp_config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: None,
+            base_url: None,
+            model: "temp".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 1,
+        max_total_tokens: 1,
+        project_root: PathBuf::from("."),
+        streaming: false,
+    };
+
+    let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
+
+    match orchestrator.cleanup_old_sessions(days).await {
+        Ok(count) => Ok(CommandResponse::ok(count)),
+        Err(e) => Ok(CommandResponse::err(format!("Failed to cleanup sessions: {}", e))),
+    }
 }
 
 #[cfg(test)]
