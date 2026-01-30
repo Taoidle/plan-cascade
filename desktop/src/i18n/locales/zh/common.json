@@ -80,7 +80,7 @@
     "retryAttempts": "重试次数"
   },
 
-  "timeline": {
+"timeline": {
     "title": "时间线",
     "noCheckpoints": "暂无检查点",
     "createFirstCheckpoint": "创建您的第一个检查点以开始跟踪会话状态。",
@@ -109,5 +109,68 @@
     "linesRemoved": "行删除",
     "noDiff": "未找到差异",
     "selectCheckpointsToCompare": "选择两个检查点进行比较"
+  },
+
+  "markdownEditor": {
+    "title": "CLAUDE.md编辑器",
+    "fileTree": {
+      "title": "CLAUDE.md文件",
+      "refresh": "刷新",
+      "createNew": "新建",
+      "fileCount": "共{{count}}个文件",
+      "noFiles": "未找到CLAUDE.md文件",
+      "noFilesHint": "在项目中创建CLAUDE.md文件以开始使用"
+    },
+    "editor": {
+      "placeholder": "选择一个文件进行编辑或创建新文件",
+      "untitled": "无标题",
+      "toolbar": {
+        "bold": "粗体",
+        "italic": "斜体",
+        "heading": "标题",
+        "link": "链接",
+        "code": "代码",
+        "codeBlock": "代码块",
+        "quote": "引用",
+        "list": "列表",
+        "orderedList": "有序列表",
+        "taskList": "任务列表"
+      }
+    },
+    "preview": {
+      "title": "预览",
+      "empty": "无内容可预览"
+    },
+    "viewMode": {
+      "split": "分屏视图",
+      "edit": "仅编辑",
+      "preview": "仅预览"
+    },
+    "saveStatus": {
+      "saved": "已保存",
+      "saving": "保存中...",
+      "unsaved": "有未保存的更改",
+      "error": "保存失败"
+    },
+    "templates": {
+      "title": "模板",
+      "selectTemplate": "选择模板",
+      "insert": "插入模板",
+      "basic": "基础",
+      "apiDocs": "API文档",
+      "codingGuidelines": "编码规范",
+      "projectStructure": "项目结构",
+      "troubleshooting": "故障排除"
+    },
+    "autoSave": {
+      "enabled": "已启用自动保存",
+      "disabled": "已禁用自动保存"
+    },
+    "errors": {
+      "loadFailed": "加载文件失败",
+      "saveFailed": "保存文件失败",
+      "scanFailed": "扫描文件失败",
+      "createFailed": "创建文件失败"
+    }
   }
 }

@@ -4,6 +4,7 @@
 
 pub mod checkpoint;
 pub mod claude_code;
+pub mod markdown;
 pub mod mcp;
 pub mod project;
 pub mod response;
@@ -12,6 +13,7 @@ pub mod settings;
 
 pub use checkpoint::*;
 pub use claude_code::*;
+pub use markdown::*;
 pub use mcp::*;
 pub use project::*;
 pub use response::*;

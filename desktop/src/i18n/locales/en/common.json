@@ -123,7 +123,7 @@
     }
   },
 
-  "timeline": {
+"timeline": {
     "title": "Timeline",
     "noCheckpoints": "No Checkpoints Yet",
     "createFirstCheckpoint": "Create your first checkpoint to start tracking session state.",
@@ -152,6 +152,69 @@
     "linesRemoved": "lines removed",
     "noDiff": "No differences found",
     "selectCheckpointsToCompare": "Select two checkpoints to compare"
+  },
+
+  "markdownEditor": {
+    "title": "CLAUDE.md Editor",
+    "fileTree": {
+      "title": "CLAUDE.md Files",
+      "refresh": "Refresh",
+      "createNew": "Create New",
+      "fileCount": "{{count}} file(s) found",
+      "noFiles": "No CLAUDE.md files found",
+      "noFilesHint": "Create a CLAUDE.md file in your project to get started"
+    },
+    "editor": {
+      "placeholder": "Select a file to edit or create a new one",
+      "untitled": "Untitled",
+      "toolbar": {
+        "bold": "Bold",
+        "italic": "Italic",
+        "heading": "Heading",
+        "link": "Link",
+        "code": "Code",
+        "codeBlock": "Code Block",
+        "quote": "Quote",
+        "list": "List",
+        "orderedList": "Ordered List",
+        "taskList": "Task List"
+      }
+    },
+    "preview": {
+      "title": "Preview",
+      "empty": "Nothing to preview"
+    },
+    "viewMode": {
+      "split": "Split View",
+      "edit": "Edit Only",
+      "preview": "Preview Only"
+    },
+    "saveStatus": {
+      "saved": "Saved",
+      "saving": "Saving...",
+      "unsaved": "Unsaved changes",
+      "error": "Save failed"
+    },
+    "templates": {
+      "title": "Templates",
+      "selectTemplate": "Select a template",
+      "insert": "Insert Template",
+      "basic": "Basic",
+      "apiDocs": "API Documentation",
+      "codingGuidelines": "Coding Guidelines",
+      "projectStructure": "Project Structure",
+      "troubleshooting": "Troubleshooting"
+    },
+    "autoSave": {
+      "enabled": "Auto-save enabled",
+      "disabled": "Auto-save disabled"
+    },
+    "errors": {
+      "loadFailed": "Failed to load file",
+      "saveFailed": "Failed to save file",
+      "scanFailed": "Failed to scan for files",
+      "createFailed": "Failed to create file"
+    }
   },
 
   "mcp": {

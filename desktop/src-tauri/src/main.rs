@@ -61,6 +61,12 @@ fn main() {
             plan_cascade_desktop::commands::timeline::rename_branch,
             plan_cascade_desktop::commands::timeline::get_checkpoint_diff,
             plan_cascade_desktop::commands::timeline::get_diff_from_current,
+            // Markdown commands
+            plan_cascade_desktop::commands::markdown::scan_claude_md,
+            plan_cascade_desktop::commands::markdown::read_claude_md,
+            plan_cascade_desktop::commands::markdown::save_claude_md,
+            plan_cascade_desktop::commands::markdown::create_claude_md,
+            plan_cascade_desktop::commands::markdown::get_claude_md_metadata,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

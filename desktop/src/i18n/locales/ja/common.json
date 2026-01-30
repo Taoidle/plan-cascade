@@ -80,7 +80,7 @@
     "retryAttempts": "リトライ回数"
   },
 
-  "timeline": {
+"timeline": {
     "title": "タイムライン",
     "noCheckpoints": "チェックポイントがありません",
     "createFirstCheckpoint": "最初のチェックポイントを作成して、セッション状態の追跡を開始しましょう。",
@@ -109,5 +109,68 @@
     "linesRemoved": "行削除",
     "noDiff": "差分がありません",
     "selectCheckpointsToCompare": "比較する2つのチェックポイントを選択してください"
+  },
+
+  "markdownEditor": {
+    "title": "CLAUDE.mdエディタ",
+    "fileTree": {
+      "title": "CLAUDE.mdファイル",
+      "refresh": "更新",
+      "createNew": "新規作成",
+      "fileCount": "{{count}}ファイル",
+      "noFiles": "CLAUDE.mdファイルが見つかりません",
+      "noFilesHint": "プロジェクトにCLAUDE.mdファイルを作成してください"
+    },
+    "editor": {
+      "placeholder": "編集するファイルを選択するか、新規作成してください",
+      "untitled": "無題",
+      "toolbar": {
+        "bold": "太字",
+        "italic": "斜体",
+        "heading": "見出し",
+        "link": "リンク",
+        "code": "コード",
+        "codeBlock": "コードブロック",
+        "quote": "引用",
+        "list": "リスト",
+        "orderedList": "番号付きリスト",
+        "taskList": "タスクリスト"
+      }
+    },
+    "preview": {
+      "title": "プレビュー",
+      "empty": "プレビューするコンテンツがありません"
+    },
+    "viewMode": {
+      "split": "分割表示",
+      "edit": "編集のみ",
+      "preview": "プレビューのみ"
+    },
+    "saveStatus": {
+      "saved": "保存済み",
+      "saving": "保存中...",
+      "unsaved": "未保存の変更があります",
+      "error": "保存に失敗しました"
+    },
+    "templates": {
+      "title": "テンプレート",
+      "selectTemplate": "テンプレートを選択",
+      "insert": "テンプレートを挿入",
+      "basic": "基本",
+      "apiDocs": "APIドキュメント",
+      "codingGuidelines": "コーディングガイドライン",
+      "projectStructure": "プロジェクト構成",
+      "troubleshooting": "トラブルシューティング"
+    },
+    "autoSave": {
+      "enabled": "自動保存有効",
+      "disabled": "自動保存無効"
+    },
+    "errors": {
+      "loadFailed": "ファイルの読み込みに失敗しました",
+      "saveFailed": "ファイルの保存に失敗しました",
+      "scanFailed": "ファイルのスキャンに失敗しました",
+      "createFailed": "ファイルの作成に失敗しました"
+    }
   }
 }

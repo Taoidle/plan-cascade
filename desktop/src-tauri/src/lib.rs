@@ -40,6 +40,8 @@ pub use commands::{
     create_checkpoint, list_checkpoints, get_checkpoint, delete_checkpoint,
     get_timeline, restore_checkpoint, fork_branch, list_branches, get_branch,
     switch_branch, delete_branch, rename_branch, get_checkpoint_diff, get_diff_from_current,
+    // Markdown commands
+    scan_claude_md, read_claude_md, save_claude_md, create_claude_md, get_claude_md_metadata,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;
