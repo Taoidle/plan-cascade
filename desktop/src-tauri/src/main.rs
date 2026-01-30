@@ -5,6 +5,9 @@
 use plan_cascade_desktop::state::AppState;
 use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
 use plan_cascade_desktop::commands::analytics::AnalyticsState;
+use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
+use plan_cascade_desktop::commands::worktree::WorktreeState;
+use plan_cascade_desktop::commands::standalone::StandaloneState;
 
 use tauri::Manager;
 
@@ -14,6 +17,9 @@ fn main() {
         .manage(AppState::new())
         .manage(ClaudeCodeState::new())
         .manage(AnalyticsState::new())
+        .manage(QualityGatesState::new())
+        .manage(WorktreeState::new())
+        .manage(StandaloneState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -108,6 +114,43 @@ fn main() {
             plan_cascade_desktop::commands::agents::run_agent,
             plan_cascade_desktop::commands::agents::export_agents,
             plan_cascade_desktop::commands::agents::import_agents,
+            // Quality Gates commands
+            plan_cascade_desktop::commands::quality_gates::init_quality_gates,
+            plan_cascade_desktop::commands::quality_gates::detect_project_type_cmd,
+            plan_cascade_desktop::commands::quality_gates::get_available_gates,
+            plan_cascade_desktop::commands::quality_gates::list_all_gates,
+            plan_cascade_desktop::commands::quality_gates::run_quality_gates,
+            plan_cascade_desktop::commands::quality_gates::run_specific_gates,
+            plan_cascade_desktop::commands::quality_gates::run_custom_gates,
+            plan_cascade_desktop::commands::quality_gates::get_gate_results,
+            plan_cascade_desktop::commands::quality_gates::get_session_gate_results,
+            plan_cascade_desktop::commands::quality_gates::get_gate_result,
+            plan_cascade_desktop::commands::quality_gates::cleanup_gate_results,
+            plan_cascade_desktop::commands::quality_gates::get_default_gates_for_type,
+            plan_cascade_desktop::commands::quality_gates::check_quality_gates_health,
+            // Worktree commands
+            plan_cascade_desktop::commands::worktree::create_worktree,
+            plan_cascade_desktop::commands::worktree::list_worktrees,
+            plan_cascade_desktop::commands::worktree::get_worktree,
+            plan_cascade_desktop::commands::worktree::get_worktree_status,
+            plan_cascade_desktop::commands::worktree::remove_worktree,
+            plan_cascade_desktop::commands::worktree::complete_worktree,
+            // Standalone LLM commands
+            plan_cascade_desktop::commands::standalone::list_providers,
+            plan_cascade_desktop::commands::standalone::configure_provider,
+            plan_cascade_desktop::commands::standalone::check_provider_health,
+            plan_cascade_desktop::commands::standalone::execute_standalone,
+            plan_cascade_desktop::commands::standalone::get_usage_stats,
+            // Session-based standalone commands
+            plan_cascade_desktop::commands::standalone::execute_standalone_with_session,
+            plan_cascade_desktop::commands::standalone::cancel_standalone_execution,
+            plan_cascade_desktop::commands::standalone::get_standalone_status,
+            plan_cascade_desktop::commands::standalone::get_standalone_progress,
+            plan_cascade_desktop::commands::standalone::resume_standalone_execution,
+            plan_cascade_desktop::commands::standalone::get_standalone_session,
+            plan_cascade_desktop::commands::standalone::list_standalone_sessions,
+            plan_cascade_desktop::commands::standalone::delete_standalone_session,
+            plan_cascade_desktop::commands::standalone::cleanup_standalone_sessions,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

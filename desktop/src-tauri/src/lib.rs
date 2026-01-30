@@ -35,7 +35,11 @@ pub use commands::{
     ClaudeCodeState,
     // Standalone LLM commands
     list_providers, configure_provider, check_provider_health,
-    execute_standalone, get_usage_stats,
+    execute_standalone, get_usage_stats, StandaloneState,
+    // Session-based standalone commands
+    execute_standalone_with_session, cancel_standalone_execution, get_standalone_status,
+    get_standalone_progress, resume_standalone_execution, get_standalone_session,
+    list_standalone_sessions, delete_standalone_session, cleanup_standalone_sessions,
     // Timeline commands
     create_checkpoint, list_checkpoints, get_checkpoint, delete_checkpoint,
     get_timeline, restore_checkpoint, fork_branch, list_branches, get_branch,
@@ -54,6 +58,14 @@ pub use commands::{
     list_agents, list_agents_with_stats, get_agent, create_agent, update_agent, delete_agent,
     get_agent_history, get_agent_stats, get_agent_run, prune_agent_runs, run_agent,
     export_agents, import_agents,
+    // Worktree commands
+    create_worktree, list_worktrees, get_worktree, get_worktree_status,
+    remove_worktree, complete_worktree, WorktreeState,
+    // Quality Gates commands
+    QualityGatesState, init_quality_gates, detect_project_type_cmd,
+    get_available_gates, list_all_gates, run_quality_gates, run_specific_gates,
+    run_custom_gates, get_gate_results, get_session_gate_results, get_gate_result,
+    cleanup_gate_results, get_default_gates_for_type, check_quality_gates_health,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;
