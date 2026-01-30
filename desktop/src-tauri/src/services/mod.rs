@@ -3,6 +3,7 @@
 //! Business logic services for the application.
 //! Services handle the core functionality and are called by commands.
 
+pub mod claude_code;
 pub mod mcp;
 pub mod project;
 pub mod session;

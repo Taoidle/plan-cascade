@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use plan_cascade_desktop::state::AppState;
+use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
 
 use tauri::Manager;
 
@@ -10,6 +11,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::new())
+        .manage(ClaudeCodeState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -36,6 +38,14 @@ fn main() {
             plan_cascade_desktop::commands::mcp::test_mcp_server,
             plan_cascade_desktop::commands::mcp::toggle_mcp_server,
             plan_cascade_desktop::commands::mcp::import_from_claude_desktop,
+            // Claude Code commands
+            plan_cascade_desktop::commands::claude_code::start_chat,
+            plan_cascade_desktop::commands::claude_code::send_message,
+            plan_cascade_desktop::commands::claude_code::cancel_execution,
+            plan_cascade_desktop::commands::claude_code::get_session_history,
+            plan_cascade_desktop::commands::claude_code::list_active_sessions,
+            plan_cascade_desktop::commands::claude_code::remove_session,
+            plan_cascade_desktop::commands::claude_code::get_session_info,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

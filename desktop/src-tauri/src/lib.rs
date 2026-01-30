@@ -29,6 +29,10 @@ pub use commands::{
     // MCP commands
     list_mcp_servers, add_mcp_server, update_mcp_server, remove_mcp_server,
     test_mcp_server, toggle_mcp_server, import_from_claude_desktop,
+    // Claude Code commands
+    start_chat, send_message, cancel_execution, get_session_history,
+    list_active_sessions, remove_session, get_session_info,
+    ClaudeCodeState,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;
