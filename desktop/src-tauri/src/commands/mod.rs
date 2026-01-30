@@ -11,6 +11,7 @@ pub mod projects;
 pub mod sessions;
 pub mod settings;
 pub mod standalone;
+pub mod timeline;
 
 pub use claude_code::*;
 pub use health::*;
@@ -20,3 +21,4 @@ pub use projects::*;
 pub use sessions::*;
 pub use settings::*;
 pub use standalone::*;
+pub use timeline::*;

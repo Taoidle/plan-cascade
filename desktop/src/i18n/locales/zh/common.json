@@ -78,5 +78,36 @@
     "description": "描述",
     "error": "错误",
     "retryAttempts": "重试次数"
+  },
+
+  "timeline": {
+    "title": "时间线",
+    "noCheckpoints": "暂无检查点",
+    "createFirstCheckpoint": "创建您的第一个检查点以开始跟踪会话状态。",
+    "createCheckpoint": "创建检查点",
+    "checkpointLabel": "输入检查点标签...",
+    "current": "当前",
+    "files": "文件",
+    "trackedFiles": "跟踪的文件",
+    "moreFiles": "更多文件",
+    "restore": "恢复",
+    "fork": "分支",
+    "compare": "比较",
+    "noBranch": "无分支",
+    "enterBranchName": "输入分支名称：",
+    "restoreConfirm": "恢复到检查点？",
+    "restoreWarning": "这将把您的会话恢复到此检查点状态。之后的任何更改可能会丢失。",
+    "createBackup": "恢复前创建备份",
+    "filesWillChange": "将更改的文件：",
+    "confirmRestore": "恢复",
+    "cancelRestore": "取消",
+    "diffTitle": "变更",
+    "added": "新增",
+    "modified": "修改",
+    "deleted": "删除",
+    "linesAdded": "行新增",
+    "linesRemoved": "行删除",
+    "noDiff": "未找到差异",
+    "selectCheckpointsToCompare": "选择两个检查点进行比较"
   }
 }

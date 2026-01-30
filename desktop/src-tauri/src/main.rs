@@ -46,6 +46,21 @@ fn main() {
             plan_cascade_desktop::commands::claude_code::list_active_sessions,
             plan_cascade_desktop::commands::claude_code::remove_session,
             plan_cascade_desktop::commands::claude_code::get_session_info,
+            // Timeline commands
+            plan_cascade_desktop::commands::timeline::create_checkpoint,
+            plan_cascade_desktop::commands::timeline::list_checkpoints,
+            plan_cascade_desktop::commands::timeline::get_checkpoint,
+            plan_cascade_desktop::commands::timeline::delete_checkpoint,
+            plan_cascade_desktop::commands::timeline::get_timeline,
+            plan_cascade_desktop::commands::timeline::restore_checkpoint,
+            plan_cascade_desktop::commands::timeline::fork_branch,
+            plan_cascade_desktop::commands::timeline::list_branches,
+            plan_cascade_desktop::commands::timeline::get_branch,
+            plan_cascade_desktop::commands::timeline::switch_branch,
+            plan_cascade_desktop::commands::timeline::delete_branch,
+            plan_cascade_desktop::commands::timeline::rename_branch,
+            plan_cascade_desktop::commands::timeline::get_checkpoint_diff,
+            plan_cascade_desktop::commands::timeline::get_diff_from_current,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

@@ -70,6 +70,15 @@ chrono = "0.4"
 # Temporary files (for testing)
 tempfile = "3"
 
+# UUID generation
+uuid = { version = "1", features = ["v4"] }
+
+# SHA-256 hashing for file checksums
+sha2 = "0.10"
+
+# Diff calculation
+similar = "2"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

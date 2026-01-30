@@ -11,9 +11,9 @@ pub mod streaming;
 pub mod llm;
 pub mod tools;
 pub mod orchestrator;
+pub mod timeline;
 
 // Service modules will be added as they are implemented
 // pub mod agent;
 // pub mod analytics;
-// pub mod timeline;
 // pub mod markdown;

@@ -123,6 +123,37 @@
     }
   },
 
+  "timeline": {
+    "title": "Timeline",
+    "noCheckpoints": "No Checkpoints Yet",
+    "createFirstCheckpoint": "Create your first checkpoint to start tracking session state.",
+    "createCheckpoint": "Create Checkpoint",
+    "checkpointLabel": "Enter checkpoint label...",
+    "current": "Current",
+    "files": "files",
+    "trackedFiles": "Tracked Files",
+    "moreFiles": "more files",
+    "restore": "Restore",
+    "fork": "Fork",
+    "compare": "Compare",
+    "noBranch": "No Branch",
+    "enterBranchName": "Enter branch name:",
+    "restoreConfirm": "Restore to Checkpoint?",
+    "restoreWarning": "This will restore your session to this checkpoint state. Any changes since then may be lost.",
+    "createBackup": "Create backup before restore",
+    "filesWillChange": "Files that will change:",
+    "confirmRestore": "Restore",
+    "cancelRestore": "Cancel",
+    "diffTitle": "Changes",
+    "added": "Added",
+    "modified": "Modified",
+    "deleted": "Deleted",
+    "linesAdded": "lines added",
+    "linesRemoved": "lines removed",
+    "noDiff": "No differences found",
+    "selectCheckpointsToCompare": "Select two checkpoints to compare"
+  },
+
   "mcp": {
     "title": "MCP Servers",
     "description": "Manage Model Context Protocol servers for extended AI capabilities",
