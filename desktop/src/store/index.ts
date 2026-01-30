@@ -54,3 +54,15 @@ export type {
   ProjectSortBy,
   CommandResponse,
 } from '../types/project';
+
+export { useAgentsStore, getFilteredAgents } from './agents';
+export type {
+  Agent,
+  AgentWithStats,
+  AgentCreateRequest,
+  AgentUpdateRequest,
+  AgentRun,
+  AgentRunList,
+  AgentStats,
+  RunStatus,
+} from '../types/agent';

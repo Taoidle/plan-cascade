@@ -86,18 +86,59 @@ impl Database {
             [],
         )?;
 
-        // Create agents table
+        // Create agents table with all required fields
         conn.execute(
             "CREATE TABLE IF NOT EXISTS agents (
                 id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
+                name TEXT NOT NULL UNIQUE,
                 description TEXT,
-                system_prompt TEXT,
-                tools TEXT,
+                system_prompt TEXT NOT NULL,
+                model TEXT NOT NULL DEFAULT 'claude-sonnet-4-20250514',
+                allowed_tools TEXT DEFAULT '[]',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                metadata TEXT
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )",
+            [],
+        )?;
+
+        // Create index on agent name for efficient lookups
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name)",
+            [],
+        )?;
+
+        // Create agent_runs table for execution history
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS agent_runs (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                input TEXT NOT NULL,
+                output TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                duration_ms INTEGER,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                error TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        // Create indexes on agent_runs for efficient queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_id ON agent_runs(agent_id)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at DESC)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status)",
             [],
         )?;
 

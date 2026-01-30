@@ -1,0 +1,61 @@
+{
+  "title": "Agent Library",
+  "description": "Create and manage AI agents with custom system prompts and tool configurations.",
+  "createAgent": "Create Agent",
+  "createFirstAgent": "Create Your First Agent",
+  "editAgent": "Edit Agent",
+  "noAgents": "No Agents Yet",
+  "noAgentsDescription": "Create custom AI agents with specialized behaviors for your workflows.",
+  "noResults": "No Matching Agents",
+  "noResultsDescription": "Try a different search term or create a new agent.",
+  "searchPlaceholder": "Search agents...",
+  "export": "Export",
+  "import": "Import",
+  "exportHistory": "Export History",
+
+  "name": "Name",
+  "namePlaceholder": "Enter agent name",
+  "description_field": "Description",
+  "descriptionPlaceholder": "Describe what this agent does",
+  "model": "Model",
+  "systemPrompt": "System Prompt",
+  "systemPromptPlaceholder": "You are a helpful assistant that...",
+  "allowedTools": "Allowed Tools",
+  "allToolsAllowed": "all tools allowed",
+  "toolsSelected_one": "{{count}} tool selected",
+  "toolsSelected_other": "{{count}} tools selected",
+  "characters": "characters",
+
+  "tools_one": "tool",
+  "tools_other": "tools",
+  "runs_one": "run",
+  "runs_other": "runs",
+  "lastRun": "Last run",
+
+  "run": "Run",
+  "edit": "Edit",
+  "runAgent": "Run Agent",
+  "input": "Input",
+  "inputPlaceholder": "Enter your message or task...",
+  "output": "Output",
+  "outputPlaceholder": "Output will appear here...",
+  "running": "Running...",
+  "runPending": "Run created. Waiting for execution...",
+  "runShortcut": "Ctrl/Cmd + Enter to run",
+
+  "runHistory": "Run History",
+  "noRunHistory": "No run history yet",
+  "inputTokens": "Input tokens",
+  "outputTokens": "Output tokens",
+  "error": "Error",
+
+  "confirmDelete": "Are you sure you want to delete the agent \"{{name}}\"? This will also delete all run history.",
+
+  "errors": {
+    "nameRequired": "Agent name is required",
+    "nameTooLong": "Name cannot exceed 100 characters",
+    "promptRequired": "System prompt is required",
+    "promptTooLong": "System prompt cannot exceed 100,000 characters",
+    "modelRequired": "Model selection is required"
+  }
+}

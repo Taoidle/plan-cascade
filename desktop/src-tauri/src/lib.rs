@@ -42,6 +42,10 @@ pub use commands::{
     switch_branch, delete_branch, rename_branch, get_checkpoint_diff, get_diff_from_current,
     // Markdown commands
     scan_claude_md, read_claude_md, save_claude_md, create_claude_md, get_claude_md_metadata,
+    // Agent commands
+    list_agents, list_agents_with_stats, get_agent, create_agent, update_agent, delete_agent,
+    get_agent_history, get_agent_stats, get_agent_run, prune_agent_runs, run_agent,
+    export_agents, import_agents,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;
