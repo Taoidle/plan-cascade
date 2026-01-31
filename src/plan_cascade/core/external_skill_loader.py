@@ -55,13 +55,21 @@ class ExternalSkillLoader:
             print(f"[ExternalSkillLoader] Warning: Could not load config: {e}")
             return {"skills": {}, "sources": {}, "settings": {}}
 
-    def detect_applicable_skills(self) -> list[str]:
-        """Detect which skills apply to the current project."""
+    def detect_applicable_skills(self, verbose: bool = False) -> list[str]:
+        """Detect which skills apply to the current project.
+
+        Args:
+            verbose: If True, print detection results to stdout
+        """
         applicable = []
+        detection_log = []
 
         for skill_name, skill_config in self.config.get("skills", {}).items():
             if self._skill_matches_project(skill_config):
                 applicable.append(skill_name)
+                source = skill_config.get("source", "unknown")
+                priority = skill_config.get("priority", 0)
+                detection_log.append((skill_name, source, priority))
 
         # Sort by priority (highest first)
         applicable.sort(
@@ -71,7 +79,15 @@ class ExternalSkillLoader:
 
         # Limit to max skills
         max_skills = self.config.get("settings", {}).get("max_skills_per_story", 3)
-        return applicable[:max_skills]
+        result = applicable[:max_skills]
+
+        if verbose and result:
+            print("[ExternalSkillLoader] Detected applicable skills:")
+            for name, source, priority in sorted(detection_log, key=lambda x: -x[2]):
+                if name in result:
+                    print(f"  ✓ {name} (source: {source}, priority: {priority})")
+
+        return result
 
     def _skill_matches_project(self, skill_config: dict) -> bool:
         """Check if a skill matches the current project."""
@@ -130,6 +146,10 @@ class ExternalSkillLoader:
             # Extract key content (skip YAML frontmatter, limit lines)
             content = self._extract_key_content(content)
             self._cache[skill_name] = content
+
+            # Log successful load
+            content_lines = len(content.split("\n"))
+            print(f"[ExternalSkillLoader] ✓ Loaded: {skill_name} ({content_lines} lines, source: {source_name})")
 
             return LoadedSkill(
                 name=skill_name,
@@ -202,3 +222,47 @@ class ExternalSkillLoader:
         """Get formatted skill context for the current project and phase."""
         skills = self.get_skills_for_phase(phase)
         return self.format_skills_for_prompt(skills)
+
+    def get_skills_summary(self, phase: str = "implementation") -> str:
+        """Get a brief summary of loaded skills for display.
+
+        Args:
+            phase: The execution phase to get skills for
+
+        Returns:
+            Formatted summary string for display
+        """
+        skills = self.get_skills_for_phase(phase)
+
+        if not skills:
+            return ""
+
+        lines = [
+            "┌" + "─" * 58 + "┐",
+            "│  EXTERNAL FRAMEWORK SKILLS LOADED" + " " * 23 + "│",
+            "├" + "─" * 58 + "┤",
+        ]
+
+        for skill in skills:
+            name_display = skill.name.replace("-", " ").title()
+            source_display = f"(source: {skill.source})"
+            line = f"│  ✓ {name_display} {source_display}"
+            lines.append(line + " " * max(0, 59 - len(line)) + "│")
+
+        lines.append("├" + "─" * 58 + "┤")
+        lines.append(f"│  Phase: {phase} | Total: {len(skills)} skill(s)" + " " * 27 + "│"[:60])
+        lines.append("└" + "─" * 58 + "┘")
+
+        return "\n".join(lines)
+
+    def display_skills_summary(self, phase: str = "implementation") -> None:
+        """Print the skills summary to stdout.
+
+        Args:
+            phase: The execution phase to get skills for
+        """
+        summary = self.get_skills_summary(phase)
+        if summary:
+            print()
+            print(summary)
+            print()

@@ -2,7 +2,7 @@
 
 # Plan Cascade - System Architecture and Workflow Design
 
-**Version**: 4.2.0
+**Version**: 4.2.1
 **Last Updated**: 2026-01-31
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
@@ -823,6 +823,8 @@ graph TB
 | `.retry-state.json` | State | Retry history and failure records |
 | `.mega-status.json` | State | Mega-plan execution status |
 | `.agent-detection.json` | Cache | Cross-platform Agent detection results (1-hour TTL) |
+| `.hybrid-execution-context.md` | Context | Hybrid task context for AI recovery after session interruption |
+| `.mega-execution-context.md` | Context | Mega-plan context for AI recovery after session interruption |
 | `.agent-outputs/` | Output | Agent logs, prompts, and result files |
 
 ---

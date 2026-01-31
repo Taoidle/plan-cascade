@@ -614,6 +614,17 @@ if [ "$REMAINING" -gt 0 ]; then
 fi
 ```
 
+## Step 6.6: Update Execution Context File
+
+After resuming execution, update the context file:
+
+```bash
+# Update .hybrid-execution-context.md for future recovery
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update
+```
+
+This ensures the context file reflects the current resumed state.
+
 ## Step 7: Completion
 
 When all stories are complete:

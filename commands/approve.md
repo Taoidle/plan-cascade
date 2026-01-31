@@ -203,6 +203,44 @@ Else:
 
 This summary helps reviewers understand the architectural context that will guide story execution.
 
+## Step 4.6: Detect External Framework Skills
+
+Check for applicable external framework skills based on the project type:
+
+```bash
+# Detect and display loaded skills
+if command -v python3 &> /dev/null; then
+    python3 -c "
+import sys
+sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/src')
+from plan_cascade.core.external_skill_loader import ExternalSkillLoader
+from pathlib import Path
+
+loader = ExternalSkillLoader(Path('.'))
+skills = loader.detect_applicable_skills(verbose=True)
+if skills:
+    loader.display_skills_summary('implementation')
+else:
+    print('[ExternalSkillLoader] No matching framework skills detected')
+    print('                      (Skills are auto-loaded based on package.json/Cargo.toml)')
+" 2>/dev/null || echo "Note: External skills detection skipped"
+fi
+```
+
+This will display:
+```
+┌──────────────────────────────────────────────────────────┐
+│  EXTERNAL FRAMEWORK SKILLS LOADED                        │
+├──────────────────────────────────────────────────────────┤
+│  ✓ React Best Practices (source: vercel)                │
+│  ✓ Web Design Guidelines (source: vercel)               │
+├──────────────────────────────────────────────────────────┤
+│  Phase: implementation | Total: 2 skill(s)              │
+└──────────────────────────────────────────────────────────┘
+```
+
+If no skills are detected, this is normal for projects without matching frameworks.
+
 ## Step 5: Calculate Execution Batches
 
 Analyze story dependencies and create parallel execution batches:
@@ -367,6 +405,14 @@ Patterns to follow:
 
 Relevant decisions:
 {list of relevant ADRs}
+{End if}
+
+{If external skills were detected for the project:}
+## Framework-Specific Best Practices
+
+{Inject skill content from ExternalSkillLoader.get_skill_context("implementation")}
+
+(Note: Follow these framework-specific guidelines when implementing)
 {End if}
 
 Your task:

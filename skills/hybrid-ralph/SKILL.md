@@ -14,11 +14,18 @@ allowed-tools:
   - AskUserQuestion
 hooks:
   PreToolUse:
-    # Show current story context for relevant tools
-    - matcher: "Write|Edit|Bash"
+    # Show execution context and current story for relevant tools
+    - matcher: "Write|Edit|Bash|Task"
       hooks:
         - type: command
           command: |
+            # Show hybrid execution context if we're in a hybrid task
+            if [ -f "prd.json" ] || [ -f ".planning-config.json" ] || [ -f ".hybrid-execution-context.md" ]; then
+              if command -v python3 &> /dev/null; then
+                # Update and display context reminder
+                python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" both 2>/dev/null || true
+              fi
+            fi
             # Show current story context if we're executing a story
             if [ -f ".current-story" ]; then
               STORY_ID=$(cat .current-story 2>/dev/null || echo "")
@@ -33,11 +40,18 @@ hooks:
               fi
             fi
   PostToolUse:
-    # Remind to update findings after significant operations
+    # Update context file and remind to update findings after significant operations
     - matcher: "Write|Edit"
       hooks:
         - type: command
           command: |
+            # Update execution context file
+            if [ -f "prd.json" ]; then
+              if command -v python3 &> /dev/null; then
+                python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update 2>/dev/null || true
+              fi
+            fi
+            # Remind about findings
             if [ -f ".current-story" ]; then
               STORY_ID=$(cat .current-story 2>/dev/null || echo "")
               if [ -n "$STORY_ID" ]; then
@@ -64,6 +78,28 @@ hooks:
 # Hybrid Ralph + Planning-with-Files
 
 A hybrid architecture combining the best of three approaches:
+
+## Auto-Recovery Protocol (CRITICAL)
+
+**At the START of any interaction**, perform this check to recover context after compression/truncation:
+
+1. Check if `.hybrid-execution-context.md` exists in the current directory
+2. If YES:
+   - Read the file content using Read tool
+   - Display: "Detected ongoing hybrid task execution"
+   - Show current batch and pending stories from the file
+   - Resume story execution based on the state
+   - If unsure of state, suggest: `/plan-cascade:hybrid-resume --auto`
+
+3. If NO but `prd.json` exists:
+   - Run: `python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" both`
+   - This will generate the context file and display current state
+
+This ensures context recovery even after:
+- Context compression (AI summarizes old messages)
+- Context truncation (old messages deleted)
+- New conversation session
+- Claude Code restart
 
 - **Ralph**: Structured PRD format (prd.json), progress tracking patterns, small task philosophy
 - **Planning-with-Files**: 3-file planning pattern (task_plan.md, findings.md, progress.txt), Git Worktree support

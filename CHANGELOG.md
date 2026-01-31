@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.2.1] - 2026-01-31
+
+### Added
+
+- **Context Recovery System** - Auto-generated context files for AI state recovery after session interruption
+  - `.hybrid-execution-context.md` - Hybrid task context (current batch, pending stories, progress)
+  - `.mega-execution-context.md` - Mega-plan context (active worktrees, parallel execution state)
+  - Context files auto-updated via PreToolUse/PostToolUse hooks
+  - New scripts: `hybrid-context-reminder.py`, `mega-context-reminder.py`
+  - Auto-Recovery Protocol in SKILL.md guides AI to read context on session start
+
+- **Enhanced External Skill Detection** - Improved visibility of loaded framework skills
+  - `detect_applicable_skills(verbose=True)` - Print detection results to stdout
+  - `get_skills_summary(phase)` - Generate ASCII table summary of loaded skills
+  - `display_skills_summary(phase)` - Display skills summary during execution
+  - Skills now logged when loaded: `[ExternalSkillLoader] ✓ Loaded: xxx (N lines)`
+
+### Changed
+
+- **Hooks Enhancement** - PreToolUse/PostToolUse hooks now trigger context file updates
+  - `hybrid-ralph` hooks extended to match `Write|Edit|Bash|Task` (was `Write|Edit|Bash`)
+  - `mega-plan` hooks extended similarly
+  - Hooks display context reminder before relevant tool calls
+
+- **Command Updates:**
+  - `approve.md` - Added Step 4.6 for external skill detection and display
+  - `hybrid-resume.md` - Added Step 6.6 for context file update after resume
+  - `hybrid-worktree.md` - Added Step 13.6 for context file generation
+  - `mega-resume.md` - Added Step 7.1 for context file update (split from Step 7)
+  - `mega-plan/approve.md` - Added context file update and skill detection steps
+
+- **Wrong Branch Detection** - Mega-plan hooks now warn if executing on main/master while worktrees exist
+
+### Technical Details
+
+**Context File Content:**
+- Current execution mode and task name
+- Batch progress (current/total)
+- Pending stories in current batch with status
+- Critical execution rules
+- Recovery command reference
+
+**New Files:**
+| File | Description |
+|------|-------------|
+| `.hybrid-execution-context.md` | Hybrid task context for AI recovery |
+| `.mega-execution-context.md` | Mega-plan context for AI recovery |
+| `skills/hybrid-ralph/scripts/hybrid-context-reminder.py` | Context generator script |
+| `skills/mega-plan/scripts/mega-context-reminder.py` | Context generator script |
+
+---
+
 ## [4.2.0] - 2026-01-31
 
 ### Added

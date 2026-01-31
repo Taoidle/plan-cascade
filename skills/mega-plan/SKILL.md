@@ -14,22 +14,30 @@ allowed-tools:
   - AskUserQuestion
 hooks:
   PreToolUse:
-    # Show mega-plan context for relevant tools
-    - matcher: "Write|Edit|Bash"
+    # Show mega-plan context and parallel execution reminder for relevant tools
+    - matcher: "Write|Edit|Bash|Task"
       hooks:
         - type: command
           command: |
             # Show mega-plan context if we're in a mega-plan project
-            if [ -f "mega-plan.json" ]; then
-              echo ""
-              echo "=== Mega Plan Active ==="
+            if [ -f "mega-plan.json" ] || [ -f ".mega-execution-context.md" ]; then
               if command -v python3 &> /dev/null; then
-                python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-status.py" brief 2>/dev/null || true
+                # Update and display context reminder
+                python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" both 2>/dev/null || true
               fi
-              echo ""
+            fi
+            # Detect potential wrong-branch execution
+            if [ -f "mega-plan.json" ] && [ -d ".worktree" ]; then
+              CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
+              if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+                echo ""
+                echo "!!! WARNING: You are on $CURRENT_BRANCH but worktrees exist !!!"
+                echo "!!! Feature work should happen in .worktree/<feature>/ directories !!!"
+                echo ""
+              fi
             fi
   PostToolUse:
-    # Sync status after significant operations
+    # Sync status and update context file after significant operations
     - matcher: "Write|Edit"
       hooks:
         - type: command
@@ -37,6 +45,7 @@ hooks:
             if [ -f "mega-plan.json" ]; then
               if command -v python3 &> /dev/null; then
                 python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-sync.py" 2>/dev/null || true
+                python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update 2>/dev/null || true
               fi
             fi
 ---
@@ -44,6 +53,28 @@ hooks:
 # Mega Plan
 
 A project-level orchestration system that sits above `hybrid-ralph` to manage multiple parallel features as a unified project plan.
+
+## Auto-Recovery Protocol (CRITICAL)
+
+**At the START of any interaction**, perform this check to recover context after compression/truncation:
+
+1. Check if `.mega-execution-context.md` exists in the project root
+2. If YES:
+   - Read the file content using Read tool
+   - Display: "Detected ongoing mega-plan execution"
+   - Show current batch and active worktrees from the file
+   - **CRITICAL**: All feature work MUST happen in worktrees, NOT main branch
+   - If unsure of state, suggest: `/plan-cascade:mega-resume --auto-prd`
+
+3. If NO but `mega-plan.json` exists:
+   - Run: `python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" both`
+   - This will generate the context file and display current state
+
+This ensures context recovery even after:
+- Context compression (AI summarizes old messages)
+- Context truncation (old messages deleted)
+- New conversation session
+- Claude Code restart
 
 ## Architecture
 

@@ -2,7 +2,7 @@
 
 # Plan Cascade - 系统架构与流程设计
 
-**版本**: 4.2.0
+**版本**: 4.2.1
 **最后更新**: 2026-01-31
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
@@ -823,6 +823,8 @@ graph TB
 | `.retry-state.json` | 状态 | 重试历史和失败记录 |
 | `.mega-status.json` | 状态 | Mega-plan 执行状态 |
 | `.agent-detection.json` | 缓存 | 跨平台 Agent 检测结果（1小时TTL） |
+| `.hybrid-execution-context.md` | 上下文 | Hybrid 任务上下文，用于会话中断后 AI 恢复 |
+| `.mega-execution-context.md` | 上下文 | Mega-plan 上下文，用于会话中断后 AI 恢复 |
 | `.agent-outputs/` | 输出 | Agent 日志、Prompt 和结果文件 |
 
 ---

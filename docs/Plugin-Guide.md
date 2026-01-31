@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.2.0
+**Version**: 4.2.1
 **Last Updated**: 2026-01-31
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
@@ -563,6 +563,8 @@ Configure in `prd.json`:
 | `.agent-status.json` | Status | Agent status |
 | `.iteration-state.json` | Status | Iteration state |
 | `.retry-state.json` | Status | Retry record |
+| `.hybrid-execution-context.md` | Context | Hybrid task context for AI recovery |
+| `.mega-execution-context.md` | Context | Mega-plan context for AI recovery |
 | `.agent-outputs/` | Output | Agent logs |
 
 ---
@@ -610,3 +612,28 @@ These commands will:
 - Skip already-completed work
 - Resume from where execution stopped
 - Support both old and new progress marker formats
+
+### Context Recovery After Long Sessions
+
+Plan Cascade automatically generates context files that help recover execution state after:
+- Context compression (AI summarizes old messages)
+- Context truncation (old messages deleted)
+- New conversation session
+- Claude Code restart
+
+**Context files generated:**
+| File | Mode | Description |
+|------|------|-------------|
+| `.hybrid-execution-context.md` | Hybrid | Current batch, pending stories, progress summary |
+| `.mega-execution-context.md` | Mega Plan | Active worktrees, parallel execution state |
+
+These files are automatically updated via hooks during execution. If you notice the AI has lost context:
+
+```bash
+# Universal recovery command (auto-detects mode)
+/plan-cascade:resume
+
+# Or check the context file directly
+cat .hybrid-execution-context.md
+cat .mega-execution-context.md
+```

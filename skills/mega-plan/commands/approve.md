@@ -118,6 +118,34 @@ cp mega-findings.md .worktree/<feature-name>/mega-findings.md
 
 4. **Update feature status to `prd_generated`**
 
+5. **Update execution context file:**
+```bash
+# Generate/update .mega-execution-context.md for context recovery
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update
+```
+
+This file helps AI recover parallel execution context after context compression.
+
+6. **Detect and display external framework skills:**
+
+```bash
+# Detect applicable framework skills for the project
+if command -v python3 &> /dev/null; then
+    python3 -c "
+import sys
+sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/src')
+from plan_cascade.core.external_skill_loader import ExternalSkillLoader
+from pathlib import Path
+
+loader = ExternalSkillLoader(Path('.'))
+skills = loader.detect_applicable_skills(verbose=True)
+if skills:
+    loader.display_skills_summary('implementation')
+    print('These skills will be included in all story execution contexts.')
+" 2>/dev/null || true
+fi
+```
+
 ### Step 7: Generate PRDs
 
 For each feature in Batch 1, use a Task agent to generate the PRD:

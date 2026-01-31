@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**版本**: 4.2.0
+**版本**: 4.2.1
 **最后更新**: 2026-01-31
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
@@ -563,6 +563,8 @@ mega-complete → 清理计划文件
 | `.agent-status.json` | 状态 | Agent 状态 |
 | `.iteration-state.json` | 状态 | 迭代状态 |
 | `.retry-state.json` | 状态 | 重试记录 |
+| `.hybrid-execution-context.md` | 上下文 | Hybrid 任务上下文，用于 AI 恢复 |
+| `.mega-execution-context.md` | 上下文 | Mega-plan 上下文，用于 AI 恢复 |
 | `.agent-outputs/` | 输出 | Agent 日志 |
 
 ---
@@ -592,3 +594,46 @@ fatal: 'feature-xxx' is already checked out
 ```
 
 解决：使用 `/plan-cascade:hybrid-complete` 清理现有 worktree。
+
+### 中断执行恢复
+
+如果 mega-plan 或 hybrid 任务被中断（例如连接断开、Claude Code 崩溃）：
+
+```bash
+# 对于 mega-plan
+/plan-cascade:mega-resume --auto-prd
+
+# 对于 hybrid 任务
+/plan-cascade:hybrid-resume --auto
+```
+
+这些命令会：
+- 自动从现有文件检测当前状态
+- 跳过已完成的工作
+- 从中断处继续执行
+- 支持新旧两种进度标记格式
+
+### 长会话后的上下文恢复
+
+Plan Cascade 会自动生成上下文文件，帮助在以下情况后恢复执行状态：
+- 上下文压缩（AI 总结旧消息）
+- 上下文截断（旧消息被删除）
+- 新的对话会话
+- Claude Code 重启
+
+**生成的上下文文件：**
+| 文件 | 模式 | 说明 |
+|------|------|------|
+| `.hybrid-execution-context.md` | Hybrid | 当前批次、待执行 Story、进度摘要 |
+| `.mega-execution-context.md` | Mega Plan | 活动的 worktree、并行执行状态 |
+
+这些文件通过钩子在执行期间自动更新。如果发现 AI 丢失了上下文：
+
+```bash
+# 通用恢复命令（自动检测模式）
+/plan-cascade:resume
+
+# 或直接查看上下文文件
+cat .hybrid-execution-context.md
+cat .mega-execution-context.md
+```

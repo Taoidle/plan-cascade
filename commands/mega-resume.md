@@ -334,7 +334,19 @@ Once current batch is complete:
 4. If more batches remain AND --auto-prd: Continue to next batch
 5. If all batches done: Show completion status
 
-## Step 7: Update Status File
+## Step 7: Update Context and Status Files
+
+### 7.1: Update Execution Context File
+
+After resuming, update the `.mega-execution-context.md` file for future recovery:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update
+```
+
+This ensures the context file reflects the current resumed state.
+
+### 7.2: Update Status File
 
 Ensure .mega-status.json is updated with detected/corrected state:
 

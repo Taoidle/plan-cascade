@@ -410,6 +410,17 @@ CONTEXT:
 
 Launch as background task with `run_in_background: true`, then use TaskOutput to wait.
 
+## Step 13.6: Update Execution Context File
+
+After PRD and design document are ready, generate the execution context file:
+
+```bash
+# Generate .hybrid-execution-context.md for context recovery
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update
+```
+
+This file helps AI recover execution context after context compression/truncation.
+
 ## Step 14: Validate and Display PRD
 
 After PRD is loaded or generated:
