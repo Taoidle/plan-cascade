@@ -7,6 +7,7 @@ Contains the core orchestration logic including:
 - MegaPlanGenerator: Project-level multi-feature planning
 - FeatureOrchestrator: Feature-level coordination
 - IterationLoop: Automatic iteration with quality gates
+- ParallelExecutor: Parallel story execution with asyncio
 - QualityGate: Code verification (typecheck, test, lint)
 - RetryManager: Failure handling with exponential backoff
 - Mode: Simple/Expert user mode configuration
@@ -28,6 +29,15 @@ from .iteration_loop import (
     IterationMode,
     IterationState,
     IterationStatus,
+)
+from .parallel_executor import (
+    BatchProgress,
+    ParallelExecutionConfig,
+    ParallelExecutor,
+    ParallelProgressDisplay,
+    StoryProgress,
+    StoryStatus,
+    run_parallel_batch,
 )
 from .mega_generator import MegaPlanGenerator
 from .mode import ModeConfig, UserMode
@@ -76,6 +86,14 @@ __all__ = [
     "IterationState",
     "IterationCallbacks",
     "BatchResult",
+    # Parallel execution
+    "ParallelExecutor",
+    "ParallelExecutionConfig",
+    "ParallelProgressDisplay",
+    "StoryProgress",
+    "StoryStatus",
+    "BatchProgress",
+    "run_parallel_batch",
     # Quality gates
     "QualityGate",
     "Gate",

@@ -10,6 +10,20 @@ Commands:
 - plan-cascade run <description>: Execute a development task
 - plan-cascade config: Configuration management
 - plan-cascade status: View execution status
+- plan-cascade deps: Display dependency graph visualization
+- plan-cascade mega: Mega-plan workflow for multi-feature projects
+  - mega plan: Generate multi-feature plan from project description
+  - mega approve: Start execution of approved plan
+  - mega status: View execution progress
+  - mega complete: Finalize and merge all features
+  - mega edit: Interactively edit features and dependencies
+  - mega resume: Resume interrupted execution
+- plan-cascade skills: External skill management
+  - skills list: Show all configured skills
+  - skills detect: Detect applicable skills for current project
+  - skills show <name>: Display skill's SKILL.md content
+  - skills summary: Show execution summary with loaded skills
+  - skills validate: Validate skill configuration and availability
 """
 
 import asyncio
@@ -962,6 +976,736 @@ if HAS_TYPER:
         except ImportError as e:
             output.print_error(f"Detection module not available: {e}")
 
+    @app.command(name="auto-run")
+    def auto_run(
+        mode: str = typer.Option(
+            "until_complete",
+            "--mode", "-m",
+            help="Iteration mode: until_complete, max_iterations, batch_complete"
+        ),
+        max_iterations: int = typer.Option(
+            10,
+            "--max-iterations",
+            help="Maximum iterations (for max_iterations mode)"
+        ),
+        agent: str | None = typer.Option(
+            None,
+            "--agent", "-a",
+            help="Default agent for story execution"
+        ),
+        impl_agent: str | None = typer.Option(
+            None,
+            "--impl-agent",
+            help="Agent for implementation stories"
+        ),
+        retry_agent: str | None = typer.Option(
+            None,
+            "--retry-agent",
+            help="Agent to use for retry attempts"
+        ),
+        dry_run: bool = typer.Option(
+            False,
+            "--dry-run",
+            help="Show execution plan without actually running"
+        ),
+        no_quality_gates: bool = typer.Option(
+            False,
+            "--no-quality-gates",
+            help="Disable quality gates (typecheck, test, lint)"
+        ),
+        no_fallback: bool = typer.Option(
+            False,
+            "--no-fallback",
+            help="Disable agent fallback on failure"
+        ),
+        parallel: bool = typer.Option(
+            False,
+            "--parallel",
+            help="Execute stories within batches in parallel"
+        ),
+        max_concurrency: int | None = typer.Option(
+            None,
+            "--max-concurrency",
+            help="Maximum parallel stories (default: CPU count)"
+        ),
+        project_path: str | None = typer.Option(
+            None,
+            "--project", "-p",
+            help="Project path"
+        ),
+    ):
+        """
+        Auto-iterate through PRD batches until completion.
+
+        Automatically executes all stories in dependency order with quality gates
+        and retry management. Supports three iteration modes:
+
+        - until_complete: Run until all stories are complete (default)
+        - max_iterations: Run up to N iterations
+        - batch_complete: Run a single batch only
+
+        Use --parallel to execute stories within a batch concurrently.
+
+        Examples:
+            plan-cascade auto-run
+            plan-cascade auto-run --mode max_iterations --max-iterations 5
+            plan-cascade auto-run --dry-run
+            plan-cascade auto-run --no-quality-gates
+            plan-cascade auto-run --agent aider --retry-agent claude-code
+            plan-cascade auto-run --parallel --max-concurrency 4
+        """
+        project = Path(project_path) if project_path else Path.cwd()
+
+        # Print header
+        output.print_header(
+            f"Plan Cascade v{__version__} - Auto-Run",
+            f"Project: {project}"
+        )
+
+        # Run the auto-run logic
+        asyncio.run(_run_auto(
+            project=project,
+            mode=mode,
+            max_iterations=max_iterations,
+            agent=agent,
+            impl_agent=impl_agent,
+            retry_agent=retry_agent,
+            dry_run=dry_run,
+            quality_gates_enabled=not no_quality_gates,
+            fallback_enabled=not no_fallback,
+            parallel=parallel,
+            max_concurrency=max_concurrency,
+        ))
+
+    async def _run_auto(
+        project: Path,
+        mode: str,
+        max_iterations: int,
+        agent: str | None,
+        impl_agent: str | None,
+        retry_agent: str | None,
+        dry_run: bool,
+        quality_gates_enabled: bool,
+        fallback_enabled: bool,
+        parallel: bool = False,
+        max_concurrency: int | None = None,
+    ):
+        """Execute auto-run iteration loop."""
+        from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+
+        from ..core.iteration_loop import (
+            IterationCallbacks,
+            IterationConfig,
+            IterationLoop,
+            IterationMode,
+        )
+        from ..core.orchestrator import Orchestrator
+        from ..core.parallel_executor import (
+            ParallelExecutionConfig,
+            ParallelExecutor,
+            ParallelProgressDisplay,
+            StoryProgress,
+        )
+        from ..core.quality_gate import GateConfig, GateType, QualityGate
+        from ..core.retry_manager import RetryConfig, RetryManager
+        from ..state.state_manager import StateManager
+
+        # Parse iteration mode
+        mode_map = {
+            "until_complete": IterationMode.UNTIL_COMPLETE,
+            "max_iterations": IterationMode.MAX_ITERATIONS,
+            "batch_complete": IterationMode.BATCH_COMPLETE,
+        }
+        iteration_mode = mode_map.get(mode.lower())
+        if not iteration_mode:
+            output.print_error(f"Invalid mode: {mode}")
+            output.print("[dim]Valid modes: until_complete, max_iterations, batch_complete[/dim]")
+            sys.exit(1)
+
+        output.print_info(f"Mode: {iteration_mode.value}")
+        if iteration_mode == IterationMode.MAX_ITERATIONS:
+            output.print_info(f"Max Iterations: {max_iterations}")
+
+        # Initialize state manager
+        state_manager = StateManager(project)
+
+        # Load PRD
+        prd = state_manager.read_prd()
+        if not prd:
+            output.print_error("No prd.json found in project")
+            output.print("[dim]Generate a PRD first with: plan-cascade run --expert[/dim]")
+            sys.exit(1)
+
+        stories = prd.get("stories", [])
+        if not stories:
+            output.print_error("PRD has no stories")
+            sys.exit(1)
+
+        output.print_info(f"PRD loaded: {len(stories)} stories")
+        output.print()
+
+        # Build agent selection configuration
+        agent_config = _build_agent_config(
+            default_agent=agent,
+            impl_agent=impl_agent,
+            retry_agent=retry_agent,
+            fallback_enabled=fallback_enabled,
+        )
+
+        # Create orchestrator
+        orchestrator = Orchestrator(
+            project_root=project,
+            state_manager=state_manager,
+        )
+
+        # Analyze dependencies and get batches
+        batches = orchestrator.analyze_dependencies()
+        total_batches = len(batches)
+        total_stories = sum(len(batch) for batch in batches)
+
+        output.print_info(f"Execution plan: {total_batches} batches, {total_stories} stories")
+        output.print()
+
+        # Show execution plan
+        if dry_run:
+            _show_execution_plan(orchestrator, batches, agent_config)
+            output.print()
+            output.print_success("Dry run complete - no changes made")
+            return
+
+        # Create iteration config
+        iteration_config = IterationConfig(
+            mode=iteration_mode,
+            max_iterations=max_iterations,
+            quality_gates_enabled=quality_gates_enabled,
+            auto_retry_enabled=True,
+            poll_interval_seconds=5,
+            batch_timeout_seconds=3600,
+        )
+
+        # Create quality gate
+        quality_gate = None
+        if quality_gates_enabled:
+            quality_gate = QualityGate.create_default(project)
+            output.print_info("Quality gates: enabled (typecheck, test, lint)")
+        else:
+            output.print_info("Quality gates: [yellow]disabled[/yellow]")
+
+        # Create retry manager
+        retry_config = RetryConfig(
+            max_retries=3,
+            exponential_backoff=True,
+            base_delay_seconds=5.0,
+            switch_agent_on_retry=fallback_enabled,
+            retry_agent_chain=_build_retry_chain(agent, retry_agent),
+        )
+        retry_manager = RetryManager(
+            project_root=project,
+            config=retry_config,
+        )
+
+        output.print_info(f"Retry: max 3 attempts with exponential backoff")
+
+        # Show parallel execution info
+        if parallel:
+            import os
+            concurrency = max_concurrency or os.cpu_count() or 4
+            output.print_info(f"Parallel execution: [green]enabled[/green] (max {concurrency} concurrent)")
+        output.print()
+
+        # Use parallel or sequential execution based on flag
+        if parallel:
+            # Parallel execution path
+            await _run_parallel_auto(
+                project=project,
+                batches=batches,
+                orchestrator=orchestrator,
+                state_manager=state_manager,
+                quality_gate=quality_gate,
+                retry_manager=retry_manager,
+                max_concurrency=max_concurrency,
+                iteration_mode=iteration_mode,
+                max_iterations=max_iterations,
+                output=output,
+            )
+        else:
+            # Sequential execution path (existing behavior)
+            # Create iteration loop
+            iteration_loop = IterationLoop(
+                project_root=project,
+                config=iteration_config,
+                orchestrator=orchestrator,
+                quality_gate=quality_gate,
+                retry_manager=retry_manager,
+            )
+
+            # Set up callbacks for progress display
+            callbacks = _create_progress_callbacks(output, agent_config)
+
+            # Show initial status
+            output.print("[bold]Starting Auto-Run...[/bold]")
+            output.print()
+
+            try:
+                # Start iteration loop
+                final_state = iteration_loop.start(
+                    callbacks=callbacks,
+                    dry_run=False,
+                )
+
+                # Show final results
+                output.print()
+                _show_final_results(final_state, output)
+
+            except KeyboardInterrupt:
+                output.print_warning("\nInterrupted by user")
+                iteration_loop.pause("User interruption")
+                output.print_info("State saved - resume with: plan-cascade auto-run")
+
+            except Exception as e:
+                output.print_error(f"Auto-run failed: {e}")
+                sys.exit(1)
+
+    async def _run_parallel_auto(
+        project: Path,
+        batches: list[list[dict]],
+        orchestrator,
+        state_manager,
+        quality_gate,
+        retry_manager,
+        max_concurrency: int | None,
+        iteration_mode,
+        max_iterations: int,
+        output,
+    ):
+        """Execute auto-run with parallel story execution within batches."""
+        from datetime import datetime
+        from rich.panel import Panel
+
+        from ..core.iteration_loop import IterationMode, IterationState, IterationStatus
+        from ..core.parallel_executor import (
+            BatchProgress,
+            ParallelExecutionConfig,
+            ParallelExecutor,
+            ParallelProgressDisplay,
+            StoryProgress,
+            StoryStatus,
+        )
+
+        # Create parallel execution config
+        parallel_config = ParallelExecutionConfig(
+            max_concurrency=max_concurrency,
+            poll_interval_seconds=1.0,
+            timeout_seconds=3600,
+            persist_progress=True,
+            quality_gates_enabled=quality_gate is not None,
+            auto_retry_enabled=retry_manager is not None,
+        )
+
+        # Create parallel executor
+        executor = ParallelExecutor(
+            project_root=project,
+            config=parallel_config,
+            orchestrator=orchestrator,
+            state_manager=state_manager,
+            quality_gate=quality_gate,
+            retry_manager=retry_manager,
+        )
+
+        # Track overall state
+        total_stories = sum(len(batch) for batch in batches)
+        completed_stories = 0
+        failed_stories = 0
+        all_batch_results = []
+
+        output.print("[bold]Starting Parallel Auto-Run...[/bold]")
+        output.print()
+
+        start_time = datetime.now()
+        iteration = 0
+
+        try:
+            for batch_num, batch in enumerate(batches, 1):
+                iteration += 1
+
+                # Check iteration limit
+                if iteration_mode == IterationMode.MAX_ITERATIONS:
+                    if iteration > max_iterations:
+                        output.print_warning(f"Max iterations ({max_iterations}) reached")
+                        break
+
+                # Skip empty batches
+                if not batch:
+                    continue
+
+                output.print()
+                output.print(f"[bold cyan]Batch {batch_num}/{len(batches)}[/bold cyan]: {len(batch)} stories")
+                output.print("-" * 50)
+
+                # Create progress display for this batch
+                display = ParallelProgressDisplay(console)
+
+                def on_story_progress(progress: StoryProgress):
+                    """Handle individual story progress updates."""
+                    status_icons = {
+                        StoryStatus.PENDING: "[dim]o[/dim]",
+                        StoryStatus.RUNNING: "[yellow]>[/yellow]",
+                        StoryStatus.COMPLETE: "[green]v[/green]",
+                        StoryStatus.FAILED: "[red]x[/red]",
+                        StoryStatus.RETRYING: "[yellow]![/yellow]",
+                    }
+                    icon = status_icons.get(progress.status, "?")
+
+                    if progress.status == StoryStatus.RUNNING:
+                        output.print(f"  {icon} {progress.story_id} started...")
+                    elif progress.status == StoryStatus.COMPLETE:
+                        output.print(f"  {icon} {progress.story_id} completed")
+                    elif progress.status == StoryStatus.FAILED:
+                        error_msg = f": {progress.error}" if progress.error else ""
+                        output.print(f"  {icon} {progress.story_id} failed{error_msg}")
+                    elif progress.status == StoryStatus.RETRYING:
+                        output.print(f"  {icon} {progress.story_id} retrying (attempt {progress.retry_count + 1})")
+
+                def on_batch_progress(progress: BatchProgress):
+                    """Handle batch-level progress updates."""
+                    display.update(progress)
+
+                # Execute batch in parallel with live display
+                with display:
+                    result = await executor.execute_batch(
+                        stories=batch,
+                        batch_num=batch_num,
+                        on_progress=on_story_progress,
+                        on_batch_progress=on_batch_progress,
+                    )
+
+                all_batch_results.append(result)
+                completed_stories += result.stories_completed
+                failed_stories += result.stories_failed
+
+                # Show batch summary
+                output.print()
+                if result.success:
+                    output.print_success(
+                        f"Batch {batch_num} complete: {result.stories_completed}/{result.stories_launched} stories"
+                    )
+                else:
+                    output.print_error(
+                        f"Batch {batch_num} failed: {result.stories_completed} complete, "
+                        f"{result.stories_failed} failed"
+                    )
+
+                if result.stories_retried > 0:
+                    output.print_info(f"  Retried: {result.stories_retried} stories")
+                if result.quality_gate_failures > 0:
+                    output.print_warning(f"  Quality gate failures: {result.quality_gate_failures}")
+
+                output.print(f"  [dim]Duration: {result.duration_seconds:.1f}s[/dim]")
+
+                # Check if we should stop on batch mode
+                if iteration_mode == IterationMode.BATCH_COMPLETE:
+                    break
+
+                # Check if all stories are complete
+                if completed_stories >= total_stories:
+                    break
+
+            # Calculate final metrics
+            total_duration = (datetime.now() - start_time).total_seconds()
+
+            # Build final state for display
+            final_status = IterationStatus.COMPLETED if failed_stories == 0 else IterationStatus.FAILED
+            if iteration_mode == IterationMode.MAX_ITERATIONS and iteration > max_iterations:
+                final_status = IterationStatus.STOPPED
+
+            final_state = IterationState(
+                status=final_status,
+                started_at=start_time.isoformat(),
+                completed_at=datetime.now().isoformat(),
+                current_batch=len(all_batch_results),
+                total_batches=len(batches),
+                current_iteration=iteration,
+                total_stories=total_stories,
+                completed_stories=completed_stories,
+                failed_stories=failed_stories,
+            )
+
+            # Show final results
+            output.print()
+            _show_parallel_results(final_state, all_batch_results, total_duration, output)
+
+        except KeyboardInterrupt:
+            output.print_warning("\nInterrupted by user")
+            output.print_info("Progress saved - resume with: plan-cascade auto-run --parallel")
+
+        except Exception as e:
+            output.print_error(f"Parallel auto-run failed: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+    def _show_parallel_results(state, batch_results: list, total_duration: float, output):
+        """Display final parallel execution results."""
+        from rich.panel import Panel
+        from ..core.iteration_loop import IterationStatus
+
+        status_color = {
+            IterationStatus.COMPLETED: "green",
+            IterationStatus.FAILED: "red",
+            IterationStatus.STOPPED: "yellow",
+            IterationStatus.PAUSED: "cyan",
+        }.get(state.status, "white")
+
+        # Build result summary
+        lines = [
+            f"[bold]Status:[/bold] [{status_color}]{state.status.value}[/{status_color}]",
+            f"[bold]Progress:[/bold] {state.progress_percent:.1f}%",
+            "",
+            f"[bold]Stories:[/bold]",
+            f"  Completed: [green]{state.completed_stories}[/green]",
+            f"  Failed: [red]{state.failed_stories}[/red]",
+            f"  Total: {state.total_stories}",
+            "",
+            f"[bold]Batches:[/bold] {state.current_batch}/{state.total_batches}",
+        ]
+
+        # Add batch breakdown
+        if batch_results:
+            lines.append("")
+            lines.append("[bold]Batch Results:[/bold]")
+            for result in batch_results:
+                status = "[green]v[/green]" if result.success else "[red]x[/red]"
+                lines.append(
+                    f"  {status} Batch {result.batch_num}: "
+                    f"{result.stories_completed}/{result.stories_launched} stories "
+                    f"({result.duration_seconds:.1f}s)"
+                )
+
+        lines.append("")
+        lines.append(f"[bold]Total Duration:[/bold] {total_duration:.1f}s")
+
+        if state.error:
+            lines.extend([
+                "",
+                f"[bold red]Error:[/bold red] {state.error}",
+            ])
+
+        console.print(Panel(
+            "\n".join(lines),
+            title="Parallel Auto-Run Results",
+            border_style=status_color,
+        ))
+
+        # Show next steps
+        if state.status == IterationStatus.COMPLETED:
+            output.print()
+            output.print_success("All stories completed successfully!")
+        elif state.status == IterationStatus.FAILED:
+            output.print()
+            output.print_error("Execution completed with failures")
+            output.print("[dim]Retry with: plan-cascade auto-run --parallel[/dim]")
+
+    def _build_agent_config(
+        default_agent: str | None,
+        impl_agent: str | None,
+        retry_agent: str | None,
+        fallback_enabled: bool,
+    ) -> dict:
+        """Build agent selection configuration."""
+        return {
+            "default": default_agent or "claude-code",
+            "impl": impl_agent,
+            "retry": retry_agent,
+            "fallback_enabled": fallback_enabled,
+            "priority_chain": ["command_flag", "story_agent", "type_override", "default"],
+        }
+
+    def _build_retry_chain(
+        default_agent: str | None,
+        retry_agent: str | None,
+    ) -> list[str]:
+        """Build agent retry chain."""
+        chain = []
+        if default_agent:
+            chain.append(default_agent)
+        else:
+            chain.append("claude-code")
+
+        if retry_agent and retry_agent not in chain:
+            chain.append(retry_agent)
+
+        # Add fallback agents
+        for fallback in ["aider", "codex"]:
+            if fallback not in chain:
+                chain.append(fallback)
+
+        return chain
+
+    def _show_execution_plan(
+        orchestrator,
+        batches: list[list[dict]],
+        agent_config: dict,
+    ):
+        """Display the execution plan in dry-run mode."""
+        from rich.table import Table
+
+        output.print("[bold cyan]Execution Plan (Dry Run)[/bold cyan]")
+        output.print()
+
+        # Show agent configuration
+        output.print("[bold]Agent Configuration:[/bold]")
+        output.print(f"  Default Agent: {agent_config['default']}")
+        if agent_config['impl']:
+            output.print(f"  Implementation Agent: {agent_config['impl']}")
+        if agent_config['retry']:
+            output.print(f"  Retry Agent: {agent_config['retry']}")
+        output.print(f"  Fallback Enabled: {'Yes' if agent_config['fallback_enabled'] else 'No'}")
+        output.print()
+
+        # Show batches
+        for batch_num, batch in enumerate(batches, 1):
+            output.print(f"[bold]Batch {batch_num}:[/bold] {len(batch)} stories")
+
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("Story", style="cyan", width=15)
+            table.add_column("Title", width=35)
+            table.add_column("Priority", width=10)
+            table.add_column("Agent", width=15)
+            table.add_column("Dependencies", style="dim", width=20)
+
+            for story in batch:
+                story_id = story.get("id", "unknown")
+                title = story.get("title", "")[:35]
+                priority = story.get("priority", "medium")
+
+                # Determine agent based on priority chain
+                story_agent = story.get("agent")
+                if story_agent:
+                    agent = story_agent
+                elif agent_config['impl'] and "implement" in title.lower():
+                    agent = agent_config['impl']
+                else:
+                    agent = agent_config['default']
+
+                deps = story.get("dependencies", [])
+                deps_str = ", ".join(deps) if deps else "-"
+
+                table.add_row(story_id, title, priority, agent, deps_str[:20])
+
+            console.print(table)
+            output.print()
+
+        # Summary
+        total_stories = sum(len(b) for b in batches)
+        output.print(f"[bold]Summary:[/bold]")
+        output.print(f"  Total Batches: {len(batches)}")
+        output.print(f"  Total Stories: {total_stories}")
+
+    def _create_progress_callbacks(output, agent_config: dict):
+        """Create callbacks for progress display during iteration."""
+        from ..core.iteration_loop import IterationCallbacks
+
+        def on_batch_start(batch_num: int, stories: list[dict]):
+            output.print()
+            output.print(f"[bold cyan]Batch {batch_num}[/bold cyan]: {len(stories)} stories")
+            output.print("-" * 40)
+
+        def on_batch_complete(result):
+            status = "[green]Success[/green]" if result.success else "[red]Failed[/red]"
+            output.print(f"Batch {result.batch_num} complete: {status}")
+            output.print(f"  Completed: {result.stories_completed}, Failed: {result.stories_failed}")
+            if result.quality_gate_failures > 0:
+                output.print(f"  Quality Gate Failures: {result.quality_gate_failures}")
+            if result.stories_retried > 0:
+                output.print(f"  Retried: {result.stories_retried}")
+            output.print(f"  Duration: {result.duration_seconds:.1f}s")
+
+        def on_story_complete(story_id: str, success: bool):
+            if success:
+                output.print(f"  [green]v[/green] {story_id}")
+            else:
+                output.print(f"  [red]x[/red] {story_id}")
+
+        def on_story_retry(story_id: str, attempt: int):
+            output.print(f"  [yellow]![/yellow] {story_id} - retry attempt {attempt}")
+
+        def on_quality_gate_run(story_id: str, results: dict):
+            passed = all(r.get("passed", False) for r in results.values() if isinstance(r, dict))
+            status = "[green]passed[/green]" if passed else "[yellow]failed[/yellow]"
+            output.print(f"    Quality gates: {status}")
+
+        def on_iteration_complete(state):
+            output.print()
+            output.print(f"[bold]Iteration {state.current_iteration} complete[/bold]")
+            output.print(f"  Progress: {state.completed_stories}/{state.total_stories} stories")
+
+        def on_error(context: str, error: Exception):
+            output.print_error(f"Error in {context}: {error}")
+
+        return IterationCallbacks(
+            on_batch_start=on_batch_start,
+            on_batch_complete=on_batch_complete,
+            on_story_complete=on_story_complete,
+            on_story_retry=on_story_retry,
+            on_quality_gate_run=on_quality_gate_run,
+            on_iteration_complete=on_iteration_complete,
+            on_error=on_error,
+        )
+
+    def _show_final_results(state, output):
+        """Display final iteration results."""
+        from rich.panel import Panel
+
+        status_color = {
+            "completed": "green",
+            "failed": "red",
+            "stopped": "yellow",
+            "paused": "cyan",
+        }.get(state.status.value, "white")
+
+        # Build result summary
+        lines = [
+            f"[bold]Status:[/bold] [{status_color}]{state.status.value}[/{status_color}]",
+            f"[bold]Progress:[/bold] {state.progress_percent:.1f}%",
+            "",
+            f"[bold]Stories:[/bold]",
+            f"  Completed: [green]{state.completed_stories}[/green]",
+            f"  Failed: [red]{state.failed_stories}[/red]",
+            f"  Total: {state.total_stories}",
+            "",
+            f"[bold]Batches:[/bold] {len(state.batch_results)}/{state.total_batches}",
+            f"[bold]Iterations:[/bold] {state.current_iteration}",
+        ]
+
+        if state.error:
+            lines.extend([
+                "",
+                f"[bold red]Error:[/bold red] {state.error}",
+            ])
+
+        # Calculate total duration
+        if state.batch_results:
+            total_duration = sum(b.duration_seconds for b in state.batch_results)
+            lines.append(f"[bold]Total Duration:[/bold] {total_duration:.1f}s")
+
+        console.print(Panel(
+            "\n".join(lines),
+            title="Auto-Run Results",
+            border_style=status_color,
+        ))
+
+        # Show next steps
+        if state.status.value == "completed":
+            output.print()
+            output.print_success("All stories completed successfully!")
+        elif state.status.value == "paused":
+            output.print()
+            output.print_info("Execution paused - resume with: plan-cascade auto-run")
+        elif state.status.value == "failed":
+            output.print()
+            output.print_error("Execution failed - check logs for details")
+            output.print("[dim]Retry with: plan-cascade auto-run[/dim]")
+
     @app.command()
     def version():
         """Show version information."""
@@ -1424,6 +2168,487 @@ if HAS_TYPER:
 [dim]Conversation history is automatically used as context for each request.[/dim]
 """
         console.print(hints)
+
+    # ==================== Resume Command ====================
+
+    @app.command()
+    def resume(
+        auto: bool = typer.Option(
+            False,
+            "--auto", "-a",
+            help="Non-interactive resume (continue without confirmation prompts)"
+        ),
+        project_path: str | None = typer.Option(
+            None,
+            "--project", "-p",
+            help="Project path (defaults to current directory)"
+        ),
+        verbose: bool = typer.Option(
+            False,
+            "--verbose", "-v",
+            help="Show detailed state information"
+        ),
+        json_output: bool = typer.Option(
+            False,
+            "--json", "-j",
+            help="Output recovery plan in JSON format"
+        ),
+    ):
+        """
+        Auto-detect and resume any interrupted Plan Cascade task.
+
+        Detects the context type (mega-plan, hybrid-worktree, or hybrid-auto)
+        from project files and provides a recovery plan. Can automatically
+        continue execution with the --auto flag.
+
+        Context Detection:
+        - mega-plan: Checks for mega-plan.json
+        - hybrid-worktree: Checks for .worktree/ directories or .planning-config.json
+        - hybrid-auto: Checks for prd.json in current directory
+
+        State Analysis:
+        - Analyzes PRD status (missing, corrupted, empty, valid)
+        - Scans progress.txt for completion markers
+        - Checks story statuses from PRD
+
+        Examples:
+            plan-cascade resume                    # Show recovery plan
+            plan-cascade resume --auto             # Auto-resume without prompts
+            plan-cascade resume --verbose          # Show detailed state
+            plan-cascade resume --json             # Output as JSON
+        """
+        import json as json_module
+
+        project = Path(project_path) if project_path else Path.cwd()
+
+        # Import context recovery
+        try:
+            from ..state.context_recovery import (
+                ContextRecoveryManager,
+                ContextType,
+                TaskState,
+            )
+        except ImportError as e:
+            output.print_error(f"Context recovery module not available: {e}")
+            raise typer.Exit(1)
+
+        # Create recovery manager and detect context
+        recovery_manager = ContextRecoveryManager(project)
+        state = recovery_manager.detect_context()
+        plan = recovery_manager.generate_recovery_plan(state)
+
+        # Handle JSON output
+        if json_output:
+            console.print_json(json_module.dumps(plan.to_dict(), indent=2))
+            return
+
+        # Print header
+        output.print_header(
+            f"Plan Cascade v{__version__} - Context Recovery",
+            f"Project: {project}"
+        )
+
+        # Display detected context
+        _display_recovery_state(state, plan, verbose, output, console)
+
+        # If no context found, exit
+        if state.context_type == ContextType.UNKNOWN:
+            output.print_warning("No task context found in this directory.")
+            output.print()
+            output.print_info("To start a new task:")
+            output.print("  [cyan]plan-cascade run '<description>'[/cyan]")
+            output.print("  [cyan]plan-cascade mega plan '<description>'[/cyan]")
+            raise typer.Exit(0)
+
+        # Show recovery actions
+        output.print()
+        output.print("[bold]Recovery Actions:[/bold]")
+        for action in plan.actions:
+            output.print(f"  {action.priority}. {action.description}")
+            output.print(f"     [dim]{action.command}[/dim]")
+
+        # Show warnings
+        if plan.warnings:
+            output.print()
+            output.print("[bold yellow]Warnings:[/bold yellow]")
+            for warning in plan.warnings:
+                output.print_warning(warning)
+
+        # Auto-resume or prompt
+        if auto and plan.can_auto_resume:
+            output.print()
+            output.print_info("Auto-resume mode enabled. Continuing execution...")
+
+            # Update context file
+            recovery_manager.update_context_file(state)
+
+            # Execute the primary recovery action
+            _execute_recovery_action(state, plan, project, output)
+
+        elif not auto:
+            output.print()
+
+            if plan.can_auto_resume:
+                from rich.prompt import Confirm
+                if Confirm.ask("Continue with recovery?", default=True):
+                    # Update context file
+                    recovery_manager.update_context_file(state)
+
+                    # Execute recovery
+                    _execute_recovery_action(state, plan, project, output)
+            else:
+                output.print_info("Manual intervention required. See actions above.")
+
+        else:
+            output.print()
+            output.print_warning("Cannot auto-resume. Manual intervention required.")
+            output.print_info("See recovery actions above for next steps.")
+
+    def _display_recovery_state(state, plan, verbose: bool, output, console):
+        """Display the detected recovery state."""
+        from rich.panel import Panel
+        from rich.table import Table
+
+        from ..state.context_recovery import ContextType, PrdStatus, TaskState
+
+        # Context type display
+        context_colors = {
+            ContextType.MEGA_PLAN: "red",
+            ContextType.HYBRID_WORKTREE: "yellow",
+            ContextType.HYBRID_AUTO: "green",
+            ContextType.UNKNOWN: "dim",
+        }
+        context_color = context_colors.get(state.context_type, "white")
+
+        # Task state display
+        state_icons = {
+            TaskState.NEEDS_PRD: "[dim]o[/dim]",
+            TaskState.NEEDS_APPROVAL: "[yellow]~[/yellow]",
+            TaskState.EXECUTING: "[cyan]>[/cyan]",
+            TaskState.COMPLETE: "[green]v[/green]",
+            TaskState.FAILED: "[red]x[/red]",
+        }
+        state_icon = state_icons.get(state.task_state, "?")
+
+        # PRD status display
+        prd_status_display = {
+            PrdStatus.MISSING: "[dim]Missing[/dim]",
+            PrdStatus.CORRUPTED: "[red]Corrupted[/red]",
+            PrdStatus.EMPTY: "[yellow]Empty[/yellow]",
+            PrdStatus.VALID: "[green]Valid[/green]",
+        }
+
+        # Build status panel content
+        lines = [
+            f"[bold]Context Type:[/bold] [{context_color}]{state.context_type.value}[/{context_color}]",
+            f"[bold]Task State:[/bold] {state_icon} {state.task_state.value}",
+            f"[bold]PRD Status:[/bold] {prd_status_display.get(state.prd_status, 'Unknown')}",
+        ]
+
+        if state.task_name:
+            lines.append(f"[bold]Task:[/bold] {state.task_name}")
+
+        if state.target_branch:
+            lines.append(f"[bold]Target Branch:[/bold] {state.target_branch}")
+
+        if state.worktree_path:
+            lines.append(f"[bold]Worktree:[/bold] {state.worktree_path}")
+
+        if state.last_activity:
+            lines.append(f"[bold]Last Activity:[/bold] {state.last_activity}")
+
+        # Progress section
+        if state.total_stories > 0:
+            lines.append("")
+            lines.append(f"[bold]Progress:[/bold] {state.completion_percentage:.1f}%")
+            lines.append(f"  Complete: [green]{len(state.completed_stories)}[/green]")
+            lines.append(f"  In Progress: [cyan]{len(state.in_progress_stories)}[/cyan]")
+            lines.append(f"  Failed: [red]{len(state.failed_stories)}[/red]")
+            lines.append(f"  Pending: [dim]{len(state.pending_stories)}[/dim]")
+            lines.append(f"  Total: {state.total_stories}")
+
+        # Mega-plan specific progress
+        if state.mega_plan_progress:
+            lines.append("")
+            lines.append("[bold]Feature Progress:[/bold]")
+            lines.append(f"  Complete: [green]{state.mega_plan_progress.get('complete', 0)}[/green]")
+            lines.append(f"  In Progress: [cyan]{state.mega_plan_progress.get('in_progress', 0)}[/cyan]")
+            lines.append(f"  Failed: [red]{state.mega_plan_progress.get('failed', 0)}[/red]")
+            lines.append(f"  Pending: [dim]{state.mega_plan_progress.get('pending', 0)}[/dim]")
+
+        console.print(Panel(
+            "\n".join(lines),
+            title="Detected Context",
+            border_style=context_color,
+        ))
+
+        # Verbose: show story details
+        if verbose and (state.completed_stories or state.failed_stories or state.in_progress_stories):
+            output.print()
+
+            if state.completed_stories:
+                output.print("[bold green]Completed:[/bold green]")
+                for sid in state.completed_stories[:10]:
+                    output.print(f"  [green]v[/green] {sid}")
+                if len(state.completed_stories) > 10:
+                    output.print(f"  [dim]... and {len(state.completed_stories) - 10} more[/dim]")
+
+            if state.in_progress_stories:
+                output.print("[bold cyan]In Progress:[/bold cyan]")
+                for sid in state.in_progress_stories:
+                    output.print(f"  [cyan]>[/cyan] {sid}")
+
+            if state.failed_stories:
+                output.print("[bold red]Failed:[/bold red]")
+                for sid in state.failed_stories:
+                    output.print(f"  [red]x[/red] {sid}")
+
+            if state.pending_stories and len(state.pending_stories) <= 10:
+                output.print("[bold dim]Pending:[/bold dim]")
+                for sid in state.pending_stories:
+                    output.print(f"  [dim]o[/dim] {sid}")
+            elif state.pending_stories:
+                output.print(f"[bold dim]Pending:[/bold dim] {len(state.pending_stories)} stories")
+
+    def _execute_recovery_action(state, plan, project: Path, output):
+        """Execute the primary recovery action based on context type."""
+        from ..state.context_recovery import ContextType, TaskState
+
+        primary_action = plan.actions[0] if plan.actions else None
+        if not primary_action:
+            output.print_warning("No recovery action available")
+            return
+
+        output.print()
+        output.print_info(f"Executing: {primary_action.description}")
+
+        # Route to appropriate handler based on context type
+        if state.context_type == ContextType.MEGA_PLAN:
+            _resume_mega_plan(state, project, output)
+
+        elif state.context_type == ContextType.HYBRID_WORKTREE:
+            if state.worktree_path:
+                _resume_hybrid_worktree(state, state.worktree_path, output)
+            else:
+                output.print_warning("Multiple worktrees found. Please change to a worktree directory.")
+                for wt in state.mega_plan_features[:3]:
+                    output.print(f"  [cyan]cd {wt['path']}[/cyan]")
+
+        elif state.context_type == ContextType.HYBRID_AUTO:
+            _resume_hybrid_auto(state, project, output)
+
+    def _resume_mega_plan(state, project: Path, output):
+        """Resume mega-plan execution."""
+        from ..state.context_recovery import TaskState
+
+        if state.task_state == TaskState.COMPLETE:
+            output.print_info("All features complete. Running completion...")
+            # Import and run mega complete logic
+            try:
+                from ..state.mega_state import MegaStateManager
+                from ..core.mega_generator import MegaPlanGenerator
+
+                generator = MegaPlanGenerator(project)
+                state_manager = MegaStateManager(project)
+
+                mega_plan = state_manager.read_mega_plan()
+                if mega_plan:
+                    progress = generator.calculate_progress(mega_plan)
+                    output.print_success(f"Mega-plan complete: {progress['completed']}/{progress['total']} features")
+                    output.print()
+                    output.print_info("Run [cyan]plan-cascade mega complete[/cyan] to finalize and merge")
+            except ImportError as e:
+                output.print_error(f"Could not load mega-plan modules: {e}")
+
+        elif state.task_state == TaskState.NEEDS_APPROVAL:
+            output.print_info("Mega-plan needs approval")
+            output.print()
+            output.print_info("Run [cyan]plan-cascade mega approve[/cyan] to start execution")
+
+        elif state.task_state == TaskState.EXECUTING:
+            output.print_info("Resuming mega-plan execution...")
+            # Run the mega resume command programmatically
+            try:
+                from ..core.feature_orchestrator import FeatureOrchestrator
+                from ..state.mega_state import MegaStateManager
+                from ..core.mega_generator import MegaPlanGenerator
+
+                state_manager = MegaStateManager(project)
+                generator = MegaPlanGenerator(project)
+
+                # Sync status from worktrees
+                worktree_status = state_manager.sync_status_from_worktrees()
+
+                mega_plan = state_manager.read_mega_plan()
+                if mega_plan:
+                    # Update feature statuses
+                    updated = False
+                    for feature in mega_plan.get("features", []):
+                        name = feature["name"]
+                        if name in worktree_status:
+                            wt = worktree_status[name]
+                            if wt.get("stories_complete") and feature["status"] != "complete":
+                                feature["status"] = "complete"
+                                updated = True
+                                output.print_success(f"Marked {feature['id']} as complete")
+
+                    if updated:
+                        state_manager.write_mega_plan(mega_plan)
+
+                    progress = generator.calculate_progress(mega_plan)
+                    output.print()
+                    output.print_success(f"Progress: {progress['percentage']:.0f}% ({progress['completed']}/{progress['total']})")
+
+                    # Find features ready to start
+                    pending = generator.get_features_by_status(mega_plan, "pending")
+                    in_progress = [f for f in mega_plan.get("features", [])
+                                   if f.get("status") in ["in_progress", "approved", "prd_generated"]]
+
+                    if in_progress:
+                        output.print_info(f"{len(in_progress)} feature(s) in progress")
+                    if pending:
+                        output.print_info(f"{len(pending)} feature(s) pending")
+
+                    output.print()
+                    output.print_info("Monitor with: [cyan]plan-cascade mega status[/cyan]")
+
+            except ImportError as e:
+                output.print_error(f"Could not load mega-plan modules: {e}")
+                output.print_info("Run manually: [cyan]plan-cascade mega resume[/cyan]")
+
+    def _resume_hybrid_worktree(state, worktree_path: Path, output):
+        """Resume hybrid-worktree execution."""
+        from ..state.context_recovery import TaskState
+
+        if state.task_state == TaskState.COMPLETE:
+            output.print_success("All stories complete!")
+            output.print()
+            output.print_info("Run [cyan]plan-cascade worktree complete[/cyan] to merge and cleanup")
+
+        elif state.task_state == TaskState.NEEDS_PRD:
+            output.print_info("PRD needs to be generated")
+            output.print()
+            output.print_info(f"Run [cyan]plan-cascade run '<description>' --project {worktree_path}[/cyan]")
+
+        elif state.task_state == TaskState.NEEDS_APPROVAL:
+            output.print_info("PRD ready for execution")
+            output.print()
+            output.print_info(f"Run [cyan]plan-cascade auto-run --project {worktree_path}[/cyan]")
+
+        elif state.task_state == TaskState.EXECUTING:
+            output.print_info(f"Resuming execution in worktree: {worktree_path}")
+            output.print(f"  Progress: {state.completion_percentage:.0f}%")
+            output.print()
+
+            # Display what's remaining
+            if state.in_progress_stories:
+                output.print(f"  In progress: {', '.join(state.in_progress_stories[:3])}")
+            if state.pending_stories:
+                remaining = len(state.pending_stories)
+                output.print(f"  Pending: {remaining} story(ies)")
+
+            output.print()
+            output.print_info(f"Run [cyan]plan-cascade auto-run --project {worktree_path}[/cyan]")
+
+    def _resume_hybrid_auto(state, project: Path, output):
+        """Resume hybrid-auto execution."""
+        from ..state.context_recovery import TaskState
+
+        if state.task_state == TaskState.COMPLETE:
+            output.print_success("All stories complete!")
+            output.print()
+            output.print_info("View summary with: [cyan]plan-cascade status[/cyan]")
+
+        elif state.task_state == TaskState.NEEDS_PRD:
+            output.print_info("PRD needs to be generated")
+            output.print()
+            output.print_info("Run [cyan]plan-cascade run '<description>'[/cyan]")
+
+        elif state.task_state == TaskState.NEEDS_APPROVAL:
+            output.print_info("PRD ready for execution")
+            output.print()
+            output.print_info("Run [cyan]plan-cascade auto-run[/cyan]")
+
+        elif state.task_state == TaskState.EXECUTING:
+            output.print_info("Resuming execution...")
+            output.print(f"  Progress: {state.completion_percentage:.0f}%")
+            output.print()
+
+            # Display what's remaining
+            if state.in_progress_stories:
+                output.print(f"  In progress: {', '.join(state.in_progress_stories[:3])}")
+            if state.pending_stories:
+                remaining = len(state.pending_stories)
+                output.print(f"  Pending: {remaining} story(ies)")
+            if state.failed_stories:
+                output.print(f"  [red]Failed: {len(state.failed_stories)}[/red]")
+
+            output.print()
+            output.print_info("Run [cyan]plan-cascade auto-run[/cyan] to continue")
+
+    # ==================== Register Subcommands ====================
+
+    # Import and register mega-plan commands
+    try:
+        from .mega import mega_app
+
+        if mega_app:
+            app.add_typer(
+                mega_app,
+                name="mega",
+                help="Mega-plan workflow for multi-feature projects",
+            )
+    except ImportError:
+        pass  # mega module not available
+
+    # Import and register worktree commands
+    try:
+        from .worktree import worktree_app
+
+        if worktree_app:
+            app.add_typer(
+                worktree_app,
+                name="worktree",
+                help="Git worktree management for parallel task development",
+            )
+    except ImportError:
+        pass  # worktree module not available
+
+    # Import and register design document commands
+    try:
+        from .design import design_app
+
+        if design_app:
+            app.add_typer(
+                design_app,
+                name="design",
+                help="Design document management",
+            )
+    except ImportError:
+        pass  # design module not available
+
+    # Import and register skills commands
+    try:
+        from .skills import skills_app
+
+        if skills_app:
+            app.add_typer(
+                skills_app,
+                name="skills",
+                help="External skill management",
+            )
+    except ImportError:
+        pass  # skills module not available
+
+    # Import and register dependencies command
+    try:
+        from .dependencies import dependencies_command
+
+        app.command(name="deps")(dependencies_command)
+        # Also register as 'dependencies' alias for discoverability
+        app.command(name="dependencies", hidden=True)(dependencies_command)
+    except ImportError:
+        pass  # dependencies module not available
 
 else:
     # Fallback when typer is not installed
