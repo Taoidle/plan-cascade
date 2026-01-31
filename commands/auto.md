@@ -214,7 +214,9 @@ Decision:
 Executing...
 ```
 
-## Step 5: Route to Appropriate Strategy
+## Step 5: Route to Appropriate Strategy (MANDATORY SKILL TOOL USAGE)
+
+**CRITICAL: For any strategy other than DIRECT, you MUST use the Skill tool to invoke the corresponding command. DO NOT attempt to execute the strategy logic yourself - let the specialized skill handle it.**
 
 Execute the selected strategy:
 
@@ -230,23 +232,27 @@ Proceeding to implement directly...
 ```
 
 Then proceed to analyze the codebase and implement the requested changes directly.
+(This is the ONLY strategy where you execute the task yourself.)
 
 ### If STRATEGY is "HYBRID_AUTO":
 
-Route to hybrid-auto command:
+**MANDATORY: Use the Skill tool to invoke the hybrid-auto command.**
 
+Display:
 ```
 Routing to /plan-cascade:hybrid-auto...
 ```
 
-Then invoke:
+Then you MUST call the Skill tool:
 ```
-/plan-cascade:hybrid-auto "{TASK_DESC}"
+Skill(skill="plan-cascade:hybrid-auto", args="{TASK_DESC}")
 ```
+
+**DO NOT proceed to read files or implement the task yourself. The hybrid-auto skill will generate the PRD and handle execution.**
 
 ### If STRATEGY is "HYBRID_WORKTREE":
 
-Generate a task name from the description and route:
+Generate a task name from the description:
 
 ```bash
 # Generate task name from description (first 3 significant words, lowercase, hyphenated)
@@ -256,29 +262,46 @@ if [ -z "$TASK_NAME" ]; then
 fi
 ```
 
+Display:
 ```
 Routing to /plan-cascade:hybrid-worktree...
 Task name: {TASK_NAME}
 Target branch: {DEFAULT_BRANCH}
 ```
 
-Then invoke:
+**MANDATORY: Use the Skill tool to invoke the hybrid-worktree command.**
+
 ```
-/plan-cascade:hybrid-worktree {TASK_NAME} {DEFAULT_BRANCH} "{TASK_DESC}"
+Skill(skill="plan-cascade:hybrid-worktree", args="{TASK_NAME} {DEFAULT_BRANCH} {TASK_DESC}")
 ```
+
+**DO NOT proceed to create worktrees or implement the task yourself. The hybrid-worktree skill will handle it.**
 
 ### If STRATEGY is "MEGA_PLAN":
 
-Route to mega-plan command:
-
+Display:
 ```
 Routing to /plan-cascade:mega-plan...
 ```
 
-Then invoke:
+**MANDATORY: Use the Skill tool to invoke the mega-plan command.**
+
 ```
-/plan-cascade:mega-plan "{TASK_DESC}"
+Skill(skill="plan-cascade:mega-plan", args="{TASK_DESC}")
 ```
+
+**DO NOT proceed to create mega-plan.json or implement the task yourself. The mega-plan skill will handle it.**
+
+---
+
+**IMPORTANT REMINDER**: After determining the strategy:
+- For DIRECT: Execute the task yourself
+- For HYBRID_AUTO, HYBRID_WORKTREE, MEGA_PLAN: You MUST use the Skill tool. This ensures:
+  1. The correct PRD/plan files are generated
+  2. The proper review/approval workflow is followed
+  3. Parallel execution is handled correctly
+
+**If you find yourself reading code files or implementing after selecting HYBRID_AUTO/WORKTREE/MEGA_PLAN, STOP and use the Skill tool instead.**
 
 ## Strategy Summary Table
 

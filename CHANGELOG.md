@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.2.2] - 2026-01-31
+
+### Fixed
+
+- **Strategy Routing in Auto Command** - Fixed `/plan-cascade:auto` not properly routing to selected strategy
+  - When HYBRID_AUTO, HYBRID_WORKTREE, or MEGA_PLAN strategy was selected, AI would directly execute tasks instead of calling the appropriate skill
+  - Added **MANDATORY Skill tool usage** instructions in `commands/auto.md`
+  - Now explicitly requires `Skill(skill="plan-cascade:xxx", args="...")` calls for non-DIRECT strategies
+
+- **Resume Command Routing** - Fixed `/plan-cascade:resume` not properly routing to resume commands
+  - Same issue as auto command: AI would try to execute resume logic directly
+  - Added **MANDATORY Skill tool usage** instructions in `commands/resume.md`
+  - Now correctly routes to `mega-resume` or `hybrid-resume` via Skill tool
+
+### Technical Details
+
+**Root Cause:** The command instructions used ambiguous "Then invoke:" phrasing which AI interpreted as "execute directly" rather than "call via Skill tool".
+
+**Fix Applied:** Added explicit instructions:
+- `CRITICAL` warnings about mandatory Skill tool usage
+- `MANDATORY` markers before each routing step
+- Clear `Skill(skill="...", args="...")` syntax examples
+- Warnings to stop and use Skill tool if AI starts reading files after strategy selection
+
+---
+
 ## [4.2.1] - 2026-01-31
 
 ### Added

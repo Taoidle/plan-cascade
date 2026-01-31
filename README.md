@@ -9,7 +9,7 @@
 *Decompose complex projects into parallel executable tasks with multi-agent collaboration*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.2.1-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.2.2-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -224,7 +224,7 @@ plan-cascade/
 | DeepSeek | Yes | DeepSeek Chat/Coder |
 | Ollama | No | Local models |
 
-## What's New in v4.2.1
+## What's New in v4.2.2
 
 - **Context Recovery** — Auto-generated context files for AI state recovery after session interruption
 - **Enhanced Skill Detection** — Verbose output and summary display for external framework skills

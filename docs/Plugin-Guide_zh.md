@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**版本**: 4.2.1
+**版本**: 4.2.2
 **最后更新**: 2026-01-31
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。

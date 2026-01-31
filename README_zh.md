@@ -9,7 +9,7 @@
 *将复杂项目分解为可并行执行的任务，支持多 Agent 协作*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.2.1-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.2.2-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -224,7 +224,7 @@ plan-cascade/
 | DeepSeek | 是 | DeepSeek Chat/Coder |
 | Ollama | 否 | 本地模型 |
 
-## v4.2.1 更新内容
+## v4.2.2 更新内容
 
 - **上下文恢复** — 自动生成上下文文件，在会话中断后恢复 AI 执行状态
 - **增强技能检测** — 外部框架技能的详细输出和摘要显示

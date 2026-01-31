@@ -153,41 +153,53 @@ To start a new task:
   /plan-cascade:auto "your task description"
 ```
 
-## Step 3: Route to Appropriate Resume Command
+## Step 3: Route to Appropriate Resume Command (MANDATORY SKILL TOOL USAGE)
+
+**CRITICAL: You MUST use the Skill tool to invoke resume commands. DO NOT attempt to execute the resume logic yourself - let the specialized skill handle it.**
 
 Based on detected context, automatically invoke the correct resume command:
 
 ### If CONTEXT is "mega-plan":
 
+Display:
 ```
 Routing to mega-resume...
 ```
 
-Then invoke:
+**MANDATORY: Use the Skill tool to invoke the mega-resume command:**
+
 ```
-/plan-cascade:mega-resume --auto-prd
+Skill(skill="plan-cascade:mega-resume", args="--auto-prd")
 ```
+
+**DO NOT try to resume the mega-plan yourself. The mega-resume skill will handle it.**
 
 ### If CONTEXT is "hybrid-worktree" OR "hybrid-auto":
 
+Display:
 ```
 Routing to hybrid-resume...
 ```
 
-Then invoke:
+**MANDATORY: Use the Skill tool to invoke the hybrid-resume command:**
+
 ```
-/plan-cascade:hybrid-resume --auto
+Skill(skill="plan-cascade:hybrid-resume", args="--auto")
 ```
+
+**DO NOT try to resume the hybrid task yourself. The hybrid-resume skill will handle it.**
 
 ### If CONTEXT is "has-worktrees" (with mega-plan):
 
+Display:
 ```
 Routing to mega-resume (worktrees belong to mega-plan)...
 ```
 
-Then invoke:
+**MANDATORY: Use the Skill tool:**
+
 ```
-/plan-cascade:mega-resume --auto-prd
+Skill(skill="plan-cascade:mega-resume", args="--auto-prd")
 ```
 
 ### If CONTEXT is "has-worktrees" (without mega-plan):
@@ -208,14 +220,29 @@ Select which worktree to resume.
 ```
 
 Use AskUserQuestion to get selection, then:
-```
+
+1. First, change to the selected worktree directory using Bash:
+```bash
 cd .worktree/{selected}
-/plan-cascade:hybrid-resume --auto
+```
+
+2. **MANDATORY: Then use the Skill tool:**
+```
+Skill(skill="plan-cascade:hybrid-resume", args="--auto")
 ```
 
 ### If CONTEXT is "none":
 
 Do not route anywhere. Show the "no task detected" message and exit.
+
+---
+
+**IMPORTANT REMINDER**: After detecting the context:
+- For mega-plan, hybrid-worktree, or hybrid-auto contexts: You MUST use the Skill tool
+- DO NOT start reading files or executing the resume logic yourself
+- The specialized resume skills have the complete logic to handle all edge cases
+
+**If you find yourself reading prd.json, progress.txt, or other files to "resume" after detection, STOP and use the Skill tool instead.**
 
 ## Detection Priority
 
