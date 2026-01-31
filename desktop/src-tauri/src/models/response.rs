@@ -80,13 +80,13 @@ pub struct StatusResponse {
     pub status: String,
     pub task_description: String,
     pub current_story_id: Option<String>,
-    pub stories: Vec<StoryStatus>,
+    pub stories: Vec<StoryExecutionStatus>,
     pub progress: f64,
 }
 
-/// Individual story status
+/// Individual story execution status (for StatusResponse)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoryStatus {
+pub struct StoryExecutionStatus {
     pub id: String,
     pub title: String,
     pub status: String,
