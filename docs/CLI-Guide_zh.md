@@ -2,8 +2,8 @@
 
 # Plan Cascade - CLI Guide
 
-**版本**: 4.0.0
-**最后更新**: 2026-01-29
+**版本**: 4.2.0
+**最后更新**: 2026-02-01
 
 本文档详细介绍 Plan Cascade 独立 CLI 工具的使用方法。
 
@@ -38,6 +38,12 @@ plan-cascade run "实现用户登录功能" --expert
 
 # 交互式聊天模式
 plan-cascade chat
+
+# 自动运行并行执行（新功能）
+plan-cascade auto-run --parallel
+
+# 大型项目 Mega-plan（新功能）
+plan-cascade mega plan "构建电商平台"
 ```
 
 ---
@@ -188,6 +194,220 @@ plan-cascade status
 
 ```bash
 plan-cascade version
+```
+
+### auto-run - 自动批量执行（新功能）
+
+自动迭代执行 PRD 批次直到完成，支持质量门控和重试管理。
+
+```bash
+plan-cascade auto-run [options]
+
+Options:
+  -m, --mode <mode>        迭代模式 (until_complete|max_iterations|batch_complete)
+  --max-iterations <n>     最大迭代次数，用于 max_iterations 模式（默认：10）
+  -a, --agent <name>       默认执行 Agent
+  --impl-agent <name>      实现类 Story 的 Agent
+  --retry-agent <name>     重试时使用的 Agent
+  --dry-run                显示执行计划但不实际运行
+  --no-quality-gates       禁用质量门控（类型检查、测试、lint）
+  --no-fallback            禁用 Agent 失败回退
+  --parallel               批次内并行执行 Stories
+  --max-concurrency <n>    最大并行 Stories 数（默认：CPU 核心数）
+  -p, --project <path>     项目路径
+```
+
+示例：
+
+```bash
+# 运行直到所有 Stories 完成
+plan-cascade auto-run
+
+# 并行执行
+plan-cascade auto-run --parallel --max-concurrency 4
+
+# 限制为 5 次迭代
+plan-cascade auto-run --mode max_iterations --max-iterations 5
+
+# 干运行查看执行计划
+plan-cascade auto-run --dry-run
+
+# 使用指定 Agents
+plan-cascade auto-run --agent aider --retry-agent claude-code
+```
+
+### mega - Mega-Plan 工作流（新功能）
+
+管理多功能项目计划的命令组。
+
+```bash
+plan-cascade mega <subcommand> [options]
+
+子命令:
+  plan <description>    生成多功能计划
+  approve               批准并开始执行
+  status                查看执行进度
+  complete              完成并合并所有功能
+  edit                  交互式编辑功能
+  resume                恢复中断的执行
+```
+
+示例：
+
+```bash
+# 生成 mega-plan
+plan-cascade mega plan "构建电商平台：用户、商品、订单"
+
+# 批准并开始执行
+plan-cascade mega approve --auto-prd
+
+# 检查状态
+plan-cascade mega status --verbose
+
+# 完成时合并
+plan-cascade mega complete
+```
+
+### worktree - Git Worktree 集成（新功能）
+
+使用 Git worktree 管理隔离开发环境的命令组。
+
+```bash
+plan-cascade worktree <subcommand> [options]
+
+子命令:
+  create <name> <branch> [desc]   创建隔离 worktree
+  complete [name]                  合并并清理 worktree
+  list                             列出活跃的 worktrees
+```
+
+示例：
+
+```bash
+# 为功能创建 worktree
+plan-cascade worktree create feature-auth main "实现认证功能"
+
+# 列出所有 worktrees
+plan-cascade worktree list
+
+# 完成并合并
+plan-cascade worktree complete feature-auth
+```
+
+### design - 设计文档系统（新功能）
+
+管理架构设计文档的命令组。
+
+```bash
+plan-cascade design <subcommand> [options]
+
+子命令:
+  generate              生成 design_doc.json（自动检测级别）
+  show                  显示当前设计文档
+  review                交互式编辑设计文档
+  import <file>         转换外部文档（MD、JSON、HTML）
+  validate              验证设计文档结构
+```
+
+示例：
+
+```bash
+# 生成设计文档
+plan-cascade design generate
+
+# 显示设计文档
+plan-cascade design show --verbose
+
+# 从 Markdown 导入
+plan-cascade design import ./architecture.md
+
+# 交互式审查
+plan-cascade design review
+```
+
+### skills - 外部技能管理（新功能）
+
+管理框架特定技能的命令组。
+
+```bash
+plan-cascade skills <subcommand> [options]
+
+子命令:
+  list                  列出所有配置的技能
+  detect                检测项目适用的技能
+  show <name>           显示技能内容
+  summary               显示将加载的技能
+  validate              验证技能配置
+```
+
+示例：
+
+```bash
+# 列出所有技能
+plan-cascade skills list --verbose
+
+# 检测适用技能
+plan-cascade skills detect --phase implementation
+
+# 显示特定技能
+plan-cascade skills show react-best-practices
+```
+
+### deps - 依赖图可视化（新功能）
+
+显示 Stories/功能的可视化依赖图。
+
+```bash
+plan-cascade deps [options]
+
+Options:
+  -f, --format <type>    输出格式 (tree|flat|table|json)
+  --critical-path        显示关键路径分析
+  --check                检查依赖问题
+  -p, --project <path>   项目路径
+```
+
+示例：
+
+```bash
+# 显示依赖树
+plan-cascade deps
+
+# 表格形式显示
+plan-cascade deps --format table
+
+# 检查问题
+plan-cascade deps --check
+
+# JSON 输出
+plan-cascade deps --format json
+```
+
+### resume - 上下文恢复（新功能）
+
+自动检测并恢复中断的任务。
+
+```bash
+plan-cascade resume [options]
+
+Options:
+  -a, --auto             非交互式恢复
+  -v, --verbose          显示详细状态信息
+  -j, --json             JSON 格式输出
+  -p, --project <path>   项目路径
+```
+
+示例：
+
+```bash
+# 显示恢复计划
+plan-cascade resume
+
+# 自动恢复无需确认
+plan-cascade resume --auto
+
+# 详细输出
+plan-cascade resume --verbose
 ```
 
 ---
@@ -412,14 +632,23 @@ Error: Model 'gpt-5' not found
 | 后端支持 | 多 LLM | Claude Code |
 | 工具执行 | 内置 ReAct | Claude Code |
 | 离线使用 | 支持（Ollama） | 不支持 |
+| Mega-plan 工作流 | 支持 | 支持 |
+| Worktree 集成 | 支持 | 支持 |
+| 设计文档 | 支持 | 支持 |
+| 外部技能 | 支持 | 支持 |
+| 并行执行 | 支持 | 支持 |
+| 上下文恢复 | 支持 | 支持 |
+| 依赖图可视化 | 支持 | 支持 |
 
 CLI 适合：
 - 需要使用其他 LLM（OpenAI、DeepSeek 等）
 - 需要离线使用（Ollama）
 - 偏好命令行操作
 - 自动化脚本集成
+- CI/CD 流水线集成
 
 Plugin 适合：
 - Claude Code 深度用户
 - 需要完整 Claude Code 功能
 - 偏好 /slash 命令交互
+- 交互式开发工作流

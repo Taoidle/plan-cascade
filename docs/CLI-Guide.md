@@ -2,8 +2,8 @@
 
 # Plan Cascade - CLI Guide
 
-**Version**: 4.0.0
-**Last Updated**: 2026-01-29
+**Version**: 4.2.0
+**Last Updated**: 2026-02-01
 
 This document provides detailed instructions for using the Plan Cascade standalone CLI tool.
 
@@ -38,6 +38,12 @@ plan-cascade run "Implement user login functionality" --expert
 
 # Interactive chat mode
 plan-cascade chat
+
+# Auto-run with parallel execution (NEW)
+plan-cascade auto-run --parallel
+
+# Mega-plan for large projects (NEW)
+plan-cascade mega plan "Build e-commerce platform"
 ```
 
 ---
@@ -188,6 +194,220 @@ Progress: 3/5
 
 ```bash
 plan-cascade version
+```
+
+### auto-run - Automatic Batch Execution (NEW)
+
+Automatically iterate through PRD batches until completion with quality gates and retry management.
+
+```bash
+plan-cascade auto-run [options]
+
+Options:
+  -m, --mode <mode>        Iteration mode (until_complete|max_iterations|batch_complete)
+  --max-iterations <n>     Maximum iterations for max_iterations mode (default: 10)
+  -a, --agent <name>       Default agent for story execution
+  --impl-agent <name>      Agent for implementation stories
+  --retry-agent <name>     Agent to use for retry attempts
+  --dry-run                Show execution plan without running
+  --no-quality-gates       Disable quality gates (typecheck, test, lint)
+  --no-fallback            Disable agent fallback on failure
+  --parallel               Execute stories within batches in parallel
+  --max-concurrency <n>    Maximum parallel stories (default: CPU count)
+  -p, --project <path>     Project path
+```
+
+Examples:
+
+```bash
+# Run until all stories complete
+plan-cascade auto-run
+
+# Run with parallel execution
+plan-cascade auto-run --parallel --max-concurrency 4
+
+# Limit to 5 iterations
+plan-cascade auto-run --mode max_iterations --max-iterations 5
+
+# Dry run to see execution plan
+plan-cascade auto-run --dry-run
+
+# Use specific agents
+plan-cascade auto-run --agent aider --retry-agent claude-code
+```
+
+### mega - Mega-Plan Workflow (NEW)
+
+Commands for managing multi-feature project plans.
+
+```bash
+plan-cascade mega <subcommand> [options]
+
+Subcommands:
+  plan <description>    Generate multi-feature plan
+  approve               Start execution of approved plan
+  status                View execution progress
+  complete              Finalize and merge all features
+  edit                  Interactively edit features
+  resume                Resume interrupted execution
+```
+
+Examples:
+
+```bash
+# Generate mega-plan
+plan-cascade mega plan "Build e-commerce platform with users, products, orders"
+
+# Approve and start execution
+plan-cascade mega approve --auto-prd
+
+# Check status
+plan-cascade mega status --verbose
+
+# Complete when done
+plan-cascade mega complete
+```
+
+### worktree - Git Worktree Integration (NEW)
+
+Commands for managing isolated development environments using Git worktrees.
+
+```bash
+plan-cascade worktree <subcommand> [options]
+
+Subcommands:
+  create <name> <branch> [desc]   Create isolated worktree
+  complete [name]                  Merge and cleanup worktree
+  list                             List active worktrees
+```
+
+Examples:
+
+```bash
+# Create worktree for a feature
+plan-cascade worktree create feature-auth main "Implement authentication"
+
+# List all worktrees
+plan-cascade worktree list
+
+# Complete and merge
+plan-cascade worktree complete feature-auth
+```
+
+### design - Design Document System (NEW)
+
+Commands for managing architectural design documents.
+
+```bash
+plan-cascade design <subcommand> [options]
+
+Subcommands:
+  generate              Generate design_doc.json (auto-detects level)
+  show                  Display current design document
+  review                Interactive editing of design document
+  import <file>         Convert external document (MD, JSON, HTML)
+  validate              Validate design document structure
+```
+
+Examples:
+
+```bash
+# Generate design document
+plan-cascade design generate
+
+# Show design document
+plan-cascade design show --verbose
+
+# Import from Markdown
+plan-cascade design import ./architecture.md
+
+# Interactive review
+plan-cascade design review
+```
+
+### skills - External Skill Management (NEW)
+
+Commands for managing framework-specific skills.
+
+```bash
+plan-cascade skills <subcommand> [options]
+
+Subcommands:
+  list                  List all configured skills
+  detect                Detect applicable skills for project
+  show <name>           Display skill content
+  summary               Show skills that will be loaded
+  validate              Validate skill configuration
+```
+
+Examples:
+
+```bash
+# List all skills
+plan-cascade skills list --verbose
+
+# Detect applicable skills
+plan-cascade skills detect --phase implementation
+
+# Show specific skill
+plan-cascade skills show react-best-practices
+```
+
+### deps - Dependency Graph Visualization (NEW)
+
+Display visual dependency graph for stories/features.
+
+```bash
+plan-cascade deps [options]
+
+Options:
+  -f, --format <type>    Output format (tree|flat|table|json)
+  --critical-path        Show critical path analysis
+  --check                Check for dependency issues
+  -p, --project <path>   Project path
+```
+
+Examples:
+
+```bash
+# Show dependency tree
+plan-cascade deps
+
+# Show as table
+plan-cascade deps --format table
+
+# Check for issues
+plan-cascade deps --check
+
+# Output as JSON
+plan-cascade deps --format json
+```
+
+### resume - Context Recovery (NEW)
+
+Auto-detect and resume interrupted tasks.
+
+```bash
+plan-cascade resume [options]
+
+Options:
+  -a, --auto             Non-interactive resume
+  -v, --verbose          Show detailed state information
+  -j, --json             Output as JSON
+  -p, --project <path>   Project path
+```
+
+Examples:
+
+```bash
+# Show recovery plan
+plan-cascade resume
+
+# Auto-resume without prompts
+plan-cascade resume --auto
+
+# Verbose output
+plan-cascade resume --verbose
 ```
 
 ---
@@ -412,14 +632,23 @@ Solution: Check if the model name is correct, use `--model` to specify a valid m
 | Backend support | Multiple LLMs | Claude Code |
 | Tool execution | Built-in ReAct | Claude Code |
 | Offline use | Supported (Ollama) | Not supported |
+| Mega-plan workflow | Supported | Supported |
+| Worktree integration | Supported | Supported |
+| Design documents | Supported | Supported |
+| External skills | Supported | Supported |
+| Parallel execution | Supported | Supported |
+| Context recovery | Supported | Supported |
+| Dependency visualization | Supported | Supported |
 
 CLI is suitable for:
 - Need to use other LLMs (OpenAI, DeepSeek, etc.)
 - Need offline use (Ollama)
 - Prefer command line operations
 - Automation script integration
+- CI/CD pipeline integration
 
 Plugin is suitable for:
 - Claude Code power users
 - Need full Claude Code functionality
 - Prefer /slash command interaction
+- Interactive development workflow
