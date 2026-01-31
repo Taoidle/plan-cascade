@@ -30,11 +30,14 @@ Parse user arguments:
 - **PRD path OR description**: Third arg
   - If it's an existing file path → Load that PRD
   - Otherwise → Use as task description to auto-generate PRD
+- **Design doc path**: Fourth arg (optional)
+  - If provided → Convert external doc to design_doc.json format
 
 ```bash
 TASK_NAME="{{args|arg 1 or 'task-' + date + '-' + time}}"
 TARGET_BRANCH="{{args|arg 2 or auto-detect}}"
 PRD_ARG="{{args|arg 3 or ask user 'Provide PRD file path or task description'}}"
+DESIGN_ARG="{{args|arg 4 or empty}}"
 ```
 
 ## Step 2: Detect Operating System and Shell
@@ -114,6 +117,20 @@ ROOT_DIR=$(pwd)
 WORKTREE_DIR="$ROOT_DIR/.worktree/$(basename $TASK_NAME)"
 ```
 
+## Step 6.5: Check for Design Document
+
+Check if a design document exists at project root:
+
+```bash
+if [ -f "$ROOT_DIR/design_doc.json" ]; then
+    HAS_DESIGN_DOC=true
+    echo "✓ Design document detected at project root"
+else
+    HAS_DESIGN_DOC=false
+    echo "ℹ No design document found (optional)"
+fi
+```
+
 ## Step 7: Determine PRD Mode
 
 Check if PRD_ARG is an existing file:
@@ -181,6 +198,12 @@ EOF
 
 Story execution progress will be tracked here.
 EOF
+
+    # Copy design document if it exists
+    if [ "$HAS_DESIGN_DOC" = true ]; then
+        cp "$ROOT_DIR/design_doc.json" "$WORKTREE_DIR/design_doc.json"
+        echo "✓ Copied design_doc.json to worktree"
+    fi
 fi
 ```
 
@@ -219,16 +242,22 @@ Use the Task tool to automatically generate the PRD:
 You are a PRD generation specialist. Your task is to:
 
 1. ANALYZE the task description: "$TASK_DESC"
-2. EXPLORE the codebase in the current directory to understand:
+2. **If design_doc.json exists in the current directory:**
+   - Read it for architectural guidance
+   - Identify relevant components for this task
+   - Note applicable architectural patterns and decisions (ADRs)
+   - Use this context to create well-aligned stories
+3. EXPLORE the codebase in the current directory to understand:
    - Existing patterns and conventions
    - Relevant code files
    - Architecture and structure
-3. GENERATE a PRD (prd.json) with:
+4. GENERATE a PRD (prd.json) with:
    - Clear goal statement
    - 3-7 user stories
    - Each story with: id, title, description, priority (high/medium/low), dependencies, acceptance_criteria, context_estimate (small/medium/large), tags
    - Dependencies between stories (where one story must complete before another)
-4. SAVE the PRD to prd.json in the current directory
+5. **If design_doc.json exists, update its story_mappings section** to link each new story to relevant components, decisions, and interfaces
+6. SAVE the PRD to prd.json in the current directory
 
 The PRD format must be:
 {
@@ -283,6 +312,114 @@ PRD_SOURCE="Auto-generated from description"
 fi
 ```
 
+## Step 13.5: Auto-Generate Feature Design Document
+
+After PRD is ready (loaded or generated), automatically generate or update `design_doc.json`:
+
+### 13.5.1: Check for User-Provided Design Document
+
+```
+If DESIGN_ARG is not empty and file exists:
+    Read the external document at DESIGN_ARG
+    Detect format and convert:
+      - .md files: Parse Markdown structure (headers → sections)
+      - .json files: Validate/map to our schema
+      - .html files: Parse HTML structure
+    Extract: overview, architecture, patterns, decisions
+    Save as design_doc.json (overwrite copied project-level doc)
+    DESIGN_SOURCE="Converted from: $DESIGN_ARG"
+Elif design_doc.json already exists (copied from project root):
+    # Update it to become feature-level with story_mappings
+    DESIGN_SOURCE="Derived from project-level design"
+Else:
+    Auto-generate based on PRD analysis
+    DESIGN_SOURCE="Auto-generated from PRD"
+```
+
+### 13.5.2: Generate/Update Feature Design Document
+
+Use the Task tool to generate or update `design_doc.json`:
+
+```
+You are a technical design specialist. Your task is to generate a feature-level design_doc.json.
+
+CONTEXT:
+- Working directory: $WORKTREE_DIR
+- PRD file: prd.json (already exists)
+- Existing design doc: ${HAS_DESIGN_DOC ? "yes (from project root)" : "no"}
+
+1. Read prd.json to understand:
+   - The goal and objectives
+   - All stories with their requirements
+   - Dependencies between stories
+
+2. If design_doc.json exists from project root:
+   - Read it for inherited context (patterns, decisions, shared_models)
+   - Create a NEW feature-level design doc that:
+     - References the parent in metadata.parent_design_doc: "../design_doc.json"
+     - Includes inherited_context section with relevant patterns/decisions
+     - Adds feature-specific components, APIs, data_models
+     - Uses ADR-F### prefix for feature-specific decisions
+     - Creates story_mappings for all stories
+
+3. If NO design_doc.json exists:
+   - EXPLORE the codebase to understand existing patterns
+   - Generate a standalone feature-level design doc
+
+4. Generate/update design_doc.json with this structure:
+{
+  "metadata": {
+    "created_at": "<ISO-8601>",
+    "version": "1.0.0",
+    "source": "ai-generated",
+    "level": "feature",
+    "prd_reference": "prd.json",
+    "parent_design_doc": "../design_doc.json",
+    "feature_id": "$TASK_NAME"
+  },
+  "overview": {
+    "title": "<from PRD goal>",
+    "summary": "<brief description>",
+    "goals": ["<from PRD objectives>"],
+    "non_goals": ["<identified non-goals>"]
+  },
+  "inherited_context": {
+    "description": "Context inherited from project-level design document",
+    "patterns": ["PatternName"],
+    "decisions": ["ADR-001"],
+    "shared_models": ["SharedModel"]
+  },
+  "architecture": {
+    "components": [...],
+    "data_flow": "<feature-specific data flow>",
+    "patterns": [...]
+  },
+  "interfaces": {
+    "apis": [...],
+    "data_models": [...]
+  },
+  "decisions": [
+    {
+      "id": "ADR-F001",
+      "title": "Feature-specific decision",
+      ...
+    }
+  ],
+  "story_mappings": {
+    "story-001": {
+      "components": ["ComponentA"],
+      "decisions": ["ADR-F001"],
+      "interfaces": ["API-001"]
+    }
+  }
+}
+
+5. Create complete story_mappings for ALL stories in the PRD
+6. SAVE to design_doc.json (overwrite if exists)
+```
+
+Launch as background task with `run_in_background: true`, then use TaskOutput to wait.
+
 ## Step 14: Validate and Display PRD
 
 After PRD is loaded or generated:
@@ -308,9 +445,17 @@ Branch: $TASK_BRANCH
 Target: $TARGET_BRANCH
 
 ✓ PRD Ready: $PRD_SOURCE
+✓ Design Document: $DESIGN_SOURCE
 
 Stories: {count}
 Batches: {batch_count}
+
+## Design Summary
+
+Components: {component_count}
+Patterns: {pattern_count}
+Decisions: {decision_count} (ADR-F###)
+{If inherited: "Inherited from project: {inherited_pattern_count} patterns, {inherited_decision_count} ADRs"}
 
 ## Execution Plan
 
@@ -339,23 +484,31 @@ Active Worktrees:
 ## Usage Examples
 
 ```bash
-# Auto-generate PRD from description
+# Auto-generate PRD and design doc from description
 /plan-cascade:hybrid-worktree fix-auth main "Fix authentication bug in login flow"
 
-# Load existing PRD file
+# Load existing PRD file (design doc auto-generated)
 /plan-cascade:hybrid-worktree fix-auth main ./my-prd.json
 
-# Load PRD from different location
-/plan-cascade:hybrid-worktree fix-auth main ../prd-files/api-refactor.json
+# Load PRD and use external design document
+/plan-cascade:hybrid-worktree fix-auth main ./my-prd.json ./design-spec.md
+
+# Auto-generate PRD, use external design document
+/plan-cascade:hybrid-worktree fix-auth main "Fix auth flow" ./architecture.md
 ```
 
 ## Notes
 
 - **File path mode**: If the third argument is an existing file, it's loaded as PRD
 - **Description mode**: If the third argument is not a file, it's used to auto-generate PRD
-- The entire process is automated: worktree creation → PRD loading/generation → review
+- The entire process is automated: worktree creation → PRD loading/generation → design doc generation → review
 - You can edit the PRD before approving: `/plan-cascade:edit`
 - Multiple worktrees can run in parallel for different tasks
+- **Design Document Auto-Generation**:
+  - If project-level `design_doc.json` exists at root: It's used as inheritance source
+  - Feature-level `design_doc.json` is auto-generated after PRD with story_mappings
+  - Story execution receives filtered design context per story
+  - User-provided external design docs (4th arg) are automatically converted
 
 ## Recovery
 

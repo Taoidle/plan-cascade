@@ -159,6 +159,9 @@ Target Branch: <target_branch>
 Total Features: <count>
 Total Batches: <calculated>
 
+Design Document: {present at project root | not found}
+  {If present: "✓ Will be used for architectural guidance in all features"}
+
 Detected State:
   Completed Batches: [1] (from .mega-status.json)
   Current Batch: 2

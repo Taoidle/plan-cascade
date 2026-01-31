@@ -1,0 +1,121 @@
+{
+  "version": "1.0.0",
+  "description": "Built-in external skills for framework-specific guidance",
+
+  "sources": {
+    "vercel": {
+      "type": "submodule",
+      "path": "external-skills/vercel",
+      "repository": "https://github.com/vercel-labs/agent-skills"
+    },
+    "vue": {
+      "type": "submodule",
+      "path": "external-skills/vue",
+      "repository": "https://github.com/vuejs-ai/skills"
+    },
+    "rust": {
+      "type": "submodule",
+      "path": "external-skills/rust",
+      "repository": "https://github.com/actionbook/rust-skills"
+    }
+  },
+
+  "skills": {
+    "react-best-practices": {
+      "source": "vercel",
+      "skill_path": "skills/react-best-practices",
+      "detect": {
+        "files": ["package.json"],
+        "patterns": ["\"react\"", "\"next\"", "\"@react\""]
+      },
+      "inject_into": ["implementation", "retry"],
+      "priority": 100
+    },
+    "web-design-guidelines": {
+      "source": "vercel",
+      "skill_path": "skills/web-design-guidelines",
+      "detect": {
+        "files": ["package.json"],
+        "patterns": ["\"react\"", "\"vue\"", "\"svelte\""]
+      },
+      "inject_into": ["implementation"],
+      "priority": 50
+    },
+    "vue-best-practices": {
+      "source": "vue",
+      "skill_path": "skills/vue-best-practices",
+      "detect": {
+        "files": ["package.json"],
+        "patterns": ["\"vue\"", "\"nuxt\"", "\"@vue\""]
+      },
+      "inject_into": ["implementation", "retry"],
+      "priority": 100
+    },
+    "vue-router-best-practices": {
+      "source": "vue",
+      "skill_path": "skills/vue-router-best-practices",
+      "detect": {
+        "files": ["package.json"],
+        "patterns": ["\"vue-router\""]
+      },
+      "inject_into": ["implementation"],
+      "priority": 80
+    },
+    "vue-pinia-best-practices": {
+      "source": "vue",
+      "skill_path": "skills/vue-pinia-best-practices",
+      "detect": {
+        "files": ["package.json"],
+        "patterns": ["\"pinia\""]
+      },
+      "inject_into": ["implementation"],
+      "priority": 80
+    },
+    "rust-coding-guidelines": {
+      "source": "rust",
+      "skill_path": "skills/coding-guidelines",
+      "detect": {
+        "files": ["Cargo.toml"],
+        "patterns": ["[package]", "[dependencies]"]
+      },
+      "inject_into": ["implementation", "retry"],
+      "priority": 100
+    },
+    "rust-ownership": {
+      "source": "rust",
+      "skill_path": "skills/m01-ownership",
+      "detect": {
+        "files": ["Cargo.toml"],
+        "patterns": ["[package]"]
+      },
+      "inject_into": ["implementation", "retry"],
+      "priority": 90
+    },
+    "rust-error-handling": {
+      "source": "rust",
+      "skill_path": "skills/m06-error-handling",
+      "detect": {
+        "files": ["Cargo.toml"],
+        "patterns": ["[package]"]
+      },
+      "inject_into": ["implementation", "retry"],
+      "priority": 85
+    },
+    "rust-concurrency": {
+      "source": "rust",
+      "skill_path": "skills/m07-concurrency",
+      "detect": {
+        "files": ["Cargo.toml"],
+        "patterns": ["tokio", "async-std", "rayon", "crossbeam"]
+      },
+      "inject_into": ["implementation"],
+      "priority": 80
+    }
+  },
+
+  "settings": {
+    "max_skills_per_story": 3,
+    "max_content_lines": 200,
+    "cache_enabled": true
+  }
+}

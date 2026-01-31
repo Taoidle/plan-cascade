@@ -1,53 +1,139 @@
 [中文版](README_zh.md)
 
+<div align="center">
+
 # Plan Cascade
 
-> **Three-Tier Cascading Parallel Development Framework** — Decompose from project to feature to story, execute in parallel at each level
+**AI-Powered Cascading Development Framework**
+
+*Decompose complex projects into parallel executable tasks with multi-agent collaboration*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
-[![MCP Server](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-4.1.1-brightgreen)](https://github.com/Taoidle/plan-cascade)
-[![PyPI](https://img.shields.io/pypi/v/plan-cascade)](https://pypi.org/project/plan-cascade/)
+[![Version](https://img.shields.io/badge/version-4.2.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
+[![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
+
+| Component | Status |
+|-----------|--------|
+| Claude Code Plugin | ![Stable](https://img.shields.io/badge/status-stable-brightgreen) |
+| MCP Server | ![Stable](https://img.shields.io/badge/status-stable-brightgreen) |
+| Standalone CLI | ![In Development](https://img.shields.io/badge/status-in%20development-yellow) |
+| Desktop App | ![In Development](https://img.shields.io/badge/status-in%20development-yellow) |
+
+[Features](#features) • [Quick Start](#quick-start) • [Documentation](#documentation) • [Architecture](#architecture)
+
+</div>
 
 ---
 
-## Overview
+## Why Plan Cascade?
 
-Plan Cascade is a **three-tier cascading AI parallel development framework** designed for large-scale software projects. It progressively decomposes complex projects and achieves efficient parallel development through multi-agent collaboration.
+Traditional AI coding assistants struggle with large, complex projects. Plan Cascade solves this by:
 
-### Core Concepts
+- **Breaking down complexity** — Automatically decompose projects into manageable stories
+- **Parallel execution** — Run independent tasks simultaneously with multiple agents
+- **Maintaining context** — Design documents and PRDs keep AI focused on architecture
+- **Quality assurance** — Automated testing and linting at each step
 
-- **Progressive Decomposition**: Project → Feature → Story, refining task granularity at each level
-- **Parallel Execution**: Independent tasks are processed in parallel within the same batch
-- **Multi-Agent Collaboration**: Automatically selects the optimal agent based on task characteristics
-- **Quality Assurance**: Automated quality gates + intelligent retry mechanism
-- **State Tracking**: File-based state sharing with checkpoint recovery support
+## Features
 
-### Three-Tier Architecture
+### Three-Tier Cascading Architecture
 
-| Tier | Name | Responsibility | Artifact |
-|------|------|----------------|----------|
-| **Level 1** | Mega Plan | Project-level orchestration, manages multiple Features | `mega-plan.json` |
-| **Level 2** | Hybrid Ralph | Feature-level development, auto-generates PRD | `prd.json` |
-| **Level 3** | Stories | Story-level execution, parallel agent processing | Code changes |
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Level 1: Mega Plan                                         │
+│  ─────────────────                                          │
+│  Project-level orchestration                                │
+│  Manages multiple features in parallel batches              │
+│  Output: mega-plan.json + design_doc.json                   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Level 2: Hybrid Ralph (Feature)                            │
+│  ───────────────────────────────                            │
+│  Feature-level development                                  │
+│  Auto-generates PRD with user stories                       │
+│  Output: prd.json + design_doc.json                         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Level 3: Story Execution                                   │
+│  ────────────────────────                                   │
+│  Parallel story execution with multi-agent support          │
+│  Automatic agent selection based on task type               │
+│  Output: Code changes                                       │
+└─────────────────────────────────────────────────────────────┘
+```
 
----
+### Multi-Agent Collaboration
 
-## Usage Methods
+| Agent | Type | Best For |
+|-------|------|----------|
+| `claude-code` | Built-in | General purpose (default) |
+| `codex` | CLI | Bug fixes, quick implementations |
+| `aider` | CLI | Refactoring, code improvements |
+| `amp-code` | CLI | Alternative implementations |
 
-| Method | Description | Use Case | Documentation |
-|--------|-------------|----------|---------------|
-| **Standalone CLI** | Independent command-line tool | Any terminal environment | [CLI Guide](docs/CLI-Guide.md) |
-| **Claude Code Plugin** | Native integration, most complete features | Claude Code users | [Plugin Guide](docs/Plugin-Guide.md) |
-| **Desktop App** | Graphical user interface | Users preferring GUI | [Desktop Guide](docs/Desktop-Guide.md) |
-| **MCP Server** | Integration via MCP protocol | Cursor, Windsurf, etc. | [MCP Guide](docs/MCP-SERVER-GUIDE.md) |
+Agents are automatically selected based on story type, or can be manually specified.
 
----
+### Auto-Generated Design Documents
+
+Plan Cascade automatically generates technical design documents alongside PRDs:
+
+- **Project-level**: Architecture, patterns, cross-feature decisions
+- **Feature-level**: Component design, APIs, story mappings
+- **Inheritance**: Feature docs inherit from project-level context
+
+### Quality Gates
+
+Automated verification after each story:
+- TypeScript/Python type checking
+- Unit and integration tests
+- Linting (ESLint, Ruff)
+- Custom validation scripts
+
+### External Framework Skills
+
+Plan Cascade includes built-in framework-specific skills that are automatically detected and injected:
+
+| Framework | Skills | Auto-Detection |
+|-----------|--------|----------------|
+| React/Next.js | `react-best-practices`, `web-design-guidelines` | `package.json` contains `react` or `next` |
+| Vue/Nuxt | `vue-best-practices`, `vue-router-best-practices`, `vue-pinia-best-practices` | `package.json` contains `vue` or `nuxt` |
+| Rust | `rust-coding-guidelines`, `rust-ownership`, `rust-error-handling`, `rust-concurrency` | `Cargo.toml` exists |
+
+Skills are loaded from Git submodules and provide framework-specific guidance during story execution:
+
+```bash
+# Initialize external skills (first time)
+git submodule update --init --recursive
+
+# In a React project, skills are auto-detected:
+/plan-cascade:auto "Add user profile component"
+# → Automatically includes React best practices in context
+```
 
 ## Quick Start
 
-### Standalone CLI
+### Option 1: Claude Code Plugin (Recommended)
+
+```bash
+# Install the plugin
+claude plugins install Taoidle/plan-cascade
+
+# Let AI choose the best strategy
+/plan-cascade:auto "Build a REST API with user authentication and JWT tokens"
+
+# Or choose manually
+/plan-cascade:hybrid-auto "Add password reset functionality"
+/plan-cascade:approve --auto-run
+```
+
+### Option 2: Standalone CLI
+
+> **Note**: The standalone CLI is currently in active development. Some features may be incomplete or unstable. For production use, we recommend the Claude Code Plugin.
 
 ```bash
 # Install
@@ -56,232 +142,126 @@ pip install plan-cascade
 # Configure
 plan-cascade config --setup
 
-# Simple mode - one-click execution
-plan-cascade run "Implement user login feature"
+# Run with auto-strategy
+plan-cascade run "Implement user authentication"
 
-# Expert mode - more control
-plan-cascade run "Implement user login feature" --expert
-
-# Interactive chat
-plan-cascade chat
+# Or use expert mode for more control
+plan-cascade run "Implement user authentication" --expert
 ```
 
-### Claude Code Plugin
+### Option 3: Desktop App
 
+> **Note**: The desktop application is currently in active development. Stay tuned for updates.
+
+Download from [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases) (coming soon).
+
+## Usage Examples
+
+### Simple Task (Direct Execution)
 ```bash
-# Install
-claude plugins install Taoidle/plan-cascade
-
-# Usage - Auto mode (recommended for new users)
-/plan-cascade:auto "Your task description"
-
-# Usage - Manual mode selection
-/plan-cascade:hybrid-auto "Add search functionality"
-/plan-cascade:approve --auto-run
+/plan-cascade:auto "Fix the typo in the login button"
+# → Executes directly without planning
 ```
 
-### Desktop App
+### Medium Feature (Hybrid Auto)
+```bash
+/plan-cascade:auto "Implement OAuth2 login with Google and GitHub"
+# → Generates PRD with 3-5 stories, executes in parallel
+```
 
-Download the installer for your platform from [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases).
+### Large Project (Mega Plan)
+```bash
+/plan-cascade:auto "Build an e-commerce platform with users, products, cart, and orders"
+# → Creates mega-plan with 4 features, each with its own PRD
+```
 
----
+### With External Design Document
+```bash
+/plan-cascade:mega-plan "Build blog platform" ./architecture.md
+# → Converts your design doc and uses it for guidance
+```
 
-## Core Features
+### With Specific Agent
+```bash
+/plan-cascade:approve --impl-agent=aider --retry-agent=codex
+# → Uses aider for implementation, codex for retries
+```
 
-### Dual Mode Design
+## Documentation
 
-| Mode | Use Case | Characteristics |
-|------|----------|-----------------|
-| **Simple Mode** | New users, quick tasks | AI automatically determines strategy and executes |
-| **Expert Mode** | Experienced users, fine-grained control | PRD editing, agent selection, quality gate configuration |
+| Document | Description |
+|----------|-------------|
+| [Plugin Guide](docs/Plugin-Guide.md) | Claude Code plugin usage |
+| [CLI Guide](docs/CLI-Guide.md) | Standalone CLI usage |
+| [Desktop Guide](docs/Desktop-Guide.md) | Desktop application |
+| [MCP Server Guide](docs/MCP-SERVER-GUIDE.md) | Integration with Cursor, Windsurf |
+| [System Architecture](docs/System-Architecture.md) | Technical architecture |
 
-### AI Automatic Strategy Selection
+## Architecture
 
-In simple mode, AI automatically selects the execution strategy based on requirements:
+### File Structure
 
-| Input Type | Execution Strategy |
-|------------|-------------------|
-| Small task (e.g., "add a button") | Direct execution |
-| Medium feature (e.g., "user login") | Hybrid Auto |
-| Large project (e.g., "e-commerce platform") | Mega Plan |
-| Requires isolation (e.g., "experimental refactoring") | Hybrid Worktree |
+```
+plan-cascade/
+├── src/plan_cascade/       # Python core
+│   ├── core/               # Orchestration engine
+│   ├── backends/           # Agent abstraction
+│   ├── llm/                # LLM providers
+│   └── cli/                # CLI entry
+├── commands/               # Plugin commands
+├── skills/                 # Plugin skills
+├── mcp_server/             # MCP server
+└── desktop/                # Desktop app (Tauri + React)
+```
 
-### Multi-LLM Backend
+### Supported LLM Backends
 
-| Backend | Requires API Key | Description |
-|---------|-----------------|-------------|
+| Backend | API Key Required | Notes |
+|---------|-----------------|-------|
 | Claude Code | No | Default, via Claude Code CLI |
-| Claude Max | No | Obtain LLM via Claude Code |
-| Claude API | Yes | Direct Anthropic API calls |
+| Claude API | Yes | Direct Anthropic API |
 | OpenAI | Yes | GPT-4o, etc. |
 | DeepSeek | Yes | DeepSeek Chat/Coder |
 | Ollama | No | Local models |
 
-### Multi-Agent Collaboration
+## What's New in v4.2.0
 
-Supports using different agents to execute stories:
+- **Design Document System** — Auto-generated technical design docs with two-level hierarchy
+- **Multi-Agent Integration** — Full integration in all execution modes
+- **AI Strategy Selection** — Intelligent task analysis replaces keyword matching
+- **External Design Import** — Convert Markdown/JSON/HTML design docs
 
-| Agent | Type | Description |
-|-------|------|-------------|
-| claude-code | task-tool | Built-in, always available |
-| codex | cli | OpenAI Codex |
-| aider | cli | AI pair programming |
-| amp-code | cli | Amp Code |
-| cursor-cli | cli | Cursor CLI |
+See [CHANGELOG.md](CHANGELOG.md) for full history.
 
-### Quality Gates
+## Contributing
 
-Automatic quality verification runs after each story completion:
+Contributions are welcome! Please read our contributing guidelines before submitting PRs.
 
-| Gate | Tools |
-|------|-------|
-| TypeCheck | tsc, mypy, pyright |
-| Test | pytest, jest |
-| Lint | eslint, ruff |
-| Custom | Custom scripts |
-
----
-
-## Command Quick Reference
-
-### CLI
-
-```bash
-plan-cascade run <description>          # Execute task
-plan-cascade run <description> --expert # Expert mode
-plan-cascade chat                       # Interactive chat
-plan-cascade config --setup             # Configuration wizard
-plan-cascade status                     # View status
-```
-
-### Claude Code Plugin
-
-```bash
-# Auto mode - AI automatically selects strategy
-/plan-cascade:auto <description>        # Auto-select and execute best strategy
-
-# Project level
-/plan-cascade:mega-plan <description>   # Generate project plan
-/plan-cascade:mega-approve --auto-prd   # Approve and auto-execute all batches
-/plan-cascade:mega-resume --auto-prd    # Resume interrupted mega-plan
-/plan-cascade:mega-complete             # Complete and merge
-
-# Feature level
-/plan-cascade:hybrid-auto <description> # Generate PRD
-/plan-cascade:approve --auto-run        # Approve and auto-execute
-/plan-cascade:hybrid-resume --auto      # Resume interrupted task
-/plan-cascade:hybrid-complete           # Complete
-
-# General
-/plan-cascade:edit                      # Edit PRD
-/plan-cascade:status                    # View status
-```
-
----
-
-## Project Structure
-
-```
-plan-cascade/
-├── src/plan_cascade/       # Python core package
-│   ├── core/               # Orchestration engine
-│   ├── backends/           # Backend abstraction
-│   ├── llm/                # LLM providers
-│   ├── tools/              # Tool execution
-│   ├── settings/           # Settings management
-│   └── cli/                # CLI entry point
-├── .claude-plugin/         # Plugin configuration
-├── commands/               # Plugin commands
-├── skills/                 # Plugin skills
-├── mcp_server/             # MCP server
-├── desktop/                # Desktop application
-└── docs/                   # Documentation
-    ├── CLI-Guide.md
-    ├── Plugin-Guide.md
-    ├── Desktop-Guide.md
-    └── MCP-SERVER-GUIDE.md
-```
-
----
-
-## Documentation Index
-
-| Document | Description |
-|----------|-------------|
-| [CLI Guide](docs/CLI-Guide.md) | Detailed CLI usage guide |
-| [Plugin Guide](docs/Plugin-Guide.md) | Detailed Claude Code plugin guide |
-| [Desktop Guide](docs/Desktop-Guide.md) | Desktop application guide |
-| [MCP Server Guide](docs/MCP-SERVER-GUIDE.md) | MCP server configuration guide |
-| [System Architecture](docs/System-Architecture.md) | System architecture and process design (with diagrams) |
-| [Design Document](docs/Design-Plan-Cascade-Standalone.md) | Technical design document |
-| [PRD Document](docs/PRD-Plan-Cascade-Standalone.md) | Product requirements document |
-
----
-
-## Changelog
-
-### v4.1.1
-
-- **Mega-Approve Full Automation** - Fixed `/plan-cascade:mega-approve --auto-prd` not running to completion
-  - Now runs the ENTIRE mega-plan automatically without manual intervention
-  - Only pauses on errors or merge conflicts
-- **Resume Commands** - New commands to resume interrupted tasks
-  - `/plan-cascade:mega-resume` - Resume interrupted mega-plan execution
-  - `/plan-cascade:hybrid-resume` - Resume interrupted hybrid task
-  - Auto-detects state from files, skips completed work
-  - Compatible with both old and new progress markers
-
-### v4.1.0
-
-- **Auto Strategy Command** - New `/plan-cascade:auto` command
-  - AI automatically analyzes task and selects optimal strategy
-  - Supports 4 strategies: direct, hybrid-auto, hybrid-worktree, mega-plan
-  - Keyword-based detection (not word count based)
-  - No user confirmation required - direct execution
-
-### v4.0.0
-
-- **Standalone CLI Complete** - Independent command-line tool fully functional
-  - Simple mode/Expert mode dual-mode support
-  - Interactive REPL chat mode
-  - AI automatic strategy selection
-- **Multi-LLM Backend** - Support for 5 LLM providers
-  - Claude Max (no API key required)
-  - Claude API, OpenAI, DeepSeek, Ollama
-- **Independent ReAct Engine** - Complete Think→Act→Observe loop
-- **Documentation Restructure** - Split into separate usage guides
-
-### v3.x
-
-- **MCP Server** - Support for Cursor, Windsurf, etc.
-- **Multi-Agent Collaboration** - Codex, Aider, etc.
-- **Auto Iteration Loop** - Quality gates, intelligent retry
-- **Mega Plan** - Project-level multi-feature orchestration
-
-See [CHANGELOG.md](CHANGELOG.md) for the complete changelog.
-
----
-
-## Project Origins
-
-This project is forked from [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) (v2.7.1), significantly expanding upon its Manus-style file-based planning foundation.
-
----
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## Acknowledgments
 
-- **[OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files)** - Original project
-- **[snarktank/ralph](https://github.com/snarktank/ralph)** - PRD format inspiration
-- **Anthropic** - Claude Code, Plugin system, and MCP protocol
-
----
+- [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) — Original inspiration
+- [snarktank/ralph](https://github.com/snarktank/ralph) — PRD format
+- [Anthropic](https://www.anthropic.com/) — Claude Code & MCP protocol
+- [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) — React/Next.js best practices skills
+- [vuejs-ai/skills](https://github.com/vuejs-ai/skills) — Vue.js best practices skills
+- [actionbook/rust-skills](https://github.com/actionbook/rust-skills) — Rust meta-cognition framework skills
 
 ## License
 
-MIT License
+[MIT License](LICENSE)
 
 ---
 
-**Repository**: [Taoidle/plan-cascade](https://github.com/Taoidle/plan-cascade)
+<div align="center">
+
+**[GitHub](https://github.com/Taoidle/plan-cascade)** • **[Issues](https://github.com/Taoidle/plan-cascade/issues)** • **[Discussions](https://github.com/Taoidle/plan-cascade/discussions)**
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Taoidle/plan-cascade&type=Date)](https://star-history.com/#Taoidle/plan-cascade&Date)
+
+</div>

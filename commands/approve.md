@@ -1,10 +1,40 @@
 ---
-description: "Approve the current PRD and begin parallel story execution. Analyzes dependencies, creates execution batches, launches background Task agents for each story, and monitors progress."
+description: "Approve the current PRD and begin parallel story execution. Analyzes dependencies, creates execution batches, launches background Task agents for each story, and monitors progress. Usage: /plan-cascade:approve [--agent <name>] [--impl-agent <name>] [--retry-agent <name>] [--no-fallback] [--auto-run]"
 ---
 
 # Hybrid Ralph - Approve PRD and Execute
 
 You are approving the PRD and starting parallel execution of user stories.
+
+## Multi-Agent Collaboration
+
+This command supports multiple AI agents for story execution. The system automatically selects the best agent based on:
+
+1. Command-line parameters (highest priority)
+2. Story-level `agent` field in PRD
+3. Story type inference (bugfix→codex, refactor→aider)
+4. Phase defaults from agents.json
+5. Fallback to claude-code (always available)
+
+### Supported Agents
+
+| Agent | Type | Best For |
+|-------|------|----------|
+| `claude-code` | task-tool | General purpose (default, always available) |
+| `codex` | cli | Bug fixes, quick implementations |
+| `aider` | cli | Refactoring, code improvements |
+| `amp-code` | cli | Alternative implementations |
+| `cursor-cli` | cli | IDE-integrated tasks |
+
+### Command Parameters
+
+```
+--agent <name>       Global agent override (all stories use this agent)
+--impl-agent <name>  Agent for implementation phase
+--retry-agent <name> Agent for retry phase (after failures)
+--no-fallback        Disable automatic fallback to claude-code
+--auto-run           Start execution immediately after approval
+```
 
 ## Tool Usage Policy (CRITICAL)
 
@@ -50,7 +80,56 @@ case "$OS_TYPE" in
 esac
 ```
 
-## Step 2: Ensure Auto-Approval Configuration
+## Step 2: Parse Agent Parameters
+
+Parse agent-related arguments:
+
+```bash
+# Parse arguments
+GLOBAL_AGENT=""
+IMPL_AGENT=""
+RETRY_AGENT=""
+NO_FALLBACK=false
+AUTO_RUN=false
+
+for arg in $ARGUMENTS; do
+    case "$arg" in
+        --agent=*) GLOBAL_AGENT="${arg#*=}" ;;
+        --impl-agent=*) IMPL_AGENT="${arg#*=}" ;;
+        --retry-agent=*) RETRY_AGENT="${arg#*=}" ;;
+        --no-fallback) NO_FALLBACK=true ;;
+        --auto-run) AUTO_RUN=true ;;
+    esac
+done
+
+# Also support space-separated format: --agent codex
+# Parse with Read tool logic in Claude's response
+```
+
+Display agent configuration:
+```
+Agent Configuration:
+  Global Override: ${GLOBAL_AGENT:-"none (use priority chain)"}
+  Implementation: ${IMPL_AGENT:-"default"}
+  Retry: ${RETRY_AGENT:-"default"}
+  Fallback: ${NO_FALLBACK:+"disabled" || "enabled"}
+```
+
+## Step 2.5: Load Agent Configuration
+
+Read `agents.json` if it exists to get agent definitions and phase defaults:
+
+```
+If agents.json exists:
+    Load agent configuration:
+    - agents: Map of agent_name → {type, command, args, ...}
+    - phase_defaults: {implementation: {...}, retry: {...}, ...}
+    - story_type_defaults: {bugfix: "codex", refactor: "aider", ...}
+Else:
+    Use default: claude-code only
+```
+
+## Step 3: Ensure Auto-Approval Configuration
 
 Ensure command auto-approval settings are configured (merges with existing settings):
 
@@ -82,6 +161,47 @@ Read `prd.json` and validate:
 - All dependency references exist
 
 If validation fails, show errors and suggest `/plan-cascade:edit`.
+
+## Step 4.5: Check for Design Document (Optional)
+
+Check if `design_doc.json` exists and display a summary:
+
+```
+If design_doc.json exists:
+    Read and display design document summary:
+
+    ────────────────────────────────────────────────────────────────
+    📐 DESIGN DOCUMENT DETECTED
+    ────────────────────────────────────────────────────────────────
+    Title: <overview.title>
+
+    Components: N defined
+      • <component1>
+      • <component2>
+      ...
+
+    Architectural Patterns: M patterns
+      • <pattern1> - <rationale>
+      • <pattern2> - <rationale>
+
+    Key Decisions: P ADRs
+      • ADR-001: <title>
+      • ADR-002: <title>
+
+    Story Mappings: Q stories mapped
+      ✓ Mapped: story-001, story-002, ...
+      ⚠ Unmapped: story-005, story-006, ... (if any)
+
+    Agents will receive relevant design context during execution.
+    ────────────────────────────────────────────────────────────────
+
+Else:
+    Note: No design document found.
+          Consider generating one with /plan-cascade:design-generate
+          for better architectural guidance during execution.
+```
+
+This summary helps reviewers understand the architectural context that will guide story execution.
 
 ## Step 5: Calculate Execution Batches
 
@@ -165,12 +285,66 @@ EOF
 
 Create `.agent-outputs/` directory for agent logs.
 
-## Step 8: Launch Batch 1 Agents
+## Step 8: Launch Batch Agents with Multi-Agent Support
 
-For each story in Batch 1, launch a background Task agent:
+For each story in the current batch, resolve the agent and launch execution.
 
-For each story:
+### 8.1: Agent Resolution for Each Story
+
+For each story, resolve agent using this priority chain:
+
 ```
+1. GLOBAL_AGENT (--agent parameter)     → Use if specified
+2. IMPL_AGENT (--impl-agent parameter)  → Use for implementation phase
+3. story.agent (from PRD)               → Use if specified in story
+4. Story type inference:
+   - Check story.tags for: bugfix, refactor, test, feature
+   - Check story.title for keywords:
+     - "fix", "bug", "error" → bugfix → prefer codex
+     - "refactor", "cleanup", "optimize" → refactor → prefer aider
+     - "test", "spec" → test → prefer claude-code
+     - "add", "create", "implement" → feature → prefer claude-code
+5. Phase default from agents.json       → implementation.default_agent
+6. Fallback chain from agents.json      → implementation.fallback_chain
+7. claude-code                          → Ultimate fallback (always available)
+```
+
+### 8.2: Agent Availability Check
+
+Before using a CLI agent, verify it's available:
+
+```
+For agent_name in resolved_chain:
+    If agent_name == "claude-code":
+        AVAILABLE = true (always)
+    Elif agent.type == "cli":
+        Check if agent.command exists in PATH:
+        - Unix: which {command}
+        - Windows: where {command}
+        If not found AND NO_FALLBACK == false:
+            Continue to next agent in chain
+        Elif not found AND NO_FALLBACK == true:
+            ERROR: Agent {agent_name} not available and fallback disabled
+
+    If AVAILABLE:
+        RESOLVED_AGENT = agent_name
+        Break
+```
+
+### 8.3: Launch Story Execution
+
+For each story in the batch:
+
+```
+# Resolve agent for this story
+RESOLVED_AGENT = resolve_agent(story, phase="implementation")
+
+# Log agent selection
+echo "[{story_id}] Using agent: {RESOLVED_AGENT}"
+echo "[AGENT] {story_id} -> {RESOLVED_AGENT}" >> progress.txt
+
+# Build prompt
+PROMPT = """
 You are executing story {story_id}: {title}
 
 Description:
@@ -180,7 +354,20 @@ Acceptance Criteria:
 - {criterion1}
 - {criterion2}
 
-Dependencies: None
+Dependencies: {dependencies or "None"}
+
+{If design_doc.json exists and has story_mappings[story_id]:}
+## Technical Design Context
+
+Components to use:
+{list of relevant components from design_doc}
+
+Patterns to follow:
+{list of relevant patterns}
+
+Relevant decisions:
+{list of relevant ADRs}
+{End if}
 
 Your task:
 1. Read relevant code and documentation
@@ -191,25 +378,57 @@ Your task:
 
 Execute all necessary bash/powershell commands directly to complete the story.
 Work methodically and document your progress.
+"""
+
+# Execute based on agent type
+If RESOLVED_AGENT == "claude-code":
+    # Use Task tool (built-in)
+    Task(
+        prompt=PROMPT,
+        subagent_type="general-purpose",
+        run_in_background=true
+    )
+    Store task_id for monitoring
+
+Elif agents[RESOLVED_AGENT].type == "cli":
+    # Use CLI agent via Bash
+    agent_config = agents[RESOLVED_AGENT]
+    command = agent_config.command  # e.g., "aider", "codex"
+    args = agent_config.args        # e.g., ["--message", "{prompt}"]
+
+    # Replace {prompt} placeholder with actual prompt
+    # Replace {working_dir} with current directory
+    full_command = f"{command} {' '.join(args)}"
+
+    Bash(
+        command=full_command,
+        run_in_background=true,
+        timeout=agent_config.timeout or 600000
+    )
+    Store task_id for monitoring
 ```
 
-Launch each agent with `run_in_background: true`.
-
-Store each task_id for monitoring.
-
-## Step 9: Wait for Batch Completion (Using TaskOutput)
-
-After launching Batch 1 agents, display:
+### 8.4: Display Agent Launch Summary
 
 ```
-=== Batch 1 Started ===
+=== Batch {N} Launched ===
 
-Launched X parallel agents:
-  - story-001: task_id-xxx (running in background)
-  - story-002: task_id-yyy (running in background)
+Stories and assigned agents:
+  - story-001: claude-code (task-tool)
+  - story-002: aider (cli) [refactor detected]
+  - story-003: codex (cli) [bugfix detected]
+
+{If any fallbacks occurred:}
+⚠️ Agent fallbacks:
+  - story-002: aider → claude-code (aider CLI not found)
+{End if}
 
 Waiting for completion...
 ```
+
+## Step 9: Wait for Batch Completion (Using TaskOutput)
+
+After launching batch agents, wait for completion:
 
 **CRITICAL**: Use TaskOutput to wait instead of sleep+grep polling. This avoids Bash confirmation prompts.
 
@@ -244,10 +463,49 @@ failed_count = count occurrences of "[FAILED]" in progress_content
 if error_count > 0 or failed_count > 0:
     echo "⚠️ ISSUES DETECTED IN BATCH"
     # Show which stories failed
-    pause for review
+    # Offer retry with different agent (see Step 9.2.5)
 
 if complete_count >= expected_count:
     echo "✓ Batch complete!"
+```
+
+### 9.2.5: Retry Failed Stories with Different Agent
+
+When a story fails, offer to retry with a different agent:
+
+```
+For each failed_story in failed_stories:
+    # Determine retry agent
+    If RETRY_AGENT specified:
+        retry_agent = RETRY_AGENT
+    Elif phase_defaults.retry.default_agent in agents.json:
+        retry_agent = phase_defaults.retry.default_agent
+    Else:
+        retry_agent = "claude-code"
+
+    # Check if retry agent is different from original
+    original_agent = get_original_agent(failed_story)
+
+    If retry_agent != original_agent AND is_agent_available(retry_agent):
+        echo "Retrying {story_id} with {retry_agent} (was: {original_agent})"
+
+        # Build retry prompt with error context
+        RETRY_PROMPT = """
+        You are RETRYING story {story_id}: {title}
+
+        PREVIOUS ATTEMPT FAILED. Error details:
+        {error_message from progress.txt}
+
+        Please analyze what went wrong and try a different approach.
+        {rest of original prompt}
+        """
+
+        # Launch retry agent
+        Launch agent (retry_agent) with RETRY_PROMPT
+        echo "[RETRY] {story_id} -> {retry_agent}" >> progress.txt
+    Else:
+        echo "Cannot retry {story_id}: no alternative agent available"
+        # Pause for manual intervention
 ```
 
 ### 9.3: Progress to Next Batch

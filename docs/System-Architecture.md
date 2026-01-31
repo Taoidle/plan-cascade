@@ -2,8 +2,8 @@
 
 # Plan Cascade - System Architecture and Workflow Design
 
-**Version**: 4.1.0
-**Last Updated**: 2026-01-29
+**Version**: 4.2.0
+**Last Updated**: 2026-01-31
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
 
@@ -15,13 +15,14 @@ This document contains detailed architecture diagrams, flowcharts, and system de
 2. [Core Components](#2-core-components)
 3. [Complete Workflow](#3-complete-workflow)
 4. [Auto Strategy Workflow](#4-auto-strategy-workflow)
-5. [Mega Plan Workflow](#5-mega-plan-workflow)
-6. [Hybrid Worktree Workflow](#6-hybrid-worktree-workflow)
-7. [Hybrid Auto Workflow](#7-hybrid-auto-workflow)
-8. [Auto-Iteration Workflow](#8-auto-iteration-workflow)
-9. [Data Flow and State Files](#9-data-flow-and-state-files)
-10. [Dual-Mode Architecture](#10-dual-mode-architecture)
-11. [Multi-Agent Collaboration Architecture](#11-multi-agent-collaboration-architecture)
+5. [Design Document System](#5-design-document-system)
+6. [Mega Plan Workflow](#6-mega-plan-workflow)
+7. [Hybrid Worktree Workflow](#7-hybrid-worktree-workflow)
+8. [Hybrid Auto Workflow](#8-hybrid-auto-workflow)
+9. [Auto-Iteration Workflow](#9-auto-iteration-workflow)
+10. [Data Flow and State Files](#10-data-flow-and-state-files)
+11. [Dual-Mode Architecture](#11-dual-mode-architecture)
+12. [Multi-Agent Collaboration Architecture](#12-multi-agent-collaboration-architecture)
 
 ---
 
@@ -30,7 +31,8 @@ This document contains detailed architecture diagrams, flowcharts, and system de
 ```mermaid
 graph TB
     subgraph "Level 1: Mega Plan Project Level"
-        MP[mega-plan.json] --> F1[Feature 1]
+        MP[mega-plan.json] --> DD1[design_doc.json<br/>Project-level]
+        MP --> F1[Feature 1]
         MP --> F2[Feature 2]
         MP --> F3[Feature 3]
     end
@@ -42,6 +44,9 @@ graph TB
         W1 --> PRD1[prd.json]
         W2 --> PRD2[prd.json]
         W3 --> PRD3[prd.json]
+        PRD1 --> DD2[design_doc.json<br/>Feature-level]
+        PRD2 --> DD3[design_doc.json<br/>Feature-level]
+        PRD3 --> DD4[design_doc.json<br/>Feature-level]
     end
 
     subgraph "Level 3: Stories Story Level"
@@ -59,14 +64,18 @@ graph TB
         S4 --> A1
         S5 --> A2
     end
+
+    DD1 -.->|inheritance| DD2
+    DD1 -.->|inheritance| DD3
+    DD1 -.->|inheritance| DD4
 ```
 
 ### Tier Details
 
 | Tier | Name | Responsibility | Artifact |
 |------|------|----------------|----------|
-| **Level 1** | Mega Plan | Project-level orchestration, manages dependencies and execution order of multiple Features | `mega-plan.json` |
-| **Level 2** | Hybrid Ralph | Feature-level development, executes in isolated Worktree, auto-generates PRD | `prd.json`, `findings.md` |
+| **Level 1** | Mega Plan | Project-level orchestration, manages dependencies and execution order of multiple Features | `mega-plan.json`, `design_doc.json` (project-level) |
+| **Level 2** | Hybrid Ralph | Feature-level development, executes in isolated Worktree, auto-generates PRD and design doc | `prd.json`, `design_doc.json` (feature-level), `findings.md` |
 | **Level 3** | Stories | Story-level execution, processed in parallel by Agents, supports quality gates and retries | Code changes, `progress.txt` |
 
 ---
@@ -94,6 +103,7 @@ graph LR
     subgraph "State Layer"
         SM[StateManager<br/>State Manager]
         CF[ContextFilter<br/>Context Filter]
+        ESL[ExternalSkillLoader<br/>External Skills]
     end
 
     O --> IL
@@ -104,6 +114,7 @@ graph LR
     QG --> RM
     O --> SM
     SM --> CF
+    CF --> ESL
 ```
 
 ### Component Descriptions
@@ -118,6 +129,7 @@ graph LR
 | **RetryManager** | Retry management, handles failure retries |
 | **StateManager** | State management, persists execution state |
 | **ContextFilter** | Context filter, optimizes Agent input |
+| **ExternalSkillLoader** | Framework skill loading, auto-detects and injects best practices |
 
 ---
 
@@ -170,7 +182,8 @@ flowchart TB
 
         AUTO --> BATCH[Execute Current Batch]
         MANUAL --> BATCH
-        BATCH --> PARALLEL[Start Agents in Parallel]
+        BATCH --> CTX[Load Context<br/>Design Doc + External Skills]
+        CTX --> PARALLEL[Start Agents in Parallel]
         PARALLEL --> WAIT[Wait for Completion]
         WAIT --> QG{Quality Gate}
         QG -->|Pass| NEXT{Next Batch?}
@@ -192,54 +205,266 @@ flowchart TB
 
 ## 4. Auto Strategy Workflow
 
-The `/plan-cascade:auto` command provides AI-driven automatic strategy selection based on task analysis.
+The `/plan-cascade:auto` command provides AI-driven automatic strategy selection based on structured task analysis.
 
 ### Strategy Selection Flowchart
 
 ```mermaid
 flowchart TD
     A["/plan-cascade:auto<br/>Task Description"] --> B[Gather Project Context]
-    B --> C[AI Strategy Analysis]
+    B --> C[AI Self-Assessment Analysis]
 
-    C --> D{Keyword Detection}
+    C --> D[Structured Task Analysis]
 
-    D -->|"platform, system,<br/>architecture, 3+ modules"| E[MEGA_PLAN]
-    D -->|"implement, create +<br/>experimental, refactor"| F[HYBRID_WORKTREE]
-    D -->|"implement, create,<br/>build, feature"| G[HYBRID_AUTO]
-    D -->|"fix, update, simple<br/>or default"| H[DIRECT]
+    D --> E{Analyze Dimensions}
+    E --> E1[Scope: Functional areas?]
+    E --> E2[Complexity: Dependencies?]
+    E --> E3[Risk: Break existing code?]
+    E --> E4[Parallelization benefit?]
 
-    E --> I["/plan-cascade:mega-plan"]
-    F --> J["/plan-cascade:hybrid-worktree"]
-    G --> K["/plan-cascade:hybrid-auto"]
-    H --> L[Direct Execution]
+    E1 --> F[Output Structured JSON]
+    E2 --> F
+    E3 --> F
+    E4 --> F
 
-    I --> M[Multi-Feature Orchestration]
-    J --> N[Isolated Development]
-    K --> O[PRD + Story Execution]
-    L --> P[Task Complete]
+    F --> G{Strategy Decision}
+
+    G -->|"4+ areas, multiple features"| H[MEGA_PLAN]
+    G -->|"2-3 areas + high risk"| I[HYBRID_WORKTREE]
+    G -->|"2-3 areas, 3-7 steps"| J[HYBRID_AUTO]
+    G -->|"1 area, 1-2 steps, low risk"| K[DIRECT]
+
+    H --> L["/plan-cascade:mega-plan"]
+    I --> M["/plan-cascade:hybrid-worktree"]
+    J --> N["/plan-cascade:hybrid-auto"]
+    K --> O[Direct Execution]
+
+    L --> P[Multi-Feature Orchestration]
+    M --> Q[Isolated Development]
+    N --> R[PRD + Story Execution]
+    O --> S[Task Complete]
 ```
 
-### Strategy Detection Rules
+### AI Self-Assessment Output
 
-| Priority | Strategy | Keywords | Condition |
-|----------|----------|----------|-----------|
-| 1 | **MEGA_PLAN** | platform, system, architecture, microservices | OR 3+ independent modules listed |
-| 2 | **HYBRID_WORKTREE** | (feature keywords) + experimental, refactor, isolated | Both conditions required |
-| 3 | **HYBRID_AUTO** | implement, create, build, feature, api | Without isolation keywords |
-| 4 | **DIRECT** | fix, typo, update, simple, single | Default fallback |
+The AI outputs structured analysis in JSON format:
+
+```json
+{
+  "task_analysis": {
+    "functional_areas": ["auth", "api", "frontend"],
+    "estimated_stories": 5,
+    "has_dependencies": true,
+    "requires_architecture_decisions": true,
+    "risk_level": "medium",
+    "parallelization_benefit": "significant"
+  },
+  "strategy_decision": {
+    "strategy": "HYBRID_AUTO",
+    "confidence": 0.85,
+    "reasoning": "Task involves 3 functional areas with dependencies..."
+  }
+}
+```
+
+### Strategy Selection Guidelines
+
+| Analysis Result | Strategy | Example |
+|----------------|----------|---------|
+| 1 functional area, 1-2 steps, low risk | **DIRECT** | "Fix the typo in README" |
+| 2-3 functional areas, 3-7 steps, has dependencies | **HYBRID_AUTO** | "Implement user authentication with OAuth" |
+| HYBRID_AUTO + high risk or experimental | **HYBRID_WORKTREE** | "Experimental refactoring of payment module" |
+| 4+ functional areas, multiple independent features | **MEGA_PLAN** | "Build e-commerce platform with users, products, cart, orders" |
 
 ### Example Strategy Mappings
 
-| Task Description | Detected Keywords | Selected Strategy |
-|-----------------|-------------------|-------------------|
-| "Fix the typo in README" | fix, typo | DIRECT |
-| "Implement user authentication with OAuth" | implement, authentication | HYBRID_AUTO |
-| "Experimental refactoring of payment module" | refactoring + experimental | HYBRID_WORKTREE |
-| "Build e-commerce platform with users, products, cart, orders" | platform + 4 modules | MEGA_PLAN |
+| Task Description | Analysis Result | Selected Strategy |
+|-----------------|-----------------|-------------------|
+| "Fix the typo in README" | 1 area, low risk | DIRECT |
+| "Implement user authentication with OAuth" | 3 areas, has dependencies | HYBRID_AUTO |
+| "Experimental refactoring of payment module" | medium risk + experimental | HYBRID_WORKTREE |
+| "Build e-commerce platform with users, products, cart, orders" | 4+ functional areas | MEGA_PLAN |
 
 ---
 
-## 5. Mega Plan Workflow
+## 5. Design Document System
+
+Plan Cascade automatically generates technical design documents (`design_doc.json`) alongside PRDs to provide architectural context during story execution.
+
+### Two-Level Architecture
+
+```mermaid
+graph TB
+    subgraph "Level 1: Project Design"
+        PDD[Project design_doc.json]
+        PDD --> ARCH[Architecture Overview]
+        PDD --> PATTERNS[Cross-Feature Patterns]
+        PDD --> PADRS[Project ADRs<br/>ADR-001, ADR-002...]
+        PDD --> FMAP[Feature Mappings]
+    end
+
+    subgraph "Level 2: Feature Design"
+        FDD[Feature design_doc.json]
+        FDD --> COMP[Feature Components]
+        FDD --> API[Feature APIs]
+        FDD --> FADRS[Feature ADRs<br/>ADR-F001, ADR-F002...]
+        FDD --> SMAP[Story Mappings]
+    end
+
+    PDD -.->|inheritance| FDD
+    PATTERNS -.->|referenced by| COMP
+    PADRS -.->|extended by| FADRS
+```
+
+### Design Document Schema
+
+```json
+{
+  "metadata": {
+    "created_at": "ISO-8601",
+    "version": "1.0.0",
+    "source": "ai-generated|user-provided|converted",
+    "prd_reference": "prd.json",
+    "parent_design_doc": "path/to/project/design_doc.json"
+  },
+  "overview": {
+    "title": "Project/Feature Title",
+    "summary": "Summary description",
+    "goals": ["Goal 1", "Goal 2"],
+    "non_goals": ["Non-goal 1"]
+  },
+  "architecture": {
+    "components": [{
+      "name": "ComponentName",
+      "description": "Description",
+      "responsibilities": ["Responsibility 1"],
+      "dependencies": ["DependencyComponent"],
+      "files": ["src/file.py"]
+    }],
+    "data_flow": "Data flow description",
+    "patterns": [{
+      "name": "PatternName",
+      "description": "Description",
+      "rationale": "Why this pattern"
+    }]
+  },
+  "interfaces": {
+    "apis": [...],
+    "data_models": [...]
+  },
+  "decisions": [{
+    "id": "ADR-001",
+    "title": "Decision Title",
+    "context": "Background context",
+    "decision": "The decision made",
+    "rationale": "Why this decision",
+    "alternatives_considered": ["Alternative 1"],
+    "status": "accepted"
+  }],
+  "story_mappings": {
+    "story-001": {
+      "components": ["ComponentA"],
+      "decisions": ["ADR-001"],
+      "interfaces": ["API-1"]
+    }
+  },
+  "feature_mappings": {
+    "feature-001": {
+      "patterns": ["PatternA"],
+      "decisions": ["ADR-001"]
+    }
+  }
+}
+```
+
+### Auto-Generation Flow
+
+```mermaid
+flowchart TD
+    subgraph "Mega Plan Flow"
+        MP[mega-plan.json] --> PDD[Generate Project design_doc.json]
+        PDD --> F1[Feature 1 Worktree]
+        PDD --> F2[Feature 2 Worktree]
+        F1 --> PRD1[prd.json]
+        F2 --> PRD2[prd.json]
+        PRD1 --> FDD1[Feature design_doc.json<br/>inherits from Project]
+        PRD2 --> FDD2[Feature design_doc.json<br/>inherits from Project]
+    end
+
+    subgraph "Hybrid Auto/Worktree Flow"
+        PRD[prd.json] --> FDD[Generate Feature design_doc.json]
+    end
+```
+
+### External Design Document Import
+
+All three main commands support importing external design documents:
+
+```bash
+# mega-plan: 2nd argument
+/plan-cascade:mega-plan "Build e-commerce" ./architecture.md
+
+# hybrid-auto: 2nd argument
+/plan-cascade:hybrid-auto "Implement auth" ./auth-design.md
+
+# hybrid-worktree: 4th argument
+/plan-cascade:hybrid-worktree fix-auth main "Fix auth" ./design.md
+```
+
+Supported formats: Markdown (.md), JSON (.json), HTML (.html)
+
+### Context Injection Flow
+
+```mermaid
+flowchart LR
+    DD[design_doc.json] --> CF[ContextFilter]
+    CF --> |story_mappings| SC[Story Context]
+    SC --> AE[AgentExecutor]
+    AE --> |Design-aware prompt| Agent
+
+    subgraph "Story Context"
+        SC --> COMP[Relevant Components]
+        SC --> DEC[Relevant Decisions]
+        SC --> PAT[Architectural Patterns]
+    end
+```
+
+### External Framework Skills
+
+Plan Cascade includes built-in framework-specific skills loaded from Git submodules:
+
+```mermaid
+flowchart TD
+    subgraph "Skill Detection"
+        PJ[package.json] --> ESL[ExternalSkillLoader]
+        CT[Cargo.toml] --> ESL
+        ESL --> |detect patterns| MATCH{Framework Match?}
+    end
+
+    subgraph "Skill Sources (Git Submodules)"
+        MATCH -->|React/Next| VS[external-skills/vercel/]
+        MATCH -->|Vue/Nuxt| VUE[external-skills/vue/]
+        MATCH -->|Rust| RS[external-skills/rust/]
+    end
+
+    subgraph "Injection"
+        VS --> LOAD[Load SKILL.md]
+        VUE --> LOAD
+        RS --> LOAD
+        LOAD --> CF2[ContextFilter]
+        CF2 --> |external_skills| SC2[Story Context]
+    end
+```
+
+| Framework | Detection | Skills Injected |
+|-----------|-----------|-----------------|
+| React/Next.js | `package.json` contains `react`, `next` | `react-best-practices`, `web-design-guidelines` |
+| Vue/Nuxt | `package.json` contains `vue`, `nuxt` | `vue-best-practices`, `vue-router-best-practices`, `vue-pinia-best-practices` |
+| Rust | `Cargo.toml` exists | `rust-coding-guidelines`, `rust-ownership`, `rust-error-handling`, `rust-concurrency` |
+
+---
+
+## 6. Mega Plan Workflow
 
 Suitable for large project development containing multiple related feature modules.
 
@@ -312,7 +537,7 @@ flowchart TD
 
 ---
 
-## 6. Hybrid Worktree Workflow
+## 7. Hybrid Worktree Workflow
 
 Suitable for single complex feature development requiring branch isolation.
 
@@ -375,7 +600,7 @@ flowchart TD
 
 ---
 
-## 7. Hybrid Auto Workflow
+## 8. Hybrid Auto Workflow
 
 Suitable for quick development of simple features without Worktree isolation.
 
@@ -434,7 +659,7 @@ flowchart TD
 
 ---
 
-## 8. Auto-Iteration Workflow
+## 9. Auto-Iteration Workflow
 
 Auto-iteration loop started by `/plan-cascade:approve --auto-run` or `/plan-cascade:auto-run` command:
 
@@ -463,9 +688,10 @@ flowchart TD
     M --> N2[Story Type: bugfix → codex]
     M --> N3[Story Type: refactor → aider]
 
-    N1 --> O[Start Agents in Parallel]
-    N2 --> O
-    N3 --> O
+    N1 --> CTX[Load Story Context<br/>Design Doc + External Skills]
+    N2 --> CTX
+    N3 --> CTX
+    CTX --> O[Start Agents in Parallel]
 
     O --> P[Poll Wait<br/>poll_interval: 10s]
     P --> Q{Story Complete?}
@@ -528,28 +754,32 @@ flowchart TD
 
 ---
 
-## 9. Data Flow and State Files
+## 10. Data Flow and State Files
 
 ```mermaid
 graph TB
     subgraph "Input"
         U[User Description] --> CMD[Command Parser]
         CFG[agents.json] --> CMD
+        EXT[External Design Doc<br/>.md/.json/.html] -.-> CMD
     end
 
     subgraph "Planning Files"
         CMD --> PRD[prd.json<br/>PRD Document]
         CMD --> MP[mega-plan.json<br/>Project Plan]
+        CMD --> DD[design_doc.json<br/>Design Document]
     end
 
     subgraph "Execution State"
         PRD --> AS[.agent-status.json<br/>Agent Status]
         PRD --> IS[.iteration-state.json<br/>Iteration State]
         PRD --> RS[.retry-state.json<br/>Retry State]
+        MP --> MS[.mega-status.json<br/>Mega Plan Status]
     end
 
     subgraph "Shared Context"
         AS --> FD[findings.md<br/>Findings Record]
+        AS --> MF[mega-findings.md<br/>Project Findings]
         AS --> PG[progress.txt<br/>Progress Log]
     end
 
@@ -562,12 +792,18 @@ graph TB
         LK[.locks/<br/>File Locks]
     end
 
+    DD --> CF[ContextFilter]
+    CF --> AS
+
     style PRD fill:#e1f5fe
     style MP fill:#e1f5fe
+    style DD fill:#e1f5fe
     style AS fill:#fff3e0
     style IS fill:#fff3e0
     style RS fill:#fff3e0
+    style MS fill:#fff3e0
     style FD fill:#e8f5e9
+    style MF fill:#e8f5e9
     style PG fill:#e8f5e9
 ```
 
@@ -577,18 +813,21 @@ graph TB
 |------|------|-------------|
 | `prd.json` | Planning | PRD document, contains goals, stories, dependencies |
 | `mega-plan.json` | Planning | Project-level plan, manages multiple Features |
+| `design_doc.json` | Planning | Technical design document, architecture and decisions |
 | `agents.json` | Configuration | Agent configuration, includes phase defaults and fallback chains |
 | `findings.md` | Shared | Agent findings record, supports tag filtering |
+| `mega-findings.md` | Shared | Project-level findings (mega-plan mode) |
 | `progress.txt` | Shared | Progress timeline, includes Agent execution info |
 | `.agent-status.json` | State | Agent running/completed/failed status |
 | `.iteration-state.json` | State | Auto-iteration progress and batch results |
 | `.retry-state.json` | State | Retry history and failure records |
+| `.mega-status.json` | State | Mega-plan execution status |
 | `.agent-detection.json` | Cache | Cross-platform Agent detection results (1-hour TTL) |
 | `.agent-outputs/` | Output | Agent logs, prompts, and result files |
 
 ---
 
-## 10. Dual-Mode Architecture
+## 11. Dual-Mode Architecture
 
 ### Mode Switching Design
 
@@ -756,7 +995,7 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 
 ---
 
-## 11. Multi-Agent Collaboration Architecture
+## 12. Multi-Agent Collaboration Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -789,6 +1028,42 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Supported Agents
+
+| Agent | Type | Best For |
+|-------|------|----------|
+| `claude-code` | task-tool | General purpose (default, always available) |
+| `codex` | cli | Bug fixes, quick implementations |
+| `aider` | cli | Refactoring, code improvements |
+| `amp-code` | cli | Alternative implementations |
+| `cursor-cli` | cli | Cursor editor integration |
+
+### Command Parameters
+
+**For `/plan-cascade:approve` (story execution):**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `--agent` | Global agent override (all stories) | `--agent=codex` |
+| `--impl-agent` | Implementation phase agent | `--impl-agent=claude-code` |
+| `--retry-agent` | Retry phase agent | `--retry-agent=aider` |
+| `--no-fallback` | Disable auto-fallback on failure | `--no-fallback` |
+
+**For `/plan-cascade:mega-approve` (feature execution):**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `--agent` | Global agent override | `--agent=claude-code` |
+| `--prd-agent` | PRD generation agent | `--prd-agent=codex` |
+| `--impl-agent` | Implementation phase agent | `--impl-agent=aider` |
+| `--auto-prd` | Auto-generate PRDs and execute | `--auto-prd` |
+
+**For `/plan-cascade:hybrid-auto` (PRD generation):**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `--agent` | Agent for PRD generation | `--agent=codex` |
+
 ### Phase-Based Agent Assignment
 
 | Phase | Default Agent | Fallback Chain | Story Type Override |
@@ -809,6 +1084,29 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 5. Phase default Agent                    # phase_defaults configuration
 6. Fallback chain                         # fallback_chain
 7. claude-code                            # Ultimate fallback (always available)
+```
+
+### Agent Configuration File (agents.json)
+
+```json
+{
+  "default_agent": "claude-code",
+  "agents": {
+    "claude-code": {"type": "task-tool"},
+    "codex": {"type": "cli", "command": "codex"},
+    "aider": {"type": "cli", "command": "aider"}
+  },
+  "phase_defaults": {
+    "implementation": {
+      "default_agent": "claude-code",
+      "fallback_chain": ["codex", "aider"],
+      "story_type_overrides": {
+        "refactor": "aider",
+        "bugfix": "codex"
+      }
+    }
+  }
+}
 ```
 
 ---

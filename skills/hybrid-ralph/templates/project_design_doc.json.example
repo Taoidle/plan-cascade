@@ -1,0 +1,223 @@
+{
+  "metadata": {
+    "created_at": "2024-01-15T10:00:00Z",
+    "version": "1.0.0",
+    "source": "ai-generated",
+    "level": "project",
+    "mega_plan_reference": "mega-plan.json"
+  },
+  "overview": {
+    "title": "E-Commerce Platform",
+    "summary": "A comprehensive e-commerce platform with user management, product catalog, shopping cart, and order processing capabilities.",
+    "goals": [
+      "Enable users to browse, search, and purchase products",
+      "Provide secure payment processing",
+      "Support inventory management and order fulfillment",
+      "Scale to handle high traffic volumes"
+    ],
+    "non_goals": [
+      "Marketplace functionality (multi-vendor) - Phase 2",
+      "Mobile native apps - separate project",
+      "Advanced analytics dashboard - future enhancement"
+    ]
+  },
+  "architecture": {
+    "system_overview": "Microservices architecture with API Gateway, deployed on Kubernetes. Each feature is an independent service with its own database.",
+    "components": [
+      {
+        "name": "API Gateway",
+        "description": "Central entry point for all client requests",
+        "responsibilities": [
+          "Request routing to appropriate services",
+          "Authentication and authorization",
+          "Rate limiting and throttling",
+          "Request/response logging"
+        ],
+        "dependencies": [],
+        "features": ["all"]
+      },
+      {
+        "name": "User Service",
+        "description": "User management and authentication",
+        "responsibilities": [
+          "User registration and profile management",
+          "Authentication and session management",
+          "Password reset and account recovery"
+        ],
+        "dependencies": ["API Gateway"],
+        "features": ["feature-users"]
+      },
+      {
+        "name": "Product Service",
+        "description": "Product catalog and inventory management",
+        "responsibilities": [
+          "Product CRUD operations",
+          "Category management",
+          "Inventory tracking",
+          "Search and filtering"
+        ],
+        "dependencies": ["API Gateway"],
+        "features": ["feature-products"]
+      },
+      {
+        "name": "Cart Service",
+        "description": "Shopping cart management",
+        "responsibilities": [
+          "Cart item management",
+          "Price calculation",
+          "Session persistence"
+        ],
+        "dependencies": ["API Gateway", "Product Service"],
+        "features": ["feature-cart"]
+      },
+      {
+        "name": "Order Service",
+        "description": "Order processing and fulfillment",
+        "responsibilities": [
+          "Order creation and management",
+          "Payment processing integration",
+          "Order status tracking",
+          "Fulfillment workflow"
+        ],
+        "dependencies": ["API Gateway", "User Service", "Product Service", "Cart Service"],
+        "features": ["feature-orders"]
+      }
+    ],
+    "data_flow": "Client → API Gateway → Service → Database. Services communicate via message queue for async operations and direct HTTP for sync operations.",
+    "patterns": [
+      {
+        "name": "API Gateway Pattern",
+        "description": "Single entry point for all client requests",
+        "rationale": "Centralized cross-cutting concerns (auth, logging, rate limiting); simplifies client integration",
+        "applies_to": ["all"]
+      },
+      {
+        "name": "Database per Service",
+        "description": "Each microservice owns its data",
+        "rationale": "Loose coupling, independent scaling, technology freedom per service",
+        "applies_to": ["all"]
+      },
+      {
+        "name": "Event-Driven Communication",
+        "description": "Services publish events for async processing",
+        "rationale": "Decoupling, reliability, eventual consistency where appropriate",
+        "applies_to": ["feature-orders", "feature-cart"]
+      },
+      {
+        "name": "Repository Pattern",
+        "description": "Abstract data access behind repository interfaces",
+        "rationale": "Testability, separation of concerns",
+        "applies_to": ["all"]
+      }
+    ],
+    "infrastructure": {
+      "deployment": "Kubernetes on AWS EKS",
+      "database": "PostgreSQL for each service",
+      "cache": "Redis for session and frequently accessed data",
+      "message_queue": "RabbitMQ for async communication",
+      "monitoring": "Prometheus + Grafana"
+    }
+  },
+  "interfaces": {
+    "api_standards": {
+      "style": "RESTful",
+      "versioning": "URL-based (/api/v1/...)",
+      "authentication": "JWT Bearer tokens",
+      "error_format": {
+        "code": "string",
+        "message": "string",
+        "details": "object (optional)"
+      }
+    },
+    "shared_data_models": [
+      {
+        "name": "Money",
+        "description": "Monetary value representation",
+        "fields": {
+          "amount": "integer (cents)",
+          "currency": "string (ISO 4217)"
+        },
+        "used_by": ["feature-products", "feature-cart", "feature-orders"]
+      },
+      {
+        "name": "Address",
+        "description": "Physical address",
+        "fields": {
+          "street": "string",
+          "city": "string",
+          "state": "string",
+          "postal_code": "string",
+          "country": "string (ISO 3166)"
+        },
+        "used_by": ["feature-users", "feature-orders"]
+      }
+    ]
+  },
+  "decisions": [
+    {
+      "id": "ADR-001",
+      "title": "Use microservices architecture",
+      "context": "Platform needs to scale independently per domain and support multiple development teams.",
+      "decision": "Adopt microservices with one service per business domain (users, products, cart, orders).",
+      "rationale": "Independent scaling, team autonomy, technology flexibility, fault isolation.",
+      "alternatives_considered": [
+        "Monolith - simpler initially but scaling challenges",
+        "Modular monolith - compromise but shared deployment"
+      ],
+      "status": "accepted",
+      "applies_to": ["all"]
+    },
+    {
+      "id": "ADR-002",
+      "title": "Use PostgreSQL as primary database",
+      "context": "Need reliable, ACID-compliant database with good JSON support.",
+      "decision": "PostgreSQL 15+ for all services, with JSONB for flexible fields.",
+      "rationale": "Battle-tested reliability, excellent performance, rich feature set, team familiarity.",
+      "alternatives_considered": [
+        "MySQL - less rich JSON support",
+        "MongoDB - eventual consistency concerns for orders"
+      ],
+      "status": "accepted",
+      "applies_to": ["all"]
+    },
+    {
+      "id": "ADR-003",
+      "title": "JWT for authentication",
+      "context": "Stateless authentication needed for microservices.",
+      "decision": "JWT tokens with 1-hour expiry, refresh token rotation.",
+      "rationale": "Stateless, scalable, works across services without session store.",
+      "alternatives_considered": [
+        "Session-based - requires shared session store",
+        "OAuth2 only - more complex for internal auth"
+      ],
+      "status": "accepted",
+      "applies_to": ["feature-users"]
+    }
+  ],
+  "feature_mappings": {
+    "feature-users": {
+      "components": ["API Gateway", "User Service"],
+      "patterns": ["Repository Pattern", "API Gateway Pattern"],
+      "decisions": ["ADR-001", "ADR-002", "ADR-003"],
+      "description": "User registration, authentication, and profile management"
+    },
+    "feature-products": {
+      "components": ["API Gateway", "Product Service"],
+      "patterns": ["Repository Pattern", "API Gateway Pattern"],
+      "decisions": ["ADR-001", "ADR-002"],
+      "description": "Product catalog, categories, and inventory"
+    },
+    "feature-cart": {
+      "components": ["API Gateway", "Cart Service", "Product Service"],
+      "patterns": ["Repository Pattern", "Event-Driven Communication"],
+      "decisions": ["ADR-001", "ADR-002"],
+      "description": "Shopping cart management"
+    },
+    "feature-orders": {
+      "components": ["API Gateway", "Order Service", "User Service", "Product Service", "Cart Service"],
+      "patterns": ["Repository Pattern", "Event-Driven Communication"],
+      "decisions": ["ADR-001", "ADR-002"],
+      "description": "Order processing and fulfillment"
+    }
+  }
+}

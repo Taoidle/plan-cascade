@@ -1,10 +1,36 @@
 ---
-description: "Approve the mega-plan and start feature execution. Creates worktrees and generates PRDs for each feature. Usage: /plan-cascade:mega-approve [--auto-prd]"
+description: "Approve the mega-plan and start feature execution. Creates worktrees and generates PRDs for each feature. Usage: /plan-cascade:mega-approve [--auto-prd] [--agent <name>] [--prd-agent <name>] [--impl-agent <name>]"
 ---
 
 # Approve Mega Plan and Start Execution
 
 Approve the mega-plan and begin executing features in **batch-by-batch** order with **FULL AUTOMATION**.
+
+## Multi-Agent Collaboration
+
+Mega-plan execution supports multiple AI agents at two levels:
+
+1. **PRD Generation**: Agent that generates PRDs for each feature worktree
+2. **Story Execution**: Agent that executes stories within each feature
+
+### Supported Agents
+
+| Agent | Type | Best For |
+|-------|------|----------|
+| `claude-code` | task-tool | General purpose (default, always available) |
+| `codex` | cli | PRD generation, bug fixes |
+| `aider` | cli | Refactoring, code improvements |
+| `amp-code` | cli | Alternative implementations |
+
+### Command Parameters
+
+```
+--auto-prd           Fully automatic mode (no pauses)
+--agent <name>       Global agent override (all tasks use this agent)
+--prd-agent <name>   Agent for PRD generation phase
+--impl-agent <name>  Agent for story implementation phase
+--no-fallback        Disable automatic fallback to claude-code
+```
 
 ## Tool Usage Policy (CRITICAL)
 
@@ -40,10 +66,6 @@ Approve the mega-plan and begin executing features in **batch-by-batch** order w
 
 **WITHOUT `--auto-prd`**: Pauses after PRD generation for manual review.
 
-## Arguments
-
-- `--auto-prd`: **FULLY AUTOMATIC MODE** - No manual intervention required until completion or error
-
 ## Step 1: Verify Mega Plan Exists
 
 ```bash
@@ -56,12 +78,30 @@ fi
 
 ## Step 2: Parse Arguments and State
 
-Check if `--auto-prd` was specified:
+Parse all command arguments:
 
 ```bash
+# Mode flags
 AUTO_PRD=false
-if [[ "$ARGUMENTS" == *"--auto-prd"* ]]; then
-    AUTO_PRD=true
+NO_FALLBACK=false
+
+# Agent parameters
+GLOBAL_AGENT=""
+PRD_AGENT=""
+IMPL_AGENT=""
+
+# Parse arguments
+for arg in $ARGUMENTS; do
+    case "$arg" in
+        --auto-prd) AUTO_PRD=true ;;
+        --no-fallback) NO_FALLBACK=true ;;
+        --agent=*) GLOBAL_AGENT="${arg#*=}" ;;
+        --prd-agent=*) PRD_AGENT="${arg#*=}" ;;
+        --impl-agent=*) IMPL_AGENT="${arg#*=}" ;;
+    esac
+done
+
+if [ "$AUTO_PRD" = true ]; then
     echo "============================================"
     echo "FULLY AUTOMATIC MODE ENABLED"
     echo "============================================"
@@ -69,12 +109,73 @@ if [[ "$ARGUMENTS" == *"--auto-prd"* ]]; then
     echo "Only pauses on errors."
     echo "============================================"
 fi
+
+# Display agent configuration
+echo ""
+echo "Agent Configuration:"
+echo "  Global Override: ${GLOBAL_AGENT:-"none (use defaults)"}"
+echo "  PRD Generation: ${PRD_AGENT:-"claude-code"}"
+echo "  Implementation: ${IMPL_AGENT:-"per-story resolution"}"
+echo "  Fallback: ${NO_FALLBACK:+"disabled"}"
+echo ""
+```
+
+### 2.1: Load Agent Configuration
+
+```
+If agents.json exists at project root:
+    Load agent configuration:
+    - agents: Map of agent definitions
+    - phase_defaults: PRD generation and implementation defaults
+    - story_type_defaults: Agent selection by story type
+Else:
+    Use defaults: claude-code for all tasks
 ```
 
 Read current state from `.mega-status.json`:
 - `current_batch`: Which batch is currently executing (0 = not started)
 - `completed_batches`: List of completed batch numbers
 - `features`: Status of each feature
+
+## Step 2.5: Check for Design Document (Optional)
+
+Check if a global `design_doc.json` exists at project root:
+
+```
+If design_doc.json exists:
+    Read and display design document summary:
+
+    ────────────────────────────────────────────────────────────────
+    📐 GLOBAL DESIGN DOCUMENT DETECTED
+    ────────────────────────────────────────────────────────────────
+    Title: <overview.title>
+
+    Components: N defined
+      • <component1> - <description>
+      • <component2> - <description>
+
+    Architectural Patterns: M patterns
+      • <pattern1>
+      • <pattern2>
+
+    Key Decisions: P ADRs
+      • ADR-001: <title>
+      • ADR-002: <title>
+
+    This design document will be:
+    ✓ Copied to each feature worktree
+    ✓ Used to guide PRD generation
+    ✓ Injected into story execution context
+    ────────────────────────────────────────────────────────────────
+
+    HAS_DESIGN_DOC=true
+Else:
+    Note: No global design document found.
+          Consider creating one with /plan-cascade:design-generate
+          for better architectural guidance across features.
+
+    HAS_DESIGN_DOC=false
+```
 
 ## Step 3: Calculate Batches and Determine State
 
@@ -159,6 +260,7 @@ Create in each worktree:
 - `findings.md` initialized with feature info
 - `progress.txt` for tracking
 - Copy `mega-findings.md` from project root
+- Copy `design_doc.json` from project root (if exists)
 
 ## Step 6: Generate PRDs for Batch (Task Agents)
 
@@ -179,13 +281,19 @@ Working Directory: {worktree_path}
 Your task:
 1. Change to the worktree directory: cd {worktree_path}
 2. Read mega-findings.md for project context
-3. Explore relevant code in the codebase
-4. Generate a comprehensive prd.json with:
+3. **If design_doc.json exists, read it for architectural guidance:**
+   - Identify relevant components for this feature
+   - Note applicable architectural patterns
+   - Reference relevant ADRs (architectural decisions)
+   - Map stories to components/decisions in the PRD
+4. Explore relevant code in the codebase
+5. Generate a comprehensive prd.json with:
    - Clear goal matching the feature description
    - 3-7 user stories with proper dependencies
    - Each story has: id, title, description, priority, dependencies, acceptance_criteria, status="pending"
-5. Save prd.json to {worktree_path}/prd.json
-6. Update progress.txt: echo "[PRD_COMPLETE] {feature_id}" >> {worktree_path}/progress.txt
+6. **If design_doc.json exists, also generate/update story_mappings** linking each story to relevant components, decisions, and interfaces
+7. Save prd.json to {worktree_path}/prd.json
+8. Update progress.txt: echo "[PRD_COMPLETE] {feature_id}" >> {worktree_path}/progress.txt
 
 PRD JSON format:
 {
@@ -214,19 +322,60 @@ PRD JSON format:
 Work methodically. When done, the [PRD_COMPLETE] marker in progress.txt signals completion.
 ```
 
-### 6.2: Launch PRD Agents in Parallel
+### 6.2: Resolve PRD Generation Agent
 
-Launch ALL PRD generation agents simultaneously using the Task tool:
+Determine which agent to use for PRD generation:
+
+```
+# Priority chain for PRD agent
+If GLOBAL_AGENT specified:
+    prd_agent = GLOBAL_AGENT
+Elif PRD_AGENT specified:
+    prd_agent = PRD_AGENT
+Elif phase_defaults.planning.default_agent in agents.json:
+    prd_agent = phase_defaults.planning.default_agent
+Else:
+    prd_agent = "claude-code"
+
+# Verify agent availability
+If prd_agent != "claude-code":
+    If agents[prd_agent].type == "cli":
+        If not is_command_available(agents[prd_agent].command):
+            If NO_FALLBACK:
+                ERROR: Agent {prd_agent} not available
+            Else:
+                echo "⚠️ {prd_agent} not available, falling back to claude-code"
+                prd_agent = "claude-code"
+
+echo "PRD Generation Agent: {prd_agent}"
+```
+
+### 6.3: Launch PRD Agents in Parallel
+
+Launch ALL PRD generation agents simultaneously:
 
 ```
 For each feature in batch:
-    task_id = Task(
-        prompt=<PRD generation prompt above>,
-        subagent_type="general-purpose",
-        run_in_background=true,
-        description="Generate PRD for {feature_id}"
-    )
+    If prd_agent == "claude-code":
+        # Use Task tool (built-in)
+        task_id = Task(
+            prompt=<PRD generation prompt above>,
+            subagent_type="general-purpose",
+            run_in_background=true,
+            description="Generate PRD for {feature_id}"
+        )
+    Else:
+        # Use CLI agent
+        agent_config = agents[prd_agent]
+        command = build_cli_command(agent_config, prompt)
+        task_id = Bash(
+            command=command,
+            run_in_background=true,
+            timeout=agent_config.timeout
+        )
+
     Store task_id in prd_tasks[feature_id]
+    echo "[PRD_AGENT] {feature_id} -> {prd_agent}" >> mega-findings.md
 ```
 
 ### 6.3: Wait for All PRD Agents to Complete
@@ -269,14 +418,21 @@ Working Directory: {worktree_path}
 
 EXECUTION RULES:
 1. Read prd.json from {worktree_path}/prd.json
-2. Calculate story batches based on dependencies
-3. Execute stories in batch order (parallel within batch, sequential across batches)
-4. For each story:
-   a. Implement according to acceptance criteria
-   b. Test your implementation
-   c. Mark complete: Update story status to "complete" in prd.json
-   d. Log to progress.txt: echo "[STORY_COMPLETE] {story_id}" >> progress.txt
-5. When ALL stories are complete:
+2. **If design_doc.json exists, read it for architectural context:**
+   - Check story_mappings to find relevant components for each story
+   - Follow the architectural patterns defined in the document
+   - Adhere to the architectural decisions (ADRs)
+   - Reference the relevant APIs and data models
+3. Calculate story batches based on dependencies
+4. Execute stories in batch order (parallel within batch, sequential across batches)
+5. For each story:
+   a. **Get design context for this story from design_doc.json (if exists)**
+   b. Implement according to acceptance criteria
+   c. **Follow architectural patterns and decisions from design context**
+   d. Test your implementation
+   e. Mark complete: Update story status to "complete" in prd.json
+   f. Log to progress.txt: echo "[STORY_COMPLETE] {story_id}" >> progress.txt
+6. When ALL stories are complete:
    echo "[FEATURE_COMPLETE] {feature_id}" >> progress.txt
 
 IMPORTANT:
@@ -299,18 +455,68 @@ Story execution loop:
 When completely done, [FEATURE_COMPLETE] marker signals this feature is ready for merge.
 ```
 
-### 7.2: Launch Feature Execution Agents in Parallel
+### 7.2: Resolve Story Execution Agent
+
+For mega-plan, the feature execution agent handles all stories within a feature.
+Agent resolution follows the same priority chain:
+
+```
+# Priority chain for implementation agent
+If GLOBAL_AGENT specified:
+    impl_agent = GLOBAL_AGENT
+Elif IMPL_AGENT specified:
+    impl_agent = IMPL_AGENT
+Elif phase_defaults.implementation.default_agent in agents.json:
+    impl_agent = phase_defaults.implementation.default_agent
+Else:
+    impl_agent = "claude-code"
+
+# Verify agent availability
+If impl_agent != "claude-code":
+    If agents[impl_agent].type == "cli":
+        If not is_command_available(agents[impl_agent].command):
+            If NO_FALLBACK:
+                ERROR: Agent {impl_agent} not available
+            Else:
+                echo "⚠️ {impl_agent} not available, falling back to claude-code"
+                impl_agent = "claude-code"
+
+echo "Story Execution Agent: {impl_agent}"
+```
+
+### 7.3: Launch Feature Execution Agents in Parallel
 
 ```
 For each feature in batch:
-    task_id = Task(
-        prompt=<Story execution prompt above>,
-        subagent_type="general-purpose",
-        run_in_background=true,
-        description="Execute stories for {feature_id}"
-    )
+    If impl_agent == "claude-code":
+        # Use Task tool (built-in)
+        task_id = Task(
+            prompt=<Story execution prompt above>,
+            subagent_type="general-purpose",
+            run_in_background=true,
+            description="Execute stories for {feature_id}"
+        )
+    Else:
+        # Use CLI agent
+        agent_config = agents[impl_agent]
+        command = build_cli_command(agent_config, prompt)
+        task_id = Bash(
+            command=command,
+            run_in_background=true,
+            timeout=agent_config.timeout
+        )
+
     Store task_id in execution_tasks[feature_id]
+    echo "[IMPL_AGENT] {feature_id} -> {impl_agent}" >> mega-findings.md
 ```
+
+**Note on Story-Level Agent Selection**:
+Within each feature, the execution agent may optionally use different agents per story based on:
+- `story.agent` field in prd.json
+- Story type inference (bugfix, refactor, etc.)
+- Story type defaults from agents.json
+
+This is handled within the feature execution prompt if the agent supports it.
 
 ## Step 8: Wait for Batch Completion (Using TaskOutput)
 

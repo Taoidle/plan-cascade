@@ -2,8 +2,8 @@
 
 # Plan Cascade - 系统架构与流程设计
 
-**版本**: 4.1.0
-**最后更新**: 2026-01-29
+**版本**: 4.2.0
+**最后更新**: 2026-01-31
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
 
@@ -15,13 +15,14 @@
 2. [核心组件](#2-核心组件)
 3. [完整工作流](#3-完整工作流)
 4. [Auto 自动策略流程](#4-auto-自动策略流程)
-5. [Mega Plan 流程](#5-mega-plan-流程)
-6. [Hybrid Worktree 流程](#6-hybrid-worktree-流程)
-7. [Hybrid Auto 流程](#7-hybrid-auto-流程)
-8. [自动迭代流程](#8-自动迭代流程)
-9. [数据流与状态文件](#9-数据流与状态文件)
-10. [双模式架构](#10-双模式架构)
-11. [多 Agent 协同架构](#11-多-agent-协同架构)
+5. [设计文档系统](#5-设计文档系统)
+6. [Mega Plan 流程](#6-mega-plan-流程)
+7. [Hybrid Worktree 流程](#7-hybrid-worktree-流程)
+8. [Hybrid Auto 流程](#8-hybrid-auto-流程)
+9. [自动迭代流程](#9-自动迭代流程)
+10. [数据流与状态文件](#10-数据流与状态文件)
+11. [双模式架构](#11-双模式架构)
+12. [多 Agent 协同架构](#12-多-agent-协同架构)
 
 ---
 
@@ -30,7 +31,8 @@
 ```mermaid
 graph TB
     subgraph "Level 1: Mega Plan 项目级"
-        MP[mega-plan.json] --> F1[Feature 1]
+        MP[mega-plan.json] --> DD1[design_doc.json<br/>项目级]
+        MP --> F1[Feature 1]
         MP --> F2[Feature 2]
         MP --> F3[Feature 3]
     end
@@ -42,6 +44,9 @@ graph TB
         W1 --> PRD1[prd.json]
         W2 --> PRD2[prd.json]
         W3 --> PRD3[prd.json]
+        PRD1 --> DD2[design_doc.json<br/>功能级]
+        PRD2 --> DD3[design_doc.json<br/>功能级]
+        PRD3 --> DD4[design_doc.json<br/>功能级]
     end
 
     subgraph "Level 3: Stories 故事级"
@@ -59,14 +64,18 @@ graph TB
         S4 --> A1
         S5 --> A2
     end
+
+    DD1 -.->|继承| DD2
+    DD1 -.->|继承| DD3
+    DD1 -.->|继承| DD4
 ```
 
 ### 层级详解
 
 | 层级 | 名称 | 职责 | 产物 |
 |------|------|------|------|
-| **Level 1** | Mega Plan | 项目级编排，管理多个 Feature 的依赖和执行顺序 | `mega-plan.json` |
-| **Level 2** | Hybrid Ralph | 功能级开发，在独立 Worktree 中执行，自动生成 PRD | `prd.json`, `findings.md` |
+| **Level 1** | Mega Plan | 项目级编排，管理多个 Feature 的依赖和执行顺序 | `mega-plan.json`, `design_doc.json` (项目级) |
+| **Level 2** | Hybrid Ralph | 功能级开发，在独立 Worktree 中执行，自动生成 PRD 和设计文档 | `prd.json`, `design_doc.json` (功能级), `findings.md` |
 | **Level 3** | Stories | 故事级执行，由 Agent 并行处理，支持质量门控和重试 | 代码变更, `progress.txt` |
 
 ---
@@ -94,6 +103,7 @@ graph LR
     subgraph "状态层"
         SM[StateManager<br/>状态管理器]
         CF[ContextFilter<br/>上下文过滤]
+        ESL[ExternalSkillLoader<br/>外部技能]
     end
 
     O --> IL
@@ -104,6 +114,7 @@ graph LR
     QG --> RM
     O --> SM
     SM --> CF
+    CF --> ESL
 ```
 
 ### 组件说明
@@ -118,6 +129,7 @@ graph LR
 | **RetryManager** | 重试管理，处理失败重试 |
 | **StateManager** | 状态管理，持久化执行状态 |
 | **ContextFilter** | 上下文过滤，优化 Agent 输入 |
+| **ExternalSkillLoader** | 框架技能加载，自动检测并注入最佳实践 |
 
 ---
 
@@ -170,7 +182,8 @@ flowchart TB
 
         AUTO --> BATCH[执行当前批次]
         MANUAL --> BATCH
-        BATCH --> PARALLEL[并行启动 Agent]
+        BATCH --> CTX[加载上下文<br/>设计文档 + 外部技能]
+        CTX --> PARALLEL[并行启动 Agent]
         PARALLEL --> WAIT[等待完成]
         WAIT --> QG{质量门控}
         QG -->|通过| NEXT{下一批次?}
@@ -192,54 +205,266 @@ flowchart TB
 
 ## 4. Auto 自动策略流程
 
-`/plan-cascade:auto` 命令提供基于任务分析的 AI 驱动自动策略选择。
+`/plan-cascade:auto` 命令提供基于结构化任务分析的 AI 驱动自动策略选择。
 
 ### 策略选择流程图
 
 ```mermaid
 flowchart TD
     A["/plan-cascade:auto<br/>任务描述"] --> B[收集项目上下文]
-    B --> C[AI 策略分析]
+    B --> C[AI 自评估分析]
 
-    C --> D{关键词检测}
+    C --> D[结构化任务分析]
 
-    D -->|"platform, system,<br/>architecture, 3+ 模块"| E[MEGA_PLAN]
-    D -->|"implement, create +<br/>experimental, refactor"| F[HYBRID_WORKTREE]
-    D -->|"implement, create,<br/>build, feature"| G[HYBRID_AUTO]
-    D -->|"fix, update, simple<br/>或默认"| H[DIRECT]
+    D --> E{分析维度}
+    E --> E1[范围: 涉及多少功能区域?]
+    E --> E2[复杂度: 有子任务依赖?]
+    E --> E3[风险: 可能破坏现有代码?]
+    E --> E4[并行化收益?]
 
-    E --> I["/plan-cascade:mega-plan"]
-    F --> J["/plan-cascade:hybrid-worktree"]
-    G --> K["/plan-cascade:hybrid-auto"]
-    H --> L[直接执行]
+    E1 --> F[输出结构化 JSON]
+    E2 --> F
+    E3 --> F
+    E4 --> F
 
-    I --> M[多功能编排]
-    J --> N[隔离开发]
-    K --> O[PRD + Story 执行]
-    L --> P[任务完成]
+    F --> G{策略决策}
+
+    G -->|"4+ 区域, 多个功能"| H[MEGA_PLAN]
+    G -->|"2-3 区域 + 高风险"| I[HYBRID_WORKTREE]
+    G -->|"2-3 区域, 3-7 步"| J[HYBRID_AUTO]
+    G -->|"1 区域, 1-2 步, 低风险"| K[DIRECT]
+
+    H --> L["/plan-cascade:mega-plan"]
+    I --> M["/plan-cascade:hybrid-worktree"]
+    J --> N["/plan-cascade:hybrid-auto"]
+    K --> O[直接执行]
+
+    L --> P[多功能编排]
+    M --> Q[隔离开发]
+    N --> R[PRD + Story 执行]
+    O --> S[任务完成]
 ```
 
-### 策略检测规则
+### AI 自评估输出
 
-| 优先级 | 策略 | 关键词 | 条件 |
-|--------|------|--------|------|
-| 1 | **MEGA_PLAN** | platform, system, architecture, microservices | 或列举 3+ 个独立模块 |
-| 2 | **HYBRID_WORKTREE** | (功能关键词) + experimental, refactor, isolated | 两个条件同时满足 |
-| 3 | **HYBRID_AUTO** | implement, create, build, feature, api | 无隔离关键词 |
-| 4 | **DIRECT** | fix, typo, update, simple, single | 默认回退 |
+AI 输出结构化 JSON 格式的分析结果：
+
+```json
+{
+  "task_analysis": {
+    "functional_areas": ["auth", "api", "frontend"],
+    "estimated_stories": 5,
+    "has_dependencies": true,
+    "requires_architecture_decisions": true,
+    "risk_level": "medium",
+    "parallelization_benefit": "significant"
+  },
+  "strategy_decision": {
+    "strategy": "HYBRID_AUTO",
+    "confidence": 0.85,
+    "reasoning": "任务涉及 3 个功能区域，有依赖关系..."
+  }
+}
+```
+
+### 策略选择指南
+
+| 分析结果 | 策略 | 示例 |
+|----------|------|------|
+| 1 个功能区域, 1-2 步, 低风险 | **DIRECT** | "修复 README 中的拼写错误" |
+| 2-3 个功能区域, 3-7 步, 有依赖 | **HYBRID_AUTO** | "实现 OAuth 用户认证" |
+| HYBRID_AUTO + 高风险或实验性 | **HYBRID_WORKTREE** | "实验性重构支付模块" |
+| 4+ 功能区域, 多个独立功能 | **MEGA_PLAN** | "构建电商平台：用户、商品、购物车、订单" |
 
 ### 策略映射示例
 
-| 任务描述 | 检测到的关键词 | 选择的策略 |
-|----------|----------------|------------|
-| "修复 README 中的拼写错误" | fix, typo | DIRECT |
-| "实现 OAuth 用户认证" | implement, authentication | HYBRID_AUTO |
-| "实验性重构支付模块" | refactoring + experimental | HYBRID_WORKTREE |
-| "构建电商平台：用户、商品、购物车、订单" | platform + 4 个模块 | MEGA_PLAN |
+| 任务描述 | 分析结果 | 选择的策略 |
+|----------|----------|------------|
+| "修复 README 中的拼写错误" | 1 区域, 低风险 | DIRECT |
+| "实现 OAuth 用户认证" | 3 区域, 有依赖 | HYBRID_AUTO |
+| "实验性重构支付模块" | 中等风险 + 实验性 | HYBRID_WORKTREE |
+| "构建电商平台：用户、商品、购物车、订单" | 4+ 功能区域 | MEGA_PLAN |
 
 ---
 
-## 5. Mega Plan 流程
+## 5. 设计文档系统
+
+Plan Cascade 自动生成技术设计文档 (`design_doc.json`)，与 PRD 并行，在故事执行时提供架构上下文。
+
+### 两级架构
+
+```mermaid
+graph TB
+    subgraph "Level 1: 项目级设计"
+        PDD[项目 design_doc.json]
+        PDD --> ARCH[架构概览]
+        PDD --> PATTERNS[跨功能模式]
+        PDD --> PADRS[项目 ADRs<br/>ADR-001, ADR-002...]
+        PDD --> FMAP[功能映射]
+    end
+
+    subgraph "Level 2: 功能级设计"
+        FDD[功能 design_doc.json]
+        FDD --> COMP[功能组件]
+        FDD --> API[功能 APIs]
+        FDD --> FADRS[功能 ADRs<br/>ADR-F001, ADR-F002...]
+        FDD --> SMAP[Story 映射]
+    end
+
+    PDD -.->|继承| FDD
+    PATTERNS -.->|被引用| COMP
+    PADRS -.->|被扩展| FADRS
+```
+
+### 设计文档 Schema
+
+```json
+{
+  "metadata": {
+    "created_at": "ISO-8601",
+    "version": "1.0.0",
+    "source": "ai-generated|user-provided|converted",
+    "prd_reference": "prd.json",
+    "parent_design_doc": "path/to/project/design_doc.json"
+  },
+  "overview": {
+    "title": "项目/功能标题",
+    "summary": "摘要描述",
+    "goals": ["目标1", "目标2"],
+    "non_goals": ["非目标1"]
+  },
+  "architecture": {
+    "components": [{
+      "name": "组件名称",
+      "description": "描述",
+      "responsibilities": ["职责1"],
+      "dependencies": ["依赖组件"],
+      "files": ["src/file.py"]
+    }],
+    "data_flow": "数据流描述",
+    "patterns": [{
+      "name": "模式名称",
+      "description": "描述",
+      "rationale": "采用理由"
+    }]
+  },
+  "interfaces": {
+    "apis": [...],
+    "data_models": [...]
+  },
+  "decisions": [{
+    "id": "ADR-001",
+    "title": "决策标题",
+    "context": "背景上下文",
+    "decision": "决策内容",
+    "rationale": "决策理由",
+    "alternatives_considered": ["备选方案1"],
+    "status": "accepted"
+  }],
+  "story_mappings": {
+    "story-001": {
+      "components": ["ComponentA"],
+      "decisions": ["ADR-001"],
+      "interfaces": ["API-1"]
+    }
+  },
+  "feature_mappings": {
+    "feature-001": {
+      "patterns": ["PatternA"],
+      "decisions": ["ADR-001"]
+    }
+  }
+}
+```
+
+### 自动生成流程
+
+```mermaid
+flowchart TD
+    subgraph "Mega Plan 流程"
+        MP[mega-plan.json] --> PDD[生成项目 design_doc.json]
+        PDD --> F1[Feature 1 Worktree]
+        PDD --> F2[Feature 2 Worktree]
+        F1 --> PRD1[prd.json]
+        F2 --> PRD2[prd.json]
+        PRD1 --> FDD1[功能 design_doc.json<br/>继承自项目]
+        PRD2 --> FDD2[功能 design_doc.json<br/>继承自项目]
+    end
+
+    subgraph "Hybrid Auto/Worktree 流程"
+        PRD[prd.json] --> FDD[生成功能 design_doc.json]
+    end
+```
+
+### 外部设计文档导入
+
+三个主要命令都支持导入外部设计文档：
+
+```bash
+# mega-plan: 第2个参数
+/plan-cascade:mega-plan "构建电商平台" ./architecture.md
+
+# hybrid-auto: 第2个参数
+/plan-cascade:hybrid-auto "实现用户认证" ./auth-design.md
+
+# hybrid-worktree: 第4个参数
+/plan-cascade:hybrid-worktree fix-auth main "修复认证" ./design.md
+```
+
+支持格式: Markdown (.md), JSON (.json), HTML (.html)
+
+### 上下文注入流程
+
+```mermaid
+flowchart LR
+    DD[design_doc.json] --> CF[ContextFilter]
+    CF --> |story_mappings| SC[Story 上下文]
+    SC --> AE[AgentExecutor]
+    AE --> |设计感知提示词| Agent
+
+    subgraph "Story 上下文"
+        SC --> COMP[相关组件]
+        SC --> DEC[相关决策]
+        SC --> PAT[架构模式]
+    end
+```
+
+### 外部框架技能
+
+Plan Cascade 内置框架特定技能，从 Git 子模块加载：
+
+```mermaid
+flowchart TD
+    subgraph "技能检测"
+        PJ[package.json] --> ESL[ExternalSkillLoader]
+        CT[Cargo.toml] --> ESL
+        ESL --> |检测模式| MATCH{框架匹配?}
+    end
+
+    subgraph "技能来源 (Git 子模块)"
+        MATCH -->|React/Next| VS[external-skills/vercel/]
+        MATCH -->|Vue/Nuxt| VUE[external-skills/vue/]
+        MATCH -->|Rust| RS[external-skills/rust/]
+    end
+
+    subgraph "注入"
+        VS --> LOAD[加载 SKILL.md]
+        VUE --> LOAD
+        RS --> LOAD
+        LOAD --> CF2[ContextFilter]
+        CF2 --> |external_skills| SC2[Story 上下文]
+    end
+```
+
+| 框架 | 检测方式 | 注入的技能 |
+|------|----------|------------|
+| React/Next.js | `package.json` 包含 `react`, `next` | `react-best-practices`, `web-design-guidelines` |
+| Vue/Nuxt | `package.json` 包含 `vue`, `nuxt` | `vue-best-practices`, `vue-router-best-practices`, `vue-pinia-best-practices` |
+| Rust | 存在 `Cargo.toml` | `rust-coding-guidelines`, `rust-ownership`, `rust-error-handling`, `rust-concurrency` |
+
+---
+
+## 6. Mega Plan 流程
 
 适用于包含多个相关功能模块的大型项目开发。
 
@@ -312,7 +537,7 @@ flowchart TD
 
 ---
 
-## 6. Hybrid Worktree 流程
+## 7. Hybrid Worktree 流程
 
 适用于需要分支隔离的单个复杂功能开发。
 
@@ -375,7 +600,7 @@ flowchart TD
 
 ---
 
-## 7. Hybrid Auto 流程
+## 8. Hybrid Auto 流程
 
 适用于简单功能的快速开发，无需 Worktree 隔离。
 
@@ -434,7 +659,7 @@ flowchart TD
 
 ---
 
-## 8. 自动迭代流程
+## 9. 自动迭代流程
 
 `/plan-cascade:approve --auto-run` 或 `/plan-cascade:auto-run` 命令启动的自动迭代循环：
 
@@ -463,9 +688,10 @@ flowchart TD
     M --> N2[Story类型: bugfix → codex]
     M --> N3[Story类型: refactor → aider]
 
-    N1 --> O[并行启动 Agents]
-    N2 --> O
-    N3 --> O
+    N1 --> CTX[加载 Story 上下文<br/>设计文档 + 外部技能]
+    N2 --> CTX
+    N3 --> CTX
+    CTX --> O[并行启动 Agents]
 
     O --> P[轮询等待<br/>poll_interval: 10s]
     P --> Q{Story 完成?}
@@ -528,28 +754,32 @@ flowchart TD
 
 ---
 
-## 9. 数据流与状态文件
+## 10. 数据流与状态文件
 
 ```mermaid
 graph TB
     subgraph "输入"
         U[用户描述] --> CMD[命令解析]
         CFG[agents.json] --> CMD
+        EXT[外部设计文档<br/>.md/.json/.html] -.-> CMD
     end
 
     subgraph "规划文件"
         CMD --> PRD[prd.json<br/>PRD文档]
         CMD --> MP[mega-plan.json<br/>项目计划]
+        CMD --> DD[design_doc.json<br/>设计文档]
     end
 
     subgraph "执行状态"
         PRD --> AS[.agent-status.json<br/>Agent状态]
         PRD --> IS[.iteration-state.json<br/>迭代状态]
         PRD --> RS[.retry-state.json<br/>重试状态]
+        MP --> MS[.mega-status.json<br/>Mega Plan状态]
     end
 
     subgraph "共享上下文"
         AS --> FD[findings.md<br/>发现记录]
+        AS --> MF[mega-findings.md<br/>项目发现]
         AS --> PG[progress.txt<br/>进度日志]
     end
 
@@ -562,12 +792,18 @@ graph TB
         LK[.locks/<br/>文件锁]
     end
 
+    DD --> CF[ContextFilter]
+    CF --> AS
+
     style PRD fill:#e1f5fe
     style MP fill:#e1f5fe
+    style DD fill:#e1f5fe
     style AS fill:#fff3e0
     style IS fill:#fff3e0
     style RS fill:#fff3e0
+    style MS fill:#fff3e0
     style FD fill:#e8f5e9
+    style MF fill:#e8f5e9
     style PG fill:#e8f5e9
 ```
 
@@ -577,18 +813,21 @@ graph TB
 |------|------|------|
 | `prd.json` | 规划 | PRD 文档，包含目标、故事、依赖关系 |
 | `mega-plan.json` | 规划 | 项目级计划，管理多个 Feature |
+| `design_doc.json` | 规划 | 技术设计文档，架构和决策 |
 | `agents.json` | 配置 | Agent 配置，包含阶段默认和降级链 |
 | `findings.md` | 共享 | Agent 发现记录，支持标签过滤 |
+| `mega-findings.md` | 共享 | 项目级发现记录（mega-plan 模式） |
 | `progress.txt` | 共享 | 进度时间线，包含 Agent 执行信息 |
 | `.agent-status.json` | 状态 | Agent 运行/完成/失败状态 |
 | `.iteration-state.json` | 状态 | 自动迭代进度和批次结果 |
 | `.retry-state.json` | 状态 | 重试历史和失败记录 |
+| `.mega-status.json` | 状态 | Mega-plan 执行状态 |
 | `.agent-detection.json` | 缓存 | 跨平台 Agent 检测结果（1小时TTL） |
 | `.agent-outputs/` | 输出 | Agent 日志、Prompt 和结果文件 |
 
 ---
 
-## 10. 双模式架构
+## 11. 双模式架构
 
 ### 模式切换设计
 
@@ -751,7 +990,7 @@ graph TB
 
 ---
 
-## 11. 多 Agent 协同架构
+## 12. 多 Agent 协同架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -783,6 +1022,42 @@ graph TB
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 支持的 Agents
+
+| Agent | 类型 | 最适用于 |
+|-------|------|----------|
+| `claude-code` | task-tool | 通用任务（默认，始终可用） |
+| `codex` | cli | Bug 修复、快速实现 |
+| `aider` | cli | 重构、代码改进 |
+| `amp-code` | cli | 替代实现方案 |
+| `cursor-cli` | cli | Cursor 编辑器集成 |
+
+### 命令参数
+
+**`/plan-cascade:approve`（Story 执行）：**
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--agent` | 全局 Agent 覆盖（所有 Stories） | `--agent=codex` |
+| `--impl-agent` | 实现阶段 Agent | `--impl-agent=claude-code` |
+| `--retry-agent` | 重试阶段 Agent | `--retry-agent=aider` |
+| `--no-fallback` | 禁用失败自动降级 | `--no-fallback` |
+
+**`/plan-cascade:mega-approve`（Feature 执行）：**
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--agent` | 全局 Agent 覆盖 | `--agent=claude-code` |
+| `--prd-agent` | PRD 生成 Agent | `--prd-agent=codex` |
+| `--impl-agent` | 实现阶段 Agent | `--impl-agent=aider` |
+| `--auto-prd` | 自动生成 PRD 并执行 | `--auto-prd` |
+
+**`/plan-cascade:hybrid-auto`（PRD 生成）：**
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--agent` | PRD 生成 Agent | `--agent=codex` |
+
 ### 阶段化 Agent 分配
 
 | 阶段 | 默认 Agent | 降级链 | Story 类型覆盖 |
@@ -803,6 +1078,29 @@ graph TB
 5. 阶段默认 Agent               # phase_defaults 配置
 6. 降级链                       # fallback_chain
 7. claude-code                  # 终极回退（始终可用）
+```
+
+### Agent 配置文件 (agents.json)
+
+```json
+{
+  "default_agent": "claude-code",
+  "agents": {
+    "claude-code": {"type": "task-tool"},
+    "codex": {"type": "cli", "command": "codex"},
+    "aider": {"type": "cli", "command": "aider"}
+  },
+  "phase_defaults": {
+    "implementation": {
+      "default_agent": "claude-code",
+      "fallback_chain": ["codex", "aider"],
+      "story_type_overrides": {
+        "refactor": "aider",
+        "bugfix": "codex"
+      }
+    }
+  }
+}
 ```
 
 ---

@@ -11,20 +11,27 @@ import re
 import sys
 from pathlib import Path
 
+from ..core.external_skill_loader import ExternalSkillLoader
+
 
 class ContextFilter:
     """Filters and extracts relevant context for a specific story."""
 
-    def __init__(self, project_root: Path):
+    def __init__(self, project_root: Path, plugin_root: Path = None):
         """
         Initialize the context filter.
 
         Args:
             project_root: Root directory of the project
+            plugin_root: Root directory of the Plan Cascade plugin (optional)
         """
         self.project_root = Path(project_root)
         self.prd_path = self.project_root / "prd.json"
         self.findings_path = self.project_root / "findings.md"
+        self.design_doc_path = self.project_root / "design_doc.json"
+
+        # Initialize external skill loader
+        self.external_loader = ExternalSkillLoader(project_root, plugin_root)
 
     def load_prd(self) -> dict | None:
         """
@@ -42,6 +49,225 @@ class ContextFilter:
         except (OSError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load PRD: {e}")
             return None
+
+    def load_design_doc(self) -> dict | None:
+        """
+        Load the design document JSON file.
+
+        Returns:
+            Design document dictionary or None if not found
+        """
+        if not self.design_doc_path.exists():
+            return None
+
+        try:
+            with open(self.design_doc_path, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Warning: Could not load design document: {e}")
+            return None
+
+    def load_parent_design_doc(self) -> dict | None:
+        """
+        Load the parent (project-level) design document.
+
+        Looks for design_doc.json in parent directories for worktree scenarios.
+
+        Returns:
+            Parent design document dictionary or None if not found
+        """
+        # Check parent directory
+        parent_path = self.project_root.parent / "design_doc.json"
+        if parent_path.exists():
+            try:
+                with open(parent_path, encoding="utf-8") as f:
+                    doc = json.load(f)
+                    # Only return if it's a project-level doc
+                    if doc.get("metadata", {}).get("level") == "project":
+                        return doc
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        # Check grandparent (for .worktree/feature-name/ structure)
+        grandparent_path = self.project_root.parent.parent / "design_doc.json"
+        if grandparent_path.exists():
+            try:
+                with open(grandparent_path, encoding="utf-8") as f:
+                    doc = json.load(f)
+                    if doc.get("metadata", {}).get("level") == "project":
+                        return doc
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        return None
+
+    def get_design_context_for_story(self, story_id: str) -> dict:
+        """
+        Get design context relevant to a specific story.
+
+        Uses story_mappings to filter relevant components, decisions,
+        interfaces, and patterns for the story. Also includes inherited
+        context from project-level design document if available.
+
+        Args:
+            story_id: Story ID
+
+        Returns:
+            Dictionary with relevant design context:
+            - overview: Feature overview
+            - components: List of relevant component definitions
+            - decisions: List of relevant ADRs (feature + inherited)
+            - apis: List of relevant API definitions
+            - data_models: List of relevant data models
+            - patterns: List of architectural patterns to follow (feature + inherited)
+            - data_flow: Data flow description
+            - inherited: Inherited context from project-level doc
+        """
+        design_doc = self.load_design_doc()
+        if not design_doc:
+            # Try loading parent design doc directly
+            parent_doc = self.load_parent_design_doc()
+            if parent_doc:
+                return self._get_project_context_only(parent_doc)
+            return {}
+
+        # Get inherited context from parent document
+        parent_doc = self.load_parent_design_doc()
+        inherited_context = self._get_inherited_context(design_doc, parent_doc)
+
+        # Get story mapping
+        story_mappings = design_doc.get("story_mappings", {})
+        mapping = story_mappings.get(story_id, {})
+
+        if not mapping:
+            # If no specific mapping, return overview context with inherited
+            return {
+                "overview": design_doc.get("overview", {}),
+                "patterns": design_doc.get("architecture", {}).get("patterns", []),
+                "inherited": inherited_context
+            }
+
+        # Extract relevant components
+        component_names = mapping.get("components", [])
+        all_components = design_doc.get("architecture", {}).get("components", [])
+        relevant_components = [
+            c for c in all_components
+            if c.get("name") in component_names
+        ]
+
+        # Extract relevant decisions (feature-level)
+        decision_ids = mapping.get("decisions", [])
+        all_decisions = design_doc.get("decisions", [])
+        relevant_decisions = [
+            d for d in all_decisions
+            if d.get("id") in decision_ids
+        ]
+
+        # Extract relevant interfaces
+        interface_ids = mapping.get("interfaces", [])
+        all_apis = design_doc.get("interfaces", {}).get("apis", [])
+        all_models = design_doc.get("interfaces", {}).get("data_models", [])
+
+        relevant_apis = [
+            api for api in all_apis
+            if api.get("id") in interface_ids
+        ]
+        relevant_models = [
+            model for model in all_models
+            if model.get("name") in interface_ids
+        ]
+
+        # Always include architectural patterns (global guidance)
+        patterns = design_doc.get("architecture", {}).get("patterns", [])
+
+        return {
+            "overview": design_doc.get("overview", {}),
+            "components": relevant_components,
+            "decisions": relevant_decisions,
+            "apis": relevant_apis,
+            "data_models": relevant_models,
+            "patterns": patterns,
+            "data_flow": design_doc.get("architecture", {}).get("data_flow", ""),
+            "inherited": inherited_context
+        }
+
+    def _get_inherited_context(
+        self,
+        feature_doc: dict,
+        parent_doc: dict | None
+    ) -> dict:
+        """
+        Get inherited context from parent (project-level) design document.
+
+        Args:
+            feature_doc: Feature-level design document
+            parent_doc: Project-level design document (or None)
+
+        Returns:
+            Dictionary with inherited context
+        """
+        if not parent_doc:
+            # Check if feature doc has inherited_context section
+            return feature_doc.get("inherited_context", {})
+
+        inherited = {
+            "project_overview": parent_doc.get("overview", {}),
+            "patterns": [],
+            "decisions": [],
+            "shared_models": [],
+            "api_standards": parent_doc.get("interfaces", {}).get("api_standards", {})
+        }
+
+        # Get feature ID from the feature doc
+        feature_id = feature_doc.get("metadata", {}).get("feature_id")
+
+        # Get patterns and decisions from feature_mappings
+        if feature_id:
+            feature_mappings = parent_doc.get("feature_mappings", {})
+            if feature_id in feature_mappings:
+                mapping = feature_mappings[feature_id]
+                inherited_pattern_names = mapping.get("patterns", [])
+                inherited_decision_ids = mapping.get("decisions", [])
+
+                # Get full pattern definitions
+                all_patterns = parent_doc.get("architecture", {}).get("patterns", [])
+                inherited["patterns"] = [
+                    p for p in all_patterns
+                    if p.get("name") in inherited_pattern_names
+                ]
+
+                # Get full decision definitions
+                all_decisions = parent_doc.get("decisions", [])
+                inherited["decisions"] = [
+                    d for d in all_decisions
+                    if d.get("id") in inherited_decision_ids
+                ]
+
+        # Get shared data models
+        shared_models = parent_doc.get("interfaces", {}).get("shared_data_models", [])
+        inherited["shared_models"] = shared_models
+
+        return inherited
+
+    def _get_project_context_only(self, parent_doc: dict) -> dict:
+        """
+        Get context from project-level document when no feature doc exists.
+
+        Args:
+            parent_doc: Project-level design document
+
+        Returns:
+            Dictionary with project context
+        """
+        return {
+            "overview": parent_doc.get("overview", {}),
+            "patterns": parent_doc.get("architecture", {}).get("patterns", []),
+            "decisions": parent_doc.get("decisions", []),
+            "api_standards": parent_doc.get("interfaces", {}).get("api_standards", {}),
+            "shared_models": parent_doc.get("interfaces", {}).get("shared_data_models", []),
+            "data_flow": parent_doc.get("architecture", {}).get("data_flow", ""),
+            "is_project_level": True
+        }
 
     def get_story(self, story_id: str) -> dict | None:
         """
@@ -148,6 +374,7 @@ class ContextFilter:
         - Story metadata from PRD
         - Summaries of completed dependencies
         - Tagged findings sections relevant to this story
+        - Design context (components, decisions, patterns) if available
 
         Args:
             story_id: Story ID
@@ -180,12 +407,41 @@ class ContextFilter:
         # Get tagged findings
         findings_context = self._get_tagged_findings(story_id)
 
+        # Get design context (if design_doc.json exists)
+        design_context = self.get_design_context_for_story(story_id)
+
+        # Get external skill context
+        external_skill_context = self.external_loader.get_skill_context("implementation")
+
         return {
             "story": story,
             "dependencies": dependency_summaries,
             "findings": findings_context,
+            "design": design_context,
+            "external_skills": external_skill_context,
             "context_estimate": story.get("context_estimate", "medium")
         }
+
+    def get_external_skill_context(self, phase: str = "implementation") -> str:
+        """
+        Get external skill context for a specific phase.
+
+        Args:
+            phase: Execution phase (implementation, retry, etc.)
+
+        Returns:
+            Formatted skill context string
+        """
+        return self.external_loader.get_skill_context(phase)
+
+    def get_detected_frameworks(self) -> list[str]:
+        """
+        Get list of detected framework skills for the current project.
+
+        Returns:
+            List of applicable skill names
+        """
+        return self.external_loader.detect_applicable_skills()
 
     def _get_story_status(self, story_id: str) -> str:
         """

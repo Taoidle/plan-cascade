@@ -287,6 +287,10 @@ class AgentExecutor:
         findings = context.get("findings", [])
         finding_lines = "\n".join(findings[:5]) if findings else "  No previous findings"
 
+        # Build design context section if available
+        design_context = context.get("design", {})
+        design_section = self._format_design_context(design_context)
+
         prompt = f"""You are executing story {story_id}: {title}
 
 Description:
@@ -300,17 +304,186 @@ Dependencies Summary:
 
 Relevant Findings:
 {finding_lines}
-
+{design_section}
 Your task:
 1. Read the relevant code and documentation
 2. Implement the story according to acceptance criteria
-3. Test your implementation
-4. Update findings.md with any discoveries (tag with <!-- @tags: {story_id} -->)
-5. Mark as complete by appending to progress.txt: [COMPLETE] {story_id}
+3. **Follow the architectural patterns and decisions above**
+4. Test your implementation
+5. Update findings.md with any discoveries (tag with <!-- @tags: {story_id} -->)
+6. Mark as complete by appending to progress.txt: [COMPLETE] {story_id}
 
 Work methodically and document your progress.
 """
         return prompt
+
+    def _format_design_context(self, design_context: dict) -> str:
+        """
+        Format design context for inclusion in the story prompt.
+
+        Args:
+            design_context: Design context dictionary from ContextFilter
+
+        Returns:
+            Formatted string for prompt inclusion
+        """
+        if not design_context:
+            return ""
+
+        sections = []
+
+        # Overview summary (if available)
+        overview = design_context.get("overview", {})
+        if overview.get("summary"):
+            sections.append(f"Project Context: {overview.get('summary')}")
+
+        # Architectural patterns to follow
+        patterns = design_context.get("patterns", [])
+        if patterns:
+            pattern_lines = []
+            for p in patterns:
+                name = p.get("name", "")
+                desc = p.get("description", "")
+                rationale = p.get("rationale", "")
+                if name:
+                    line = f"  - **{name}**: {desc}"
+                    if rationale:
+                        line += f" (Reason: {rationale})"
+                    pattern_lines.append(line)
+            if pattern_lines:
+                sections.append("Architectural Patterns:\n" + "\n".join(pattern_lines))
+
+        # Relevant components
+        components = design_context.get("components", [])
+        if components:
+            comp_lines = []
+            for c in components:
+                name = c.get("name", "")
+                desc = c.get("description", "")
+                files = c.get("files", [])
+                if name:
+                    line = f"  - **{name}**: {desc}"
+                    if files:
+                        line += f" (Files: {', '.join(files)})"
+                    comp_lines.append(line)
+            if comp_lines:
+                sections.append("Relevant Components:\n" + "\n".join(comp_lines))
+
+        # Architectural decisions (ADRs)
+        decisions = design_context.get("decisions", [])
+        if decisions:
+            dec_lines = []
+            for d in decisions:
+                adr_id = d.get("id", "")
+                title = d.get("title", "")
+                decision = d.get("decision", "")
+                if adr_id and title:
+                    line = f"  - **{adr_id}: {title}**"
+                    if decision:
+                        line += f"\n    Decision: {decision}"
+                    dec_lines.append(line)
+            if dec_lines:
+                sections.append("Architectural Decisions:\n" + "\n".join(dec_lines))
+
+        # Relevant APIs
+        apis = design_context.get("apis", [])
+        if apis:
+            api_lines = []
+            for api in apis:
+                api_id = api.get("id", "")
+                method = api.get("method", "")
+                path = api.get("path", "")
+                desc = api.get("description", "")
+                if path:
+                    line = f"  - {method} {path}"
+                    if desc:
+                        line += f" - {desc}"
+                    api_lines.append(line)
+            if api_lines:
+                sections.append("API Interfaces:\n" + "\n".join(api_lines))
+
+        # Relevant data models
+        data_models = design_context.get("data_models", [])
+        if data_models:
+            model_lines = []
+            for model in data_models:
+                name = model.get("name", "")
+                desc = model.get("description", "")
+                if name:
+                    line = f"  - **{name}**: {desc}"
+                    model_lines.append(line)
+            if model_lines:
+                sections.append("Data Models:\n" + "\n".join(model_lines))
+
+        # Data flow
+        data_flow = design_context.get("data_flow", "")
+        if data_flow:
+            sections.append(f"Data Flow: {data_flow}")
+
+        # Inherited context from project-level design document
+        inherited = design_context.get("inherited", {})
+        if inherited:
+            inherited_sections = []
+
+            # Inherited patterns
+            inherited_patterns = inherited.get("patterns", [])
+            if inherited_patterns:
+                pattern_names = []
+                for p in inherited_patterns:
+                    name = p.get("name", "") if isinstance(p, dict) else str(p)
+                    if name:
+                        pattern_names.append(name)
+                if pattern_names:
+                    inherited_sections.append(f"  - Patterns: {', '.join(pattern_names)}")
+
+            # Inherited decisions
+            inherited_decisions = inherited.get("decisions", [])
+            if inherited_decisions:
+                dec_lines = []
+                for d in inherited_decisions:
+                    if isinstance(d, dict):
+                        adr_id = d.get("id", "")
+                        title = d.get("title", "")
+                        decision = d.get("decision", "")
+                        if adr_id:
+                            line = f"    - **{adr_id}: {title}**"
+                            if decision:
+                                line += f" - {decision}"
+                            dec_lines.append(line)
+                    else:
+                        dec_lines.append(f"    - {d}")
+                if dec_lines:
+                    inherited_sections.append("  - Decisions:\n" + "\n".join(dec_lines))
+
+            # Shared models
+            shared_models = inherited.get("shared_models", [])
+            if shared_models:
+                model_names = []
+                for m in shared_models:
+                    name = m.get("name", "") if isinstance(m, dict) else str(m)
+                    if name:
+                        model_names.append(name)
+                if model_names:
+                    inherited_sections.append(f"  - Shared Models: {', '.join(model_names)}")
+
+            # API standards
+            api_standards = inherited.get("api_standards", {})
+            if api_standards:
+                std_parts = []
+                if api_standards.get("style"):
+                    std_parts.append(f"Style: {api_standards['style']}")
+                if api_standards.get("authentication"):
+                    std_parts.append(f"Auth: {api_standards['authentication']}")
+                if std_parts:
+                    inherited_sections.append(f"  - API Standards: {', '.join(std_parts)}")
+
+            if inherited_sections:
+                sections.append("Inherited from Project:\n" + "\n".join(inherited_sections))
+
+        if not sections:
+            return ""
+
+        return "\n\n## Technical Design Context\n" + "\n\n".join(sections) + "\n"
 
     def _execute_via_task_tool(
         self,

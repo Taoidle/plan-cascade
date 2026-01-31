@@ -282,6 +282,9 @@ Directory: {current directory}
 PRD Status: {missing | corrupted | empty | valid}
   Stories: {count if valid}
 
+Design Document: {present | not found}
+  {If present: "✓ Architectural context will guide execution"}
+
 Progress:
   Complete: {count} / {total}
   Failed: {count}

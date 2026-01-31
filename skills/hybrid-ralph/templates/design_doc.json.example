@@ -1,0 +1,247 @@
+{
+  "metadata": {
+    "created_at": "2024-01-15T10:00:00Z",
+    "version": "1.0.0",
+    "source": "ai-generated",
+    "level": "feature",
+    "prd_reference": "prd.json",
+    "parent_design_doc": "../design_doc.json",
+    "feature_id": "feature-users"
+  },
+  "overview": {
+    "title": "User Authentication System",
+    "summary": "A secure authentication system providing user registration, login, and password reset functionality with JWT-based session management.",
+    "goals": [
+      "Secure user authentication with industry-standard practices",
+      "Stateless session management using JWT tokens",
+      "Self-service password reset via email verification"
+    ],
+    "non_goals": [
+      "Social login (OAuth) integration - planned for Phase 2",
+      "Two-factor authentication - future enhancement",
+      "Session management UI - separate feature"
+    ]
+  },
+  "inherited_context": {
+    "description": "Context inherited from project-level design document",
+    "patterns": ["Repository Pattern", "API Gateway Pattern"],
+    "decisions": ["ADR-001", "ADR-002", "ADR-003"],
+    "shared_models": ["Address"]
+  },
+  "architecture": {
+    "components": [
+      {
+        "name": "AuthController",
+        "description": "HTTP controller handling authentication API endpoints",
+        "responsibilities": [
+          "Validate incoming request payloads",
+          "Delegate to AuthService for business logic",
+          "Return appropriate HTTP responses and status codes"
+        ],
+        "dependencies": ["AuthService", "ValidationMiddleware"],
+        "files": ["src/controllers/auth_controller.py"]
+      },
+      {
+        "name": "AuthService",
+        "description": "Core authentication business logic",
+        "responsibilities": [
+          "User registration with email validation",
+          "Password hashing and verification",
+          "JWT token generation and validation",
+          "Password reset token management"
+        ],
+        "dependencies": ["UserRepository", "PasswordHasher", "TokenService", "EmailService"],
+        "files": ["src/services/auth_service.py"]
+      },
+      {
+        "name": "UserRepository",
+        "description": "Data access layer for user persistence",
+        "responsibilities": [
+          "CRUD operations for user records",
+          "Email uniqueness enforcement",
+          "Password reset token storage"
+        ],
+        "dependencies": ["Database"],
+        "files": ["src/repositories/user_repository.py"]
+      },
+      {
+        "name": "TokenService",
+        "description": "JWT token generation and validation",
+        "responsibilities": [
+          "Generate access tokens with configurable expiry",
+          "Validate and decode tokens",
+          "Handle token refresh logic"
+        ],
+        "dependencies": [],
+        "files": ["src/services/token_service.py"]
+      },
+      {
+        "name": "EmailService",
+        "description": "Email sending for password reset",
+        "responsibilities": [
+          "Send password reset emails",
+          "Email template rendering"
+        ],
+        "dependencies": ["SMTP Provider"],
+        "files": ["src/services/email_service.py"]
+      }
+    ],
+    "data_flow": "Request → AuthController → AuthService → UserRepository → Database. Response flows back through the same layers. JWT tokens are stateless and validated on each request via middleware.",
+    "patterns": [
+      {
+        "name": "Service Layer",
+        "description": "Encapsulates business logic in dedicated service classes",
+        "rationale": "Keeps controllers thin; enables reuse of business logic across different entry points"
+      },
+      {
+        "name": "Dependency Injection",
+        "description": "Components receive dependencies through constructors",
+        "rationale": "Improves testability; makes dependencies explicit; supports different configurations"
+      }
+    ]
+  },
+  "interfaces": {
+    "apis": [
+      {
+        "id": "API-001",
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "description": "Register a new user account",
+        "request_body": {
+          "email": "string (required, valid email format)",
+          "password": "string (required, min 8 chars)",
+          "name": "string (optional)"
+        },
+        "response": {
+          "success": { "token": "string", "user": { "id": "string", "email": "string" } },
+          "error_codes": ["400 - Invalid input", "409 - Email already exists"]
+        }
+      },
+      {
+        "id": "API-002",
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "description": "Authenticate existing user",
+        "request_body": {
+          "email": "string (required)",
+          "password": "string (required)"
+        },
+        "response": {
+          "success": { "token": "string", "refresh_token": "string", "user": { "id": "string", "email": "string" } },
+          "error_codes": ["401 - Invalid credentials"]
+        }
+      },
+      {
+        "id": "API-003",
+        "method": "POST",
+        "path": "/api/v1/auth/forgot-password",
+        "description": "Request password reset email",
+        "request_body": {
+          "email": "string (required)"
+        },
+        "response": {
+          "success": { "message": "Reset email sent if account exists" },
+          "error_codes": []
+        }
+      },
+      {
+        "id": "API-004",
+        "method": "POST",
+        "path": "/api/v1/auth/reset-password",
+        "description": "Reset password with token",
+        "request_body": {
+          "token": "string (required)",
+          "new_password": "string (required, min 8 chars)"
+        },
+        "response": {
+          "success": { "message": "Password reset successful" },
+          "error_codes": ["400 - Invalid or expired token"]
+        }
+      }
+    ],
+    "data_models": [
+      {
+        "name": "User",
+        "description": "Core user entity for authentication",
+        "fields": {
+          "id": "UUID (primary key)",
+          "email": "string (unique, indexed)",
+          "password_hash": "string (bcrypt hash)",
+          "name": "string (optional)",
+          "created_at": "timestamp",
+          "updated_at": "timestamp"
+        }
+      },
+      {
+        "name": "PasswordResetToken",
+        "description": "Temporary token for password reset flow",
+        "fields": {
+          "id": "UUID (primary key)",
+          "user_id": "UUID (foreign key to User)",
+          "token_hash": "string (hashed token)",
+          "expires_at": "timestamp",
+          "used": "boolean (default false)"
+        }
+      },
+      {
+        "name": "RefreshToken",
+        "description": "Long-lived token for session refresh",
+        "fields": {
+          "id": "UUID (primary key)",
+          "user_id": "UUID (foreign key to User)",
+          "token_hash": "string",
+          "expires_at": "timestamp",
+          "revoked": "boolean (default false)"
+        }
+      }
+    ]
+  },
+  "decisions": [
+    {
+      "id": "ADR-F001",
+      "title": "Use bcrypt for password hashing",
+      "context": "Need to securely store user passwords. Options include bcrypt, argon2, scrypt, or PBKDF2.",
+      "decision": "Use bcrypt with cost factor 12 for password hashing.",
+      "rationale": "bcrypt is battle-tested, widely supported, and includes built-in salt. Cost factor 12 provides good security without excessive latency (~250ms).",
+      "alternatives_considered": [
+        "Argon2 - More modern but less library support",
+        "PBKDF2 - NIST approved but requires separate salt management"
+      ],
+      "status": "accepted"
+    },
+    {
+      "id": "ADR-F002",
+      "title": "Password reset tokens expire in 1 hour",
+      "context": "Password reset links need an expiration to limit security exposure.",
+      "decision": "Reset tokens expire 1 hour after creation and can only be used once.",
+      "rationale": "1 hour gives users enough time to complete reset while limiting the window for token theft. Single-use prevents replay attacks.",
+      "alternatives_considered": [
+        "24-hour expiry - Too long, increases risk",
+        "15-minute expiry - Too short for some email delays"
+      ],
+      "status": "accepted"
+    }
+  ],
+  "story_mappings": {
+    "story-001": {
+      "components": ["UserRepository"],
+      "decisions": [],
+      "interfaces": ["User", "PasswordResetToken", "RefreshToken"]
+    },
+    "story-002": {
+      "components": ["AuthController", "AuthService", "UserRepository", "TokenService"],
+      "decisions": ["ADR-F001"],
+      "interfaces": ["API-001"]
+    },
+    "story-003": {
+      "components": ["AuthController", "AuthService", "UserRepository", "TokenService"],
+      "decisions": ["ADR-F001"],
+      "interfaces": ["API-002"]
+    },
+    "story-004": {
+      "components": ["AuthController", "AuthService", "UserRepository", "EmailService"],
+      "decisions": ["ADR-F002"],
+      "interfaces": ["API-003", "API-004", "PasswordResetToken"]
+    }
+  }
+}

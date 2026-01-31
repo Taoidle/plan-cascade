@@ -1,53 +1,139 @@
 [English](README.md)
 
+<div align="center">
+
 # Plan Cascade
 
-> **三层级联的并行开发框架** — 从项目到功能到故事，层层分解、并行执行
+**AI 驱动的级联开发框架**
+
+*将复杂项目分解为可并行执行的任务，支持多 Agent 协作*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
-[![MCP Server](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-4.1.1-brightgreen)](https://github.com/Taoidle/plan-cascade)
-[![PyPI](https://img.shields.io/pypi/v/plan-cascade)](https://pypi.org/project/plan-cascade/)
+[![Version](https://img.shields.io/badge/version-4.2.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
+[![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
+
+| 组件 | 状态 |
+|------|------|
+| Claude Code 插件 | ![稳定](https://img.shields.io/badge/状态-稳定-brightgreen) |
+| MCP 服务器 | ![稳定](https://img.shields.io/badge/状态-稳定-brightgreen) |
+| 独立 CLI | ![开发中](https://img.shields.io/badge/状态-开发中-yellow) |
+| 桌面应用 | ![开发中](https://img.shields.io/badge/状态-开发中-yellow) |
+
+[功能特性](#功能特性) • [快速开始](#快速开始) • [文档](#文档) • [架构](#架构)
+
+</div>
 
 ---
 
-## 概述
+## 为什么选择 Plan Cascade？
 
-Plan Cascade 是一个**三层级联的 AI 并行开发框架**，专为大型软件项目设计。它将复杂项目逐层分解，通过多 Agent 协作实现高效的并行开发。
+传统 AI 编程助手在处理大型复杂项目时力不从心。Plan Cascade 通过以下方式解决这个问题：
 
-### 核心理念
+- **分解复杂性** — 自动将项目分解为可管理的 Story
+- **并行执行** — 使用多个 Agent 同时执行独立任务
+- **保持上下文** — 设计文档和 PRD 让 AI 始终聚焦于架构
+- **质量保障** — 每一步都有自动化测试和代码检查
 
-- **层层分解**：项目 → 功能 → 故事，逐级细化任务粒度
-- **并行执行**：无依赖的任务在同一批次中并行处理
-- **多 Agent 协作**：根据任务特点自动选择最优 Agent
-- **质量保障**：自动化质量门控 + 智能重试机制
-- **状态追踪**：基于文件的状态共享，支持断点恢复
+## 功能特性
 
-### 三层架构
+### 三层级联架构
 
-| 层级 | 名称 | 职责 | 产物 |
-|------|------|------|------|
-| **Level 1** | Mega Plan | 项目级编排，管理多个 Feature | `mega-plan.json` |
-| **Level 2** | Hybrid Ralph | 功能级开发，自动生成 PRD | `prd.json` |
-| **Level 3** | Stories | 故事级执行，Agent 并行处理 | 代码变更 |
+```
+┌─────────────────────────────────────────────────────────────┐
+│  第1层: Mega Plan                                           │
+│  ────────────────                                           │
+│  项目级编排                                                  │
+│  管理多个 Feature 的并行批次                                 │
+│  输出: mega-plan.json + design_doc.json                     │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  第2层: Hybrid Ralph (Feature)                              │
+│  ─────────────────────────────                              │
+│  功能级开发                                                  │
+│  自动生成包含用户故事的 PRD                                  │
+│  输出: prd.json + design_doc.json                           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  第3层: Story 执行                                          │
+│  ─────────────────                                          │
+│  支持多 Agent 的并行 Story 执行                              │
+│  根据任务类型自动选择 Agent                                  │
+│  输出: 代码变更                                              │
+└─────────────────────────────────────────────────────────────┘
+```
 
----
+### 多 Agent 协作
 
-## 使用方式
+| Agent | 类型 | 最适用于 |
+|-------|------|----------|
+| `claude-code` | 内置 | 通用任务（默认） |
+| `codex` | CLI | Bug 修复、快速实现 |
+| `aider` | CLI | 重构、代码改进 |
+| `amp-code` | CLI | 替代实现方案 |
 
-| 方式 | 说明 | 适用场景 | 详细文档 |
-|------|------|----------|----------|
-| **Standalone CLI** | 独立命令行工具 | 任何终端环境 | [CLI Guide](docs/CLI-Guide_zh.md) |
-| **Claude Code Plugin** | 原生集成，功能最完整 | Claude Code 用户 | [Plugin Guide](docs/Plugin-Guide_zh.md) |
-| **Desktop App** | 图形化界面 | 偏好 GUI 的用户 | [Desktop Guide](docs/Desktop-Guide_zh.md) |
-| **MCP Server** | 通过 MCP 协议集成 | Cursor, Windsurf 等 | [MCP Guide](docs/MCP-SERVER-GUIDE.md) |
+Agent 可根据 Story 类型自动选择，也可手动指定。
 
----
+### 自动生成设计文档
+
+Plan Cascade 会自动生成与 PRD 配套的技术设计文档：
+
+- **项目级**: 架构、模式、跨功能决策
+- **功能级**: 组件设计、API、Story 映射
+- **继承机制**: 功能级文档继承项目级上下文
+
+### 质量门控
+
+每个 Story 完成后自动验证：
+- TypeScript/Python 类型检查
+- 单元测试和集成测试
+- 代码检查（ESLint、Ruff）
+- 自定义验证脚本
+
+### 外部框架技能
+
+Plan Cascade 内置框架特定技能，可自动检测并注入：
+
+| 框架 | 技能 | 自动检测 |
+|------|------|----------|
+| React/Next.js | `react-best-practices`, `web-design-guidelines` | `package.json` 包含 `react` 或 `next` |
+| Vue/Nuxt | `vue-best-practices`, `vue-router-best-practices`, `vue-pinia-best-practices` | `package.json` 包含 `vue` 或 `nuxt` |
+| Rust | `rust-coding-guidelines`, `rust-ownership`, `rust-error-handling`, `rust-concurrency` | 存在 `Cargo.toml` |
+
+技能从 Git 子模块加载，在 Story 执行期间提供框架特定的指导：
+
+```bash
+# 初始化外部技能（首次使用）
+git submodule update --init --recursive
+
+# 在 React 项目中，技能会自动检测：
+/plan-cascade:auto "添加用户资料组件"
+# → 自动将 React 最佳实践注入上下文
+```
 
 ## 快速开始
 
-### Standalone CLI
+### 方式一：Claude Code 插件（推荐）
+
+```bash
+# 安装插件
+claude plugins install Taoidle/plan-cascade
+
+# 让 AI 选择最佳策略
+/plan-cascade:auto "构建一个带用户认证和 JWT 的 REST API"
+
+# 或手动选择
+/plan-cascade:hybrid-auto "添加密码重置功能"
+/plan-cascade:approve --auto-run
+```
+
+### 方式二：独立 CLI
+
+> **注意**：独立 CLI 目前正在积极开发中，部分功能可能不完整或不稳定。生产环境建议使用 Claude Code 插件。
 
 ```bash
 # 安装
@@ -56,232 +142,126 @@ pip install plan-cascade
 # 配置
 plan-cascade config --setup
 
-# 简单模式 - 一键执行
-plan-cascade run "实现用户登录功能"
+# 自动策略运行
+plan-cascade run "实现用户认证"
 
-# 专家模式 - 更多控制
-plan-cascade run "实现用户登录功能" --expert
-
-# 交互式聊天
-plan-cascade chat
+# 或使用专家模式获得更多控制
+plan-cascade run "实现用户认证" --expert
 ```
 
-### Claude Code Plugin
+### 方式三：桌面应用
 
+> **注意**：桌面应用目前正在积极开发中，敬请期待。
+
+从 [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases) 下载（即将推出）。
+
+## 使用示例
+
+### 简单任务（直接执行）
 ```bash
-# 安装
-claude plugins install Taoidle/plan-cascade
-
-# 使用 - 自动模式（推荐新手使用）
-/plan-cascade:auto "你的任务描述"
-
-# 使用 - 手动选择模式
-/plan-cascade:hybrid-auto "添加搜索功能"
-/plan-cascade:approve --auto-run
+/plan-cascade:auto "修复登录按钮的拼写错误"
+# → 无需规划，直接执行
 ```
 
-### Desktop App
+### 中等功能（Hybrid Auto）
+```bash
+/plan-cascade:auto "实现 Google 和 GitHub 的 OAuth2 登录"
+# → 生成包含 3-5 个 Story 的 PRD，并行执行
+```
 
-从 [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases) 下载适合您平台的安装包。
+### 大型项目（Mega Plan）
+```bash
+/plan-cascade:auto "构建电商平台：用户、商品、购物车、订单"
+# → 创建包含 4 个 Feature 的 mega-plan，每个都有独立 PRD
+```
 
----
+### 使用外部设计文档
+```bash
+/plan-cascade:mega-plan "构建博客平台" ./architecture.md
+# → 转换你的设计文档并用于指导开发
+```
 
-## 核心功能
+### 指定特定 Agent
+```bash
+/plan-cascade:approve --impl-agent=aider --retry-agent=codex
+# → 实现阶段使用 aider，重试阶段使用 codex
+```
 
-### 双模式设计
+## 文档
 
-| 模式 | 适用场景 | 特点 |
-|------|----------|------|
-| **简单模式** | 新手用户、快速任务 | AI 自动判断策略并执行 |
-| **专家模式** | 资深用户、精细控制 | PRD 编辑、Agent 指定、质量门控配置 |
+| 文档 | 说明 |
+|------|------|
+| [插件指南](docs/Plugin-Guide_zh.md) | Claude Code 插件使用 |
+| [CLI 指南](docs/CLI-Guide_zh.md) | 独立 CLI 使用 |
+| [桌面应用指南](docs/Desktop-Guide_zh.md) | 桌面应用 |
+| [MCP 服务器指南](docs/MCP-SERVER-GUIDE.md) | 集成 Cursor、Windsurf |
+| [系统架构](docs/System-Architecture_zh.md) | 技术架构 |
 
-### AI 自动策略判断
+## 架构
 
-简单模式下，AI 根据需求自动选择执行策略：
+### 文件结构
 
-| 输入类型 | 执行策略 |
-|----------|----------|
-| 小任务（如"添加按钮"） | 直接执行 |
-| 中等功能（如"用户登录"） | Hybrid Auto |
-| 大型项目（如"电商平台"） | Mega Plan |
-| 需要隔离（如"实验性重构"） | Hybrid Worktree |
+```
+plan-cascade/
+├── src/plan_cascade/       # Python 核心
+│   ├── core/               # 编排引擎
+│   ├── backends/           # Agent 抽象
+│   ├── llm/                # LLM 提供者
+│   └── cli/                # CLI 入口
+├── commands/               # 插件命令
+├── skills/                 # 插件技能
+├── mcp_server/             # MCP 服务器
+└── desktop/                # 桌面应用（Tauri + React）
+```
 
-### 多 LLM 后端
+### 支持的 LLM 后端
 
-| 后端 | 需要 API Key | 说明 |
+| 后端 | 需要 API Key | 备注 |
 |------|-------------|------|
 | Claude Code | 否 | 默认，通过 Claude Code CLI |
-| Claude Max | 否 | 通过 Claude Code 获取 LLM |
 | Claude API | 是 | 直接调用 Anthropic API |
 | OpenAI | 是 | GPT-4o 等 |
 | DeepSeek | 是 | DeepSeek Chat/Coder |
 | Ollama | 否 | 本地模型 |
 
-### 多 Agent 协作
+## v4.2.0 更新内容
 
-支持使用不同 Agent 执行 Story：
+- **设计文档系统** — 自动生成两级层次结构的技术设计文档
+- **多 Agent 集成** — 在所有执行模式中完整集成
+- **AI 策略选择** — 智能任务分析取代关键词匹配
+- **外部设计导入** — 支持转换 Markdown/JSON/HTML 设计文档
 
-| Agent | 类型 | 说明 |
-|-------|------|------|
-| claude-code | task-tool | 内置，始终可用 |
-| codex | cli | OpenAI Codex |
-| aider | cli | AI 结对编程 |
-| amp-code | cli | Amp Code |
-| cursor-cli | cli | Cursor CLI |
+完整历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-### 质量门控
+## 贡献
 
-每个 Story 完成后自动运行质量验证：
+欢迎贡献！提交 PR 前请先阅读贡献指南。
 
-| 门控 | 工具 |
-|------|------|
-| TypeCheck | tsc, mypy, pyright |
-| Test | pytest, jest |
-| Lint | eslint, ruff |
-| Custom | 自定义脚本 |
-
----
-
-## 命令快速参考
-
-### CLI
-
-```bash
-plan-cascade run <description>          # 执行任务
-plan-cascade run <description> --expert # 专家模式
-plan-cascade chat                       # 交互式聊天
-plan-cascade config --setup             # 配置向导
-plan-cascade status                     # 查看状态
-```
-
-### Claude Code Plugin
-
-```bash
-# 自动模式 - AI 自动选择策略
-/plan-cascade:auto <描述>               # 自动选择并执行最佳策略
-
-# 项目级
-/plan-cascade:mega-plan <描述>          # 生成项目计划
-/plan-cascade:mega-approve --auto-prd   # 批准并全自动执行所有批次
-/plan-cascade:mega-resume --auto-prd    # 恢复中断的 mega-plan
-/plan-cascade:mega-complete             # 完成合并
-
-# 功能级
-/plan-cascade:hybrid-auto <描述>        # 生成 PRD
-/plan-cascade:approve --auto-run        # 批准并自动执行
-/plan-cascade:hybrid-resume --auto      # 恢复中断的任务
-/plan-cascade:hybrid-complete           # 完成
-
-# 通用
-/plan-cascade:edit                      # 编辑 PRD
-/plan-cascade:status                    # 查看状态
-```
-
----
-
-## 项目结构
-
-```
-plan-cascade/
-├── src/plan_cascade/       # Python 核心包
-│   ├── core/               # 编排引擎
-│   ├── backends/           # 后端抽象
-│   ├── llm/                # LLM 提供者
-│   ├── tools/              # 工具执行
-│   ├── settings/           # 设置管理
-│   └── cli/                # CLI 入口
-├── .claude-plugin/         # Plugin 配置
-├── commands/               # Plugin 命令
-├── skills/                 # Plugin 技能
-├── mcp_server/             # MCP 服务器
-├── desktop/                # Desktop 应用
-└── docs/                   # 文档
-    ├── CLI-Guide.md
-    ├── Plugin-Guide.md
-    ├── Desktop-Guide.md
-    └── MCP-SERVER-GUIDE.md
-```
-
----
-
-## 文档索引
-
-| 文档 | 说明 |
-|------|------|
-| [CLI Guide](docs/CLI-Guide_zh.md) | CLI 详细使用指南 |
-| [Plugin Guide](docs/Plugin-Guide_zh.md) | Claude Code 插件详细指南 |
-| [Desktop Guide](docs/Desktop-Guide_zh.md) | Desktop 应用指南 |
-| [MCP Server Guide](docs/MCP-SERVER-GUIDE.md) | MCP 服务器配置指南 |
-| [System Architecture](docs/System-Architecture_zh.md) | 系统架构与流程设计（含流程图） |
-| [Design Document](docs/Design-Plan-Cascade-Standalone_zh.md) | 技术设计文档 |
-| [PRD Document](docs/PRD-Plan-Cascade-Standalone_zh.md) | 产品需求文档 |
-
----
-
-## 更新日志
-
-### v4.1.1
-
-- **Mega-Approve 全自动化** - 修复 `/plan-cascade:mega-approve --auto-prd` 不能完全自动执行的问题
-  - 现在可以全自动执行整个 mega-plan，无需手动干预
-  - 仅在出错或合并冲突时暂停
-- **恢复命令** - 新增中断恢复命令
-  - `/plan-cascade:mega-resume` - 恢复中断的 mega-plan 执行
-  - `/plan-cascade:hybrid-resume` - 恢复中断的 hybrid 任务
-  - 自动从文件检测状态，跳过已完成的工作
-  - 兼容新旧两种进度标记格式
-
-### v4.1.0
-
-- **自动策略命令** - 新增 `/plan-cascade:auto` 命令
-  - AI 自动分析任务并选择最佳策略
-  - 支持 4 种策略：direct 直接执行、hybrid-auto、hybrid-worktree、mega-plan
-  - 基于关键词检测（非字数判断）
-  - 无需用户确认，直接执行
-
-### v4.0.0
-
-- **Standalone CLI 完成** - 独立命令行工具全功能可用
-  - 简单模式/专家模式双模式支持
-  - 交互式 REPL 聊天模式
-  - AI 自动策略判断
-- **多 LLM 后端** - 支持 5 种 LLM 提供者
-  - Claude Max（无需 API Key）
-  - Claude API、OpenAI、DeepSeek、Ollama
-- **独立 ReAct 引擎** - 完整的 Think→Act→Observe 循环
-- **文档重构** - 拆分为独立的使用指南
-
-### v3.x
-
-- **MCP 服务器** - 支持 Cursor、Windsurf 等
-- **多 Agent 协作** - Codex、Aider 等
-- **自动迭代循环** - 质量门控、智能重试
-- **Mega Plan** - 项目级多功能编排
-
-完整更新日志见 [CHANGELOG.md](CHANGELOG.md)
-
----
-
-## 项目起源
-
-本项目 fork 自 [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files)（v2.7.1），在其 Manus 风格的文件规划基础上，大幅扩展了功能。
-
----
+1. Fork 仓库
+2. 创建功能分支（`git checkout -b feature/amazing-feature`）
+3. 提交更改（`git commit -m 'Add amazing feature'`）
+4. 推送分支（`git push origin feature/amazing-feature`）
+5. 创建 Pull Request
 
 ## 致谢
 
-- **[OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files)** - 原始项目
-- **[snarktank/ralph](https://github.com/snarktank/ralph)** - PRD 格式启发
-- **Anthropic** - Claude Code、Plugin 系统和 MCP 协议
-
----
+- [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) — 原始灵感
+- [snarktank/ralph](https://github.com/snarktank/ralph) — PRD 格式
+- [Anthropic](https://www.anthropic.com/) — Claude Code 和 MCP 协议
+- [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) — React/Next.js 最佳实践技能
+- [vuejs-ai/skills](https://github.com/vuejs-ai/skills) — Vue.js 最佳实践技能
+- [actionbook/rust-skills](https://github.com/actionbook/rust-skills) — Rust 元认知框架技能
 
 ## 许可证
 
-MIT License
+[MIT License](LICENSE)
 
 ---
 
-**项目地址**: [Taoidle/plan-cascade](https://github.com/Taoidle/plan-cascade)
+<div align="center">
+
+**[GitHub](https://github.com/Taoidle/plan-cascade)** • **[Issues](https://github.com/Taoidle/plan-cascade/issues)** • **[Discussions](https://github.com/Taoidle/plan-cascade/discussions)**
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Taoidle/plan-cascade&type=Date)](https://star-history.com/#Taoidle/plan-cascade&Date)
+
+</div>

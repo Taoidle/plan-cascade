@@ -1,5 +1,5 @@
 ---
-description: "Generate a mega-plan for project-level multi-feature orchestration. Breaks a complex project into parallel features with dependencies. Usage: /plan-cascade:mega-plan <project description>"
+description: "Generate a mega-plan for project-level multi-feature orchestration. Breaks a complex project into parallel features with dependencies. Usage: /plan-cascade:mega-plan <project description> [design-doc-path]"
 ---
 
 # Mega Plan - Project-Level Feature Orchestration
@@ -16,16 +16,22 @@ Level 1: Mega Plan (This level - Project)
 
 ## Step 1: Parse Arguments
 
-Get the project description from user arguments:
+Parse user arguments:
+- **Project description**: First argument (required)
+- **Design doc path**: Second argument (optional) - external design document to convert
 
 ```bash
-PROJECT_DESC="$ARGUMENTS"
+PROJECT_DESC="{{args|arg 1}}"
+DESIGN_DOC_ARG="{{args|arg 2 or empty}}"
 ```
 
 If no description provided, ask the user:
 ```
 Please provide a project description. What do you want to build?
 Example: "Build an e-commerce platform with user authentication, product catalog, shopping cart, and order processing"
+
+Optional: You can also provide an external design document path as second argument:
+/plan-cascade:mega-plan "Build e-commerce platform..." ./architecture.md
 ```
 
 ## Step 2: Check for Existing Mega Plan
@@ -84,7 +90,108 @@ Create `mega-plan.json` with 2-6 features:
 - `dependencies`: List feature IDs that must complete first
 - `priority`: "high" (core), "medium" (important), "low" (nice-to-have)
 
-## Step 5: Create Supporting Files
+## Step 5: Generate Project-Level Design Document
+
+After generating mega-plan.json, automatically generate `design_doc.json` (project-level):
+
+### 5.1: Check for User-Provided Design Document
+
+```
+If DESIGN_DOC_ARG is not empty and file exists:
+    Read the external document at DESIGN_DOC_ARG
+    Detect format:
+      - .md files: Parse Markdown structure (headers → sections)
+      - .json files: Validate/map to our schema
+      - .html files: Parse HTML structure
+    Convert to our format:
+      - Extract overview, architecture, patterns, decisions
+      - Map to feature_mappings based on mega-plan features
+    Save as design_doc.json
+    DESIGN_SOURCE="Converted from: $DESIGN_DOC_ARG"
+Else:
+    Auto-generate based on mega-plan analysis
+    DESIGN_SOURCE="Auto-generated from mega-plan"
+```
+
+### 5.2: Auto-Generate Project Design Document
+
+Based on the features in mega-plan.json, generate `design_doc.json`:
+
+```json
+{
+  "metadata": {
+    "created_at": "<timestamp>",
+    "version": "1.0.0",
+    "source": "ai-generated",
+    "level": "project",
+    "mega_plan_reference": "mega-plan.json"
+  },
+  "overview": {
+    "title": "<from mega-plan goal>",
+    "summary": "<project summary>",
+    "goals": ["<extracted goals>"],
+    "non_goals": ["<identified non-goals>"]
+  },
+  "architecture": {
+    "system_overview": "<high-level architecture based on features>",
+    "components": [
+      {
+        "name": "ComponentName",
+        "description": "Description",
+        "responsibilities": ["resp1"],
+        "dependencies": [],
+        "features": ["feature-001", "feature-002"]
+      }
+    ],
+    "data_flow": "<how data flows between features>",
+    "patterns": [
+      {
+        "name": "PatternName",
+        "description": "What it does",
+        "rationale": "Why use it",
+        "applies_to": ["feature-001", "all"]
+      }
+    ],
+    "infrastructure": {}
+  },
+  "interfaces": {
+    "api_standards": {
+      "style": "RESTful",
+      "versioning": "URL-based",
+      "authentication": "<method>"
+    },
+    "shared_data_models": []
+  },
+  "decisions": [
+    {
+      "id": "ADR-001",
+      "title": "Decision title",
+      "context": "Background",
+      "decision": "What we decided",
+      "rationale": "Why",
+      "alternatives_considered": [],
+      "status": "accepted",
+      "applies_to": ["all"]
+    }
+  ],
+  "feature_mappings": {
+    "feature-001": {
+      "components": [],
+      "patterns": [],
+      "decisions": [],
+      "description": "<from mega-plan>"
+    }
+  }
+}
+```
+
+**Design Document Generation Guidelines:**
+- Analyze feature descriptions to identify shared components
+- Identify cross-cutting patterns (e.g., Repository, Service Layer)
+- Create feature_mappings linking each feature to relevant patterns/decisions
+- Mark patterns/decisions with `applies_to: ["all"]` if they apply universally
+
+## Step 6: Create Supporting Files
 
 Create `mega-findings.md`:
 
@@ -177,13 +284,15 @@ Batch 3 (After Batch 2):
 
 Files created:
   - mega-plan.json       (project plan)
+  - design_doc.json      (project-level technical design)
   - mega-findings.md     (shared findings)
   - .mega-status.json    (execution status)
 
 Next steps:
-  1. Review the plan: cat mega-plan.json
-  2. Edit if needed: /plan-cascade:mega-edit
-  3. Start execution: /plan-cascade:mega-approve
+  1. Review the plan: Read mega-plan.json
+  2. Review the design: Read design_doc.json
+  3. Edit if needed: /plan-cascade:mega-edit
+  4. Start execution: /plan-cascade:mega-approve
      Or with auto PRD approval: /plan-cascade:mega-approve --auto-prd
 
 ============================================================

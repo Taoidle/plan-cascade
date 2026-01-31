@@ -2,8 +2,8 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.1.1
-**Last Updated**: 2026-01-30
+**Version**: 4.2.0
+**Last Updated**: 2026-01-31
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
 
@@ -35,6 +35,107 @@ Plan Cascade provides four main entry commands, suitable for development scenari
 
 ---
 
+## Design Document System
+
+Plan Cascade automatically generates technical design documents (`design_doc.json`) to provide architectural context during story execution.
+
+### Two-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Level 1: Project Design (from mega-plan.json)               │
+│ ─────────────────────────────────────────────────────────── │
+│ • Global architecture and system overview                   │
+│ • Cross-feature components and patterns                     │
+│ • Project-wide ADRs (architectural decisions)               │
+│ • Feature mappings (which patterns/decisions apply where)   │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          │ inheritance
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Level 2: Feature Design (from prd.json)                     │
+│ ─────────────────────────────────────────────────────────── │
+│ • Feature-specific components                               │
+│ • Feature-specific APIs and data models                     │
+│ • Feature-specific ADRs (prefixed ADR-F###)                 │
+│ • Story mappings (which components/decisions per story)     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Auto-Generation Flow
+
+| Command | Design Doc Generated | Level |
+|---------|---------------------|-------|
+| `mega-plan` | Automatic after mega-plan.json | Project |
+| `hybrid-worktree` | Automatic after prd.json | Feature (inherits from project) |
+| `hybrid-auto` | Automatic after prd.json | Feature |
+
+### External Design Documents
+
+All three main commands support optional external design documents:
+
+```bash
+# mega-plan: 2nd argument
+/plan-cascade:mega-plan "Build e-commerce platform" ./project-architecture.md
+
+# hybrid-auto: 2nd argument
+/plan-cascade:hybrid-auto "Implement user auth" ./auth-design.md
+
+# hybrid-worktree: 4th argument
+/plan-cascade:hybrid-worktree fix-auth main "Fix auth" ./architecture.md
+
+# Supported formats: Markdown (.md), JSON (.json), HTML (.html)
+```
+
+External documents are automatically converted to the `design_doc.json` format.
+
+### Design Document Commands
+
+```bash
+/plan-cascade:design-generate    # Manually generate design document
+/plan-cascade:design-review      # Review design document
+/plan-cascade:design-import      # Import external document
+```
+
+---
+
+## External Framework Skills
+
+Plan Cascade includes built-in framework-specific skills that are automatically detected and injected into story execution context.
+
+### Supported Frameworks
+
+| Framework | Skills | Auto-Detection |
+|-----------|--------|----------------|
+| React/Next.js | `react-best-practices`, `web-design-guidelines` | `package.json` contains `react` or `next` |
+| Vue/Nuxt | `vue-best-practices`, `vue-router-best-practices`, `vue-pinia-best-practices` | `package.json` contains `vue` or `nuxt` |
+| Rust | `rust-coding-guidelines`, `rust-ownership`, `rust-error-handling`, `rust-concurrency` | `Cargo.toml` exists |
+
+### How It Works
+
+1. **Detection**: When a story is executed, Plan Cascade scans the project for framework indicators (`package.json`, `Cargo.toml`)
+2. **Loading**: Matching skills are loaded from Git submodules in `external-skills/`
+3. **Injection**: Skill content is injected into the agent's context during implementation and retry phases
+
+### Initialization
+
+External skills are included as Git submodules. Initialize them after cloning:
+
+```bash
+git submodule update --init --recursive
+```
+
+### Skill Sources
+
+| Source | Repository | Skills |
+|--------|------------|--------|
+| Vercel | [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) | React, Web Design |
+| Vue.js | [vuejs-ai/skills](https://github.com/vuejs-ai/skills) | Vue, Pinia, Router |
+| Rust | [actionbook/rust-skills](https://github.com/actionbook/rust-skills) | Coding Guidelines, Ownership, Error Handling, Concurrency |
+
+---
+
 ## `/plan-cascade:auto` - AI Auto Strategy
 
 The easiest entry point. AI analyzes your task description and automatically selects the best strategy.
@@ -42,18 +143,22 @@ The easiest entry point. AI analyzes your task description and automatically sel
 ### How It Works
 
 1. You provide a task description
-2. AI analyzes keywords and patterns
-3. AI selects optimal strategy (direct, hybrid-auto, hybrid-worktree, or mega-plan)
-4. Executes the strategy without confirmation
+2. AI performs structured self-assessment analyzing:
+   - **Scope**: How many functional areas are involved?
+   - **Complexity**: Are there sub-task dependencies? Architecture decisions needed?
+   - **Risk**: Could it break existing functionality? Needs isolation?
+   - **Parallelization**: Can work be parallelized for efficiency?
+3. AI outputs structured analysis with confidence score
+4. AI selects optimal strategy and executes without confirmation
 
 ### Strategy Selection
 
-| Strategy | Trigger Keywords | Example |
-|----------|------------------|---------|
-| **direct** | fix, typo, update, simple, single | "Fix the login button styling" |
-| **hybrid-auto** | implement, create, feature, api | "Implement user authentication" |
-| **hybrid-worktree** | experimental, refactor, isolated | "Experimental refactoring of payment module" |
-| **mega-plan** | platform, system, 3+ modules | "Build e-commerce platform with users, products, orders" |
+| Analysis Result | Strategy | Example |
+|----------------|----------|---------|
+| 1 area, 1-2 steps, low risk | **direct** | "Fix the login button styling" |
+| 2-3 areas, 3-7 steps, has dependencies | **hybrid-auto** | "Implement user authentication" |
+| hybrid-auto + high risk or experimental | **hybrid-worktree** | "Experimental refactoring of payment module" |
+| 4+ areas, multiple independent features | **mega-plan** | "Build e-commerce platform with users, products, orders" |
 
 ### Usage Example
 
@@ -307,18 +412,34 @@ Configure in `prd.json`:
 
 ### Specifying Agents
 
+**For hybrid-auto (PRD generation):**
 ```bash
 # Use default agent (claude-code)
 /plan-cascade:hybrid-auto "Implement user authentication"
 
-# Specify using codex for execution
-/plan-cascade:hybrid-auto "Implement user authentication" --agent codex
+# Specify agent for PRD generation
+/plan-cascade:hybrid-auto "Implement user authentication" --agent=codex
+```
 
-# Use different Agents for different phases
-/plan-cascade:approve --impl-agent claude-code --retry-agent aider
+**For approve (story execution):**
+```bash
+# Global agent override (all stories)
+/plan-cascade:approve --agent=codex
+
+# Phase-specific agents
+/plan-cascade:approve --impl-agent=claude-code --retry-agent=aider
 
 # Disable auto-fallback
-/plan-cascade:approve --agent codex --no-fallback
+/plan-cascade:approve --agent=codex --no-fallback
+```
+
+**For mega-approve (feature execution):**
+```bash
+# Specify agents for different phases
+/plan-cascade:mega-approve --auto-prd --prd-agent=codex --impl-agent=aider
+
+# Global override
+/plan-cascade:mega-approve --auto-prd --agent=claude-code
 ```
 
 ### Specifying Agent in PRD
@@ -409,6 +530,14 @@ Configure in `prd.json`:
 /plan-cascade:show-dependencies                       # Dependency graph
 ```
 
+### Design Documents
+
+```bash
+/plan-cascade:design-generate            # Auto-generate design document
+/plan-cascade:design-import <path>       # Import external design document
+/plan-cascade:design-review              # Review design document
+```
+
 ### Basic Planning
 
 ```bash
@@ -425,9 +554,12 @@ Configure in `prd.json`:
 |------|------|-------------|
 | `prd.json` | Planning | PRD document |
 | `mega-plan.json` | Planning | Project plan |
+| `design_doc.json` | Planning | Technical design document |
 | `agents.json` | Configuration | Agent configuration |
 | `findings.md` | Shared | Findings record |
+| `mega-findings.md` | Shared | Project-level findings (mega-plan) |
 | `progress.txt` | Shared | Progress log |
+| `.mega-status.json` | Status | Mega-plan execution status |
 | `.agent-status.json` | Status | Agent status |
 | `.iteration-state.json` | Status | Iteration state |
 | `.retry-state.json` | Status | Retry record |

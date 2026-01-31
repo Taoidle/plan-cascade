@@ -75,70 +75,124 @@ PROJECT_TYPE="unknown"
 [ -f "go.mod" ] && PROJECT_TYPE="go"
 ```
 
-## Step 3: AI Strategy Analysis
+## Step 3: AI Self-Assessment of Task Complexity
 
-Analyze the task description using keyword-based detection (not word count):
+Instead of keyword matching, perform a structured analysis of the task to determine the appropriate strategy.
 
-### Strategy Detection Rules
+### 3.1: Task Decomposition Analysis
 
-**Priority Order** (check in this order, first match wins):
+Analyze the task description across these dimensions:
 
-### 1. MEGA_PLAN Detection
+1. **Scope Assessment**: How many functional areas does this task touch?
+   - Single file or function
+   - Single module/component
+   - Multiple modules with clear boundaries
+   - Cross-cutting concerns affecting the whole system
 
-**Keywords** (any match triggers mega-plan):
-- Scale keywords: `platform`, `system`, `architecture`, `infrastructure`, `framework`
-- Multi-feature keywords: `multiple features`, `several modules`, `various components`
-- Completeness keywords: `complete`, `comprehensive`, `full`, `entire`, `whole`, `end-to-end`, `e2e`
-- Architecture keywords: `microservices`, `monorepo`, `multi-tenant`, `distributed`
+2. **Complexity Indicators**: What level of planning is needed?
+   - Simple change (1-2 steps, obvious solution)
+   - Moderate (3-5 steps, some decisions needed)
+   - Complex (6+ steps, dependencies between subtasks)
+   - Architectural (requires design decisions, patterns, interfaces)
 
-**Structure patterns**:
-- Lists 3+ independent functional modules (e.g., users, products, orders)
-- Contains enumeration patterns like "A, B, C, and D"
+3. **Risk Assessment**: What's the potential impact?
+   - Low: Isolated change, easy to revert
+   - Medium: Touches shared code, needs testing
+   - High: Breaking changes, experimental, or affects critical paths
 
-### 2. HYBRID_WORKTREE Detection
+4. **Parallelization Benefit**: Can work be split effectively?
+   - None: Sequential steps only
+   - Some: 2-3 independent subtasks
+   - Significant: 4+ independent features/stories
 
-**Requires BOTH conditions**:
-- Contains feature development keywords (from hybrid-auto list below)
-- **AND** contains isolation keywords:
-  - `experimental`, `experiment`, `prototype`, `poc`, `proof of concept`
-  - `parallel`, `isolation`, `isolated`, `separate`, `independently`
-  - `refactor`, `refactoring`, `rewrite`, `restructure`, `reorganize`
-  - `risky`, `breaking`, `major change`, `don't affect`, `without affecting`
+### 3.2: Output Structured Analysis
 
-### 3. HYBRID_AUTO Detection
+Produce a JSON analysis of your assessment:
 
-**Keywords** (any match without isolation keywords):
-- Action keywords: `implement`, `create`, `build`, `develop`, `design`, `integrate`
-- Feature keywords: `feature`, `function`, `module`, `component`, `api`, `endpoint`, `service`, `handler`
-- Technical keywords: `authentication`, `authorization`, `login`, `registration`, `crud`, `database`, `cache`
+```json
+{
+  "task_analysis": {
+    "functional_areas": ["<area1>", "<area2>"],
+    "estimated_stories": <number>,
+    "has_dependencies": true|false,
+    "requires_architecture_decisions": true|false,
+    "risk_level": "low|medium|high",
+    "parallelization_benefit": "none|some|significant"
+  },
+  "strategy_decision": {
+    "strategy": "DIRECT|HYBRID_AUTO|HYBRID_WORKTREE|MEGA_PLAN",
+    "confidence": 0.0-1.0,
+    "reasoning": "<explanation of why this strategy was chosen>"
+  }
+}
+```
 
-### 4. DIRECT (Default)
+### 3.3: Strategy Selection Guide
 
-**Keywords that suggest direct execution**:
-- Action keywords: `fix`, `typo`, `update`, `modify`, `change`, `rename`, `remove`, `delete`, `add` (alone)
-- Scope keywords: `minor`, `simple`, `quick`, `small`, `single`, `one`, `only`, `just`, `trivial`, `tiny`
-- Target keywords: `file`, `line`, `button`, `text`, `string`, `config`, `setting`, `style`, `css`
+Use this decision matrix based on your analysis:
 
-**Default**: If no other strategy matches, use DIRECT.
+| Analysis Result | Strategy | When to Use |
+|-----------------|----------|-------------|
+| 1 area, 1-2 steps, low risk, no parallelization | **DIRECT** | Quick fixes, config changes, simple updates |
+| 2-3 areas, 3-7 steps, has dependencies | **HYBRID_AUTO** | Feature development with clear stories |
+| HYBRID_AUTO conditions + high risk OR experimental | **HYBRID_WORKTREE** | Risky changes needing isolation |
+| 4+ areas, 8+ steps, significant parallelization | **MEGA_PLAN** | Multiple independent features, platform work |
+
+### 3.4: Strategy Decision Rules
+
+**DIRECT** - Choose when ALL of these are true:
+- Single functional area
+- 1-2 implementation steps
+- Low to medium risk
+- No subtask dependencies
+- No architecture decisions needed
+
+**HYBRID_AUTO** - Choose when ANY of these are true:
+- 2-3 functional areas involved
+- 3-7 estimated implementation steps
+- Dependencies between subtasks exist
+- Moderate complexity requiring story breakdown
+- BUT: Risk is low to medium and main branch is acceptable
+
+**HYBRID_WORKTREE** - Choose when HYBRID_AUTO applies AND:
+- High risk level (breaking changes, experimental)
+- Need to preserve main branch integrity
+- Parallel development with other features
+- Major refactoring or restructuring
+- Prototype or proof-of-concept work
+
+**MEGA_PLAN** - Choose when ANY of these are true:
+- 4+ distinct functional areas
+- 8+ estimated stories
+- Multiple independent features can be developed in parallel
+- Project-level scope (platform, system, infrastructure)
+- Significant parallelization benefit identified
 
 ## Step 4: Display Analysis Result and Execute
 
-Display the selected strategy and reasoning:
+Display your structured analysis and selected strategy:
 
 ```
 ============================================================
-AUTO STRATEGY: {STRATEGY}
+AUTO STRATEGY ANALYSIS
 ============================================================
 Task: {TASK_DESC}
-Reasoning: {REASONING}
+
+Analysis:
+  Functional Areas: {functional_areas}
+  Estimated Stories: {estimated_stories}
+  Has Dependencies: {has_dependencies}
+  Architecture Decisions: {requires_architecture_decisions}
+  Risk Level: {risk_level}
+  Parallelization: {parallelization_benefit}
+
+Decision:
+  Strategy: {STRATEGY}
+  Confidence: {confidence}
+  Reasoning: {reasoning}
 ============================================================
 Executing...
 ```
-
-Where `{REASONING}` explains:
-- Which keywords were detected
-- Why this strategy was chosen
-- For mega-plan: list the identified modules
 
 ## Step 5: Route to Appropriate Strategy
 
@@ -262,6 +316,8 @@ This will:
 ## Notes
 
 - Strategy selection is fully automatic - no user confirmation required
-- The AI analyzes keywords and patterns, not task description length
+- The AI performs structured complexity analysis, not keyword matching
+- Analysis considers scope, complexity, risk, and parallelization benefit
 - Existing planning files (prd.json, mega-plan.json) are detected but don't change strategy selection
-- For ambiguous cases, the AI errs on the side of simpler strategies (DIRECT > HYBRID_AUTO > HYBRID_WORKTREE > MEGA_PLAN)
+- For ambiguous cases (low confidence < 0.7), the AI errs on the side of simpler strategies
+- The JSON analysis is logged for debugging and can be reviewed in progress.txt

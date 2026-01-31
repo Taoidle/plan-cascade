@@ -2,6 +2,149 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.2.0] - 2026-01-31
+
+### Added
+
+- **External Framework Skills** - Auto-detected framework-specific best practices injected into story execution
+  - Git submodules for skill sources: vercel, vue, rust
+  - Auto-detection based on project files (`package.json`, `Cargo.toml`)
+  - Skills loaded and injected during implementation and retry phases
+  - Supported frameworks:
+    | Framework | Skills | Detection |
+    |-----------|--------|-----------|
+    | React/Next.js | `react-best-practices`, `web-design-guidelines` | `package.json` contains `react`/`next` |
+    | Vue/Nuxt | `vue-best-practices`, `vue-router-best-practices`, `vue-pinia-best-practices` | `package.json` contains `vue`/`nuxt` |
+    | Rust | `rust-coding-guidelines`, `rust-ownership`, `rust-error-handling`, `rust-concurrency` | `Cargo.toml` exists |
+  - Skill sources:
+    - [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) — React/Next.js
+    - [vuejs-ai/skills](https://github.com/vuejs-ai/skills) — Vue.js
+    - [actionbook/rust-skills](https://github.com/actionbook/rust-skills) — Rust meta-cognition framework
+  - New module: `src/plan_cascade/core/external_skill_loader.py`
+  - Configuration: `external-skills.json`
+
+- **Design Document System** - Auto-generated technical design documents alongside PRDs
+  - Two-level hierarchy: Project-level (from mega-plan.json) and Feature-level (from prd.json)
+  - Feature design docs inherit from project-level context
+  - `story_mappings`: Links stories to relevant components/decisions/interfaces
+  - `feature_mappings`: Links features to patterns/decisions in project-level docs
+  - ADR (Architecture Decision Record) support with prefixes: `ADR-###` (project), `ADR-F###` (feature)
+  - Automatic generation after PRD creation in all three modes
+
+- **External Design Document Import** - Convert and use existing design documents
+  - Supported formats: Markdown (.md), JSON (.json), HTML (.html)
+  - All three main commands support external design docs:
+    - `/plan-cascade:mega-plan "desc" ./architecture.md`
+    - `/plan-cascade:hybrid-auto "desc" ./design.md`
+    - `/plan-cascade:hybrid-worktree name branch "desc" ./design.md`
+  - Automatic conversion to `design_doc.json` format
+
+- **Design Document Commands:**
+  - `/plan-cascade:design-generate` - Manually generate design document
+  - `/plan-cascade:design-import <path>` - Import external design document
+  - `/plan-cascade:design-review` - Review current design document
+
+- **Context Injection** - Design context provided to agents during story execution
+  - ContextFilter extracts relevant components/decisions per story via `story_mappings`
+  - AgentExecutor builds design-aware prompts with architectural patterns
+  - Reduces AI hallucination by maintaining architectural context
+
+### Changed
+
+- **Auto Strategy Selection** - AI self-assessment replaces keyword matching
+  - Analyzes task across 4 dimensions: scope, complexity, risk, parallelization benefit
+  - Outputs structured JSON with `task_analysis` and `strategy_decision`
+  - Includes confidence score and reasoning
+  - More accurate strategy selection based on actual task complexity
+
+- **Strategy Selection Guidelines:**
+  | Analysis Result | Strategy |
+  |----------------|----------|
+  | 1 area, 1-2 steps, low risk | DIRECT |
+  | 2-3 areas, 3-7 steps, has dependencies | HYBRID_AUTO |
+  | HYBRID_AUTO + high risk or experimental | HYBRID_WORKTREE |
+  | 4+ areas, multiple independent features | MEGA_PLAN |
+
+- **Multi-Agent Command Parameters** - Full integration in all command files
+  - `/plan-cascade:approve`: `--agent`, `--impl-agent`, `--retry-agent`, `--no-fallback`
+  - `/plan-cascade:mega-approve`: `--agent`, `--prd-agent`, `--impl-agent`, `--auto-prd`
+  - `/plan-cascade:hybrid-auto`: `--agent`
+
+- **Documentation Updates:**
+  - README.md/README_zh.md - Restructured with professional open source format, added External Framework Skills section
+  - Plugin-Guide.md/Plugin-Guide_zh.md - Added design document, multi-agent, and External Framework Skills sections
+  - System-Architecture.md/System-Architecture_zh.md - Complete rewrite with new sections:
+    - Section 5: Design Document System with External Framework Skills subsection
+    - Updated Section 3: Complete Workflow with context loading step
+    - Updated Section 9: Auto-Iteration Workflow with skill injection
+    - Added ExternalSkillLoader to Core Components diagram
+    - Updated Section 4: AI self-assessment flow
+    - Updated Section 10: Data flow with design_doc.json
+    - Updated Section 12: Multi-agent command parameters
+
+### Technical Details
+
+**Design Document Schema:**
+```json
+{
+  "metadata": {
+    "source": "ai-generated|user-provided|converted",
+    "prd_reference": "prd.json",
+    "parent_design_doc": "path/to/project/design_doc.json"
+  },
+  "overview": { "title", "summary", "goals", "non_goals" },
+  "architecture": {
+    "components": [{ "name", "responsibilities", "dependencies", "files" }],
+    "patterns": [{ "name", "description", "rationale" }]
+  },
+  "decisions": [{ "id", "title", "context", "decision", "status" }],
+  "story_mappings": { "story-001": { "components", "decisions", "interfaces" } },
+  "feature_mappings": { "feature-001": { "patterns", "decisions" } }
+}
+```
+
+**AI Self-Assessment Output:**
+```json
+{
+  "task_analysis": {
+    "functional_areas": ["auth", "api", "frontend"],
+    "estimated_stories": 5,
+    "has_dependencies": true,
+    "requires_architecture_decisions": true,
+    "risk_level": "medium",
+    "parallelization_benefit": "significant"
+  },
+  "strategy_decision": {
+    "strategy": "HYBRID_AUTO",
+    "confidence": 0.85,
+    "reasoning": "Task involves 3 functional areas with dependencies..."
+  }
+}
+```
+
+**New Files:**
+| File | Description |
+|------|-------------|
+| `design_doc.json` | Technical design document |
+| `mega-findings.md` | Project-level findings (mega-plan) |
+| `.mega-status.json` | Mega-plan execution status |
+| `external-skills.json` | External skill mapping configuration |
+| `external-skills/vercel/` | Git submodule for React/Next.js skills |
+| `external-skills/vue/` | Git submodule for Vue.js skills |
+| `external-skills/rust/` | Git submodule for Rust skills |
+
+**External Skill Loader:**
+```python
+# Usage in ContextFilter
+from ..core.external_skill_loader import ExternalSkillLoader
+
+loader = ExternalSkillLoader(project_root, plugin_root)
+skills = loader.detect_applicable_skills()  # ['react-best-practices', 'web-design-guidelines']
+context = loader.get_skill_context("implementation")  # Formatted markdown for agent prompt
+```
+
+---
+
 ## [4.1.1] - 2026-01-30
 
 ### Added

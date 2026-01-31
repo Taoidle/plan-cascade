@@ -1,7 +1,7 @@
 {
   "name": "plan-cascade",
-  "version": "4.1.4",
-  "description": "Three-layer cascaded parallel development framework with multi-agent collaboration. Breaks down projects into Features (Mega Plan), Features into Stories (Hybrid Ralph), with dependency-driven batch execution, Git Worktree isolation, and support for multiple AI agents (Codex, Amp, Aider, etc.).",
+  "version": "4.2.0",
+  "description": "AI-powered cascading development framework with design document system and multi-agent collaboration. Breaks down projects into Features (Mega Plan), Features into Stories (Hybrid Ralph), with auto-generated technical design docs, dependency-driven batch execution, Git Worktree isolation, and support for multiple AI agents (Codex, Amp, Aider, etc.).",
   "author": {
     "name": "Taoidle",
     "url": "https://github.com/Taoidle"
@@ -32,6 +32,10 @@
     "codex",
     "aider",
     "amp-code",
-    "agent-collaboration"
+    "agent-collaboration",
+    "design-doc",
+    "architecture",
+    "adr",
+    "ai-strategy"
   ]
 }

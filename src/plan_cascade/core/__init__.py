@@ -11,8 +11,14 @@ Contains the core orchestration logic including:
 - RetryManager: Failure handling with exponential backoff
 - Mode: Simple/Expert user mode configuration
 - Strategy: Execution strategy selection (Direct/Hybrid/Mega)
+- DesignDocGenerator: Technical design document generation
+- DesignDocConverter: External document conversion
+- ExternalSkillLoader: Framework-specific skill loading
 """
 
+from .design_doc_converter import DesignDocConverter
+from .design_doc_generator import DesignDocGenerator
+from .external_skill_loader import ExternalSkillLoader, LoadedSkill
 from .feature_orchestrator import FeatureOrchestrator
 from .iteration_loop import (
     BatchResult,
@@ -56,6 +62,12 @@ __all__ = [
     "create_sample_prd",
     "MegaPlanGenerator",
     "FeatureOrchestrator",
+    # Design documents
+    "DesignDocGenerator",
+    "DesignDocConverter",
+    # External skills
+    "ExternalSkillLoader",
+    "LoadedSkill",
     # Iteration
     "IterationLoop",
     "IterationConfig",
