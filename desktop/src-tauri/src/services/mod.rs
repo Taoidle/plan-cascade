@@ -10,6 +10,7 @@ pub mod claude_code;
 pub mod context;
 pub mod dependency;
 pub mod design;
+pub mod fallback;
 pub mod iteration;
 pub mod llm;
 pub mod markdown;
@@ -34,6 +35,7 @@ pub use iteration::{IterationLoop, IterationLoopConfig, IterationLoopError, Iter
 pub use mega::{MegaOrchestrator, MegaOrchestratorConfig, MegaOrchestratorError};
 pub use phase::{Phase, PhaseConfig, PhaseManager, PhaseError};
 pub use context::{ContextFilter, ContextFilterConfig, ContextTag, StoryContext, ContextError};
+pub use fallback::{AgentFallbackChain, FallbackConfig, FallbackError, FailureReason, FallbackAttempt, FallbackExecutionLog};
 pub use quality_gates::{ProjectDetector, ValidatorRegistry, QualityGateRunner, QualityGatesStore};
 pub use sync::{FileWatcherService, WatcherConfig, WatchTarget, start_default_watches};
 pub use worktree::{WorktreeManager, PlanningConfigService, GitOps};
