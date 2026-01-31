@@ -78,6 +78,9 @@ prd.json
 findings.md
 progress.txt
 .agent-status.json
+design_doc.json
+.hybrid-execution-context.md
+.mega-execution-context.md
 
 # Desktop app (Tauri + React)
 desktop/node_modules/
