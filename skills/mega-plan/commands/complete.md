@@ -15,13 +15,13 @@ Complete the mega-plan by merging all features in dependency order and cleaning 
 
 ### Step 1: Check for Mega Plan
 
-First, verify mega-plan.json exists:
+**Use Read tool (NOT Bash) to check if mega-plan.json exists:**
 
-```bash
-ls -la mega-plan.json 2>/dev/null
+```
+Read("mega-plan.json")
 ```
 
-If it doesn't exist:
+If the file doesn't exist (Read returns error):
 ```
 No mega-plan.json found.
 Nothing to complete.

@@ -11,13 +11,13 @@ Edit the mega-plan.json file interactively.
 
 ### Step 1: Check for Mega Plan
 
-First, verify mega-plan.json exists:
+**Use Read tool (NOT Bash) to check if mega-plan.json exists:**
 
-```bash
-ls -la mega-plan.json 2>/dev/null
+```
+Read("mega-plan.json")
 ```
 
-If it doesn't exist, inform the user:
+If the file doesn't exist (Read returns error), inform the user:
 ```
 No mega-plan.json found.
 Use /mega:plan <description> to create one first.
@@ -25,11 +25,7 @@ Use /mega:plan <description> to create one first.
 
 ### Step 2: Read Current Plan
 
-Read the current mega-plan:
-
-```bash
-cat mega-plan.json
-```
+The mega-plan was already read in Step 1 using the Read tool. Parse the JSON content from that result.
 
 ### Step 3: Display Current Structure
 

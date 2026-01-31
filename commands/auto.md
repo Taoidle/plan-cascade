@@ -40,40 +40,60 @@ Example: "Fix the login button styling" or "Build a user authentication system"
 
 ## Step 2: Gather Project Context
 
-Collect project context for strategy analysis:
+Collect project context for strategy analysis.
+
+**IMPORTANT: Use the correct tools to avoid command confirmation prompts:**
+
+### 2.1: Check Git Repository (Bash - unavoidable)
 
 ```bash
-# Check if in Git repository
-if git rev-parse --git-dir > /dev/null 2>&1; then
-    GIT_REPO=true
-    CURRENT_BRANCH=$(git branch --show-current)
-    DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@refs/remotes/origin/@@')
-    if [ -z "$DEFAULT_BRANCH" ]; then
-        if git show-ref --verify --quiet refs/heads/main; then
-            DEFAULT_BRANCH="main"
-        elif git show-ref --verify --quiet refs/heads/master; then
-            DEFAULT_BRANCH="master"
-        else
-            DEFAULT_BRANCH="main"
-        fi
-    fi
-else
-    GIT_REPO=false
-fi
-
-# Check for existing planning files
-HAS_PRD=false
-HAS_MEGA_PLAN=false
-[ -f "prd.json" ] && HAS_PRD=true
-[ -f "mega-plan.json" ] && HAS_MEGA_PLAN=true
-
-# Detect project type (optional context)
-PROJECT_TYPE="unknown"
-[ -f "package.json" ] && PROJECT_TYPE="nodejs"
-[ -f "requirements.txt" ] || [ -f "pyproject.toml" ] && PROJECT_TYPE="python"
-[ -f "Cargo.toml" ] && PROJECT_TYPE="rust"
-[ -f "go.mod" ] && PROJECT_TYPE="go"
+# Only git commands are acceptable for Bash here
+git rev-parse --git-dir 2>/dev/null && git branch --show-current && git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@refs/remotes/origin/@@'
 ```
+
+If git command fails, assume not in a git repository. If default branch detection fails, try:
+```bash
+git show-ref --verify --quiet refs/heads/main && echo "main" || git show-ref --verify --quiet refs/heads/master && echo "master" || echo "main"
+```
+
+### 2.2: Check Planning Files (Use Glob - NO Bash)
+
+Use the **Glob** tool to check for existing planning files:
+
+```
+Glob("prd.json")           -> HAS_PRD = (result count > 0)
+Glob("mega-plan.json")     -> HAS_MEGA_PLAN = (result count > 0)
+Glob(".worktrees/*")       -> HAS_WORKTREES = (result count > 0)
+```
+
+### 2.3: Detect Project Type (Use Glob - NO Bash)
+
+Use the **Glob** tool to detect project type by checking for marker files:
+
+```
+Glob("package.json")       -> PROJECT_TYPE = "nodejs"
+Glob("pyproject.toml")     -> PROJECT_TYPE = "python"
+Glob("requirements.txt")   -> PROJECT_TYPE = "python" (if no pyproject.toml)
+Glob("Cargo.toml")         -> PROJECT_TYPE = "rust"
+Glob("go.mod")             -> PROJECT_TYPE = "go"
+```
+
+Execute these Glob calls in parallel (single message with multiple tool calls) for efficiency.
+
+**Example correct usage:**
+```
+// Call these 5 Glob patterns in parallel in a single message
+Glob("prd.json")
+Glob("mega-plan.json")
+Glob("package.json")
+Glob("Cargo.toml")
+Glob("go.mod")
+```
+
+**DO NOT use Bash for file existence checks like:**
+- ❌ `[ -f "prd.json" ]`
+- ❌ `ls *.json`
+- ❌ `test -f package.json`
 
 ## Step 3: AI Self-Assessment of Task Complexity
 

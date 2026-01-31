@@ -37,181 +37,139 @@ Resume execution of an interrupted hybrid task by detecting current state from e
 
 ## Step 1: Detect Context
 
+**IMPORTANT: Use Read/Glob tools for file detection, NOT Bash**
+
 ### 1.1: Check if in Worktree
 
-```bash
-if [ -f ".planning-config.json" ]; then
-    MODE=$(jq -r '.mode // empty' .planning-config.json 2>/dev/null)
-    if [ "$MODE" = "hybrid" ]; then
-        CONTEXT="worktree"
-        TASK_NAME=$(jq -r '.task_name' .planning-config.json)
-        TARGET_BRANCH=$(jq -r '.target_branch' .planning-config.json)
-        WORKTREE_DIR=$(pwd)
-        echo "✓ Detected hybrid worktree: $TASK_NAME"
-    fi
-fi
+**Use Read tool (NOT Bash) to check for worktree config:**
+
 ```
+Read(".planning-config.json")
+```
+
+If Read succeeds:
+- Parse the JSON content
+- Check if `mode` equals "hybrid"
+- If yes: `CONTEXT="worktree"`, extract `task_name`, `target_branch`
+- Log "✓ Detected hybrid worktree: {task_name}"
 
 ### 1.2: Check for Regular Hybrid Task
 
-```bash
-if [ -z "$CONTEXT" ]; then
-    if [ -f "prd.json" ]; then
-        CONTEXT="regular"
-        echo "✓ Detected regular hybrid task (prd.json found)"
-    fi
-fi
+If CONTEXT is not set yet:
+
+**Use Read tool to check for PRD:**
+
 ```
+Read("prd.json")
+```
+
+If Read succeeds:
+- `CONTEXT="regular"`
+- Log "✓ Detected regular hybrid task (prd.json found)"
 
 ### 1.3: Scan for Worktrees (if not in one)
 
-```bash
-if [ -z "$CONTEXT" ]; then
-    # Look for hybrid worktrees
-    echo "Scanning for interrupted hybrid tasks..."
+If CONTEXT is still not set:
 
-    HYBRID_TASKS=()
+**Use Glob tool (NOT Bash `ls`) to find worktrees:**
 
-    # Check .worktree directory
-    if [ -d ".worktree" ]; then
-        for dir in .worktree/*/; do
-            if [ -f "${dir}.planning-config.json" ]; then
-                mode=$(jq -r '.mode // empty' "${dir}.planning-config.json" 2>/dev/null)
-                if [ "$mode" = "hybrid" ]; then
-                    task_name=$(jq -r '.task_name' "${dir}.planning-config.json" 2>/dev/null)
-                    HYBRID_TASKS+=("$dir|$task_name|worktree")
-                fi
-            elif [ -f "${dir}prd.json" ]; then
-                # Worktree with PRD but no config
-                HYBRID_TASKS+=("$dir|$(basename $dir)|worktree-legacy")
-            fi
-        done
-    fi
-
-    if [ ${#HYBRID_TASKS[@]} -eq 0 ]; then
-        echo ""
-        echo "============================================"
-        echo "No interrupted hybrid tasks found"
-        echo "============================================"
-        echo ""
-        echo "To start a new task:"
-        echo "  /plan-cascade:hybrid-auto <description>"
-        echo "  /plan-cascade:hybrid-worktree <name> <branch> <description>"
-        exit 0
-    fi
-
-    echo ""
-    echo "Found ${#HYBRID_TASKS[@]} interrupted hybrid task(s):"
-    echo ""
-
-    for i in "${!HYBRID_TASKS[@]}"; do
-        IFS='|' read -r path name type <<< "${HYBRID_TASKS[$i]}"
-        echo "  [$((i+1))] $name"
-        echo "      Path: $path"
-        echo "      Type: $type"
-
-        # Show state preview
-        if [ -f "${path}prd.json" ]; then
-            stories=$(jq '.stories | length' "${path}prd.json" 2>/dev/null || echo "?")
-            echo "      PRD: $stories stories"
-        else
-            echo "      PRD: not generated"
-        fi
-
-        if [ -f "${path}progress.txt" ]; then
-            complete=$(grep -c "\[COMPLETE\]" "${path}progress.txt" 2>/dev/null || echo "0")
-            echo "      Progress: $complete stories complete"
-        fi
-        echo ""
-    done
-
-    read -p "Select task to resume [1-${#HYBRID_TASKS[@]}]: " selection
-
-    if [ "$selection" -lt 1 ] || [ "$selection" -gt ${#HYBRID_TASKS[@]} ]; then
-        echo "Invalid selection."
-        exit 1
-    fi
-
-    selected="${HYBRID_TASKS[$((selection-1))]}"
-    IFS='|' read -r SELECTED_PATH TASK_NAME TYPE <<< "$selected"
-
-    cd "$SELECTED_PATH"
-    CONTEXT="worktree"
-    WORKTREE_DIR=$(pwd)
-    echo ""
-    echo "✓ Now in: $(pwd)"
-fi
 ```
+Glob(".worktree/*/.planning-config.json")
+Glob(".worktree/*/prd.json")
+```
+
+Execute these Glob calls in parallel.
+
+For each found file:
+- **Use Read tool** to read the config/prd content
+- Parse to get task info (mode, task_name, etc.)
+- Build list of HYBRID_TASKS
+
+If no tasks found:
+```
+============================================
+No interrupted hybrid tasks found
+============================================
+
+To start a new task:
+  /plan-cascade:hybrid-auto <description>
+  /plan-cascade:hybrid-worktree <name> <branch> <description>
+```
+
+If tasks found, display them and use **AskUserQuestion** to let user select:
+
+```
+Found {count} interrupted hybrid task(s):
+
+  [1] {task_name_1}
+      Path: {path_1}
+      PRD: {story_count} stories
+      Progress: {complete_count} complete
+
+  [2] {task_name_2}
+      ...
+```
+
+After user selection, navigate to the selected worktree directory.
 
 ## Step 2: Analyze Current State
 
+**IMPORTANT: Use Read/Grep tools for state analysis, NOT Bash**
+
 ### 2.1: Check PRD Status
 
-```bash
-PRD_STATUS="missing"
-TOTAL_STORIES=0
+**Use Read tool to get PRD content:**
 
-if [ -f "prd.json" ]; then
-    # Validate JSON
-    if python3 -m json.tool prd.json > /dev/null 2>&1 || jq '.' prd.json > /dev/null 2>&1; then
-        TOTAL_STORIES=$(jq '.stories | length' prd.json 2>/dev/null || echo "0")
-
-        if [ "$TOTAL_STORIES" -gt 0 ]; then
-            PRD_STATUS="valid"
-        else
-            PRD_STATUS="empty"
-        fi
-    else
-        PRD_STATUS="corrupted"
-    fi
-fi
-
-echo "PRD Status: $PRD_STATUS"
-if [ "$PRD_STATUS" = "valid" ]; then
-    echo "  Stories: $TOTAL_STORIES"
-fi
 ```
+Read("prd.json")
+```
+
+Based on result:
+- If Read fails → `PRD_STATUS="missing"`
+- If Read succeeds:
+  - Parse JSON in the response
+  - If JSON invalid → `PRD_STATUS="corrupted"`
+  - If `stories` array is empty → `PRD_STATUS="empty"`
+  - If `stories` array has items → `PRD_STATUS="valid"`, `TOTAL_STORIES=len(stories)`
+
+Display: `PRD Status: {PRD_STATUS}` and `Stories: {TOTAL_STORIES}` if valid
 
 ### 2.2: Check Progress Status
 
-```bash
-STORIES_COMPLETE=0
-STORIES_FAILED=0
-STORIES_IN_PROGRESS=0
-CURRENT_BATCH=0
+**Use Read tool to get progress content:**
 
-if [ -f "progress.txt" ]; then
-    # Count completion markers (both old and new style)
-    STORIES_COMPLETE=$(grep -cE "\[COMPLETE\]|\[STORY_COMPLETE\]" progress.txt 2>/dev/null || echo "0")
-    STORIES_FAILED=$(grep -cE "\[FAILED\]|\[STORY_FAILED\]|\[ERROR\]" progress.txt 2>/dev/null || echo "0")
-
-    # Try to detect current batch
-    CURRENT_BATCH=$(grep -oE "Batch [0-9]+" progress.txt | tail -1 | grep -oE "[0-9]+" || echo "0")
-
-    # Check execution mode
-    EXECUTION_MODE=$(grep -oE "execution_mode: (auto|manual)" progress.txt | cut -d' ' -f2 || echo "auto")
-fi
-
-echo "Progress Status:"
-echo "  Complete: $STORIES_COMPLETE"
-echo "  Failed: $STORIES_FAILED"
-echo "  Current Batch: $CURRENT_BATCH"
 ```
+Read("progress.txt")
+```
+
+**Use Grep tool to count markers (NOT Bash grep):**
+
+```
+Grep("[COMPLETE]", path="progress.txt", output_mode="count")
+Grep("[FAILED]", path="progress.txt", output_mode="count")
+Grep("Batch [0-9]+", path="progress.txt", output_mode="content")
+```
+
+From results:
+- `STORIES_COMPLETE` = count of [COMPLETE] or [STORY_COMPLETE] markers
+- `STORIES_FAILED` = count of [FAILED] or [ERROR] markers
+- `CURRENT_BATCH` = extract batch number from last "Batch N" line
+
+Display progress status summary.
 
 ### 2.3: Check Story Statuses in PRD
 
-```bash
-if [ "$PRD_STATUS" = "valid" ]; then
-    # Count stories by status in prd.json
-    PENDING_IN_PRD=$(jq '[.stories[] | select(.status == "pending" or .status == null)] | length' prd.json 2>/dev/null || echo "0")
-    COMPLETE_IN_PRD=$(jq '[.stories[] | select(.status == "complete")] | length' prd.json 2>/dev/null || echo "0")
-    IN_PROGRESS_IN_PRD=$(jq '[.stories[] | select(.status == "in_progress")] | length' prd.json 2>/dev/null || echo "0")
+If PRD is valid (from 2.1), analyze the prd.json content that was already read:
+- Count stories with `status == "pending"` or no status
+- Count stories with `status == "complete"`
+- Count stories with `status == "in_progress"`
 
-    echo "PRD Story Statuses:"
-    echo "  Pending: $PENDING_IN_PRD"
-    echo "  In Progress: $IN_PROGRESS_IN_PRD"
-    echo "  Complete: $COMPLETE_IN_PRD"
-fi
+Display:
+```
+PRD Story Statuses:
+  Pending: {PENDING_IN_PRD}
+  In Progress: {IN_PROGRESS_IN_PRD}
+  Complete: {COMPLETE_IN_PRD}
 ```
 
 ## Step 3: Determine Task State

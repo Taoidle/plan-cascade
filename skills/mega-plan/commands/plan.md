@@ -23,13 +23,13 @@ The user wants to create a mega-plan for: `$ARGUMENTS`
 
 ### Step 1: Check for Existing Mega Plan
 
-First, check if a mega-plan already exists:
+**Use Read tool (NOT Bash) to check if a mega-plan already exists:**
 
-```bash
-ls -la mega-plan.json 2>/dev/null
+```
+Read("mega-plan.json")
 ```
 
-If it exists, ask the user:
+If the file exists (Read returns content), ask the user:
 - Do they want to overwrite it?
 - Or should they use `/mega:edit` instead?
 

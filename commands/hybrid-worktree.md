@@ -119,35 +119,25 @@ WORKTREE_DIR="$ROOT_DIR/.worktree/$(basename $TASK_NAME)"
 
 ## Step 6.5: Check for Design Document
 
-Check if a design document exists at project root:
+**Use Read tool (NOT Bash) to check for design document:**
 
-```bash
-if [ -f "$ROOT_DIR/design_doc.json" ]; then
-    HAS_DESIGN_DOC=true
-    echo "✓ Design document detected at project root"
-else
-    HAS_DESIGN_DOC=false
-    echo "ℹ No design document found (optional)"
-fi
 ```
+Read("design_doc.json")  # in ROOT_DIR
+```
+
+- If Read succeeds → `HAS_DESIGN_DOC=true`, log "✓ Design document detected at project root"
+- If Read fails (file not found) → `HAS_DESIGN_DOC=false`, log "ℹ No design document found (optional)"
 
 ## Step 7: Determine PRD Mode
 
-Check if PRD_ARG is an existing file:
+**Use Read tool (NOT Bash) to check if PRD_ARG is an existing file:**
 
-```bash
-if [ -f "$PRD_ARG" ]; then
-    # User provided an existing PRD file
-    PRD_PATH="$PRD_ARG"
-    PRD_MODE="load"
-    echo "Loading PRD from: $PRD_PATH"
-else
-    # User provided a task description
-    TASK_DESC="$PRD_ARG"
-    PRD_MODE="generate"
-    echo "Will generate PRD from description"
-fi
 ```
+Read("$PRD_ARG")  # Try to read the path as a file
+```
+
+- If Read succeeds → `PRD_MODE="load"`, `PRD_PATH="$PRD_ARG"`, log "Loading PRD from: $PRD_PATH"
+- If Read fails (file not found) → `PRD_MODE="generate"`, `TASK_DESC="$PRD_ARG"`, log "Will generate PRD from description"
 
 ## Step 8: Check for Existing Worktree
 

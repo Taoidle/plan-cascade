@@ -11,13 +11,13 @@ Display comprehensive status of the mega-plan execution.
 
 ### Step 1: Check for Mega Plan
 
-First, verify mega-plan.json exists:
+**Use Read tool (NOT Bash) to check if mega-plan.json exists:**
 
-```bash
-ls -la mega-plan.json 2>/dev/null
+```
+Read("mega-plan.json")
 ```
 
-If it doesn't exist, inform the user:
+If the file doesn't exist (Read returns error), inform the user:
 ```
 No mega-plan.json found.
 Use /mega:plan <description> to create one first.
@@ -25,12 +25,14 @@ Use /mega:plan <description> to create one first.
 
 ### Step 2: Read Current State
 
-Read the mega-plan and status files:
+**Use Read tool (NOT Bash) to read state files:**
 
-```bash
-cat mega-plan.json
-cat .mega-status.json 2>/dev/null || echo "{}"
 ```
+Read("mega-plan.json")       # Already read in Step 1
+Read(".mega-status.json")    # May not exist, that's OK
+```
+
+Execute these Read calls to get the current plan and status data.
 
 ### Step 3: Sync Status from Worktrees
 
