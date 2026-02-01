@@ -11,16 +11,57 @@ This script:
 3. Displays critical execution reminders
 """
 
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
 from datetime import datetime
 
 
+def get_data_dir() -> Path:
+    """Get the platform-specific data directory for Plan Cascade."""
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "plan-cascade"
+        return Path.home() / "AppData" / "Roaming" / "plan-cascade"
+    else:
+        return Path.home() / ".plan-cascade"
+
+
+def get_project_id(project_root: Path) -> str:
+    """Compute a unique, filesystem-safe project ID from the project root path."""
+    name = project_root.name
+    # Sanitize name
+    sanitized = name.replace(" ", "-")
+    sanitized = re.sub(r"[^a-zA-Z0-9\-_]", "", sanitized)
+    if not sanitized:
+        sanitized = "project"
+    sanitized = sanitized[:32]
+
+    # Compute hash
+    path_str = str(project_root)
+    normalized_path = path_str.replace("\\", "/").lower()
+    path_hash = hashlib.sha256(normalized_path.encode("utf-8")).hexdigest()[:8]
+
+    return f"{sanitized}-{path_hash}"
+
+
+def get_new_mode_prd_path(project_root: Path) -> Path:
+    """Get the prd.json path in new mode (user data directory)."""
+    data_dir = get_data_dir()
+    project_id = get_project_id(project_root)
+    return data_dir / project_id / "prd.json"
+
+
 def get_worktree_root():
-    """Find worktree root by looking for .planning-config.json or prd.json."""
+    """Find worktree root by looking for .planning-config.json or prd.json.
+
+    Checks both legacy (project root) and new mode (user data directory) locations.
+    """
     cwd = Path.cwd()
 
     # Check current directory for hybrid worktree indicators
@@ -30,11 +71,20 @@ def get_worktree_root():
     if (cwd / "prd.json").exists():
         return cwd, "regular"
 
+    # Check new mode location for prd.json
+    new_mode_prd = get_new_mode_prd_path(cwd)
+    if new_mode_prd.exists():
+        return cwd, "regular"
+
     # Check parent directories
     for parent in cwd.parents:
         if (parent / ".planning-config.json").exists():
             return parent, "worktree"
         if (parent / "prd.json").exists():
+            return parent, "regular"
+        # Also check new mode location for each parent
+        new_mode_prd = get_new_mode_prd_path(parent)
+        if new_mode_prd.exists():
             return parent, "regular"
 
     return None, None
@@ -54,16 +104,26 @@ def read_planning_config(root: Path):
 
 
 def read_prd(root: Path):
-    """Read prd.json."""
+    """Read prd.json from legacy or new mode location."""
+    # Try legacy location first (project root)
     prd_path = root / "prd.json"
-    if not prd_path.exists():
-        return None
+    if prd_path.exists():
+        try:
+            with open(prd_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
 
-    try:
-        with open(prd_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    # Try new mode location (user data directory)
+    new_mode_prd = get_new_mode_prd_path(root)
+    if new_mode_prd.exists():
+        try:
+            with open(new_mode_prd, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    return None
 
 
 def read_progress(root: Path) -> dict:

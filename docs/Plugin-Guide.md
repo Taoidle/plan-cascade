@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.2.3
+**Version**: 4.3.0
 **Last Updated**: 2026-02-01
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.

@@ -9,7 +9,7 @@
 *Decompose complex projects into parallel executable tasks with multi-agent collaboration*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.2.4-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.3.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -224,13 +224,13 @@ plan-cascade/
 | DeepSeek | Yes | DeepSeek Chat/Coder |
 | Ollama | No | Local models |
 
-## What's New in v4.2.4
+## What's New in v4.3.0
 
-- **Runtime Files Migration** — Planning files now stored in user directory (`~/.plan-cascade/` on Unix, `%APPDATA%/plan-cascade/` on Windows)
-- **New State Modules** — PathResolver, ConfigManager, ProjectLinkManager for unified path management
-- **Migration Tool** — `plan-cascade migrate` command to migrate existing projects
-- **Auto Gitignore** — Automatic `.gitignore` configuration when using Plan Cascade
-- **465 Tests** — Comprehensive test coverage including 21 new gitignore tests
+- **Quality Gate Enhancements** — Parallel execution, caching, incremental checking, and structured error parsing
+- **Context Recovery Fix** — Fixed hybrid-auto mode context recovery after context compression/truncation
+- **Dual Path Detection** — prd.json now detected in both new mode and legacy locations
+- **Unified Context File Path** — Hybrid context files always written to project root for consistency
+- **Script Updates** — Both reminder scripts now support new path mode
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

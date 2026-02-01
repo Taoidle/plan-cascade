@@ -11,54 +11,126 @@ This script:
 3. Displays critical parallel execution reminders
 """
 
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
 from datetime import datetime
 
 
+def get_data_dir() -> Path:
+    """Get the platform-specific data directory for Plan Cascade."""
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "plan-cascade"
+        return Path.home() / "AppData" / "Roaming" / "plan-cascade"
+    else:
+        return Path.home() / ".plan-cascade"
+
+
+def get_project_id(project_root: Path) -> str:
+    """Compute a unique, filesystem-safe project ID from the project root path."""
+    name = project_root.name
+    # Sanitize name
+    sanitized = name.replace(" ", "-")
+    sanitized = re.sub(r"[^a-zA-Z0-9\-_]", "", sanitized)
+    if not sanitized:
+        sanitized = "project"
+    sanitized = sanitized[:32]
+
+    # Compute hash
+    path_str = str(project_root)
+    normalized_path = path_str.replace("\\", "/").lower()
+    path_hash = hashlib.sha256(normalized_path.encode("utf-8")).hexdigest()[:8]
+
+    return f"{sanitized}-{path_hash}"
+
+
+def get_new_mode_path(project_root: Path, filename: str) -> Path:
+    """Get file path in new mode (user data directory)."""
+    data_dir = get_data_dir()
+    project_id = get_project_id(project_root)
+    return data_dir / project_id / filename
+
+
 def get_project_root():
-    """Find project root by looking for mega-plan.json."""
+    """Find project root by looking for mega-plan.json.
+
+    Checks both legacy (project root) and new mode (user data directory) locations.
+    """
     cwd = Path.cwd()
 
-    # Check current directory
+    # Check current directory (legacy location)
     if (cwd / "mega-plan.json").exists():
+        return cwd
+
+    # Check new mode location
+    new_mode_path = get_new_mode_path(cwd, "mega-plan.json")
+    if new_mode_path.exists():
         return cwd
 
     # Check parent directories
     for parent in cwd.parents:
         if (parent / "mega-plan.json").exists():
             return parent
+        # Also check new mode location for each parent
+        new_mode_path = get_new_mode_path(parent, "mega-plan.json")
+        if new_mode_path.exists():
+            return parent
 
     return None
 
 
 def read_mega_plan(project_root: Path):
-    """Read mega-plan.json."""
+    """Read mega-plan.json from legacy or new mode location."""
+    # Try legacy location first
     plan_path = project_root / "mega-plan.json"
-    if not plan_path.exists():
-        return None
+    if plan_path.exists():
+        try:
+            with open(plan_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
 
-    try:
-        with open(plan_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    # Try new mode location
+    new_mode_path = get_new_mode_path(project_root, "mega-plan.json")
+    if new_mode_path.exists():
+        try:
+            with open(new_mode_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    return None
 
 
 def read_mega_status(project_root: Path):
-    """Read .mega-status.json."""
+    """Read .mega-status.json from legacy or new mode location."""
+    # Try legacy location first
     status_path = project_root / ".mega-status.json"
-    if not status_path.exists():
-        return None
+    if status_path.exists():
+        try:
+            with open(status_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
 
-    try:
-        with open(status_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    # Try new mode location (in .state subdirectory)
+    data_dir = get_data_dir()
+    project_id = get_project_id(project_root)
+    new_mode_path = data_dir / project_id / ".state" / ".mega-status.json"
+    if new_mode_path.exists():
+        try:
+            with open(new_mode_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    return None
 
 
 def get_feature_batches(plan: dict) -> list:

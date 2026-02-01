@@ -2,6 +2,103 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.3.0] - 2026-02-01
+
+### Added
+
+- **Quality Gate Parallel Execution** - Execute multiple quality gates concurrently with `execute_all_async()`
+  - Uses `asyncio.gather()` for parallel gate execution
+  - `fail_fast` option with task cancellation on required gate failure
+  - Significant performance improvement for multi-gate validation
+
+- **Incremental Quality Checking** - `ChangedFilesDetector` for git-based incremental checks
+  - Detects changed files since last commit or specific base
+  - Filters files by extension for targeted validation
+  - Reduces unnecessary checks on unchanged code
+
+- **Quality Gate Result Caching** - `GateCache` for result persistence
+  - Cache based on git commit + tree hash
+  - Avoids re-running gates on unchanged code
+  - Configurable cache directory and TTL
+
+- **Structured Error Parsing** - `ErrorParser` with `ErrorInfo` dataclass
+  - Unified error format for mypy, ruff, pytest, eslint, and tsc
+  - Extracts file path, line number, error code, message, and severity
+  - Enables better error reporting and filtering
+
+- **Mixed Project Support** - `detect_project_types()` for multi-language projects
+  - Detects Python, Node.js, and other project types
+  - Enables appropriate gate selection per project type
+
+### Fixed
+
+- **Context Recovery for Hybrid-Auto Mode** - Fixed recovery after context compression/truncation
+  - Added dual path detection for `prd.json` (new mode + legacy location fallback)
+  - Updated `prd_path` to use correct location when found in legacy position
+  - Ensures context recovery works regardless of path mode
+
+- **Unified Hybrid Context File Path** - Context files now always written to project root
+  - `context_recovery.py` now writes `.hybrid-execution-context.md` to project root
+  - Consistent with `hybrid-context-reminder.py` script behavior
+  - Prevents path mismatch between recovery manager and scripts
+
+- **Script Support for New Path Mode** - Updated reminder scripts for dual path detection
+  - `hybrid-context-reminder.py` now checks both legacy and new mode paths
+  - `mega-context-reminder.py` now checks both legacy and new mode paths
+  - Added `get_data_dir()`, `get_project_id()`, `get_new_mode_path()` functions
+
+### Changed
+
+- **ParallelExecutor Integration** - Quality gate improvements integrated into executor
+  - Progress display for gate execution
+  - Better error reporting with structured errors
+
+### Technical Details
+
+**Parallel Gate Execution:**
+```python
+from plan_cascade.core.quality_gate import QualityGateRunner
+
+runner = QualityGateRunner(project_root)
+results = await runner.execute_all_async(fail_fast=True)
+```
+
+**Incremental Checking:**
+```python
+from plan_cascade.core.changed_files import ChangedFilesDetector
+
+detector = ChangedFilesDetector(project_root)
+changed = detector.get_changed_files(extensions=[".py", ".ts"])
+```
+
+**Error Parsing:**
+```python
+from plan_cascade.core.error_parser import ErrorParser
+
+parser = ErrorParser()
+errors = parser.parse_mypy_output(output)
+for err in errors:
+    print(f"{err.file}:{err.line}: {err.message}")
+```
+
+**New Files:**
+| File | Description |
+|------|-------------|
+| `src/plan_cascade/core/changed_files.py` | Git-based changed file detection |
+| `src/plan_cascade/core/error_parser.py` | Structured error parsing |
+| `src/plan_cascade/core/gate_cache.py` | Quality gate result caching |
+| `tests/test_error_parser.py` | 471 lines of tests |
+| `tests/test_gate_cache.py` | 929 lines of tests |
+| `tests/test_incremental_gate.py` | 492 lines of tests |
+| `tests/test_parallel_executor_gates.py` | 740 lines of tests |
+
+**Test Summary:**
+- Total tests: 508 (was 465 in v4.2.4)
+- New tests: 43 (context_recovery: 43)
+- Quality gate tests: 181 new tests across 4 files
+
+---
+
 ## [4.2.4] - 2026-02-01
 
 ### Added

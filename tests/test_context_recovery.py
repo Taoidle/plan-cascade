@@ -587,6 +587,39 @@ class TestPathResolverIntegration:
         assert state.context_type == ContextType.HYBRID_AUTO
         assert state.prd_status == PrdStatus.VALID
 
+    def test_new_mode_detects_prd_in_legacy_location(self, tmp_path: Path):
+        """Test that new mode falls back to legacy location for prd.json.
+
+        This ensures backward compatibility when prd.json is in project root
+        but PathResolver is in new mode.
+        """
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        resolver = PathResolver(
+            project_root=project_root,
+            legacy_mode=False,
+            data_dir_override=data_dir
+        )
+
+        # Create PRD in project root (legacy location), NOT in user data dir
+        prd = {
+            "goal": "Test Legacy Fallback",
+            "stories": [{"id": "story-001", "title": "Test", "status": "pending"}],
+        }
+        with open(project_root / "prd.json", "w") as f:
+            json.dump(prd, f)
+
+        manager = ContextRecoveryManager(project_root, path_resolver=resolver)
+        state = manager.detect_context()
+
+        # Should still detect the PRD in legacy location
+        assert state.context_type == ContextType.HYBRID_AUTO
+        assert state.prd_status == PrdStatus.VALID
+        assert state.task_name == "Test Legacy Fallback"
+
     def test_new_mode_detects_mega_plan_in_user_dir(self, tmp_path: Path):
         """Test that new mode correctly detects mega-plan.json in user directory."""
         project_root = tmp_path / "project"
@@ -674,8 +707,12 @@ class TestPathResolverIntegration:
         assert manager.worktree_dir == tmp_path / ".worktree"
         assert manager.config_path == tmp_path / ".planning-config.json"
 
-    def test_context_file_in_state_dir_new_mode(self, tmp_path: Path):
-        """Test that context files are written to state dir in new mode."""
+    def test_context_file_in_project_root_new_mode(self, tmp_path: Path):
+        """Test that hybrid context files are written to project root even in new mode.
+
+        This ensures consistency with hybrid-context-reminder.py script which
+        always writes to project root for user visibility.
+        """
         project_root = tmp_path / "project"
         project_root.mkdir()
         data_dir = tmp_path / "data"
@@ -702,9 +739,9 @@ class TestPathResolverIntegration:
         state = manager.detect_context()
         manager.update_context_file(state)
 
-        # Context file should be in state directory
-        state_dir = resolver.get_state_dir()
-        context_file = state_dir / "hybrid-execution-context.md"
+        # Hybrid context file should be in project root (not state dir)
+        # for consistency with hybrid-context-reminder.py script
+        context_file = project_root / ".hybrid-execution-context.md"
         assert context_file.exists()
 
         content = context_file.read_text()

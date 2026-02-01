@@ -287,7 +287,17 @@ class ContextRecoveryManager:
             return self._scan_worktrees_for_recovery(state)
 
         # Check for hybrid-auto context (prd.json using PathResolver path)
-        if self.prd_path.exists():
+        # Also check legacy location if in new mode for backward compatibility
+        prd_exists = self.prd_path.exists()
+        if not prd_exists and not self.is_legacy_mode():
+            # In new mode, also check legacy location (project root)
+            legacy_prd = self.project_root / "prd.json"
+            if legacy_prd.exists():
+                prd_exists = True
+                # Update prd_path to use the legacy location for subsequent operations
+                self.prd_path = legacy_prd
+
+        if prd_exists:
             return self._detect_hybrid_auto_context(state)
 
         # Check for .planning-config.json (using computed config path)
@@ -991,8 +1001,12 @@ class ContextRecoveryManager:
         Writes to .hybrid-execution-context.md or .mega-execution-context.md
         depending on context type.
 
-        In new mode, these files are written to the state directory.
-        In legacy mode or for worktrees, they are written to project/worktree root.
+        For mega-plan: In new mode, written to state directory; in legacy mode,
+        written to project root.
+
+        For hybrid (auto/worktree): Always written to project/worktree root
+        to stay consistent with hybrid-context-reminder.py script and keep
+        the file visible to users.
 
         Args:
             state: Current recovery state
@@ -1009,16 +1023,11 @@ class ContextRecoveryManager:
                 context_file.parent.mkdir(parents=True, exist_ok=True)
             content = self._generate_mega_context(state)
         else:
-            # For hybrid context files
+            # For hybrid context files - always write to project/worktree root
+            # This keeps the file visible to users and consistent with
+            # hybrid-context-reminder.py script which also writes to root
             target_path = state.worktree_path or self.project_root
-            if self.is_legacy_mode() or state.worktree_path:
-                # Legacy mode or worktree: write to target path
-                context_file = target_path / ".hybrid-execution-context.md"
-            else:
-                # New mode: write to state directory
-                context_file = self._path_resolver.get_state_file_path("hybrid-execution-context.md")
-                # Ensure directory exists
-                context_file.parent.mkdir(parents=True, exist_ok=True)
+            context_file = target_path / ".hybrid-execution-context.md"
             content = self._generate_hybrid_context(state)
 
         try:

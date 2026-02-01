@@ -2,7 +2,7 @@
 
 # Plan Cascade - CLI Guide
 
-**Version**: 4.2.4
+**Version**: 4.3.0
 **Last Updated**: 2026-02-01
 
 This document provides detailed instructions for using the Plan Cascade standalone CLI tool.
