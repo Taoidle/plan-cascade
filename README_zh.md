@@ -9,7 +9,7 @@
 *将复杂项目分解为可并行执行的任务，支持多 Agent 协作*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.2.2-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.2.3-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -224,18 +224,13 @@ plan-cascade/
 | DeepSeek | 是 | DeepSeek Chat/Coder |
 | Ollama | 否 | 本地模型 |
 
-## v4.2.2 更新内容
+## v4.2.3 更新内容
 
-- **上下文恢复** — 自动生成上下文文件，在会话中断后恢复 AI 执行状态
-- **增强技能检测** — 外部框架技能的详细输出和摘要显示
-- **改进的钩子** — PreToolUse/PostToolUse 钩子现在自动更新上下文文件
-
-## v4.2.0 更新内容
-
-- **设计文档系统** — 自动生成两级层次结构的技术设计文档
-- **多 Agent 集成** — 在所有执行模式中完整集成
-- **AI 策略选择** — 智能任务分析取代关键词匹配
-- **外部设计导入** — 支持转换 Markdown/JSON/HTML 设计文档
+- **三层技能系统** — 内置(1-50) < 外部(51-100) < 用户(101-200) 优先级链
+- **内置技能** — Python、Go、Java、TypeScript 最佳实践随 Plan Cascade 一起分发
+- **用户技能配置** — 通过 `.plan-cascade/skills.json` 自定义技能
+- **远程技能缓存** — 7天缓存有效期，网络错误时优雅降级
+- **新 CLI 命令** — `skills add`、`skills remove`、`skills refresh`、`skills cache`
 
 完整历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 

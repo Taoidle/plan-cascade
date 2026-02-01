@@ -2,8 +2,8 @@
 
 # Plan Cascade - 系统架构与流程设计
 
-**版本**: 4.2.2
-**最后更新**: 2026-01-31
+**版本**: 4.2.3
+**最后更新**: 2026-02-01
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
 
@@ -129,7 +129,7 @@ graph LR
 | **RetryManager** | 重试管理，处理失败重试 |
 | **StateManager** | 状态管理，持久化执行状态 |
 | **ContextFilter** | 上下文过滤，优化 Agent 输入 |
-| **ExternalSkillLoader** | 框架技能加载，自动检测并注入最佳实践 |
+| **ExternalSkillLoader** | 三层技能加载（内置/外部/用户），自动检测并按优先级覆盖注入最佳实践 |
 
 ---
 
@@ -429,38 +429,80 @@ flowchart LR
     end
 ```
 
-### 外部框架技能
+### 三层外部技能系统
 
-Plan Cascade 内置框架特定技能，从 Git 子模块加载：
+Plan Cascade 使用三层技能优先级系统提供框架特定的最佳实践：
 
 ```mermaid
 flowchart TD
-    subgraph "技能检测"
+    subgraph "第一层：内置技能 (优先级 1-50)"
+        BS[builtin-skills/]
+        BS --> PY[python/]
+        BS --> GO[go/]
+        BS --> JAVA[java/]
+        BS --> TS[typescript/]
+    end
+
+    subgraph "第二层：外部技能 (优先级 51-100)"
+        ES[external-skills/]
+        ES --> VS[vercel/ - React/Next.js]
+        ES --> VUE[vue/ - Vue/Nuxt]
+        ES --> RS[rust/ - Rust]
+    end
+
+    subgraph "第三层：用户技能 (优先级 101-200)"
+        UC[.plan-cascade/skills.json]
+        UC --> LOCAL[本地路径技能]
+        UC --> REMOTE[远程 URL 技能]
+    end
+
+    subgraph "技能加载"
         PJ[package.json] --> ESL[ExternalSkillLoader]
         CT[Cargo.toml] --> ESL
-        ESL --> |检测模式| MATCH{框架匹配?}
-    end
-
-    subgraph "技能来源 (Git 子模块)"
-        MATCH -->|React/Next| VS[external-skills/vercel/]
-        MATCH -->|Vue/Nuxt| VUE[external-skills/vue/]
-        MATCH -->|Rust| RS[external-skills/rust/]
-    end
-
-    subgraph "注入"
-        VS --> LOAD[加载 SKILL.md]
-        VUE --> LOAD
-        RS --> LOAD
-        LOAD --> CF2[ContextFilter]
-        CF2 --> |external_skills| SC2[Story 上下文]
+        PP[pyproject.toml] --> ESL
+        ESL --> |检测与去重| MERGE{优先级合并}
+        MERGE --> |高优先级覆盖| CF2[ContextFilter]
+        CF2 --> SC2[Story 上下文]
     end
 ```
 
-| 框架 | 检测方式 | 注入的技能 |
-|------|----------|------------|
-| React/Next.js | `package.json` 包含 `react`, `next` | `react-best-practices`, `web-design-guidelines` |
-| Vue/Nuxt | `package.json` 包含 `vue`, `nuxt` | `vue-best-practices`, `vue-router-best-practices`, `vue-pinia-best-practices` |
-| Rust | 存在 `Cargo.toml` | `rust-coding-guidelines`, `rust-ownership`, `rust-error-handling`, `rust-concurrency` |
+**优先级层次：**
+
+| 层次 | 优先级范围 | 来源 | 描述 |
+|------|------------|------|------|
+| 内置 | 1-50 | `builtin-skills/` | Python、Go、Java、TypeScript 最佳实践，随 Plan Cascade 分发 |
+| 外部 | 51-100 | `external-skills/` | 来自 Git 子模块的框架技能（React、Vue、Rust） |
+| 用户 | 101-200 | `.plan-cascade/skills.json` | 来自本地路径或远程 URL 的自定义技能 |
+
+**同名覆盖：** 当技能同名时，高优先级覆盖低优先级。
+
+**检测的技能：**
+
+| 框架 | 检测方式 | 技能 |
+|------|----------|------|
+| Python | `pyproject.toml`, `requirements.txt` | `python-best-practices` (内置) |
+| Go | `go.mod` | `go-best-practices` (内置) |
+| Java | `pom.xml`, `build.gradle` | `java-best-practices` (内置) |
+| TypeScript | `tsconfig.json` | `typescript-best-practices` (内置) |
+| React/Next.js | `package.json` 包含 `react`, `next` | `react-best-practices` (外部) |
+| Vue/Nuxt | `package.json` 包含 `vue`, `nuxt` | `vue-best-practices` (外部) |
+| Rust | 存在 `Cargo.toml` | `rust-coding-guidelines` (外部) |
+
+**用户配置 (`.plan-cascade/skills.json`)：**
+
+```json
+{
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "my-custom-skill",
+      "path": "./my-skills/custom/SKILL.md",
+      "detect": { "files": ["package.json"], "patterns": ["my-framework"] },
+      "priority": 150
+    }
+  ]
+}
+```
 
 ---
 

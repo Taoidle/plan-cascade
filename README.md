@@ -9,7 +9,7 @@
 *Decompose complex projects into parallel executable tasks with multi-agent collaboration*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.2.2-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.2.3-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -224,18 +224,13 @@ plan-cascade/
 | DeepSeek | Yes | DeepSeek Chat/Coder |
 | Ollama | No | Local models |
 
-## What's New in v4.2.2
+## What's New in v4.2.3
 
-- **Context Recovery** — Auto-generated context files for AI state recovery after session interruption
-- **Enhanced Skill Detection** — Verbose output and summary display for external framework skills
-- **Improved Hooks** — PreToolUse/PostToolUse hooks now update context files automatically
-
-## What's New in v4.2.0
-
-- **Design Document System** — Auto-generated technical design docs with two-level hierarchy
-- **Multi-Agent Integration** — Full integration in all execution modes
-- **AI Strategy Selection** — Intelligent task analysis replaces keyword matching
-- **External Design Import** — Convert Markdown/JSON/HTML design docs
+- **Three-Tier Skill System** — Builtin (1-50) < External (51-100) < User (101-200) priority chain
+- **Builtin Skills** — Python, Go, Java, TypeScript best practices bundled with Plan Cascade
+- **User Skill Configuration** — Custom skills via `.plan-cascade/skills.json`
+- **Remote Skill Caching** — 7-day cache with graceful degradation for URL-based skills
+- **New CLI Commands** — `skills add`, `skills remove`, `skills refresh`, `skills cache`
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

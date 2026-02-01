@@ -1,0 +1,35 @@
+{
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "my-custom-skill",
+      "path": "./my-skills/custom/SKILL.md",
+      "detect": {
+        "files": ["package.json"],
+        "patterns": ["my-framework"]
+      },
+      "priority": 150,
+      "inject_into": ["implementation"]
+    },
+    {
+      "name": "company-coding-standards",
+      "path": "../shared-skills/coding-standards/SKILL.md",
+      "detect": {
+        "files": ["pyproject.toml", "package.json", "Cargo.toml"],
+        "patterns": []
+      },
+      "priority": 180,
+      "inject_into": ["implementation", "retry"]
+    },
+    {
+      "name": "remote-skill",
+      "url": "https://raw.githubusercontent.com/example/skills/main/advanced",
+      "detect": {
+        "files": ["config.json"],
+        "patterns": ["advanced-feature"]
+      },
+      "priority": 160,
+      "inject_into": ["implementation"]
+    }
+  ]
+}

@@ -1,8 +1,31 @@
 {
-  "version": "1.0.0",
-  "description": "Built-in external skills for framework-specific guidance",
+  "version": "1.1.0",
+  "description": "Three-tier skill configuration: builtin (1-50) < submodule (51-100) < user (101-200). Higher priority skills override lower ones when conflicts arise.",
+
+  "priority_ranges": {
+    "builtin": {
+      "min": 1,
+      "max": 50,
+      "description": "Built-in skills bundled with Plan Cascade, lowest priority"
+    },
+    "submodule": {
+      "min": 51,
+      "max": 100,
+      "description": "External skills from git submodules, medium priority"
+    },
+    "user": {
+      "min": 101,
+      "max": 200,
+      "description": "User-defined skills from local paths or URLs, highest priority"
+    }
+  },
 
   "sources": {
+    "builtin": {
+      "type": "builtin",
+      "path": "builtin-skills",
+      "description": "Built-in language-agnostic skills bundled with Plan Cascade"
+    },
     "vercel": {
       "type": "submodule",
       "path": "external-skills/vercel",
@@ -21,6 +44,46 @@
   },
 
   "skills": {
+    "python-best-practices": {
+      "source": "builtin",
+      "skill_path": "python",
+      "detect": {
+        "files": ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile"],
+        "patterns": []
+      },
+      "inject_into": ["implementation", "retry"],
+      "priority": 30
+    },
+    "go-best-practices": {
+      "source": "builtin",
+      "skill_path": "go",
+      "detect": {
+        "files": ["go.mod", "go.sum"],
+        "patterns": []
+      },
+      "inject_into": ["implementation", "retry"],
+      "priority": 32
+    },
+    "java-best-practices": {
+      "source": "builtin",
+      "skill_path": "java",
+      "detect": {
+        "files": ["pom.xml", "build.gradle", "build.gradle.kts"],
+        "patterns": []
+      },
+      "inject_into": ["implementation", "retry"],
+      "priority": 34
+    },
+    "typescript-best-practices": {
+      "source": "builtin",
+      "skill_path": "typescript",
+      "detect": {
+        "files": ["tsconfig.json", "package.json"],
+        "patterns": ["\"typescript\"", "\"@types/"]
+      },
+      "inject_into": ["implementation", "retry"],
+      "priority": 36
+    },
     "react-best-practices": {
       "source": "vercel",
       "skill_path": "skills/react-best-practices",
@@ -39,7 +102,7 @@
         "patterns": ["\"react\"", "\"vue\"", "\"svelte\""]
       },
       "inject_into": ["implementation"],
-      "priority": 50
+      "priority": 55
     },
     "vue-best-practices": {
       "source": "vue",

@@ -30,6 +30,9 @@ from .iteration_loop import (
     IterationState,
     IterationStatus,
 )
+from .mega_generator import MegaPlanGenerator
+from .mode import ModeConfig, UserMode
+from .orchestrator import Orchestrator, StoryAgent
 from .parallel_executor import (
     BatchProgress,
     ParallelExecutionConfig,
@@ -39,9 +42,6 @@ from .parallel_executor import (
     StoryStatus,
     run_parallel_batch,
 )
-from .mega_generator import MegaPlanGenerator
-from .mode import ModeConfig, UserMode
-from .orchestrator import Orchestrator, StoryAgent
 from .prd_generator import PRDGenerator, create_sample_prd
 from .quality_gate import (
     CustomGate,
@@ -62,7 +62,9 @@ from .retry_manager import (
     RetryManager,
     RetryState,
 )
+from .skill_cache import SkillCache, SkillCacheEntry
 from .strategy import ExecutionStrategy, StrategyDecision
+from .user_skill_config import UserSkillConfig, UserSkillEntry
 
 __all__ = [
     # Orchestration
@@ -78,6 +80,10 @@ __all__ = [
     # External skills
     "ExternalSkillLoader",
     "LoadedSkill",
+    "SkillCache",
+    "SkillCacheEntry",
+    "UserSkillConfig",
+    "UserSkillEntry",
     # Iteration
     "IterationLoop",
     "IterationConfig",

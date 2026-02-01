@@ -2,8 +2,8 @@
 
 # Plan Cascade - System Architecture and Workflow Design
 
-**Version**: 4.2.2
-**Last Updated**: 2026-01-31
+**Version**: 4.2.3
+**Last Updated**: 2026-02-01
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
 
@@ -129,7 +129,7 @@ graph LR
 | **RetryManager** | Retry management, handles failure retries |
 | **StateManager** | State management, persists execution state |
 | **ContextFilter** | Context filter, optimizes Agent input |
-| **ExternalSkillLoader** | Framework skill loading, auto-detects and injects best practices |
+| **ExternalSkillLoader** | Three-tier skill loading (builtin/external/user), auto-detects and injects best practices with priority-based override |
 
 ---
 
@@ -429,38 +429,80 @@ flowchart LR
     end
 ```
 
-### External Framework Skills
+### Three-Tier External Skills System
 
-Plan Cascade includes built-in framework-specific skills loaded from Git submodules:
+Plan Cascade uses a three-tier skill priority system to provide framework-specific best practices:
 
 ```mermaid
 flowchart TD
-    subgraph "Skill Detection"
+    subgraph "Tier 1: Builtin Skills (Priority 1-50)"
+        BS[builtin-skills/]
+        BS --> PY[python/]
+        BS --> GO[go/]
+        BS --> JAVA[java/]
+        BS --> TS[typescript/]
+    end
+
+    subgraph "Tier 2: External Skills (Priority 51-100)"
+        ES[external-skills/]
+        ES --> VS[vercel/ - React/Next.js]
+        ES --> VUE[vue/ - Vue/Nuxt]
+        ES --> RS[rust/ - Rust]
+    end
+
+    subgraph "Tier 3: User Skills (Priority 101-200)"
+        UC[.plan-cascade/skills.json]
+        UC --> LOCAL[Local Path Skills]
+        UC --> REMOTE[Remote URL Skills]
+    end
+
+    subgraph "Skill Loading"
         PJ[package.json] --> ESL[ExternalSkillLoader]
         CT[Cargo.toml] --> ESL
-        ESL --> |detect patterns| MATCH{Framework Match?}
-    end
-
-    subgraph "Skill Sources (Git Submodules)"
-        MATCH -->|React/Next| VS[external-skills/vercel/]
-        MATCH -->|Vue/Nuxt| VUE[external-skills/vue/]
-        MATCH -->|Rust| RS[external-skills/rust/]
-    end
-
-    subgraph "Injection"
-        VS --> LOAD[Load SKILL.md]
-        VUE --> LOAD
-        RS --> LOAD
-        LOAD --> CF2[ContextFilter]
-        CF2 --> |external_skills| SC2[Story Context]
+        PP[pyproject.toml] --> ESL
+        ESL --> |detect & dedupe| MERGE{Priority Merge}
+        MERGE --> |higher wins| CF2[ContextFilter]
+        CF2 --> SC2[Story Context]
     end
 ```
 
-| Framework | Detection | Skills Injected |
-|-----------|-----------|-----------------|
-| React/Next.js | `package.json` contains `react`, `next` | `react-best-practices`, `web-design-guidelines` |
-| Vue/Nuxt | `package.json` contains `vue`, `nuxt` | `vue-best-practices`, `vue-router-best-practices`, `vue-pinia-best-practices` |
-| Rust | `Cargo.toml` exists | `rust-coding-guidelines`, `rust-ownership`, `rust-error-handling`, `rust-concurrency` |
+**Priority Tiers:**
+
+| Tier | Priority Range | Source | Description |
+|------|----------------|--------|-------------|
+| Builtin | 1-50 | `builtin-skills/` | Python, Go, Java, TypeScript best practices bundled with Plan Cascade |
+| External | 51-100 | `external-skills/` | Framework skills from Git submodules (React, Vue, Rust) |
+| User | 101-200 | `.plan-cascade/skills.json` | Custom skills from local paths or remote URLs |
+
+**Same-name Override:** When skills share the same name, higher priority wins.
+
+**Detected Skills:**
+
+| Framework | Detection | Skills |
+|-----------|-----------|--------|
+| Python | `pyproject.toml`, `requirements.txt` | `python-best-practices` (builtin) |
+| Go | `go.mod` | `go-best-practices` (builtin) |
+| Java | `pom.xml`, `build.gradle` | `java-best-practices` (builtin) |
+| TypeScript | `tsconfig.json` | `typescript-best-practices` (builtin) |
+| React/Next.js | `package.json` contains `react`, `next` | `react-best-practices` (external) |
+| Vue/Nuxt | `package.json` contains `vue`, `nuxt` | `vue-best-practices` (external) |
+| Rust | `Cargo.toml` exists | `rust-coding-guidelines` (external) |
+
+**User Configuration (`.plan-cascade/skills.json`):**
+
+```json
+{
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "my-custom-skill",
+      "path": "./my-skills/custom/SKILL.md",
+      "detect": { "files": ["package.json"], "patterns": ["my-framework"] },
+      "priority": 150
+    }
+  ]
+}
+```
 
 ---
 

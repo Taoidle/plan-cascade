@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.2.3] - 2026-02-01
+
+### Added
+
+- **Three-Tier Skill Priority System** - Comprehensive skill management with priority-based override
+  - **Builtin skills** (priority 1-50): Python, Go, Java, TypeScript best practices bundled with Plan Cascade
+  - **External skills** (priority 51-100): Framework skills from git submodules (React, Vue, Rust)
+  - **User skills** (priority 101-200): Custom skills via `.plan-cascade/skills.json` with highest priority
+  - Same-name skills are deduplicated with higher priority winning
+
+- **User Skill Configuration** - Project and user-level custom skill support
+  - Project config: `.plan-cascade/skills.json`
+  - User config: `~/.plan-cascade/skills.json`
+  - Configuration cascade: project > user > builtin defaults
+  - Support for local paths and remote URLs
+
+- **Remote Skill Caching** - Persistent cache for URL-based skills
+  - Cache location: `~/.plan-cascade/cache/skills/`
+  - Default TTL: 7 days with auto-expiry
+  - Graceful degradation: uses expired cache on network errors
+  - Cache metadata tracking (download time, content hash, size)
+
+- **New CLI Commands** for skill management:
+  - `skills list --group` - List skills grouped by source type
+  - `skills detect --overrides` - Show skill override analysis
+  - `skills add <name> --path|--url` - Add custom skill
+  - `skills remove <name>` - Remove custom skill
+  - `skills refresh` - Refresh cached remote skills
+  - `skills cache` - Show cache statistics
+
+### Changed
+
+- **ExternalSkillLoader Refactored** - Multi-source loading with priority sorting
+  - `LoadedSkill` now includes `source_type` and `origin` fields
+  - Automatic deduplication of same-name skills by priority
+  - Enhanced verbose output showing skill sources
+
+- **external-skills.json Updated** - Version 1.1.0 with three-tier support
+  - Added `priority_ranges` section defining valid ranges per type
+  - Added builtin source pointing to `builtin-skills/`
+  - Builtin skills for Python, Go, Java, TypeScript (priority 30-36)
+
+### Documentation
+
+- Updated Plugin-Guide.md with comprehensive skill system documentation
+- Updated Plugin-Guide_zh.md with Chinese translation
+- Added `.plan-cascade/skills.example.json` for reference
+
+---
+
 ## [4.2.2] - 2026-01-31
 
 ### Fixed

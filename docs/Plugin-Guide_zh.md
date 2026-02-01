@@ -2,8 +2,8 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**版本**: 4.2.2
-**最后更新**: 2026-01-31
+**版本**: 4.2.3
+**最后更新**: 2026-02-01
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
 
@@ -133,6 +133,247 @@ git submodule update --init --recursive
 | Vercel | [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) | React, Web Design |
 | Vue.js | [vuejs-ai/skills](https://github.com/vuejs-ai/skills) | Vue, Pinia, Router |
 | Rust | [actionbook/rust-skills](https://github.com/actionbook/rust-skills) | 编码规范、所有权、错误处理、并发 |
+
+---
+
+## 三层外部技能系统
+
+Plan Cascade 使用三层技能系统，允许内置、外部和用户定义的技能共存，并具有明确的优先级规则。
+
+### 层级概览
+
+| 层级 | 来源类型 | 优先级范围 | 说明 |
+|------|----------|------------|------|
+| 1 | 内置 (Builtin) | 1-50 | Plan Cascade 内置（Python、TypeScript、Go、Java） |
+| 2 | 子模块 (Submodule) | 51-100 | 来自 Git 子模块（Vercel、Vue、Rust 技能） |
+| 3 | 用户 (User) | 101-200 | 用户自定义，最高优先级 |
+
+优先级高的技能会覆盖同名的低优先级技能。
+
+### 技能检测和注入机制
+
+1. **检测**：执行 Story 时，Plan Cascade 扫描项目文件中的框架标识
+2. **匹配**：选择 `detect.files` 和 `detect.patterns` 匹配的技能
+3. **去重**：如果多个技能具有相同的基础名称，仅保留最高优先级的
+4. **注入**：在 `implementation` 和 `retry` 阶段最多注入 3 个技能到 Agent 上下文
+
+### CLI 命令
+
+```bash
+# 列出所有可用技能
+plan-cascade skills list
+
+# 按来源类型分组列出技能
+plan-cascade skills list --group
+
+# 显示适用于当前项目的技能
+plan-cascade skills detect
+
+# 显示技能及覆盖详情
+plan-cascade skills detect --overrides
+
+# 从本地路径添加用户技能
+plan-cascade skills add my-skill --path ./my-skills/SKILL.md
+
+# 从远程 URL 添加用户技能
+plan-cascade skills add remote-skill --url https://example.com/skills/SKILL.md
+
+# 使用自定义选项添加
+plan-cascade skills add my-skill --path ./SKILL.md --priority 150 --level project \
+  --detect-files package.json,tsconfig.json --detect-patterns typescript \
+  --inject-into implementation,retry
+
+# 删除用户技能
+plan-cascade skills remove my-skill
+
+# 从特定级别删除
+plan-cascade skills remove my-skill --level user
+
+# 验证所有技能配置
+plan-cascade skills validate
+
+# 详细模式验证
+plan-cascade skills validate --verbose
+
+# 刷新缓存的远程技能（重新下载）
+plan-cascade skills refresh --all
+
+# 刷新特定技能
+plan-cascade skills refresh remote-skill
+
+# 清除缓存而不重新下载
+plan-cascade skills refresh --all --clear
+
+# 显示缓存统计信息
+plan-cascade skills cache
+```
+
+### 配置文件
+
+用户技能在 `.plan-cascade/skills.json`（项目级）或 `~/.plan-cascade/skills.json`（用户级）中配置。
+
+**项目级配置优先于用户级配置。**
+
+```json
+{
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "my-custom-skill",
+      "path": "./my-skills/custom/SKILL.md",
+      "detect": {
+        "files": ["package.json"],
+        "patterns": ["my-framework"]
+      },
+      "priority": 150,
+      "inject_into": ["implementation"]
+    },
+    {
+      "name": "company-coding-standards",
+      "path": "../shared-skills/coding-standards/SKILL.md",
+      "detect": {
+        "files": ["pyproject.toml", "package.json", "Cargo.toml"],
+        "patterns": []
+      },
+      "priority": 180,
+      "inject_into": ["implementation", "retry"]
+    },
+    {
+      "name": "remote-skill",
+      "url": "https://raw.githubusercontent.com/example/skills/main/advanced/SKILL.md",
+      "detect": {
+        "files": ["config.json"],
+        "patterns": ["advanced-feature"]
+      },
+      "priority": 160,
+      "inject_into": ["implementation"]
+    }
+  ]
+}
+```
+
+**配置字段说明：**
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| `name` | 是 | 唯一技能名称 |
+| `path` | 是* | SKILL.md 的本地路径（相对于配置文件） |
+| `url` | 是* | 技能目录的远程 URL |
+| `detect.files` | 否 | 触发此技能的文件（如 `["package.json"]`） |
+| `detect.patterns` | 否 | 在检测文件中匹配的模式（如 `["react"]`） |
+| `priority` | 否 | 优先级 101-200（默认：150） |
+| `inject_into` | 否 | 注入阶段：`implementation`、`retry`（默认：两者都注入） |
+
+*`path` 或 `url` 必须提供其一，但不能同时提供。
+
+### 创建自定义技能
+
+自定义技能在带有 YAML frontmatter 的 SKILL.md 文件中定义。
+
+**SKILL.md 格式：**
+
+```markdown
+---
+name: my-custom-skill
+description: 简要描述此技能提供的功能。
+license: MIT
+metadata:
+  author: your-name
+  version: "1.0.0"
+---
+
+# 我的自定义技能
+
+## 适用场景
+
+描述何时应该使用此技能...
+
+## 指南
+
+| 规则 | 说明 |
+|------|------|
+| 规则 1 | 描述 |
+| 规则 2 | 描述 |
+
+## 代码示例
+
+\`\`\`typescript
+// 示例代码...
+\`\`\`
+
+## 反模式
+
+| 避免 | 替代方案 |
+|------|----------|
+| 不好的模式 | 好的模式 |
+```
+
+**Frontmatter 字段：**
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| `name` | 是 | 技能标识符 |
+| `description` | 是 | 何时使用此技能 |
+| `license` | 否 | 许可证类型 |
+| `metadata.author` | 否 | 技能作者 |
+| `metadata.version` | 否 | 技能版本 |
+
+### 优先级和覆盖规则
+
+1. **高优先级胜出**：当技能共享相同的基础名称时，使用最高优先级的技能
+2. **用户技能可覆盖**：优先级 150 的用户技能会覆盖优先级 30 的内置技能
+3. **项目 > 用户**：项目级 `.plan-cascade/skills.json` 优先于 `~/.plan-cascade/skills.json`
+
+**覆盖示例：**
+
+```
+builtin/typescript (优先级: 30) <- 被覆盖
+submodule/vercel-react (优先级: 75) <- 生效
+user/my-typescript (优先级: 150) <- 生效（覆盖 builtin/typescript）
+```
+
+**检查生效的技能：**
+
+```bash
+# 查看实际会使用哪些技能
+plan-cascade skills detect --overrides
+
+# 输出显示：
+# - 总匹配数: 5
+# - 去重后生效: 3
+# - 覆盖详情: "user/my-typescript (150) 覆盖 builtin/typescript (30)"
+```
+
+### 远程技能缓存
+
+远程 URL 技能会缓存到本地以提高性能和支持离线访问。
+
+**缓存详情：**
+- 位置：`~/.plan-cascade/cache/skills/`
+- 默认 TTL：7 天
+- 优雅降级：网络失败时使用过期缓存
+
+**缓存命令：**
+
+```bash
+# 查看缓存统计信息
+plan-cascade skills cache
+
+# 强制刷新所有缓存的技能
+plan-cascade skills refresh --all
+
+# 清除所有缓存
+plan-cascade skills refresh --all --clear
+```
+
+### 最佳实践
+
+1. **使用项目级配置**：用于团队共享的技能
+2. **使用用户级配置**：用于个人编码风格偏好
+3. **谨慎设置优先级**：一般覆盖使用 150，关键规则使用 180+
+4. **保持技能专注**：每个技能专注一个关注点（如测试、错误处理）
+5. **包含检测模式**：更具体的模式可减少误匹配
+6. **使用 `skills detect` 测试**：执行前验证技能是否正确检测
 
 ---
 

@@ -2,8 +2,8 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.2.2
-**Last Updated**: 2026-01-31
+**Version**: 4.2.3
+**Last Updated**: 2026-02-01
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
 
@@ -133,6 +133,247 @@ git submodule update --init --recursive
 | Vercel | [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) | React, Web Design |
 | Vue.js | [vuejs-ai/skills](https://github.com/vuejs-ai/skills) | Vue, Pinia, Router |
 | Rust | [actionbook/rust-skills](https://github.com/actionbook/rust-skills) | Coding Guidelines, Ownership, Error Handling, Concurrency |
+
+---
+
+## Three-Tier External Skills System
+
+Plan Cascade uses a three-tier skill system that allows built-in, external, and user-defined skills to coexist with clear priority rules.
+
+### Tier Overview
+
+| Tier | Source Type | Priority Range | Description |
+|------|-------------|----------------|-------------|
+| 1 | Builtin | 1-50 | Built-in with Plan Cascade (Python, TypeScript, Go, Java) |
+| 2 | Submodule | 51-100 | From Git submodules (Vercel, Vue, Rust skills) |
+| 3 | User | 101-200 | User-defined, highest priority |
+
+Higher priority skills override lower priority skills with the same base name.
+
+### How Skills Are Detected and Injected
+
+1. **Detection**: When a story executes, Plan Cascade scans project files for framework indicators
+2. **Matching**: Skills with matching `detect.files` and `detect.patterns` are selected
+3. **Deduplication**: If multiple skills share the same base name, only the highest priority is kept
+4. **Injection**: Up to 3 skills are injected into the agent's context during `implementation` and `retry` phases
+
+### CLI Commands
+
+```bash
+# List all available skills
+plan-cascade skills list
+
+# List skills grouped by source type
+plan-cascade skills list --group
+
+# Show skills applicable to current project
+plan-cascade skills detect
+
+# Show skills with override details
+plan-cascade skills detect --overrides
+
+# Add a user skill from local path
+plan-cascade skills add my-skill --path ./my-skills/SKILL.md
+
+# Add a user skill from remote URL
+plan-cascade skills add remote-skill --url https://example.com/skills/SKILL.md
+
+# Add with custom options
+plan-cascade skills add my-skill --path ./SKILL.md --priority 150 --level project \
+  --detect-files package.json,tsconfig.json --detect-patterns typescript \
+  --inject-into implementation,retry
+
+# Remove a user skill
+plan-cascade skills remove my-skill
+
+# Remove from specific level
+plan-cascade skills remove my-skill --level user
+
+# Validate all skill configurations
+plan-cascade skills validate
+
+# Validate with verbose output
+plan-cascade skills validate --verbose
+
+# Refresh cached remote skills (re-download)
+plan-cascade skills refresh --all
+
+# Refresh specific skill
+plan-cascade skills refresh remote-skill
+
+# Clear cache without re-downloading
+plan-cascade skills refresh --all --clear
+
+# Show cache statistics
+plan-cascade skills cache
+```
+
+### Configuration File
+
+User skills are configured in `.plan-cascade/skills.json` (project-level) or `~/.plan-cascade/skills.json` (user-level).
+
+**Project-level configuration takes precedence over user-level.**
+
+```json
+{
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "my-custom-skill",
+      "path": "./my-skills/custom/SKILL.md",
+      "detect": {
+        "files": ["package.json"],
+        "patterns": ["my-framework"]
+      },
+      "priority": 150,
+      "inject_into": ["implementation"]
+    },
+    {
+      "name": "company-coding-standards",
+      "path": "../shared-skills/coding-standards/SKILL.md",
+      "detect": {
+        "files": ["pyproject.toml", "package.json", "Cargo.toml"],
+        "patterns": []
+      },
+      "priority": 180,
+      "inject_into": ["implementation", "retry"]
+    },
+    {
+      "name": "remote-skill",
+      "url": "https://raw.githubusercontent.com/example/skills/main/advanced/SKILL.md",
+      "detect": {
+        "files": ["config.json"],
+        "patterns": ["advanced-feature"]
+      },
+      "priority": 160,
+      "inject_into": ["implementation"]
+    }
+  ]
+}
+```
+
+**Configuration Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique skill name |
+| `path` | Yes* | Local path to SKILL.md (relative to config file) |
+| `url` | Yes* | Remote URL to skill directory |
+| `detect.files` | No | Files that trigger this skill (e.g., `["package.json"]`) |
+| `detect.patterns` | No | Patterns to match in detected files (e.g., `["react"]`) |
+| `priority` | No | Priority 101-200 (default: 150) |
+| `inject_into` | No | Phases to inject: `implementation`, `retry` (default: both) |
+
+*Either `path` or `url` is required, but not both.
+
+### Creating Custom Skills
+
+Custom skills are defined in SKILL.md files with YAML frontmatter.
+
+**SKILL.md Format:**
+
+```markdown
+---
+name: my-custom-skill
+description: Brief description of what this skill provides.
+license: MIT
+metadata:
+  author: your-name
+  version: "1.0.0"
+---
+
+# My Custom Skill
+
+## When to Apply
+
+Describe when this skill should be used...
+
+## Guidelines
+
+| Rule | Guideline |
+|------|-----------|
+| Rule 1 | Description |
+| Rule 2 | Description |
+
+## Code Examples
+
+\`\`\`typescript
+// Example code...
+\`\`\`
+
+## Anti-Patterns
+
+| Avoid | Use Instead |
+|-------|-------------|
+| Bad pattern | Good pattern |
+```
+
+**Frontmatter Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Skill identifier |
+| `description` | Yes | When to use this skill |
+| `license` | No | License type |
+| `metadata.author` | No | Skill author |
+| `metadata.version` | No | Skill version |
+
+### Priority and Override Rules
+
+1. **Higher priority wins**: When skills share the same base name, the highest priority skill is used
+2. **User skills can override**: A user skill with priority 150 overrides a builtin skill with priority 30
+3. **Project > User**: Project-level `.plan-cascade/skills.json` takes precedence over `~/.plan-cascade/skills.json`
+
+**Example Override:**
+
+```
+builtin/typescript (priority: 30) <- OVERRIDDEN
+submodule/vercel-react (priority: 75) <- ACTIVE
+user/my-typescript (priority: 150) <- ACTIVE (overrides builtin/typescript)
+```
+
+**Check effective skills:**
+
+```bash
+# See which skills will actually be used
+plan-cascade skills detect --overrides
+
+# Output shows:
+# - Total matched: 5
+# - Effective after dedup: 3
+# - Override details: "user/my-typescript (150) overrides builtin/typescript (30)"
+```
+
+### Remote Skill Caching
+
+Remote URL skills are cached locally for performance and offline access.
+
+**Cache Details:**
+- Location: `~/.plan-cascade/cache/skills/`
+- Default TTL: 7 days
+- Graceful degradation: Uses expired cache if network fails
+
+**Cache Commands:**
+
+```bash
+# View cache statistics
+plan-cascade skills cache
+
+# Force refresh all cached skills
+plan-cascade skills refresh --all
+
+# Clear all cache
+plan-cascade skills refresh --all --clear
+```
+
+### Best Practices
+
+1. **Use project-level config** for team-shared skills
+2. **Use user-level config** for personal coding style preferences
+3. **Set priority carefully**: 150 for general overrides, 180+ for critical rules
+4. **Keep skills focused**: One skill per concern (e.g., testing, error handling)
+5. **Include detection patterns**: More specific patterns reduce false matches
+6. **Test with `skills detect`**: Verify skills are correctly detected before execution
 
 ---
 
