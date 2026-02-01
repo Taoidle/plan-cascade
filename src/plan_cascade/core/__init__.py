@@ -17,10 +17,24 @@ Contains the core orchestration logic including:
 - ExternalSkillLoader: Framework-specific skill loading
 """
 
+from .changed_files import ChangedFilesDetector
 from .design_doc_converter import DesignDocConverter
 from .design_doc_generator import DesignDocGenerator
+from .error_parser import (
+    ErrorInfo,
+    ErrorSeverity,
+    EslintParser,
+    FlakeParser,
+    MypyParser,
+    PyrightParser,
+    PytestParser,
+    RuffParser,
+    TscParser,
+    generate_error_summary,
+)
 from .external_skill_loader import ExternalSkillLoader, LoadedSkill
 from .feature_orchestrator import FeatureOrchestrator
+from .gate_cache import CacheEntry, GateCache
 from .iteration_loop import (
     BatchResult,
     IterationCallbacks,
@@ -77,6 +91,8 @@ __all__ = [
     # Design documents
     "DesignDocGenerator",
     "DesignDocConverter",
+    # Changed files detection
+    "ChangedFilesDetector",
     # External skills
     "ExternalSkillLoader",
     "LoadedSkill",
@@ -111,6 +127,20 @@ __all__ = [
     "LintGate",
     "CustomGate",
     "ProjectType",
+    # Gate caching
+    "GateCache",
+    "CacheEntry",
+    # Error parsing
+    "ErrorInfo",
+    "ErrorSeverity",
+    "MypyParser",
+    "RuffParser",
+    "PytestParser",
+    "TscParser",
+    "EslintParser",
+    "FlakeParser",
+    "PyrightParser",
+    "generate_error_summary",
     # Retry management
     "RetryManager",
     "RetryConfig",

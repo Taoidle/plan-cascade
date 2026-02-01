@@ -23,11 +23,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from .orchestrator import Orchestrator
-    from .quality_gate import QualityGate
-    from .retry_manager import RetryManager
-    from ..state.state_manager import StateManager
     from ..state.path_resolver import PathResolver
+    from ..state.state_manager import StateManager
+    from .orchestrator import Orchestrator
+    from .quality_gate import GateOutput, QualityGate
+    from .retry_manager import RetryManager
 
 
 class StoryStatus(Enum):
@@ -49,6 +49,9 @@ class ParallelExecutionConfig:
     quality_gates_enabled: bool = True
     auto_retry_enabled: bool = True
     separate_output: bool = True  # Separate output per story
+    gate_caching_enabled: bool = True  # Cache gate results across stories in batch
+    gate_fail_fast: bool = False  # Stop on first required gate failure
+    incremental_gates: bool = True  # Enable incremental checking based on changed files
 
     def __post_init__(self):
         """Set default concurrency if not specified."""
@@ -65,6 +68,9 @@ class ParallelExecutionConfig:
             "quality_gates_enabled": self.quality_gates_enabled,
             "auto_retry_enabled": self.auto_retry_enabled,
             "separate_output": self.separate_output,
+            "gate_caching_enabled": self.gate_caching_enabled,
+            "gate_fail_fast": self.gate_fail_fast,
+            "incremental_gates": self.incremental_gates,
         }
 
     @classmethod
@@ -78,6 +84,40 @@ class ParallelExecutionConfig:
             quality_gates_enabled=data.get("quality_gates_enabled", True),
             auto_retry_enabled=data.get("auto_retry_enabled", True),
             separate_output=data.get("separate_output", True),
+            gate_caching_enabled=data.get("gate_caching_enabled", True),
+            gate_fail_fast=data.get("gate_fail_fast", False),
+            incremental_gates=data.get("incremental_gates", True),
+        )
+
+
+@dataclass
+class GateProgress:
+    """Progress information for gate execution within a story."""
+    gate_name: str
+    status: str  # "pending", "running", "passed", "failed", "cached", "skipped"
+    duration_seconds: float = 0.0
+    from_cache: bool = False
+    error_summary: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "gate_name": self.gate_name,
+            "status": self.status,
+            "duration_seconds": self.duration_seconds,
+            "from_cache": self.from_cache,
+            "error_summary": self.error_summary,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "GateProgress":
+        """Create from dictionary."""
+        return cls(
+            gate_name=data["gate_name"],
+            status=data.get("status", "pending"),
+            duration_seconds=data.get("duration_seconds", 0.0),
+            from_cache=data.get("from_cache", False),
+            error_summary=data.get("error_summary"),
         )
 
 
@@ -92,6 +132,9 @@ class StoryProgress:
     retry_count: int = 0
     agent: str | None = None
     output_lines: list[str] = field(default_factory=list)
+    gate_progress: dict[str, GateProgress] = field(default_factory=dict)
+    changed_files: list[str] = field(default_factory=list)
+    cache_time_saved: float = 0.0  # Time saved by using cached gate results
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -103,11 +146,20 @@ class StoryProgress:
             "error": self.error,
             "retry_count": self.retry_count,
             "agent": self.agent,
+            "gate_progress": {
+                name: gp.to_dict() for name, gp in self.gate_progress.items()
+            },
+            "changed_files": self.changed_files,
+            "cache_time_saved": self.cache_time_saved,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "StoryProgress":
         """Create from dictionary."""
+        gate_progress = {}
+        for name, gp_data in data.get("gate_progress", {}).items():
+            gate_progress[name] = GateProgress.from_dict(gp_data)
+
         return cls(
             story_id=data["story_id"],
             status=StoryStatus(data.get("status", "pending")),
@@ -116,6 +168,9 @@ class StoryProgress:
             error=data.get("error"),
             retry_count=data.get("retry_count", 0),
             agent=data.get("agent"),
+            gate_progress=gate_progress,
+            changed_files=data.get("changed_files", []),
+            cache_time_saved=data.get("cache_time_saved", 0.0),
         )
 
 
@@ -375,11 +430,12 @@ class ParallelExecutor:
 
         # Process results
         for res in results:
-            if isinstance(res, Exception):
+            if isinstance(res, BaseException):
                 result.stories_failed += 1
                 continue
 
-            story_id, success, message = res
+            # res is guaranteed to be tuple[str, bool, str] here
+            story_id, success, message = res  # type: ignore[misc]
             result.story_results[story_id] = (success, message)
 
             if success:
@@ -451,8 +507,63 @@ class ParallelExecutor:
                 message = "Executed successfully (mock)"
 
             # Run quality gates if enabled and execution succeeded
+            gate_results: dict[str, Any] = {}
             if success and self.config.quality_gates_enabled and self.quality_gate:
-                gate_results = self.quality_gate.execute_all(story_id, {"story": story})
+                # Build context for gate execution
+                gate_context: dict[str, Any] = {"story": story}
+
+                # Get changed files for incremental checking if enabled
+                changed_files: list[str] = []
+                if self.config.incremental_gates:
+                    changed_files = self._get_changed_files_for_story(story)
+                    gate_context["changed_files"] = changed_files
+
+                    # Update story progress with changed files
+                    async with self._lock:
+                        if self._current_progress:
+                            progress = self._current_progress.story_progress.get(story_id)
+                            if progress:
+                                progress.changed_files = changed_files
+
+                # Update gate progress to running state
+                async with self._lock:
+                    if self._current_progress:
+                        progress = self._current_progress.story_progress.get(story_id)
+                        if progress and self.quality_gate:
+                            for gate_config in self.quality_gate.gates:
+                                if gate_config.enabled:
+                                    progress.gate_progress[gate_config.name] = GateProgress(
+                                        gate_name=gate_config.name,
+                                        status="running",
+                                    )
+
+                # Use async gate execution for parallel gate checking
+                gate_results = await self.quality_gate.execute_all_async(story_id, gate_context)
+
+                # Update gate progress with results
+                cache_time_saved = 0.0
+                async with self._lock:
+                    if self._current_progress:
+                        progress = self._current_progress.story_progress.get(story_id)
+                        if progress:
+                            for gate_name, output in gate_results.items():
+                                status = "passed" if output.passed else "failed"
+                                if output.skipped:
+                                    status = "skipped"
+                                elif output.from_cache:
+                                    status = "cached"
+                                    # Estimate time saved (use last cached duration)
+                                    cache_time_saved += output.duration_seconds
+
+                                progress.gate_progress[gate_name] = GateProgress(
+                                    gate_name=gate_name,
+                                    status=status,
+                                    duration_seconds=output.duration_seconds,
+                                    from_cache=output.from_cache,
+                                    error_summary=output.error_summary if not output.passed else None,
+                                )
+                            progress.cache_time_saved = cache_time_saved
+
                 if not self.quality_gate.should_allow_progression(gate_results):
                     success = False
                     message = "Quality gate failed"
@@ -474,18 +585,38 @@ class ParallelExecutor:
                                 progress.status = StoryStatus.RETRYING
                                 progress.retry_count += 1
 
-                    # Record failure and retry
+                    # Record failure with structured error context from gate results
                     from .retry_manager import ErrorType
+                    quality_gate_dict = None
+                    if gate_results:
+                        quality_gate_dict = {
+                            name: {
+                                "passed": output.passed,
+                                "gate_type": output.gate_type.value,
+                                "error_summary": output.error_summary,
+                                "structured_errors": [
+                                    {"file": e.file, "line": e.line, "message": e.message}
+                                    for e in output.structured_errors[:5]  # Limit errors
+                                ] if output.structured_errors else [],
+                            }
+                            for name, output in gate_results.items()
+                        }
+
                     self.retry_manager.record_failure(
                         story_id=story_id,
                         agent="unknown",
-                        error_type=ErrorType.EXIT_CODE,
+                        error_type=ErrorType.QUALITY_GATE if gate_results else ErrorType.EXIT_CODE,
                         error_message=message,
+                        quality_gate_results=quality_gate_dict,
                     )
 
                     # Wait for backoff delay
                     delay = self.retry_manager.get_retry_delay(story_id)
                     await asyncio.sleep(delay)
+
+                    # Invalidate gate cache before retry (files may have changed)
+                    if self.quality_gate and hasattr(self.quality_gate, 'invalidate_cache'):
+                        self.quality_gate.invalidate_cache()
 
                     # Retry execution
                     if self.orchestrator:
@@ -494,6 +625,18 @@ class ParallelExecutor:
                         await asyncio.sleep(0.1)
                         success = True
                         message = "Retry succeeded (mock)"
+
+                    # Re-run gates after retry if initially failed on gates
+                    if success and gate_results and self.quality_gate:
+                        retry_gate_results = await self.quality_gate.execute_all_async(story_id, gate_context)
+                        if not self.quality_gate.should_allow_progression(retry_gate_results):
+                            success = False
+                            message = "Quality gate failed after retry"
+                            async with self._lock:
+                                if self._current_progress:
+                                    progress = self._current_progress.story_progress.get(story_id)
+                                    if progress:
+                                        progress.error = self.quality_gate.get_failure_summary(retry_gate_results)
 
             # Update final progress
             async with self._lock:
@@ -570,6 +713,42 @@ class ParallelExecutor:
             self.state_manager.write_iteration_state(state)
         except Exception:
             pass  # Non-critical failure
+
+    def _get_changed_files_for_story(self, story: dict) -> list[str]:
+        """
+        Get list of files changed by a story.
+
+        Uses the story's file patterns if available, otherwise
+        falls back to git diff for detecting changes.
+
+        Args:
+            story: Story dictionary containing file patterns or paths
+
+        Returns:
+            List of changed file paths relative to project root
+        """
+        changed_files: list[str] = []
+
+        # First, try to get files from story metadata
+        story_files = story.get("files", [])
+        if story_files:
+            return story_files
+
+        # Check for affected_files in story
+        affected_files = story.get("affected_files", [])
+        if affected_files:
+            return affected_files
+
+        # Fall back to detecting changes via git
+        try:
+            from .changed_files import ChangedFilesDetector
+            detector = ChangedFilesDetector(self.project_root)
+            if detector.is_git_repository():
+                changed_files = detector.get_changed_files()
+        except Exception:
+            pass
+
+        return changed_files
 
     def get_current_progress(self) -> BatchProgress | None:
         """Get the current batch progress."""
@@ -655,7 +834,7 @@ class ParallelProgressDisplay:
         )
         table.add_column("Story", style="cyan", width=15)
         table.add_column("Status", width=12)
-        table.add_column("Agent", style="dim", width=15)
+        table.add_column("Gates", width=20)
         table.add_column("Duration", style="dim", width=12)
         table.add_column("Info", width=30)
 
@@ -702,17 +881,22 @@ class ParallelProgressDisplay:
                 else:
                     duration = f"{(datetime.now() - start).total_seconds():.1f}s..."
 
+            # Gate status column
+            gate_info = self._format_gate_status(sp)
+
             # Info column
             info = ""
             if sp.retry_count > 0:
                 info = f"Retry #{sp.retry_count}"
+            if sp.cache_time_saved > 0:
+                info = f"Cache saved {sp.cache_time_saved:.1f}s"
             if sp.error:
                 info = sp.error[:30] + "..." if len(sp.error) > 30 else sp.error
 
             table.add_row(
                 sid,
                 status_styles.get(sp.status, str(sp.status.value)),
-                sp.agent or "-",
+                gate_info,
                 duration,
                 info,
             )
@@ -728,6 +912,37 @@ class ParallelProgressDisplay:
         table.add_row("", "", "", "", summary)
 
         return table
+
+    def _format_gate_status(self, story_progress: StoryProgress) -> str:
+        """
+        Format gate execution status for display.
+
+        Args:
+            story_progress: Story progress containing gate status
+
+        Returns:
+            Formatted string showing gate status
+        """
+        if not story_progress.gate_progress:
+            return "-"
+
+        status_icons = {
+            "pending": "[dim].[/dim]",
+            "running": "[yellow]~[/yellow]",
+            "passed": "[green]+[/green]",
+            "failed": "[red]x[/red]",
+            "cached": "[cyan]c[/cyan]",
+            "skipped": "[dim]s[/dim]",
+        }
+
+        parts = []
+        for gate_name, gp in story_progress.gate_progress.items():
+            # Use first letter of gate name + status icon
+            short_name = gate_name[0].upper() if gate_name else "?"
+            icon = status_icons.get(gp.status, "?")
+            parts.append(f"{short_name}:{icon}")
+
+        return " ".join(parts)
 
     def start(self) -> None:
         """Start the live display."""

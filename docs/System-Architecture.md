@@ -2,7 +2,7 @@
 
 # Plan Cascade - System Architecture and Workflow Design
 
-**Version**: 4.2.3
+**Version**: 4.3.0
 **Last Updated**: 2026-02-01
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
@@ -98,6 +98,9 @@ graph LR
     subgraph "Quality Layer"
         QG[QualityGate<br/>Quality Gate]
         RM[RetryManager<br/>Retry Manager]
+        GC[GateCache<br/>Gate Cache]
+        EP[ErrorParser<br/>Error Parser]
+        CFD[ChangedFilesDetector<br/>Changed Files]
     end
 
     subgraph "State Layer"
@@ -112,6 +115,9 @@ graph LR
     PM --> CPD
     IL --> QG
     QG --> RM
+    QG --> GC
+    QG --> EP
+    QG --> CFD
     O --> SM
     SM --> CF
     CF --> ESL
@@ -125,8 +131,11 @@ graph LR
 | **IterationLoop** | Auto-iteration loop, manages batch execution |
 | **AgentExecutor** | Agent execution abstraction, supports multiple Agents |
 | **PhaseManager** | Phase management, selects Agent based on phase |
-| **QualityGate** | Quality gates, validates code quality |
-| **RetryManager** | Retry management, handles failure retries |
+| **QualityGate** | Quality gates with parallel async execution, fail-fast, incremental checking, and caching support |
+| **RetryManager** | Retry management, handles failure retries with structured error context |
+| **GateCache** | Gate result caching based on git commit + working tree hash, avoids redundant checks |
+| **ErrorParser** | Structured error parsing for mypy, ruff, pytest, eslint, tsc with ErrorInfo extraction |
+| **ChangedFilesDetector** | Git-based change detection for incremental gate execution |
 | **StateManager** | State management, persists execution state |
 | **ContextFilter** | Context filter, optimizes Agent input |
 | **ExternalSkillLoader** | Three-tier skill loading (builtin/external/user), auto-detects and injects best practices with priority-based override |
@@ -831,6 +840,7 @@ graph TB
 
     subgraph "Cache"
         AD[.agent-detection.json<br/>Agent Detection Cache]
+        GCF[.state/gate-cache.json<br/>Gate Result Cache]
         LK[.locks/<br/>File Locks]
     end
 
@@ -865,6 +875,7 @@ graph TB
 | `.retry-state.json` | State | Retry history and failure records |
 | `.mega-status.json` | State | Mega-plan execution status |
 | `.agent-detection.json` | Cache | Cross-platform Agent detection results (1-hour TTL) |
+| `.state/gate-cache.json` | Cache | Gate execution results cache (keyed by git commit + tree hash) |
 | `.hybrid-execution-context.md` | Context | Hybrid task context for AI recovery after session interruption |
 | `.mega-execution-context.md` | Context | Mega-plan context for AI recovery after session interruption |
 | `.agent-outputs/` | Output | Agent logs, prompts, and result files |

@@ -2,7 +2,7 @@
 
 # Plan Cascade - 系统架构与流程设计
 
-**版本**: 4.2.3
+**版本**: 4.3.0
 **最后更新**: 2026-02-01
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
@@ -98,6 +98,9 @@ graph LR
     subgraph "质量层"
         QG[QualityGate<br/>质量门控]
         RM[RetryManager<br/>重试管理器]
+        GC[GateCache<br/>门控缓存]
+        EP[ErrorParser<br/>错误解析器]
+        CFD[ChangedFilesDetector<br/>变更文件检测]
     end
 
     subgraph "状态层"
@@ -112,6 +115,9 @@ graph LR
     PM --> CPD
     IL --> QG
     QG --> RM
+    QG --> GC
+    QG --> EP
+    QG --> CFD
     O --> SM
     SM --> CF
     CF --> ESL
@@ -125,8 +131,11 @@ graph LR
 | **IterationLoop** | 自动迭代循环，管理批次执行 |
 | **AgentExecutor** | Agent 执行抽象，支持多种 Agent |
 | **PhaseManager** | 阶段管理，根据阶段选择 Agent |
-| **QualityGate** | 质量门控，验证代码质量 |
-| **RetryManager** | 重试管理，处理失败重试 |
+| **QualityGate** | 质量门控，支持并行异步执行、快速失败、增量检查和缓存 |
+| **RetryManager** | 重试管理，处理失败重试，传递结构化错误上下文 |
+| **GateCache** | 门控结果缓存，基于 git commit + 工作树哈希，避免重复检查 |
+| **ErrorParser** | 结构化错误解析，支持 mypy、ruff、pytest、eslint、tsc，提取 ErrorInfo |
+| **ChangedFilesDetector** | 基于 Git 的变更检测，用于增量门控执行 |
 | **StateManager** | 状态管理，持久化执行状态 |
 | **ContextFilter** | 上下文过滤，优化 Agent 输入 |
 | **ExternalSkillLoader** | 三层技能加载（内置/外部/用户），自动检测并按优先级覆盖注入最佳实践 |
@@ -831,6 +840,7 @@ graph TB
 
     subgraph "缓存"
         AD[.agent-detection.json<br/>Agent检测缓存]
+        GCF[.state/gate-cache.json<br/>门控结果缓存]
         LK[.locks/<br/>文件锁]
     end
 
@@ -865,6 +875,7 @@ graph TB
 | `.retry-state.json` | 状态 | 重试历史和失败记录 |
 | `.mega-status.json` | 状态 | Mega-plan 执行状态 |
 | `.agent-detection.json` | 缓存 | 跨平台 Agent 检测结果（1小时TTL） |
+| `.state/gate-cache.json` | 缓存 | 门控执行结果缓存（基于 git commit + 工作树哈希） |
 | `.hybrid-execution-context.md` | 上下文 | Hybrid 任务上下文，用于会话中断后 AI 恢复 |
 | `.mega-execution-context.md` | 上下文 | Mega-plan 上下文，用于会话中断后 AI 恢复 |
 | `.agent-outputs/` | 输出 | Agent 日志、Prompt 和结果文件 |
