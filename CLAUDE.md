@@ -8,22 +8,25 @@ Plan Cascade is an AI-powered cascading development framework that decomposes co
 
 ## Build & Development Commands
 
-```bash
-# Install dependencies
-pip install -e ".[all]"
+**Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/)**
 
-# Run tests
-pytest tests/                          # All tests
-pytest tests/test_prd_generator.py     # Single test file
+```bash
+# Run tests (uv auto-creates venv and installs deps)
+uv run pytest tests/                          # All tests
+uv run pytest tests/test_prd_generator.py     # Single test file
+uv run pytest tests/ -k "test_name"           # Run specific test by name
 
 # Linting
-ruff check src/
+uv run ruff check src/
 
 # Type checking
-mypy src/
+uv run mypy src/
 
 # Initialize external framework skills
 git submodule update --init --recursive
+
+# Manual install (alternative to uv)
+pip install -e ".[all]"
 ```
 
 **Entry points**: `plan-cascade` (CLI) and `plan-cascade-mcp` (MCP server)
@@ -48,8 +51,10 @@ Story Execution (task-level) → Code changes
   - `builtin.py` - BuiltinBackend: direct LLM API with ReAct loop
 - `src/plan_cascade/state/` - Thread-safe state management with platform-specific file locking
 - `src/plan_cascade/llm/` - LLM provider abstraction (Anthropic, OpenAI, DeepSeek, Ollama)
-- `commands/` - 23 Plugin command definitions (markdown files)
-- `skills/` - Plugin skills providing execution context
+- `src/plan_cascade/tools/` - ReAct tool implementations (file_tools, search_tools, shell_tools)
+- `src/plan_cascade/settings/` - Configuration storage, validation, and migration
+- `commands/` - Plugin command definitions (markdown files with step-by-step AI instructions)
+- `skills/` - Plugin skills: `hybrid-ralph/`, `mega-plan/`, `planning-with-files/`
 - `mcp_server/` - FastMCP server implementation
 - `external-skills/` - Git submodules with framework-specific best practices (React, Vue, Rust)
 
@@ -68,6 +73,10 @@ Story Execution (task-level) → Code changes
 **State Persistence** (`state/state_manager.py`): Thread-safe file operations with Unix/Windows locking.
 
 **Context Recovery** (`state/context_recovery.py`): Auto-generates `.hybrid-execution-context.md` and `.mega-execution-context.md` for session recovery.
+
+**Path Resolution** (`state/path_resolver.py`): Unified path resolution for runtime files. Files stored in platform-specific user directories:
+- Windows: `%APPDATA%/plan-cascade/<project-id>/`
+- Unix/macOS: `~/.plan-cascade/<project-id>/`
 
 ### Design Document Hierarchy
 
