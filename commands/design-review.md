@@ -6,6 +6,14 @@ description: "Review and interactively edit the current design_doc.json. Display
 
 Review the current `design_doc.json` and make interactive edits to components, patterns, architectural decisions, and story mappings.
 
+## Path Storage Modes
+
+Design documents are user-visible files and remain in the working directory in both modes:
+- `design_doc.json`: Located in current working directory (project root or worktree)
+- PRD references may be in different locations based on storage mode
+
+This command primarily works with design_doc.json in the current directory.
+
 ## Tool Usage Policy (CRITICAL)
 
 **To avoid command confirmation prompts:**

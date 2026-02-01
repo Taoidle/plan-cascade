@@ -6,6 +6,20 @@ description: "Generate a technical design document. Auto-detects level: project-
 
 Generate a structured technical design document (`design_doc.json`). Auto-detects the appropriate level based on available files.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+- `mega-plan.json`: In `~/.plan-cascade/<project-id>/`
+- `prd.json`: In worktree directory or `~/.plan-cascade/<project-id>/`
+- `design_doc.json`: Always created in project root (user-visible file)
+
+### Legacy Mode
+- All files in project root or worktree directory
+
+Note: design_doc.json is a user-visible documentation file and always stays in the working directory.
+
 ## Two-Level Design Document System
 
 ```
@@ -42,17 +56,23 @@ Generate a structured technical design document (`design_doc.json`). Auto-detect
 
 ## Step 1: Detect Level
 
-Auto-detect based on available files:
+Auto-detect based on available files (check both new mode and legacy locations):
 
 ```
-If mega-plan.json exists:
+# Get paths from PathResolver
+MEGA_PLAN_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())"
+PRD_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
+
+# Check for mega-plan.json (new mode path first, then legacy)
+If file exists at MEGA_PLAN_PATH or "mega-plan.json":
     LEVEL = "project"
     echo "Detected project-level context (mega-plan.json)"
-Elif prd.json exists:
+Elif file exists at PRD_PATH or "prd.json":
     LEVEL = "feature"
     echo "Detected feature-level context (prd.json)"
 Else:
     ERROR: Neither mega-plan.json nor prd.json found.
+    Checked: {MEGA_PLAN_PATH}, mega-plan.json, {PRD_PATH}, prd.json
     Generate one first:
       /plan-cascade:mega-plan <description>  (for project)
       /plan-cascade:hybrid-auto <description>  (for feature)

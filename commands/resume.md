@@ -6,6 +6,28 @@ description: "Auto-detect and resume any interrupted Plan Cascade task. Detects 
 
 Automatically detect and resume any interrupted Plan Cascade task.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes and auto-detects which is active:
+
+### New Mode (Default)
+Files are stored in user data directory:
+- **Windows**: `%APPDATA%/plan-cascade/<project-id>/`
+- **Unix/macOS**: `~/.plan-cascade/<project-id>/`
+
+Detection checks:
+- `<user-dir>/mega-plan.json` for mega-plan tasks
+- `<user-dir>/.worktree/*/` for worktree tasks
+- `<user-dir>/prd.json` for hybrid-auto tasks
+
+### Legacy Mode
+Files in project root:
+- `<project-root>/mega-plan.json`
+- `<project-root>/.worktree/*/`
+- `<project-root>/prd.json`
+
+The command scans both locations for maximum compatibility.
+
 ## Tool Usage Policy (CRITICAL)
 
 **To avoid command confirmation prompts:**
@@ -21,7 +43,14 @@ Check for various planning files to determine what type of task was interrupted.
 ### 1.1: Check for Mega Plan
 
 ```
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())"
+
 Use Read tool to check if mega-plan.json exists:
+  Read(MEGA_PLAN_PATH)
+
+# Also check legacy location if different
+If file not found and MEGA_PLAN_PATH != "mega-plan.json":
   Read("mega-plan.json")
 
 If file exists and is valid JSON:
@@ -43,7 +72,15 @@ If file exists and mode = "hybrid":
 ### 1.3: Check for Worktrees Directory
 
 ```
-Use Glob tool to find worktrees:
+# Get worktree base directory from PathResolver
+WORKTREE_BASE = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())"
+
+Use Glob tool to find worktrees in new mode location:
+  Glob("{WORKTREE_BASE}/*/.planning-config.json")
+  Glob("{WORKTREE_BASE}/*/prd.json")
+
+# Also check legacy location if different
+If WORKTREE_BASE != ".worktree":
   Glob(".worktree/*/.planning-config.json")
   Glob(".worktree/*/prd.json")
 
@@ -55,7 +92,14 @@ If any worktrees found:
 ### 1.4: Check for Regular Hybrid Task
 
 ```
+# Get PRD path from PathResolver
+PRD_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
+
 Use Read tool to check for PRD:
+  Read(PRD_PATH)
+
+# Also check legacy location if different
+If file not found and PRD_PATH != "prd.json":
   Read("prd.json")
 
 If file exists and has stories:
@@ -143,9 +187,14 @@ Stories: {total} ({complete} complete, {pending} pending)
 ```
 No interrupted task detected.
 
-Checked for:
-  ✗ mega-plan.json (not found)
+Checked for (new mode paths):
+  ✗ {MEGA_PLAN_PATH} (not found)
   ✗ .planning-config.json (not found)
+  ✗ {WORKTREE_BASE}/ directory (not found or empty)
+  ✗ {PRD_PATH} (not found)
+
+Also checked legacy locations:
+  ✗ mega-plan.json (not found)
   ✗ .worktree/ directory (not found or empty)
   ✗ prd.json (not found)
 

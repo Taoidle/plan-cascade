@@ -8,11 +8,34 @@ Complete the mega-plan by cleaning up remaining planning files.
 
 **Note**: In the new batch-by-batch execution model, code merging happens automatically when each batch completes (via `mega-approve`). This command only performs final cleanup.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+Cleanup removes files from user data directory:
+- `~/.plan-cascade/<project-id>/mega-plan.json`
+- `~/.plan-cascade/<project-id>/.state/.mega-status.json`
+- `~/.plan-cascade/<project-id>/.worktree/` (remaining worktrees)
+- `<project-root>/mega-findings.md` (user-visible file in project root)
+
+### Legacy Mode
+Cleanup removes files from project root:
+- `<project-root>/mega-plan.json`
+- `<project-root>/.mega-status.json`
+- `<project-root>/.worktree/`
+- `<project-root>/mega-findings.md`
+
+The command auto-detects which mode is active.
+
 ## Step 1: Verify Mega Plan Exists
 
 ```bash
-if [ ! -f "mega-plan.json" ]; then
-    echo "No mega-plan.json found."
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+
+if [ ! -f "$MEGA_PLAN_PATH" ]; then
+    echo "No mega-plan.json found at: $MEGA_PLAN_PATH"
     echo "Nothing to complete."
     exit 0
 fi
@@ -108,23 +131,31 @@ If user selected "Yes, cleanup":
 ### 6.1: Remove Planning Files
 
 ```bash
-# Remove mega-plan files (they are in .gitignore, so not tracked)
-rm -f mega-plan.json
-rm -f mega-findings.md
-rm -f .mega-status.json
+# Get file paths from PathResolver (handles new vs legacy mode)
+MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+MEGA_STATUS_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
+MEGA_FINDINGS_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_findings_path())" 2>/dev/null || echo "mega-findings.md")
 
-echo "[OK] Removed mega-plan.json"
-echo "[OK] Removed mega-findings.md"
-echo "[OK] Removed .mega-status.json"
+# Remove mega-plan files
+rm -f "$MEGA_PLAN_PATH"
+rm -f "$MEGA_FINDINGS_PATH"
+rm -f "$MEGA_STATUS_PATH"
+
+echo "[OK] Removed mega-plan.json from: $MEGA_PLAN_PATH"
+echo "[OK] Removed mega-findings.md from: $MEGA_FINDINGS_PATH"
+echo "[OK] Removed .mega-status.json from: $MEGA_STATUS_PATH"
 ```
 
 ### 6.2: Cleanup Any Remaining Worktrees
 
 ```bash
-# Check for any remaining worktrees
-if [ -d ".worktree" ]; then
+# Get worktree base directory from PathResolver
+WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
+
+# Check for any remaining worktrees in the resolved location
+if [ -d "$WORKTREE_BASE" ]; then
     # List and remove any remaining worktrees
-    for dir in .worktree/*/; do
+    for dir in "$WORKTREE_BASE"/*/; do
         if [ -d "$dir" ]; then
             FEATURE_NAME=$(basename "$dir")
             git worktree remove "$dir" --force 2>/dev/null || rm -rf "$dir"
@@ -132,13 +163,37 @@ if [ -d ".worktree" ]; then
         fi
     done
 
-    # Remove the .worktree directory if empty
+    # Remove the worktree directory if empty
+    rmdir "$WORKTREE_BASE" 2>/dev/null || true
+fi
+
+# Also check legacy location if different
+if [ "$WORKTREE_BASE" != ".worktree" ] && [ -d ".worktree" ]; then
+    for dir in .worktree/*/; do
+        if [ -d "$dir" ]; then
+            FEATURE_NAME=$(basename "$dir")
+            git worktree remove "$dir" --force 2>/dev/null || rm -rf "$dir"
+            echo "[OK] Removed legacy worktree: $dir"
+        fi
+    done
     rmdir .worktree 2>/dev/null || rm -rf .worktree
 fi
 
 # Prune git worktree list
 git worktree prune
 echo "[OK] Pruned git worktree list"
+
+# Optionally clean up project data directory in new mode
+PROJECT_DIR=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print(r.get_project_dir()) if not r.is_legacy_mode() else print('')" 2>/dev/null || echo "")
+if [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ]; then
+    # Check if directory is empty (only manifest.json might remain)
+    FILE_COUNT=$(find "$PROJECT_DIR" -type f ! -name "manifest.json" | wc -l)
+    if [ "$FILE_COUNT" -eq 0 ]; then
+        echo "Project data directory is empty, cleaning up..."
+        rm -rf "$PROJECT_DIR"
+        echo "[OK] Removed project data directory: $PROJECT_DIR"
+    fi
+fi
 ```
 
 ### 6.3: Cleanup Remaining Feature Branches

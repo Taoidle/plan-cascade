@@ -6,6 +6,22 @@ description: "AI auto strategy executor. Analyzes task and automatically selects
 
 AI automatically analyzes the task and executes the optimal strategy without user confirmation.
 
+## Path Storage Modes
+
+Plan Cascade supports two path storage modes:
+
+### New Mode (Default)
+Runtime files are stored in a user directory:
+- **Windows**: `%APPDATA%/plan-cascade/<project-id>/`
+- **Unix/macOS**: `~/.plan-cascade/<project-id>/`
+
+This keeps the project root clean and avoids polluting the codebase with planning files.
+
+### Legacy Mode
+Files are stored in project root for backward compatibility.
+
+The auto command uses PathResolver to detect existing files in either location.
+
 ## Tool Usage Policy (CRITICAL)
 
 **To avoid command confirmation prompts during automatic execution:**
@@ -23,6 +39,14 @@ AI automatically analyzes the task and executes the optimal strategy without use
    - File existence checks (when necessary)
 
 4. **For strategy routing:** Use the Skill tool to invoke other commands
+
+## Step 0: Ensure .gitignore Configuration
+
+**IMPORTANT**: Before any planning operations, ensure the project's `.gitignore` is configured:
+
+```bash
+python3 -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || true
+```
 
 ## Step 1: Parse Task Description
 
@@ -58,12 +82,23 @@ git show-ref --verify --quiet refs/heads/main && echo "main" || git show-ref --v
 
 ### 2.2: Check Planning Files (Use Glob - NO Bash)
 
-Use the **Glob** tool to check for existing planning files:
+Use the **Glob** tool to check for existing planning files in both new mode and legacy locations:
 
 ```
-Glob("prd.json")           -> HAS_PRD = (result count > 0)
-Glob("mega-plan.json")     -> HAS_MEGA_PLAN = (result count > 0)
-Glob(".worktrees/*")       -> HAS_WORKTREES = (result count > 0)
+# Get paths from PathResolver
+PRD_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
+MEGA_PLAN_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())"
+WORKTREE_BASE = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())"
+
+# Check new mode paths
+Glob(PRD_PATH)             -> HAS_PRD = (result count > 0)
+Glob(MEGA_PLAN_PATH)       -> HAS_MEGA_PLAN = (result count > 0)
+Glob(WORKTREE_BASE + "/*") -> HAS_WORKTREES = (result count > 0)
+
+# Also check legacy paths if different
+Glob("prd.json")           -> HAS_PRD |= (result count > 0)
+Glob("mega-plan.json")     -> HAS_MEGA_PLAN |= (result count > 0)
+Glob(".worktree/*")        -> HAS_WORKTREES |= (result count > 0)
 ```
 
 ### 2.3: Detect Project Type (Use Glob - NO Bash)

@@ -6,6 +6,20 @@ description: "Show detailed status of mega-plan execution including feature prog
 
 Display comprehensive status of the mega-plan execution.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+- `mega-plan.json`: `~/.plan-cascade/<project-id>/mega-plan.json`
+- `.mega-status.json`: `~/.plan-cascade/<project-id>/.state/.mega-status.json`
+- Worktrees: `~/.plan-cascade/<project-id>/.worktree/<feature>/`
+
+### Legacy Mode
+- All files in project root
+
+The command uses PathResolver to find files in the correct locations.
+
 ## Tool Usage Policy (CRITICAL)
 
 **To avoid command confirmation prompts:**
@@ -27,8 +41,11 @@ Display comprehensive status of the mega-plan execution.
 ## Step 1: Verify Mega Plan Exists
 
 ```bash
-if [ ! -f "mega-plan.json" ]; then
-    echo "No mega-plan.json found."
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+
+if [ ! -f "$MEGA_PLAN_PATH" ]; then
+    echo "No mega-plan.json found at: $MEGA_PLAN_PATH"
     echo "Use /plan-cascade:mega-plan <description> to create one first."
     exit 1
 fi
@@ -39,8 +56,12 @@ fi
 Read the mega-plan and sync status from worktrees:
 
 ```bash
-cat mega-plan.json
-cat .mega-status.json 2>/dev/null || echo "{}"
+# Get file paths from PathResolver
+MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+MEGA_STATUS_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
+
+cat "$MEGA_PLAN_PATH"
+cat "$MEGA_STATUS_PATH" 2>/dev/null || echo "{}"
 ```
 
 ## Step 3: Sync Status from Worktrees

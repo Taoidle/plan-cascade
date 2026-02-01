@@ -10,28 +10,68 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..core.external_skill_loader import ExternalSkillLoader
+
+if TYPE_CHECKING:
+    from .path_resolver import PathResolver
 
 
 class ContextFilter:
     """Filters and extracts relevant context for a specific story."""
 
-    def __init__(self, project_root: Path, plugin_root: Path = None):
+    def __init__(
+        self,
+        project_root: Path,
+        plugin_root: Path = None,
+        path_resolver: "PathResolver | None" = None,
+        legacy_mode: bool | None = None,
+    ):
         """
         Initialize the context filter.
 
         Args:
             project_root: Root directory of the project
             plugin_root: Root directory of the Plan Cascade plugin (optional)
+            path_resolver: Optional PathResolver instance. If not provided,
+                creates a default one based on legacy_mode setting.
+            legacy_mode: If True, use project root for all paths (backward compatible).
+                If None, defaults to True when path_resolver is not provided.
         """
         self.project_root = Path(project_root)
-        self.prd_path = self.project_root / "prd.json"
+
+        # Set up PathResolver
+        if path_resolver is not None:
+            self._path_resolver = path_resolver
+        else:
+            # Default to legacy mode for backward compatibility
+            if legacy_mode is None:
+                legacy_mode = True
+            from .path_resolver import PathResolver
+            self._path_resolver = PathResolver(
+                project_root=self.project_root,
+                legacy_mode=legacy_mode,
+            )
+
+        # Use PathResolver for PRD path
+        self.prd_path = self._path_resolver.get_prd_path()
+
+        # findings.md and design_doc.json are user-visible files and stay in project root
         self.findings_path = self.project_root / "findings.md"
         self.design_doc_path = self.project_root / "design_doc.json"
 
         # Initialize external skill loader
         self.external_loader = ExternalSkillLoader(project_root, plugin_root)
+
+    @property
+    def path_resolver(self) -> "PathResolver":
+        """Get the PathResolver instance."""
+        return self._path_resolver
+
+    def is_legacy_mode(self) -> bool:
+        """Check if running in legacy mode."""
+        return self._path_resolver.is_legacy_mode()
 
     def load_prd(self) -> dict | None:
         """

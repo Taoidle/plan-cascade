@@ -7,6 +7,7 @@ Tests cover:
 - PRD status analysis
 - Progress marker parsing
 - Recovery plan generation
+- PathResolver integration (new mode vs legacy mode)
 """
 
 import json
@@ -23,6 +24,7 @@ from src.plan_cascade.state.context_recovery import (
     RecoveryPlan,
     TaskState,
 )
+from src.plan_cascade.state.path_resolver import PathResolver
 
 
 class TestContextDetection:
@@ -513,6 +515,285 @@ class TestCompletionPercentage:
         state = manager.detect_context()
 
         assert state.completion_percentage == 100.0
+
+
+class TestPathResolverIntegration:
+    """Tests for PathResolver integration."""
+
+    def test_legacy_mode_default(self, tmp_path: Path):
+        """Test that legacy mode is default when no path_resolver provided."""
+        manager = ContextRecoveryManager(tmp_path)
+
+        assert manager.is_legacy_mode() is True
+        # In legacy mode, paths should be in project root
+        assert manager.prd_path == tmp_path / "prd.json"
+        assert manager.mega_plan_path == tmp_path / "mega-plan.json"
+        assert manager.worktree_dir == tmp_path / ".worktree"
+
+    def test_legacy_mode_explicit(self, tmp_path: Path):
+        """Test explicit legacy mode."""
+        manager = ContextRecoveryManager(tmp_path, legacy_mode=True)
+
+        assert manager.is_legacy_mode() is True
+        assert manager.prd_path == tmp_path / "prd.json"
+
+    def test_new_mode_with_data_dir_override(self, tmp_path: Path):
+        """Test new mode with custom data directory."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        resolver = PathResolver(
+            project_root=project_root,
+            legacy_mode=False,
+            data_dir_override=data_dir
+        )
+        manager = ContextRecoveryManager(project_root, path_resolver=resolver)
+
+        assert manager.is_legacy_mode() is False
+        # PRD should be in data directory
+        project_id = resolver.get_project_id()
+        expected_prd_path = data_dir / project_id / "prd.json"
+        assert manager.prd_path == expected_prd_path
+
+    def test_new_mode_detects_prd_in_user_dir(self, tmp_path: Path):
+        """Test that new mode correctly detects prd.json in user directory."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        resolver = PathResolver(
+            project_root=project_root,
+            legacy_mode=False,
+            data_dir_override=data_dir
+        )
+
+        # Create PRD in the user data directory
+        project_dir = resolver.get_project_dir()
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        prd = {
+            "goal": "Test",
+            "stories": [{"id": "story-001", "title": "Test", "status": "pending"}],
+        }
+        with open(project_dir / "prd.json", "w") as f:
+            json.dump(prd, f)
+
+        manager = ContextRecoveryManager(project_root, path_resolver=resolver)
+        state = manager.detect_context()
+
+        assert state.context_type == ContextType.HYBRID_AUTO
+        assert state.prd_status == PrdStatus.VALID
+
+    def test_new_mode_detects_mega_plan_in_user_dir(self, tmp_path: Path):
+        """Test that new mode correctly detects mega-plan.json in user directory."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        resolver = PathResolver(
+            project_root=project_root,
+            legacy_mode=False,
+            data_dir_override=data_dir
+        )
+
+        # Create mega-plan in the user data directory
+        project_dir = resolver.get_project_dir()
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        mega_plan = {
+            "goal": "Multi-feature project",
+            "target_branch": "main",
+            "features": [
+                {"id": "feature-001", "name": "auth", "title": "Auth", "status": "pending"},
+            ],
+        }
+        with open(project_dir / "mega-plan.json", "w") as f:
+            json.dump(mega_plan, f)
+
+        manager = ContextRecoveryManager(project_root, path_resolver=resolver)
+        state = manager.detect_context()
+
+        assert state.context_type == ContextType.MEGA_PLAN
+        assert state.prd_status == PrdStatus.VALID
+
+    def test_new_mode_worktree_detection(self, tmp_path: Path):
+        """Test that new mode correctly detects worktrees in user directory."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        resolver = PathResolver(
+            project_root=project_root,
+            legacy_mode=False,
+            data_dir_override=data_dir
+        )
+
+        # Create worktree directory structure in user data directory
+        worktree_dir = resolver.get_worktree_dir()
+        worktree_task = worktree_dir / "feature-login"
+        worktree_task.mkdir(parents=True)
+
+        # Create config in worktree
+        config = {
+            "task_name": "feature-login",
+            "target_branch": "main",
+            "branch_name": "task/feature-login",
+        }
+        with open(worktree_task / ".planning-config.json", "w") as f:
+            json.dump(config, f)
+
+        manager = ContextRecoveryManager(project_root, path_resolver=resolver)
+        state = manager.detect_context()
+
+        # Should detect the worktree
+        assert state.context_type == ContextType.HYBRID_WORKTREE
+        assert state.total_stories == 1  # One worktree found
+
+    def test_shared_path_resolver(self, tmp_path: Path):
+        """Test that a shared PathResolver can be used across managers."""
+        resolver = PathResolver(tmp_path, legacy_mode=True)
+
+        manager = ContextRecoveryManager(tmp_path, path_resolver=resolver)
+
+        # Verify the manager uses the provided resolver
+        assert manager.path_resolver is resolver
+        assert manager.is_legacy_mode() == resolver.is_legacy_mode()
+
+    def test_show_paths_legacy(self, tmp_path: Path):
+        """Test path computation in legacy mode."""
+        manager = ContextRecoveryManager(tmp_path, legacy_mode=True)
+
+        assert manager.mega_plan_path == tmp_path / "mega-plan.json"
+        assert manager.prd_path == tmp_path / "prd.json"
+        assert manager.progress_path == tmp_path / "progress.txt"
+        assert manager.worktree_dir == tmp_path / ".worktree"
+        assert manager.config_path == tmp_path / ".planning-config.json"
+
+    def test_context_file_in_state_dir_new_mode(self, tmp_path: Path):
+        """Test that context files are written to state dir in new mode."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        resolver = PathResolver(
+            project_root=project_root,
+            legacy_mode=False,
+            data_dir_override=data_dir
+        )
+
+        # Create PRD in user data directory
+        project_dir = resolver.get_project_dir()
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        prd = {
+            "goal": "Test",
+            "stories": [{"id": "story-001", "title": "Test", "status": "pending"}],
+        }
+        with open(project_dir / "prd.json", "w") as f:
+            json.dump(prd, f)
+
+        manager = ContextRecoveryManager(project_root, path_resolver=resolver)
+        state = manager.detect_context()
+        manager.update_context_file(state)
+
+        # Context file should be in state directory
+        state_dir = resolver.get_state_dir()
+        context_file = state_dir / "hybrid-execution-context.md"
+        assert context_file.exists()
+
+        content = context_file.read_text()
+        assert "Hybrid Execution Context" in content
+
+    def test_context_file_in_project_root_legacy_mode(self, tmp_path: Path):
+        """Test that context files are written to project root in legacy mode."""
+        prd = {
+            "goal": "Test",
+            "stories": [{"id": "story-001", "title": "Test", "status": "pending"}],
+        }
+        with open(tmp_path / "prd.json", "w") as f:
+            json.dump(prd, f)
+
+        manager = ContextRecoveryManager(tmp_path, legacy_mode=True)
+        state = manager.detect_context()
+        manager.update_context_file(state)
+
+        # Context file should be in project root
+        context_file = tmp_path / ".hybrid-execution-context.md"
+        assert context_file.exists()
+
+
+class TestWorktreePathDetection:
+    """Tests for worktree path detection in both modes."""
+
+    def test_is_in_worktree_legacy_config(self, tmp_path: Path):
+        """Test worktree detection via config file."""
+        config = {
+            "branch_name": "task/feature-login",
+        }
+        with open(tmp_path / ".planning-config.json", "w") as f:
+            json.dump(config, f)
+
+        manager = ContextRecoveryManager(tmp_path)
+        assert manager._is_in_worktree() is True
+
+    def test_is_not_in_worktree_no_task_branch(self, tmp_path: Path):
+        """Test non-worktree detection when branch doesn't start with task/."""
+        config = {
+            "branch_name": "feature/login",
+        }
+        with open(tmp_path / ".planning-config.json", "w") as f:
+            json.dump(config, f)
+
+        manager = ContextRecoveryManager(tmp_path)
+        assert manager._is_in_worktree() is False
+
+    def test_is_in_worktree_parent_path(self, tmp_path: Path):
+        """Test worktree detection via parent directory name."""
+        # Create a path that looks like it's inside a .worktree directory
+        worktree_parent = tmp_path / ".worktree"
+        worktree_parent.mkdir()
+        worktree_dir = worktree_parent / "my-task"
+        worktree_dir.mkdir()
+
+        manager = ContextRecoveryManager(worktree_dir)
+        assert manager._is_in_worktree() is True
+
+
+class TestBackwardCompatibility:
+    """Tests for backward compatibility with existing projects."""
+
+    def test_existing_project_detected_in_legacy_mode(self, tmp_path: Path):
+        """Test that existing projects with files in root are detected."""
+        # Simulate existing project with files in root
+        prd = {
+            "goal": "Existing project",
+            "stories": [{"id": "story-001", "title": "Test", "status": "complete"}],
+        }
+        with open(tmp_path / "prd.json", "w") as f:
+            json.dump(prd, f)
+
+        # Default mode should be legacy
+        manager = ContextRecoveryManager(tmp_path)
+        state = manager.detect_context()
+
+        assert state.context_type == ContextType.HYBRID_AUTO
+        assert state.task_state == TaskState.COMPLETE
+
+    def test_constructor_without_resolver_is_legacy(self, tmp_path: Path):
+        """Test that creating manager without resolver defaults to legacy mode."""
+        manager = ContextRecoveryManager(tmp_path)
+        assert manager.is_legacy_mode() is True
+
+    def test_legacy_mode_none_defaults_to_true(self, tmp_path: Path):
+        """Test that legacy_mode=None defaults to True."""
+        manager = ContextRecoveryManager(tmp_path, legacy_mode=None)
+        assert manager.is_legacy_mode() is True
 
 
 if __name__ == "__main__":

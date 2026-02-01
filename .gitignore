@@ -69,18 +69,41 @@ htmlcov/
 .agent/
 
 # Plan Cascade planning files (should not be committed)
+# Runtime directories
 .worktree/
+.locks/
+.state/
+
+# Planning documents
+prd.json
 mega-plan.json
-mega-findings.md
+design_doc.json
+
+# Status and state files
 .mega-status.json
 .planning-config.json
-prd.json
-findings.md
-progress.txt
 .agent-status.json
-design_doc.json
+.iteration-state.json
+.retry-state.json
+
+# User-visible tracking files
+findings.md
+mega-findings.md
+progress.txt
+
+# Context recovery files
 .hybrid-execution-context.md
 .mega-execution-context.md
+
+# New mode: Project link file and backup directory
+.plan-cascade-link.json
+.plan-cascade-backup/
+
+# Project-level config file
+.plan-cascade.json
+
+# Agent output directory
+.agent-outputs/
 
 # Desktop app (Tauri + React)
 desktop/node_modules/

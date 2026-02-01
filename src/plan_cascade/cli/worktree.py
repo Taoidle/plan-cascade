@@ -32,6 +32,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     from .output import OutputManager
+    from ..state.path_resolver import PathResolver
 
 
 class WorktreeStatus(str, Enum):
@@ -104,15 +105,49 @@ class WorktreeManager:
     WORKTREE_DIR_NAME = ".worktree"
     CONFIG_FILE_NAME = ".planning-config.json"
 
-    def __init__(self, project_root: Path):
+    def __init__(
+        self,
+        project_root: Path,
+        path_resolver: "PathResolver | None" = None,
+        legacy_mode: bool | None = None,
+    ):
         """
         Initialize the worktree manager.
 
         Args:
             project_root: Root directory of the Git repository
+            path_resolver: Optional PathResolver instance. If not provided,
+                creates a default one based on legacy_mode setting.
+            legacy_mode: If True, use project root for worktree directory (backward compatible).
+                If None, defaults to True when path_resolver is not provided for
+                backward compatibility.
         """
         self.project_root = Path(project_root).resolve()
-        self.worktree_dir = self.project_root / self.WORKTREE_DIR_NAME
+
+        # Set up PathResolver
+        if path_resolver is not None:
+            self._path_resolver = path_resolver
+        else:
+            # Default to legacy mode for backward compatibility
+            if legacy_mode is None:
+                legacy_mode = True
+            from ..state.path_resolver import PathResolver
+            self._path_resolver = PathResolver(
+                project_root=self.project_root,
+                legacy_mode=legacy_mode,
+            )
+
+        # Use PathResolver for worktree directory
+        self.worktree_dir = self._path_resolver.get_worktree_dir()
+
+    @property
+    def path_resolver(self) -> "PathResolver":
+        """Get the PathResolver instance."""
+        return self._path_resolver
+
+    def is_legacy_mode(self) -> bool:
+        """Check if running in legacy mode."""
+        return self._path_resolver.is_legacy_mode()
 
     def _run_git_command(
         self,

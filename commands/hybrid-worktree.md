@@ -6,6 +6,29 @@ description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD
 
 You are starting a task in **Git Worktree + Hybrid Ralph mode**. This will create the worktree and handle the PRD automatically.
 
+## Path Storage Modes
+
+Plan Cascade supports two path storage modes for runtime files:
+
+### New Mode (Default)
+Runtime files are stored in a user directory, keeping the project root clean:
+- **Windows**: `%APPDATA%/plan-cascade/<project-id>/`
+- **Unix/macOS**: `~/.plan-cascade/<project-id>/`
+
+Where `<project-id>` is a unique identifier based on the project name and path hash (e.g., `my-project-a1b2c3d4`).
+
+File locations in new mode:
+- Worktrees: `<user-dir>/.worktree/<task-name>/`
+- PRD: `<worktree>/.prd.json` or `<user-dir>/prd.json` for non-worktree
+- State files: `<user-dir>/.state/`
+
+### Legacy Mode
+All files stored in project root (backward compatible):
+- Worktrees: `<project-root>/.worktree/<task-name>/`
+- PRD: `<worktree>/prd.json`
+
+**Note**: User-visible files like `findings.md`, `progress.txt`, and `mega-findings.md` always remain in the worktree/project root for easy access.
+
 ## Tool Usage Policy (CRITICAL)
 
 **To avoid command confirmation prompts:**
@@ -75,6 +98,17 @@ For PowerShell equivalents:
 - `if [ ]` → `if ()`
 - `echo` → `Write-Host`
 
+## Step 2.5: Ensure .gitignore Configuration
+
+**IMPORTANT**: Before creating any planning files, ensure the project's `.gitignore` is configured to ignore Plan Cascade temporary files:
+
+```bash
+# Check and update .gitignore for Plan Cascade entries
+python3 -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || echo "Note: Could not auto-update .gitignore"
+```
+
+This ensures that planning files (prd.json, .worktree/, etc.) won't be accidentally committed to version control.
+
 ## Step 3: Ensure Auto-Approval Configuration
 
 Ensure command auto-approval settings are configured (merges with existing settings):
@@ -114,7 +148,15 @@ TARGET_BRANCH="${TARGET_BRANCH:-$DEFAULT_BRANCH}"
 TASK_BRANCH="$TASK_NAME"
 ORIGINAL_BRANCH=$(git branch --show-current)
 ROOT_DIR=$(pwd)
-WORKTREE_DIR="$ROOT_DIR/.worktree/$(basename $TASK_NAME)"
+
+# Resolve worktree directory using PathResolver
+# New mode: ~/.plan-cascade/<project-id>/.worktree/<task-name>
+# Legacy mode: <project-root>/.worktree/<task-name>
+WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo "$ROOT_DIR/.worktree")
+WORKTREE_DIR="$WORKTREE_BASE/$(basename $TASK_NAME)"
+
+# Ensure worktree base directory exists
+mkdir -p "$WORKTREE_BASE"
 ```
 
 ## Step 6.5: Check for Design Document

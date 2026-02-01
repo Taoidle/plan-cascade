@@ -11,21 +11,58 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..state.path_resolver import PathResolver
 
 
 class MegaPlanGenerator:
     """Generates mega-plan from project descriptions."""
 
-    def __init__(self, project_root: Path):
+    def __init__(
+        self,
+        project_root: Path,
+        path_resolver: "PathResolver | None" = None,
+        legacy_mode: bool | None = None,
+    ):
         """
         Initialize the mega-plan generator.
 
         Args:
             project_root: Root directory of the project
+            path_resolver: Optional PathResolver instance. If not provided,
+                creates a default one based on legacy_mode setting.
+            legacy_mode: If True, use project root for mega-plan path (backward compatible).
+                If None, defaults to True when path_resolver is not provided.
         """
         self.project_root = Path(project_root)
-        self.mega_plan_path = self.project_root / "mega-plan.json"
+
+        # Set up PathResolver
+        if path_resolver is not None:
+            self._path_resolver = path_resolver
+        else:
+            # Default to legacy mode for backward compatibility
+            if legacy_mode is None:
+                legacy_mode = True
+            from ..state.path_resolver import PathResolver
+            self._path_resolver = PathResolver(
+                project_root=self.project_root,
+                legacy_mode=legacy_mode,
+            )
+
+        # Use PathResolver for mega-plan path
+        self.mega_plan_path = self._path_resolver.get_mega_plan_path()
         self.feature_counter = 0
+
+    @property
+    def path_resolver(self) -> "PathResolver":
+        """Get the PathResolver instance."""
+        return self._path_resolver
+
+    def is_legacy_mode(self) -> bool:
+        """Check if running in legacy mode."""
+        return self._path_resolver.is_legacy_mode()
 
     def generate_mega_plan(
         self,

@@ -6,6 +6,28 @@ description: "Resume an interrupted mega-plan execution. Detects current state f
 
 Resume execution of an interrupted mega-plan by detecting the current state from existing files.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+Files are stored in user data directory:
+- **Windows**: `%APPDATA%/plan-cascade/<project-id>/`
+- **Unix/macOS**: `~/.plan-cascade/<project-id>/`
+
+File locations:
+- `mega-plan.json`: `<user-dir>/mega-plan.json`
+- `.mega-status.json`: `<user-dir>/.state/.mega-status.json`
+- Worktrees: `<user-dir>/.worktree/<feature-name>/`
+
+### Legacy Mode
+All files in project root:
+- `mega-plan.json`: `<project-root>/mega-plan.json`
+- `.mega-status.json`: `<project-root>/.mega-status.json`
+- Worktrees: `<project-root>/.worktree/<feature-name>/`
+
+The command auto-detects which mode is active and scans the appropriate directories.
+
 ## Tool Usage Policy (CRITICAL)
 
 **To avoid command confirmation prompts during automatic execution:**
@@ -36,10 +58,14 @@ Resume execution of an interrupted mega-plan by detecting the current state from
 ## Step 1: Verify Mega Plan Exists
 
 ```bash
-if [ ! -f "mega-plan.json" ]; then
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+
+if [ ! -f "$MEGA_PLAN_PATH" ]; then
     echo "============================================"
     echo "ERROR: No mega-plan.json found"
     echo "============================================"
+    echo "Searched at: $MEGA_PLAN_PATH"
     echo "Nothing to resume."
     echo "Use /plan-cascade:mega-plan <description> to create a new plan."
     exit 1
@@ -78,8 +104,16 @@ Extract:
 For each feature in mega-plan.json:
 
 ```bash
+# Get worktree base directory from PathResolver
+WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
+
 FEATURE_NAME="<feature-name>"
-WORKTREE_PATH=".worktree/$FEATURE_NAME"
+WORKTREE_PATH="$WORKTREE_BASE/$FEATURE_NAME"
+
+# Also check legacy location if worktree not found in new location
+if [ ! -d "$WORKTREE_PATH" ] && [ -d ".worktree/$FEATURE_NAME" ]; then
+    WORKTREE_PATH=".worktree/$FEATURE_NAME"
+fi
 
 # Check worktree existence
 if [ -d "$WORKTREE_PATH" ]; then

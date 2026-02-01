@@ -6,6 +6,28 @@ description: "Start a new task in an isolated Git worktree for parallel multi-ta
 
 You are now starting a task in **Git Worktree Mode**. This creates an isolated environment for your task with its own branch and directory, enabling **parallel multi-task development**.
 
+## Path Storage Modes
+
+Plan Cascade supports two path storage modes for runtime files:
+
+### New Mode (Default)
+Runtime files are stored in a user directory, keeping the project root clean:
+- **Windows**: `%APPDATA%/plan-cascade/<project-id>/.worktree/`
+- **Unix/macOS**: `~/.plan-cascade/<project-id>/.worktree/`
+
+Where `<project-id>` is a unique identifier based on the project name and path hash (e.g., `my-project-a1b2c3d4`).
+
+### Legacy Mode
+Files are stored in the project root for backward compatibility:
+- Worktrees: `<project-root>/.worktree/`
+
+To check which mode is active, use:
+```bash
+python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('Mode:', 'legacy' if r.is_legacy_mode() else 'new'); print('Worktree dir:', r.get_worktree_dir())"
+```
+
+**Note**: User-visible files like `findings.md` and `progress.md` remain in the worktree directory itself, not in the user data directory.
+
 ## What is Git Worktree Mode?
 
 Git worktree allows you to have multiple working trees attached to the same repository, each on a different branch. This means:
@@ -56,29 +78,39 @@ fi
 echo "Default branch detected: $DEFAULT_BRANCH"
 ```
 
-## Step 5: Determine Task Names
+## Step 5: Determine Task Names and Paths
 
-Set these variables:
+Set these variables using PathResolver for proper path resolution:
+
 ```bash
 TASK_NAME="{{args|first arg or 'task-' + date + '-' + time}}"
 TASK_BRANCH="$TASK_NAME"
 TARGET_BRANCH="{{args|second arg or $DEFAULT_BRANCH}}"
-WORKTREE_DIR=".worktree/$(basename $TASK_NAME)"
 ORIGINAL_BRANCH=$(git branch --show-current)
 ROOT_DIR=$(pwd)
+
+# Resolve worktree directory using PathResolver
+# New mode: ~/.plan-cascade/<project-id>/.worktree/<task-name>
+# Legacy mode: <project-root>/.worktree/<task-name>
+WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
+WORKTREE_DIR="$WORKTREE_BASE/$(basename $TASK_NAME)"
 ```
 
 Example with command `/plan-cascade:worktree feature-login main`:
 - `TASK_NAME = "feature-login"`
 - `TASK_BRANCH = "feature-login"`
 - `TARGET_BRANCH = "main"`
-- `WORKTREE_DIR = ".worktree/feature-login"`
+- `WORKTREE_DIR`:
+  - **New mode**: `~/.plan-cascade/my-project-a1b2c3d4/.worktree/feature-login`
+  - **Legacy mode**: `.worktree/feature-login`
 
 Example with no args `/plan-cascade:worktree`:
 - `TASK_NAME = "task-2026-01-23-1430"` (includes time for uniqueness)
 - `TASK_BRANCH = "task-2026-01-23-1430"`
 - `TARGET_BRANCH = "main"` (detected)
-- `WORKTREE_DIR = ".worktree/task-2026-01-23-1430"`
+- `WORKTREE_DIR`:
+  - **New mode**: `~/.plan-cascade/my-project-a1b2c3d4/.worktree/task-2026-01-23-1430`
+  - **Legacy mode**: `.worktree/task-2026-01-23-1430"`
 
 ## Step 6: Check for Existing Worktree
 
@@ -236,7 +268,39 @@ To return to the main project:
 
 ## Directory Structure
 
-After creating a worktree, your project structure looks like:
+After creating a worktree, the directory structure depends on the storage mode:
+
+### New Mode (Default)
+
+Project root stays clean; worktrees are in user data directory:
+
+```
+# User Data Directory
+~/.plan-cascade/my-project-a1b2c3d4/   (or %APPDATA%/plan-cascade/... on Windows)
+├── .worktree/
+│   ├── task-auth-fix/          ← Worktree 1
+│   │   ├── .planning-config.json
+│   │   ├── task_plan.md
+│   │   ├── findings.md         ← User-visible files stay in worktree
+│   │   ├── progress.md
+│   │   └── (complete project copy)
+│   └── task-api-refactor/       ← Worktree 2 (can exist simultaneously)
+│       └── ...
+├── .state/                       ← State files
+├── .locks/                       ← Lock files
+└── manifest.json                 ← Project root reference
+
+# Project Root (unchanged)
+project/
+├── .git/
+├── src/
+├── main.go
+└── ...                          ← Main directory stays clean
+```
+
+### Legacy Mode
+
+Traditional structure with worktrees in project root:
 
 ```
 project/
@@ -249,11 +313,7 @@ project/
 │   │   ├── progress.md
 │   │   └── (complete project copy)
 │   └── task-api-refactor/       ← Worktree 2 (can exist simultaneously)
-│       ├── .planning-config.json
-│       ├── task_plan.md
-│       ├── findings.md
-│       ├── progress.md
-│       └── (complete project copy)
+│       └── ...
 ├── src/
 ├── main.go
 └── ...                          ← Main directory (unchanged)

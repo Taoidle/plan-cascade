@@ -2,7 +2,7 @@
 
 # Plan Cascade - CLI Guide
 
-**Version**: 4.2.0
+**Version**: 4.2.4
 **Last Updated**: 2026-02-01
 
 This document provides detailed instructions for using the Plan Cascade standalone CLI tool.
@@ -381,6 +381,35 @@ plan-cascade deps --check
 
 # Output as JSON
 plan-cascade deps --format json
+```
+
+### migrate - Path Migration (NEW)
+
+Migrate planning files between legacy mode (project root) and new mode (user directory).
+
+```bash
+plan-cascade migrate <subcommand> [options]
+
+Subcommands:
+  detect                Scan for legacy files in project
+  run [--dry-run]       Migrate to new path mode
+  rollback              Revert to legacy mode
+```
+
+Examples:
+
+```bash
+# Detect legacy files
+plan-cascade migrate detect
+
+# Preview migration without making changes
+plan-cascade migrate run --dry-run
+
+# Perform actual migration
+plan-cascade migrate run
+
+# Rollback if needed
+plan-cascade migrate rollback
 ```
 
 ### resume - Context Recovery (NEW)

@@ -6,11 +6,26 @@ description: "Edit the current PRD in your default editor. Opens prd.json, valid
 
 You are opening the PRD file for manual editing.
 
+## Path Storage Modes
+
+PRD file location depends on the storage mode:
+- **New Mode**: `~/.plan-cascade/<project-id>/prd.json` or in worktree directory
+- **Legacy Mode**: `prd.json` in project root or worktree
+
+The command uses PathResolver to find the correct file location.
+
 ## Step 1: Verify PRD Exists
 
 ```bash
-if [ ! -f "prd.json" ]; then
-    echo "ERROR: No PRD found. Please generate one first with:"
+# Get PRD path from PathResolver
+PRD_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())" 2>/dev/null || echo "prd.json")
+
+# Also check local prd.json (in worktree)
+if [ -f "prd.json" ]; then
+    PRD_PATH="prd.json"
+elif [ ! -f "$PRD_PATH" ]; then
+    echo "ERROR: No PRD found at: $PRD_PATH"
+    echo "Please generate one first with:"
     echo "  /plan-cascade:hybrid-auto <description>"
     echo "  /plan-cascade:hybrid-manual <path>"
     exit 1
@@ -19,25 +34,25 @@ fi
 
 ## Step 2: Open in Editor
 
-Open `prd.json` with the system's default editor:
+Open the PRD file with the system's default editor:
 
 ```bash
 # Detect platform and open editor
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OS" == "Windows_NT" ]]; then
     # Windows
-    start prd.json
+    start "$PRD_PATH"
 elif [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS
-    open prd.json
+    open "$PRD_PATH"
 else
     # Linux - use $EDITOR or fallback
-    ${EDITOR:-nano} prd.json
+    ${EDITOR:-nano} "$PRD_PATH"
 fi
 ```
 
 Tell the user:
 ```
-Opening prd.json in your default editor...
+Opening PRD at: {PRD_PATH} in your default editor...
 
 Make your changes, then save and close the editor to continue.
 ```
@@ -52,8 +67,8 @@ After the editor closes, validate the modified PRD:
 
 ```bash
 # Check JSON syntax
-if ! python3 -m json.tool prd.json > /dev/null 2>&1; then
-    echo "ERROR: Invalid JSON in prd.json"
+if ! python3 -m json.tool "$PRD_PATH" > /dev/null 2>&1; then
+    echo "ERROR: Invalid JSON in PRD at: $PRD_PATH"
     echo "Please fix the syntax errors and run /plan-cascade:edit again"
     exit 1
 fi

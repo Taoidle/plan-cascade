@@ -2650,6 +2650,19 @@ if HAS_TYPER:
     except ImportError:
         pass  # dependencies module not available
 
+    # Import and register migrate command
+    try:
+        from .migrate import migrate_app
+
+        if migrate_app:
+            app.add_typer(
+                migrate_app,
+                name="migrate",
+                help="Migrate planning files from project root to user directory",
+            )
+    except ImportError:
+        pass  # migrate module not available
+
 else:
     # Fallback when typer is not installed
     app = None

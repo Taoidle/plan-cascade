@@ -10,10 +10,13 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ..state.context_filter import ContextFilter
 from ..state.state_manager import StateManager
+
+if TYPE_CHECKING:
+    from ..state.path_resolver import PathResolver
 
 
 class StoryAgent:
@@ -70,6 +73,8 @@ class Orchestrator:
         agents: list[StoryAgent] | None = None,
         state_manager: StateManager | None = None,
         context_filter: ContextFilter | None = None,
+        path_resolver: "PathResolver | None" = None,
+        legacy_mode: bool | None = None,
     ):
         """
         Initialize the orchestrator.
@@ -79,11 +84,41 @@ class Orchestrator:
             agents: List of available agents
             state_manager: StateManager instance (created if not provided)
             context_filter: ContextFilter instance (created if not provided)
+            path_resolver: Optional PathResolver instance. If not provided,
+                creates a default one based on legacy_mode setting.
+            legacy_mode: If True, use project root for all paths (backward compatible).
+                If None, defaults to True when path_resolver is not provided.
         """
         self.project_root = Path(project_root)
         self.agents = agents or self.DEFAULT_AGENTS
-        self.state_manager = state_manager or StateManager(self.project_root)
-        self.context_filter = context_filter or ContextFilter(self.project_root)
+
+        # Set up PathResolver
+        if path_resolver is not None:
+            self._path_resolver = path_resolver
+        else:
+            # Default to legacy mode for backward compatibility
+            if legacy_mode is None:
+                legacy_mode = True
+            from ..state.path_resolver import PathResolver
+            self._path_resolver = PathResolver(
+                project_root=self.project_root,
+                legacy_mode=legacy_mode,
+            )
+
+        # Create or use provided StateManager/ContextFilter with PathResolver
+        self.state_manager = state_manager or StateManager(
+            self.project_root,
+            path_resolver=self._path_resolver,
+        )
+        self.context_filter = context_filter or ContextFilter(
+            self.project_root,
+            path_resolver=self._path_resolver,
+        )
+
+    @property
+    def path_resolver(self) -> "PathResolver":
+        """Get the PathResolver instance."""
+        return self._path_resolver
 
         # Sort agents by priority (highest first)
         self.agents.sort(key=lambda a: a.priority, reverse=True)

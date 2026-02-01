@@ -9,7 +9,7 @@
 *Decompose complex projects into parallel executable tasks with multi-agent collaboration*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.2.3-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.2.4-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -224,13 +224,13 @@ plan-cascade/
 | DeepSeek | Yes | DeepSeek Chat/Coder |
 | Ollama | No | Local models |
 
-## What's New in v4.2.3
+## What's New in v4.2.4
 
-- **Three-Tier Skill System** — Builtin (1-50) < External (51-100) < User (101-200) priority chain
-- **Builtin Skills** — Python, Go, Java, TypeScript best practices bundled with Plan Cascade
-- **User Skill Configuration** — Custom skills via `.plan-cascade/skills.json`
-- **Remote Skill Caching** — 7-day cache with graceful degradation for URL-based skills
-- **New CLI Commands** — `skills add`, `skills remove`, `skills refresh`, `skills cache`
+- **Runtime Files Migration** — Planning files now stored in user directory (`~/.plan-cascade/` on Unix, `%APPDATA%/plan-cascade/` on Windows)
+- **New State Modules** — PathResolver, ConfigManager, ProjectLinkManager for unified path management
+- **Migration Tool** — `plan-cascade migrate` command to migrate existing projects
+- **Auto Gitignore** — Automatic `.gitignore` configuration when using Plan Cascade
+- **465 Tests** — Comprehensive test coverage including 21 new gitignore tests
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

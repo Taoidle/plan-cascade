@@ -6,6 +6,22 @@ description: "Approve the current PRD and begin parallel story execution. Analyz
 
 You are approving the PRD and starting parallel execution of user stories.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+- PRD file: In worktree directory or `~/.plan-cascade/<project-id>/prd.json`
+- State files: `~/.plan-cascade/<project-id>/.state/`
+- Agent outputs: In worktree or project root `.agent-outputs/`
+
+### Legacy Mode
+- PRD file: In worktree or project root `prd.json`
+- State files: In project root
+- Agent outputs: In project root `.agent-outputs/`
+
+User-visible files (`progress.txt`, `findings.md`) always remain in the working directory.
+
 ## Multi-Agent Collaboration
 
 This command supports multiple AI agents for story execution. The system automatically selects the best agent based on:

@@ -6,6 +6,21 @@ description: "Resume an interrupted hybrid task (worktree or regular). Auto-dete
 
 Resume execution of an interrupted hybrid task by detecting current state from existing files.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+- Worktrees in: `~/.plan-cascade/<project-id>/.worktree/` (Unix) or `%APPDATA%/plan-cascade/<project-id>/.worktree/` (Windows)
+- State files in: `~/.plan-cascade/<project-id>/.state/`
+- PRD files in worktree directory
+
+### Legacy Mode
+- Worktrees in: `<project-root>/.worktree/`
+- State/PRD files in project root or worktree
+
+The command auto-detects which mode is active and scans the appropriate directories.
+
 ## Tool Usage Policy (CRITICAL)
 
 **To avoid command confirmation prompts during automatic execution:**
@@ -71,9 +86,17 @@ If Read succeeds:
 
 If CONTEXT is still not set:
 
-**Use Glob tool (NOT Bash `ls`) to find worktrees:**
+**Use Glob tool (NOT Bash `ls`) to find worktrees in both new and legacy locations:**
 
 ```
+# Get worktree base directory from PathResolver
+WORKTREE_BASE = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())"
+
+# Scan for worktrees (path depends on mode)
+Glob("{WORKTREE_BASE}/*/.planning-config.json")
+Glob("{WORKTREE_BASE}/*/prd.json")
+
+# Also check legacy location if different
 Glob(".worktree/*/.planning-config.json")
 Glob(".worktree/*/prd.json")
 ```

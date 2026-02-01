@@ -2,7 +2,7 @@
 
 # Plan Cascade - CLI Guide
 
-**版本**: 4.2.0
+**版本**: 4.2.4
 **最后更新**: 2026-02-01
 
 本文档详细介绍 Plan Cascade 独立 CLI 工具的使用方法。
@@ -381,6 +381,35 @@ plan-cascade deps --check
 
 # JSON 输出
 plan-cascade deps --format json
+```
+
+### migrate - 路径迁移（新功能）
+
+在旧模式（项目根目录）和新模式（用户目录）之间迁移规划文件。
+
+```bash
+plan-cascade migrate <subcommand> [options]
+
+子命令:
+  detect                扫描项目中的旧版文件
+  run [--dry-run]       迁移到新路径模式
+  rollback              回退到旧模式
+```
+
+示例：
+
+```bash
+# 检测旧版文件
+plan-cascade migrate detect
+
+# 预览迁移但不实际执行
+plan-cascade migrate run --dry-run
+
+# 执行实际迁移
+plan-cascade migrate run
+
+# 需要时回退
+plan-cascade migrate rollback
 ```
 
 ### resume - 上下文恢复（新功能）

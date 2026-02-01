@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from .quality_gate import QualityGate
     from .retry_manager import RetryManager
     from ..state.state_manager import StateManager
+    from ..state.path_resolver import PathResolver
 
 
 class StoryStatus(Enum):
@@ -226,6 +227,8 @@ class ParallelExecutor:
         state_manager: Optional["StateManager"] = None,
         quality_gate: Optional["QualityGate"] = None,
         retry_manager: Optional["RetryManager"] = None,
+        path_resolver: Optional["PathResolver"] = None,
+        legacy_mode: bool | None = None,
     ):
         """
         Initialize the parallel executor.
@@ -237,17 +240,48 @@ class ParallelExecutor:
             state_manager: StateManager for persisting progress
             quality_gate: QualityGate for verification
             retry_manager: RetryManager for handling failures
+            path_resolver: Optional PathResolver instance. If not provided,
+                creates a default one based on legacy_mode setting.
+            legacy_mode: If True, use project root for all paths (backward compatible).
+                If None, defaults to True when path_resolver is not provided.
         """
         self.project_root = Path(project_root)
         self.config = config or ParallelExecutionConfig()
         self.orchestrator = orchestrator
-        self.state_manager = state_manager
         self.quality_gate = quality_gate
         self.retry_manager = retry_manager
+
+        # Set up PathResolver
+        if path_resolver is not None:
+            self._path_resolver = path_resolver
+        else:
+            # Default to legacy mode for backward compatibility
+            if legacy_mode is None:
+                legacy_mode = True
+            from ..state.path_resolver import PathResolver
+            self._path_resolver = PathResolver(
+                project_root=self.project_root,
+                legacy_mode=legacy_mode,
+            )
+
+        # Create or use provided StateManager with PathResolver
+        if state_manager is not None:
+            self.state_manager = state_manager
+        else:
+            from ..state.state_manager import StateManager
+            self.state_manager = StateManager(
+                self.project_root,
+                path_resolver=self._path_resolver,
+            )
 
         self._current_progress: BatchProgress | None = None
         self._lock = asyncio.Lock()
         self._story_outputs: dict[str, list[str]] = {}
+
+    @property
+    def path_resolver(self) -> "PathResolver":
+        """Get the PathResolver instance."""
+        return self._path_resolver
 
     async def execute_batch(
         self,
@@ -745,6 +779,8 @@ async def run_parallel_batch(
     quality_gate: Optional["QualityGate"] = None,
     retry_manager: Optional["RetryManager"] = None,
     show_progress: bool = True,
+    path_resolver: Optional["PathResolver"] = None,
+    legacy_mode: bool | None = None,
 ) -> BatchResult:
     """
     Convenience function to run a batch in parallel with progress display.
@@ -759,6 +795,8 @@ async def run_parallel_batch(
         quality_gate: QualityGate instance
         retry_manager: RetryManager instance
         show_progress: Whether to show live progress display
+        path_resolver: Optional PathResolver instance
+        legacy_mode: If True, use legacy paths
 
     Returns:
         BatchResult with execution summary
@@ -770,6 +808,8 @@ async def run_parallel_batch(
         state_manager=state_manager,
         quality_gate=quality_gate,
         retry_manager=retry_manager,
+        path_resolver=path_resolver,
+        legacy_mode=legacy_mode,
     )
 
     if show_progress:

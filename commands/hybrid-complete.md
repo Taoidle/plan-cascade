@@ -6,6 +6,22 @@ description: "Complete Hybrid Ralph task in worktree, verify all stories complet
 
 You are completing a Hybrid Ralph task in a worktree and merging it to the target branch.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+- Worktrees located in: `~/.plan-cascade/<project-id>/.worktree/` (Unix) or `%APPDATA%/plan-cascade/<project-id>/.worktree/` (Windows)
+- State files in: `~/.plan-cascade/<project-id>/.state/`
+- Cleanup removes files from user data directory
+
+### Legacy Mode
+- Worktrees located in: `<project-root>/.worktree/`
+- State files in project root
+- Cleanup removes files from project root
+
+The command auto-detects which mode is active based on `.planning-config.json` contents.
+
 ## Step 1: Detect Current Location
 
 Check if we're in a worktree or the root directory:
@@ -36,9 +52,12 @@ else
     git worktree list
     echo ""
 
-    # Find all hybrid worktrees
+    # Find all hybrid worktrees (check both new mode user directory and legacy project root)
     echo "Scanning for hybrid worktrees..."
     HYBRID_WORKTREES=()
+
+    # Get worktree base directory from PathResolver (handles new vs legacy mode)
+    WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
 
     while IFS= read -r line; do
         worktree_path=$(echo "$line" | awk '{print $1}')
@@ -259,13 +278,24 @@ fi
 
 ## Step 6: Delete Planning Files
 
-Now that code changes are handled, delete planning files:
+Now that code changes are handled, delete planning files from both worktree and user data directory:
 
 ```bash
 echo "Deleting planning files..."
+
+# Delete files from current worktree directory
 rm -f prd.json findings.md progress.txt .planning-config.json mega-findings.md .agent-status.json
 rm -rf .agent-outputs
-echo "✓ Planning files deleted"
+echo "✓ Planning files deleted from worktree"
+
+# Also clean up state files from user data directory (new mode)
+USER_STATE_DIR=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_state_dir())" 2>/dev/null || echo "")
+if [ -n "$USER_STATE_DIR" ] && [ -d "$USER_STATE_DIR" ]; then
+    echo "Cleaning up state files from user data directory..."
+    rm -f "$USER_STATE_DIR/.iteration-state.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/.agent-status.json" 2>/dev/null || true
+    echo "✓ State files cleaned"
+fi
 ```
 
 ## Step 7: Show Completion Summary

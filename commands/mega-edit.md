@@ -6,11 +6,22 @@ description: "Edit the mega-plan interactively. Add, remove, or modify features.
 
 Edit the mega-plan.json file interactively to add, remove, or modify features.
 
+## Path Storage Modes
+
+Mega-plan file location depends on the storage mode:
+- **New Mode**: `~/.plan-cascade/<project-id>/mega-plan.json`
+- **Legacy Mode**: `mega-plan.json` in project root
+
+The command uses PathResolver to find the correct file location.
+
 ## Step 1: Verify Mega Plan Exists
 
 ```bash
-if [ ! -f "mega-plan.json" ]; then
-    echo "No mega-plan.json found."
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+
+if [ ! -f "$MEGA_PLAN_PATH" ]; then
+    echo "No mega-plan.json found at: $MEGA_PLAN_PATH"
     echo "Use /plan-cascade:mega-plan <description> to create one first."
     exit 1
 fi
@@ -18,10 +29,10 @@ fi
 
 ## Step 2: Read Current Plan
 
-Read and parse `mega-plan.json`:
+Read and parse mega-plan.json:
 
 ```bash
-cat mega-plan.json
+cat "$MEGA_PLAN_PATH"
 ```
 
 ## Step 3: Display Current Structure
@@ -111,7 +122,7 @@ After any edit, validate the mega-plan:
 
 ## Step 7: Save and Display
 
-Save the updated `mega-plan.json` and show:
+Save the updated mega-plan.json to `$MEGA_PLAN_PATH` and show:
 
 ```
 ============================================================

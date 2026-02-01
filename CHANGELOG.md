@@ -2,6 +2,172 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.2.4] - 2026-02-01
+
+### Added
+
+- **Runtime Files Migration to User Directory** - Planning files now stored in centralized user directory
+  - **Windows**: `%APPDATA%/plan-cascade/<project-id>/`
+  - **Unix/macOS**: `~/.plan-cascade/<project-id>/`
+  - Project ID format: `<sanitized-name>-<SHA256-8chars>` for uniqueness
+  - Keeps project root clean and avoids polluting codebase with planning files
+
+- **PathResolver Module** - Unified path resolution for all Plan Cascade files
+  - `get_data_dir()` - User data directory
+  - `get_project_id()` - Unique project identifier
+  - `get_project_dir()` - Project-specific data directory
+  - `get_prd_path()`, `get_mega_plan_path()` - Planning file paths
+  - `get_worktree_dir()`, `get_locks_dir()`, `get_state_dir()` - Runtime directories
+  - 45 comprehensive tests
+
+- **ConfigManager Module** - Hierarchical configuration system
+  - Priority: Environment variables > Project config > Global config > Defaults
+  - `PLAN_CASCADE_DATA_DIR` - Custom data directory
+  - `PLAN_CASCADE_LEGACY_MODE` - Enable legacy mode (files in project root)
+  - 46 comprehensive tests
+
+- **ProjectLinkManager Module** - Project discovery via `.plan-cascade-link.json`
+  - Lightweight link file in project root for project discovery
+  - Contains project ID and data directory path
+  - Enables finding all Plan Cascade projects
+  - 38 comprehensive tests
+
+- **MigrationManager Module** - `plan-cascade migrate` command
+  - `migrate detect` - Scan for legacy files
+  - `migrate run` - Migrate to new mode with `--dry-run` support
+  - `migrate rollback` - Revert to legacy mode
+  - Automatic backup creation during migration
+  - 39 comprehensive tests
+
+- **GitignoreManager Module** - Automatic `.gitignore` configuration
+  - Auto-checks and updates `.gitignore` when Plan Cascade commands start
+  - Prevents planning files from being committed to version control
+  - New command: `/plan-cascade:check-gitignore`
+  - Idempotent: Safe to run multiple times
+  - 21 comprehensive tests
+
+- **New CLI Commands:**
+  - `migrate detect` - Detect legacy files in project
+  - `migrate run [--dry-run]` - Migrate project to new path mode
+  - `migrate rollback` - Revert to legacy mode
+
+### Changed
+
+- **StateManager Updated** - Now uses PathResolver for all path operations
+  - Supports both new mode (user directory) and legacy mode (project root)
+  - Backward compatible with existing projects
+
+- **MegaStateManager Updated** - Uses PathResolver for mega-plan state files
+  - `.mega-status.json` now in state directory
+  - `mega-plan.json` in project data directory
+
+- **ContextRecoveryManager Updated** - Uses PathResolver for context files
+  - `.hybrid-execution-context.md` and `.mega-execution-context.md` paths resolved dynamically
+
+- **All 21 Command Files Updated** - Path Storage Modes documentation added
+  - `hybrid-auto.md`, `mega-plan.md`, `auto.md` - Auto gitignore check at start
+  - All commands document new mode vs legacy mode file locations
+
+- **User-Visible Files** - Always remain in project root for visibility
+  - `findings.md`, `progress.txt`, `mega-findings.md`
+  - These files are useful for users and should not be hidden
+
+### Technical Details
+
+**Path Resolution:**
+```python
+from plan_cascade.state.path_resolver import PathResolver
+from pathlib import Path
+
+resolver = PathResolver(Path.cwd())
+print(resolver.get_prd_path())        # ~/.plan-cascade/<project-id>/prd.json
+print(resolver.get_worktree_dir())    # ~/.plan-cascade/<project-id>/.worktree/
+print(resolver.is_legacy_mode())      # False (default)
+```
+
+**Configuration:**
+```bash
+# Use custom data directory
+export PLAN_CASCADE_DATA_DIR=/custom/path
+
+# Enable legacy mode (files in project root)
+export PLAN_CASCADE_LEGACY_MODE=true
+
+# Or in .plan-cascade/config.json
+{
+  "data_dir": "/custom/path",
+  "legacy_mode": false
+}
+```
+
+**Migration:**
+```bash
+# Detect legacy files
+plan-cascade migrate detect
+
+# Migrate with dry-run preview
+plan-cascade migrate run --dry-run
+
+# Perform actual migration
+plan-cascade migrate run
+
+# Rollback if needed
+plan-cascade migrate rollback
+```
+
+**Gitignore Entries:**
+```
+# Plan Cascade - Runtime directories
+.worktree/
+.locks/
+.state/
+
+# Plan Cascade - Planning documents
+prd.json
+mega-plan.json
+design_doc.json
+
+# Plan Cascade - Status files
+.mega-status.json
+.planning-config.json
+.agent-status.json
+.iteration-state.json
+.retry-state.json
+
+# Plan Cascade - Context recovery
+.hybrid-execution-context.md
+.mega-execution-context.md
+
+# Plan Cascade - New mode files
+.plan-cascade-link.json
+.plan-cascade-backup/
+.plan-cascade.json
+
+# Plan Cascade - Agent outputs
+.agent-outputs/
+```
+
+**New Files:**
+| File | Description |
+|------|-------------|
+| `src/plan_cascade/state/path_resolver.py` | Unified path resolution |
+| `src/plan_cascade/state/config_manager.py` | Hierarchical configuration |
+| `src/plan_cascade/state/project_link.py` | Project link management |
+| `src/plan_cascade/cli/migrate.py` | Migration tool |
+| `src/plan_cascade/utils/gitignore.py` | Gitignore management |
+| `commands/check-gitignore.md` | New command for manual gitignore check |
+| `tests/test_path_resolver.py` | 45 tests |
+| `tests/test_config_manager.py` | 46 tests |
+| `tests/test_project_link.py` | 38 tests |
+| `tests/test_migrate.py` | 39 tests |
+| `tests/test_gitignore.py` | 21 tests |
+
+**Test Summary:**
+- Total tests: 465 (was 276 in v4.2.3)
+- New tests: 189 (path_resolver: 45, config: 46, link: 38, migrate: 39, gitignore: 21)
+
+---
+
 ## [4.2.3] - 2026-02-01
 
 ### Added

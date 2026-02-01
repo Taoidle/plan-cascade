@@ -3,12 +3,13 @@ Plan Cascade CLI Module
 
 Contains the command-line interface:
 - main: CLI entry point with typer
-- Commands: run, config, status, worktree, mega, design
+- Commands: run, config, status, worktree, mega, design, migrate
 - Simple mode: One-click execution
 - Expert mode: Interactive PRD editing
 - Worktree: Parallel task development with Git worktrees
 - Mega: Multi-feature project orchestration
 - Design: Design document management
+- Migrate: Migration of planning files to user directory
 """
 
 from .main import app, main
@@ -31,6 +32,13 @@ try:
 except ImportError:
     design_app = None
 
+try:
+    from .migrate import MigrationManager, MigrationResult, migrate_app
+except ImportError:
+    MigrationManager = None
+    MigrationResult = None
+    migrate_app = None
+
 __all__ = [
     "app",
     "main",
@@ -40,4 +48,7 @@ __all__ = [
     "worktree_app",
     "mega_app",
     "design_app",
+    "migrate_app",
+    "MigrationManager",
+    "MigrationResult",
 ]

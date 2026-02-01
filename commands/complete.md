@@ -13,6 +13,21 @@ You are now completing a worktree task. This will:
 6. Remove the worktree
 7. Delete the task branch
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+- Worktrees in: `~/.plan-cascade/<project-id>/.worktree/`
+- State files in: `~/.plan-cascade/<project-id>/.state/`
+- Cleanup removes files from user data directory
+
+### Legacy Mode
+- Worktrees in: `<project-root>/.worktree/`
+- State files in project root
+
+The command auto-detects which mode is active based on `.planning-config.json` contents.
+
 ## Step 1: Detect Current Location
 
 Check if we're in a worktree or the root directory:
@@ -43,9 +58,12 @@ else
     git worktree list
     echo ""
 
-    # Find all worktrees with .planning-config.json
+    # Find all worktrees with .planning-config.json (check both new and legacy locations)
     echo "Scanning for planning worktrees..."
     WORKTREE_LIST=()
+
+    # Get worktree base directory from PathResolver
+    WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
 
     while IFS= read -r line; do
         worktree_path=$(echo "$line" | awk '{print $1}')

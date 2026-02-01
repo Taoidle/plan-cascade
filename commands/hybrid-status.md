@@ -6,6 +6,21 @@ description: "Show execution status of all stories in the PRD. Displays batch pr
 
 You are displaying the current execution status of all stories in the PRD.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+- PRD file: In worktree or `~/.plan-cascade/<project-id>/prd.json`
+- Progress file: Always in working directory `progress.txt`
+- Agent outputs: `.agent-outputs/` in working directory
+
+### Legacy Mode
+- PRD file: In worktree or project root `prd.json`
+- Progress file: `progress.txt` in working directory
+
+User-visible files always remain in the working directory for easy access.
+
 ## Tool Usage Policy (CRITICAL)
 
 **To avoid command confirmation prompts:**

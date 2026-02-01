@@ -6,6 +6,28 @@ description: "Approve the mega-plan and start feature execution. Creates worktre
 
 Approve the mega-plan and begin executing features in **batch-by-batch** order with **FULL AUTOMATION**.
 
+## Path Storage Modes
+
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+Files are stored in user data directory:
+- **Windows**: `%APPDATA%/plan-cascade/<project-id>/`
+- **Unix/macOS**: `~/.plan-cascade/<project-id>/`
+
+File locations:
+- `mega-plan.json`: `<user-dir>/mega-plan.json`
+- `.mega-status.json`: `<user-dir>/.state/.mega-status.json`
+- Worktrees: `<user-dir>/.worktree/<feature-name>/`
+
+### Legacy Mode
+All files in project root:
+- `mega-plan.json`: `<project-root>/mega-plan.json`
+- `.mega-status.json`: `<project-root>/.mega-status.json`
+- Worktrees: `<project-root>/.worktree/<feature-name>/`
+
+The command uses PathResolver to determine correct paths automatically.
+
 ## Multi-Agent Collaboration
 
 Mega-plan execution supports multiple AI agents at two levels:
@@ -69,8 +91,11 @@ Mega-plan execution supports multiple AI agents at two levels:
 ## Step 1: Verify Mega Plan Exists
 
 ```bash
-if [ ! -f "mega-plan.json" ]; then
-    echo "No mega-plan.json found."
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+
+if [ ! -f "$MEGA_PLAN_PATH" ]; then
+    echo "No mega-plan.json found at: $MEGA_PLAN_PATH"
     echo "Use /plan-cascade:mega-plan <description> to create one first."
     exit 1
 fi
@@ -245,9 +270,15 @@ git pull origin "$TARGET_BRANCH" 2>/dev/null || true
 ### 5.2: Create Worktree
 
 ```bash
+# Get worktree base directory from PathResolver
+WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
+
+# Ensure worktree base directory exists
+mkdir -p "$WORKTREE_BASE"
+
 FEATURE_NAME="<feature-name>"
 BRANCH_NAME="mega-$FEATURE_NAME"
-WORKTREE_PATH=".worktree/$FEATURE_NAME"
+WORKTREE_PATH="$WORKTREE_BASE/$FEATURE_NAME"
 
 # Create worktree from current HEAD (includes all previously merged batches)
 git worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH"

@@ -4,32 +4,101 @@ Mega State Manager for Plan Cascade
 
 Provides thread-safe file operations for mega-plan state files.
 Handles mega-plan.json, .mega-status.json, and mega-findings.md with concurrent access safety.
+
+Now integrated with PathResolver for unified path resolution.
 """
+
+from __future__ import annotations
 
 import json
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .state_manager import FileLock
 
+if TYPE_CHECKING:
+    from plan_cascade.state.path_resolver import PathResolver
+
 
 class MegaStateManager:
-    """Manages mega-plan state files with locking."""
+    """Manages mega-plan state files with locking.
 
-    def __init__(self, project_root: Path):
+    Can operate in two modes:
+    - New mode (with PathResolver): Files stored in ~/.plan-cascade/<project-id>/
+    - Legacy mode: Files stored in project root (backward compatible)
+    """
+
+    def __init__(
+        self,
+        project_root: Path,
+        path_resolver: PathResolver | None = None,
+        legacy_mode: bool | None = None,
+    ):
         """
         Initialize the mega state manager.
 
         Args:
             project_root: Root directory of the project
+            path_resolver: Optional PathResolver instance. If not provided,
+                creates a default one based on legacy_mode setting.
+            legacy_mode: If True, use project root for all paths (backward compatible).
+                If None, defaults to True when path_resolver is not provided for
+                backward compatibility. If False, uses new ~/.plan-cascade/<project-id>/
+                structure.
         """
         self.project_root = Path(project_root)
-        self.locks_dir = self.project_root / ".locks"
-        self.mega_plan_path = self.project_root / "mega-plan.json"
-        self.mega_status_path = self.project_root / ".mega-status.json"
-        self.mega_findings_path = self.project_root / "mega-findings.md"
-        self.worktree_dir = self.project_root / ".worktree"
+
+        # Determine legacy mode and set up PathResolver
+        if path_resolver is not None:
+            # Use provided resolver's mode
+            self._path_resolver = path_resolver
+        else:
+            # Create default resolver
+            # Default to legacy mode for backward compatibility when no resolver provided
+            if legacy_mode is None:
+                legacy_mode = True
+            from plan_cascade.state.path_resolver import PathResolver
+            self._path_resolver = PathResolver(
+                project_root=self.project_root,
+                legacy_mode=legacy_mode,
+            )
+
+        # Initialize paths using PathResolver
+        self._init_paths()
+
+    def _init_paths(self) -> None:
+        """Initialize all file paths using PathResolver."""
+        resolver = self._path_resolver
+
+        # Lock directory
+        self.locks_dir = resolver.get_locks_dir()
+
+        # Mega plan file
+        self.mega_plan_path = resolver.get_mega_plan_path()
+
+        # Mega status file
+        self.mega_status_path = resolver.get_mega_status_path()
+
+        # Mega findings - stays in project root as user-visible file
+        self.mega_findings_path = resolver.get_mega_findings_path()
+
+        # Worktree directory
+        self.worktree_dir = resolver.get_worktree_dir()
+
+    @property
+    def path_resolver(self) -> PathResolver:
+        """Get the PathResolver instance."""
+        return self._path_resolver
+
+    def is_legacy_mode(self) -> bool:
+        """Check if running in legacy mode."""
+        return self._path_resolver.is_legacy_mode()
+
+    def ensure_directories(self) -> None:
+        """Ensure all necessary directories exist."""
+        self._path_resolver.ensure_directories()
 
     def _get_lock_path(self, file_path: Path) -> Path:
         """Get the lock file path for a given file."""
@@ -67,6 +136,8 @@ class MegaStateManager:
 
         with FileLock(lock_path):
             try:
+                # Ensure parent directory exists
+                self.mega_plan_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(self.mega_plan_path, "w", encoding="utf-8") as f:
                     json.dump(plan, f, indent=2)
             except OSError as e:
@@ -124,6 +195,8 @@ class MegaStateManager:
 
         with FileLock(lock_path):
             try:
+                # Ensure parent directory exists
+                self.mega_status_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(self.mega_status_path, "w", encoding="utf-8") as f:
                     json.dump(status, f, indent=2)
             except OSError as e:
@@ -377,7 +450,9 @@ Feature-specific findings should be in their respective worktrees.
 def main():
     """CLI interface for testing mega state manager."""
     if len(sys.argv) < 2:
-        print("Usage: mega_state.py <command> [args]")
+        print("Usage: mega_state.py [--legacy] <command> [args]")
+        print("Options:")
+        print("  --legacy                    - Use legacy mode (files in project root)")
         print("Commands:")
         print("  read-plan                   - Read mega-plan")
         print("  read-status                 - Read mega-status")
@@ -385,12 +460,17 @@ def main():
         print("  sync-worktrees              - Sync status from worktrees")
         print("  update-feature <id> <status> - Update feature status")
         print("  cleanup-locks               - Remove stale locks")
+        print("  show-paths                  - Show all file paths")
         sys.exit(1)
 
-    command = sys.argv[1]
+    # Check for --legacy flag
+    legacy_mode = "--legacy" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--legacy"]
+    command = args[0] if args else ""
+
     project_root = Path.cwd()
 
-    sm = MegaStateManager(project_root)
+    sm = MegaStateManager(project_root, legacy_mode=legacy_mode)
 
     if command == "read-plan":
         plan = sm.read_mega_plan()
@@ -408,15 +488,24 @@ def main():
         results = sm.sync_status_from_worktrees()
         print(json.dumps(results, indent=2))
 
-    elif command == "update-feature" and len(sys.argv) >= 4:
-        feature_id = sys.argv[2]
-        status = sys.argv[3]
+    elif command == "update-feature" and len(args) >= 3:
+        feature_id = args[1]
+        status = args[2]
         sm.update_feature_status(feature_id, status)
         print(f"Updated {feature_id} to {status}")
 
     elif command == "cleanup-locks":
         sm.cleanup_locks()
         print("Locks cleaned up")
+
+    elif command == "show-paths":
+        print(f"Mode: {'legacy' if sm.is_legacy_mode() else 'new'}")
+        print(f"Project root: {sm.project_root}")
+        print(f"Mega plan path: {sm.mega_plan_path}")
+        print(f"Mega status path: {sm.mega_status_path}")
+        print(f"Mega findings path: {sm.mega_findings_path}")
+        print(f"Worktree directory: {sm.worktree_dir}")
+        print(f"Locks directory: {sm.locks_dir}")
 
     else:
         print(f"Unknown command: {command}")

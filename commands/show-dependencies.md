@@ -6,18 +6,30 @@ description: "Display the dependency graph for all stories in the PRD. Shows vis
 
 You are displaying the dependency graph and analysis for all stories in the PRD.
 
+## Path Storage Modes
+
+PRD file location depends on the storage mode:
+- **New Mode**: `~/.plan-cascade/<project-id>/prd.json` or in worktree directory
+- **Legacy Mode**: `prd.json` in project root or worktree
+
 ## Step 1: Verify PRD Exists
 
 ```bash
-if [ ! -f "prd.json" ]; then
-    echo "ERROR: No PRD found."
+# Get PRD path from PathResolver
+PRD_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())" 2>/dev/null || echo "prd.json")
+
+# Also check local prd.json (in worktree)
+if [ -f "prd.json" ]; then
+    PRD_PATH="prd.json"
+elif [ ! -f "$PRD_PATH" ]; then
+    echo "ERROR: No PRD found at: $PRD_PATH"
     exit 1
 fi
 ```
 
 ## Step 2: Read PRD
 
-Read `prd.json` to get all stories and their dependencies.
+Read the PRD file at `$PRD_PATH` to get all stories and their dependencies.
 
 ## Step 3: Build Dependency Graph
 

@@ -7,14 +7,20 @@ Handles prd.json, findings.md, progress.txt, and .agent-status.json
 with concurrent access safety.
 
 Extended for multi-agent collaboration support.
+Now integrated with PathResolver for unified path resolution.
 """
+
+from __future__ import annotations
 
 import json
 import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from plan_cascade.state.path_resolver import PathResolver
 
 # Platform-specific locking imports
 try:
@@ -126,23 +132,96 @@ class FileLock:
 
 
 class StateManager:
-    """Manages shared state files with locking."""
+    """Manages shared state files with locking.
 
-    def __init__(self, project_root: Path):
+    Can operate in two modes:
+    - New mode (with PathResolver): Files stored in ~/.plan-cascade/<project-id>/
+    - Legacy mode: Files stored in project root (backward compatible)
+    """
+
+    def __init__(
+        self,
+        project_root: Path,
+        path_resolver: PathResolver | None = None,
+        legacy_mode: bool | None = None,
+    ):
         """
         Initialize the state manager.
 
         Args:
             project_root: Root directory of the project
+            path_resolver: Optional PathResolver instance. If not provided,
+                creates a default one based on legacy_mode setting.
+            legacy_mode: If True, use project root for all paths (backward compatible).
+                If None, defaults to True when path_resolver is not provided for
+                backward compatibility. If False, uses new ~/.plan-cascade/<project-id>/
+                structure.
         """
         self.project_root = Path(project_root)
-        self.locks_dir = self.project_root / ".locks"
-        self.prd_path = self.project_root / "prd.json"
-        self.findings_path = self.project_root / "findings.md"
-        self.progress_path = self.project_root / "progress.txt"
-        self.agent_status_path = self.project_root / ".agent-status.json"
-        self.iteration_state_path = self.project_root / ".iteration-state.json"
-        self.retry_state_path = self.project_root / ".retry-state.json"
+
+        # Determine legacy mode
+        if path_resolver is not None:
+            # Use provided resolver's mode
+            self._path_resolver = path_resolver
+        else:
+            # Create default resolver
+            # Default to legacy mode for backward compatibility when no resolver provided
+            if legacy_mode is None:
+                legacy_mode = True
+            from plan_cascade.state.path_resolver import PathResolver
+            self._path_resolver = PathResolver(
+                project_root=self.project_root,
+                legacy_mode=legacy_mode,
+            )
+
+        # Initialize paths using PathResolver
+        self._init_paths()
+
+    def _init_paths(self) -> None:
+        """Initialize all file paths using PathResolver."""
+        resolver = self._path_resolver
+
+        # Lock directory
+        self.locks_dir = resolver.get_locks_dir()
+
+        # PRD file - use resolver's method
+        self.prd_path = resolver.get_prd_path()
+
+        # State files - use state directory from resolver
+        state_dir = resolver.get_state_dir()
+
+        # For legacy mode, keep files at project root
+        # For new mode, use state subdirectory
+        if resolver.is_legacy_mode():
+            # Legacy: files directly in project root
+            self.findings_path = self.project_root / "findings.md"
+            self.progress_path = self.project_root / "progress.txt"
+            self.agent_status_path = self.project_root / ".agent-status.json"
+            self.iteration_state_path = self.project_root / ".iteration-state.json"
+            self.retry_state_path = self.project_root / ".retry-state.json"
+        else:
+            # New mode: organized in state directory
+            # Note: findings.md and progress.txt remain in project root
+            # as they are user-visible documentation files
+            self.findings_path = self.project_root / "findings.md"
+            self.progress_path = self.project_root / "progress.txt"
+            # Internal state files go to state directory
+            self.agent_status_path = resolver.get_state_file_path("agent-status.json")
+            self.iteration_state_path = resolver.get_state_file_path("iteration-state.json")
+            self.retry_state_path = resolver.get_state_file_path("retry-state.json")
+
+    @property
+    def path_resolver(self) -> PathResolver:
+        """Get the PathResolver instance."""
+        return self._path_resolver
+
+    def is_legacy_mode(self) -> bool:
+        """Check if running in legacy mode."""
+        return self._path_resolver.is_legacy_mode()
+
+    def ensure_directories(self) -> None:
+        """Ensure all necessary directories exist."""
+        self._path_resolver.ensure_directories()
 
     def _get_lock_path(self, file_path: Path) -> Path:
         """Get the lock file path for a given file."""
@@ -180,6 +259,8 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
+                # Ensure parent directory exists
+                self.prd_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(self.prd_path, "w", encoding="utf-8") as f:
                     json.dump(prd, f, indent=2)
             except OSError as e:
@@ -403,6 +484,8 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
+                # Ensure parent directory exists
+                self.agent_status_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(self.agent_status_path, "w", encoding="utf-8") as f:
                     json.dump(status, f, indent=2)
             except OSError as e:
@@ -630,6 +713,8 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
+                # Ensure parent directory exists
+                self.iteration_state_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(self.iteration_state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, indent=2)
             except OSError as e:
@@ -700,6 +785,8 @@ class StateManager:
 
         with FileLock(lock_path):
             try:
+                # Ensure parent directory exists
+                self.retry_state_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(self.retry_state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, indent=2)
             except OSError as e:
@@ -795,7 +882,9 @@ class StateManager:
 def main():
     """CLI interface for testing state manager."""
     if len(sys.argv) < 2:
-        print("Usage: state_manager.py <command> [args]")
+        print("Usage: state_manager.py [--legacy] <command> [args]")
+        print("Options:")
+        print("  --legacy                    - Use legacy mode (files in project root)")
         print("Commands:")
         print("  read-prd                    - Read PRD file")
         print("  write-prd <json>            - Write PRD file")
@@ -803,12 +892,17 @@ def main():
         print("  mark-complete <story_id>    - Mark story complete")
         print("  get-statuses                - Get all story statuses")
         print("  cleanup-locks               - Remove stale locks")
+        print("  show-paths                  - Show all file paths")
         sys.exit(1)
 
-    command = sys.argv[1]
+    # Check for --legacy flag
+    legacy_mode = "--legacy" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--legacy"]
+    command = args[0] if args else ""
+
     project_root = Path.cwd()
 
-    sm = StateManager(project_root)
+    sm = StateManager(project_root, legacy_mode=legacy_mode)
 
     if command == "read-prd":
         prd = sm.read_prd()
@@ -837,6 +931,17 @@ def main():
     elif command == "cleanup-locks":
         sm.cleanup_locks()
         print("Locks cleaned up")
+
+    elif command == "show-paths":
+        print(f"Mode: {'legacy' if sm.is_legacy_mode() else 'new'}")
+        print(f"Project root: {sm.project_root}")
+        print(f"PRD path: {sm.prd_path}")
+        print(f"Findings path: {sm.findings_path}")
+        print(f"Progress path: {sm.progress_path}")
+        print(f"Locks directory: {sm.locks_dir}")
+        print(f"Agent status path: {sm.agent_status_path}")
+        print(f"Iteration state path: {sm.iteration_state_path}")
+        print(f"Retry state path: {sm.retry_state_path}")
 
     else:
         print(f"Unknown command: {command}")

@@ -30,6 +30,7 @@ from ..state.state_manager import StateManager
 if TYPE_CHECKING:
     from .cross_platform_detector import CrossPlatformDetector
     from .phase_config import AgentOverrides, ExecutionPhase, PhaseAgentManager
+    from ..state.path_resolver import PathResolver
 
 
 class AgentExecutor:
@@ -60,7 +61,9 @@ class AgentExecutor:
         agents_config: dict | None = None,
         config_path: Path | None = None,
         detector: Optional["CrossPlatformDetector"] = None,
-        phase_manager: Optional["PhaseAgentManager"] = None
+        phase_manager: Optional["PhaseAgentManager"] = None,
+        path_resolver: Optional["PathResolver"] = None,
+        legacy_mode: bool | None = None,
     ):
         """
         Initialize the AgentExecutor.
@@ -71,15 +74,34 @@ class AgentExecutor:
             config_path: Path to agents.json file (optional, defaults to project_root)
             detector: CrossPlatformDetector instance (optional, created if not provided)
             phase_manager: PhaseAgentManager instance (optional, created if not provided)
+            path_resolver: Optional PathResolver instance. If not provided,
+                creates a default one based on legacy_mode setting.
+            legacy_mode: If True, use project root for all paths (backward compatible).
+                If None, defaults to True when path_resolver is not provided.
         """
         self.project_root = Path(project_root)
         self.default_agent = "claude-code"
         self.agents = self.DEFAULT_AGENTS.copy()
-        self.state_manager = StateManager(project_root)
         self._full_config: dict[str, Any] = {}
 
-        # Agent status tracking
-        self.agent_status_path = self.project_root / ".agent-status.json"
+        # Set up PathResolver
+        if path_resolver is not None:
+            self._path_resolver = path_resolver
+        else:
+            # Default to legacy mode for backward compatibility
+            if legacy_mode is None:
+                legacy_mode = True
+            from ..state.path_resolver import PathResolver
+            self._path_resolver = PathResolver(
+                project_root=self.project_root,
+                legacy_mode=legacy_mode,
+            )
+
+        # Create StateManager with PathResolver
+        self.state_manager = StateManager(project_root, path_resolver=self._path_resolver)
+
+        # Agent status path uses StateManager's path
+        self.agent_status_path = self.state_manager.agent_status_path
 
         # Load configuration
         if agents_config:
@@ -107,6 +129,11 @@ class AgentExecutor:
             )
         except ImportError:
             self.phase_manager = None
+
+    @property
+    def path_resolver(self) -> "PathResolver":
+        """Get the PathResolver instance."""
+        return self._path_resolver
 
     def _load_config(self, config: dict) -> None:
         """Load configuration from a dictionary."""

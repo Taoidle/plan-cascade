@@ -6,6 +6,13 @@ description: "Import an external design document (Markdown, JSON, or HTML from C
 
 Import an external design document and convert it to the unified `design_doc.json` format used by Plan Cascade.
 
+## Path Storage Modes
+
+Design documents are user-visible files and remain in the working directory in both modes:
+- `design_doc.json`: Created in current working directory (project root or worktree)
+
+This command does not use PathResolver since it works with user-provided paths and creates user-visible documentation files.
+
 ## Supported Formats
 
 | Format | Extensions | Source |
@@ -199,7 +206,20 @@ Next steps:
 
 ## Step 7: Handle PRD Integration
 
-If `prd.json` exists:
+If PRD exists (check both new mode and legacy locations):
+
+```
+# Get PRD path from PathResolver
+PRD_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
+
+# Check for PRD in local directory first, then PathResolver location
+If file exists at "prd.json" or PRD_PATH:
+    PRD_FOUND = true
+Else:
+    PRD_FOUND = false
+```
+
+If PRD_FOUND:
 
 1. Read the PRD to get story IDs
 2. Attempt to auto-map stories to design elements:

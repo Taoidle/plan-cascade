@@ -6,6 +6,25 @@ description: "Generate PRD from task description and enter review mode. Auto-gen
 
 You are automatically generating a Product Requirements Document (PRD) from the task description.
 
+## Path Storage Modes
+
+Plan Cascade supports two path storage modes:
+
+### New Mode (Default)
+Runtime files stored in user directory:
+- **Windows**: `%APPDATA%/plan-cascade/<project-id>/`
+- **Unix/macOS**: `~/.plan-cascade/<project-id>/`
+
+Files created:
+- `prd.json`: `<user-dir>/prd.json` (or in worktree if in worktree mode)
+- `design_doc.json`: In project root (user-visible)
+- State files: `<user-dir>/.state/`
+
+### Legacy Mode
+All files in project root or worktree directory.
+
+User-visible files (`progress.txt`, `findings.md`) always remain in the working directory.
+
 ## Multi-Agent Support
 
 PRD generation can use different AI agents:
@@ -33,6 +52,17 @@ PRD generation can use different AI agents:
 2. **Use Write tool for file creation** - When creating prd.json
    - ✅ `Write("prd.json", content)`
    - Or have the Task agent write it directly
+
+## Step 0: Ensure .gitignore Configuration
+
+**IMPORTANT**: Before creating any planning files, ensure the project's `.gitignore` is configured to ignore Plan Cascade temporary files:
+
+```bash
+# Check and update .gitignore for Plan Cascade entries
+python3 -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || echo "Note: Could not auto-update .gitignore"
+```
+
+This prevents planning files from being accidentally committed to version control.
 
 ## Step 1: Parse Arguments
 

@@ -9,7 +9,7 @@
 *将复杂项目分解为可并行执行的任务，支持多 Agent 协作*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.2.3-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.2.4-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -224,13 +224,13 @@ plan-cascade/
 | DeepSeek | 是 | DeepSeek Chat/Coder |
 | Ollama | 否 | 本地模型 |
 
-## v4.2.3 更新内容
+## v4.2.4 更新内容
 
-- **三层技能系统** — 内置(1-50) < 外部(51-100) < 用户(101-200) 优先级链
-- **内置技能** — Python、Go、Java、TypeScript 最佳实践随 Plan Cascade 一起分发
-- **用户技能配置** — 通过 `.plan-cascade/skills.json` 自定义技能
-- **远程技能缓存** — 7天缓存有效期，网络错误时优雅降级
-- **新 CLI 命令** — `skills add`、`skills remove`、`skills refresh`、`skills cache`
+- **运行时文件迁移** — 规划文件现存储在用户目录（Unix: `~/.plan-cascade/`，Windows: `%APPDATA%/plan-cascade/`）
+- **新状态模块** — PathResolver、ConfigManager、ProjectLinkManager 实现统一路径管理
+- **迁移工具** — `plan-cascade migrate` 命令用于迁移现有项目
+- **自动 Gitignore** — 使用 Plan Cascade 时自动配置 `.gitignore`
+- **465 测试** — 全面的测试覆盖，包括 21 个新的 gitignore 测试
 
 完整历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 

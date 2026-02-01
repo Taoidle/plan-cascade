@@ -6,6 +6,32 @@ description: "Generate a mega-plan for project-level multi-feature orchestration
 
 You are creating a **Mega Plan** - a project-level plan that orchestrates multiple features in parallel.
 
+## Path Storage Modes
+
+Plan Cascade supports two path storage modes for runtime files:
+
+### New Mode (Default)
+Runtime files are stored in a user directory:
+- **Windows**: `%APPDATA%/plan-cascade/<project-id>/`
+- **Unix/macOS**: `~/.plan-cascade/<project-id>/`
+
+File locations in new mode:
+- `mega-plan.json`: `<user-dir>/mega-plan.json`
+- `.mega-status.json`: `<user-dir>/.state/.mega-status.json`
+- Feature worktrees: `<user-dir>/.worktree/<feature-name>/`
+- `mega-findings.md`: `<project-root>/mega-findings.md` (user-visible, stays in project)
+
+### Legacy Mode
+All files in project root:
+- `mega-plan.json`: `<project-root>/mega-plan.json`
+- `.mega-status.json`: `<project-root>/.mega-status.json`
+- Feature worktrees: `<project-root>/.worktree/<feature-name>/`
+
+To check which mode is active:
+```bash
+python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('Mode:', 'legacy' if r.is_legacy_mode() else 'new'); print('Mega plan:', r.get_mega_plan_path())"
+```
+
 ## Architecture
 
 ```
@@ -13,6 +39,17 @@ Level 1: Mega Plan (This level - Project)
     └── Level 2: Features (hybrid:worktree tasks)
               └── Level 3: Stories (hybrid-ralph internal parallelism)
 ```
+
+## Step 0: Ensure .gitignore Configuration
+
+**IMPORTANT**: Before creating any planning files, ensure the project's `.gitignore` is configured to ignore Plan Cascade temporary files:
+
+```bash
+# Check and update .gitignore for Plan Cascade entries
+python3 -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || echo "Note: Could not auto-update .gitignore"
+```
+
+This prevents planning files (mega-plan.json, .worktree/, etc.) from being accidentally committed.
 
 ## Step 1: Parse Arguments
 
@@ -37,8 +74,11 @@ Optional: You can also provide an external design document path as second argume
 ## Step 2: Check for Existing Mega Plan
 
 ```bash
-if [ -f "mega-plan.json" ]; then
-    echo "A mega-plan.json already exists in this directory."
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+
+if [ -f "$MEGA_PLAN_PATH" ]; then
+    echo "A mega-plan.json already exists at: $MEGA_PLAN_PATH"
 fi
 ```
 
@@ -219,7 +259,15 @@ Feature-specific findings should be in their respective worktrees.
 <!-- Add notes about how features will integrate -->
 ```
 
-Create `.mega-status.json`:
+Create `.mega-status.json` (in state directory for new mode, project root for legacy):
+
+```bash
+# Get status file path from PathResolver
+MEGA_STATUS_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
+
+# Ensure directory exists
+mkdir -p "$(dirname "$MEGA_STATUS_PATH")"
+```
 
 ```json
 {
@@ -283,10 +331,12 @@ Batch 3 (After Batch 2):
 ============================================================
 
 Files created:
-  - mega-plan.json       (project plan)
-  - design_doc.json      (project-level technical design)
-  - mega-findings.md     (shared findings)
-  - .mega-status.json    (execution status)
+  - mega-plan.json       (project plan - in user data dir or project root)
+  - design_doc.json      (project-level technical design - in project root)
+  - mega-findings.md     (shared findings - always in project root for visibility)
+  - .mega-status.json    (execution status - in .state/ dir or project root)
+
+Note: Use PathResolver to find exact file locations based on storage mode.
 
 Next steps:
   1. Review the plan: Read mega-plan.json
