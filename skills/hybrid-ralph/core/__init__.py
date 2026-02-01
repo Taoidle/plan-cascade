@@ -39,6 +39,10 @@ from .quality_gate import (
     LintGate,
     CustomGate,
     ProjectType,
+    detect_venv,
+    get_venv_bin_path,
+    get_venv_python,
+    VENV_DIRS,
 )
 from .retry_manager import (
     RetryManager,
@@ -91,6 +95,10 @@ __all__ = [
     "LintGate",
     "CustomGate",
     "ProjectType",
+    "detect_venv",
+    "get_venv_bin_path",
+    "get_venv_python",
+    "VENV_DIRS",
     # Retry manager
     "RetryManager",
     "RetryConfig",

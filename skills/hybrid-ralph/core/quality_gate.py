@@ -3,6 +3,7 @@ Quality Gate System
 
 Run verification after story completion to ensure code quality.
 Supports typecheck, test, lint, and custom gates with auto-detection.
+Includes automatic virtual environment detection for Python projects.
 """
 
 import json
@@ -15,6 +16,76 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+
+# Common virtual environment directory names
+VENV_DIRS = [".venv", "venv", "env", ".env", "virtualenv", ".virtualenv"]
+
+
+def detect_venv(project_root: Path) -> Optional[Path]:
+    """
+    Detect virtual environment in project directory.
+
+    Checks for common venv directory names and validates they contain
+    a Python interpreter.
+
+    Args:
+        project_root: Root directory of the project
+
+    Returns:
+        Path to venv directory if found, None otherwise
+    """
+    for venv_name in VENV_DIRS:
+        venv_path = project_root / venv_name
+        if venv_path.is_dir():
+            # Verify it's a valid venv by checking for python executable
+            if sys.platform == "win32":
+                python_path = venv_path / "Scripts" / "python.exe"
+            else:
+                python_path = venv_path / "bin" / "python"
+
+            if python_path.exists():
+                return venv_path
+
+    # Also check for conda environment indicator
+    conda_meta = project_root / "conda-meta"
+    if conda_meta.is_dir():
+        return None  # Conda env, handled differently
+
+    return None
+
+
+def get_venv_bin_path(venv_path: Path) -> Path:
+    """
+    Get the bin/Scripts directory path for a virtual environment.
+
+    Args:
+        venv_path: Path to virtual environment root
+
+    Returns:
+        Path to bin (Unix) or Scripts (Windows) directory
+    """
+    if sys.platform == "win32":
+        return venv_path / "Scripts"
+    else:
+        return venv_path / "bin"
+
+
+def get_venv_python(venv_path: Path) -> Path:
+    """
+    Get the Python executable path for a virtual environment.
+
+    Args:
+        venv_path: Path to virtual environment root
+
+    Returns:
+        Path to python executable
+    """
+    bin_path = get_venv_bin_path(venv_path)
+    if sys.platform == "win32":
+        return bin_path / "python.exe"
+    else:
+        return bin_path / "python"
 
 
 class GateType(Enum):
@@ -97,11 +168,39 @@ class Gate(ABC):
     def __init__(self, config: GateConfig, project_root: Path):
         self.config = config
         self.project_root = project_root
+        # Auto-detect virtual environment
+        self._venv_path: Optional[Path] = detect_venv(project_root)
+        self._venv_bin_path: Optional[Path] = (
+            get_venv_bin_path(self._venv_path) if self._venv_path else None
+        )
+        self._venv_python: Optional[Path] = (
+            get_venv_python(self._venv_path) if self._venv_path else None
+        )
+
+    @property
+    def has_venv(self) -> bool:
+        """Check if a virtual environment was detected."""
+        return self._venv_path is not None
 
     @abstractmethod
     def execute(self, story_id: str, context: Dict[str, Any]) -> GateOutput:
         """Execute the gate and return results."""
         pass
+
+    def _get_venv_command(self, command: List[str]) -> List[str]:
+        """
+        Adjust command to use virtual environment if available.
+
+        For Python projects, replaces 'python' with venv python path.
+        """
+        if not self._venv_python or not command:
+            return command
+
+        # If command starts with 'python', use venv python
+        if command[0] in ("python", "python3"):
+            return [str(self._venv_python)] + command[1:]
+
+        return command
 
     def _run_command(
         self,
@@ -112,6 +211,10 @@ class Gate(ABC):
     ) -> Tuple[int, str, str, float]:
         """
         Run a command and return (exit_code, stdout, stderr, duration).
+
+        Automatically detects and uses virtual environment if present.
+        The venv bin/Scripts directory is prepended to PATH so tools
+        installed in the venv are found first.
         """
         timeout = timeout or self.config.timeout_seconds
         cwd = cwd or (Path(self.config.working_dir) if self.config.working_dir else self.project_root)
@@ -122,6 +225,20 @@ class Gate(ABC):
             run_env.update(self.config.env)
         if env:
             run_env.update(env)
+
+        # Prepend venv bin directory to PATH if virtual environment detected
+        if self._venv_bin_path and self._venv_bin_path.exists():
+            current_path = run_env.get("PATH", "")
+            venv_bin_str = str(self._venv_bin_path)
+            # Only prepend if not already in PATH
+            if venv_bin_str not in current_path:
+                path_sep = ";" if sys.platform == "win32" else ":"
+                run_env["PATH"] = f"{venv_bin_str}{path_sep}{current_path}"
+            # Also set VIRTUAL_ENV for tools that check it
+            run_env["VIRTUAL_ENV"] = str(self._venv_path)
+
+        # Adjust command to use venv python if needed
+        command = self._get_venv_command(command)
 
         start_time = datetime.now()
 
@@ -462,6 +579,46 @@ class QualityGate:
         self.project_root = Path(project_root)
         self.gates = gates or []
         self._project_type: Optional[ProjectType] = None
+        # Auto-detect virtual environment
+        self._venv_path: Optional[Path] = detect_venv(project_root)
+
+    def detect_venv(self) -> Optional[Path]:
+        """
+        Detect virtual environment in project.
+
+        Returns:
+            Path to venv directory if found, None otherwise
+        """
+        return self._venv_path
+
+    def get_venv_info(self) -> Dict[str, Any]:
+        """
+        Get information about detected virtual environment.
+
+        Returns:
+            Dictionary with venv information:
+            - detected: bool - whether venv was found
+            - path: str | None - path to venv directory
+            - bin_path: str | None - path to bin/Scripts directory
+            - python_path: str | None - path to python executable
+        """
+        if not self._venv_path:
+            return {
+                "detected": False,
+                "path": None,
+                "bin_path": None,
+                "python_path": None,
+            }
+
+        bin_path = get_venv_bin_path(self._venv_path)
+        python_path = get_venv_python(self._venv_path)
+
+        return {
+            "detected": True,
+            "path": str(self._venv_path),
+            "bin_path": str(bin_path) if bin_path.exists() else None,
+            "python_path": str(python_path) if python_path.exists() else None,
+        }
 
     def detect_project_type(self) -> ProjectType:
         """Auto-detect project type from configuration files."""
