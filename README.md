@@ -93,6 +93,7 @@ Automated verification after each story:
 - Unit and integration tests
 - Linting (ESLint, Ruff)
 - Custom validation scripts
+- **AI Verification Gate** - Validates implementation against acceptance criteria and detects skeleton code
 
 ### External Framework Skills
 
@@ -226,6 +227,7 @@ plan-cascade/
 
 ## What's New in v4.3.0
 
+- **AI Verification Gate** — AI-powered implementation validation that checks code against acceptance criteria and detects skeleton code (enabled by default)
 - **Quality Gate Enhancements** — Parallel execution, caching, incremental checking, and structured error parsing
 - **Context Recovery Fix** — Fixed hybrid-auto mode context recovery after context compression/truncation
 - **Dual Path Detection** — prd.json now detected in both new mode and legacy locations

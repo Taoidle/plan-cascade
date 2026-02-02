@@ -3,7 +3,7 @@
 # Plan Cascade - CLI Guide
 
 **Version**: 4.3.0
-**Last Updated**: 2026-02-01
+**Last Updated**: 2026-02-02
 
 This document provides detailed instructions for using the Plan Cascade standalone CLI tool.
 
@@ -211,6 +211,8 @@ Options:
   --retry-agent <name>     Agent to use for retry attempts
   --dry-run                Show execution plan without running
   --no-quality-gates       Disable quality gates (typecheck, test, lint)
+  --no-verify              Disable AI verification gate
+  --verify-agent <name>    Agent for AI verification (default: from config)
   --no-fallback            Disable agent fallback on failure
   --parallel               Execute stories within batches in parallel
   --max-concurrency <n>    Maximum parallel stories (default: CPU count)
@@ -605,6 +607,15 @@ quality_gates:
   custom: false
   custom_script: ""
   max_retries: 3
+
+# AI Verification Gate
+verification_gate:
+  enabled: true              # Enable AI verification (default: true)
+  confidence_threshold: 0.7  # Minimum confidence for pass
+  timeout: 120               # Verification timeout in seconds
+  skeleton_detection:
+    patterns: ["pass", "...", "NotImplementedError", "TODO", "FIXME", "stub"]
+    strict: true             # Fail on any skeleton code detected
 
 # Execution configuration
 max_parallel_stories: 3

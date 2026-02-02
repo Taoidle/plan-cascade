@@ -3,7 +3,7 @@
 # Plan Cascade - CLI Guide
 
 **版本**: 4.3.0
-**最后更新**: 2026-02-01
+**最后更新**: 2026-02-02
 
 本文档详细介绍 Plan Cascade 独立 CLI 工具的使用方法。
 
@@ -211,6 +211,8 @@ Options:
   --retry-agent <name>     重试时使用的 Agent
   --dry-run                显示执行计划但不实际运行
   --no-quality-gates       禁用质量门控（类型检查、测试、lint）
+  --no-verify              禁用 AI 验证门
+  --verify-agent <name>    AI 验证 Agent（默认：从配置读取）
   --no-fallback            禁用 Agent 失败回退
   --parallel               批次内并行执行 Stories
   --max-concurrency <n>    最大并行 Stories 数（默认：CPU 核心数）
@@ -605,6 +607,15 @@ quality_gates:
   custom: false
   custom_script: ""
   max_retries: 3
+
+# AI 验证门
+verification_gate:
+  enabled: true              # 启用 AI 验证（默认：true）
+  confidence_threshold: 0.7  # 最小置信度阈值
+  timeout: 120               # 验证超时（秒）
+  skeleton_detection:
+    patterns: ["pass", "...", "NotImplementedError", "TODO", "FIXME", "stub"]
+    strict: true             # 检测到骨架代码时失败
 
 # 执行配置
 max_parallel_stories: 3

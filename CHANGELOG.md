@@ -2,9 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## [4.3.0] - 2026-02-01
+## [4.3.0] - 2026-02-02
 
 ### Added
+
+- **AI Verification Gate for Plugin Mode** - AI-powered implementation verification using Task subagent
+  - Validates code implementation against story acceptance criteria
+  - Detects skeleton code patterns (`pass`, `...`, `NotImplementedError`, `TODO`, `FIXME`, etc.)
+  - Uses Task tool with configurable subagent type (default: `general-purpose`)
+  - Configurable confidence threshold (default: 0.7)
+  - **Enabled by default** in `agents.json` via `verification_gate.enabled: true`
+  - New command parameters: `--verify` and `--verify-agent` for `/plan-cascade:approve`
+  - Works in Plugin mode without requiring Python dependencies (pure Markdown instructions)
 
 - **Quality Gate Parallel Execution** - Execute multiple quality gates concurrently with `execute_all_async()`
   - Uses `asyncio.gather()` for parallel gate execution

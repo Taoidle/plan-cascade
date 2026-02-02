@@ -1,5 +1,5 @@
 ---
-description: "Approve the current PRD and begin parallel story execution. Analyzes dependencies, creates execution batches, launches background Task agents for each story, and monitors progress. Usage: /plan-cascade:approve [--agent <name>] [--impl-agent <name>] [--retry-agent <name>] [--no-fallback] [--auto-run]"
+description: "Approve the current PRD and begin parallel story execution. Analyzes dependencies, creates execution batches, launches background Task agents for each story, and monitors progress. Usage: /plan-cascade:approve [--agent <name>] [--impl-agent <name>] [--retry-agent <name>] [--verify] [--verify-agent <name>] [--no-fallback] [--auto-run]"
 ---
 
 # Hybrid Ralph - Approve PRD and Execute
@@ -50,6 +50,8 @@ This command supports multiple AI agents for story execution. The system automat
 --retry-agent <name> Agent for retry phase (after failures)
 --no-fallback        Disable automatic fallback to claude-code
 --auto-run           Start execution immediately after approval
+--verify             Enable AI verification gate after each batch
+--verify-agent <name> Agent for verification (default: claude-code task-tool)
 ```
 
 ## Tool Usage Policy (CRITICAL)
@@ -105,16 +107,20 @@ Parse agent-related arguments:
 GLOBAL_AGENT=""
 IMPL_AGENT=""
 RETRY_AGENT=""
+VERIFY_AGENT=""
 NO_FALLBACK=false
 AUTO_RUN=false
+ENABLE_VERIFY=false
 
 for arg in $ARGUMENTS; do
     case "$arg" in
         --agent=*) GLOBAL_AGENT="${arg#*=}" ;;
         --impl-agent=*) IMPL_AGENT="${arg#*=}" ;;
         --retry-agent=*) RETRY_AGENT="${arg#*=}" ;;
+        --verify-agent=*) VERIFY_AGENT="${arg#*=}" ;;
         --no-fallback) NO_FALLBACK=true ;;
         --auto-run) AUTO_RUN=true ;;
+        --verify) ENABLE_VERIFY=true ;;
     esac
 done
 
@@ -129,6 +135,8 @@ Agent Configuration:
   Implementation: ${IMPL_AGENT:-"default"}
   Retry: ${RETRY_AGENT:-"default"}
   Fallback: ${NO_FALLBACK:+"disabled" || "enabled"}
+  AI Verification: ${ENABLE_VERIFY:+"enabled" || "disabled"}
+  Verify Agent: ${VERIFY_AGENT:-"claude-code (task-tool)"}
 ```
 
 ## Step 2.5: Load Agent Configuration
@@ -569,6 +577,153 @@ For each failed_story in failed_stories:
         echo "Cannot retry {story_id}: no alternative agent available"
         # Pause for manual intervention
 ```
+
+### 9.2.6: AI Verification Gate (Optional)
+
+If `--verify` flag is specified OR `verification_gate.enabled` in PRD is true, run AI verification for completed stories.
+
+**Verification Gate Types:**
+
+| Type | Implementation | Requires |
+|------|----------------|----------|
+| `task-tool` (default) | Task subagent | Nothing extra |
+| `cli` | External LLM CLI | CLI tool installed |
+
+**9.2.6.1: Task-Tool Verification (Recommended)**
+
+For each completed story, launch a verification subagent:
+
+```
+For each completed_story in batch:
+    story_id = completed_story.id
+
+    # Get git diff for this story's changes
+    git_diff = Bash("git diff HEAD~1 HEAD -- . 2>/dev/null || git diff HEAD -- .")
+
+    # Build verification prompt
+    VERIFY_PROMPT = """
+    You are an implementation verification agent. Verify that story {story_id} is properly implemented.
+
+    ## Story: {story_id} - {title}
+    {description}
+
+    ## Acceptance Criteria
+    {acceptance_criteria as bullet list}
+
+    ## Git Diff (Changes Made)
+    ```diff
+    {git_diff}
+    ```
+
+    ## Your Task
+    Analyze the code changes and verify:
+    1. Each acceptance criterion is implemented (not just stubbed)
+    2. No skeleton code (pass, ..., NotImplementedError, TODO, FIXME in new code)
+    3. The implementation is functional, not placeholder
+
+    ## Skeleton Code Detection Rules
+    Mark as FAILED if you find ANY of these in NEW code:
+    - Functions with only `pass`, `...`, or `raise NotImplementedError`
+    - TODO/FIXME comments in newly added code
+    - Placeholder return values like `return None`, `return ""`, `return []` without logic
+    - Empty function/method bodies
+    - Comments like "# implement later" or "# stub"
+
+    ## Output Format
+    After analysis, append ONE of these to progress.txt:
+
+    If ALL criteria met and NO skeleton code:
+      [VERIFIED] {story_id} - All acceptance criteria implemented
+
+    If issues found:
+      [VERIFY_FAILED] {story_id} - <brief reason>
+
+    Then write a detailed verification report to .agent-outputs/{story_id}.verify.md
+    """
+
+    # Launch verification subagent
+    Task(
+        prompt=VERIFY_PROMPT,
+        subagent_type="general-purpose",
+        run_in_background=true,
+        description="Verify {story_id}"
+    )
+    Store verify_task_id for monitoring
+```
+
+**9.2.6.2: Wait for Verification**
+
+```
+For each story_id, verify_task_id in verification_tasks:
+    result = TaskOutput(
+        task_id=verify_task_id,
+        block=true,
+        timeout=120000  # 2 minutes per verification
+    )
+
+# Check verification results
+progress_content = Read("progress.txt")
+verified_count = count "[VERIFIED]" in progress_content
+verify_failed_count = count "[VERIFY_FAILED]" in progress_content
+
+If verify_failed_count > 0:
+    echo "⚠️ VERIFICATION FAILURES DETECTED"
+    # List failed stories and reasons
+    # Offer to retry with different agent or skip verification
+```
+
+**9.2.6.3: CLI Verification (Alternative)**
+
+If using external LLM CLI for verification (configured in agents.json):
+
+```json
+{
+  "verification_gate": {
+    "type": "cli",
+    "command": "claude",
+    "args": ["-p", "{prompt}"],
+    "timeout": 120
+  }
+}
+```
+
+```
+# Execute CLI verification
+Bash(
+    command="claude -p '{VERIFY_PROMPT}' >> .agent-outputs/{story_id}.verify.md",
+    timeout=120000
+)
+
+# Parse output and update progress.txt accordingly
+```
+
+**9.2.6.4: Handling Verification Failures**
+
+```
+For each verify_failed_story:
+    echo ""
+    echo "Story {story_id} failed verification:"
+    echo "  Reason: {reason from progress.txt}"
+    echo ""
+    echo "Options:"
+    echo "  1. Retry implementation with different agent"
+    echo "  2. Skip verification and continue"
+    echo "  3. Pause for manual review"
+
+    # Use AskUserQuestion to get user choice
+    If choice == 1:
+        # Go to Step 9.2.5 retry logic
+    Elif choice == 2:
+        echo "[VERIFY_SKIPPED] {story_id}" >> progress.txt
+        # Continue to next batch
+    Else:
+        # Pause execution
+        exit
+```
+
+**Note**: AI verification is optional and disabled by default. Enable with:
+- Command flag: `/plan-cascade:approve --verify`
+- PRD config: `"verification_gate": {"enabled": true}`
 
 ### 9.3: Progress to Next Batch
 

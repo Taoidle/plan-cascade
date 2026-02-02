@@ -87,5 +87,16 @@
     "test": "claude-code",
     "documentation": "claude-code",
     "infrastructure": "claude-code"
+  },
+  "verification_gate": {
+    "enabled": true,
+    "type": "task-tool",
+    "subagent_type": "general-purpose",
+    "confidence_threshold": 0.7,
+    "timeout": 120,
+    "skeleton_detection": {
+      "patterns": ["pass", "...", "NotImplementedError", "TODO", "FIXME", "implement later", "stub"],
+      "strict": true
+    }
   }
 }
