@@ -2,7 +2,7 @@
 
 # Plan Cascade - 系统架构与流程设计
 
-**版本**: 4.4.0
+**版本**: 4.3.1
 **最后更新**: 2026-02-02
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
@@ -19,10 +19,12 @@
 6. [Mega Plan 流程](#6-mega-plan-流程)
 7. [Hybrid Worktree 流程](#7-hybrid-worktree-流程)
 8. [Hybrid Auto 流程](#8-hybrid-auto-流程)
-9. [自动迭代流程](#9-自动迭代流程)
-10. [数据流与状态文件](#10-数据流与状态文件)
-11. [双模式架构](#11-双模式架构)
-12. [多 Agent 协同架构](#12-多-agent-协同架构)
+9. [Approve 执行流程](#9-approve-执行流程)
+10. [自动迭代流程](#10-自动迭代流程)
+11. [路径存储模式](#11-路径存储模式)
+12. [数据流与状态文件](#12-数据流与状态文件)
+13. [双模式架构](#13-双模式架构)
+14. [多 Agent 协同架构](#14-多-agent-协同架构)
 
 ---
 
@@ -156,52 +158,60 @@ flowchart TB
     end
 
     subgraph "Mega Plan 流程"
-        MEGA --> MP_GEN[生成 mega-plan.json]
-        MP_GEN --> MP_EDIT{编辑?}
+        MEGA --> MP_GEN[生成 mega-plan.json<br/>+ design_doc.json]
+        MP_GEN --> MP_REVIEW[统一审查显示]
+        MP_REVIEW --> MP_EDIT{编辑?}
         MP_EDIT -->|是| MP_MODIFY["/plan-cascade:mega-edit"]
-        MP_MODIFY --> MP_GEN
+        MP_MODIFY --> MP_REVIEW
         MP_EDIT -->|否| MP_APPROVE["/plan-cascade:mega-approve"]
-        MP_APPROVE --> MP_BATCH[按批次创建 Worktree]
-        MP_BATCH --> MP_PRD[每个 Feature 生成 PRD]
     end
 
     subgraph "Hybrid Worktree 流程"
         HW --> HW_CREATE[创建 Worktree + 分支]
-        HW_CREATE --> HW_PRD["/plan-cascade:hybrid-auto 生成 PRD"]
+        HW_CREATE --> HW_PRD[生成 PRD<br/>+ design_doc.json]
+        HW_PRD --> HW_REVIEW[统一审查显示]
     end
 
     subgraph "Hybrid Auto 流程"
-        HA --> HA_GEN[分析任务 + 生成 PRD]
+        HA --> HA_GEN[分析任务 + 生成 PRD<br/>+ design_doc.json]
+        HA_GEN --> HA_REVIEW[统一审查显示]
     end
 
-    MP_PRD --> PRD_REVIEW
-    HW_PRD --> PRD_REVIEW
-    HA_GEN --> PRD_REVIEW
+    MP_APPROVE --> BATCH_EXEC
+    HW_REVIEW --> PRD_EDIT
+    HA_REVIEW --> PRD_EDIT
 
     subgraph "PRD 审核"
-        PRD_REVIEW[显示 PRD 预览]
-        PRD_REVIEW --> PRD_EDIT{编辑?}
+        PRD_EDIT{编辑?}
         PRD_EDIT -->|是| PRD_MODIFY["/plan-cascade:edit"]
-        PRD_MODIFY --> PRD_REVIEW
+        PRD_MODIFY --> PRD_REVIEW2[统一审查显示]
+        PRD_REVIEW2 --> PRD_EDIT
         PRD_EDIT -->|否| APPROVE["/plan-cascade:approve"]
     end
 
     subgraph "执行阶段"
-        APPROVE --> EXEC_MODE{执行模式?}
+        APPROVE --> AGENT_CFG[解析 Agent 配置<br/>--agent, --impl-agent, --verify]
+        AGENT_CFG --> EXEC_MODE{执行模式?}
         EXEC_MODE -->|手动| MANUAL[手动推进批次]
-        EXEC_MODE -->|自动| AUTO[自动迭代循环]
+        EXEC_MODE -->|"--auto-run"| AUTO[自动迭代循环]
 
-        AUTO --> BATCH[执行当前批次]
-        MANUAL --> BATCH
-        BATCH --> CTX[加载上下文<br/>设计文档 + 外部技能]
-        CTX --> PARALLEL[并行启动 Agent]
-        PARALLEL --> WAIT[等待完成]
-        WAIT --> QG{质量门控}
+        AUTO --> BATCH_EXEC
+        MANUAL --> BATCH_EXEC
+
+        BATCH_EXEC[执行当前批次] --> CTX[加载上下文<br/>设计文档 + 外部技能]
+        CTX --> RESOLVE[解析每个 Story 的 Agent<br/>优先级链]
+        RESOLVE --> PARALLEL[并行启动 Agent<br/>显示 Agent 分配]
+        PARALLEL --> WAIT[通过 TaskOutput 等待]
+        WAIT --> VERIFY{AI 验证?<br/>--verify}
+        VERIFY -->|是| VGATE[AI 验证门<br/>检测骨架代码]
+        VERIFY -->|否| QG
+        VGATE --> QG{质量门控}
         QG -->|通过| NEXT{下一批次?}
         QG -->|失败| RETRY{重试?}
-        RETRY -->|是| BATCH
+        RETRY -->|是| RETRY_AGENT[选择重试 Agent<br/>+ 错误上下文]
+        RETRY_AGENT --> PARALLEL
         RETRY -->|否| FAIL[标记失败]
-        NEXT -->|是| BATCH
+        NEXT -->|是| BATCH_EXEC
         NEXT -->|否| DONE[执行完成]
     end
 
@@ -211,6 +221,18 @@ flowchart TB
         MERGE --> CLEANUP[清理 Worktree]
     end
 ```
+
+### 与旧版本的主要变化
+
+| 方面 | 旧版本 | 当前版本 |
+|------|--------|----------|
+| **设计文档** | 未显示 | 每个层级自动生成 |
+| **审查显示** | "显示 PRD 预览" | "统一审查显示"（PRD + 设计文档） |
+| **Agent 配置** | 未显示 | 显式解析 `--agent`, `--impl-agent`, `--verify` |
+| **Agent 分配** | 隐式 | "解析每个 Story 的 Agent" + 优先级链 |
+| **验证** | 未显示 | 可选的 "AI 验证门" |
+| **重试** | 简单重试 | "选择重试 Agent + 错误上下文" |
+| **等待机制** | 隐式 | "通过 TaskOutput 等待" |
 
 ---
 
@@ -286,15 +308,6 @@ AI 输出结构化 JSON 格式的分析结果：
 | 2-3 个功能区域, 3-7 步, 有依赖 | **HYBRID_AUTO** | "实现 OAuth 用户认证" |
 | HYBRID_AUTO + 高风险或实验性 | **HYBRID_WORKTREE** | "实验性重构支付模块" |
 | 4+ 功能区域, 多个独立功能 | **MEGA_PLAN** | "构建电商平台：用户、商品、购物车、订单" |
-
-### 策略映射示例
-
-| 任务描述 | 分析结果 | 选择的策略 |
-|----------|----------|------------|
-| "修复 README 中的拼写错误" | 1 区域, 低风险 | DIRECT |
-| "实现 OAuth 用户认证" | 3 区域, 有依赖 | HYBRID_AUTO |
-| "实验性重构支付模块" | 中等风险 + 实验性 | HYBRID_WORKTREE |
-| "构建电商平台：用户、商品、购物车、订单" | 4+ 功能区域 | MEGA_PLAN |
 
 ---
 
@@ -487,44 +500,6 @@ flowchart TD
 
 **同名覆盖：** 当技能同名时，高优先级覆盖低优先级。
 
-**检测的技能：**
-
-| 框架 | 检测方式 | 技能 |
-|------|----------|------|
-| Python | `pyproject.toml`, `requirements.txt` | `python-best-practices` (内置) |
-| Go | `go.mod` | `go-best-practices` (内置) |
-| Java | `pom.xml`, `build.gradle` | `java-best-practices` (内置) |
-| TypeScript | `tsconfig.json` | `typescript-best-practices` (内置) |
-| React/Next.js | `package.json` 包含 `react`, `next` | `react-best-practices` (外部) |
-| Vue/Nuxt | `package.json` 包含 `vue`, `nuxt` | `vue-best-practices` (外部) |
-| Rust | 存在 `Cargo.toml` | `rust-coding-guidelines` (外部) |
-
-**技能注入阶段：**
-
-技能根据其 `inject_into` 配置注入到不同的执行阶段：
-
-| 阶段 | 说明 | 示例技能 |
-|------|------|----------|
-| `planning` | PRD 生成时注入，用于架构感知的 Story 创建 | `python-best-practices`, `typescript-best-practices`, `react-best-practices` |
-| `implementation` | Story 执行时注入，用于代码实现 | 所有检测到的技能 |
-| `retry` | 重试时注入，包含失败上下文 | 所有检测到的技能 |
-
-**用户配置 (`.plan-cascade/skills.json`)：**
-
-```json
-{
-  "version": "1.0.0",
-  "skills": [
-    {
-      "name": "my-custom-skill",
-      "path": "./my-skills/custom/SKILL.md",
-      "detect": { "files": ["package.json"], "patterns": ["my-framework"] },
-      "priority": 150
-    }
-  ]
-}
-```
-
 ---
 
 ## 6. Mega Plan 流程
@@ -541,61 +516,79 @@ flowchart TD
 | ❌ 不适用 | 单个功能开发 | 仅实现用户认证（用 Hybrid Ralph） |
 | ❌ 不适用 | Bug 修复 | 修复登录页表单验证问题 |
 
-### 批次间顺序执行
+### 命令参数
 
+```bash
+/plan-cascade:mega-plan <项目描述> [设计文档路径]
+
+# 示例：
+/plan-cascade:mega-plan "构建电商平台"
+/plan-cascade:mega-plan "构建电商平台" ./architecture.md
 ```
-mega-approve (第1次) → 启动 Batch 1
-    ↓ Batch 1 完成
-mega-approve (第2次) → 合并 Batch 1 → 从更新后的分支创建 Batch 2
-    ↓ Batch 2 完成
-mega-approve (第3次) → 合并 Batch 2 → ...
-    ↓ 所有批次完成
-mega-complete → 清理计划文件
-```
+
+| 参数 | 说明 |
+|------|------|
+| `项目描述` | 必填。用于功能分解的项目描述 |
+| `设计文档路径` | 可选。要导入的外部设计文档（.md/.json/.html） |
 
 ### 详细流程图
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:mega-plan</b><br/>电商平台：用户、商品、订单"] --> B[分析项目需求]
-    B --> C[识别功能模块]
-    C --> D[生成 Feature 列表]
-    D --> E[分析 Feature 依赖]
-    E --> F[生成 mega-plan.json]
+    A["<b>/plan-cascade:mega-plan</b><br/>项目描述 [设计文档]"] --> A0[Step 0: 配置 .gitignore]
+    A0 --> B[Step 1: 解析参数]
+    B --> C[Step 2: 检查现有 Mega Plan]
+    C --> D[Step 3: 分析项目需求]
+    D --> E[Step 4: 生成 mega-plan.json]
 
-    F --> G{用户操作}
-    G -->|编辑| H["/plan-cascade:mega-edit"]
-    H --> F
-    G -->|批准| I["<b>/plan-cascade:mega-approve</b><br/>(第1次)"]
+    E --> F{外部设计文档?}
+    F -->|是| F1[转换 .md/.json/.html<br/>为 design_doc.json]
+    F -->|否| F2[Step 5: 自动生成<br/>项目 design_doc.json]
+    F1 --> G
+    F2 --> G
 
-    I --> J[创建 Batch 1 Worktrees]
-    J --> K[Batch 1: 基础设施]
+    G[Step 6: 创建支持文件<br/>mega-findings.md, .mega-status.json]
+    G --> H[计算执行批次]
+    H --> I[Step 7: 询问执行模式<br/>自动 / 手动]
+    I --> J[Step 8: 显示统一审查<br/>unified-review.py --mode mega]
 
-    subgraph "Feature 并行开发 (Batch 1)"
-        K --> L1["Feature: 用户系统<br/>Worktree: .worktrees/user"]
-        K --> L2["Feature: 商品系统<br/>Worktree: .worktrees/product"]
+    J --> K{用户操作}
+    K -->|编辑| L["/plan-cascade:mega-edit"]
+    L --> J
+    K -->|批准| M["/plan-cascade:mega-approve"]
 
-        L1 --> M1[自动生成 PRD]
-        L2 --> M2[自动生成 PRD]
-
-        M1 --> N1[执行 Stories<br/>+ 质量门控 + 重试]
-        M2 --> N2[执行 Stories<br/>+ 质量门控 + 重试]
+    subgraph "mega-approve 执行"
+        M --> N[解析 --auto-prd --agent --prd-agent --impl-agent]
+        N --> O[创建批次 N 的 Worktrees]
+        O --> P[为批次生成 PRDs<br/>使用选定的 PRD Agent]
+        P --> Q[为批次执行 Stories<br/>使用选定的 Impl Agent]
+        Q --> R[通过 TaskOutput 等待]
+        R --> S{批次完成?}
+        S -->|是| T[合并批次到目标分支]
+        T --> U[清理批次 Worktrees]
+        U --> V{还有批次?}
+        V -->|是| O
+        V -->|否| W[全部完成]
     end
 
-    N1 --> O1[Feature 完成]
-    N2 --> O2[Feature 完成]
+    W --> X["/plan-cascade:mega-complete"]
+    X --> Y[最终清理]
+```
 
-    O1 --> P["<b>/plan-cascade:mega-approve</b><br/>(第2次)"]
-    O2 --> P
-    P --> P1[合并 Batch 1 到目标分支]
-    P1 --> P2[从更新后的分支创建 Batch 2]
-    P2 --> Q[Batch 2: 订单系统<br/>依赖用户+商品]
+### 创建的文件
 
-    Q --> R[继续执行...]
-    R --> S[所有 Feature 完成]
-    S --> T["<b>/plan-cascade:mega-complete</b>"]
-    T --> U[清理计划文件]
-    U --> V[清理所有 Worktrees]
+| 文件 | 位置 | 说明 |
+|------|------|------|
+| `mega-plan.json` | 用户数据目录或项目根目录 | 包含 Features 的项目计划 |
+| `design_doc.json` | 项目根目录 | 项目级技术设计 |
+| `mega-findings.md` | 项目根目录 | 跨 Feature 共享发现 |
+| `.mega-status.json` | 状态目录或项目根目录 | 执行状态 |
+
+### 恢复
+
+如果中断：
+```bash
+/plan-cascade:mega-resume --auto-prd
 ```
 
 ---
@@ -603,6 +596,8 @@ flowchart TD
 ## 7. Hybrid Worktree 流程
 
 适用于需要分支隔离的单个复杂功能开发。
+
+**重要**：此命令只处理 Worktree 创建和 PRD/设计文档生成。Story 执行由 `/plan-cascade:approve` 处理。
 
 ### 适用场景
 
@@ -614,51 +609,107 @@ flowchart TD
 | ❌ 不适用 | 简单单文件修改 | 修改一个组件的样式 |
 | ❌ 不适用 | 快速原型验证 | 验证某个库是否可用 |
 
+### 命令参数
+
+```bash
+/plan-cascade:hybrid-worktree <任务名> <目标分支> <PRD或描述> [设计文档路径]
+
+# 示例：
+/plan-cascade:hybrid-worktree fix-auth main "修复认证 bug"
+/plan-cascade:hybrid-worktree fix-auth main ./existing-prd.json
+/plan-cascade:hybrid-worktree fix-auth main "修复认证" ./design-spec.md
+```
+
+| 参数 | 说明 |
+|------|------|
+| `任务名` | 必填。Worktree 和分支的名称 |
+| `目标分支` | 必填。完成后合并到的分支 |
+| `PRD或描述` | 必填。现有 PRD 文件路径或任务描述 |
+| `设计文档路径` | 可选。要导入的外部设计文档 |
+
 ### 详细流程图
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-worktree</b><br/>feature-auth main 用户认证"] --> B[创建 Git 分支]
-    B --> C[创建 Worktree 目录]
-    C --> D[初始化规划文件]
-    D --> E["<b>/plan-cascade:hybrid-auto</b><br/>生成 PRD"]
+    A["<b>/plan-cascade:hybrid-worktree</b><br/>任务名 目标分支 PRD或描述 [设计文档]"] --> A0[Step 0: 配置 .gitignore]
+    A0 --> B[Step 1: 解析参数]
+    B --> C[Step 2: 检测操作系统和 Shell<br/>跨平台支持]
+    C --> D[Step 3: 验证 Git 仓库]
+    D --> E[Step 4: 检测默认分支]
+    E --> F[Step 5: 通过 PathResolver 设置变量]
 
-    E --> F[分析任务描述]
-    F --> G[扫描代码库结构]
-    G --> H[生成 prd.json]
-    H --> I[显示 PRD 预览]
+    F --> G[Step 6: 检查项目 design_doc.json]
+    G --> H{Worktree 存在?}
+    H -->|是| I[导航到现有 Worktree]
+    H -->|否| J[创建 Git Worktree + 分支]
 
-    I --> J{用户操作}
-    J -->|编辑| K["/plan-cascade:edit"]
-    K --> I
-    J -->|批准| L["<b>/plan-cascade:approve</b>"]
+    J --> K[初始化规划文件<br/>findings.md, progress.txt]
+    K --> L{复制项目 design_doc.json?}
+    L -->|是| L1[复制到 Worktree]
+    L -->|否| M
+    L1 --> M
+    I --> M
 
-    L --> M{执行模式}
-    M -->|"--auto-run"| N[自动迭代模式]
-    M -->|手动| O[手动模式]
+    M[Step 7: 确定 PRD 模式]
+    M --> N{PRD_ARG 是文件?}
+    N -->|是| O[从文件加载 PRD]
+    N -->|否| P[通过 Task Agent 生成 PRD]
 
-    subgraph "自动迭代"
-        N --> P[执行 Batch 1]
-        P --> Q[并行 Agent 执行]
-        Q --> R[质量门控检查]
-        R --> S{通过?}
-        S -->|是| T{还有批次?}
-        S -->|否| U[智能重试]
-        U --> Q
-        T -->|是| P
-        T -->|否| V[全部完成]
-    end
+    O --> Q
+    P --> Q[通过 TaskOutput 等待]
+    Q --> R[验证 PRD]
 
-    subgraph "手动模式"
-        O --> W[执行 Batch 1]
-        W --> X["/plan-cascade:status 查看进度"]
-        X --> Y[手动推进下一批次]
-        Y --> W
-    end
+    R --> S{外部设计文档?}
+    S -->|是| S1[转换外部文档]
+    S -->|否| S2[自动生成功能 design_doc.json]
+    S1 --> T
+    S2 --> T
 
-    V --> Z["<b>/plan-cascade:hybrid-complete</b>"]
-    Z --> AA[合并到 main 分支]
-    AA --> AB[删除 Worktree]
+    T[创建 story_mappings<br/>将 Stories 链接到组件/决策]
+    T --> U[更新 .hybrid-execution-context.md]
+    U --> V[显示统一审查<br/>unified-review.py --mode hybrid]
+    V --> W[显示 Worktree 摘要]
+
+    W --> X{用户操作}
+    X -->|编辑| Y["/plan-cascade:edit"]
+    Y --> V
+    X -->|批准| Z["/plan-cascade:approve"]
+
+    Z --> EXEC[执行 Stories<br/>参见第 9 节]
+    EXEC --> AA["/plan-cascade:hybrid-complete"]
+    AA --> AB[合并到目标分支]
+    AB --> AC[删除 Worktree]
+```
+
+### 设计文档继承
+
+当项目级 `design_doc.json` 存在时：
+
+```json
+{
+  "metadata": {
+    "parent_design_doc": "../design_doc.json",
+    "level": "feature"
+  },
+  "inherited_context": {
+    "patterns": ["PatternName"],
+    "decisions": ["ADR-001"],
+    "shared_models": ["SharedModel"]
+  },
+  "story_mappings": {
+    "story-001": {
+      "components": ["ComponentA"],
+      "decisions": ["ADR-F001"]
+    }
+  }
+}
+```
+
+### 恢复
+
+如果中断：
+```bash
+/plan-cascade:hybrid-resume --auto
 ```
 
 ---
@@ -667,62 +718,213 @@ flowchart TD
 
 适用于简单功能的快速开发，无需 Worktree 隔离。
 
+**重要**：此命令只处理 PRD 和设计文档生成。Story 执行由 `/plan-cascade:approve` 处理。
+
+### 命令参数
+
+```bash
+/plan-cascade:hybrid-auto <任务描述> [设计文档路径] [--agent <名称>]
+
+# 示例：
+/plan-cascade:hybrid-auto "添加密码重置功能"
+/plan-cascade:hybrid-auto "实现认证" ./auth-design.md
+/plan-cascade:hybrid-auto "修复 bug" --agent=codex
+```
+
+| 参数 | 说明 |
+|------|------|
+| `任务描述` | 必填。用于 PRD 生成的任务描述 |
+| `设计文档路径` | 可选。要导入的外部设计文档 |
+| `--agent` | 可选。PRD 生成使用的 Agent（默认：claude-code） |
+
 ### 详细流程图
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-auto</b><br/>添加密码重置功能"] --> B[解析任务描述]
-    B --> C[分析代码库上下文]
-    C --> D{生成 PRD}
+    A["<b>/plan-cascade:hybrid-auto</b><br/>任务描述 [设计文档] [--agent]"] --> A0[Step 0: 配置 .gitignore]
+    A0 --> B[Step 1: 解析参数]
+    B --> C[Step 1.1: 解析 PRD Agent<br/>claude-code / codex / aider]
 
-    D --> E[Goal: 主要目标]
-    D --> F[Objectives: 子目标列表]
-    D --> G[Stories: 用户故事]
+    C --> D{CLI Agent 可用?}
+    D -->|否| D1[降级到 claude-code]
+    D -->|是| E
+    D1 --> E
 
-    G --> H[Story 1: 设计 API]
-    G --> I[Story 2: 实现后端]
-    G --> J[Story 3: 添加邮件]
-    G --> K[Story 4: 前端页面]
+    E[Step 2: 通过 Agent 生成 PRD]
+    E --> F[Step 3: 通过 TaskOutput 等待]
+    F --> G[Step 4: 验证 PRD 结构]
 
-    H --> L[依赖分析]
-    I --> L
-    J --> L
-    K --> L
+    G --> H{外部设计文档?}
+    H -->|是| I[Step 4.5.1: 转换外部文档<br/>.md / .json / .html]
+    H -->|否| J[Step 4.5.2: 自动生成<br/>design_doc.json]
+    I --> K
+    J --> K
 
-    L --> M[生成执行批次]
-    M --> N["Batch 1: Story 1<br/>Batch 2: Story 2, 3<br/>Batch 3: Story 4"]
+    K[创建 story_mappings<br/>将 Stories 链接到组件]
+    K --> L[通过 TaskOutput 等待]
+    L --> M[Step 5: 显示统一审查<br/>unified-review.py --mode hybrid]
 
-    N --> O[显示 PRD 预览]
-    O --> P{用户操作}
+    M --> N[Step 6: 确认生成完成]
+    N --> O{用户操作}
 
-    P -->|编辑| Q["/plan-cascade:edit"]
-    Q --> O
-    P -->|批准| R["<b>/plan-cascade:approve</b>"]
-    P -->|"批准+自动"| S["<b>/plan-cascade:approve --auto-run</b>"]
+    O -->|编辑| P["/plan-cascade:edit"]
+    P --> M
+    O -->|批准| Q["/plan-cascade:approve"]
+    O -->|"批准+自动"| R["/plan-cascade:approve --auto-run"]
 
-    R --> T[手动执行模式]
-    S --> U[自动迭代模式]
+    Q --> EXEC[执行 Stories<br/>参见第 9 节]
+    R --> EXEC
+```
 
-    subgraph "执行详情"
-        T --> V[启动 Batch 1]
-        U --> V
-        V --> W["Agent 并行执行<br/>(支持多种 Agent)"]
-        W --> X[质量门控]
-        X --> Y{检查结果}
-        Y -->|typecheck ❌| Z[重试 + 失败上下文]
-        Y -->|test ❌| Z
-        Y -->|通过 ✓| AA[推进下一批次]
-        Z --> W
-        AA --> V
-    end
+### 生成的文件
 
-    AA --> AB[所有 Stories 完成]
-    AB --> AC[显示执行摘要]
+| 文件 | 说明 |
+|------|------|
+| `prd.json` | 包含 Stories 的产品需求 |
+| `design_doc.json` | 包含 story_mappings 的技术设计 |
+
+### 恢复
+
+如果中断：
+```bash
+/plan-cascade:hybrid-resume --auto
 ```
 
 ---
 
-## 9. 自动迭代流程
+## 9. Approve 执行流程
+
+`/plan-cascade:approve` 命令处理 Story 执行，支持多 Agent 协作。
+
+### 命令参数
+
+```bash
+/plan-cascade:approve [选项]
+
+选项：
+  --agent <名称>        全局 Agent 覆盖（所有 Stories）
+  --impl-agent <名称>   实现阶段 Agent
+  --retry-agent <名称>  重试阶段 Agent
+  --verify              启用 AI 验证门
+  --verify-agent <名称> 验证 Agent（默认：claude-code）
+  --no-fallback         禁用自动降级到 claude-code
+  --auto-run            立即开始执行
+```
+
+### Agent 优先级链
+
+```
+1. --agent 参数           （最高 - 全局覆盖）
+2. --impl-agent 参数      （阶段特定覆盖）
+3. PRD 中的 story.agent   （Story 级指定）
+4. Story 类型推断：
+   - bugfix, fix → codex
+   - refactor, cleanup → aider
+   - test, spec → claude-code
+   - feature, add → claude-code
+5. agents.json 中的 phase_defaults
+6. agents.json 中的 fallback_chain
+7. claude-code            （始终可用的回退）
+```
+
+### 详细流程图
+
+```mermaid
+flowchart TD
+    A["<b>/plan-cascade:approve</b><br/>[--agent] [--impl-agent] [--verify] [--auto-run]"] --> B[Step 1: 检测操作系统和 Shell]
+    B --> C[Step 2: 解析 Agent 参数]
+    C --> D[Step 2.5: 加载 agents.json 配置]
+    D --> E[Step 3: 验证 PRD 存在]
+    E --> F[Step 4: 读取并验证 PRD]
+
+    F --> G[Step 4.5: 检查 design_doc.json]
+    G --> H[显示设计文档摘要<br/>组件、模式、ADRs、映射]
+
+    H --> I[Step 4.6: 检测外部技能<br/>ExternalSkillLoader]
+    I --> J[显示加载的技能摘要]
+
+    J --> K[Step 5: 计算执行批次<br/>基于依赖关系]
+    K --> L[Step 6: 选择执行模式<br/>自动 / 手动]
+    L --> M[Step 7: 初始化 progress.txt]
+
+    M --> N[Step 8: 启动批次 Agents]
+
+    subgraph "Step 8: Agent 解析与启动"
+        N --> O[8.1: 为每个 Story 解析 Agent<br/>优先级链]
+        O --> P[8.2: 检查 Agent 可用性<br/>CLI: which/where]
+        P --> Q{可用?}
+        Q -->|否 + 降级| R[使用链中下一个]
+        Q -->|否 + 禁用降级| S[错误]
+        Q -->|是| T[8.3: 构建 Story Prompt<br/>+ 设计上下文<br/>+ 外部技能]
+        R --> Q
+        T --> U[8.4: 启动 Agent<br/>Task 工具或 CLI]
+        U --> V[显示 Agent 启动摘要]
+    end
+
+    V --> W[Step 9: 等待批次完成]
+
+    subgraph "Step 9: 等待与验证"
+        W --> X[9.1: 通过 TaskOutput 等待<br/>每个 Story]
+        X --> Y[9.2: 验证完成<br/>读取 progress.txt]
+        Y --> Z{启用 --verify?}
+        Z -->|是| AA[9.2.6: AI 验证门<br/>检测骨架代码]
+        Z -->|否| AB
+        AA --> AB{全部通过?}
+        AB -->|否| AC[9.2.5: 使用不同 Agent 重试<br/>+ 错误上下文]
+        AC --> U
+        AB -->|是| AD[9.3: 推进到下一批次]
+    end
+
+    AD --> AE{还有批次?}
+    AE -->|是 + 自动| N
+    AE -->|是 + 手动| AF[询问用户确认]
+    AF --> N
+    AE -->|否| AG[Step 10: 显示最终状态]
+```
+
+### AI 验证门
+
+当启用 `--verify` 时，验证每个完成的 Story：
+
+```
+[VERIFIED] story-001 - 所有验收标准已实现
+[VERIFY_FAILED] story-002 - 检测到骨架代码：函数只有 'pass'
+```
+
+检测规则：
+- 只有 `pass`、`...` 或 `raise NotImplementedError` 的函数
+- 新代码中的 TODO/FIXME 注释
+- 没有逻辑的占位符返回值
+- 空的函数/方法体
+
+### 进度中的 Agent 显示
+
+```
+=== 批次 1 已启动 ===
+
+Stories 和分配的 Agents：
+  - story-001: claude-code (task-tool)
+  - story-002: aider (cli) [检测到 refactor]
+  - story-003: codex (cli) [检测到 bugfix]
+
+⚠️ Agent 降级：
+  - story-004: aider → claude-code (aider CLI 未找到)
+
+等待完成...
+```
+
+### 进度日志格式
+
+```
+[2026-01-28 10:30:00] story-001: [START] via codex (pid:12345)
+[2026-01-28 10:30:05] story-001: 进度更新...
+[2026-01-28 10:35:00] story-001: [COMPLETE] via codex
+[2026-01-28 10:35:01] story-001: [VERIFIED] 所有标准满足
+```
+
+---
+
+## 10. 自动迭代流程
 
 `/plan-cascade:approve --auto-run` 或 `/plan-cascade:auto-run` 命令启动的自动迭代循环：
 
@@ -756,7 +958,7 @@ flowchart TD
     N3 --> CTX
     CTX --> O[并行启动 Agents]
 
-    O --> P[轮询等待<br/>poll_interval: 10s]
+    O --> P[通过 TaskOutput 等待]
     P --> Q{Story 完成?}
 
     Q -->|运行中| P
@@ -773,9 +975,14 @@ flowchart TD
     W -->|✓| Y{Lint}
     W -->|✗| X
 
-    Y -->|✓| T
+    Y -->|✓| VERIFY{AI 验证?}
     Y -->|✗ 且必需| X
-    Y -->|✗ 但可选| T
+    Y -->|✗ 但可选| VERIFY
+
+    VERIFY -->|是| VGATE[AI 验证门]
+    VERIFY -->|否| T
+    VGATE -->|通过| T
+    VGATE -->|失败| X
 
     X --> Z{可重试?}
     S --> Z
@@ -817,7 +1024,54 @@ flowchart TD
 
 ---
 
-## 10. 数据流与状态文件
+## 11. 路径存储模式
+
+Plan Cascade 支持两种运行时文件的路径存储模式：
+
+### 新模式（默认）
+
+运行时文件存储在用户特定目录，保持项目根目录整洁：
+
+| 平台 | 用户数据目录 |
+|------|--------------|
+| **Windows** | `%APPDATA%/plan-cascade/<project-id>/` |
+| **Unix/macOS** | `~/.plan-cascade/<project-id>/` |
+
+其中 `<project-id>` 是基于项目名称和路径哈希的唯一标识符（例如：`my-project-a1b2c3d4`）。
+
+**新模式下的文件位置：**
+
+| 文件类型 | 位置 |
+|----------|------|
+| `prd.json` | `<user-dir>/prd.json`（或 worktree 模式下在 worktree 中） |
+| `mega-plan.json` | `<user-dir>/mega-plan.json` |
+| `.mega-status.json` | `<user-dir>/.state/.mega-status.json` |
+| `.iteration-state.json` | `<user-dir>/.state/` |
+| Worktrees | `<user-dir>/.worktree/<task-name>/` |
+| `design_doc.json` | **项目根目录**（用户可见） |
+| `progress.txt` | **工作目录**（用户可见） |
+| `findings.md` | **工作目录**（用户可见） |
+
+### 旧模式
+
+所有文件存储在项目根目录（向后兼容）：
+
+| 文件 | 位置 |
+|------|------|
+| `prd.json` | `<project-root>/prd.json` |
+| `mega-plan.json` | `<project-root>/mega-plan.json` |
+| `.mega-status.json` | `<project-root>/.mega-status.json` |
+| Worktrees | `<project-root>/.worktree/<task-name>/` |
+
+### 检查当前模式
+
+```bash
+python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('模式:', 'legacy' if r.is_legacy_mode() else 'new'); print('PRD 路径:', r.get_prd_path())"
+```
+
+---
+
+## 12. 数据流与状态文件
 
 ```mermaid
 graph TB
@@ -847,13 +1101,18 @@ graph TB
     end
 
     subgraph "Agent 输出"
-        AS --> AO[.agent-outputs/<br/>├─ story-001.log<br/>├─ story-001.prompt.txt<br/>└─ story-001.result.json]
+        AS --> AO[.agent-outputs/<br/>├─ story-001.log<br/>├─ story-001.prompt.txt<br/>├─ story-001.verify.md<br/>└─ story-001.result.json]
     end
 
     subgraph "缓存"
         AD[.agent-detection.json<br/>Agent检测缓存]
         GCF[.state/gate-cache.json<br/>门控结果缓存]
         LK[.locks/<br/>文件锁]
+    end
+
+    subgraph "上下文恢复"
+        HEC[.hybrid-execution-context.md]
+        MEC[.mega-execution-context.md]
     end
 
     DD --> CF[ContextFilter]
@@ -890,11 +1149,11 @@ graph TB
 | `.state/gate-cache.json` | 缓存 | 门控执行结果缓存（基于 git commit + 工作树哈希） |
 | `.hybrid-execution-context.md` | 上下文 | Hybrid 任务上下文，用于会话中断后 AI 恢复 |
 | `.mega-execution-context.md` | 上下文 | Mega-plan 上下文，用于会话中断后 AI 恢复 |
-| `.agent-outputs/` | 输出 | Agent 日志、Prompt 和结果文件 |
+| `.agent-outputs/` | 输出 | Agent 日志、Prompt、验证报告和结果文件 |
 
 ---
 
-## 11. 双模式架构
+## 13. 双模式架构
 
 ### 模式切换设计
 
@@ -979,85 +1238,9 @@ graph TB
 两种模式都支持：PRD 驱动开发、批次执行、质量门控、状态追踪
 ```
 
-### 独立编排模式架构详解
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       独立编排模式                                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌─ 编排层 ─────────────────────────────────────────────────────────┐   │
-│  │                                                                    │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                │   │
-│  │  │ 意图分类器  │  │ 策略分析器  │  │  PRD 生成器 │                │   │
-│  │  │ Intent     │  │ Strategy   │  │ PRDGenerator│                │   │
-│  │  │ Classifier │  │ Analyzer   │  │             │                │   │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘                │   │
-│  │         │               │               │                          │   │
-│  │         └───────────────┴───────────────┘                          │   │
-│  │                         │                                          │   │
-│  │                         ▼                                          │   │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
-│  │  │                   Orchestrator                               │  │   │
-│  │  │  • 批次依赖分析                                              │  │   │
-│  │  │  • 并行执行协调                                              │  │   │
-│  │  │  • 质量门控检查                                              │  │   │
-│  │  │  • 重试管理                                                  │  │   │
-│  │  └─────────────────────────────────────────────────────────────┘  │   │
-│  │                         │                                          │   │
-│  └─────────────────────────┼──────────────────────────────────────────┘   │
-│                            ▼                                              │
-│  ┌─ 执行层 ─────────────────────────────────────────────────────────┐   │
-│  │                                                                    │   │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
-│  │  │                   ReAct 执行引擎                             │  │   │
-│  │  │                                                              │  │   │
-│  │  │   ┌─────────┐     ┌─────────┐     ┌─────────┐               │  │   │
-│  │  │   │  Think  │ ──→ │   Act   │ ──→ │ Observe │ ──→ (循环)    │  │   │
-│  │  │   │  (LLM)  │     │ (工具)  │     │ (结果)  │               │  │   │
-│  │  │   └─────────┘     └─────────┘     └─────────┘               │  │   │
-│  │  │                                                              │  │   │
-│  │  └─────────────────────────────────────────────────────────────┘  │   │
-│  │                         │                                          │   │
-│  │                         ▼                                          │   │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
-│  │  │                   工具执行引擎                               │  │   │
-│  │  │                                                              │  │   │
-│  │  │   ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐   │  │   │
-│  │  │   │  Read  │ │ Write  │ │  Edit  │ │  Bash  │ │  Glob  │   │  │   │
-│  │  │   └────────┘ └────────┘ └────────┘ └────────┘ └────────┘   │  │   │
-│  │  │   ┌────────┐ ┌────────┐                                     │  │   │
-│  │  │   │  Grep  │ │   LS   │                                     │  │   │
-│  │  │   └────────┘ └────────┘                                     │  │   │
-│  │  │                                                              │  │   │
-│  │  └─────────────────────────────────────────────────────────────┘  │   │
-│  │                                                                    │   │
-│  └────────────────────────────────────────────────────────────────────┘   │
-│                            │                                              │
-│                            ▼                                              │
-│  ┌─ LLM 层 ─────────────────────────────────────────────────────────┐   │
-│  │                                                                    │   │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
-│  │  │                   LLM 抽象层                                 │  │   │
-│  │  │              (只提供思考，不执行工具)                        │  │   │
-│  │  └─────────────────────────────────────────────────────────────┘  │   │
-│  │                         │                                          │   │
-│  │       ┌─────────────────┼─────────────────┐                       │   │
-│  │       ▼                 ▼                 ▼                       │   │
-│  │  ┌─────────┐       ┌─────────┐       ┌─────────┐                 │   │
-│  │  │ Claude  │       │ Claude  │       │ OpenAI  │                 │   │
-│  │  │   Max   │       │   API   │       │ DeepSeek│                 │   │
-│  │  │(via CC) │       │         │       │ Ollama  │                 │   │
-│  │  └─────────┘       └─────────┘       └─────────┘                 │   │
-│  │                                                                    │   │
-│  └────────────────────────────────────────────────────────────────────┘   │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
 ---
 
-## 12. 多 Agent 协同架构
+## 14. 多 Agent 协同架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -1108,6 +1291,8 @@ graph TB
 | `--agent` | 全局 Agent 覆盖（所有 Stories） | `--agent=codex` |
 | `--impl-agent` | 实现阶段 Agent | `--impl-agent=claude-code` |
 | `--retry-agent` | 重试阶段 Agent | `--retry-agent=aider` |
+| `--verify` | 启用 AI 验证门 | `--verify` |
+| `--verify-agent` | 验证 Agent | `--verify-agent=claude-code` |
 | `--no-fallback` | 禁用失败自动降级 | `--no-fallback` |
 
 **`/plan-cascade:mega-approve`（Feature 执行）：**

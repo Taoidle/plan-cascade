@@ -2,7 +2,7 @@
 
 # Plan Cascade - System Architecture and Workflow Design
 
-**Version**: 4.4.0
+**Version**: 4.3.1
 **Last Updated**: 2026-02-02
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
@@ -19,10 +19,12 @@ This document contains detailed architecture diagrams, flowcharts, and system de
 6. [Mega Plan Workflow](#6-mega-plan-workflow)
 7. [Hybrid Worktree Workflow](#7-hybrid-worktree-workflow)
 8. [Hybrid Auto Workflow](#8-hybrid-auto-workflow)
-9. [Auto-Iteration Workflow](#9-auto-iteration-workflow)
-10. [Data Flow and State Files](#10-data-flow-and-state-files)
-11. [Dual-Mode Architecture](#11-dual-mode-architecture)
-12. [Multi-Agent Collaboration Architecture](#12-multi-agent-collaboration-architecture)
+9. [Approve and Execute Workflow](#9-approve-and-execute-workflow)
+10. [Auto-Iteration Workflow](#10-auto-iteration-workflow)
+11. [Path Storage Modes](#11-path-storage-modes)
+12. [Data Flow and State Files](#12-data-flow-and-state-files)
+13. [Dual-Mode Architecture](#13-dual-mode-architecture)
+14. [Multi-Agent Collaboration Architecture](#14-multi-agent-collaboration-architecture)
 
 ---
 
@@ -156,52 +158,60 @@ flowchart TB
     end
 
     subgraph "Mega Plan Flow"
-        MEGA --> MP_GEN[Generate mega-plan.json]
-        MP_GEN --> MP_EDIT{Edit?}
+        MEGA --> MP_GEN[Generate mega-plan.json<br/>+ design_doc.json]
+        MP_GEN --> MP_REVIEW[Unified Review Display]
+        MP_REVIEW --> MP_EDIT{Edit?}
         MP_EDIT -->|Yes| MP_MODIFY["/plan-cascade:mega-edit"]
-        MP_MODIFY --> MP_GEN
+        MP_MODIFY --> MP_REVIEW
         MP_EDIT -->|No| MP_APPROVE["/plan-cascade:mega-approve"]
-        MP_APPROVE --> MP_BATCH[Create Worktrees by Batch]
-        MP_BATCH --> MP_PRD[Generate PRD for each Feature]
     end
 
     subgraph "Hybrid Worktree Flow"
         HW --> HW_CREATE[Create Worktree + Branch]
-        HW_CREATE --> HW_PRD["/plan-cascade:hybrid-auto Generate PRD"]
+        HW_CREATE --> HW_PRD[Generate PRD<br/>+ design_doc.json]
+        HW_PRD --> HW_REVIEW[Unified Review Display]
     end
 
     subgraph "Hybrid Auto Flow"
-        HA --> HA_GEN[Analyze Task + Generate PRD]
+        HA --> HA_GEN[Analyze Task + Generate PRD<br/>+ design_doc.json]
+        HA_GEN --> HA_REVIEW[Unified Review Display]
     end
 
-    MP_PRD --> PRD_REVIEW
-    HW_PRD --> PRD_REVIEW
-    HA_GEN --> PRD_REVIEW
+    MP_APPROVE --> BATCH_EXEC
+    HW_REVIEW --> PRD_EDIT
+    HA_REVIEW --> PRD_EDIT
 
     subgraph "PRD Review"
-        PRD_REVIEW[Display PRD Preview]
-        PRD_REVIEW --> PRD_EDIT{Edit?}
+        PRD_EDIT{Edit?}
         PRD_EDIT -->|Yes| PRD_MODIFY["/plan-cascade:edit"]
-        PRD_MODIFY --> PRD_REVIEW
+        PRD_MODIFY --> PRD_REVIEW2[Unified Review Display]
+        PRD_REVIEW2 --> PRD_EDIT
         PRD_EDIT -->|No| APPROVE["/plan-cascade:approve"]
     end
 
     subgraph "Execution Phase"
-        APPROVE --> EXEC_MODE{Execution Mode?}
+        APPROVE --> AGENT_CFG[Parse Agent Configuration<br/>--agent, --impl-agent, --verify]
+        AGENT_CFG --> EXEC_MODE{Execution Mode?}
         EXEC_MODE -->|Manual| MANUAL[Manual Batch Progression]
-        EXEC_MODE -->|Auto| AUTO[Auto-Iteration Loop]
+        EXEC_MODE -->|"--auto-run"| AUTO[Auto-Iteration Loop]
 
-        AUTO --> BATCH[Execute Current Batch]
-        MANUAL --> BATCH
-        BATCH --> CTX[Load Context<br/>Design Doc + External Skills]
-        CTX --> PARALLEL[Start Agents in Parallel]
-        PARALLEL --> WAIT[Wait for Completion]
-        WAIT --> QG{Quality Gate}
+        AUTO --> BATCH_EXEC
+        MANUAL --> BATCH_EXEC
+
+        BATCH_EXEC[Execute Current Batch] --> CTX[Load Context<br/>Design Doc + External Skills]
+        CTX --> RESOLVE[Resolve Agent per Story<br/>Priority Chain]
+        RESOLVE --> PARALLEL[Start Agents in Parallel<br/>Display Agent Assignment]
+        PARALLEL --> WAIT[Wait via TaskOutput]
+        WAIT --> VERIFY{AI Verify?<br/>--verify}
+        VERIFY -->|Yes| VGATE[AI Verification Gate<br/>Detect Skeleton Code]
+        VERIFY -->|No| QG
+        VGATE --> QG{Quality Gate}
         QG -->|Pass| NEXT{Next Batch?}
         QG -->|Fail| RETRY{Retry?}
-        RETRY -->|Yes| BATCH
+        RETRY -->|Yes| RETRY_AGENT[Select Retry Agent<br/>+ Error Context]
+        RETRY_AGENT --> PARALLEL
         RETRY -->|No| FAIL[Mark Failed]
-        NEXT -->|Yes| BATCH
+        NEXT -->|Yes| BATCH_EXEC
         NEXT -->|No| DONE[Execution Complete]
     end
 
@@ -211,6 +221,18 @@ flowchart TB
         MERGE --> CLEANUP[Cleanup Worktree]
     end
 ```
+
+### Key Changes from Previous Version
+
+| Aspect | Previous | Current |
+|--------|----------|---------|
+| **Design Doc** | Not shown | Auto-generated at each level |
+| **Review Display** | "Display PRD Preview" | "Unified Review Display" (PRD + Design Doc) |
+| **Agent Config** | Not shown | Explicit `--agent`, `--impl-agent`, `--verify` parsing |
+| **Agent Assignment** | Implicit | "Resolve Agent per Story" with priority chain |
+| **Verification** | Not shown | Optional "AI Verification Gate" |
+| **Retry** | Simple retry | "Select Retry Agent + Error Context" |
+| **Wait Mechanism** | Implicit | "Wait via TaskOutput" |
 
 ---
 
@@ -286,15 +308,6 @@ The AI outputs structured analysis in JSON format:
 | 2-3 functional areas, 3-7 steps, has dependencies | **HYBRID_AUTO** | "Implement user authentication with OAuth" |
 | HYBRID_AUTO + high risk or experimental | **HYBRID_WORKTREE** | "Experimental refactoring of payment module" |
 | 4+ functional areas, multiple independent features | **MEGA_PLAN** | "Build e-commerce platform with users, products, cart, orders" |
-
-### Example Strategy Mappings
-
-| Task Description | Analysis Result | Selected Strategy |
-|-----------------|-----------------|-------------------|
-| "Fix the typo in README" | 1 area, low risk | DIRECT |
-| "Implement user authentication with OAuth" | 3 areas, has dependencies | HYBRID_AUTO |
-| "Experimental refactoring of payment module" | medium risk + experimental | HYBRID_WORKTREE |
-| "Build e-commerce platform with users, products, cart, orders" | 4+ functional areas | MEGA_PLAN |
 
 ---
 
@@ -487,44 +500,6 @@ flowchart TD
 
 **Same-name Override:** When skills share the same name, higher priority wins.
 
-**Detected Skills:**
-
-| Framework | Detection | Skills |
-|-----------|-----------|--------|
-| Python | `pyproject.toml`, `requirements.txt` | `python-best-practices` (builtin) |
-| Go | `go.mod` | `go-best-practices` (builtin) |
-| Java | `pom.xml`, `build.gradle` | `java-best-practices` (builtin) |
-| TypeScript | `tsconfig.json` | `typescript-best-practices` (builtin) |
-| React/Next.js | `package.json` contains `react`, `next` | `react-best-practices` (external) |
-| Vue/Nuxt | `package.json` contains `vue`, `nuxt` | `vue-best-practices` (external) |
-| Rust | `Cargo.toml` exists | `rust-coding-guidelines` (external) |
-
-**Skill Injection Phases:**
-
-Skills are injected into different phases of execution based on their `inject_into` configuration:
-
-| Phase | Description | Example Skills |
-|-------|-------------|----------------|
-| `planning` | Injected during PRD generation for architecture-aware story creation | `python-best-practices`, `typescript-best-practices`, `react-best-practices` |
-| `implementation` | Injected during story execution for code implementation | All detected skills |
-| `retry` | Injected during retry attempts with failure context | All detected skills |
-
-**User Configuration (`.plan-cascade/skills.json`):**
-
-```json
-{
-  "version": "1.0.0",
-  "skills": [
-    {
-      "name": "my-custom-skill",
-      "path": "./my-skills/custom/SKILL.md",
-      "detect": { "files": ["package.json"], "patterns": ["my-framework"] },
-      "priority": 150
-    }
-  ]
-}
-```
-
 ---
 
 ## 6. Mega Plan Workflow
@@ -541,61 +516,79 @@ Suitable for large project development containing multiple related feature modul
 | ❌ Not suitable | Single feature development | Only implement user authentication (use Hybrid Ralph) |
 | ❌ Not suitable | Bug fixes | Fix login page form validation issue |
 
-### Sequential Execution Between Batches
+### Command Parameters
 
+```bash
+/plan-cascade:mega-plan <project-description> [design-doc-path]
+
+# Examples:
+/plan-cascade:mega-plan "Build e-commerce platform"
+/plan-cascade:mega-plan "Build e-commerce platform" ./architecture.md
 ```
-mega-approve (1st time) → Start Batch 1
-    ↓ Batch 1 complete
-mega-approve (2nd time) → Merge Batch 1 → Create Batch 2 from updated branch
-    ↓ Batch 2 complete
-mega-approve (3rd time) → Merge Batch 2 → ...
-    ↓ All batches complete
-mega-complete → Clean up planning files
-```
+
+| Parameter | Description |
+|-----------|-------------|
+| `project-description` | Required. Project description for feature decomposition |
+| `design-doc-path` | Optional. External design document to import (.md/.json/.html) |
 
 ### Detailed Flowchart
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:mega-plan</b><br/>E-commerce platform: users, products, orders"] --> B[Analyze Project Requirements]
-    B --> C[Identify Feature Modules]
-    C --> D[Generate Feature List]
-    D --> E[Analyze Feature Dependencies]
-    E --> F[Generate mega-plan.json]
+    A["<b>/plan-cascade:mega-plan</b><br/>project-desc [design-doc]"] --> A0[Step 0: Configure .gitignore]
+    A0 --> B[Step 1: Parse Arguments]
+    B --> C[Step 2: Check Existing Mega Plan]
+    C --> D[Step 3: Analyze Project Requirements]
+    D --> E[Step 4: Generate mega-plan.json]
 
-    F --> G{User Action}
-    G -->|Edit| H["/plan-cascade:mega-edit"]
-    H --> F
-    G -->|Approve| I["<b>/plan-cascade:mega-approve</b><br/>(1st time)"]
+    E --> F{External Design Doc?}
+    F -->|Yes| F1[Convert .md/.json/.html<br/>to design_doc.json]
+    F -->|No| F2[Step 5: Auto-Generate<br/>Project design_doc.json]
+    F1 --> G
+    F2 --> G
 
-    I --> J[Create Batch 1 Worktrees]
-    J --> K[Batch 1: Infrastructure]
+    G[Step 6: Create Supporting Files<br/>mega-findings.md, .mega-status.json]
+    G --> H[Calculate Execution Batches]
+    H --> I[Step 7: Ask Execution Mode<br/>Auto / Manual]
+    I --> J[Step 8: Display Unified Review<br/>unified-review.py --mode mega]
 
-    subgraph "Feature Parallel Development (Batch 1)"
-        K --> L1["Feature: User System<br/>Worktree: .worktrees/user"]
-        K --> L2["Feature: Product System<br/>Worktree: .worktrees/product"]
+    J --> K{User Action}
+    K -->|Edit| L["/plan-cascade:mega-edit"]
+    L --> J
+    K -->|Approve| M["/plan-cascade:mega-approve"]
 
-        L1 --> M1[Auto-generate PRD]
-        L2 --> M2[Auto-generate PRD]
-
-        M1 --> N1[Execute Stories<br/>+ Quality Gates + Retry]
-        M2 --> N2[Execute Stories<br/>+ Quality Gates + Retry]
+    subgraph "mega-approve Execution"
+        M --> N[Parse --auto-prd --agent --prd-agent --impl-agent]
+        N --> O[Create Batch N Worktrees]
+        O --> P[Generate PRDs for Batch<br/>via selected PRD Agent]
+        P --> Q[Execute Stories for Batch<br/>via selected Impl Agent]
+        Q --> R[Wait via TaskOutput]
+        R --> S{Batch Complete?}
+        S -->|Yes| T[Merge Batch to Target Branch]
+        T --> U[Cleanup Batch Worktrees]
+        U --> V{More Batches?}
+        V -->|Yes| O
+        V -->|No| W[All Complete]
     end
 
-    N1 --> O1[Feature Complete]
-    N2 --> O2[Feature Complete]
+    W --> X["/plan-cascade:mega-complete"]
+    X --> Y[Final Cleanup]
+```
 
-    O1 --> P["<b>/plan-cascade:mega-approve</b><br/>(2nd time)"]
-    O2 --> P
-    P --> P1[Merge Batch 1 to Target Branch]
-    P1 --> P2[Create Batch 2 from Updated Branch]
-    P2 --> Q[Batch 2: Order System<br/>Depends on User+Product]
+### Files Created
 
-    Q --> R[Continue Execution...]
-    R --> S[All Features Complete]
-    S --> T["<b>/plan-cascade:mega-complete</b>"]
-    T --> U[Clean Up Planning Files]
-    U --> V[Clean Up All Worktrees]
+| File | Location | Description |
+|------|----------|-------------|
+| `mega-plan.json` | User data dir or project root | Project plan with features |
+| `design_doc.json` | Project root | Project-level technical design |
+| `mega-findings.md` | Project root | Shared findings across features |
+| `.mega-status.json` | State dir or project root | Execution status |
+
+### Recovery
+
+If interrupted:
+```bash
+/plan-cascade:mega-resume --auto-prd
 ```
 
 ---
@@ -603,6 +596,8 @@ flowchart TD
 ## 7. Hybrid Worktree Workflow
 
 Suitable for single complex feature development requiring branch isolation.
+
+**Important**: This command only handles worktree creation and PRD/design doc generation. Story execution is handled by `/plan-cascade:approve`.
 
 ### Use Cases
 
@@ -614,51 +609,107 @@ Suitable for single complex feature development requiring branch isolation.
 | ❌ Not suitable | Simple single-file modification | Modify a component's style |
 | ❌ Not suitable | Quick prototype validation | Verify if a library is usable |
 
+### Command Parameters
+
+```bash
+/plan-cascade:hybrid-worktree <task-name> <target-branch> <prd-or-description> [design-doc-path]
+
+# Examples:
+/plan-cascade:hybrid-worktree fix-auth main "Fix authentication bug"
+/plan-cascade:hybrid-worktree fix-auth main ./existing-prd.json
+/plan-cascade:hybrid-worktree fix-auth main "Fix auth" ./design-spec.md
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `task-name` | Required. Name for worktree and branch |
+| `target-branch` | Required. Branch to merge into when complete |
+| `prd-or-description` | Required. Existing PRD file path OR task description |
+| `design-doc-path` | Optional. External design document to import |
+
 ### Detailed Flowchart
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-worktree</b><br/>feature-auth main User Authentication"] --> B[Create Git Branch]
-    B --> C[Create Worktree Directory]
-    C --> D[Initialize Planning Files]
-    D --> E["<b>/plan-cascade:hybrid-auto</b><br/>Generate PRD"]
+    A["<b>/plan-cascade:hybrid-worktree</b><br/>task-name target-branch prd-or-desc [design-doc]"] --> A0[Step 0: Configure .gitignore]
+    A0 --> B[Step 1: Parse Parameters]
+    B --> C[Step 2: Detect OS and Shell<br/>Cross-platform support]
+    C --> D[Step 3: Verify Git Repository]
+    D --> E[Step 4: Detect Default Branch]
+    E --> F[Step 5: Set Variables via PathResolver]
 
-    E --> F[Analyze Task Description]
-    F --> G[Scan Codebase Structure]
-    G --> H[Generate prd.json]
-    H --> I[Display PRD Preview]
+    F --> G[Step 6: Check for Project design_doc.json]
+    G --> H{Worktree Exists?}
+    H -->|Yes| I[Navigate to Existing Worktree]
+    H -->|No| J[Create Git Worktree + Branch]
 
-    I --> J{User Action}
-    J -->|Edit| K["/plan-cascade:edit"]
-    K --> I
-    J -->|Approve| L["<b>/plan-cascade:approve</b>"]
+    J --> K[Initialize Planning Files<br/>findings.md, progress.txt]
+    K --> L{Copy Project design_doc.json?}
+    L -->|Yes| L1[Copy to Worktree]
+    L -->|No| M
+    L1 --> M
+    I --> M
 
-    L --> M{Execution Mode}
-    M -->|"--auto-run"| N[Auto-Iteration Mode]
-    M -->|Manual| O[Manual Mode]
+    M[Step 7: Determine PRD Mode]
+    M --> N{PRD_ARG is file?}
+    N -->|Yes| O[Load PRD from File]
+    N -->|No| P[Generate PRD via Task Agent]
 
-    subgraph "Auto-Iteration"
-        N --> P[Execute Batch 1]
-        P --> Q[Parallel Agent Execution]
-        Q --> R[Quality Gate Check]
-        R --> S{Pass?}
-        S -->|Yes| T{More Batches?}
-        S -->|No| U[Smart Retry]
-        U --> Q
-        T -->|Yes| P
-        T -->|No| V[All Complete]
-    end
+    O --> Q
+    P --> Q[Wait via TaskOutput]
+    Q --> R[Validate PRD]
 
-    subgraph "Manual Mode"
-        O --> W[Execute Batch 1]
-        W --> X["/plan-cascade:status View Progress"]
-        X --> Y[Manual Advance to Next Batch]
-        Y --> W
-    end
+    R --> S{External Design Doc?}
+    S -->|Yes| S1[Convert External Doc]
+    S -->|No| S2[Auto-Generate Feature design_doc.json]
+    S1 --> T
+    S2 --> T
 
-    V --> Z["<b>/plan-cascade:hybrid-complete</b>"]
-    Z --> AA[Merge to main Branch]
-    AA --> AB[Delete Worktree]
+    T[Create story_mappings<br/>Link stories to components/decisions]
+    T --> U[Update .hybrid-execution-context.md]
+    U --> V[Display Unified Review<br/>unified-review.py --mode hybrid]
+    V --> W[Show Worktree Summary]
+
+    W --> X{User Action}
+    X -->|Edit| Y["/plan-cascade:edit"]
+    Y --> V
+    X -->|Approve| Z["/plan-cascade:approve"]
+
+    Z --> EXEC[Execute Stories<br/>See Section 9]
+    EXEC --> AA["/plan-cascade:hybrid-complete"]
+    AA --> AB[Merge to Target Branch]
+    AB --> AC[Delete Worktree]
+```
+
+### Design Document Inheritance
+
+When a project-level `design_doc.json` exists:
+
+```json
+{
+  "metadata": {
+    "parent_design_doc": "../design_doc.json",
+    "level": "feature"
+  },
+  "inherited_context": {
+    "patterns": ["PatternName"],
+    "decisions": ["ADR-001"],
+    "shared_models": ["SharedModel"]
+  },
+  "story_mappings": {
+    "story-001": {
+      "components": ["ComponentA"],
+      "decisions": ["ADR-F001"]
+    }
+  }
+}
+```
+
+### Recovery
+
+If interrupted:
+```bash
+/plan-cascade:hybrid-resume --auto
 ```
 
 ---
@@ -667,62 +718,213 @@ flowchart TD
 
 Suitable for quick development of simple features without Worktree isolation.
 
+**Important**: This command only handles PRD and design doc generation. Story execution is handled by `/plan-cascade:approve`.
+
+### Command Parameters
+
+```bash
+/plan-cascade:hybrid-auto <task-description> [design-doc-path] [--agent <name>]
+
+# Examples:
+/plan-cascade:hybrid-auto "Add password reset functionality"
+/plan-cascade:hybrid-auto "Implement auth" ./auth-design.md
+/plan-cascade:hybrid-auto "Fix bug" --agent=codex
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `task-description` | Required. Task description for PRD generation |
+| `design-doc-path` | Optional. External design document to import |
+| `--agent` | Optional. Agent for PRD generation (default: claude-code) |
+
 ### Detailed Flowchart
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-auto</b><br/>Add Password Reset Functionality"] --> B[Parse Task Description]
-    B --> C[Analyze Codebase Context]
-    C --> D{Generate PRD}
+    A["<b>/plan-cascade:hybrid-auto</b><br/>task-desc [design-doc] [--agent]"] --> A0[Step 0: Configure .gitignore]
+    A0 --> B[Step 1: Parse Arguments]
+    B --> C[Step 1.1: Resolve PRD Agent<br/>claude-code / codex / aider]
 
-    D --> E[Goal: Main Objective]
-    D --> F[Objectives: Sub-objectives List]
-    D --> G[Stories: User Stories]
+    C --> D{CLI Agent Available?}
+    D -->|No| D1[Fallback to claude-code]
+    D -->|Yes| E
+    D1 --> E
 
-    G --> H[Story 1: Design API]
-    G --> I[Story 2: Implement Backend]
-    G --> J[Story 3: Add Email]
-    G --> K[Story 4: Frontend Page]
+    E[Step 2: Generate PRD via Agent]
+    E --> F[Step 3: Wait via TaskOutput]
+    F --> G[Step 4: Validate PRD Structure]
 
-    H --> L[Dependency Analysis]
-    I --> L
-    J --> L
-    K --> L
+    G --> H{External Design Doc?}
+    H -->|Yes| I[Step 4.5.1: Convert External Doc<br/>.md / .json / .html]
+    H -->|No| J[Step 4.5.2: Auto-Generate<br/>design_doc.json]
+    I --> K
+    J --> K
 
-    L --> M[Generate Execution Batches]
-    M --> N["Batch 1: Story 1<br/>Batch 2: Story 2, 3<br/>Batch 3: Story 4"]
+    K[Create story_mappings<br/>Link stories to components]
+    K --> L[Wait via TaskOutput]
+    L --> M[Step 5: Display Unified Review<br/>unified-review.py --mode hybrid]
 
-    N --> O[Display PRD Preview]
-    O --> P{User Action}
+    M --> N[Step 6: Confirm Generation Complete]
+    N --> O{User Action}
 
-    P -->|Edit| Q["/plan-cascade:edit"]
-    Q --> O
-    P -->|Approve| R["<b>/plan-cascade:approve</b>"]
-    P -->|"Approve+Auto"| S["<b>/plan-cascade:approve --auto-run</b>"]
+    O -->|Edit| P["/plan-cascade:edit"]
+    P --> M
+    O -->|Approve| Q["/plan-cascade:approve"]
+    O -->|"Approve+Auto"| R["/plan-cascade:approve --auto-run"]
 
-    R --> T[Manual Execution Mode]
-    S --> U[Auto-Iteration Mode]
+    Q --> EXEC[Execute Stories<br/>See Section 9]
+    R --> EXEC
+```
 
-    subgraph "Execution Details"
-        T --> V[Start Batch 1]
-        U --> V
-        V --> W["Agent Parallel Execution<br/>(Multiple Agents Supported)"]
-        W --> X[Quality Gates]
-        X --> Y{Check Result}
-        Y -->|typecheck ❌| Z[Retry + Failure Context]
-        Y -->|test ❌| Z
-        Y -->|Pass ✓| AA[Advance to Next Batch]
-        Z --> W
-        AA --> V
-    end
+### Generated Files
 
-    AA --> AB[All Stories Complete]
-    AB --> AC[Display Execution Summary]
+| File | Description |
+|------|-------------|
+| `prd.json` | Product requirements with stories |
+| `design_doc.json` | Technical design with story_mappings |
+
+### Recovery
+
+If interrupted:
+```bash
+/plan-cascade:hybrid-resume --auto
 ```
 
 ---
 
-## 9. Auto-Iteration Workflow
+## 9. Approve and Execute Workflow
+
+The `/plan-cascade:approve` command handles story execution with multi-agent support.
+
+### Command Parameters
+
+```bash
+/plan-cascade:approve [options]
+
+Options:
+  --agent <name>        Global agent override (all stories)
+  --impl-agent <name>   Agent for implementation phase
+  --retry-agent <name>  Agent for retry phase
+  --verify              Enable AI verification gate
+  --verify-agent <name> Agent for verification (default: claude-code)
+  --no-fallback         Disable automatic fallback to claude-code
+  --auto-run            Start execution immediately
+```
+
+### Agent Priority Chain
+
+```
+1. --agent parameter           (Highest - global override)
+2. --impl-agent parameter      (Phase-specific override)
+3. story.agent in PRD          (Story-level specification)
+4. Story type inference:
+   - bugfix, fix → codex
+   - refactor, cleanup → aider
+   - test, spec → claude-code
+   - feature, add → claude-code
+5. phase_defaults in agents.json
+6. fallback_chain in agents.json
+7. claude-code                 (Always available fallback)
+```
+
+### Detailed Flowchart
+
+```mermaid
+flowchart TD
+    A["<b>/plan-cascade:approve</b><br/>[--agent] [--impl-agent] [--verify] [--auto-run]"] --> B[Step 1: Detect OS and Shell]
+    B --> C[Step 2: Parse Agent Parameters]
+    C --> D[Step 2.5: Load agents.json Config]
+    D --> E[Step 3: Verify PRD Exists]
+    E --> F[Step 4: Read and Validate PRD]
+
+    F --> G[Step 4.5: Check for design_doc.json]
+    G --> H[Display Design Document Summary<br/>Components, Patterns, ADRs, Mappings]
+
+    H --> I[Step 4.6: Detect External Skills<br/>ExternalSkillLoader]
+    I --> J[Display Loaded Skills Summary]
+
+    J --> K[Step 5: Calculate Execution Batches<br/>Based on Dependencies]
+    K --> L[Step 6: Choose Execution Mode<br/>Auto / Manual]
+    L --> M[Step 7: Initialize progress.txt]
+
+    M --> N[Step 8: Launch Batch Agents]
+
+    subgraph "Step 8: Agent Resolution & Launch"
+        N --> O[8.1: Resolve Agent per Story<br/>Priority Chain]
+        O --> P[8.2: Check Agent Availability<br/>CLI: which/where]
+        P --> Q{Available?}
+        Q -->|No + Fallback| R[Use Next in Chain]
+        Q -->|No + No Fallback| S[ERROR]
+        Q -->|Yes| T[8.3: Build Story Prompt<br/>+ Design Context<br/>+ External Skills]
+        R --> Q
+        T --> U[8.4: Launch Agent<br/>Task tool or CLI]
+        U --> V[Display Agent Launch Summary]
+    end
+
+    V --> W[Step 9: Wait for Batch Completion]
+
+    subgraph "Step 9: Wait & Verify"
+        W --> X[9.1: Wait via TaskOutput<br/>per story]
+        X --> Y[9.2: Verify Completion<br/>Read progress.txt]
+        Y --> Z{--verify enabled?}
+        Z -->|Yes| AA[9.2.6: AI Verification Gate<br/>Detect Skeleton Code]
+        Z -->|No| AB
+        AA --> AB{All Pass?}
+        AB -->|No| AC[9.2.5: Retry with Different Agent<br/>+ Error Context]
+        AC --> U
+        AB -->|Yes| AD[9.3: Progress to Next Batch]
+    end
+
+    AD --> AE{More Batches?}
+    AE -->|Yes + Auto| N
+    AE -->|Yes + Manual| AF[Ask User Confirmation]
+    AF --> N
+    AE -->|No| AG[Step 10: Show Final Status]
+```
+
+### AI Verification Gate
+
+When `--verify` is enabled, each completed story is verified:
+
+```
+[VERIFIED] story-001 - All acceptance criteria implemented
+[VERIFY_FAILED] story-002 - Skeleton code detected: function has only 'pass'
+```
+
+Detection rules:
+- Functions with only `pass`, `...`, or `raise NotImplementedError`
+- TODO/FIXME comments in new code
+- Placeholder return values without logic
+- Empty function/method bodies
+
+### Agent Display in Progress
+
+```
+=== Batch 1 Launched ===
+
+Stories and assigned agents:
+  - story-001: claude-code (task-tool)
+  - story-002: aider (cli) [refactor detected]
+  - story-003: codex (cli) [bugfix detected]
+
+⚠️ Agent fallbacks:
+  - story-004: aider → claude-code (aider CLI not found)
+
+Waiting for completion...
+```
+
+### Progress Log Format
+
+```
+[2026-01-28 10:30:00] story-001: [START] via codex (pid:12345)
+[2026-01-28 10:30:05] story-001: Progress update...
+[2026-01-28 10:35:00] story-001: [COMPLETE] via codex
+[2026-01-28 10:35:01] story-001: [VERIFIED] All criteria met
+```
+
+---
+
+## 10. Auto-Iteration Workflow
 
 Auto-iteration loop started by `/plan-cascade:approve --auto-run` or `/plan-cascade:auto-run` command:
 
@@ -756,7 +958,7 @@ flowchart TD
     N3 --> CTX
     CTX --> O[Start Agents in Parallel]
 
-    O --> P[Poll Wait<br/>poll_interval: 10s]
+    O --> P[Wait via TaskOutput]
     P --> Q{Story Complete?}
 
     Q -->|Running| P
@@ -773,9 +975,14 @@ flowchart TD
     W -->|✓| Y{Lint}
     W -->|✗| X
 
-    Y -->|✓| T
+    Y -->|✓| VERIFY{AI Verify?}
     Y -->|✗ and required| X
-    Y -->|✗ but optional| T
+    Y -->|✗ but optional| VERIFY
+
+    VERIFY -->|Yes| VGATE[AI Verification Gate]
+    VERIFY -->|No| T
+    VGATE -->|Pass| T
+    VGATE -->|Fail| X
 
     X --> Z{Can Retry?}
     S --> Z
@@ -817,7 +1024,54 @@ flowchart TD
 
 ---
 
-## 10. Data Flow and State Files
+## 11. Path Storage Modes
+
+Plan Cascade supports two path storage modes for runtime files:
+
+### New Mode (Default)
+
+Runtime files are stored in a user-specific directory, keeping the project root clean:
+
+| Platform | User Data Directory |
+|----------|---------------------|
+| **Windows** | `%APPDATA%/plan-cascade/<project-id>/` |
+| **Unix/macOS** | `~/.plan-cascade/<project-id>/` |
+
+Where `<project-id>` is a unique identifier based on project name and path hash (e.g., `my-project-a1b2c3d4`).
+
+**File Locations in New Mode:**
+
+| File Type | Location |
+|-----------|----------|
+| `prd.json` | `<user-dir>/prd.json` (or worktree if in worktree mode) |
+| `mega-plan.json` | `<user-dir>/mega-plan.json` |
+| `.mega-status.json` | `<user-dir>/.state/.mega-status.json` |
+| `.iteration-state.json` | `<user-dir>/.state/` |
+| Worktrees | `<user-dir>/.worktree/<task-name>/` |
+| `design_doc.json` | **Project root** (user-visible) |
+| `progress.txt` | **Working directory** (user-visible) |
+| `findings.md` | **Working directory** (user-visible) |
+
+### Legacy Mode
+
+All files are stored in the project root (backward compatible):
+
+| File | Location |
+|------|----------|
+| `prd.json` | `<project-root>/prd.json` |
+| `mega-plan.json` | `<project-root>/mega-plan.json` |
+| `.mega-status.json` | `<project-root>/.mega-status.json` |
+| Worktrees | `<project-root>/.worktree/<task-name>/` |
+
+### Checking Current Mode
+
+```bash
+python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('Mode:', 'legacy' if r.is_legacy_mode() else 'new'); print('PRD path:', r.get_prd_path())"
+```
+
+---
+
+## 12. Data Flow and State Files
 
 ```mermaid
 graph TB
@@ -847,13 +1101,18 @@ graph TB
     end
 
     subgraph "Agent Output"
-        AS --> AO[.agent-outputs/<br/>├─ story-001.log<br/>├─ story-001.prompt.txt<br/>└─ story-001.result.json]
+        AS --> AO[.agent-outputs/<br/>├─ story-001.log<br/>├─ story-001.prompt.txt<br/>├─ story-001.verify.md<br/>└─ story-001.result.json]
     end
 
     subgraph "Cache"
         AD[.agent-detection.json<br/>Agent Detection Cache]
         GCF[.state/gate-cache.json<br/>Gate Result Cache]
         LK[.locks/<br/>File Locks]
+    end
+
+    subgraph "Context Recovery"
+        HEC[.hybrid-execution-context.md]
+        MEC[.mega-execution-context.md]
     end
 
     DD --> CF[ContextFilter]
@@ -890,11 +1149,11 @@ graph TB
 | `.state/gate-cache.json` | Cache | Gate execution results cache (keyed by git commit + tree hash) |
 | `.hybrid-execution-context.md` | Context | Hybrid task context for AI recovery after session interruption |
 | `.mega-execution-context.md` | Context | Mega-plan context for AI recovery after session interruption |
-| `.agent-outputs/` | Output | Agent logs, prompts, and result files |
+| `.agent-outputs/` | Output | Agent logs, prompts, verification reports, and result files |
 
 ---
 
-## 11. Dual-Mode Architecture
+## 13. Dual-Mode Architecture
 
 ### Mode Switching Design
 
@@ -985,84 +1244,9 @@ graph TB
 Both modes support: PRD-driven development, batch execution, quality gates, state tracking
 ```
 
-### Standalone Orchestration Mode Architecture Details
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       Standalone Orchestration Mode                       │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌─ Orchestration Layer ─────────────────────────────────────────────┐  │
-│  │                                                                    │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                │  │
-│  │  │ Intent      │  │ Strategy    │  │  PRD        │                │  │
-│  │  │ Classifier  │  │ Analyzer    │  │  Generator  │                │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘                │  │
-│  │         │               │               │                          │  │
-│  │         └───────────────┴───────────────┘                          │  │
-│  │                         │                                          │  │
-│  │                         ▼                                          │  │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │  │
-│  │  │                   Orchestrator                               │  │  │
-│  │  │  • Batch dependency analysis                                 │  │  │
-│  │  │  • Parallel execution coordination                           │  │  │
-│  │  │  • Quality gate checks                                       │  │  │
-│  │  │  • Retry management                                          │  │  │
-│  │  └─────────────────────────────────────────────────────────────┘  │  │
-│  │                         │                                          │  │
-│  └─────────────────────────┼──────────────────────────────────────────┘  │
-│                            ▼                                              │
-│  ┌─ Execution Layer ─────────────────────────────────────────────────┐  │
-│  │                                                                    │  │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │  │
-│  │  │                   ReAct Execution Engine                     │  │  │
-│  │  │                                                              │  │  │
-│  │  │   ┌─────────┐     ┌─────────┐     ┌─────────┐               │  │  │
-│  │  │   │  Think  │ ──→ │   Act   │ ──→ │ Observe │ ──→ (loop)    │  │  │
-│  │  │   │  (LLM)  │     │ (Tool)  │     │ (Result)│               │  │  │
-│  │  │   └─────────┘     └─────────┘     └─────────┘               │  │  │
-│  │  │                                                              │  │  │
-│  │  └─────────────────────────────────────────────────────────────┘  │  │
-│  │                         │                                          │  │
-│  │                         ▼                                          │  │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │  │
-│  │  │                   Tool Execution Engine                      │  │  │
-│  │  │                                                              │  │  │
-│  │  │   ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐   │  │  │
-│  │  │   │  Read  │ │ Write  │ │  Edit  │ │  Bash  │ │  Glob  │   │  │  │
-│  │  │   └────────┘ └────────┘ └────────┘ └────────┘ └────────┘   │  │  │
-│  │  │   ┌────────┐ ┌────────┐                                     │  │  │
-│  │  │   │  Grep  │ │   LS   │                                     │  │  │
-│  │  │   └────────┘ └────────┘                                     │  │  │
-│  │  │                                                              │  │  │
-│  │  └─────────────────────────────────────────────────────────────┘  │  │
-│  │                                                                    │  │
-│  └────────────────────────────────────────────────────────────────────┘  │
-│                            │                                              │
-│                            ▼                                              │
-│  ┌─ LLM Layer ───────────────────────────────────────────────────────┐  │
-│  │                                                                    │  │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │  │
-│  │  │                   LLM Abstraction Layer                      │  │  │
-│  │  │              (Only provides thinking, no tool execution)     │  │  │
-│  │  └─────────────────────────────────────────────────────────────┘  │  │
-│  │                         │                                          │  │
-│  │       ┌─────────────────┼─────────────────┐                       │  │
-│  │       ▼                 ▼                 ▼                       │  │
-│  │  ┌─────────┐       ┌─────────┐       ┌─────────┐                 │  │
-│  │  │ Claude  │       │ Claude  │       │ OpenAI  │                 │  │
-│  │  │   Max   │       │   API   │       │ DeepSeek│                 │  │
-│  │  │(via CC) │       │         │       │ Ollama  │                 │  │
-│  │  └─────────┘       └─────────┘       └─────────┘                 │  │
-│  │                                                                    │  │
-│  └────────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
 ---
 
-## 12. Multi-Agent Collaboration Architecture
+## 14. Multi-Agent Collaboration Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -1114,6 +1298,8 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 | `--agent` | Global agent override (all stories) | `--agent=codex` |
 | `--impl-agent` | Implementation phase agent | `--impl-agent=claude-code` |
 | `--retry-agent` | Retry phase agent | `--retry-agent=aider` |
+| `--verify` | Enable AI verification gate | `--verify` |
+| `--verify-agent` | Verification agent | `--verify-agent=claude-code` |
 | `--no-fallback` | Disable auto-fallback on failure | `--no-fallback` |
 
 **For `/plan-cascade:mega-approve` (feature execution):**
