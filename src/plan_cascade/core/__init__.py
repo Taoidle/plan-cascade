@@ -77,6 +77,17 @@ from .retry_manager import (
     RetryState,
 )
 from .skill_cache import SkillCache, SkillCacheEntry
+from .stage_state import (
+    ExecutionStage,
+    StageStatus,
+    StageState,
+    StageInput,
+    StageOutput,
+    StageContract,
+    StageContractRegistry,
+    StageStateMachine,
+    get_contract_registry,
+)
 from .strategy import ExecutionStrategy, StrategyDecision
 from .user_skill_config import UserSkillConfig, UserSkillEntry
 
@@ -152,4 +163,14 @@ __all__ = [
     "ModeConfig",
     "ExecutionStrategy",
     "StrategyDecision",
+    # Stage state machine
+    "ExecutionStage",
+    "StageStatus",
+    "StageState",
+    "StageInput",
+    "StageOutput",
+    "StageContract",
+    "StageContractRegistry",
+    "StageStateMachine",
+    "get_contract_registry",
 ]

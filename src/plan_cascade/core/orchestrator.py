@@ -4,6 +4,8 @@ PRD Story Orchestrator for Plan Cascade
 
 Executes stories from a PRD in batches with dependency resolution.
 Handles parallel agent execution with automatic fallback and context injection.
+
+Optionally integrates with StageStateMachine for unified stage tracking.
 """
 
 import json
@@ -17,6 +19,7 @@ from ..state.state_manager import StateManager
 
 if TYPE_CHECKING:
     from ..state.path_resolver import PathResolver
+    from .stage_state import StageStateMachine, ExecutionStage
 
 
 class StoryAgent:
@@ -75,6 +78,7 @@ class Orchestrator:
         context_filter: ContextFilter | None = None,
         path_resolver: "PathResolver | None" = None,
         legacy_mode: bool | None = None,
+        stage_machine: "StageStateMachine | None" = None,
     ):
         """
         Initialize the orchestrator.
@@ -88,9 +92,13 @@ class Orchestrator:
                 creates a default one based on legacy_mode setting.
             legacy_mode: If True, use project root for all paths (backward compatible).
                 If None, defaults to True when path_resolver is not provided.
+            stage_machine: Optional StageStateMachine for unified stage tracking.
+                When provided, the orchestrator will update stage states during execution.
+                When None (default), the orchestrator behaves as before (backward compatible).
         """
         self.project_root = Path(project_root)
         self.agents = agents or self.DEFAULT_AGENTS
+        self._stage_machine = stage_machine
 
         # Set up PathResolver
         if path_resolver is not None:
@@ -119,6 +127,66 @@ class Orchestrator:
     def path_resolver(self) -> "PathResolver":
         """Get the PathResolver instance."""
         return self._path_resolver
+
+    @property
+    def stage_machine(self) -> "StageStateMachine | None":
+        """Get the StageStateMachine instance if configured."""
+        return self._stage_machine
+
+    def set_stage_machine(self, machine: "StageStateMachine") -> None:
+        """
+        Set or update the stage machine.
+
+        Args:
+            machine: StageStateMachine instance to use
+        """
+        self._stage_machine = machine
+
+    def get_stage_status(self) -> dict[str, Any] | None:
+        """
+        Get current stage status from the stage machine.
+
+        Returns:
+            Stage progress summary dict if stage machine is configured, None otherwise
+        """
+        if self._stage_machine is None:
+            return None
+        return self._stage_machine.get_progress_summary()
+
+    def _update_stage(
+        self,
+        action: str,
+        stage: "ExecutionStage | None" = None,
+        outputs: dict[str, Any] | None = None,
+        errors: list[str] | None = None,
+    ) -> None:
+        """
+        Internal helper to update stage state if stage machine is configured.
+
+        Args:
+            action: One of 'start', 'complete', 'fail'
+            stage: Stage to update (uses EXECUTE if not specified)
+            outputs: Stage outputs (for complete action)
+            errors: Error messages (for fail action)
+        """
+        if self._stage_machine is None:
+            return
+
+        from .stage_state import ExecutionStage
+
+        target_stage = stage or ExecutionStage.EXECUTE
+
+        try:
+            if action == "start":
+                self._stage_machine.start_stage(target_stage)
+            elif action == "complete":
+                self._stage_machine.complete_stage(target_stage, outputs or {})
+            elif action == "fail":
+                self._stage_machine.fail_stage(target_stage, errors or [])
+        except ValueError:
+            # Stage transition not valid - this is expected in some cases
+            # e.g., stage already started by external caller
+            pass
 
         # Sort agents by priority (highest first)
         self.agents.sort(key=lambda a: a.priority, reverse=True)
@@ -345,7 +413,40 @@ class Orchestrator:
             status = "OK" if success else "FAIL"
             print(f"    -> {status}: {message}")
 
+        # Record batch results to stage machine if configured
+        self._record_batch_to_stage(batch_num, results)
+
         return results
+
+    def _record_batch_to_stage(
+        self,
+        batch_num: int,
+        results: dict[str, tuple[bool, str]],
+    ) -> None:
+        """
+        Record batch execution results to stage machine outputs.
+
+        Args:
+            batch_num: Batch number
+            results: Batch execution results
+        """
+        if self._stage_machine is None:
+            return
+
+        from .stage_state import ExecutionStage, StageStatus
+
+        execute_state = self._stage_machine.get_stage_state(ExecutionStage.EXECUTE)
+        if execute_state.status != StageStatus.IN_PROGRESS:
+            return
+
+        # Accumulate results in stage outputs
+        batch_outputs = execute_state.outputs.get("batch_results", {})
+        batch_outputs[f"batch_{batch_num}"] = {
+            "completed": [sid for sid, (ok, _) in results.items() if ok],
+            "failed": [sid for sid, (ok, _) in results.items() if not ok],
+        }
+        execute_state.outputs["batch_results"] = batch_outputs
+        execute_state.outputs["batches_executed"] = batch_num
 
     def check_batch_complete(self, batch: list[dict]) -> bool:
         """
@@ -375,6 +476,11 @@ class Orchestrator:
         """
         Execute all stories in dependency order.
 
+        When a stage_machine is configured, this method updates the EXECUTE stage:
+        - Starts EXECUTE stage at the beginning (if not already started)
+        - Records batch results as stage outputs
+        - Completes or fails EXECUTE stage based on results
+
         Args:
             dry_run: If True, don't actually execute
             callback: Optional callback after each batch
@@ -386,34 +492,61 @@ class Orchestrator:
         if not batches:
             return {"success": False, "error": "No batches to execute"}
 
+        # Start EXECUTE stage if stage machine is configured
+        self._update_stage("start")
+
         all_results: dict[str, tuple[bool, str]] = {}
         failed_stories: list[str] = []
         completed_stories: list[str] = []
 
-        for batch_num, batch in enumerate(batches, 1):
-            results = self.execute_batch(batch, batch_num, dry_run)
-            all_results.update(results)
+        try:
+            for batch_num, batch in enumerate(batches, 1):
+                results = self.execute_batch(batch, batch_num, dry_run)
+                all_results.update(results)
 
-            # Track successes and failures
-            for story_id, (success, _) in results.items():
-                if success:
-                    completed_stories.append(story_id)
-                else:
-                    failed_stories.append(story_id)
+                # Track successes and failures
+                for story_id, (success, _) in results.items():
+                    if success:
+                        completed_stories.append(story_id)
+                    else:
+                        failed_stories.append(story_id)
 
-            # Call callback if provided
-            if callback:
-                callback(batch_num, batch, results)
+                # Call callback if provided
+                if callback:
+                    callback(batch_num, batch, results)
 
-        return {
-            "success": len(failed_stories) == 0,
-            "total_batches": len(batches),
-            "total_stories": len(all_results),
-            "completed": len(completed_stories),
-            "failed": len(failed_stories),
-            "failed_stories": failed_stories,
-            "results": all_results,
-        }
+            # Prepare summary
+            summary = {
+                "success": len(failed_stories) == 0,
+                "total_batches": len(batches),
+                "total_stories": len(all_results),
+                "completed": len(completed_stories),
+                "failed": len(failed_stories),
+                "failed_stories": failed_stories,
+                "results": all_results,
+            }
+
+            # Complete or fail EXECUTE stage based on results
+            if len(failed_stories) == 0:
+                self._update_stage(
+                    "complete",
+                    outputs={
+                        "completed_stories": completed_stories,
+                        "batches_executed": len(batches),
+                    }
+                )
+            else:
+                self._update_stage(
+                    "fail",
+                    errors=[f"Stories failed: {', '.join(failed_stories)}"]
+                )
+
+            return summary
+
+        except Exception as e:
+            # Fail EXECUTE stage on exception
+            self._update_stage("fail", errors=[str(e)])
+            raise
 
     def get_execution_plan(self) -> str:
         """
