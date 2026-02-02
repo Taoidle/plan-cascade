@@ -18,6 +18,25 @@ import sys
 from pathlib import Path
 
 
+
+def _force_utf8_stdio() -> None:
+    """
+    Force UTF-8 for stdout/stderr so box-drawing characters render correctly
+    when the caller expects UTF-8 (common for plugin log capture).
+
+    On some Windows setups, Python defaults to a legacy encoding (e.g. GBK),
+    which causes mojibake like '�T�T�T' when the consumer decodes as UTF-8.
+    """
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            # Best-effort: if reconfigure isn't available, keep default behavior.
+            pass
+
+
+_force_utf8_stdio()
 # Box drawing characters
 BOX_TL = "\u250c"  # ┌
 BOX_TR = "\u2510"  # ┐
