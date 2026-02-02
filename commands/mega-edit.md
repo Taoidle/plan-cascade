@@ -18,7 +18,7 @@ The command uses PathResolver to find the correct file location.
 
 ```bash
 # Get mega-plan path from PathResolver
-MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
 
 if [ ! -f "$MEGA_PLAN_PATH" ]; then
     echo "No mega-plan.json found at: $MEGA_PLAN_PATH"

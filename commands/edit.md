@@ -18,7 +18,7 @@ The command uses PathResolver to find the correct file location.
 
 ```bash
 # Get PRD path from PathResolver
-PRD_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())" 2>/dev/null || echo "prd.json")
+PRD_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())" 2>/dev/null || echo "prd.json")
 
 # Also check local prd.json (in worktree)
 if [ -f "prd.json" ]; then
@@ -67,7 +67,7 @@ After the editor closes, validate the modified PRD:
 
 ```bash
 # Check JSON syntax
-if ! python3 -m json.tool "$PRD_PATH" > /dev/null 2>&1; then
+if ! uv run python -m json.tool "$PRD_PATH" > /dev/null 2>&1; then
     echo "ERROR: Invalid JSON in PRD at: $PRD_PATH"
     echo "Please fix the syntax errors and run /plan-cascade:edit again"
     exit 1

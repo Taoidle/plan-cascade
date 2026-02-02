@@ -22,6 +22,24 @@ claude plugins install ./plan-cascade
 
 ---
 
+## 首次设置
+
+使用 Plan Cascade 命令前，请运行初始化命令以确保环境正确配置：
+
+```bash
+/plan-cascade:init
+```
+
+此命令会：
+- 检测操作系统
+- 安装 `uv`（快速 Python 包管理器）（如果需要）
+- 验证 Python 执行是否正常
+- 确认 Plan Cascade 模块可访问
+
+**注意**：这在 Windows 上尤为重要，因为 Windows 的 Python 执行别名可能会干扰直接的 `python3` 调用。
+
+---
+
 ## 命令概览
 
 Plan Cascade 提供四个主要入口命令，适用于不同规模的开发场景：

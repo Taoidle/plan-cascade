@@ -32,7 +32,7 @@ The command auto-detects which mode is active.
 
 ```bash
 # Get mega-plan path from PathResolver
-MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
 
 if [ ! -f "$MEGA_PLAN_PATH" ]; then
     echo "No mega-plan.json found at: $MEGA_PLAN_PATH"
@@ -132,9 +132,9 @@ If user selected "Yes, cleanup":
 
 ```bash
 # Get file paths from PathResolver (handles new vs legacy mode)
-MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
-MEGA_STATUS_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
-MEGA_FINDINGS_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_findings_path())" 2>/dev/null || echo "mega-findings.md")
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+MEGA_STATUS_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
+MEGA_FINDINGS_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_findings_path())" 2>/dev/null || echo "mega-findings.md")
 
 # Remove mega-plan files
 rm -f "$MEGA_PLAN_PATH"
@@ -150,7 +150,7 @@ echo "[OK] Removed .mega-status.json from: $MEGA_STATUS_PATH"
 
 ```bash
 # Get worktree base directory from PathResolver
-WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
+WORKTREE_BASE=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
 
 # Check for any remaining worktrees in the resolved location
 if [ -d "$WORKTREE_BASE" ]; then
@@ -184,7 +184,7 @@ git worktree prune
 echo "[OK] Pruned git worktree list"
 
 # Optionally clean up project data directory in new mode
-PROJECT_DIR=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print(r.get_project_dir()) if not r.is_legacy_mode() else print('')" 2>/dev/null || echo "")
+PROJECT_DIR=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print(r.get_project_dir()) if not r.is_legacy_mode() else print('')" 2>/dev/null || echo "")
 if [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ]; then
     # Check if directory is empty (only manifest.json might remain)
     FILE_COUNT=$(find "$PROJECT_DIR" -type f ! -name "manifest.json" | wc -l)

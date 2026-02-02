@@ -6,6 +6,15 @@ description: "Generate a mega-plan for project-level multi-feature orchestration
 
 You are creating a **Mega Plan** - a project-level plan that orchestrates multiple features in parallel.
 
+## Prerequisites Check
+
+**CRITICAL**: If this is your first time using Plan Cascade, run `/plan-cascade:init` first to set up the environment.
+
+```bash
+# Quick check - if this fails, run /plan-cascade:init
+uv run python -c "print('Environment OK')" 2>/dev/null || echo "Warning: Run /plan-cascade:init to set up environment"
+```
+
 ## Path Storage Modes
 
 Plan Cascade supports two path storage modes for runtime files:
@@ -29,7 +38,7 @@ All files in project root:
 
 To check which mode is active:
 ```bash
-python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('Mode:', 'legacy' if r.is_legacy_mode() else 'new'); print('Mega plan:', r.get_mega_plan_path())"
+uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('Mode:', 'legacy' if r.is_legacy_mode() else 'new'); print('Mega plan:', r.get_mega_plan_path())"
 ```
 
 ## Architecture
@@ -46,7 +55,7 @@ Level 1: Mega Plan (This level - Project)
 
 ```bash
 # Check and update .gitignore for Plan Cascade entries
-python3 -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || echo "Note: Could not auto-update .gitignore"
+uv run python -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || echo "Note: Could not auto-update .gitignore"
 ```
 
 This prevents planning files (mega-plan.json, .worktree/, etc.) from being accidentally committed.
@@ -75,7 +84,7 @@ Optional: You can also provide an external design document path as second argume
 
 ```bash
 # Get mega-plan path from PathResolver
-MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
 
 if [ -f "$MEGA_PLAN_PATH" ]; then
     echo "A mega-plan.json already exists at: $MEGA_PLAN_PATH"
@@ -263,7 +272,7 @@ Create `.mega-status.json` (in state directory for new mode, project root for le
 
 ```bash
 # Get status file path from PathResolver
-MEGA_STATUS_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
+MEGA_STATUS_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
 
 # Ensure directory exists
 mkdir -p "$(dirname "$MEGA_STATUS_PATH")"
@@ -309,7 +318,7 @@ Update `mega-plan.json` with the chosen mode.
 **CRITICAL**: Use Bash to display the unified Mega-Plan + Design Document review:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode mega
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode mega
 ```
 
 This displays:

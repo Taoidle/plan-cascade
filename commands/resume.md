@@ -44,7 +44,7 @@ Check for various planning files to determine what type of task was interrupted.
 
 ```
 # Get mega-plan path from PathResolver
-MEGA_PLAN_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())"
+MEGA_PLAN_PATH = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())"
 
 Use Read tool to check if mega-plan.json exists:
   Read(MEGA_PLAN_PATH)
@@ -73,7 +73,7 @@ If file exists and mode = "hybrid":
 
 ```
 # Get worktree base directory from PathResolver
-WORKTREE_BASE = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())"
+WORKTREE_BASE = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())"
 
 Use Glob tool to find worktrees in new mode location:
   Glob("{WORKTREE_BASE}/*/.planning-config.json")
@@ -93,7 +93,7 @@ If any worktrees found:
 
 ```
 # Get PRD path from PathResolver
-PRD_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
+PRD_PATH = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
 
 Use Read tool to check for PRD:
   Read(PRD_PATH)

@@ -142,7 +142,7 @@ Create `.mega-status.json`:
 Validate the mega-plan using:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/mega_generator.py" validate
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/mega_generator.py" validate
 ```
 
 Then display the plan summary:

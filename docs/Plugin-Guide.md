@@ -22,6 +22,24 @@ claude plugins install ./plan-cascade
 
 ---
 
+## First-Time Setup
+
+Before using Plan Cascade commands, run the initialization command to ensure your environment is properly configured:
+
+```bash
+/plan-cascade:init
+```
+
+This command:
+- Detects your operating system
+- Installs `uv` (fast Python package manager) if needed
+- Verifies Python execution works correctly
+- Confirms Plan Cascade module is accessible
+
+**Note**: This is especially important on Windows, where Python execution aliases can interfere with direct `python3` calls.
+
+---
+
 ## Command Overview
 
 Plan Cascade provides four main entry commands, suitable for development scenarios of different scales:

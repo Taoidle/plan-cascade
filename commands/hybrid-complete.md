@@ -57,7 +57,7 @@ else
     HYBRID_WORKTREES=()
 
     # Get worktree base directory from PathResolver (handles new vs legacy mode)
-    WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
+    WORKTREE_BASE=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
 
     while IFS= read -r line; do
         worktree_path=$(echo "$line" | awk '{print $1}')
@@ -289,7 +289,7 @@ rm -rf .agent-outputs
 echo "✓ Planning files deleted from worktree"
 
 # Also clean up state files from user data directory (new mode)
-USER_STATE_DIR=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_state_dir())" 2>/dev/null || echo "")
+USER_STATE_DIR=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_state_dir())" 2>/dev/null || echo "")
 if [ -n "$USER_STATE_DIR" ] && [ -d "$USER_STATE_DIR" ]; then
     echo "Cleaning up state files from user data directory..."
     rm -f "$USER_STATE_DIR/.iteration-state.json" 2>/dev/null || true

@@ -21,9 +21,9 @@ hooks:
           command: |
             # Show hybrid execution context if we're in a hybrid task
             if [ -f "prd.json" ] || [ -f ".planning-config.json" ] || [ -f ".hybrid-execution-context.md" ]; then
-              if command -v python3 &> /dev/null; then
+              if command -v uv &> /dev/null; then
                 # Update and display context reminder
-                python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" both 2>/dev/null || true
+                uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" both 2>/dev/null || true
               fi
             fi
             # Show current story context if we're executing a story
@@ -33,8 +33,8 @@ hooks:
                 echo ""
                 echo "=== Current Story: $STORY_ID ==="
                 # Show story details from prd.json if available
-                if command -v python3 &> /dev/null; then
-                  python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/core/context_filter.py" get-story "$STORY_ID" 2>/dev/null | head -20 || true
+                if command -v uv &> /dev/null; then
+                  uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/core/context_filter.py" get-story "$STORY_ID" 2>/dev/null | head -20 || true
                 fi
                 echo ""
               fi
@@ -47,8 +47,8 @@ hooks:
           command: |
             # Update execution context file
             if [ -f "prd.json" ]; then
-              if command -v python3 &> /dev/null; then
-                python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update 2>/dev/null || true
+              if command -v uv &> /dev/null; then
+                uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update 2>/dev/null || true
               fi
             fi
             # Remind about findings
@@ -92,7 +92,7 @@ A hybrid architecture combining the best of three approaches:
    - If unsure of state, suggest: `/plan-cascade:hybrid-resume --auto`
 
 3. If NO but `prd.json` exists:
-   - Run: `python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" both`
+   - Run: `uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" both`
    - This will generate the context file and display current state
 
 This ensures context recovery even after:
@@ -208,16 +208,16 @@ Filters and extracts relevant context for specific stories.
 
 ```bash
 # Get story details
-python3 context_filter.py get-story story-001
+uv run python context_filter.py get-story story-001
 
 # Get context for a story
-python3 context_filter.py get-context story-001
+uv run python context_filter.py get-context story-001
 
 # Get execution batch
-python3 context_filter.py get-batch 1
+uv run python context_filter.py get-batch 1
 
 # Show full execution plan
-python3 context_filter.py plan-batches
+uv run python context_filter.py plan-batches
 ```
 
 ### state_manager.py
@@ -226,13 +226,13 @@ Thread-safe file operations with platform-specific locking.
 
 ```bash
 # Read PRD
-python3 state_manager.py read-prd
+uv run python state_manager.py read-prd
 
 # Mark story complete
-python3 state_manager.py mark-complete story-001
+uv run python state_manager.py mark-complete story-001
 
 # Get all story statuses
-python3 state_manager.py get-statuses
+uv run python state_manager.py get-statuses
 ```
 
 ### prd_generator.py
@@ -241,13 +241,13 @@ Generates PRD from task descriptions and manages story dependencies.
 
 ```bash
 # Validate PRD
-python3 prd_generator.py validate
+uv run python prd_generator.py validate
 
 # Show execution batches
-python3 prd_generator.py batches
+uv run python prd_generator.py batches
 
 # Create sample PRD
-python3 prd_generator.py sample
+uv run python prd_generator.py sample
 ```
 
 ### orchestrator.py
@@ -256,13 +256,13 @@ Manages parallel execution of stories.
 
 ```bash
 # Show execution plan
-python3 orchestrator.py plan
+uv run python orchestrator.py plan
 
 # Show execution status
-python3 orchestrator.py status
+uv run python orchestrator.py status
 
 # Execute a batch
-python3 orchestrator.py execute-batch 1
+uv run python orchestrator.py execute-batch 1
 ```
 
 ## Commands Reference
@@ -589,7 +589,7 @@ Solution: Use `/hybrid:auto` to generate or `/hybrid:manual` to load.
 TimeoutError: Could not acquire lock within 30s
 ```
 
-Solution: Run `python3 state_manager.py cleanup-locks` to remove stale locks.
+Solution: Run `uv run python state_manager.py cleanup-locks` to remove stale locks.
 
 ### Dependency Not Found
 

@@ -40,12 +40,21 @@ The auto command uses PathResolver to detect existing files in either location.
 
 4. **For strategy routing:** Use the Skill tool to invoke other commands
 
+## Prerequisites Check
+
+**CRITICAL**: If this is your first time using Plan Cascade, run `/plan-cascade:init` first to set up the environment.
+
+```bash
+# Quick check - if this fails, run /plan-cascade:init
+uv run python -c "print('Environment OK')" 2>/dev/null || echo "Warning: Run /plan-cascade:init to set up environment"
+```
+
 ## Step 0: Ensure .gitignore Configuration
 
 **IMPORTANT**: Before any planning operations, ensure the project's `.gitignore` is configured:
 
 ```bash
-python3 -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || true
+uv run python -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || true
 ```
 
 ## Step 1: Parse Task Description
@@ -86,9 +95,9 @@ Use the **Glob** tool to check for existing planning files in both new mode and 
 
 ```
 # Get paths from PathResolver
-PRD_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
-MEGA_PLAN_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())"
-WORKTREE_BASE = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())"
+PRD_PATH = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
+MEGA_PLAN_PATH = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())"
+WORKTREE_BASE = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())"
 
 # Check new mode paths
 Glob(PRD_PATH)             -> HAS_PRD = (result count > 0)

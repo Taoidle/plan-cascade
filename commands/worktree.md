@@ -23,7 +23,7 @@ Files are stored in the project root for backward compatibility:
 
 To check which mode is active, use:
 ```bash
-python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('Mode:', 'legacy' if r.is_legacy_mode() else 'new'); print('Worktree dir:', r.get_worktree_dir())"
+uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('Mode:', 'legacy' if r.is_legacy_mode() else 'new'); print('Worktree dir:', r.get_worktree_dir())"
 ```
 
 **Note**: User-visible files like `findings.md` and `progress.md` remain in the worktree directory itself, not in the user data directory.
@@ -92,7 +92,7 @@ ROOT_DIR=$(pwd)
 # Resolve worktree directory using PathResolver
 # New mode: ~/.plan-cascade/<project-id>/.worktree/<task-name>
 # Legacy mode: <project-root>/.worktree/<task-name>
-WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
+WORKTREE_BASE=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
 WORKTREE_DIR="$WORKTREE_BASE/$(basename $TASK_NAME)"
 ```
 

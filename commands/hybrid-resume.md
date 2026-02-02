@@ -90,7 +90,7 @@ If CONTEXT is still not set:
 
 ```
 # Get worktree base directory from PathResolver
-WORKTREE_BASE = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())"
+WORKTREE_BASE = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())"
 
 # Scan for worktrees (path depends on mode)
 Glob("{WORKTREE_BASE}/*/.planning-config.json")
@@ -643,7 +643,7 @@ After resuming execution, update the context file:
 
 ```bash
 # Update .hybrid-execution-context.md for future recovery
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update
 ```
 
 This ensures the context file reflects the current resumed state.

@@ -104,7 +104,7 @@ For PowerShell equivalents:
 
 ```bash
 # Check and update .gitignore for Plan Cascade entries
-python3 -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || echo "Note: Could not auto-update .gitignore"
+uv run python -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || echo "Note: Could not auto-update .gitignore"
 ```
 
 This ensures that planning files (prd.json, .worktree/, etc.) won't be accidentally committed to version control.
@@ -115,7 +115,7 @@ Ensure command auto-approval settings are configured (merges with existing setti
 
 ```bash
 # Run the settings merge script
-python3 scripts/ensure-settings.py || echo "Warning: Could not update settings, continuing..."
+uv run python scripts/ensure-settings.py || echo "Warning: Could not update settings, continuing..."
 ```
 
 This script intelligently merges required auto-approval patterns with any existing `.claude/settings.local.json`, preserving user customizations.
@@ -152,7 +152,7 @@ ROOT_DIR=$(pwd)
 # Resolve worktree directory using PathResolver
 # New mode: ~/.plan-cascade/<project-id>/.worktree/<task-name>
 # Legacy mode: <project-root>/.worktree/<task-name>
-WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo "$ROOT_DIR/.worktree")
+WORKTREE_BASE=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo "$ROOT_DIR/.worktree")
 WORKTREE_DIR="$WORKTREE_BASE/$(basename $TASK_NAME)"
 
 # Ensure worktree base directory exists
@@ -257,7 +257,7 @@ if [ "$PRD_MODE" = "load" ]; then
     echo "Loaded PRD from: $PRD_PATH"
 
     # Validate PRD
-    if ! python3 -m json.tool prd.json > /dev/null 2>&1; then
+    if ! uv run python -m json.tool prd.json > /dev/null 2>&1; then
         echo "ERROR: Invalid JSON in PRD file"
         exit 1
     fi
@@ -458,7 +458,7 @@ After PRD and design document are ready, generate the execution context file:
 
 ```bash
 # Generate .hybrid-execution-context.md for context recovery
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update
 ```
 
 This file helps AI recover execution context after context compression/truncation.
@@ -468,7 +468,7 @@ This file helps AI recover execution context after context compression/truncatio
 **CRITICAL**: Use Bash to display the unified PRD + Design Document review:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode hybrid
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode hybrid
 ```
 
 This displays:

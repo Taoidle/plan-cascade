@@ -117,7 +117,7 @@ After editor closes, validate the file.
 After any edit, validate the mega-plan:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/mega_generator.py" validate
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/mega_generator.py" validate
 ```
 
 If validation fails, show errors and offer to fix.

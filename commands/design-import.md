@@ -210,7 +210,7 @@ If PRD exists (check both new mode and legacy locations):
 
 ```
 # Get PRD path from PathResolver
-PRD_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
+PRD_PATH = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
 
 # Check for PRD in local directory first, then PathResolver location
 If file exists at "prd.json" or PRD_PATH:

@@ -77,7 +77,7 @@ Work like Manus: Use persistent markdown files as your "working memory on disk."
 
 ```bash
 # Linux/macOS
-$(command -v python3 || command -v python) ${CLAUDE_PLUGIN_ROOT}/scripts/session-catchup.py "$(pwd)"
+uv run python ${CLAUDE_PLUGIN_ROOT}/scripts/session-catchup.py "$(pwd)"
 ```
 
 ```powershell

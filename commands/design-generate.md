@@ -60,8 +60,8 @@ Auto-detect based on available files (check both new mode and legacy locations):
 
 ```
 # Get paths from PathResolver
-MEGA_PLAN_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())"
-PRD_PATH = python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
+MEGA_PLAN_PATH = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())"
+PRD_PATH = uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())"
 
 # Check for mega-plan.json (new mode path first, then legacy)
 If file exists at MEGA_PLAN_PATH or "mega-plan.json":

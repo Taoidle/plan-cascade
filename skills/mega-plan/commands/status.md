@@ -39,7 +39,7 @@ Execute these Read calls to get the current plan and status data.
 Update status by checking each worktree:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-sync.py"
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-sync.py"
 ```
 
 ### Step 4: Calculate Progress

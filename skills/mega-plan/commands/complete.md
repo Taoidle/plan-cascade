@@ -32,7 +32,7 @@ Nothing to complete.
 Check each feature's status:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/merge_coordinator.py" verify
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/merge_coordinator.py" verify
 ```
 
 If any features are not complete:
@@ -71,7 +71,7 @@ Check if target branch was specified in arguments:
 - Otherwise, use the target_branch from mega-plan.json
 
 ```bash
-TARGET_BRANCH="${ARGUMENTS:-$(cat mega-plan.json | python3 -c "import json,sys; print(json.load(sys.stdin)['target_branch'])")}"
+TARGET_BRANCH="${ARGUMENTS:-$(cat mega-plan.json | uv run python -c "import json,sys; print(json.load(sys.stdin)['target_branch'])")}"
 ```
 
 ### Step 4: Show Merge Plan

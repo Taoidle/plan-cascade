@@ -25,7 +25,7 @@ These files should NOT be committed to version control because:
 First, check the current state of `.gitignore`:
 
 ```bash
-python3 -c "
+uv run python -c "
 from plan_cascade.utils.gitignore import GitignoreManager
 from pathlib import Path
 
@@ -53,7 +53,7 @@ else:
 If the check shows missing entries, update `.gitignore`:
 
 ```bash
-python3 -c "
+uv run python -c "
 from plan_cascade.utils.gitignore import GitignoreManager
 from pathlib import Path
 

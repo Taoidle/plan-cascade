@@ -124,6 +124,9 @@ git submodule update --init --recursive
 # 安装插件
 claude plugins install Taoidle/plan-cascade
 
+# 首次设置（推荐，尤其是 Windows 用户）
+/plan-cascade:init
+
 # 让 AI 选择最佳策略
 /plan-cascade:auto "构建一个带用户认证和 JWT 的 REST API"
 

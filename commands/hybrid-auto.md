@@ -6,6 +6,15 @@ description: "Generate PRD from task description and enter review mode. Auto-gen
 
 You are automatically generating a Product Requirements Document (PRD) from the task description.
 
+## Prerequisites Check
+
+**CRITICAL**: If this is your first time using Plan Cascade, run `/plan-cascade:init` first to set up the environment.
+
+```bash
+# Quick check - if this fails, run /plan-cascade:init
+uv run python -c "print('Environment OK')" 2>/dev/null || echo "Warning: Run /plan-cascade:init to set up environment"
+```
+
 ## Path Storage Modes
 
 Plan Cascade supports two path storage modes:
@@ -59,7 +68,7 @@ PRD generation can use different AI agents:
 
 ```bash
 # Check and update .gitignore for Plan Cascade entries
-python3 -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || echo "Note: Could not auto-update .gitignore"
+uv run python -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || echo "Note: Could not auto-update .gitignore"
 ```
 
 This prevents planning files from being accidentally committed to version control.
@@ -408,7 +417,7 @@ TaskOutput(task_id=task_id, block=true, timeout=600000)
 **CRITICAL**: Use Bash to display the unified PRD + Design Document review:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode hybrid
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode hybrid
 ```
 
 This displays:

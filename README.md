@@ -124,6 +124,9 @@ git submodule update --init --recursive
 # Install the plugin
 claude plugins install Taoidle/plan-cascade
 
+# First-time setup (recommended, especially on Windows)
+/plan-cascade:init
+
 # Let AI choose the best strategy
 /plan-cascade:auto "Build a REST API with user authentication and JWT tokens"
 

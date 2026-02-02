@@ -63,7 +63,7 @@ else
     WORKTREE_LIST=()
 
     # Get worktree base directory from PathResolver
-    WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
+    WORKTREE_BASE=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
 
     while IFS= read -r line; do
         worktree_path=$(echo "$line" | awk '{print $1}')

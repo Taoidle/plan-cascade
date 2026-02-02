@@ -167,7 +167,7 @@ Ensure command auto-approval settings are configured (merges with existing setti
 
 ```bash
 # Run the settings merge script from project root
-python3 ../scripts/ensure-settings.py 2>/dev/null || python3 scripts/ensure-settings.py || echo "Warning: Could not update settings, continuing..."
+uv run python ../scripts/ensure-settings.py 2>/dev/null || uv run python scripts/ensure-settings.py || echo "Warning: Could not update settings, continuing..."
 ```
 
 This script intelligently merges required auto-approval patterns with any existing `.claude/settings.local.json`, preserving user customizations.
@@ -241,8 +241,8 @@ Check for applicable external framework skills based on the project type:
 
 ```bash
 # Detect and display loaded skills
-if command -v python3 &> /dev/null; then
-    python3 -c "
+if command -v uv &> /dev/null; then
+    uv run python -c "
 import sys
 sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/src')
 from plan_cascade.core.external_skill_loader import ExternalSkillLoader

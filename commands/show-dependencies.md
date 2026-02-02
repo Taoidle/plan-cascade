@@ -16,7 +16,7 @@ PRD file location depends on the storage mode:
 
 ```bash
 # Get PRD path from PathResolver
-PRD_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())" 2>/dev/null || echo "prd.json")
+PRD_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())" 2>/dev/null || echo "prd.json")
 
 # Also check local prd.json (in worktree)
 if [ -f "prd.json" ]; then

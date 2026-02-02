@@ -21,9 +21,9 @@ hooks:
           command: |
             # Show mega-plan context if we're in a mega-plan project
             if [ -f "mega-plan.json" ] || [ -f ".mega-execution-context.md" ]; then
-              if command -v python3 &> /dev/null; then
+              if command -v uv &> /dev/null; then
                 # Update and display context reminder
-                python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" both 2>/dev/null || true
+                uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" both 2>/dev/null || true
               fi
             fi
             # Detect potential wrong-branch execution
@@ -43,9 +43,9 @@ hooks:
         - type: command
           command: |
             if [ -f "mega-plan.json" ]; then
-              if command -v python3 &> /dev/null; then
-                python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-sync.py" 2>/dev/null || true
-                python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update 2>/dev/null || true
+              if command -v uv &> /dev/null; then
+                uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-sync.py" 2>/dev/null || true
+                uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update 2>/dev/null || true
               fi
             fi
 ---
@@ -67,7 +67,7 @@ A project-level orchestration system that sits above `hybrid-ralph` to manage mu
    - If unsure of state, suggest: `/plan-cascade:mega-resume --auto-prd`
 
 3. If NO but `mega-plan.json` exists:
-   - Run: `python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" both`
+   - Run: `uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" both`
    - This will generate the context file and display current state
 
 This ensures context recovery even after:
@@ -364,13 +364,13 @@ Generates mega-plan from project descriptions.
 
 ```bash
 # Validate mega-plan
-python3 mega_generator.py validate
+uv run python mega_generator.py validate
 
 # Show execution batches
-python3 mega_generator.py batches
+uv run python mega_generator.py batches
 
 # Show progress
-python3 mega_generator.py progress
+uv run python mega_generator.py progress
 ```
 
 ### mega_state.py
@@ -379,13 +379,13 @@ Thread-safe state management.
 
 ```bash
 # Read mega-plan
-python3 mega_state.py read-plan
+uv run python mega_state.py read-plan
 
 # Read status
-python3 mega_state.py read-status
+uv run python mega_state.py read-status
 
 # Sync from worktrees
-python3 mega_state.py sync-worktrees
+uv run python mega_state.py sync-worktrees
 ```
 
 ### feature_orchestrator.py
@@ -394,10 +394,10 @@ Orchestrates feature execution.
 
 ```bash
 # Show execution plan
-python3 feature_orchestrator.py plan
+uv run python feature_orchestrator.py plan
 
 # Show status
-python3 feature_orchestrator.py status
+uv run python feature_orchestrator.py status
 ```
 
 ### merge_coordinator.py
@@ -406,13 +406,13 @@ Coordinates final merge.
 
 ```bash
 # Verify all complete
-python3 merge_coordinator.py verify
+uv run python merge_coordinator.py verify
 
 # Show merge plan
-python3 merge_coordinator.py plan
+uv run python merge_coordinator.py plan
 
 # Complete (merge & cleanup)
-python3 merge_coordinator.py complete
+uv run python merge_coordinator.py complete
 ```
 
 ## Findings Management

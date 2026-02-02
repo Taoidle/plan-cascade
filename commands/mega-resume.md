@@ -59,7 +59,7 @@ The command auto-detects which mode is active and scans the appropriate director
 
 ```bash
 # Get mega-plan path from PathResolver
-MEGA_PLAN_PATH=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
 
 if [ ! -f "$MEGA_PLAN_PATH" ]; then
     echo "============================================"
@@ -105,7 +105,7 @@ For each feature in mega-plan.json:
 
 ```bash
 # Get worktree base directory from PathResolver
-WORKTREE_BASE=$(python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
+WORKTREE_BASE=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
 
 FEATURE_NAME="<feature-name>"
 WORKTREE_PATH="$WORKTREE_BASE/$FEATURE_NAME"
@@ -375,7 +375,7 @@ Once current batch is complete:
 After resuming, update the `.mega-execution-context.md` file for future recovery:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update
 ```
 
 This ensures the context file reflects the current resumed state.

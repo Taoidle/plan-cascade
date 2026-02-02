@@ -108,7 +108,7 @@ EOF
     # Create initial PRD template
     if [ -n "$task_description" ]; then
         print_msg "$BLUE" "Generating PRD from description..."
-        python3 "${SCRIPT_DIR}/prd-generate.py" "$task_description" > "${worktree_path}/prd.json" 2>/dev/null || true
+        uv run python "${SCRIPT_DIR}/prd-generate.py" "$task_description" > "${worktree_path}/prd.json" 2>/dev/null || true
         print_msg "$GREEN" "✓ PRD template created"
     fi
 

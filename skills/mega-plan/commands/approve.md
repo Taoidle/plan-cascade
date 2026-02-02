@@ -36,7 +36,7 @@ Use /mega:plan <description> to create one first.
 Validate before proceeding:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/mega_generator.py" validate
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/mega_generator.py" validate
 ```
 
 If validation fails, show errors and exit.
@@ -121,7 +121,7 @@ cp mega-findings.md .worktree/<feature-name>/mega-findings.md
 5. **Update execution context file:**
 ```bash
 # Generate/update .mega-execution-context.md for context recovery
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update
 ```
 
 This file helps AI recover parallel execution context after context compression.
@@ -130,8 +130,8 @@ This file helps AI recover parallel execution context after context compression.
 
 ```bash
 # Detect applicable framework skills for the project
-if command -v python3 &> /dev/null; then
-    python3 -c "
+if command -v uv &> /dev/null; then
+    uv run python -c "
 import sys
 sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/src')
 from plan_cascade.core.external_skill_loader import ExternalSkillLoader
