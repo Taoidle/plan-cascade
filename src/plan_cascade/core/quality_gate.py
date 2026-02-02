@@ -41,6 +41,7 @@ class GateType(Enum):
     TEST = "test"
     LINT = "lint"
     CUSTOM = "custom"
+    IMPLEMENTATION_VERIFY = "implementation_verify"
 
 
 class ProjectType(Enum):
@@ -84,6 +85,8 @@ class GateConfig:
     env: dict[str, str] = field(default_factory=dict)
     project_type: ProjectType | None = None  # Applicable project type for this gate
     incremental: bool = False  # If True, only check changed files
+    run_per_batch: bool = False  # If True, run once per batch instead of per story
+    confidence_threshold: float = 0.7  # For AI-powered gates like IMPLEMENTATION_VERIFY
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -98,6 +101,8 @@ class GateConfig:
             "working_dir": self.working_dir,
             "env": self.env,
             "incremental": self.incremental,
+            "run_per_batch": self.run_per_batch,
+            "confidence_threshold": self.confidence_threshold,
         }
         if self.project_type is not None:
             result["project_type"] = self.project_type.value
@@ -121,6 +126,8 @@ class GateConfig:
             env=data.get("env", {}),
             project_type=project_type,
             incremental=data.get("incremental", False),
+            run_per_batch=data.get("run_per_batch", False),
+            confidence_threshold=data.get("confidence_threshold", 0.7),
         )
 
 
@@ -753,12 +760,35 @@ class QualityGate:
     Supports auto-detection of project type and appropriate tools.
     """
 
+    # Base gate classes - ImplementationVerifyGate is loaded lazily to avoid circular imports
     GATE_CLASSES: dict[GateType, type] = {
         GateType.TYPECHECK: TypeCheckGate,
         GateType.TEST: TestGate,
         GateType.LINT: LintGate,
         GateType.CUSTOM: CustomGate,
     }
+
+    @classmethod
+    def _get_gate_class(cls, gate_type: GateType) -> type | None:
+        """
+        Get the gate class for a gate type, with lazy loading for special gates.
+
+        Args:
+            gate_type: The type of gate to get
+
+        Returns:
+            The gate class or None if not found
+        """
+        if gate_type in cls.GATE_CLASSES:
+            return cls.GATE_CLASSES[gate_type]
+
+        # Lazy load ImplementationVerifyGate to avoid circular imports
+        if gate_type == GateType.IMPLEMENTATION_VERIFY:
+            from .verification_gate import ImplementationVerifyGate
+            cls.GATE_CLASSES[GateType.IMPLEMENTATION_VERIFY] = ImplementationVerifyGate
+            return ImplementationVerifyGate
+
+        return None
 
     # Common subdirectory names for mixed projects
     SUBDIR_NAMES = ["frontend", "backend", "web", "api", "server", "client", "app", "src"]
@@ -908,10 +938,10 @@ class QualityGate:
         should_skip_remaining = False
 
         # Collect enabled gates for potential skipping
-        enabled_gates = [g for g in self.gates if g.enabled and self.GATE_CLASSES.get(g.type)]
+        enabled_gates = [g for g in self.gates if g.enabled and self._get_gate_class(g.type)]
 
         for gate_config in enabled_gates:
-            gate_class = self.GATE_CLASSES.get(gate_config.type)
+            gate_class = self._get_gate_class(gate_config.type)
             if not gate_class:
                 continue
 
@@ -994,7 +1024,7 @@ class QualityGate:
             if not gate_config.enabled:
                 continue
 
-            gate_class = self.GATE_CLASSES.get(gate_config.type)
+            gate_class = self._get_gate_class(gate_config.type)
             if not gate_class:
                 continue
 

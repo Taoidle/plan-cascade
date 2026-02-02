@@ -51,7 +51,7 @@
         "files": ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile"],
         "patterns": []
       },
-      "inject_into": ["implementation", "retry"],
+      "inject_into": ["planning", "implementation", "retry"],
       "priority": 30
     },
     "go-best-practices": {
@@ -81,7 +81,7 @@
         "files": ["tsconfig.json", "package.json"],
         "patterns": ["\"typescript\"", "\"@types/"]
       },
-      "inject_into": ["implementation", "retry"],
+      "inject_into": ["planning", "implementation", "retry"],
       "priority": 36
     },
     "react-best-practices": {
@@ -91,7 +91,7 @@
         "files": ["package.json"],
         "patterns": ["\"react\"", "\"next\"", "\"@react\""]
       },
-      "inject_into": ["implementation", "retry"],
+      "inject_into": ["planning", "implementation", "retry"],
       "priority": 100
     },
     "web-design-guidelines": {
@@ -111,7 +111,7 @@
         "files": ["package.json"],
         "patterns": ["\"vue\"", "\"nuxt\"", "\"@vue\""]
       },
-      "inject_into": ["implementation", "retry"],
+      "inject_into": ["planning", "implementation", "retry"],
       "priority": 100
     },
     "vue-router-best-practices": {
@@ -141,7 +141,7 @@
         "files": ["Cargo.toml"],
         "patterns": ["[package]", "[dependencies]"]
       },
-      "inject_into": ["implementation", "retry"],
+      "inject_into": ["planning", "implementation", "retry"],
       "priority": 100
     },
     "rust-ownership": {

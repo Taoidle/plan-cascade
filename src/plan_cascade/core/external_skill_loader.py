@@ -651,6 +651,98 @@ class ExternalSkillLoader:
         skills = self.get_skills_for_phase(phase)
         return self.format_skills_for_prompt(skills)
 
+    def get_planning_skills_summary(self) -> str:
+        """
+        Get skill summary optimized for PRD generation prompts.
+
+        Extracts planning-relevant content from skills (project structure,
+        patterns, architecture sections) and formats it for injection into
+        PRD generation prompts.
+
+        Returns:
+            Formatted string with planning guidance from detected skills,
+            or empty string if no planning skills are detected.
+        """
+        skills = self.get_skills_for_phase("planning")
+        if not skills:
+            return ""
+
+        lines = [
+            "## Framework-Specific Planning Guidance",
+            "",
+            "The following framework best practices should guide story decomposition:",
+            "",
+        ]
+
+        for skill in skills:
+            lines.append(f"### {skill.name.replace('-', ' ').title()}")
+            lines.append("")
+
+            # Extract planning-relevant sections from skill content
+            planning_content = self._extract_planning_content(skill.content)
+            lines.append(planning_content)
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _extract_planning_content(self, content: str) -> str:
+        """
+        Extract planning-relevant content from a skill's full content.
+
+        Focuses on sections about:
+        - Project structure and organization
+        - Architecture patterns
+        - Best practices for code organization
+        - Naming conventions
+        - Component/module patterns
+
+        Args:
+            content: Full skill content (from SKILL.md)
+
+        Returns:
+            Filtered content relevant to planning phase
+        """
+        # Keywords that indicate planning-relevant sections
+        planning_keywords = [
+            "structure", "architecture", "pattern", "organization",
+            "convention", "layout", "best practice", "component",
+            "module", "directory", "folder", "project setup",
+            "file structure", "naming", "design pattern",
+        ]
+
+        lines = content.split("\n")
+        result_lines: list[str] = []
+        in_relevant_section = False
+        current_header_level = 0
+
+        for line in lines:
+            # Check if this is a header
+            if line.startswith("#"):
+                header_level = len(line) - len(line.lstrip("#"))
+                header_text = line.lstrip("# ").lower()
+
+                # Check if header contains planning-relevant keywords
+                is_relevant = any(kw in header_text for kw in planning_keywords)
+
+                if is_relevant:
+                    in_relevant_section = True
+                    current_header_level = header_level
+                    result_lines.append(line)
+                elif in_relevant_section and header_level <= current_header_level:
+                    # Exited the relevant section
+                    in_relevant_section = False
+                elif in_relevant_section:
+                    result_lines.append(line)
+            elif in_relevant_section:
+                result_lines.append(line)
+
+        # If no specific sections found, return a condensed version
+        if not result_lines:
+            # Return first 50 lines as general guidance
+            return "\n".join(lines[:50])
+
+        return "\n".join(result_lines)
+
     def get_skills_summary(self, phase: str = "implementation") -> str:
         """Get a brief summary of loaded skills for display.
 

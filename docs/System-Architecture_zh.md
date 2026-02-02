@@ -2,8 +2,8 @@
 
 # Plan Cascade - 系统架构与流程设计
 
-**版本**: 4.3.0
-**最后更新**: 2026-02-01
+**版本**: 4.4.0
+**最后更新**: 2026-02-02
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
 
@@ -97,6 +97,7 @@ graph LR
 
     subgraph "质量层"
         QG[QualityGate<br/>质量门控]
+        VG[VerificationGate<br/>实现验证]
         RM[RetryManager<br/>重试管理器]
         GC[GateCache<br/>门控缓存]
         EP[ErrorParser<br/>错误解析器]
@@ -132,13 +133,14 @@ graph LR
 | **AgentExecutor** | Agent 执行抽象，支持多种 Agent |
 | **PhaseManager** | 阶段管理，根据阶段选择 Agent |
 | **QualityGate** | 质量门控，支持并行异步执行、快速失败、增量检查和缓存 |
+| **VerificationGate** | AI 驱动的实现验证，检测骨架代码并验证验收标准 |
 | **RetryManager** | 重试管理，处理失败重试，传递结构化错误上下文 |
 | **GateCache** | 门控结果缓存，基于 git commit + 工作树哈希，避免重复检查 |
 | **ErrorParser** | 结构化错误解析，支持 mypy、ruff、pytest、eslint、tsc，提取 ErrorInfo |
 | **ChangedFilesDetector** | 基于 Git 的变更检测，用于增量门控执行 |
 | **StateManager** | 状态管理，持久化执行状态 |
 | **ContextFilter** | 上下文过滤，优化 Agent 输入 |
-| **ExternalSkillLoader** | 三层技能加载（内置/外部/用户），自动检测并按优先级覆盖注入最佳实践 |
+| **ExternalSkillLoader** | 三层技能加载（内置/外部/用户），自动检测并按优先级覆盖注入最佳实践。支持阶段化注入（planning、implementation、retry） |
 
 ---
 
@@ -496,6 +498,16 @@ flowchart TD
 | React/Next.js | `package.json` 包含 `react`, `next` | `react-best-practices` (外部) |
 | Vue/Nuxt | `package.json` 包含 `vue`, `nuxt` | `vue-best-practices` (外部) |
 | Rust | 存在 `Cargo.toml` | `rust-coding-guidelines` (外部) |
+
+**技能注入阶段：**
+
+技能根据其 `inject_into` 配置注入到不同的执行阶段：
+
+| 阶段 | 说明 | 示例技能 |
+|------|------|----------|
+| `planning` | PRD 生成时注入，用于架构感知的 Story 创建 | `python-best-practices`, `typescript-best-practices`, `react-best-practices` |
+| `implementation` | Story 执行时注入，用于代码实现 | 所有检测到的技能 |
+| `retry` | 重试时注入，包含失败上下文 | 所有检测到的技能 |
 
 **用户配置 (`.plan-cascade/skills.json`)：**
 

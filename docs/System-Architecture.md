@@ -2,8 +2,8 @@
 
 # Plan Cascade - System Architecture and Workflow Design
 
-**Version**: 4.3.0
-**Last Updated**: 2026-02-01
+**Version**: 4.4.0
+**Last Updated**: 2026-02-02
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
 
@@ -97,6 +97,7 @@ graph LR
 
     subgraph "Quality Layer"
         QG[QualityGate<br/>Quality Gate]
+        VG[VerificationGate<br/>Implementation Verify]
         RM[RetryManager<br/>Retry Manager]
         GC[GateCache<br/>Gate Cache]
         EP[ErrorParser<br/>Error Parser]
@@ -132,13 +133,14 @@ graph LR
 | **AgentExecutor** | Agent execution abstraction, supports multiple Agents |
 | **PhaseManager** | Phase management, selects Agent based on phase |
 | **QualityGate** | Quality gates with parallel async execution, fail-fast, incremental checking, and caching support |
+| **VerificationGate** | AI-powered implementation verification, detects skeleton code and validates acceptance criteria |
 | **RetryManager** | Retry management, handles failure retries with structured error context |
 | **GateCache** | Gate result caching based on git commit + working tree hash, avoids redundant checks |
 | **ErrorParser** | Structured error parsing for mypy, ruff, pytest, eslint, tsc with ErrorInfo extraction |
 | **ChangedFilesDetector** | Git-based change detection for incremental gate execution |
 | **StateManager** | State management, persists execution state |
 | **ContextFilter** | Context filter, optimizes Agent input |
-| **ExternalSkillLoader** | Three-tier skill loading (builtin/external/user), auto-detects and injects best practices with priority-based override |
+| **ExternalSkillLoader** | Three-tier skill loading (builtin/external/user), auto-detects and injects best practices with priority-based override. Supports phase-based injection (planning, implementation, retry) |
 
 ---
 
@@ -496,6 +498,16 @@ flowchart TD
 | React/Next.js | `package.json` contains `react`, `next` | `react-best-practices` (external) |
 | Vue/Nuxt | `package.json` contains `vue`, `nuxt` | `vue-best-practices` (external) |
 | Rust | `Cargo.toml` exists | `rust-coding-guidelines` (external) |
+
+**Skill Injection Phases:**
+
+Skills are injected into different phases of execution based on their `inject_into` configuration:
+
+| Phase | Description | Example Skills |
+|-------|-------------|----------------|
+| `planning` | Injected during PRD generation for architecture-aware story creation | `python-best-practices`, `typescript-best-practices`, `react-best-practices` |
+| `implementation` | Injected during story execution for code implementation | All detected skills |
+| `retry` | Injected during retry attempts with failure context | All detected skills |
 
 **User Configuration (`.plan-cascade/skills.json`):**
 

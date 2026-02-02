@@ -198,6 +198,24 @@ class RetryManager:
                 "Run with appropriate privileges if needed",
             ],
         },
+        "verification_failure": {
+            "patterns": [
+                "Criterion not met",
+                "skeleton detected",
+                "SKELETON",
+                "NotImplementedError",
+                "pass  # TODO",
+                "raise NotImplementedError",
+                "missing implementation",
+                "Low confidence",
+            ],
+            "fixes": [
+                "Review acceptance criteria and ensure all are implemented",
+                "Remove skeleton code (pass, NotImplementedError, TODO)",
+                "Implement missing functionality from verification feedback",
+                "Replace placeholder return values with actual logic",
+            ],
+        },
     }
 
     def __init__(
@@ -455,6 +473,18 @@ class RetryManager:
                     fixes.append("Review failing test assertions and update implementation")
                 elif gate_type == "lint":
                     fixes.append("Fix lint issues - consider running the linter with --fix")
+                elif gate_type == "implementation_verify":
+                    fixes.append("Review verification feedback and complete implementation")
+                    # Check for skeleton code in structured errors
+                    for error in result.get("structured_errors", [])[:3]:
+                        error_code = error.get("code", "")
+                        if error_code == "SKELETON" or "skeleton" in error.get("message", "").lower():
+                            fixes.append("Replace skeleton code with actual implementation")
+                            break
+                    # Check for missing implementations
+                    error_summary = result.get("error_summary", "")
+                    if "Missing:" in error_summary:
+                        fixes.append("Implement all missing functionality listed in verification")
 
         return fixes
 
