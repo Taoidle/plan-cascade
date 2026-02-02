@@ -635,11 +635,16 @@ if HAS_TYPER:
         # Circular dependencies (errors)
         if result.circular_dependencies:
             console.print()
-            for cycle in result.circular_dependencies:
+            console.print(
+                f"[red][bold]CIRCULAR DEPENDENCIES DETECTED ({len(result.circular_dependencies)} cycle(s))[/bold][/red]"
+            )
+            console.print("[red]The following cycles must be resolved before execution:[/red]")
+            console.print()
+            for i, cycle in enumerate(result.circular_dependencies, 1):
                 cycle_str = " -> ".join(cycle)
-                console.print(
-                    f"[red]x[/red] [bold]Circular dependency detected:[/bold] {cycle_str}"
-                )
+                console.print(f"  [red]Cycle {i}:[/red] {cycle_str}")
+            console.print()
+            console.print("[dim]Tip: Break cycles by removing or reordering dependencies[/dim]")
 
         # Legend
         console.print()
@@ -733,6 +738,11 @@ if HAS_TYPER:
             "--check/--no-check",
             help="Check for dependency issues",
         ),
+        strict: bool = typer.Option(
+            False,
+            "--strict",
+            help="Exit with error code if circular dependencies are detected",
+        ),
     ) -> None:
         """
         Display dependency graph for PRD stories or mega-plan features.
@@ -749,6 +759,7 @@ if HAS_TYPER:
             plan-cascade deps --format flat
             plan-cascade deps --format json
             plan-cascade deps --no-critical-path --no-check
+            plan-cascade deps --strict  # Exit with error if cycles found
         """
         from .context import get_cli_context
 
@@ -800,11 +811,20 @@ if HAS_TYPER:
             if show_critical_path or check_issues:
                 _display_summary(result)
 
-            # Exit with error code if issues found and checking enabled
-            if check_issues and result.circular_dependencies:
+            # Handle circular dependencies
+            if result.circular_dependencies:
                 console.print()
-                _print_error("Dependency graph has circular dependencies!")
-                raise typer.Exit(1)
+                if strict:
+                    _print_error(
+                        f"Dependency graph has {len(result.circular_dependencies)} circular "
+                        f"dependency cycle(s). Use --no-strict to show warning only."
+                    )
+                    raise typer.Exit(1)
+                else:
+                    _print_warning(
+                        f"Found {len(result.circular_dependencies)} circular dependency cycle(s). "
+                        "These must be resolved before execution."
+                    )
 
         except FileNotFoundError as e:
             _print_error(str(e))

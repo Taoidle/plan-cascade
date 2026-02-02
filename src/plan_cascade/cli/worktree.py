@@ -12,6 +12,7 @@ Commands:
 """
 
 import json
+import logging
 import subprocess
 import sys
 import time
@@ -20,6 +21,8 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 try:
     import typer
@@ -230,7 +233,8 @@ class WorktreeManager:
             self._run_git_command(["rev-parse", "--verify", branch_name])
             raise ValueError(f"Branch '{branch_name}' already exists")
         except subprocess.CalledProcessError:
-            pass  # Branch doesn't exist, which is what we want
+            # Branch doesn't exist, which is what we want
+            logger.debug("Branch '%s' does not exist (expected for new worktree)", branch_name)
 
         # Create the worktree with a new branch
         self._run_git_command(
@@ -411,8 +415,11 @@ class WorktreeManager:
             try:
                 rel_path = cwd.relative_to(self.worktree_dir)
                 return rel_path.parts[0] if rel_path.parts else None
-            except ValueError:
-                pass
+            except ValueError as e:
+                logger.debug(
+                    "Could not get relative path from '%s' to worktree dir '%s': %s",
+                    cwd, self.worktree_dir, e
+                )
 
         # Check for .planning-config.json in current directory
         config_path = cwd / self.CONFIG_FILE_NAME
@@ -577,8 +584,10 @@ class WorktreeManager:
             # Try to abort merge if it failed
             try:
                 self._run_git_command(["merge", "--abort"], check=False)
-            except Exception:
-                pass
+            except Exception as abort_error:
+                logger.warning(
+                    "Failed to abort merge after merge failure: %s", abort_error
+                )
             return False, str(e.stderr or e)
 
     def _cleanup_worktree(
@@ -639,8 +648,10 @@ class WorktreeManager:
                 if info:
                     worktrees.append(info)
 
-        except subprocess.CalledProcessError:
-            pass
+        except subprocess.CalledProcessError as e:
+            logger.warning(
+                "Failed to list git worktrees: %s", e.stderr or e
+            )
 
         return worktrees
 
@@ -673,8 +684,10 @@ class WorktreeManager:
                 info.task_name = config.get("task_name", "")
                 info.target_branch = config.get("target_branch", "")
                 info.created_at = config.get("created_at", "")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to read planning config at '%s': %s", config_path, e
+                )
 
         # Try to read story progress from PRD
         prd_path = worktree_path / "prd.json"
@@ -691,8 +704,10 @@ class WorktreeManager:
                     info.progress_percentage = (
                         info.stories_complete / info.stories_total * 100
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to read PRD at '%s': %s", prd_path, e
+                )
 
         return info
 

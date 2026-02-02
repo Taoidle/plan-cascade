@@ -529,46 +529,305 @@ class DesignDocGenerator:
             return None
 
     def validate_design_doc(self, design_doc: dict) -> tuple[bool, list[str]]:
-        """Validate a design document for correctness."""
+        """
+        Validate a design document against the expected schema.
+
+        Performs comprehensive validation including:
+        - Required fields at each level
+        - Type checking for all fields
+        - Structural validation (arrays, nested objects)
+        - Level-specific requirements (project vs feature)
+        - Optional field graceful degradation
+
+        Args:
+            design_doc: The design document dictionary to validate
+
+        Returns:
+            Tuple of (is_valid, list of error messages with field paths)
+        """
         errors = []
 
-        # Check required sections
+        # Schema definitions for validation
+        METADATA_SCHEMA = {
+            "required": ["level", "source"],
+            "optional": ["created_at", "version", "prd_reference", "mega_plan_reference",
+                        "parent_design_doc", "feature_id"],
+            "types": {
+                "created_at": str,
+                "version": str,
+                "source": str,
+                "level": str,
+                "prd_reference": (str, type(None)),
+                "mega_plan_reference": (str, type(None)),
+                "parent_design_doc": (str, type(None)),
+                "feature_id": (str, type(None)),
+            }
+        }
+
+        OVERVIEW_SCHEMA = {
+            "required": ["title"],
+            "optional": ["summary", "goals", "non_goals"],
+            "types": {
+                "title": str,
+                "summary": str,
+                "goals": list,
+                "non_goals": list,
+            }
+        }
+
+        COMPONENT_SCHEMA = {
+            "required": ["name"],
+            "optional": ["description", "responsibilities", "dependencies", "files", "features"],
+            "types": {
+                "name": str,
+                "description": str,
+                "responsibilities": list,
+                "dependencies": list,
+                "files": list,
+                "features": list,
+            }
+        }
+
+        PATTERN_SCHEMA = {
+            "required": ["name"],
+            "optional": ["description", "rationale", "applies_to"],
+            "types": {
+                "name": str,
+                "description": str,
+                "rationale": str,
+                "applies_to": list,
+            }
+        }
+
+        DECISION_SCHEMA = {
+            "required": ["id", "title"],
+            "optional": ["context", "decision", "rationale", "alternatives_considered",
+                        "status", "applies_to"],
+            "types": {
+                "id": str,
+                "title": str,
+                "context": str,
+                "decision": str,
+                "rationale": str,
+                "alternatives_considered": list,
+                "status": str,
+                "applies_to": list,
+            }
+        }
+
+        API_SCHEMA = {
+            "required": ["method", "path"],
+            "optional": ["id", "description", "request_body", "response"],
+            "types": {
+                "id": str,
+                "method": str,
+                "path": str,
+                "description": str,
+                "request_body": dict,
+                "response": dict,
+            }
+        }
+
+        DATA_MODEL_SCHEMA = {
+            "required": ["name"],
+            "optional": ["description", "fields", "used_by"],
+            "types": {
+                "name": str,
+                "description": str,
+                "fields": dict,
+                "used_by": list,
+            }
+        }
+
+        def validate_field_type(value, expected_type, path: str) -> list[str]:
+            """Validate a field value against expected type(s)."""
+            if isinstance(expected_type, tuple):
+                if not isinstance(value, expected_type):
+                    type_names = " or ".join(t.__name__ if t != type(None) else "null"
+                                            for t in expected_type)
+                    return [f"{path}: expected {type_names}, got {type(value).__name__}"]
+            else:
+                if not isinstance(value, expected_type):
+                    return [f"{path}: expected {expected_type.__name__}, got {type(value).__name__}"]
+            return []
+
+        def validate_object(obj: dict, schema: dict, path: str) -> list[str]:
+            """Validate an object against a schema definition."""
+            errs = []
+
+            # Check required fields
+            for field in schema.get("required", []):
+                if field not in obj:
+                    errs.append(f"{path}.{field}: required field is missing")
+                elif obj[field] is None or obj[field] == "":
+                    errs.append(f"{path}.{field}: required field is empty")
+
+            # Type check all present fields
+            type_map = schema.get("types", {})
+            for field, value in obj.items():
+                if field in type_map and value is not None:
+                    field_path = f"{path}.{field}"
+                    errs.extend(validate_field_type(value, type_map[field], field_path))
+
+            return errs
+
+        def validate_array_of_objects(arr: list, item_schema: dict, path: str) -> list[str]:
+            """Validate an array of objects."""
+            errs = []
+            if not isinstance(arr, list):
+                errs.append(f"{path}: expected array, got {type(arr).__name__}")
+                return errs
+
+            for i, item in enumerate(arr):
+                item_path = f"{path}[{i}]"
+                if not isinstance(item, dict):
+                    errs.append(f"{item_path}: expected object, got {type(item).__name__}")
+                else:
+                    errs.extend(validate_object(item, item_schema, item_path))
+
+            return errs
+
+        # ========== Top-level validation ==========
+
+        # Validate metadata section
         if "metadata" not in design_doc:
-            errors.append("Missing 'metadata' section")
+            errors.append("metadata: required section is missing")
+        elif not isinstance(design_doc["metadata"], dict):
+            errors.append(f"metadata: expected object, got {type(design_doc['metadata']).__name__}")
         else:
-            if "level" not in design_doc["metadata"]:
-                errors.append("Missing 'level' in metadata")
-            if "source" not in design_doc["metadata"]:
-                errors.append("Missing 'source' in metadata")
+            errors.extend(validate_object(design_doc["metadata"], METADATA_SCHEMA, "metadata"))
 
+            # Validate level value
+            level = design_doc["metadata"].get("level", "")
+            if level and level not in ("project", "feature"):
+                errors.append(f"metadata.level: must be 'project' or 'feature', got '{level}'")
+
+        # Validate overview section
         if "overview" not in design_doc:
-            errors.append("Missing 'overview' section")
+            errors.append("overview: required section is missing")
+        elif not isinstance(design_doc["overview"], dict):
+            errors.append(f"overview: expected object, got {type(design_doc['overview']).__name__}")
         else:
-            if not design_doc["overview"].get("title"):
-                errors.append("Missing or empty 'title' in overview")
+            errors.extend(validate_object(design_doc["overview"], OVERVIEW_SCHEMA, "overview"))
 
+            # Validate goals/non_goals arrays contain strings
+            for list_field in ["goals", "non_goals"]:
+                if list_field in design_doc["overview"]:
+                    arr = design_doc["overview"][list_field]
+                    if isinstance(arr, list):
+                        for i, item in enumerate(arr):
+                            if not isinstance(item, str):
+                                errors.append(f"overview.{list_field}[{i}]: expected string, got {type(item).__name__}")
+
+        # Validate architecture section
         if "architecture" not in design_doc:
-            errors.append("Missing 'architecture' section")
-
-        if "decisions" not in design_doc:
-            errors.append("Missing 'decisions' section")
+            errors.append("architecture: required section is missing")
+        elif not isinstance(design_doc["architecture"], dict):
+            errors.append(f"architecture: expected object, got {type(design_doc['architecture']).__name__}")
         else:
+            arch = design_doc["architecture"]
+
+            # Validate components array
+            if "components" in arch:
+                errors.extend(validate_array_of_objects(
+                    arch["components"], COMPONENT_SCHEMA, "architecture.components"
+                ))
+
+            # Validate patterns array
+            if "patterns" in arch:
+                errors.extend(validate_array_of_objects(
+                    arch["patterns"], PATTERN_SCHEMA, "architecture.patterns"
+                ))
+
+            # Validate data_flow is string if present
+            if "data_flow" in arch and arch["data_flow"] is not None:
+                if not isinstance(arch["data_flow"], str):
+                    errors.append(f"architecture.data_flow: expected string, got {type(arch['data_flow']).__name__}")
+
+        # Validate interfaces section (optional but should be object if present)
+        if "interfaces" in design_doc:
+            if not isinstance(design_doc["interfaces"], dict):
+                errors.append(f"interfaces: expected object, got {type(design_doc['interfaces']).__name__}")
+            else:
+                interfaces = design_doc["interfaces"]
+
+                # Validate apis array
+                if "apis" in interfaces:
+                    errors.extend(validate_array_of_objects(
+                        interfaces["apis"], API_SCHEMA, "interfaces.apis"
+                    ))
+
+                # Validate data_models array
+                if "data_models" in interfaces:
+                    errors.extend(validate_array_of_objects(
+                        interfaces["data_models"], DATA_MODEL_SCHEMA, "interfaces.data_models"
+                    ))
+
+                # Validate shared_data_models array (project-level)
+                if "shared_data_models" in interfaces:
+                    errors.extend(validate_array_of_objects(
+                        interfaces["shared_data_models"], DATA_MODEL_SCHEMA, "interfaces.shared_data_models"
+                    ))
+
+        # Validate decisions section
+        if "decisions" not in design_doc:
+            errors.append("decisions: required section is missing")
+        elif not isinstance(design_doc["decisions"], list):
+            errors.append(f"decisions: expected array, got {type(design_doc['decisions']).__name__}")
+        else:
+            errors.extend(validate_array_of_objects(
+                design_doc["decisions"], DECISION_SCHEMA, "decisions"
+            ))
+
             # Validate ADR IDs are unique
             adr_ids = set()
-            for adr in design_doc["decisions"]:
-                adr_id = adr.get("id", "")
-                if adr_id in adr_ids:
-                    errors.append(f"Duplicate ADR ID: {adr_id}")
-                adr_ids.add(adr_id)
+            for i, adr in enumerate(design_doc["decisions"]):
+                if isinstance(adr, dict):
+                    adr_id = adr.get("id", "")
+                    if adr_id and adr_id in adr_ids:
+                        errors.append(f"decisions[{i}].id: duplicate ADR ID '{adr_id}'")
+                    adr_ids.add(adr_id)
+
+                    # Validate status values
+                    status = adr.get("status")
+                    if status and status not in ("accepted", "proposed", "deprecated", "superseded"):
+                        errors.append(f"decisions[{i}].status: invalid value '{status}', "
+                                     "expected one of: accepted, proposed, deprecated, superseded")
 
         # Level-specific validation
         level = design_doc.get("metadata", {}).get("level", "")
+
         if level == "project":
             if "feature_mappings" not in design_doc:
-                errors.append("Missing 'feature_mappings' section for project-level doc")
+                errors.append("feature_mappings: required for project-level document")
+            elif not isinstance(design_doc["feature_mappings"], dict):
+                errors.append(f"feature_mappings: expected object, got {type(design_doc['feature_mappings']).__name__}")
+            else:
+                # Validate each feature mapping
+                for feature_id, mapping in design_doc["feature_mappings"].items():
+                    if not isinstance(mapping, dict):
+                        errors.append(f"feature_mappings.{feature_id}: expected object, got {type(mapping).__name__}")
+                    else:
+                        for arr_field in ["components", "patterns", "decisions"]:
+                            if arr_field in mapping and not isinstance(mapping[arr_field], list):
+                                errors.append(f"feature_mappings.{feature_id}.{arr_field}: "
+                                            f"expected array, got {type(mapping[arr_field]).__name__}")
+
         elif level == "feature":
             if "story_mappings" not in design_doc:
-                errors.append("Missing 'story_mappings' section for feature-level doc")
+                errors.append("story_mappings: required for feature-level document")
+            elif not isinstance(design_doc["story_mappings"], dict):
+                errors.append(f"story_mappings: expected object, got {type(design_doc['story_mappings']).__name__}")
+            else:
+                # Validate each story mapping
+                for story_id, mapping in design_doc["story_mappings"].items():
+                    if not isinstance(mapping, dict):
+                        errors.append(f"story_mappings.{story_id}: expected object, got {type(mapping).__name__}")
+                    else:
+                        for arr_field in ["components", "decisions", "interfaces"]:
+                            if arr_field in mapping and not isinstance(mapping[arr_field], list):
+                                errors.append(f"story_mappings.{story_id}.{arr_field}: "
+                                            f"expected array, got {type(mapping[arr_field]).__name__}")
 
         return (len(errors) == 0, errors)
 

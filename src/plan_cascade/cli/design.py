@@ -359,6 +359,7 @@ if HAS_TYPER:
         project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed information"),
         json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+        skip_validation: bool = typer.Option(False, "--no-validate", help="Skip validation check"),
     ):
         """
         Display the current design document.
@@ -366,10 +367,14 @@ if HAS_TYPER:
         Shows the design document in a readable format with components,
         patterns, decisions, and mappings.
 
+        By default, validates the document and shows warnings for any issues.
+        Use --no-validate to skip validation.
+
         Examples:
             plan-cascade design show
             plan-cascade design show --verbose
             plan-cascade design show --json
+            plan-cascade design show --no-validate
         """
         project = _get_project_path(project_path)
 
@@ -390,6 +395,19 @@ if HAS_TYPER:
                 "Design Document",
                 f"Project: {project}"
             )
+
+            # Validate and show warnings (non-blocking)
+            if not skip_validation:
+                is_valid, errors = generator.validate_design_doc(design_doc)
+                if not is_valid:
+                    console.print(Panel(
+                        f"[yellow]Document has {len(errors)} validation issue{'s' if len(errors) > 1 else ''}.[/yellow]\n"
+                        f"[dim]Run 'plan-cascade design validate' for details.[/dim]",
+                        title="Validation Warning",
+                        border_style="yellow"
+                    ))
+                    console.print()
+
             _display_design_doc(design_doc, verbose=verbose)
 
     @design_app.command("review")
@@ -933,54 +951,151 @@ if HAS_TYPER:
     @design_app.command("validate")
     def validate(
         project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        json_output: bool = typer.Option(False, "--json", "-j", help="Output validation results as JSON"),
+        quiet: bool = typer.Option(False, "--quiet", "-q", help="Only output errors, no summary"),
+        file_path: Optional[str] = typer.Option(None, "--file", "-f", help="Validate a specific JSON file instead of design_doc.json"),
     ):
         """
-        Validate the current design document.
+        Validate a design document against the expected schema.
 
-        Checks for required sections, valid structure, and consistency.
+        Performs comprehensive validation including:
+        - Required fields at each level (metadata, overview, architecture, decisions)
+        - Type checking for all fields
+        - Structural validation (arrays, nested objects)
+        - Level-specific requirements (project vs feature)
+        - ADR ID uniqueness
+        - Status value validation
 
         Examples:
             plan-cascade design validate
+            plan-cascade design validate --json
+            plan-cascade design validate --file my-design.json
+            plan-cascade design validate --quiet
         """
         project = _get_project_path(project_path)
 
-        _print_header(
-            "Design Document Validation",
-            f"Project: {project}"
-        )
+        if not quiet and not json_output:
+            _print_header(
+                "Design Document Validation",
+                f"Project: {project}"
+            )
 
         from ..core.design_doc_generator import DesignDocGenerator
 
         generator = DesignDocGenerator(project)
-        design_doc = generator.load_design_doc()
 
-        if not design_doc:
-            _print_error("No design_doc.json found")
-            raise typer.Exit(1)
+        # Load from specific file or default design_doc.json
+        if file_path:
+            target_path = Path(file_path)
+            if not target_path.is_absolute():
+                target_path = project / target_path
+            if not target_path.exists():
+                if json_output:
+                    console.print(json.dumps({
+                        "valid": False,
+                        "errors": [f"File not found: {target_path}"],
+                        "summary": None
+                    }, indent=2))
+                else:
+                    _print_error(f"File not found: {target_path}")
+                raise typer.Exit(1)
+            try:
+                with open(target_path, encoding="utf-8") as f:
+                    design_doc = json.load(f)
+                if not quiet and not json_output:
+                    _print_info(f"Validating: {target_path}")
+            except json.JSONDecodeError as e:
+                if json_output:
+                    console.print(json.dumps({
+                        "valid": False,
+                        "errors": [f"Invalid JSON: {e}"],
+                        "summary": None
+                    }, indent=2))
+                else:
+                    _print_error(f"Invalid JSON in {target_path}: {e}")
+                raise typer.Exit(1)
+        else:
+            design_doc = generator.load_design_doc()
+            if not design_doc:
+                if json_output:
+                    console.print(json.dumps({
+                        "valid": False,
+                        "errors": ["No design_doc.json found"],
+                        "summary": None
+                    }, indent=2))
+                else:
+                    _print_error("No design_doc.json found")
+                raise typer.Exit(1)
 
         is_valid, errors = generator.validate_design_doc(design_doc)
+
+        # Build summary
+        metadata = design_doc.get("metadata", {})
+        arch = design_doc.get("architecture", {})
+        interfaces = design_doc.get("interfaces", {})
+        decisions = design_doc.get("decisions", [])
+
+        summary = {
+            "level": metadata.get("level", "unknown"),
+            "source": metadata.get("source", "unknown"),
+            "version": metadata.get("version", "unknown"),
+            "components": len(arch.get("components", [])) if isinstance(arch.get("components"), list) else 0,
+            "patterns": len(arch.get("patterns", [])) if isinstance(arch.get("patterns"), list) else 0,
+            "decisions": len(decisions) if isinstance(decisions, list) else 0,
+            "apis": len(interfaces.get("apis", [])) if isinstance(interfaces.get("apis"), list) else 0,
+            "data_models": len(interfaces.get("data_models", [])) if isinstance(interfaces.get("data_models"), list) else 0,
+        }
+
+        if json_output:
+            result = {
+                "valid": is_valid,
+                "errors": errors,
+                "summary": summary if is_valid else None
+            }
+            console.print(json.dumps(result, indent=2))
+            if not is_valid:
+                raise typer.Exit(1)
+            return
 
         if is_valid:
             _print_success("Design document is valid!")
 
-            # Show summary
-            console.print()
-            metadata = design_doc.get("metadata", {})
-            arch = design_doc.get("architecture", {})
-            interfaces = design_doc.get("interfaces", {})
-            decisions = design_doc.get("decisions", [])
-
-            console.print("[bold]Summary:[/bold]")
-            console.print(f"  Level: {metadata.get('level', 'unknown')}")
-            console.print(f"  Components: {len(arch.get('components', []))}")
-            console.print(f"  Patterns: {len(arch.get('patterns', []))}")
-            console.print(f"  Decisions: {len(decisions)}")
-            console.print(f"  APIs: {len(interfaces.get('apis', []))}")
-            console.print(f"  Data Models: {len(interfaces.get('data_models', []))}")
+            if not quiet:
+                # Show summary
+                console.print()
+                console.print("[bold]Summary:[/bold]")
+                console.print(f"  Level: {summary['level']}")
+                console.print(f"  Source: {summary['source']}")
+                console.print(f"  Version: {summary['version']}")
+                console.print(f"  Components: {summary['components']}")
+                console.print(f"  Patterns: {summary['patterns']}")
+                console.print(f"  Decisions: {summary['decisions']}")
+                console.print(f"  APIs: {summary['apis']}")
+                console.print(f"  Data Models: {summary['data_models']}")
         else:
-            _print_error("Design document validation failed:")
+            _print_error(f"Design document validation failed ({len(errors)} error{'s' if len(errors) > 1 else ''}):")
+            console.print()
+
+            # Group errors by section for better readability
+            section_errors: dict[str, list[str]] = {}
             for error in errors:
-                console.print(f"  [red]-[/red] {error}")
+                # Extract section from field path (e.g., "metadata.level" -> "metadata")
+                section = error.split(".")[0].split("[")[0]
+                if section not in section_errors:
+                    section_errors[section] = []
+                section_errors[section].append(error)
+
+            for section, section_errs in section_errors.items():
+                console.print(f"  [bold]{section}:[/bold]")
+                for error in section_errs:
+                    # Remove the section prefix for cleaner display
+                    display_error = error
+                    if error.startswith(f"{section}."):
+                        display_error = error[len(section) + 1:]
+                    elif error.startswith(f"{section}:"):
+                        display_error = error[len(section) + 1:].strip()
+                    console.print(f"    [red]-[/red] {display_error}")
+
             raise typer.Exit(1)
 
 else:

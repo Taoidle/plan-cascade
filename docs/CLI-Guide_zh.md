@@ -361,6 +361,12 @@ plan-cascade skills <subcommand> [options]
   show <name>           显示技能内容
   summary               显示将加载的技能
   validate              验证技能配置
+
+List 选项:
+  -v, --verbose         显示详细信息
+  -u, --check-updates   检查可用更新（需要网络）
+  -g, --group           按来源类型分组技能
+  -j, --json            以 JSON 格式输出
 ```
 
 示例：
@@ -368,6 +374,9 @@ plan-cascade skills <subcommand> [options]
 ```bash
 # 列出所有技能
 plan-cascade skills list --verbose
+
+# 检查更新
+plan-cascade skills list --check-updates
 
 # 检测适用技能
 plan-cascade skills detect --phase implementation
@@ -387,6 +396,7 @@ Options:
   -f, --format <type>    输出格式 (tree|flat|table|json)
   --critical-path        显示关键路径分析
   --check                检查依赖问题
+  --strict               检测到循环依赖时以错误码退出
   -p, --project <path>   项目路径
 ```
 

@@ -361,6 +361,12 @@ Subcommands:
   show <name>           Display skill content
   summary               Show skills that will be loaded
   validate              Validate skill configuration
+
+List Options:
+  -v, --verbose         Show detailed information
+  -u, --check-updates   Check for available updates (requires network)
+  -g, --group           Group skills by source type
+  -j, --json            Output as JSON
 ```
 
 Examples:
@@ -368,6 +374,9 @@ Examples:
 ```bash
 # List all skills
 plan-cascade skills list --verbose
+
+# Check for updates
+plan-cascade skills list --check-updates
 
 # Detect applicable skills
 plan-cascade skills detect --phase implementation
@@ -387,6 +396,7 @@ Options:
   -f, --format <type>    Output format (tree|flat|table|json)
   --critical-path        Show critical path analysis
   --check                Check for dependency issues
+  --strict               Exit with error code if circular dependencies detected
   -p, --project <path>   Project path
 ```
 

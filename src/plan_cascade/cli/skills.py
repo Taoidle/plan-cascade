@@ -12,8 +12,10 @@ Provides CLI commands for external skill management:
 - skills refresh: Refresh cached remote skills
 """
 
+import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 try:
     import typer
@@ -26,6 +28,15 @@ try:
     HAS_TYPER = True
 except ImportError:
     HAS_TYPER = False
+
+
+class VersionInfo(NamedTuple):
+    """Version information for a skill."""
+
+    current: str | None  # Currently installed version
+    available: str | None  # Latest available version
+    status: str  # "up-to-date", "update-available", "unknown"
+    update_command: str | None  # Command to update if outdated
 
 if HAS_TYPER:
     # Create Typer app for skills commands
@@ -94,6 +105,210 @@ if HAS_TYPER:
         }
         return ranges.get(source_type, "unknown")
 
+    def _get_submodule_current_version(submodule_path: Path) -> str | None:
+        """Get the current version (commit hash or tag) of a Git submodule.
+
+        Args:
+            submodule_path: Path to the submodule directory
+
+        Returns:
+            Version string (tag or short commit hash) or None if not available
+        """
+        if not submodule_path.exists():
+            return None
+
+        try:
+            # First try to get a tag pointing to the current commit
+            result = subprocess.run(
+                ["git", "describe", "--tags", "--exact-match", "HEAD"],
+                cwd=str(submodule_path),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+
+            # Fall back to short commit hash
+            result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(submodule_path),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+
+        return None
+
+    def _get_submodule_latest_version(submodule_path: Path) -> str | None:
+        """Get the latest available version (tag or commit) from remote.
+
+        Args:
+            submodule_path: Path to the submodule directory
+
+        Returns:
+            Latest version string or None if not available
+        """
+        if not submodule_path.exists():
+            return None
+
+        try:
+            # Fetch remote refs without updating
+            result = subprocess.run(
+                ["git", "ls-remote", "--tags", "--refs", "origin"],
+                cwd=str(submodule_path),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # Parse tags and find the latest semver-like tag
+                tags = []
+                for line in result.stdout.strip().split("\n"):
+                    if "\t" in line:
+                        _, ref = line.split("\t", 1)
+                        tag = ref.replace("refs/tags/", "")
+                        tags.append(tag)
+
+                if tags:
+                    # Sort tags, preferring semver-like versions
+                    def version_key(tag: str) -> tuple:
+                        # Remove 'v' prefix for sorting
+                        clean = tag.lstrip("v")
+                        parts = []
+                        for part in clean.split("."):
+                            try:
+                                parts.append((0, int(part)))
+                            except ValueError:
+                                parts.append((1, part))
+                        return parts
+
+                    tags.sort(key=version_key, reverse=True)
+                    return tags[0]
+
+            # If no tags, get latest commit on default branch
+            result = subprocess.run(
+                ["git", "ls-remote", "origin", "HEAD"],
+                cwd=str(submodule_path),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                commit_hash = result.stdout.strip().split()[0]
+                return commit_hash[:7]  # Short hash
+
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+
+        return None
+
+    def _get_skill_version_info(
+        skill_name: str,
+        skill_config: dict,
+        sources: dict,
+        plugin_root: Path,
+        check_remote: bool = False,
+    ) -> VersionInfo:
+        """Get version information for a skill.
+
+        Args:
+            skill_name: Name of the skill
+            skill_config: Skill configuration dict
+            sources: Sources configuration dict
+            plugin_root: Path to the plugin root
+            check_remote: Whether to check remote for latest version
+
+        Returns:
+            VersionInfo with current/available versions and status
+        """
+        source_name = skill_config.get("source", "")
+        source_config = sources.get(source_name, {})
+        source_type = source_config.get("type", "submodule")
+
+        current_version: str | None = None
+        available_version: str | None = None
+        update_command: str | None = None
+
+        if source_type == "builtin":
+            # Builtin skills use the Plan Cascade version
+            current_version = "bundled"
+            available_version = "bundled"
+            return VersionInfo(
+                current=current_version,
+                available=available_version,
+                status="up-to-date",
+                update_command=None,
+            )
+
+        elif source_type == "submodule":
+            source_path = source_config.get("path", "")
+            submodule_path = plugin_root / source_path
+
+            current_version = _get_submodule_current_version(submodule_path)
+
+            if check_remote:
+                available_version = _get_submodule_latest_version(submodule_path)
+            else:
+                available_version = current_version  # Assume up-to-date if not checking
+
+            update_command = "git submodule update --remote --merge"
+
+        elif source_type == "user":
+            # User skills may have version in config or manifest
+            user_version = skill_config.get("version")
+            if user_version:
+                current_version = user_version
+                available_version = user_version  # Can't check remote for user skills
+            else:
+                current_version = "custom"
+                available_version = "custom"
+
+            return VersionInfo(
+                current=current_version,
+                available=available_version,
+                status="up-to-date",
+                update_command=None,
+            )
+
+        # Determine status
+        if current_version is None:
+            status = "unknown"
+        elif available_version is None:
+            status = "unknown"
+        elif current_version == available_version:
+            status = "up-to-date"
+        else:
+            # Compare versions - check if available is newer
+            status = "update-available"
+
+        return VersionInfo(
+            current=current_version,
+            available=available_version,
+            status=status,
+            update_command=update_command if status == "update-available" else None,
+        )
+
+    def _get_version_badge(status: str) -> str:
+        """Get a styled badge for version status.
+
+        Args:
+            status: Version status string
+
+        Returns:
+            Rich-formatted status badge
+        """
+        badges = {
+            "up-to-date": "[green]UP-TO-DATE[/green]",
+            "update-available": "[yellow]UPDATE AVAILABLE[/yellow]",
+            "unknown": "[dim]UNKNOWN[/dim]",
+        }
+        return badges.get(status, f"[dim]{status}[/dim]")
+
     # ========== CLI Commands ==========
 
     @skills_app.command("list")
@@ -102,6 +317,7 @@ if HAS_TYPER:
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed information"),
         json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
         group_by_type: bool = typer.Option(False, "--group", "-g", help="Group skills by source type"),
+        check_updates: bool = typer.Option(False, "--check-updates", "-u", help="Check for available updates (requires network)"),
     ):
         """
         List all configured external skills.
@@ -116,6 +332,7 @@ if HAS_TYPER:
             plan-cascade skills list --group
             plan-cascade skills list --verbose
             plan-cascade skills list --json
+            plan-cascade skills list --check-updates
         """
         project = _get_project_path(project_path)
 
@@ -141,6 +358,14 @@ if HAS_TYPER:
 
         # Get skills grouped by type
         skills_by_type = loader.get_skills_by_type()
+        sources = config.get("sources", {})
+
+        # Track outdated skills for update suggestions
+        outdated_skills: list[tuple[str, str]] = []  # (skill_name, update_command)
+
+        if check_updates:
+            _print_info("Checking for updates (this may take a moment)...")
+            console.print()
 
         if group_by_type:
             # Display skills grouped by source type using Tree
@@ -168,7 +393,22 @@ if HAS_TYPER:
                 for skill_name, priority in skill_list:
                     skill_cfg = skills.get(skill_name, {})
                     inject_into = ", ".join(skill_cfg.get("inject_into", ["implementation"]))
-                    type_branch.add(f"[cyan]{skill_name}[/cyan] (priority: {priority}, phases: {inject_into})")
+
+                    # Get version info if checking updates
+                    version_str = ""
+                    if check_updates or verbose:
+                        version_info = _get_skill_version_info(
+                            skill_name, skill_cfg, sources, loader.plugin_root, check_remote=check_updates
+                        )
+                        if version_info.current:
+                            version_str = f" | v{version_info.current}"
+                            if check_updates and version_info.status == "update-available":
+                                version_str += f" -> {version_info.available}"
+                                version_str += f" {_get_version_badge(version_info.status)}"
+                                if version_info.update_command:
+                                    outdated_skills.append((skill_name, version_info.update_command))
+
+                    type_branch.add(f"[cyan]{skill_name}[/cyan] (priority: {priority}, phases: {inject_into}{version_str})")
 
             console.print(tree)
             console.print()
@@ -186,7 +426,11 @@ if HAS_TYPER:
             table.add_column("Priority", style="yellow", width=10, justify="right")
             table.add_column("Inject Into", style="dim", width=18)
 
-            if verbose:
+            if check_updates or verbose:
+                table.add_column("Version", width=12)
+                table.add_column("Status", width=18)
+
+            if verbose and not check_updates:
                 table.add_column("Detection", style="dim", width=25)
 
             # Get all skills with their info
@@ -203,7 +447,21 @@ if HAS_TYPER:
 
                 row = [skill_name, type_badge, source, priority, inject_into]
 
-                if verbose:
+                if check_updates or verbose:
+                    skill_cfg = skills.get(skill_name, {})
+                    version_info = _get_skill_version_info(
+                        skill_name, skill_cfg, sources, loader.plugin_root, check_remote=check_updates
+                    )
+                    version_display = version_info.current or "-"
+                    if check_updates and version_info.status == "update-available" and version_info.available:
+                        version_display = f"{version_info.current} -> {version_info.available}"
+                    row.append(version_display)
+                    row.append(_get_version_badge(version_info.status))
+
+                    if version_info.status == "update-available" and version_info.update_command:
+                        outdated_skills.append((skill_name, version_info.update_command))
+
+                if verbose and not check_updates:
                     skill_config = skills.get(skill_name, {})
                     detect = skill_config.get("detect", {})
                     files = detect.get("files", [])
@@ -227,8 +485,7 @@ if HAS_TYPER:
             count = len(skills_by_type.get(source_type, []))
             console.print(f"  {badge}: {range_str} ({count} skills)")
 
-        # Show sources
-        sources = config.get("sources", {})
+        # Show sources (sources variable already defined above)
         if sources and verbose:
             console.print()
             console.print("[bold]Skill Sources:[/bold]")
@@ -249,6 +506,28 @@ if HAS_TYPER:
             console.print(f"  Max skills per story: {settings.get('max_skills_per_story', 3)}")
             console.print(f"  Max content lines: {settings.get('max_content_lines', 200)}")
             console.print(f"  Cache enabled: {settings.get('cache_enabled', True)}")
+
+        # Show update suggestions if any skills are outdated
+        if outdated_skills:
+            console.print()
+            console.print(Panel(
+                "[yellow]Updates Available[/yellow]\n\n"
+                f"{len(outdated_skills)} skill(s) have updates available.\n\n"
+                "To update submodule skills, run:\n"
+                "[bold]git submodule update --remote --merge[/bold]",
+                title="Update Suggestions",
+                border_style="yellow",
+            ))
+
+            # Show individual skill update info if verbose
+            if verbose:
+                console.print()
+                console.print("[bold]Outdated Skills:[/bold]")
+                for skill_name, update_cmd in outdated_skills:
+                    console.print(f"  [yellow]-[/yellow] {skill_name}")
+        elif check_updates:
+            console.print()
+            _print_success("All skills are up to date!")
 
     @skills_app.command("detect")
     def detect_skills(

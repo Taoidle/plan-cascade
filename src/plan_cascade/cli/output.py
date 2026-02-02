@@ -5,6 +5,8 @@ Provides beautiful terminal output with progress bars, tables, panels, and style
 Uses the Rich library for all formatting.
 """
 
+import difflib
+import json
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -23,6 +25,7 @@ try:
         TimeElapsedColumn,
     )
     from rich.status import Status
+    from rich.syntax import Syntax
     from rich.table import Table
     from rich.text import Text
     from rich.tree import Tree
@@ -280,6 +283,143 @@ class OutputManager:
             print("-" * 60)
             for i, story in enumerate(stories, 1):
                 print(f"  {i}. [{story.get('status')}] {story.get('id')}: {story.get('title')}")
+            print()
+
+    def print_table(
+        self,
+        headers: list[str],
+        rows: list[list[Any]],
+        title: str | None = None
+    ) -> None:
+        """
+        Display data as a formatted table.
+
+        Args:
+            headers: List of column header strings
+            rows: List of rows, where each row is a list of cell values
+            title: Optional table title
+        """
+        if self.is_available:
+            table = Table(title=title)
+
+            for header in headers:
+                table.add_column(header, style="cyan")
+
+            for row in rows:
+                table.add_row(*[str(cell) for cell in row])
+
+            self.console.print(table)
+        else:
+            if title:
+                print(f"\n{title}")
+            # Calculate column widths
+            col_widths = [len(h) for h in headers]
+            for row in rows:
+                for i, cell in enumerate(row):
+                    if i < len(col_widths):
+                        col_widths[i] = max(col_widths[i], len(str(cell)))
+
+            # Print header
+            header_line = " | ".join(
+                h.ljust(col_widths[i]) for i, h in enumerate(headers)
+            )
+            print(header_line)
+            print("-" * len(header_line))
+
+            # Print rows
+            for row in rows:
+                row_line = " | ".join(
+                    str(cell).ljust(col_widths[i]) for i, cell in enumerate(row)
+                )
+                print(row_line)
+            print()
+
+    def print_json_pretty(
+        self,
+        data: Any,
+        title: str | None = None
+    ) -> None:
+        """
+        Pretty-print JSON data with syntax highlighting.
+
+        Args:
+            data: Data to serialize and display as JSON (dict, list, or any JSON-serializable object)
+            title: Optional title to display above the JSON
+        """
+        json_str = json.dumps(data, indent=2, ensure_ascii=False, default=str)
+
+        if self.is_available:
+            if title:
+                self.console.print(f"[bold]{title}[/bold]")
+
+            syntax = Syntax(json_str, "json", theme="monokai", line_numbers=False)
+            self.console.print(syntax)
+        else:
+            if title:
+                print(f"\n{title}")
+                print("-" * len(title))
+            print(json_str)
+            print()
+
+    def print_diff(
+        self,
+        old_content: str,
+        new_content: str,
+        title: str | None = None,
+        old_label: str = "old",
+        new_label: str = "new"
+    ) -> None:
+        """
+        Display a unified diff between two strings with color highlighting.
+
+        Args:
+            old_content: Original content string
+            new_content: Modified content string
+            title: Optional title to display above the diff
+            old_label: Label for the old content (default: "old")
+            new_label: Label for the new content (default: "new")
+        """
+        old_lines = old_content.splitlines(keepends=True)
+        new_lines = new_content.splitlines(keepends=True)
+
+        diff = list(difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=old_label,
+            tofile=new_label
+        ))
+
+        if not diff:
+            if self.is_available:
+                self.console.print("[dim]No differences found[/dim]")
+            else:
+                print("No differences found")
+            return
+
+        if self.is_available:
+            if title:
+                self.console.print(f"[bold]{title}[/bold]")
+
+            for line in diff:
+                line = line.rstrip('\n')
+                if line.startswith('+++'):
+                    self.console.print(f"[bold green]{escape(line)}[/bold green]")
+                elif line.startswith('---'):
+                    self.console.print(f"[bold red]{escape(line)}[/bold red]")
+                elif line.startswith('@@'):
+                    self.console.print(f"[cyan]{escape(line)}[/cyan]")
+                elif line.startswith('+'):
+                    self.console.print(f"[green]{escape(line)}[/green]")
+                elif line.startswith('-'):
+                    self.console.print(f"[red]{escape(line)}[/red]")
+                else:
+                    self.console.print(escape(line))
+        else:
+            if title:
+                print(f"\n{title}")
+                print("-" * len(title))
+            for line in diff:
+                print(line.rstrip('\n'))
             print()
 
     # ==================== Progress ====================

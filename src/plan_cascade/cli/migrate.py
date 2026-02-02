@@ -61,6 +61,17 @@ MIGRATION_STATE_FILE = ".migration-state.json"
 
 
 @dataclass
+class DryRunItem:
+    """Represents an item in the dry-run migration plan."""
+
+    source_path: Path
+    dest_path: Path
+    is_dir: bool
+    size: int
+    would_update: bool  # True if destination exists, False for new file
+
+
+@dataclass
 class MigrationResult:
     """Result of a migration operation."""
 
@@ -70,6 +81,7 @@ class MigrationResult:
     dirs_migrated: list[str] = field(default_factory=list)
     worktrees_moved: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    dry_run_items: list[DryRunItem] = field(default_factory=list)
 
 
 @dataclass
@@ -250,24 +262,38 @@ class MigrationManager:
             detected: List of detected files/directories
 
         Returns:
-            MigrationResult with preview information
+            MigrationResult with preview information including detailed dry-run items
         """
         target_dir = self.get_target_dir()
         files_migrated = []
         dirs_migrated = []
+        dry_run_items = []
 
         for item in detected:
             rel_path = item.path.name
+            dest_path = target_dir / rel_path
+            would_update = dest_path.exists()
+
+            # Create detailed dry-run item
+            dry_run_items.append(DryRunItem(
+                source_path=item.path,
+                dest_path=dest_path,
+                is_dir=item.is_dir,
+                size=item.size,
+                would_update=would_update,
+            ))
+
             if item.is_dir:
-                dirs_migrated.append(f"{rel_path}/ -> {target_dir / rel_path}")
+                dirs_migrated.append(f"{rel_path}/ -> {dest_path}")
             else:
-                files_migrated.append(f"{rel_path} -> {target_dir / rel_path}")
+                files_migrated.append(f"{rel_path} -> {dest_path}")
 
         return MigrationResult(
             success=True,
             message=f"DRY RUN: Would migrate {len(files_migrated)} files and {len(dirs_migrated)} directories to {target_dir}",
             files_migrated=files_migrated,
             dirs_migrated=dirs_migrated,
+            dry_run_items=dry_run_items,
         )
 
     def _create_backup(self, detected: list[DetectedFile]) -> MigrationResult:
@@ -801,7 +827,21 @@ if HAS_TYPER:
             elif dry_run:
                 # Dry run mode
                 output.print_info(f"DRY RUN: Checking migration for: {project}")
+                output.print(f"  [dim]Project ID:[/dim] {manager.get_project_id()}")
                 result = manager.migrate(dry_run=True)
+
+                # Display detailed dry-run report
+                if result.success and result.dry_run_items:
+                    _display_dry_run_report(output, result, manager.get_target_dir())
+                    output.print()
+                    output.print("[dim]No changes made. Run without --dry-run to perform migration.[/dim]")
+                    return
+                elif not result.success:
+                    output.print_error(result.message)
+                    raise typer.Exit(1)
+                else:
+                    output.print_success(result.message)
+                    return
             else:
                 # Normal migration
                 output.print_info(f"Migrating project: {project}")
@@ -823,14 +863,14 @@ if HAS_TYPER:
             else:
                 output.print_error(result.message)
 
-            # Show details
-            if result.files_migrated:
+            # Show details (for non-dry-run modes)
+            if result.files_migrated and not result.dry_run_items:
                 output.print()
                 output.print("[bold]Files:[/bold]")
                 for f in result.files_migrated:
                     output.print(f"  - {f}")
 
-            if result.dirs_migrated:
+            if result.dirs_migrated and not result.dry_run_items:
                 output.print()
                 output.print("[bold]Directories:[/bold]")
                 for d in result.dirs_migrated:
@@ -938,6 +978,104 @@ if HAS_TYPER:
             return f"{size / 1024:.1f} KB"
         else:
             return f"{size / (1024 * 1024):.1f} MB"
+
+    def _display_dry_run_report(output: "OutputManager", result: MigrationResult, target_dir: Path) -> None:
+        """
+        Display detailed dry-run migration plan.
+
+        Shows source/destination paths, file sizes, and create/update indicators.
+        """
+        if not result.dry_run_items:
+            output.print("[dim]No items to migrate.[/dim]")
+            return
+
+        output.print()
+        output.print("[bold cyan]Migration Plan[/bold cyan]")
+        output.print(f"[dim]Target directory:[/dim] {target_dir}")
+        output.print()
+
+        # Create table for migration items
+        if not output.is_available:
+            # Fallback for non-Rich output
+            total_size = 0
+            create_count = 0
+            update_count = 0
+
+            for item in result.dry_run_items:
+                action = "[UPDATE]" if item.would_update else "[CREATE]"
+                item_type = "dir" if item.is_dir else "file"
+                size_str = _format_size(item.size)
+                output.print(f"  {action} [{item_type}] {item.source_path.name} -> {item.dest_path} ({size_str})")
+                total_size += item.size
+                if item.would_update:
+                    update_count += 1
+                else:
+                    create_count += 1
+
+            output.print()
+            output.print(f"Summary: {len(result.dry_run_items)} items, {_format_size(total_size)} total")
+            output.print(f"  - {create_count} would be created")
+            output.print(f"  - {update_count} would be updated")
+            return
+
+        # Rich table output
+        table = Table(
+            show_header=True,
+            header_style="bold",
+            title="Files to Migrate",
+            title_style="bold white",
+        )
+        table.add_column("Action", style="cyan", width=8)
+        table.add_column("Type", style="dim", width=6)
+        table.add_column("Source", style="white")
+        table.add_column("Destination", style="green")
+        table.add_column("Size", justify="right", style="yellow")
+
+        total_size = 0
+        create_count = 0
+        update_count = 0
+
+        for item in result.dry_run_items:
+            if item.would_update:
+                action = "[yellow]UPDATE[/yellow]"
+                update_count += 1
+            else:
+                action = "[green]CREATE[/green]"
+                create_count += 1
+
+            item_type = "[blue]dir[/blue]" if item.is_dir else "[dim]file[/dim]"
+            size_str = _format_size(item.size)
+            total_size += item.size
+
+            # Show relative source path (just the name) and full destination
+            table.add_row(
+                action,
+                item_type,
+                item.source_path.name,
+                str(item.dest_path),
+                size_str,
+            )
+
+        console.print(table)
+
+        # Summary section
+        output.print()
+        summary_table = Table(
+            show_header=False,
+            box=None,
+            title="[bold]Summary[/bold]",
+            title_style="bold white",
+            title_justify="left",
+        )
+        summary_table.add_column("Label", style="dim")
+        summary_table.add_column("Value", style="white")
+
+        summary_table.add_row("Total items:", str(len(result.dry_run_items)))
+        summary_table.add_row("Total size:", _format_size(total_size))
+        summary_table.add_row("Would create:", f"[green]{create_count}[/green]")
+        summary_table.add_row("Would update:", f"[yellow]{update_count}[/yellow]")
+
+        console.print(summary_table)
 
 else:
     # Fallback when typer is not installed
