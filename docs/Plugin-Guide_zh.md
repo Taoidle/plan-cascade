@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**版本**: 4.3.3
+**版本**: 4.3.7
 **最后更新**: 2026-02-02
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
@@ -719,10 +719,7 @@ mega-complete → 清理计划文件
 # 禁用自动降级
 /plan-cascade:approve --agent=codex --no-fallback
 
-# 显式启用 AI 验证门
-/plan-cascade:approve --verify
-
-# 禁用 AI 验证门
+# 禁用 AI 验证门（默认启用）
 /plan-cascade:approve --no-verify
 
 # 禁用 AI 代码审查（默认启用）
@@ -817,9 +814,9 @@ mega-complete → 清理计划文件
 ```bash
 /plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # 创建 Worktree + PRD
 /plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD（无 Worktree）
-/plan-cascade:approve [--agent <name>] [--auto-run] [--verify] [--no-verify] [--no-review]  # 执行
+/plan-cascade:approve [--agent <name>] [--auto-run] [--no-verify] [--no-review]  # 执行
 /plan-cascade:hybrid-resume --auto                    # 恢复中断的执行
-/plan-cascade:auto-run [--mode <mode>] [--verify] [--no-verify] [--no-review]  # 自动迭代
+/plan-cascade:auto-run [--mode <mode>] [--no-verify] [--no-review]  # 自动迭代
 /plan-cascade:iteration-status [--verbose]            # 迭代状态
 /plan-cascade:agent-config [--action <action>]        # Agent 配置
 /plan-cascade:hybrid-status                           # 状态

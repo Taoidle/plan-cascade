@@ -1,5 +1,5 @@
 ---
-description: "Approve the current PRD and begin parallel story execution. Analyzes dependencies, creates execution batches, launches background Task agents for each story, and monitors progress. Usage: /plan-cascade:approve [--agent <name>] [--impl-agent <name>] [--retry-agent <name>] [--verify] [--verify-agent <name>] [--no-fallback] [--auto-run]"
+description: "Approve the current PRD and begin parallel story execution. Analyzes dependencies, creates execution batches, launches background Task agents for each story, and monitors progress. Usage: /plan-cascade:approve [--agent <name>] [--impl-agent <name>] [--retry-agent <name>] [--no-verify] [--verify-agent <name>] [--no-review] [--no-fallback] [--auto-run]"
 ---
 
 # Hybrid Ralph - Approve PRD and Execute
@@ -50,7 +50,7 @@ This command supports multiple AI agents for story execution. The system automat
 --retry-agent <name> Agent for retry phase (after failures)
 --no-fallback        Disable automatic fallback to claude-code
 --auto-run           Start execution immediately after approval
---verify             Enable AI verification gate after each batch
+--no-verify          Disable AI verification gate (enabled by default)
 --verify-agent <name> Agent for verification (default: claude-code task-tool)
 --no-review          Disable AI code review (enabled by default)
 --review-agent <name> Agent for code review (default: claude-code task-tool)
@@ -113,7 +113,7 @@ VERIFY_AGENT=""
 REVIEW_AGENT=""
 NO_FALLBACK=false
 AUTO_RUN=false
-ENABLE_VERIFY=false
+ENABLE_VERIFY=true   # Default: enabled
 ENABLE_REVIEW=true   # Default: enabled
 
 for arg in $ARGUMENTS; do
@@ -125,7 +125,7 @@ for arg in $ARGUMENTS; do
         --review-agent=*) REVIEW_AGENT="${arg#*=}" ;;
         --no-fallback) NO_FALLBACK=true ;;
         --auto-run) AUTO_RUN=true ;;
-        --verify) ENABLE_VERIFY=true ;;
+        --no-verify) ENABLE_VERIFY=false ;;
         --no-review) ENABLE_REVIEW=false ;;
     esac
 done
@@ -193,6 +193,39 @@ Read `prd.json` and validate:
 - All dependency references exist
 
 If validation fails, show errors and suggest `/plan-cascade:edit`.
+
+## Step 4.1: Apply PRD Quality Gate Configuration
+
+After reading prd.json, check for quality gate settings that override command-line defaults:
+
+```
+prd_content = Read("prd.json")
+prd = parse_json(prd_content)
+
+# Check PRD-level verification gate configuration
+# PRD config can DISABLE gates that are enabled by default
+If prd has "verification_gate" field:
+    If prd.verification_gate.enabled == false:
+        ENABLE_VERIFY = false
+        echo "Note: AI Verification disabled by PRD config"
+
+# Check PRD-level code review configuration
+If prd has "code_review" field:
+    If prd.code_review.enabled == false:
+        ENABLE_REVIEW = false
+        echo "Note: AI Code Review disabled by PRD config"
+
+# Command-line flags take final precedence (already parsed in Step 2)
+# --no-verify overrides PRD config to disable
+# --no-review overrides PRD config to disable
+```
+
+Display final quality gate configuration:
+```
+Quality Gates:
+  AI Verification: ${ENABLE_VERIFY ? "enabled" : "disabled"}
+  AI Code Review: ${ENABLE_REVIEW ? "enabled" : "disabled"}
+```
 
 ## Step 4.5: Check for Design Document (Optional)
 
@@ -599,9 +632,9 @@ For each failed_story in failed_stories:
         # Pause for manual intervention
 ```
 
-### 9.2.6: AI Verification Gate (Optional)
+### 9.2.6: AI Verification Gate (Default Enabled)
 
-If `--verify` flag is specified OR `verification_gate.enabled` in PRD is true, run AI verification for completed stories.
+If `ENABLE_VERIFY` is true (default), run AI verification for completed stories to ensure acceptance criteria are met and no skeleton code exists.
 
 **Verification Gate Types:**
 
@@ -615,6 +648,10 @@ If `--verify` flag is specified OR `verification_gate.enabled` in PRD is true, r
 For each completed story, launch a verification subagent:
 
 ```
+If ENABLE_VERIFY == false:
+    Skip verification for all stories
+    Continue to Step 9.2.7 (Code Review)
+
 For each completed_story in batch:
     story_id = completed_story.id
 
@@ -742,9 +779,9 @@ For each verify_failed_story:
         exit
 ```
 
-**Note**: AI verification is optional and disabled by default. Enable with:
-- Command flag: `/plan-cascade:approve --verify`
-- PRD config: `"verification_gate": {"enabled": true}`
+**Note**: AI verification is enabled by default. Disable with:
+- Command flag: `/plan-cascade:approve --no-verify`
+- PRD config: `"verification_gate": {"enabled": false}`
 
 ### 9.2.7: AI Code Review (Default Enabled)
 
@@ -755,11 +792,11 @@ If `ENABLE_REVIEW` is true (default), run code review for completed and verified
 For each story that passed verification (or if verification is disabled), launch a code review subagent:
 
 ```
-For each completed_story in batch:
-    If ENABLE_REVIEW == false:
-        Skip review for all stories
-        Continue to next batch
+If ENABLE_REVIEW == false:
+    Skip review for all stories
+    Continue to Step 9.3 (Next Batch)
 
+For each completed_story in batch:
     story_id = completed_story.id
 
     # Get git diff for this story's changes

@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.3.3
+**Version**: 4.3.7
 **Last Updated**: 2026-02-02
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
@@ -719,10 +719,7 @@ Configure in `prd.json`:
 # Disable auto-fallback
 /plan-cascade:approve --agent=codex --no-fallback
 
-# Enable AI verification gate explicitly
-/plan-cascade:approve --verify
-
-# Disable AI verification gate
+# Disable AI verification gate (enabled by default)
 /plan-cascade:approve --no-verify
 
 # Disable AI code review (enabled by default)
@@ -817,9 +814,9 @@ Configure in `prd.json`:
 ```bash
 /plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # Create worktree + PRD
 /plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD (no worktree)
-/plan-cascade:approve [--agent <name>] [--auto-run] [--verify] [--no-verify] [--no-review]  # Execute
+/plan-cascade:approve [--agent <name>] [--auto-run] [--no-verify] [--no-review]  # Execute
 /plan-cascade:hybrid-resume --auto                    # Resume interrupted execution
-/plan-cascade:auto-run [--mode <mode>] [--verify] [--no-verify] [--no-review]  # Auto-iteration
+/plan-cascade:auto-run [--mode <mode>] [--no-verify] [--no-review]  # Auto-iteration
 /plan-cascade:iteration-status [--verbose]            # Iteration status
 /plan-cascade:agent-config [--action <action>]        # Agent configuration
 /plan-cascade:hybrid-status                           # Status
