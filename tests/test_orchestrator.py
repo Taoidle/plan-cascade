@@ -6,6 +6,11 @@ from pathlib import Path
 
 from plan_cascade.core.orchestrator import Orchestrator, StoryAgent
 from plan_cascade.core.prd_generator import create_sample_prd
+from plan_cascade.core.stage_state import (
+    ExecutionStage,
+    StageStatus,
+    StageStateMachine,
+)
 
 
 class TestStoryAgent:
@@ -133,3 +138,154 @@ class TestOrchestrator:
         batches = orchestrator.analyze_dependencies()
 
         assert batches == []
+
+
+class TestOrchestratorWithStageMachine:
+    """Tests for Orchestrator integration with StageStateMachine."""
+
+    @pytest.fixture
+    def stage_machine(self) -> StageStateMachine:
+        """Create a stage machine ready for EXECUTE stage."""
+        machine = StageStateMachine(
+            execution_id="test-001",
+            strategy="hybrid_auto",
+            flow="standard",
+        )
+        # Complete prerequisite stages
+        for stage in [
+            ExecutionStage.INTAKE,
+            ExecutionStage.ANALYZE,
+            ExecutionStage.PLAN,
+            ExecutionStage.DESIGN,
+            ExecutionStage.READY_CHECK,
+        ]:
+            machine.start_stage(stage)
+            machine.complete_stage(stage, outputs={})
+        return machine
+
+    @pytest.fixture
+    def orchestrator_with_stage_machine(
+        self, tmp_path: Path, stage_machine: StageStateMachine
+    ) -> Orchestrator:
+        """Create orchestrator with sample PRD and stage machine."""
+        prd = create_sample_prd()
+        prd_path = tmp_path / "prd.json"
+        with open(prd_path, "w") as f:
+            json.dump(prd, f)
+
+        return Orchestrator(tmp_path, stage_machine=stage_machine)
+
+    def test_init_with_stage_machine(self, tmp_path: Path, stage_machine: StageStateMachine):
+        """Test Orchestrator initialization with stage machine."""
+        orchestrator = Orchestrator(tmp_path, stage_machine=stage_machine)
+
+        assert orchestrator.stage_machine is stage_machine
+        assert orchestrator.get_stage_status() is not None
+
+    def test_init_without_stage_machine(self, tmp_path: Path):
+        """Test Orchestrator initialization without stage machine (backward compatible)."""
+        orchestrator = Orchestrator(tmp_path)
+
+        assert orchestrator.stage_machine is None
+        assert orchestrator.get_stage_status() is None
+
+    def test_set_stage_machine(self, tmp_path: Path, stage_machine: StageStateMachine):
+        """Test setting stage machine after initialization."""
+        orchestrator = Orchestrator(tmp_path)
+        assert orchestrator.stage_machine is None
+
+        orchestrator.set_stage_machine(stage_machine)
+        assert orchestrator.stage_machine is stage_machine
+
+    def test_get_stage_status(
+        self, orchestrator_with_stage_machine: Orchestrator, stage_machine: StageStateMachine
+    ):
+        """Test getting stage status."""
+        status = orchestrator_with_stage_machine.get_stage_status()
+
+        assert status is not None
+        assert status["execution_id"] == "test-001"
+        assert status["strategy"] == "hybrid_auto"
+        assert status["completed_stages"] == 5
+
+    def test_execute_all_updates_stage_on_success(
+        self, orchestrator_with_stage_machine: Orchestrator, stage_machine: StageStateMachine
+    ):
+        """Test that execute_all updates EXECUTE stage on success."""
+        results = orchestrator_with_stage_machine.execute_all(dry_run=True)
+
+        assert results["success"] is True
+
+        # EXECUTE stage should be completed
+        execute_state = stage_machine.get_stage_state(ExecutionStage.EXECUTE)
+        assert execute_state.status == StageStatus.COMPLETED
+        assert "completed_stories" in execute_state.outputs
+        assert "batches_executed" in execute_state.outputs
+
+    def test_execute_all_without_stage_machine_works(self, tmp_path: Path):
+        """Test that execute_all works without stage machine (backward compatible)."""
+        prd = create_sample_prd()
+        prd_path = tmp_path / "prd.json"
+        with open(prd_path, "w") as f:
+            json.dump(prd, f)
+
+        orchestrator = Orchestrator(tmp_path)  # No stage machine
+
+        results = orchestrator.execute_all(dry_run=True)
+
+        assert results["success"] is True
+
+    def test_execute_batch_records_to_stage(
+        self, orchestrator_with_stage_machine: Orchestrator, stage_machine: StageStateMachine
+    ):
+        """Test that batch execution records results to stage outputs."""
+        # Start EXECUTE stage
+        stage_machine.start_stage(ExecutionStage.EXECUTE)
+
+        batches = orchestrator_with_stage_machine.analyze_dependencies()
+        batch = batches[0]
+
+        orchestrator_with_stage_machine.execute_batch(batch, 1, dry_run=True)
+
+        # Check batch results were recorded
+        execute_state = stage_machine.get_stage_state(ExecutionStage.EXECUTE)
+        assert "batch_results" in execute_state.outputs
+        assert "batch_1" in execute_state.outputs["batch_results"]
+        assert execute_state.outputs["batches_executed"] == 1
+
+    def test_execute_all_with_callback(
+        self, orchestrator_with_stage_machine: Orchestrator
+    ):
+        """Test execute_all with callback still works with stage machine."""
+        callbacks_received = []
+
+        def callback(batch_num, batch, results):
+            callbacks_received.append((batch_num, len(batch)))
+
+        results = orchestrator_with_stage_machine.execute_all(
+            dry_run=True, callback=callback
+        )
+
+        assert results["success"] is True
+        assert len(callbacks_received) > 0
+
+    def test_stage_status_shows_progress(
+        self, orchestrator_with_stage_machine: Orchestrator, stage_machine: StageStateMachine
+    ):
+        """Test that stage status reflects execution progress."""
+        # Before execution
+        status_before = orchestrator_with_stage_machine.get_stage_status()
+        assert status_before["current_stage"] is None  # EXECUTE not started
+
+        # During execution (start EXECUTE manually)
+        stage_machine.start_stage(ExecutionStage.EXECUTE)
+        status_during = orchestrator_with_stage_machine.get_stage_status()
+        assert status_during["current_stage"] == "execute"
+
+        # After execution
+        stage_machine.complete_stage(ExecutionStage.EXECUTE, outputs={
+            "completed_stories": ["story-001"],
+            "batches_executed": 1,
+        })
+        status_after = orchestrator_with_stage_machine.get_stage_status()
+        assert status_after["completed_stages"] == 6  # Previous 5 + EXECUTE
