@@ -6,6 +6,78 @@ description: "AI auto strategy executor. Analyzes task and automatically selects
 
 AI automatically analyzes the task and executes the optimal strategy without user confirmation.
 
+## Command-Line Flags
+
+The auto command supports the following flags to customize execution:
+
+### `--flow <quick|standard|full>`
+
+Override the automatically selected execution flow depth.
+
+| Flow | Description | Gate Mode | AI Verification | Confirm Required |
+|------|-------------|-----------|-----------------|------------------|
+| `quick` | Fastest path, minimal gating | soft | disabled | no |
+| `standard` | Balanced speed and quality (default) | soft | enabled | no |
+| `full` | Strict methodology + strict gating | hard | enabled + review | yes |
+
+**Usage:**
+```
+/plan-cascade:auto --flow full "Implement critical security feature"
+/plan-cascade:auto --flow quick "Fix typo in documentation"
+```
+
+### `--explain`
+
+Display detailed analysis results and decision rationale without executing.
+
+This flag shows:
+- **Key Factors**: scope, complexity, risk, parallelism assessment
+- **Strategy Decision**: selected strategy, flow, confidence score
+- **Confirmation Points**: questions for user review (if any)
+- **TDD Recommendation**: test-driven development guidance
+- **Estimates**: stories, features, duration, worktree usage
+
+**Usage:**
+```
+/plan-cascade:auto --explain "Build user authentication system"
+```
+
+The output is human-readable by default. For machine-readable JSON output, combine with `--json`:
+```
+/plan-cascade:auto --explain --json "Build user authentication system"
+```
+
+### `--confirm`
+
+Display confirmation points before execution and wait for user acknowledgment.
+
+When this flag is set:
+1. Analysis is performed and displayed
+2. Confirmation points are shown (if any exist)
+3. User must acknowledge before execution proceeds
+
+Confirmation points are generated when:
+- Low confidence (< 0.7): "Do you want to proceed with this strategy?"
+- High risk: "Have you considered rollback procedures?"
+- Architecture decisions needed: "Would you like to create a design document first?"
+
+**Usage:**
+```
+/plan-cascade:auto --confirm "Major refactoring of payment module"
+```
+
+### Combining Flags
+
+Flags can be combined for customized behavior:
+
+```
+# Analyze with full flow, show results, and wait for confirmation
+/plan-cascade:auto --flow full --explain --confirm "Critical database migration"
+
+# Quick analysis without execution
+/plan-cascade:auto --flow quick --explain "Simple config update"
+```
+
 ## Path Storage Modes
 
 Plan Cascade supports two path storage modes:
@@ -57,13 +129,35 @@ uv run python -c "print('Environment OK')" 2>/dev/null || echo "Warning: Run /pl
 uv run python -c "from plan_cascade.utils.gitignore import ensure_gitignore; from pathlib import Path; ensure_gitignore(Path.cwd())" 2>/dev/null || true
 ```
 
-## Step 1: Parse Task Description
+## Step 1: Parse Arguments and Flags
 
-Get the task description from user arguments:
+Parse user arguments to extract task description and optional flags:
 
 ```
-TASK_DESC="{{args}}"
+ARGS="{{args}}"
+
+# Parse flags from arguments
+FLOW_OVERRIDE = null     # --flow <quick|standard|full>
+EXPLAIN_MODE = false     # --explain
+CONFIRM_MODE = false     # --confirm
+JSON_OUTPUT = false      # --json
+
+# Extract flags using pattern matching:
+# --flow quick|standard|full -> FLOW_OVERRIDE = "quick" | "standard" | "full"
+# --explain -> EXPLAIN_MODE = true
+# --confirm -> CONFIRM_MODE = true
+# --json -> JSON_OUTPUT = true
+
+# Remove flags from ARGS to get TASK_DESC
+TASK_DESC = (ARGS with flags removed)
 ```
+
+Parse the arguments:
+1. Check for `--flow` followed by `quick`, `standard`, or `full`
+2. Check for `--explain` flag
+3. Check for `--confirm` flag
+4. Check for `--json` flag (only meaningful with --explain)
+5. Remaining text is the task description
 
 If no description provided, ask the user:
 ```
@@ -185,11 +279,34 @@ Produce a JSON analysis of your assessment:
   },
   "strategy_decision": {
     "strategy": "DIRECT|HYBRID_AUTO|HYBRID_WORKTREE|MEGA_PLAN",
+    "flow": "quick|standard|full",
     "confidence": 0.0-1.0,
-    "reasoning": "<explanation of why this strategy was chosen>"
+    "reasoning": "<explanation of why this strategy was chosen>",
+    "confirm_points": ["<point1>", "<point2>"],
+    "tdd_recommendation": "off|on|auto"
   }
 }
 ```
+
+### 3.2.1: Flow Selection Logic
+
+The execution flow is automatically selected based on analysis:
+
+| Condition | Flow | Rationale |
+|-----------|------|-----------|
+| `risk_level='low' AND confidence>0.85 AND estimated_stories<=2` | **QUICK** | Fast path for simple, confident tasks |
+| `risk_level='high' OR confidence<0.7 OR requires_architecture_decisions=true` | **FULL** | Extra safeguards for risky/uncertain tasks |
+| All other cases | **STANDARD** | Balanced approach (default) |
+
+If `FLOW_OVERRIDE` was set via `--flow` flag, use that instead of auto-selection.
+
+### 3.2.2: Confirmation Points Generation
+
+Generate 1-3 confirmation points when warranted:
+
+1. **Low confidence (< 0.7)**: "The analysis confidence is X%. Do you want to proceed with [strategy], or would you prefer a different approach?"
+2. **High risk**: "This task is identified as high-risk. [Worktree/rollback consideration]?"
+3. **Architecture decisions needed**: "Architecture decisions are required. [Design document consideration]?"
 
 ### 3.3: Strategy Selection Guide
 
@@ -232,7 +349,7 @@ Use this decision matrix based on your analysis:
 - Project-level scope (platform, system, infrastructure)
 - Significant parallelization benefit identified
 
-## Step 4: Display Analysis Result and Execute
+## Step 4: Display Analysis Result
 
 Display your structured analysis and selected strategy:
 
@@ -242,21 +359,75 @@ AUTO STRATEGY ANALYSIS
 ============================================================
 Task: {TASK_DESC}
 
-Analysis:
-  Functional Areas: {functional_areas}
-  Estimated Stories: {estimated_stories}
-  Has Dependencies: {has_dependencies}
-  Architecture Decisions: {requires_architecture_decisions}
-  Risk Level: {risk_level}
-  Parallelization: {parallelization_benefit}
+Key Factors:
+  Scope:        {scope}
+  Complexity:   {complexity}
+  Risk:         {risk_level}
+  Parallelism:  {parallelization_benefit}
 
-Decision:
-  Strategy: {STRATEGY}
-  Confidence: {confidence}
-  Reasoning: {reasoning}
+Strategy Decision:
+  Strategy:     {STRATEGY}
+  Flow:         {FLOW}
+  Confidence:   {confidence}
+  Reasoning:    {reasoning}
+
+Confirmation Points:
+  {confirm_points or "None"}
+
+TDD Recommendation:
+  {tdd_recommendation_description}
+
+Estimates:
+  Stories:      {estimated_stories}
+  Duration:     ~{duration} hours
+  Worktree:     {use_worktree ? "Yes" : "No"}
 ============================================================
+```
+
+### Step 4.1: Handle --explain Mode
+
+If `EXPLAIN_MODE = true`:
+
+1. Display the analysis output (as shown above)
+2. If `JSON_OUTPUT = true`, also output the JSON format for machine parsing
+3. **DO NOT EXECUTE** - exit after displaying analysis
+
+```
+Analysis complete. Use without --explain to execute.
+```
+
+### Step 4.2: Handle --confirm Mode
+
+If `CONFIRM_MODE = true` AND there are confirmation points:
+
+1. Display the analysis output
+2. Display confirmation points prominently:
+   ```
+   ============================================================
+   CONFIRMATION REQUIRED
+   ============================================================
+   Please review the following points before proceeding:
+
+   1. {confirm_point_1}
+   2. {confirm_point_2}
+   3. {confirm_point_3}
+
+   Reply with "proceed" or "yes" to continue, or provide feedback.
+   ============================================================
+   ```
+3. **WAIT for user response** before proceeding
+
+If user confirms, continue to Step 5. If user provides feedback, re-analyze with their input.
+
+### Step 4.3: Normal Execution
+
+If neither `EXPLAIN_MODE` nor `CONFIRM_MODE` (or no confirm points):
+
+```
 Executing...
 ```
+
+Proceed to Step 5.
 
 ## Step 5: Route to Appropriate Strategy (MANDATORY SKILL TOOL USAGE)
 
@@ -349,12 +520,20 @@ Skill(skill="plan-cascade:mega-plan", args="{TASK_DESC}")
 
 ## Strategy Summary Table
 
-| Strategy | Trigger | Execution |
-|----------|---------|-----------|
-| **DIRECT** | Simple fixes, single-file changes, trivial tasks | Execute immediately |
-| **HYBRID_AUTO** | Feature development keywords (no isolation) | Generate PRD, parallel stories |
-| **HYBRID_WORKTREE** | Feature keywords + isolation keywords | Isolated worktree + PRD |
-| **MEGA_PLAN** | Platform/system keywords or 3+ modules | Multi-feature orchestration |
+| Strategy | Trigger | Execution | Default Flow |
+|----------|---------|-----------|--------------|
+| **DIRECT** | Simple fixes, single-file changes, trivial tasks | Execute immediately | QUICK |
+| **HYBRID_AUTO** | Feature development keywords (no isolation) | Generate PRD, parallel stories | STANDARD |
+| **HYBRID_WORKTREE** | Feature keywords + isolation keywords | Isolated worktree + PRD | STANDARD/FULL |
+| **MEGA_PLAN** | Platform/system keywords or 3+ modules | Multi-feature orchestration | STANDARD/FULL |
+
+## Flow Summary Table
+
+| Flow | Gate Mode | AI Verification | Code Review | Test Enforcement | Use When |
+|------|-----------|-----------------|-------------|------------------|----------|
+| **QUICK** | soft | disabled | no | no | Low-risk, high-confidence, small tasks |
+| **STANDARD** | soft | enabled | no | no | Normal development (default) |
+| **FULL** | hard | enabled | required | required | High-risk, architecture decisions, low confidence |
 
 ## Examples
 
@@ -362,29 +541,60 @@ Skill(skill="plan-cascade:mega-plan", args="{TASK_DESC}")
 ```
 /plan-cascade:auto "Fix the typo in the README"
 ```
-**Detected**: "fix", "typo" -> DIRECT
+**Analysis**: scope=single_file, risk=low, confidence=0.9
+**Decision**: Strategy=DIRECT, Flow=QUICK
 **Action**: Execute fix directly
 
 ### Example 2: Hybrid Auto
 ```
 /plan-cascade:auto "Implement user authentication with login and registration"
 ```
-**Detected**: "implement", "authentication", "login", "registration" -> HYBRID_AUTO
+**Analysis**: scope=multiple_modules, risk=medium, confidence=0.8
+**Decision**: Strategy=HYBRID_AUTO, Flow=STANDARD
 **Action**: Route to `/plan-cascade:hybrid-auto`
 
-### Example 3: Hybrid Worktree
+### Example 3: Hybrid Worktree (High Risk)
 ```
 /plan-cascade:auto "Experimental refactoring of the payment module"
 ```
-**Detected**: "refactoring" (feature) + "experimental" (isolation) -> HYBRID_WORKTREE
+**Analysis**: scope=single_module, risk=high, confidence=0.7
+**Decision**: Strategy=HYBRID_WORKTREE, Flow=FULL
+**Confirm Points**: "This task is high-risk. Have you considered rollback procedures?"
 **Action**: Route to `/plan-cascade:hybrid-worktree`
 
 ### Example 4: Mega Plan
 ```
 /plan-cascade:auto "Build an e-commerce platform with users, products, cart, and orders"
 ```
-**Detected**: "platform" + 4 modules listed -> MEGA_PLAN
+**Analysis**: scope=cross_cutting, risk=medium, confidence=0.85
+**Decision**: Strategy=MEGA_PLAN, Flow=STANDARD
 **Action**: Route to `/plan-cascade:mega-plan`
+
+### Example 5: Using --explain Flag
+```
+/plan-cascade:auto --explain "Migrate database schema to new format"
+```
+**Output**: Full analysis displayed (key factors, strategy, flow, confirm points)
+**Action**: No execution - analysis only
+
+### Example 6: Using --flow Override
+```
+/plan-cascade:auto --flow full "Add new API endpoint for user preferences"
+```
+**Analysis**: Would normally select HYBRID_AUTO with STANDARD flow
+**Decision**: Strategy=HYBRID_AUTO, Flow=FULL (overridden)
+**Action**: Execute with strict gating and code review required
+
+### Example 7: Using --confirm for Critical Changes
+```
+/plan-cascade:auto --confirm "Refactor authentication to use OAuth2"
+```
+**Analysis**: scope=multiple_modules, risk=high, requires_architecture=true
+**Decision**: Strategy=HYBRID_AUTO, Flow=FULL
+**Confirm Points**:
+  1. "Architecture decisions are required. Would you like to create a design document first?"
+  2. "This task is high-risk. Have you considered rollback procedures?"
+**Action**: Wait for user confirmation before executing
 
 ## Recovery
 
@@ -402,9 +612,23 @@ This will:
 
 ## Notes
 
-- Strategy selection is fully automatic - no user confirmation required
+- Strategy selection is fully automatic - no user confirmation required (unless `--confirm` is used)
 - The AI performs structured complexity analysis, not keyword matching
 - Analysis considers scope, complexity, risk, and parallelization benefit
 - Existing planning files (prd.json, mega-plan.json) are detected but don't change strategy selection
 - For ambiguous cases (low confidence < 0.7), the AI errs on the side of simpler strategies
 - The JSON analysis is logged for debugging and can be reviewed in progress.txt
+
+### Flow Behavior Notes
+
+- **Flow auto-selection**: The flow is automatically chosen based on risk, confidence, and architecture requirements
+- **--flow override**: Users can override the auto-selected flow for more/less strict execution
+- **Confirmation points**: Generated automatically for low-confidence, high-risk, or architecture-heavy tasks
+- **--explain mode**: Useful for understanding what the AI would do without actually executing
+- **--confirm mode**: Recommended for critical changes to ensure human oversight
+
+### TDD Recommendations
+
+- **off**: For simple, low-risk changes (DIRECT strategy)
+- **on**: For high-risk tasks or FULL flow - write tests before implementation
+- **auto**: Let the executing agent decide based on context (default for STANDARD flow)

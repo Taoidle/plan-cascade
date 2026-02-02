@@ -5,9 +5,14 @@ Determines the appropriate execution strategy based on task complexity:
 - Direct: Simple tasks, single-story execution
 - Hybrid: Medium tasks, multi-story PRD with dependencies
 - Mega: Complex projects, multi-feature orchestration
+
+Also defines ExecutionFlow for workflow depth control:
+- Quick: Fastest path, minimal gating
+- Standard: Balanced speed and quality (default)
+- Full: Strict methodology + strict gating
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -17,6 +22,145 @@ class ExecutionStrategy(Enum):
     DIRECT = "direct"    # Simple task, execute directly
     HYBRID = "hybrid"    # Medium task, generate PRD with stories
     MEGA = "mega"        # Complex project, multi-feature with worktrees
+
+
+class ExecutionFlow(Enum):
+    """
+    Workflow depth configuration controlling the balance between speed and strictness.
+
+    Each flow level defines different gate modes, confirmation requirements,
+    and AI verification settings.
+    """
+    QUICK = "quick"
+    """
+    Fastest execution path with minimal gating.
+
+    Use cases:
+    - Low-risk tasks with high confidence
+    - Quick fixes and minor updates
+    - Tasks with <= 2 estimated stories
+
+    Configuration:
+    - Gate mode: soft (warnings only)
+    - Require confirm: False
+    - AI verification: Disabled
+    """
+
+    STANDARD = "standard"
+    """
+    Balanced approach between speed and quality (default).
+
+    Use cases:
+    - Medium complexity tasks
+    - Normal feature development
+    - Tasks with moderate risk
+
+    Configuration:
+    - Gate mode: soft (warnings only)
+    - Require confirm: False
+    - AI verification: Enabled
+    """
+
+    FULL = "full"
+    """
+    Strict methodology with comprehensive gating.
+
+    Use cases:
+    - High-risk or experimental changes
+    - Tasks requiring architecture decisions
+    - Low confidence situations (< 0.7)
+
+    Configuration:
+    - Gate mode: hard (blocking)
+    - Require confirm: True
+    - AI verification: Enabled + code review required
+    """
+
+
+@dataclass
+class FlowConfig:
+    """
+    Configuration for a specific execution flow.
+
+    Attributes:
+        gate_mode: Gate strictness - 'soft' (warnings) or 'hard' (blocking)
+        require_confirm: Whether to show confirmation points before execution
+        enable_ai_verification: Whether to run AI verification after stories
+        require_code_review: Whether code review is required before completion
+        enforce_test_changes: Whether test changes are mandatory for code changes
+    """
+    gate_mode: str  # "soft" or "hard"
+    require_confirm: bool
+    enable_ai_verification: bool
+    require_code_review: bool = False
+    enforce_test_changes: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "gate_mode": self.gate_mode,
+            "require_confirm": self.require_confirm,
+            "enable_ai_verification": self.enable_ai_verification,
+            "require_code_review": self.require_code_review,
+            "enforce_test_changes": self.enforce_test_changes,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FlowConfig":
+        """Create from dictionary."""
+        return cls(
+            gate_mode=data.get("gate_mode", "soft"),
+            require_confirm=data.get("require_confirm", False),
+            enable_ai_verification=data.get("enable_ai_verification", True),
+            require_code_review=data.get("require_code_review", False),
+            enforce_test_changes=data.get("enforce_test_changes", False),
+        )
+
+
+# Flow configurations for each ExecutionFlow level
+_FLOW_CONFIGS: dict[ExecutionFlow, FlowConfig] = {
+    ExecutionFlow.QUICK: FlowConfig(
+        gate_mode="soft",
+        require_confirm=False,
+        enable_ai_verification=False,
+        require_code_review=False,
+        enforce_test_changes=False,
+    ),
+    ExecutionFlow.STANDARD: FlowConfig(
+        gate_mode="soft",
+        require_confirm=False,
+        enable_ai_verification=True,
+        require_code_review=False,
+        enforce_test_changes=False,
+    ),
+    ExecutionFlow.FULL: FlowConfig(
+        gate_mode="hard",
+        require_confirm=True,
+        enable_ai_verification=True,
+        require_code_review=True,
+        enforce_test_changes=True,
+    ),
+}
+
+
+def get_flow_config(flow: ExecutionFlow) -> FlowConfig:
+    """
+    Get the configuration for a specific execution flow.
+
+    Args:
+        flow: The execution flow level
+
+    Returns:
+        FlowConfig with the appropriate settings for the flow level
+
+    Example:
+        >>> config = get_flow_config(ExecutionFlow.FULL)
+        >>> config.gate_mode
+        'hard'
+        >>> config.require_confirm
+        True
+    """
+    return _FLOW_CONFIGS[flow]
 
 
 @dataclass
