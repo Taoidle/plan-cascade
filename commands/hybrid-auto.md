@@ -320,18 +320,29 @@ You are a technical design specialist. Your task is to generate a design_doc.jso
 
 Launch this as a background task with `run_in_background: true`, then use TaskOutput to wait.
 
-## Step 5: Display PRD Review
+## Step 5: Display Unified Review
 
-Display a PRD review summary showing:
+**CRITICAL**: Use Bash to display the unified PRD + Design Document review:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode hybrid
+```
+
+This displays:
+- PRD summary with stories, priorities, and execution batches
+- Design document with components, patterns, and architectural decisions
+- Story-to-design mappings (showing which stories are linked to which components)
+- Warnings for any unmapped stories
+- Available next steps
+
+If the script is not available, display a manual summary showing:
 - Goal and objectives
 - All stories with IDs, titles, priorities
-- Dependency graph (ASCII)
-- Execution batches
 - Design document summary (components, patterns, decisions)
 
-## Step 6: Show Next Steps
+## Step 6: Confirm Generation Complete
 
-After displaying the PRD review, tell the user their options:
+After displaying the unified review, confirm:
 
 ```
 PRD and Design Document generated successfully!
@@ -339,12 +350,6 @@ PRD and Design Document generated successfully!
 Files created:
   - prd.json          (product requirements document)
   - design_doc.json   (technical design document)
-
-Next steps:
-  - /plan-cascade:approve - Approve PRD and start parallel execution
-  - /plan-cascade:edit - Edit PRD manually
-  - /plan-cascade:design-review - Review design document
-  - /plan-cascade:show-dependencies - View dependency graph
 ```
 
 ## Notes

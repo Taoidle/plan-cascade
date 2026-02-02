@@ -304,7 +304,22 @@ Options:
 
 Update `mega-plan.json` with the chosen mode.
 
-## Step 8: Display the Plan
+## Step 8: Display Unified Review
+
+**CRITICAL**: Use Bash to display the unified Mega-Plan + Design Document review:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode mega
+```
+
+This displays:
+- Mega-plan summary with features, priorities, and execution batches
+- Project-level design document with system architecture, components, and patterns
+- Feature-to-design mappings (showing which features use which components)
+- Warnings for any unmapped features
+- Available next steps
+
+If the script is not available, display a manual summary:
 
 ```
 ============================================================
@@ -325,11 +340,14 @@ Batch 1 (Parallel - No Dependencies):
 Batch 2 (After Batch 1):
   - feature-003: <title> [medium] (depends on: feature-001, feature-002)
 
-Batch 3 (After Batch 2):
-  - feature-004: <title> [medium] (depends on: feature-003)
-
 ============================================================
+```
 
+## Step 9: Show Files Created
+
+After unified review, confirm created files:
+
+```
 Files created:
   - mega-plan.json       (project plan - in user data dir or project root)
   - design_doc.json      (project-level technical design - in project root)
@@ -337,15 +355,6 @@ Files created:
   - .mega-status.json    (execution status - in .state/ dir or project root)
 
 Note: Use PathResolver to find exact file locations based on storage mode.
-
-Next steps:
-  1. Review the plan: Read mega-plan.json
-  2. Review the design: Read design_doc.json
-  3. Edit if needed: /plan-cascade:mega-edit
-  4. Start execution: /plan-cascade:mega-approve
-     Or with auto PRD approval: /plan-cascade:mega-approve --auto-prd
-
-============================================================
 ```
 
 ## Example

@@ -1,6 +1,6 @@
 {
   "name": "plan-cascade",
-  "version": "4.3.0",
+  "version": "4.3.1",
   "description": "AI-powered cascading development framework with design document system and multi-agent collaboration. Breaks down projects into Features (Mega Plan), Features into Stories (Hybrid Ralph), with auto-generated technical design docs, dependency-driven batch execution, Git Worktree isolation, and support for multiple AI agents (Codex, Amp, Aider, etc.).",
   "author": {
     "name": "Taoidle",

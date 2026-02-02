@@ -463,20 +463,29 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-remind
 
 This file helps AI recover execution context after context compression/truncation.
 
-## Step 14: Validate and Display PRD
+## Step 14: Display Unified Review
 
-After PRD is loaded or generated:
+**CRITICAL**: Use Bash to display the unified PRD + Design Document review:
 
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode hybrid
+```
+
+This displays:
+- PRD summary with stories, priorities, and execution batches
+- Design document with components, patterns, and architectural decisions
+- Story-to-design mappings (showing which stories are linked to which components)
+- Warnings for any unmapped stories
+- Available next steps
+
+If the script is not available, manually display:
 1. Read the `prd.json` file
 2. Validate the structure (check for required fields)
-3. Display a comprehensive PRD review showing:
-   - Goal and objectives
-   - All stories with IDs, titles, priorities
-   - Dependency graph (ASCII)
-   - Execution batches
-   - Acceptance criteria for each story
+3. Display PRD review with stories, dependency graph, execution batches
 
-## Step 15: Show Final Summary
+## Step 15: Show Worktree Summary
+
+After unified review, show worktree-specific information:
 
 ```
 ============================================================
@@ -490,27 +499,9 @@ Target: $TARGET_BRANCH
 ✓ PRD Ready: $PRD_SOURCE
 ✓ Design Document: $DESIGN_SOURCE
 
-Stories: {count}
-Batches: {batch_count}
-
-## Design Summary
-
-Components: {component_count}
-Patterns: {pattern_count}
-Decisions: {decision_count} (ADR-F###)
-{If inherited: "Inherited from project: {inherited_pattern_count} patterns, {inherited_decision_count} ADRs"}
-
-## Execution Plan
-
-{Show batches and story details}
-
 ============================================================
 
-NEXT STEPS:
-
-1. Review the PRD above
-2. Edit if needed: /plan-cascade:edit
-3. Approve to start execution: /plan-cascade:approve
+WORKTREE-SPECIFIC COMMANDS:
 
 When complete:
   /plan-cascade:hybrid-complete
