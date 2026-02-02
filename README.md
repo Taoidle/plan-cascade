@@ -9,7 +9,7 @@
 *Decompose complex projects into parallel executable tasks with multi-agent collaboration*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.3.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.3.2-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -225,14 +225,13 @@ plan-cascade/
 | DeepSeek | Yes | DeepSeek Chat/Coder |
 | Ollama | No | Local models |
 
-## What's New in v4.3.0
+## What's New in v4.3.2
 
-- **AI Verification Gate** — AI-powered implementation validation that checks code against acceptance criteria and detects skeleton code (enabled by default)
-- **Quality Gate Enhancements** — Parallel execution, caching, incremental checking, and structured error parsing
-- **Context Recovery Fix** — Fixed hybrid-auto mode context recovery after context compression/truncation
-- **Dual Path Detection** — prd.json now detected in both new mode and legacy locations
-- **Unified Context File Path** — Hybrid context files always written to project root for consistency
-- **Script Updates** — Both reminder scripts now support new path mode
+- **FORMAT Gate** — Auto-format code after story completion using ruff/prettier/cargo fmt/gofmt (PRE_VALIDATION phase)
+- **AI Code Review Gate** — 5-dimension code review: Code Quality (25pts), Naming & Clarity (20pts), Complexity (20pts), Pattern Adherence (20pts), Security (15pts)
+- **Three-Phase Gate Execution** — Gates now execute in PRE_VALIDATION → VALIDATION → POST_VALIDATION order
+- **--no-review Flag** — Disable AI code review (enabled by default)
+- **Gate Cache Invalidation** — Cache automatically invalidated after FORMAT gate modifies files
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

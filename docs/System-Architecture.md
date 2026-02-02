@@ -2,7 +2,7 @@
 
 # Plan Cascade - System Architecture and Workflow Design
 
-**Version**: 4.3.1
+**Version**: 4.3.2
 **Last Updated**: 2026-02-02
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
@@ -134,7 +134,9 @@ graph LR
 | **IterationLoop** | Auto-iteration loop, manages batch execution |
 | **AgentExecutor** | Agent execution abstraction, supports multiple Agents |
 | **PhaseManager** | Phase management, selects Agent based on phase |
-| **QualityGate** | Quality gates with parallel async execution, fail-fast, incremental checking, and caching support |
+| **QualityGate** | Quality gates with three-phase execution: PRE_VALIDATION (FORMAT), VALIDATION (TYPECHECK, TEST, LINT in parallel), POST_VALIDATION (CODE_REVIEW, IMPLEMENTATION_VERIFY). Supports fail-fast, incremental checking, and caching |
+| **FormatGate** | Code formatting gate (PRE_VALIDATION), auto-formats code using ruff/prettier/cargo fmt/gofmt based on project type. Supports check-only mode |
+| **CodeReviewGate** | AI-powered code review (POST_VALIDATION), evaluates 5 dimensions: Code Quality (25pts), Naming & Clarity (20pts), Complexity (20pts), Pattern Adherence (20pts), Security (15pts). Blocks on critical findings |
 | **VerificationGate** | AI-powered implementation verification, detects skeleton code and validates acceptance criteria |
 | **RetryManager** | Retry management, handles failure retries with structured error context |
 | **GateCache** | Gate result caching based on git commit + working tree hash, avoids redundant checks |
@@ -807,6 +809,8 @@ Options:
   --retry-agent <name>  Agent for retry phase
   --verify              Enable AI verification gate
   --verify-agent <name> Agent for verification (default: claude-code)
+  --no-review           Disable AI code review (enabled by default)
+  --review-agent <name> Agent for code review (default: claude-code)
   --no-fallback         Disable automatic fallback to claude-code
   --auto-run            Start execution immediately
 ```
@@ -866,10 +870,13 @@ flowchart TD
     subgraph "Step 9: Wait & Verify"
         W --> X[9.1: Wait via TaskOutput<br/>per story]
         X --> Y[9.2: Verify Completion<br/>Read progress.txt]
-        Y --> Z{--verify enabled?}
+        Y --> FMT[9.2.1: FORMAT Gate<br/>PRE_VALIDATION]
+        FMT --> QGV[9.2.2: TYPECHECK + TEST + LINT<br/>VALIDATION - Parallel]
+        QGV --> Z{--verify enabled?}
         Z -->|Yes| AA[9.2.6: AI Verification Gate<br/>Detect Skeleton Code]
-        Z -->|No| AB
-        AA --> AB{All Pass?}
+        Z -->|No| CR
+        AA --> CR[9.2.7: CODE_REVIEW Gate<br/>POST_VALIDATION]
+        CR --> AB{All Pass?}
         AB -->|No| AC[9.2.5: Retry with Different Agent<br/>+ Error Context]
         AC --> U
         AB -->|Yes| AD[9.3: Progress to Next Batch]
@@ -880,6 +887,27 @@ flowchart TD
     AE -->|Yes + Manual| AF[Ask User Confirmation]
     AF --> N
     AE -->|No| AG[Step 10: Show Final Status]
+```
+
+### Quality Gate Execution Order
+
+Quality gates execute in three phases:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ PRE_VALIDATION (sequential)                                      │
+│   └── FORMAT: Auto-format code (ruff/prettier/cargo fmt/gofmt)  │
+│       └── Invalidate cache after formatting                      │
+├─────────────────────────────────────────────────────────────────┤
+│ VALIDATION (parallel)                                            │
+│   ├── TYPECHECK: mypy/tsc/cargo check                           │
+│   ├── TEST: pytest/jest/cargo test                              │
+│   └── LINT: ruff/eslint/clippy                                  │
+├─────────────────────────────────────────────────────────────────┤
+│ POST_VALIDATION (parallel)                                       │
+│   ├── IMPLEMENTATION_VERIFY: AI skeleton code detection         │
+│   └── CODE_REVIEW: AI 5-dimension code review                   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### AI Verification Gate
@@ -896,6 +924,31 @@ Detection rules:
 - TODO/FIXME comments in new code
 - Placeholder return values without logic
 - Empty function/method bodies
+
+### AI Code Review Gate
+
+By default, AI code review runs for each completed story. Use `--no-review` to disable.
+
+**Review Dimensions (100 points total):**
+
+| Dimension | Points | Focus |
+|-----------|--------|-------|
+| Code Quality | 25 | Error handling, resource management, edge cases |
+| Naming & Clarity | 20 | Variable/function names, code readability |
+| Complexity | 20 | Cyclomatic complexity, nesting depth |
+| Pattern Adherence | 20 | Architecture patterns, design doc compliance |
+| Security | 15 | OWASP vulnerabilities, input validation |
+
+**Progress markers:**
+```
+[REVIEW_PASSED] story-001 - Score: 85/100
+[REVIEW_ISSUES] story-002 - Score: 60/100 - 2 critical findings
+```
+
+**Blocking conditions:**
+- Score below threshold (default: 70)
+- Critical severity findings (when `block_on_critical=true`)
+- Confidence below 0.7
 
 ### Agent Display in Progress
 
@@ -966,11 +1019,14 @@ flowchart TD
     Q -->|Timeout| S[Record Timeout Failure]
 
     R -->|No| T[Mark Complete]
-    R -->|Yes| U[Execute Quality Checks]
+    R -->|Yes| U[Execute Quality Gates]
 
-    U --> V{TypeCheck}
+    U --> FMT2{FORMAT<br/>PRE_VALIDATION}
+    FMT2 -->|✓| V{TypeCheck}
+    FMT2 -->|✗| X[Record Failure Details]
+
     V -->|✓| W{Tests}
-    V -->|✗| X[Record Failure Details]
+    V -->|✗| X
 
     W -->|✓| Y{Lint}
     W -->|✗| X
@@ -980,9 +1036,12 @@ flowchart TD
     Y -->|✗ but optional| VERIFY
 
     VERIFY -->|Yes| VGATE[AI Verification Gate]
-    VERIFY -->|No| T
-    VGATE -->|Pass| T
+    VERIFY -->|No| CR2
+    VGATE -->|Pass| CR2{CODE_REVIEW<br/>POST_VALIDATION}
     VGATE -->|Fail| X
+
+    CR2 -->|✓ or disabled| T
+    CR2 -->|✗ critical| X
 
     X --> Z{Can Retry?}
     S --> Z
@@ -1300,6 +1359,8 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 | `--retry-agent` | Retry phase agent | `--retry-agent=aider` |
 | `--verify` | Enable AI verification gate | `--verify` |
 | `--verify-agent` | Verification agent | `--verify-agent=claude-code` |
+| `--no-review` | Disable AI code review (enabled by default) | `--no-review` |
+| `--review-agent` | Code review agent | `--review-agent=claude-code` |
 | `--no-fallback` | Disable auto-fallback on failure | `--no-fallback` |
 
 **For `/plan-cascade:mega-approve` (feature execution):**

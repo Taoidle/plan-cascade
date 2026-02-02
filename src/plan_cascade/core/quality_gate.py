@@ -37,11 +37,20 @@ from .error_parser import (
 
 class GateType(Enum):
     """Types of quality gates."""
+    FORMAT = "format"
     TYPECHECK = "typecheck"
     TEST = "test"
     LINT = "lint"
     CUSTOM = "custom"
     IMPLEMENTATION_VERIFY = "implementation_verify"
+    CODE_REVIEW = "code_review"
+
+
+class GateGroup(Enum):
+    """Gate execution groups for ordering."""
+    PRE_VALIDATION = "pre_validation"      # Gates that run before validation (e.g., FORMAT)
+    VALIDATION = "validation"              # Main validation gates (TYPECHECK, TEST, LINT)
+    POST_VALIDATION = "post_validation"    # Gates that run after validation (e.g., CODE_REVIEW)
 
 
 class ProjectType(Enum):
@@ -88,6 +97,20 @@ class GateConfig:
     run_per_batch: bool = False  # If True, run once per batch instead of per story
     confidence_threshold: float = 0.7  # For AI-powered gates like IMPLEMENTATION_VERIFY
 
+    # FORMAT gate options
+    check_only: bool = False  # For FORMAT: --check mode (verify but don't modify)
+
+    # CODE_REVIEW gate options
+    review_dimensions: list[str] = field(default_factory=lambda: [
+        "code_quality",
+        "naming_clarity",
+        "complexity",
+        "pattern_adherence",
+        "security",
+    ])  # Dimensions to evaluate in code review
+    min_score: float = 0.7  # Minimum score (0.0-1.0) to pass code review
+    block_on_critical: bool = True  # Block on critical findings in code review
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         result = {
@@ -103,6 +126,10 @@ class GateConfig:
             "incremental": self.incremental,
             "run_per_batch": self.run_per_batch,
             "confidence_threshold": self.confidence_threshold,
+            "check_only": self.check_only,
+            "review_dimensions": self.review_dimensions,
+            "min_score": self.min_score,
+            "block_on_critical": self.block_on_critical,
         }
         if self.project_type is not None:
             result["project_type"] = self.project_type.value
@@ -114,6 +141,16 @@ class GateConfig:
         project_type = None
         if "project_type" in data and data["project_type"] is not None:
             project_type = ProjectType(data["project_type"])
+
+        # Default review dimensions
+        default_dimensions = [
+            "code_quality",
+            "naming_clarity",
+            "complexity",
+            "pattern_adherence",
+            "security",
+        ]
+
         return cls(
             name=data["name"],
             type=GateType(data["type"]),
@@ -128,6 +165,10 @@ class GateConfig:
             incremental=data.get("incremental", False),
             run_per_batch=data.get("run_per_batch", False),
             confidence_threshold=data.get("confidence_threshold", 0.7),
+            check_only=data.get("check_only", False),
+            review_dimensions=data.get("review_dimensions", default_dimensions),
+            min_score=data.get("min_score", 0.7),
+            block_on_critical=data.get("block_on_critical", True),
         )
 
 
@@ -709,6 +750,144 @@ class LintGate(Gate):
         return []
 
 
+class FormatGate(Gate):
+    """Format gate supporting ruff format, prettier, cargo fmt, gofmt."""
+
+    # File extensions handled by this gate type
+    FILE_EXTENSIONS: dict[ProjectType, list[str]] = {
+        ProjectType.PYTHON: [".py"],
+        ProjectType.NODEJS: [".ts", ".tsx", ".js", ".jsx", ".json", ".css", ".scss"],
+        ProjectType.RUST: [".rs"],
+        ProjectType.GO: [".go"],
+    }
+
+    # Commands by project type
+    COMMANDS: dict[ProjectType, list[str]] = {
+        ProjectType.PYTHON: ["ruff", "format", "."],
+        ProjectType.NODEJS: ["npx", "prettier", "--write", "."],
+        ProjectType.RUST: ["cargo", "fmt"],
+        ProjectType.GO: ["gofmt", "-w", "."],
+    }
+
+    # Check-only commands (for --check mode)
+    CHECK_COMMANDS: dict[ProjectType, list[str]] = {
+        ProjectType.PYTHON: ["ruff", "format", "--check", "."],
+        ProjectType.NODEJS: ["npx", "prettier", "--check", "."],
+        ProjectType.RUST: ["cargo", "fmt", "--check"],
+        ProjectType.GO: ["gofmt", "-l", "."],  # -l lists files that would be formatted
+    }
+
+    # Fallback commands
+    FALLBACK_COMMANDS: dict[ProjectType, list[list[str]]] = {
+        ProjectType.PYTHON: [
+            ["black", "."],
+            ["python", "-m", "black", "."],
+        ],
+        ProjectType.NODEJS: [
+            ["./node_modules/.bin/prettier", "--write", "."],
+        ],
+    }
+
+    # Fallback check commands
+    FALLBACK_CHECK_COMMANDS: dict[ProjectType, list[list[str]]] = {
+        ProjectType.PYTHON: [
+            ["black", "--check", "."],
+            ["python", "-m", "black", "--check", "."],
+        ],
+        ProjectType.NODEJS: [
+            ["./node_modules/.bin/prettier", "--check", "."],
+        ],
+    }
+
+    # Gate group for ordering
+    GATE_GROUP = GateGroup.PRE_VALIDATION
+
+    def execute(self, story_id: str, context: dict[str, Any]) -> GateOutput:
+        """Execute code formatting."""
+        project_type = context.get("project_type", ProjectType.UNKNOWN)
+        check_only = self.config.check_only if hasattr(self.config, 'check_only') else False
+        checked_files: list[str] | None = None
+
+        # Check for incremental mode
+        changed_files = self._get_changed_files_for_gate(project_type, context)
+        if changed_files is not None:
+            if not changed_files:
+                return self._create_skipped_output(
+                    "No formattable files changed, skipping format",
+                    checked_files=[],
+                )
+            checked_files = changed_files
+
+        # Get command based on check_only mode
+        if self.config.command:
+            command = [self.config.command] + self.config.args
+        elif check_only:
+            command = list(self.CHECK_COMMANDS.get(project_type, ["echo", "No formatter configured"]))
+        else:
+            command = list(self.COMMANDS.get(project_type, ["echo", "No formatter configured"]))
+
+        # In incremental mode, replace "." with specific files
+        if checked_files and project_type in [ProjectType.PYTHON, ProjectType.NODEJS, ProjectType.GO]:
+            if "." in command:
+                command.remove(".")
+            command.extend(checked_files)
+
+        command_str = " ".join(command)
+        exit_code, stdout, stderr, duration = self._run_command(command)
+
+        # Try fallbacks if primary fails with "not found"
+        if exit_code == -1 and "not found" in stderr.lower():
+            fallback_list = (
+                self.FALLBACK_CHECK_COMMANDS if check_only else self.FALLBACK_COMMANDS
+            )
+            fallbacks = fallback_list.get(project_type, [])
+            for fallback in fallbacks:
+                fallback_cmd = list(fallback)
+                # Apply incremental mode to fallback
+                if checked_files and project_type in [ProjectType.PYTHON, ProjectType.NODEJS, ProjectType.GO]:
+                    if "." in fallback_cmd:
+                        fallback_cmd.remove(".")
+                    fallback_cmd.extend(checked_files)
+
+                exit_code, stdout, stderr, duration = self._run_command(fallback_cmd)
+                if exit_code != -1:
+                    command_str = " ".join(fallback_cmd)
+                    break
+
+        # For gofmt -l, exit code 0 but non-empty stdout means files need formatting
+        if not check_only:
+            # Format mode - exit code 0 means success
+            passed = exit_code == 0
+        else:
+            # Check mode - for gofmt, check stdout
+            if project_type == ProjectType.GO and exit_code == 0 and stdout.strip():
+                passed = False
+                stderr = f"Files need formatting:\n{stdout}"
+            else:
+                passed = exit_code == 0
+
+        # Generate error summary for failed formatting
+        error_summary = None
+        if not passed:
+            if stderr:
+                error_summary = stderr[:500]
+            elif stdout:
+                error_summary = f"Formatting issues: {stdout[:500]}"
+
+        return GateOutput(
+            gate_name=self.config.name,
+            gate_type=GateType.FORMAT,
+            passed=passed,
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            duration_seconds=duration,
+            command=command_str,
+            error_summary=error_summary,
+            checked_files=checked_files,
+        )
+
+
 class CustomGate(Gate):
     """Custom gate for user-defined scripts."""
 
@@ -760,12 +939,24 @@ class QualityGate:
     Supports auto-detection of project type and appropriate tools.
     """
 
-    # Base gate classes - ImplementationVerifyGate is loaded lazily to avoid circular imports
+    # Base gate classes - ImplementationVerifyGate and CodeReviewGate are loaded lazily
     GATE_CLASSES: dict[GateType, type] = {
+        GateType.FORMAT: FormatGate,
         GateType.TYPECHECK: TypeCheckGate,
         GateType.TEST: TestGate,
         GateType.LINT: LintGate,
         GateType.CUSTOM: CustomGate,
+    }
+
+    # Gate group assignments for execution ordering
+    GATE_GROUPS: dict[GateType, GateGroup] = {
+        GateType.FORMAT: GateGroup.PRE_VALIDATION,
+        GateType.TYPECHECK: GateGroup.VALIDATION,
+        GateType.TEST: GateGroup.VALIDATION,
+        GateType.LINT: GateGroup.VALIDATION,
+        GateType.CUSTOM: GateGroup.VALIDATION,
+        GateType.IMPLEMENTATION_VERIFY: GateGroup.POST_VALIDATION,
+        GateType.CODE_REVIEW: GateGroup.POST_VALIDATION,
     }
 
     @classmethod
@@ -788,7 +979,53 @@ class QualityGate:
             cls.GATE_CLASSES[GateType.IMPLEMENTATION_VERIFY] = ImplementationVerifyGate
             return ImplementationVerifyGate
 
+        # Lazy load CodeReviewGate to avoid circular imports
+        if gate_type == GateType.CODE_REVIEW:
+            from .code_review_gate import CodeReviewGate
+            cls.GATE_CLASSES[GateType.CODE_REVIEW] = CodeReviewGate
+            return CodeReviewGate
+
         return None
+
+    @classmethod
+    def _get_gate_group(cls, gate_type: GateType) -> GateGroup:
+        """
+        Get the execution group for a gate type.
+
+        Args:
+            gate_type: The type of gate
+
+        Returns:
+            The gate's execution group (defaults to VALIDATION)
+        """
+        return cls.GATE_GROUPS.get(gate_type, GateGroup.VALIDATION)
+
+    def _group_gates_by_execution_order(
+        self,
+        gates: list[GateConfig],
+    ) -> dict[GateGroup, list[GateConfig]]:
+        """
+        Group gates by their execution order.
+
+        Args:
+            gates: List of gate configurations
+
+        Returns:
+            Dictionary mapping GateGroup to list of gates in that group
+        """
+        groups: dict[GateGroup, list[GateConfig]] = {
+            GateGroup.PRE_VALIDATION: [],
+            GateGroup.VALIDATION: [],
+            GateGroup.POST_VALIDATION: [],
+        }
+
+        for gate_config in gates:
+            if not gate_config.enabled:
+                continue
+            group = self._get_gate_group(gate_config.type)
+            groups[group].append(gate_config)
+
+        return groups
 
     # Common subdirectory names for mixed projects
     SUBDIR_NAMES = ["frontend", "backend", "web", "api", "server", "client", "app", "src"]
@@ -991,17 +1228,19 @@ class QualityGate:
         context: dict[str, Any] | None = None,
     ) -> dict[str, GateOutput]:
         """
-        Execute all enabled gates in parallel.
+        Execute all enabled gates in ordered groups with parallel execution within groups.
 
-        Uses asyncio.gather() to run all gates concurrently. Each gate's
-        execute_async() method wraps the synchronous subprocess call with
-        asyncio.to_thread() for true parallel execution.
+        Gate Execution Order:
+        1. PRE_VALIDATION (e.g., FORMAT) - runs first, can modify files
+        2. Cache invalidation after PRE_VALIDATION if FORMAT gate ran and passed
+        3. VALIDATION (TYPECHECK, TEST, LINT) - runs in parallel
+        4. POST_VALIDATION (CODE_REVIEW, IMPLEMENTATION_VERIFY) - runs in parallel
 
-        The parallel execution time should be approximately equal to the
-        slowest gate rather than the sum of all gate execution times.
+        Each gate's execute_async() method wraps the synchronous subprocess call with
+        asyncio.to_thread() for true parallel execution within each group.
 
-        If fail_fast is enabled, when a required gate fails, all other
-        running gates are cancelled and marked as skipped.
+        If fail_fast is enabled, when a required gate fails, gates in subsequent
+        groups are skipped (but gates in the same group continue running).
 
         If use_cache is enabled, checks cache before executing each gate
         and returns cached results when project state hasn't changed.
@@ -1017,13 +1256,89 @@ class QualityGate:
         context["project_type"] = self.detect_project_type()
 
         results: dict[str, GateOutput] = {}
+        should_skip_remaining_groups = False
+        failing_gate_name: str | None = None
+
+        # Group gates by execution order
+        gate_groups = self._group_gates_by_execution_order(self.gates)
+        group_order = [GateGroup.PRE_VALIDATION, GateGroup.VALIDATION, GateGroup.POST_VALIDATION]
+
+        for group in group_order:
+            group_gates = gate_groups[group]
+            if not group_gates:
+                continue
+
+            # Skip this group if a required gate in a previous group failed
+            if should_skip_remaining_groups:
+                for gate_config in group_gates:
+                    results[gate_config.name] = GateOutput(
+                        gate_name=gate_config.name,
+                        gate_type=gate_config.type,
+                        passed=False,
+                        exit_code=-1,
+                        stdout="",
+                        stderr=f"Skipped due to fail_fast: '{failing_gate_name}' failed in earlier group",
+                        duration_seconds=0.0,
+                        command="",
+                        error_summary=f"Skipped due to fail_fast: '{failing_gate_name}' failed",
+                        skipped=True,
+                    )
+                continue
+
+            # Execute gates in this group
+            group_results = await self._execute_group_async(
+                group_gates, story_id, context, results
+            )
+            results.update(group_results)
+
+            # Check for required gate failures in this group
+            for gate_config in group_gates:
+                output = results.get(gate_config.name)
+                if output and gate_config.required and not output.passed and not output.skipped:
+                    if self.fail_fast:
+                        should_skip_remaining_groups = True
+                        failing_gate_name = gate_config.name
+                        break
+
+            # After PRE_VALIDATION, invalidate cache if FORMAT gate ran and modified files
+            if group == GateGroup.PRE_VALIDATION and self.use_cache:
+                for gate_config in group_gates:
+                    if gate_config.type == GateType.FORMAT:
+                        output = results.get(gate_config.name)
+                        # If FORMAT ran (not skipped) and passed, files may have changed
+                        if output and output.passed and not output.skipped:
+                            # Check if check_only mode - if so, don't invalidate
+                            check_only = getattr(gate_config, 'check_only', False)
+                            if not check_only:
+                                # Invalidate cache since files were modified
+                                self.invalidate_cache()
+
+        return results
+
+    async def _execute_group_async(
+        self,
+        group_gates: list[GateConfig],
+        story_id: str,
+        context: dict[str, Any],
+        existing_results: dict[str, GateOutput],
+    ) -> dict[str, GateOutput]:
+        """
+        Execute a group of gates in parallel.
+
+        Args:
+            group_gates: Gates in this execution group
+            story_id: ID of the story being verified
+            context: Additional context for gates
+            existing_results: Results from previous groups (for cache checks)
+
+        Returns:
+            Dictionary mapping gate names to outputs for this group
+        """
+        results: dict[str, GateOutput] = {}
 
         # Collect gates to execute, checking cache first
         gates_to_run: list[tuple[str, Gate, GateConfig]] = []
-        for gate_config in self.gates:
-            if not gate_config.enabled:
-                continue
-
+        for gate_config in group_gates:
             gate_class = self._get_gate_class(gate_config.type)
             if not gate_class:
                 continue
@@ -1042,14 +1357,14 @@ class QualityGate:
         if not gates_to_run:
             return results
 
-        # Check if any cached result is a required failure (for fail_fast)
+        # Check if any cached result is a required failure (for fail_fast within group)
         if self.fail_fast:
-            for gate_config in self.gates:
-                if not gate_config.enabled or not gate_config.required:
+            for gate_config in group_gates:
+                if not gate_config.required:
                     continue
                 cached = results.get(gate_config.name)
                 if cached and not cached.passed:
-                    # Required gate failed in cache, skip all remaining
+                    # Required gate failed in cache, skip all remaining in this group
                     for name, _, gc in gates_to_run:
                         results[name] = GateOutput(
                             gate_name=name,
@@ -1065,18 +1380,18 @@ class QualityGate:
                         )
                     return results
 
-        if not self.fail_fast:
-            # Original parallel execution without fail_fast
-            async def run_gate(name: str, gate: Gate, config: GateConfig) -> tuple[str, GateOutput, GateConfig]:
-                output = await gate.execute_async(story_id, context)
-                return (name, output, config)
+        # Execute gates in parallel
+        async def run_gate(name: str, gate: Gate, config: GateConfig) -> tuple[str, GateOutput, GateConfig]:
+            output = await gate.execute_async(story_id, context)
+            return (name, output, config)
 
+        if not self.fail_fast:
+            # Simple parallel execution without fail_fast
             tasks = [run_gate(name, gate, config) for name, gate, config in gates_to_run]
             results_list = await asyncio.gather(*tasks)
 
             for name, output, config in results_list:
                 results[name] = output
-                # Cache the result if caching is enabled
                 if self.use_cache:
                     self.cache.set(name, output, self.cache_ttl)
 
@@ -1087,14 +1402,11 @@ class QualityGate:
         failure_occurred = False
         failing_gate_name: str | None = None
 
-        # Create tasks for all gates
         for name, gate, gate_config in gates_to_run:
             task = asyncio.create_task(gate.execute_async(story_id, context))
             pending_tasks[task] = (name, gate_config)
 
-        # Process tasks as they complete
         while pending_tasks:
-            # Wait for the first task to complete
             done, _ = await asyncio.wait(
                 pending_tasks.keys(),
                 return_when=asyncio.FIRST_COMPLETED
@@ -1107,21 +1419,16 @@ class QualityGate:
                     output = task.result()
                     results[name] = output
 
-                    # Cache the result if caching is enabled
                     if self.use_cache:
                         self.cache.set(name, output, self.cache_ttl)
 
-                    # Check if this is a required gate failure
                     if gate_config.required and not output.passed and not failure_occurred:
                         failure_occurred = True
                         failing_gate_name = name
-
-                        # Cancel all remaining tasks
                         for remaining_task in list(pending_tasks.keys()):
                             remaining_task.cancel()
 
                 except asyncio.CancelledError:
-                    # Task was cancelled due to fail_fast
                     results[name] = GateOutput(
                         gate_name=name,
                         gate_type=gate_config.type,

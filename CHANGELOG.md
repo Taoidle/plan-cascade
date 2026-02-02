@@ -2,6 +2,89 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.3.2] - 2026-02-02
+
+### Added
+
+- **FORMAT Gate (CLI)** - Auto-format code after story completion
+  - Runs in PRE_VALIDATION phase before other gates
+  - Supports project-type detection: Python (ruff), Node.js (prettier), Rust (cargo fmt), Go (gofmt)
+  - Fallback support: black for Python if ruff unavailable
+  - `check_only` mode for validation without modification
+  - Automatic cache invalidation after formatting changes
+
+- **AI Code Review Gate (CLI + Plugin)** - 5-dimension code review with LLM
+  - **Code Quality** (25 pts) - Structure, maintainability, best practices
+  - **Naming & Clarity** (20 pts) - Variable/function naming, readability
+  - **Complexity** (20 pts) - Cyclomatic complexity, nesting depth
+  - **Pattern Adherence** (20 pts) - Follows project conventions and design patterns
+  - **Security** (15 pts) - Input validation, injection prevention, data handling
+  - Integrates with `design_doc.json` for architecture context
+  - Configurable minimum score threshold (default: 70/100)
+  - Block on critical findings option
+  - **Enabled by default** with `--no-review` flag to disable
+
+- **Three-Phase Gate Execution** - Structured gate execution ordering
+  - **PRE_VALIDATION**: FORMAT gate runs first
+  - **VALIDATION**: TYPECHECK, TEST, LINT run in parallel
+  - **POST_VALIDATION**: CODE_REVIEW, IMPLEMENTATION_VERIFY run in parallel
+
+### Changed
+
+- **GateConfig Extended** - New configuration options
+  - `check_only: bool` - For FORMAT gate: check mode without modification
+  - `review_dimensions: list[str]` - For CODE_REVIEW: dimensions to evaluate
+  - `min_score: float` - Minimum score to pass review (default: 0.7)
+  - `block_on_critical: bool` - Block execution on critical findings (default: True)
+
+- **Plugin Approve Command** - New parameters
+  - `--no-review` - Disable AI code review (enabled by default)
+  - `--review-agent <name>` - Specify agent for code review (default: claude-code)
+  - Added Step 9.2.7 for AI Code Review execution in batch workflow
+
+### Technical Details
+
+**Gate Execution Order:**
+```
+PRE_VALIDATION (sequential)
+    └── FORMAT Gate
+         ↓ (invalidate cache if files modified)
+VALIDATION (parallel)
+    ├── TYPECHECK Gate
+    ├── TEST Gate
+    └── LINT Gate
+         ↓
+POST_VALIDATION (parallel)
+    ├── CODE_REVIEW Gate
+    └── IMPLEMENTATION_VERIFY Gate
+```
+
+**Code Review Prompt Structure:**
+```
+Review Dimensions:
+1. Code Quality (25 pts) - Structure, maintainability, best practices
+2. Naming & Clarity (20 pts) - Variable/function naming, readability
+3. Complexity (20 pts) - Cyclomatic complexity, nesting depth
+4. Pattern Adherence (20 pts) - Project conventions, design patterns
+5. Security (15 pts) - Input validation, injection, data handling
+
+Output: JSON with overall_score, passed, confidence, findings[], summary
+```
+
+**New Files:**
+| File | Description |
+|------|-------------|
+| `src/plan_cascade/core/code_review_gate.py` | AI-powered code review implementation |
+| `tests/test_format_gate.py` | 23 tests for FormatGate |
+| `tests/test_code_review_gate.py` | 24 tests for CodeReviewGate |
+
+**Test Summary:**
+- New tests: 47 (format_gate: 23, code_review_gate: 24)
+- All existing quality gate tests pass (65 tests)
+- All verification gate tests pass (21 tests)
+
+---
+
 ## [4.3.0] - 2026-02-02
 
 ### Added

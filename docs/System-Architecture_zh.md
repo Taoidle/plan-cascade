@@ -2,7 +2,7 @@
 
 # Plan Cascade - 系统架构与流程设计
 
-**版本**: 4.3.1
+**版本**: 4.3.2
 **最后更新**: 2026-02-02
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
@@ -134,7 +134,9 @@ graph LR
 | **IterationLoop** | 自动迭代循环，管理批次执行 |
 | **AgentExecutor** | Agent 执行抽象，支持多种 Agent |
 | **PhaseManager** | 阶段管理，根据阶段选择 Agent |
-| **QualityGate** | 质量门控，支持并行异步执行、快速失败、增量检查和缓存 |
+| **QualityGate** | 质量门控，支持三阶段执行：PRE_VALIDATION（FORMAT）、VALIDATION（TYPECHECK、TEST、LINT 并行）、POST_VALIDATION（CODE_REVIEW、IMPLEMENTATION_VERIFY）。支持快速失败、增量检查和缓存 |
+| **FormatGate** | 代码格式化门控（PRE_VALIDATION），根据项目类型使用 ruff/prettier/cargo fmt/gofmt 自动格式化代码。支持仅检查模式 |
+| **CodeReviewGate** | AI 驱动的代码审查（POST_VALIDATION），评估 5 个维度：代码质量（25分）、命名清晰度（20分）、复杂度（20分）、模式遵循（20分）、安全性（15分）。遇到严重问题时阻止通过 |
 | **VerificationGate** | AI 驱动的实现验证，检测骨架代码并验证验收标准 |
 | **RetryManager** | 重试管理，处理失败重试，传递结构化错误上下文 |
 | **GateCache** | 门控结果缓存，基于 git commit + 工作树哈希，避免重复检查 |
@@ -807,6 +809,8 @@ flowchart TD
   --retry-agent <名称>  重试阶段 Agent
   --verify              启用 AI 验证门
   --verify-agent <名称> 验证 Agent（默认：claude-code）
+  --no-review           禁用 AI 代码审查（默认启用）
+  --review-agent <名称> 代码审查 Agent（默认：claude-code）
   --no-fallback         禁用自动降级到 claude-code
   --auto-run            立即开始执行
 ```
@@ -866,10 +870,13 @@ flowchart TD
     subgraph "Step 9: 等待与验证"
         W --> X[9.1: 通过 TaskOutput 等待<br/>每个 Story]
         X --> Y[9.2: 验证完成<br/>读取 progress.txt]
-        Y --> Z{启用 --verify?}
+        Y --> FMT[9.2.1: FORMAT 门控<br/>PRE_VALIDATION]
+        FMT --> QGV[9.2.2: TYPECHECK + TEST + LINT<br/>VALIDATION - 并行]
+        QGV --> Z{启用 --verify?}
         Z -->|是| AA[9.2.6: AI 验证门<br/>检测骨架代码]
-        Z -->|否| AB
-        AA --> AB{全部通过?}
+        Z -->|否| CR
+        AA --> CR[9.2.7: CODE_REVIEW 门控<br/>POST_VALIDATION]
+        CR --> AB{全部通过?}
         AB -->|否| AC[9.2.5: 使用不同 Agent 重试<br/>+ 错误上下文]
         AC --> U
         AB -->|是| AD[9.3: 推进到下一批次]
@@ -880,6 +887,27 @@ flowchart TD
     AE -->|是 + 手动| AF[询问用户确认]
     AF --> N
     AE -->|否| AG[Step 10: 显示最终状态]
+```
+
+### 质量门控执行顺序
+
+质量门控分三个阶段执行：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ PRE_VALIDATION (顺序执行)                                        │
+│   └── FORMAT: 自动格式化代码 (ruff/prettier/cargo fmt/gofmt)    │
+│       └── 格式化后使缓存失效                                     │
+├─────────────────────────────────────────────────────────────────┤
+│ VALIDATION (并行执行)                                            │
+│   ├── TYPECHECK: mypy/tsc/cargo check                           │
+│   ├── TEST: pytest/jest/cargo test                              │
+│   └── LINT: ruff/eslint/clippy                                  │
+├─────────────────────────────────────────────────────────────────┤
+│ POST_VALIDATION (并行执行)                                       │
+│   ├── IMPLEMENTATION_VERIFY: AI 骨架代码检测                    │
+│   └── CODE_REVIEW: AI 5维度代码审查                             │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### AI 验证门
@@ -896,6 +924,31 @@ flowchart TD
 - 新代码中的 TODO/FIXME 注释
 - 没有逻辑的占位符返回值
 - 空的函数/方法体
+
+### AI 代码审查门控
+
+默认情况下，AI 代码审查会在每个 Story 完成后运行。使用 `--no-review` 禁用。
+
+**审查维度（总计 100 分）：**
+
+| 维度 | 分值 | 关注点 |
+|------|------|--------|
+| 代码质量 | 25 | 错误处理、资源管理、边界情况 |
+| 命名清晰度 | 20 | 变量/函数命名、代码可读性 |
+| 复杂度 | 20 | 圈复杂度、嵌套深度 |
+| 模式遵循 | 20 | 架构模式、设计文档合规 |
+| 安全性 | 15 | OWASP 漏洞、输入验证 |
+
+**进度标记：**
+```
+[REVIEW_PASSED] story-001 - Score: 85/100
+[REVIEW_ISSUES] story-002 - Score: 60/100 - 2 critical findings
+```
+
+**阻止条件：**
+- 分数低于阈值（默认：70）
+- 存在严重级别发现（当 `block_on_critical=true` 时）
+- 置信度低于 0.7
 
 ### 进度中的 Agent 显示
 
@@ -966,11 +1019,14 @@ flowchart TD
     Q -->|超时| S[记录超时失败]
 
     R -->|否| T[标记完成]
-    R -->|是| U[执行质量检查]
+    R -->|是| U[执行质量门控]
 
-    U --> V{TypeCheck}
+    U --> FMT2{FORMAT<br/>PRE_VALIDATION}
+    FMT2 -->|✓| V{TypeCheck}
+    FMT2 -->|✗| X[记录失败详情]
+
     V -->|✓| W{Tests}
-    V -->|✗| X[记录失败详情]
+    V -->|✗| X
 
     W -->|✓| Y{Lint}
     W -->|✗| X
@@ -980,9 +1036,12 @@ flowchart TD
     Y -->|✗ 但可选| VERIFY
 
     VERIFY -->|是| VGATE[AI 验证门]
-    VERIFY -->|否| T
-    VGATE -->|通过| T
+    VERIFY -->|否| CR2
+    VGATE -->|通过| CR2{CODE_REVIEW<br/>POST_VALIDATION}
     VGATE -->|失败| X
+
+    CR2 -->|✓ 或禁用| T
+    CR2 -->|✗ 严重| X
 
     X --> Z{可重试?}
     S --> Z
@@ -1293,6 +1352,8 @@ graph TB
 | `--retry-agent` | 重试阶段 Agent | `--retry-agent=aider` |
 | `--verify` | 启用 AI 验证门 | `--verify` |
 | `--verify-agent` | 验证 Agent | `--verify-agent=claude-code` |
+| `--no-review` | 禁用 AI 代码审查（默认启用） | `--no-review` |
+| `--review-agent` | 代码审查 Agent | `--review-agent=claude-code` |
 | `--no-fallback` | 禁用失败自动降级 | `--no-fallback` |
 
 **`/plan-cascade:mega-approve`（Feature 执行）：**

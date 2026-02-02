@@ -9,7 +9,7 @@
 *将复杂项目分解为可并行执行的任务，支持多 Agent 协作*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.3.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.3.2-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -225,14 +225,13 @@ plan-cascade/
 | DeepSeek | 是 | DeepSeek Chat/Coder |
 | Ollama | 否 | 本地模型 |
 
-## v4.3.0 更新内容
+## v4.3.2 更新内容
 
-- **AI 验证门** — AI 驱动的实现验证，检查代码是否符合验收标准并检测骨架代码（默认启用）
-- **质量门增强** — 并行执行、缓存、增量检查和结构化错误解析
-- **上下文恢复修复** — 修复了 hybrid-auto 模式在上下文压缩/截断后恢复失效的问题
-- **双路径检测** — prd.json 现在同时在新模式和遗留位置检测
-- **统一上下文文件路径** — Hybrid 上下文文件始终写入项目根目录以保持一致性
-- **脚本更新** — 两个提醒脚本现在都支持新路径模式
+- **FORMAT 门控** — Story 完成后自动格式化代码，使用 ruff/prettier/cargo fmt/gofmt（PRE_VALIDATION 阶段）
+- **AI 代码审查门** — 5维度代码审查：代码质量（25分）、命名清晰度（20分）、复杂度（20分）、模式遵循（20分）、安全性（15分）
+- **三阶段门控执行** — 门控现在按 PRE_VALIDATION → VALIDATION → POST_VALIDATION 顺序执行
+- **--no-review 参数** — 禁用 AI 代码审查（默认启用）
+- **门控缓存失效** — FORMAT 门控修改文件后自动使缓存失效
 
 完整历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 

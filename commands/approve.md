@@ -52,6 +52,8 @@ This command supports multiple AI agents for story execution. The system automat
 --auto-run           Start execution immediately after approval
 --verify             Enable AI verification gate after each batch
 --verify-agent <name> Agent for verification (default: claude-code task-tool)
+--no-review          Disable AI code review (enabled by default)
+--review-agent <name> Agent for code review (default: claude-code task-tool)
 ```
 
 ## Tool Usage Policy (CRITICAL)
@@ -108,9 +110,11 @@ GLOBAL_AGENT=""
 IMPL_AGENT=""
 RETRY_AGENT=""
 VERIFY_AGENT=""
+REVIEW_AGENT=""
 NO_FALLBACK=false
 AUTO_RUN=false
 ENABLE_VERIFY=false
+ENABLE_REVIEW=true   # Default: enabled
 
 for arg in $ARGUMENTS; do
     case "$arg" in
@@ -118,9 +122,11 @@ for arg in $ARGUMENTS; do
         --impl-agent=*) IMPL_AGENT="${arg#*=}" ;;
         --retry-agent=*) RETRY_AGENT="${arg#*=}" ;;
         --verify-agent=*) VERIFY_AGENT="${arg#*=}" ;;
+        --review-agent=*) REVIEW_AGENT="${arg#*=}" ;;
         --no-fallback) NO_FALLBACK=true ;;
         --auto-run) AUTO_RUN=true ;;
         --verify) ENABLE_VERIFY=true ;;
+        --no-review) ENABLE_REVIEW=false ;;
     esac
 done
 
@@ -137,6 +143,8 @@ Agent Configuration:
   Fallback: ${NO_FALLBACK:+"disabled" || "enabled"}
   AI Verification: ${ENABLE_VERIFY:+"enabled" || "disabled"}
   Verify Agent: ${VERIFY_AGENT:-"claude-code (task-tool)"}
+  AI Code Review: ${ENABLE_REVIEW:+"enabled" || "disabled"}
+  Review Agent: ${REVIEW_AGENT:-"claude-code (task-tool)"}
 ```
 
 ## Step 2.5: Load Agent Configuration
@@ -724,6 +732,160 @@ For each verify_failed_story:
 **Note**: AI verification is optional and disabled by default. Enable with:
 - Command flag: `/plan-cascade:approve --verify`
 - PRD config: `"verification_gate": {"enabled": true}`
+
+### 9.2.7: AI Code Review (Default Enabled)
+
+If `ENABLE_REVIEW` is true (default), run code review for completed and verified stories.
+
+**9.2.7.1: Review Prompt and Execution**
+
+For each story that passed verification (or if verification is disabled), launch a code review subagent:
+
+```
+For each completed_story in batch:
+    If ENABLE_REVIEW == false:
+        Skip review for all stories
+        Continue to next batch
+
+    story_id = completed_story.id
+
+    # Get git diff for this story's changes
+    git_diff = Bash("git diff HEAD~1 HEAD -- . 2>/dev/null || git diff HEAD -- .")
+
+    # Load design document context if available
+    design_context = ""
+    If design_doc.json exists:
+        Read design_doc.json
+        Get story_mappings[story_id] for relevant:
+          - Components
+          - Patterns
+          - ADRs
+
+    REVIEW_PROMPT = """
+    You are an AI code reviewer. Review story {story_id} implementation for quality.
+
+    ## Story: {story_id} - {title}
+    {description}
+
+    ## Git Diff
+    ```diff
+    {git_diff}
+    ```
+
+    ## Review Dimensions
+    Score each dimension (total 100 points):
+
+    1. Code Quality (25 pts) - Clean code, error handling, no code smells
+    2. Naming & Clarity (20 pts) - Clear naming, self-documenting code
+    3. Complexity (20 pts) - Appropriate complexity, no over-engineering
+    4. Pattern Adherence (20 pts) - Follows project patterns
+    5. Security (15 pts) - No vulnerabilities, proper input validation
+
+    {If design_doc.json exists:}
+    ## Architecture Context
+    Components: {relevant_components}
+    Patterns: {relevant_patterns}
+    ADRs: {relevant_adrs}
+    {End if}
+
+    ## Severity Levels
+    - critical: Must fix (security, data loss)
+    - high: Should fix (bugs, poor patterns)
+    - medium: Consider fixing (code smells)
+    - low: Minor suggestions
+    - info: Informational notes
+
+    ## Output Format
+    After analysis, append ONE of these to progress.txt:
+
+    If score >= 70% AND no critical findings:
+      [REVIEW_PASSED] {story_id} - Score: X/100
+
+    If score < 70% OR has critical findings:
+      [REVIEW_ISSUES] {story_id} - Score: X/100 - <brief summary>
+
+    Then write detailed report to .agent-outputs/{story_id}.review.md with:
+    - Dimension scores and notes
+    - All findings with severity, file, line
+    - Suggestions for improvement
+    """
+
+    # Launch review subagent
+    Task(
+        prompt=REVIEW_PROMPT,
+        subagent_type="general-purpose",
+        run_in_background=true,
+        description="Review {story_id}"
+    )
+    Store review_task_id for monitoring
+```
+
+**9.2.7.2: Wait for Code Reviews**
+
+```
+For each story_id, review_task_id in review_tasks:
+    result = TaskOutput(
+        task_id=review_task_id,
+        block=true,
+        timeout=180000  # 3 minutes per review
+    )
+
+# Check review results
+progress_content = Read("progress.txt")
+review_passed_count = count "[REVIEW_PASSED]" in progress_content
+review_issues_count = count "[REVIEW_ISSUES]" in progress_content
+
+echo "Code Review Results:"
+echo "  Passed: {review_passed_count}"
+echo "  Issues: {review_issues_count}"
+
+If review_issues_count > 0:
+    echo "⚠️ CODE REVIEW ISSUES DETECTED"
+    # List stories with issues
+```
+
+**9.2.7.3: Handling Review Issues**
+
+```
+For each story_with_issues:
+    echo ""
+    echo "Story {story_id} has review issues:"
+
+    # Read the review report
+    review_report = Read(".agent-outputs/{story_id}.review.md")
+
+    # Display summary
+    echo "  Score: X/100"
+    echo "  Critical findings: Y"
+    echo ""
+    echo "Options:"
+    echo "  1. Continue anyway (issues noted for future)"
+    echo "  2. Pause for manual review and fixes"
+    echo "  3. Auto-fix suggestions and re-review"
+
+    # Use AskUserQuestion to get user choice
+    If choice == 1:
+        echo "[REVIEW_ACKNOWLEDGED] {story_id}" >> progress.txt
+        # Continue to next batch
+    Elif choice == 2:
+        # Pause execution for manual intervention
+        exit
+    Elif choice == 3:
+        # Launch fix agent with review findings
+        FIX_PROMPT = """
+        Apply these code review fixes for {story_id}:
+
+        {findings from review report}
+
+        After fixing, update progress.txt with:
+        [REVIEW_FIXED] {story_id}
+        """
+        # Rerun review after fixes
+```
+
+**Note**: AI code review is enabled by default. Disable with:
+- Command flag: `/plan-cascade:approve --no-review`
+- PRD config: `"code_review": {"enabled": false}`
 
 ### 9.3: Progress to Next Batch
 

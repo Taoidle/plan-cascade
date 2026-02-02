@@ -2,8 +2,8 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.3.0
-**Last Updated**: 2026-02-01
+**Version**: 4.3.2
+**Last Updated**: 2026-02-02
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
 
@@ -623,13 +623,31 @@ Configure in `prd.json`:
   "quality_gates": {
     "enabled": true,
     "gates": [
+      {"name": "format", "type": "format", "required": false, "check_only": false},
       {"name": "typecheck", "type": "typecheck", "required": true},
       {"name": "tests", "type": "test", "required": true},
-      {"name": "lint", "type": "lint", "required": false}
+      {"name": "lint", "type": "lint", "required": false},
+      {"name": "code-review", "type": "code_review", "required": false, "min_score": 0.7, "block_on_critical": true}
     ]
   }
 }
 ```
+
+**Gate Execution Order:**
+1. **PRE_VALIDATION**: FORMAT (auto-format code)
+2. **VALIDATION**: TYPECHECK, TEST, LINT (parallel)
+3. **POST_VALIDATION**: CODE_REVIEW, IMPLEMENTATION_VERIFY (parallel)
+
+**Gate Types:**
+
+| Type | Description | Options |
+|------|-------------|---------|
+| `format` | Auto-format code | `check_only`: only check, don't modify |
+| `typecheck` | Type checking (mypy/tsc) | - |
+| `test` | Run tests (pytest/jest) | - |
+| `lint` | Linting (ruff/eslint) | - |
+| `code_review` | AI code review | `min_score`, `block_on_critical` |
+| `implementation_verify` | AI implementation verification | - |
 
 ### View Iteration Status
 
@@ -672,6 +690,12 @@ Configure in `prd.json`:
 
 # Disable auto-fallback
 /plan-cascade:approve --agent=codex --no-fallback
+
+# Disable AI code review (enabled by default)
+/plan-cascade:approve --no-review
+
+# Specify code review agent
+/plan-cascade:approve --review-agent=claude-code
 ```
 
 **For mega-approve (feature execution):**

@@ -2,8 +2,8 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**版本**: 4.3.0
-**最后更新**: 2026-02-01
+**版本**: 4.3.2
+**最后更新**: 2026-02-02
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
 
@@ -623,13 +623,31 @@ mega-complete → 清理计划文件
   "quality_gates": {
     "enabled": true,
     "gates": [
+      {"name": "format", "type": "format", "required": false, "check_only": false},
       {"name": "typecheck", "type": "typecheck", "required": true},
       {"name": "tests", "type": "test", "required": true},
-      {"name": "lint", "type": "lint", "required": false}
+      {"name": "lint", "type": "lint", "required": false},
+      {"name": "code-review", "type": "code_review", "required": false, "min_score": 0.7, "block_on_critical": true}
     ]
   }
 }
 ```
+
+**门控执行顺序：**
+1. **PRE_VALIDATION**: FORMAT（自动格式化代码）
+2. **VALIDATION**: TYPECHECK、TEST、LINT（并行）
+3. **POST_VALIDATION**: CODE_REVIEW、IMPLEMENTATION_VERIFY（并行）
+
+**门控类型：**
+
+| 类型 | 说明 | 选项 |
+|------|------|------|
+| `format` | 自动格式化代码 | `check_only`: 仅检查，不修改 |
+| `typecheck` | 类型检查（mypy/tsc） | - |
+| `test` | 运行测试（pytest/jest） | - |
+| `lint` | 代码检查（ruff/eslint） | - |
+| `code_review` | AI 代码审查 | `min_score`、`block_on_critical` |
+| `implementation_verify` | AI 实现验证 | - |
 
 ### 查看迭代状态
 
@@ -672,6 +690,12 @@ mega-complete → 清理计划文件
 
 # 禁用自动降级
 /plan-cascade:approve --agent=codex --no-fallback
+
+# 禁用 AI 代码审查（默认启用）
+/plan-cascade:approve --no-review
+
+# 指定代码审查 agent
+/plan-cascade:approve --review-agent=claude-code
 ```
 
 **mega-approve（Feature 执行）：**
