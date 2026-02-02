@@ -228,13 +228,11 @@ plan-cascade/
 | DeepSeek | Yes | DeepSeek Chat/Coder |
 | Ollama | No | Local models |
 
-## What's New in v4.3.2
+## What's New in v4.3.6
 
-- **FORMAT Gate** — Auto-format code after story completion using ruff/prettier/cargo fmt/gofmt (PRE_VALIDATION phase)
-- **AI Code Review Gate** — 5-dimension code review: Code Quality (25pts), Naming & Clarity (20pts), Complexity (20pts), Pattern Adherence (20pts), Security (15pts)
-- **Three-Phase Gate Execution** — Gates now execute in PRE_VALIDATION → VALIDATION → POST_VALIDATION order
-- **--no-review Flag** — Disable AI code review (enabled by default)
-- **Gate Cache Invalidation** — Cache automatically invalidated after FORMAT gate modifies files
+- **`--agent` for hybrid-worktree** — PRD generation agent selection: `/plan-cascade:hybrid-worktree task branch "desc" --agent=codex`
+- **MANDATORY COMPLIANCE** — AI agents now strictly follow configured agent selection, no subjective overrides
+- **Multi-command Enforcement** — Agent selection rules enforced across hybrid-auto, mega-approve, approve, and hybrid-worktree
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

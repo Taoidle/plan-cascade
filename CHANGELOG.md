@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.3.6] - 2026-02-02
+
+### Added
+
+- **`--agent` Parameter for hybrid-worktree** - PRD generation agent selection in worktree mode
+  - New command syntax: `/plan-cascade:hybrid-worktree <task-name> <target-branch> <prd-path-or-description> [design-doc-path] [--agent <name>]`
+  - Supports all configured agents: claude-code (Task tool), codex, aider, amp-code, etc.
+  - Priority chain: `--agent` flag > `agents.json` config > default (claude-code)
+  - CLI agent availability check with automatic fallback
+
+- **MANDATORY COMPLIANCE Enforcement** - Prevents AI agents from overriding configured agent selection
+  - Added explicit enforcement language to prevent subjective agent override decisions
+  - AI agents must follow configuration, not make "better for quality" substitutions
+  - Applied across all agent-selection workflows
+
+### Changed
+
+- **hybrid-auto.md** - Added MANDATORY COMPLIANCE and CRITICAL RULES for agent selection
+  - Prevents AI from substituting configured agents with claude-code
+  - Requires confirmation message when using CLI agents
+
+- **mega-approve.md** - Added MANDATORY COMPLIANCE at PRD generation (Step 6.2) and implementation (Step 7.2)
+  - Both phases now enforce configured agent selection
+  - Added confirmation branch for CLI agent execution
+
+- **approve.md** - Added MANDATORY COMPLIANCE at story execution (Step 8)
+  - Ensures implementation agents follow configuration
+  - Added CRITICAL RULES at Step 8.2
+
+- **hybrid-worktree.md** - Complete agent selection logic added
+  - Full `agents.json` reading and parsing
+  - CLI agent availability verification
+  - Fallback chain support
+  - `--agent` parameter support
+
+### Documentation
+
+- Updated System-Architecture.md with `--agent` parameter for hybrid-worktree
+- Updated System-Architecture_zh.md with Chinese translation
+- Updated Plugin-Guide.md with hybrid-worktree agent selection documentation
+- Updated Plugin-Guide_zh.md with Chinese translation
+
+---
+
 ## [4.3.2] - 2026-02-02
 
 ### Added

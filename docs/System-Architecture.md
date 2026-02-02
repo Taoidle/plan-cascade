@@ -614,12 +614,13 @@ Suitable for single complex feature development requiring branch isolation.
 ### Command Parameters
 
 ```bash
-/plan-cascade:hybrid-worktree <task-name> <target-branch> <prd-or-description> [design-doc-path]
+/plan-cascade:hybrid-worktree <task-name> <target-branch> <prd-or-description> [design-doc-path] [--agent <name>]
 
 # Examples:
 /plan-cascade:hybrid-worktree fix-auth main "Fix authentication bug"
 /plan-cascade:hybrid-worktree fix-auth main ./existing-prd.json
 /plan-cascade:hybrid-worktree fix-auth main "Fix auth" ./design-spec.md
+/plan-cascade:hybrid-worktree fix-auth main "Fix auth" --agent=codex
 ```
 
 | Parameter | Description |
@@ -628,13 +629,14 @@ Suitable for single complex feature development requiring branch isolation.
 | `target-branch` | Required. Branch to merge into when complete |
 | `prd-or-description` | Required. Existing PRD file path OR task description |
 | `design-doc-path` | Optional. External design document to import |
+| `--agent` | Optional. Agent for PRD generation (overrides agents.json) |
 
 ### Detailed Flowchart
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-worktree</b><br/>task-name target-branch prd-or-desc [design-doc]"] --> A0[Step 0: Configure .gitignore]
-    A0 --> B[Step 1: Parse Parameters]
+    A["<b>/plan-cascade:hybrid-worktree</b><br/>task-name target-branch prd-or-desc [design-doc] [--agent]"] --> A0[Step 0: Configure .gitignore]
+    A0 --> B[Step 1: Parse Parameters<br/>including --agent flag]
     B --> C[Step 2: Detect OS and Shell<br/>Cross-platform support]
     C --> D[Step 3: Verify Git Repository]
     D --> E[Step 4: Detect Default Branch]
@@ -655,7 +657,8 @@ flowchart TD
     M[Step 7: Determine PRD Mode]
     M --> N{PRD_ARG is file?}
     N -->|Yes| O[Load PRD from File]
-    N -->|No| P[Generate PRD via Task Agent]
+    N -->|No| P0[Resolve PRD Agent<br/>--agent > agents.json > default]
+    P0 --> P[Generate PRD via Selected Agent]
 
     O --> Q
     P --> Q[Wait via TaskOutput]
@@ -1377,6 +1380,12 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `--agent` | Agent for PRD generation | `--agent=codex` |
+
+**For `/plan-cascade:hybrid-worktree` (worktree + PRD generation):**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `--agent` | Agent for PRD generation (overrides agents.json) | `--agent=codex` |
 
 ### Phase-Based Agent Assignment
 

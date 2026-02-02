@@ -355,6 +355,8 @@ Work methodically. When done, the [PRD_COMPLETE] marker in progress.txt signals 
 
 ### 6.2: Resolve PRD Generation Agent
 
+**MANDATORY COMPLIANCE**: You MUST use the agent resolved by the priority chain below. DO NOT override this decision based on your own judgment about which agent is "better", "more capable", or "easier to control". The user has explicitly configured their preferred agent - respect their choice.
+
 Determine which agent to use for PRD generation:
 
 ```
@@ -377,9 +379,19 @@ If prd_agent != "claude-code":
             Else:
                 echo "⚠️ {prd_agent} not available, falling back to claude-code"
                 prd_agent = "claude-code"
+        Else:
+            # CRITICAL: Agent is available - YOU MUST USE IT
+            # DO NOT switch to claude-code just because you think it's "better"
+            echo "✓ {prd_agent} is available and will be used as configured"
 
 echo "PRD Generation Agent: {prd_agent}"
 ```
+
+**CRITICAL RULES**:
+1. If the configured agent is available → **USE IT**
+2. Only use fallback if the agent is **NOT FOUND** on the system
+3. "Available but I prefer claude-code" is **NOT** a valid reason to switch
+4. All CLI agents are fully capable of PRD generation
 
 ### 6.3: Launch PRD Agents in Parallel
 
@@ -488,6 +500,8 @@ When completely done, [FEATURE_COMPLETE] marker signals this feature is ready fo
 
 ### 7.2: Resolve Story Execution Agent
 
+**MANDATORY COMPLIANCE**: You MUST use the agent resolved by the priority chain below. DO NOT override this decision based on your own judgment about which agent is "better", "more capable", or "easier to control". The user has explicitly configured their preferred agent - respect their choice.
+
 For mega-plan, the feature execution agent handles all stories within a feature.
 Agent resolution follows the same priority chain:
 
@@ -511,9 +525,17 @@ If impl_agent != "claude-code":
             Else:
                 echo "⚠️ {impl_agent} not available, falling back to claude-code"
                 impl_agent = "claude-code"
+        Else:
+            # CRITICAL: Agent is available - YOU MUST USE IT
+            echo "✓ {impl_agent} is available and will be used as configured"
 
 echo "Story Execution Agent: {impl_agent}"
 ```
+
+**CRITICAL RULES**:
+1. If the configured agent is available → **USE IT**
+2. Only use fallback if the agent is **NOT FOUND** on the system
+3. "Available but I prefer claude-code" is **NOT** a valid reason to switch
 
 ### 7.3: Launch Feature Execution Agents in Parallel
 

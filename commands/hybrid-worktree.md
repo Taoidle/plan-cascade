@@ -1,5 +1,5 @@
 ---
-description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, loads existing PRD or auto-generates from description. Usage: /plan-cascade:hybrid-worktree <task-name> <target-branch> <prd-path-or-description>"
+description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, loads existing PRD or auto-generates from description. Usage: /plan-cascade:hybrid-worktree <task-name> <target-branch> <prd-path-or-description> [design-doc-path] [--agent <name>]"
 ---
 
 # Hybrid Ralph + Worktree Mode (Fully Automated)
@@ -55,12 +55,21 @@ Parse user arguments:
   - Otherwise → Use as task description to auto-generate PRD
 - **Design doc path**: Fourth arg (optional)
   - If provided → Convert external doc to design_doc.json format
+- **--agent**: Optional agent override for PRD generation
 
 ```bash
 TASK_NAME="{{args|arg 1 or 'task-' + date + '-' + time}}"
 TARGET_BRANCH="{{args|arg 2 or auto-detect}}"
 PRD_ARG="{{args|arg 3 or ask user 'Provide PRD file path or task description'}}"
 DESIGN_ARG="{{args|arg 4 or empty}}"
+PRD_AGENT=""
+
+# Parse --agent flag
+for arg in $ARGUMENTS; do
+    case "$arg" in
+        --agent=*) PRD_AGENT="${arg#*=}" ;;
+    esac
+done
 ```
 
 ## Step 2: Detect Operating System and Shell
@@ -268,6 +277,74 @@ fi
 
 ### If PRD_MODE is "generate" (auto-generate from description):
 
+#### Resolve PRD Generation Agent
+
+**CRITICAL**: You MUST read `agents.json` to get the configured default agent.
+
+**MANDATORY COMPLIANCE**: You MUST use the agent specified in the configuration. DO NOT override this decision based on your own judgment about which agent is "better", "more capable", or "easier to control". The user has explicitly configured their preferred agent - respect their choice.
+
+```
+# Step 1: Read agents.json configuration
+Read("agents.json")
+
+# Step 2: Parse and select agent
+agents_config = parse_json(agents.json content)
+
+# Priority chain: --agent flag > agents.json config > default
+If PRD_AGENT specified (from --agent flag):
+    prd_agent = PRD_AGENT
+Elif agents_config.phase_defaults.planning.default_agent exists:
+    prd_agent = agents_config.phase_defaults.planning.default_agent
+Else:
+    prd_agent = "claude-code"
+
+# Step 3: Get agent configuration
+agent_config = agents_config.agents[prd_agent]
+agent_type = agent_config.type  # "task-tool" or "cli"
+
+# Step 4: Verify CLI agent availability (only for CLI agents)
+If agent_type == "cli":
+    command = agent_config.command  # e.g., "codex", "aider"
+
+    # Check if command is available
+    Bash("which {command} 2>/dev/null || where {command} 2>nul || echo 'NOT_FOUND'")
+
+    If command not found:
+        echo "⚠️ {prd_agent} ({command}) not available, checking fallback chain..."
+        fallback_chain = agents_config.phase_defaults.planning.fallback_chain
+
+        For fallback in fallback_chain:
+            If fallback == "claude-code" OR is_command_available(agents[fallback].command):
+                prd_agent = fallback
+                agent_config = agents_config.agents[prd_agent]
+                agent_type = agent_config.type
+                break
+
+        If no fallback found:
+            prd_agent = "claude-code"
+            agent_type = "task-tool"
+    Else:
+        # CRITICAL: Agent is available - YOU MUST USE IT
+        # DO NOT switch to claude-code just because you think it's "better"
+        echo "✓ {prd_agent} is available and will be used as configured"
+
+echo "PRD Generation Agent: {prd_agent} (type: {agent_type})"
+```
+
+**CRITICAL RULES**:
+1. `--agent` parameter has **HIGHEST PRIORITY** - if specified, use it
+2. If the configured agent (e.g., `codex`) is available → **USE IT**
+3. Only use fallback if the configured agent is **NOT FOUND** on the system
+4. "Available but I prefer claude-code" is **NOT** a valid reason to switch
+5. All CLI agents (codex, aider, etc.) are fully capable of exploring codebases
+
+**Example**: `/plan-cascade:hybrid-worktree fix-auth main "Fix auth" --agent=codex`
+- Agent will be `codex` regardless of agents.json config
+
+#### Generate PRD with Selected Agent
+
+**If prd_agent == "claude-code" (Task tool)**:
+
 Use the Task tool to automatically generate the PRD:
 
 ```
@@ -337,7 +414,62 @@ Launch Task tool with run_in_background: true → Get task_id → TaskOutput(tas
 
 DO NOT use sleep loops or polling. The TaskOutput tool with block=true will properly wait for the agent to complete.
 
-After TaskOutput returns, the prd.json file will be ready. Continue to Step 12.
+After TaskOutput returns, the prd.json file will be ready. Continue to Step 13.5.
+
+**If prd_agent is CLI (codex, aider, etc.)**:
+
+Based on `agent_config` from agent resolution, build and execute the CLI command:
+
+```
+# Get agent configuration (already loaded in agent resolution step)
+command = agent_config.command      # e.g., "codex"
+args = agent_config.args            # e.g., ["--prompt", "{prompt}"]
+working_dir = agent_config.working_dir or "."
+timeout = agent_config.timeout or 600  # seconds
+
+# Build the prompt for PRD generation
+prd_prompt = """
+You are a PRD generation specialist. Analyze the task and generate a PRD.
+
+Task: $TASK_DESC
+Working Directory: $WORKTREE_DIR
+
+If design_doc.json exists, read it for architectural context.
+
+Generate prd.json with:
+- metadata (created_at, version, description)
+- goal (one sentence)
+- objectives (list)
+- stories (3-7 stories with id, title, description, priority, dependencies, status, acceptance_criteria, context_estimate, tags)
+
+Save the result to prd.json in the current directory.
+"""
+
+# Substitute {prompt} in args with actual prompt
+full_args = []
+for arg in args:
+    if "{prompt}" in arg:
+        full_args.append(arg.replace("{prompt}", prd_prompt))
+    else:
+        full_args.append(arg)
+
+# Build full command
+full_command = command + " " + " ".join(full_args)
+
+# Example for codex: codex --prompt "..."
+# Example for aider: aider --message "..." --yes
+
+task_id = Bash(
+    command=full_command,
+    run_in_background=true,
+    timeout=timeout * 1000  # Convert to milliseconds
+)
+
+# Wait for completion
+TaskOutput(task_id=task_id, block=true, timeout=600000)
+```
+
+After the CLI agent completes, verify prd.json was created. Continue to Step 13.5.
 
 ```bash
 PRD_SOURCE="Auto-generated from description"
@@ -529,6 +661,12 @@ Active Worktrees:
 
 # Auto-generate PRD, use external design document
 /plan-cascade:hybrid-worktree fix-auth main "Fix auth flow" ./architecture.md
+
+# Specify agent for PRD generation (overrides agents.json config)
+/plan-cascade:hybrid-worktree fix-auth main "Fix auth" --agent=codex
+
+# Combine with external design doc and agent override
+/plan-cascade:hybrid-worktree fix-auth main "Refactor payment" ./design.md --agent=aider
 ```
 
 ## Notes

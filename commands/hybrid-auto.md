@@ -104,7 +104,9 @@ Optional arguments:
 
 ### 1.1: Resolve PRD Generation Agent
 
-**CRITICAL**: You MUST read `agents.json` to get the configured default agent:
+**CRITICAL**: You MUST read `agents.json` to get the configured default agent.
+
+**MANDATORY COMPLIANCE**: You MUST use the agent specified in the configuration. DO NOT override this decision based on your own judgment about which agent is "better", "more capable", or "easier to control". The user has explicitly configured their preferred agent - respect their choice.
 
 ```
 # Step 1: Read agents.json configuration
@@ -145,18 +147,32 @@ If agent_type == "cli":
         If no fallback found:
             agent = "claude-code"
             agent_type = "task-tool"
+    Else:
+        # CRITICAL: Agent is available - YOU MUST USE IT
+        # DO NOT switch to claude-code just because you think it's "better"
+        echo "✓ {agent} is available and will be used as configured"
 
 echo "PRD Generation Agent: {agent} (type: {agent_type})"
 ```
 
-**Example**: If `agents.json` has `phase_defaults.planning.default_agent: "codex"`, then:
-- Agent will be `codex`
+**CRITICAL RULES**:
+1. If the configured agent (e.g., `codex`) is available → **USE IT**
+2. Only use fallback if the configured agent is **NOT FOUND** on the system
+3. "Available but I prefer claude-code" is **NOT** a valid reason to switch
+4. All CLI agents (codex, aider, etc.) are fully capable of exploring codebases
+
+**Example**: If `agents.json` has `phase_defaults.planning.default_agent: "codex"` and `codex` command exists:
+- Agent MUST be `codex` (not claude-code)
 - Type will be `cli`
 - Command will be `codex` (from `agents.codex.command`)
 
 ## Step 2: Generate PRD with Selected Agent
 
-Use the resolved agent to generate the PRD.
+**CRITICAL**: Use the agent resolved in Step 1.1. DO NOT substitute a different agent here.
+
+- If Step 1.1 resolved to `codex` → Execute the CLI section below
+- If Step 1.1 resolved to `claude-code` → Execute the Task tool section below
+- **NEVER** use claude-code just because "it's easier" or "better for exploration"
 
 ### If agent == "claude-code" (Task tool):
 

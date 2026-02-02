@@ -549,21 +549,31 @@ Suitable for single complex feature development requiring branch isolation.
 ### Command Reference
 
 ```bash
-/plan-cascade:hybrid-worktree <name> <branch> <desc>  # Create development environment
-/plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD
+/plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # Create worktree + PRD
+/plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD (no worktree)
 /plan-cascade:approve [--auto-run]                    # Execute PRD
 /plan-cascade:hybrid-resume --auto                    # Resume interrupted execution
 /plan-cascade:hybrid-status                           # View status
 /plan-cascade:hybrid-complete [branch] [--force]      # Complete and merge (--force skips uncommitted check)
 ```
 
+| Parameter | Description |
+|-----------|-------------|
+| `<name>` | Task name (used for worktree and branch) |
+| `<branch>` | Target branch to merge into when complete |
+| `<desc>` | Task description OR path to existing PRD file |
+| `--agent` | Optional. Agent for PRD generation (overrides agents.json) |
+
 ### Usage Example
 
 ```bash
-# Create isolated development environment
+# Create isolated development environment (uses default agent from agents.json)
 /plan-cascade:hybrid-worktree feature-auth main "Implement user authentication: login, registration, password reset"
 
-# Generate PRD
+# Create worktree with specific agent for PRD generation
+/plan-cascade:hybrid-worktree feature-auth main "Implement user authentication" --agent=codex
+
+# Generate PRD (without worktree)
 /plan-cascade:hybrid-auto "Implement user authentication feature"
 
 # View and edit PRD
@@ -805,8 +815,8 @@ Configure in `prd.json`:
 ### Feature-Level (Hybrid Ralph)
 
 ```bash
-/plan-cascade:hybrid-worktree <name> <branch> <desc>  # Create development environment
-/plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD
+/plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # Create worktree + PRD
+/plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD (no worktree)
 /plan-cascade:approve [--agent <name>] [--auto-run] [--verify] [--no-verify] [--no-review]  # Execute
 /plan-cascade:hybrid-resume --auto                    # Resume interrupted execution
 /plan-cascade:auto-run [--mode <mode>] [--verify] [--no-verify] [--no-review]  # Auto-iteration

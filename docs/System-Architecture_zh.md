@@ -614,12 +614,13 @@ flowchart TD
 ### 命令参数
 
 ```bash
-/plan-cascade:hybrid-worktree <任务名> <目标分支> <PRD或描述> [设计文档路径]
+/plan-cascade:hybrid-worktree <任务名> <目标分支> <PRD或描述> [设计文档路径] [--agent <名称>]
 
 # 示例：
 /plan-cascade:hybrid-worktree fix-auth main "修复认证 bug"
 /plan-cascade:hybrid-worktree fix-auth main ./existing-prd.json
 /plan-cascade:hybrid-worktree fix-auth main "修复认证" ./design-spec.md
+/plan-cascade:hybrid-worktree fix-auth main "修复认证" --agent=codex
 ```
 
 | 参数 | 说明 |
@@ -628,13 +629,14 @@ flowchart TD
 | `目标分支` | 必填。完成后合并到的分支 |
 | `PRD或描述` | 必填。现有 PRD 文件路径或任务描述 |
 | `设计文档路径` | 可选。要导入的外部设计文档 |
+| `--agent` | 可选。PRD 生成使用的 Agent（覆盖 agents.json 配置） |
 
 ### 详细流程图
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-worktree</b><br/>任务名 目标分支 PRD或描述 [设计文档]"] --> A0[Step 0: 配置 .gitignore]
-    A0 --> B[Step 1: 解析参数]
+    A["<b>/plan-cascade:hybrid-worktree</b><br/>任务名 目标分支 PRD或描述 [设计文档] [--agent]"] --> A0[Step 0: 配置 .gitignore]
+    A0 --> B[Step 1: 解析参数<br/>包括 --agent 标志]
     B --> C[Step 2: 检测操作系统和 Shell<br/>跨平台支持]
     C --> D[Step 3: 验证 Git 仓库]
     D --> E[Step 4: 检测默认分支]
@@ -655,7 +657,8 @@ flowchart TD
     M[Step 7: 确定 PRD 模式]
     M --> N{PRD_ARG 是文件?}
     N -->|是| O[从文件加载 PRD]
-    N -->|否| P[通过 Task Agent 生成 PRD]
+    N -->|否| P0[解析 PRD Agent<br/>--agent > agents.json > 默认]
+    P0 --> P[通过选定 Agent 生成 PRD]
 
     O --> Q
     P --> Q[通过 TaskOutput 等待]
@@ -1370,6 +1373,12 @@ graph TB
 | 参数 | 说明 | 示例 |
 |------|------|------|
 | `--agent` | PRD 生成 Agent | `--agent=codex` |
+
+**`/plan-cascade:hybrid-worktree`（Worktree + PRD 生成）：**
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--agent` | PRD 生成 Agent（覆盖 agents.json 配置） | `--agent=codex` |
 
 ### 阶段化 Agent 分配
 

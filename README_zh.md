@@ -228,13 +228,11 @@ plan-cascade/
 | DeepSeek | 是 | DeepSeek Chat/Coder |
 | Ollama | 否 | 本地模型 |
 
-## v4.3.2 更新内容
+## v4.3.6 更新内容
 
-- **FORMAT 门控** — Story 完成后自动格式化代码，使用 ruff/prettier/cargo fmt/gofmt（PRE_VALIDATION 阶段）
-- **AI 代码审查门** — 5维度代码审查：代码质量（25分）、命名清晰度（20分）、复杂度（20分）、模式遵循（20分）、安全性（15分）
-- **三阶段门控执行** — 门控现在按 PRE_VALIDATION → VALIDATION → POST_VALIDATION 顺序执行
-- **--no-review 参数** — 禁用 AI 代码审查（默认启用）
-- **门控缓存失效** — FORMAT 门控修改文件后自动使缓存失效
+- **hybrid-worktree `--agent` 参数** — PRD 生成代理选择：`/plan-cascade:hybrid-worktree task branch "desc" --agent=codex`
+- **强制合规执行** — AI 代理现在严格遵循配置的代理选择，不再进行主观覆盖
+- **多命令强制执行** — 代理选择规则在 hybrid-auto、mega-approve、approve 和 hybrid-worktree 中统一执行
 
 完整历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 

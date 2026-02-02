@@ -549,21 +549,31 @@ mega-complete → 清理计划文件
 ### 命令参考
 
 ```bash
-/plan-cascade:hybrid-worktree <name> <branch> <desc>  # 创建开发环境
-/plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD
+/plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # 创建 Worktree + PRD
+/plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD（无 Worktree）
 /plan-cascade:approve [--auto-run]                    # 执行 PRD
 /plan-cascade:hybrid-resume --auto                    # 恢复中断的执行
 /plan-cascade:hybrid-status                           # 查看状态
 /plan-cascade:hybrid-complete [branch] [--force]      # 完成并合并（--force 跳过未提交检查）
 ```
 
+| 参数 | 说明 |
+|------|------|
+| `<name>` | 任务名称（用于 Worktree 和分支） |
+| `<branch>` | 完成后合并到的目标分支 |
+| `<desc>` | 任务描述或现有 PRD 文件路径 |
+| `--agent` | 可选。PRD 生成使用的 Agent（覆盖 agents.json 配置） |
+
 ### 使用示例
 
 ```bash
-# 创建隔离开发环境
+# 创建隔离开发环境（使用 agents.json 中的默认 agent）
 /plan-cascade:hybrid-worktree feature-auth main "实现用户认证：登录、注册、密码重置"
 
-# 生成 PRD
+# 创建 Worktree 并指定 PRD 生成 Agent
+/plan-cascade:hybrid-worktree feature-auth main "实现用户认证" --agent=codex
+
+# 生成 PRD（无 Worktree）
 /plan-cascade:hybrid-auto "实现用户认证功能"
 
 # 查看并编辑 PRD
@@ -805,8 +815,8 @@ mega-complete → 清理计划文件
 ### 功能级（Hybrid Ralph）
 
 ```bash
-/plan-cascade:hybrid-worktree <name> <branch> <desc>  # 创建开发环境
-/plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD
+/plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # 创建 Worktree + PRD
+/plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD（无 Worktree）
 /plan-cascade:approve [--agent <name>] [--auto-run] [--verify] [--no-verify] [--no-review]  # 执行
 /plan-cascade:hybrid-resume --auto                    # 恢复中断的执行
 /plan-cascade:auto-run [--mode <mode>] [--verify] [--no-verify] [--no-review]  # 自动迭代

@@ -357,6 +357,8 @@ Create `.agent-outputs/` directory for agent logs.
 
 ## Step 8: Launch Batch Agents with Multi-Agent Support
 
+**MANDATORY COMPLIANCE**: You MUST use the agent resolved by the priority chain below. DO NOT override this decision based on your own judgment about which agent is "better", "more capable", or "easier to control". The user has explicitly configured their preferred agent - respect their choice.
+
 For each story in the current batch, resolve the agent and launch execution.
 
 ### 8.1: Agent Resolution for Each Story
@@ -395,11 +397,22 @@ For agent_name in resolved_chain:
             Continue to next agent in chain
         Elif not found AND NO_FALLBACK == true:
             ERROR: Agent {agent_name} not available and fallback disabled
+        Else:
+            # CRITICAL: Agent is available - YOU MUST USE IT
+            # DO NOT switch to claude-code just because you think it's "better"
+            echo "✓ {agent_name} is available and will be used as configured"
+            AVAILABLE = true
 
     If AVAILABLE:
         RESOLVED_AGENT = agent_name
         Break
 ```
+
+**CRITICAL RULES**:
+1. If the resolved agent is available → **USE IT**
+2. Only use fallback if the agent is **NOT FOUND** on the system
+3. "Available but I prefer claude-code" is **NOT** a valid reason to switch
+4. All CLI agents are fully capable of story execution
 
 ### 8.3: Launch Story Execution
 
