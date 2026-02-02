@@ -320,6 +320,7 @@ class WorktreeManager:
         self,
         task_name: str | None = None,
         target_branch: str | None = None,
+        force: bool = False,
     ) -> tuple[bool, str]:
         """
         Complete a worktree task: verify stories, commit, merge, and cleanup.
@@ -329,6 +330,7 @@ class WorktreeManager:
         Args:
             task_name: Name of the task to complete (optional)
             target_branch: Branch to merge into (overrides config if provided)
+            force: If True, complete even if stories are incomplete
 
         Returns:
             Tuple of (success: bool, message: str)
@@ -359,14 +361,19 @@ class WorktreeManager:
 
         # 1. Verify all stories are complete
         stories_complete, story_msg = self._verify_stories_complete(worktree_path)
+        incomplete_stories: list[str] = []
+
         if not stories_complete:
-            return False, f"Cannot complete: {story_msg}"
+            if not force:
+                return False, f"Cannot complete: {story_msg}"
+            # Extract incomplete story IDs for commit message
+            incomplete_stories = self._get_incomplete_stories(worktree_path)
 
         # 2. Check for uncommitted changes and commit if needed
         has_changes = self._has_uncommitted_changes(worktree_path)
         if has_changes:
             commit_success, commit_msg = self._commit_changes(
-                worktree_path, task_name
+                worktree_path, task_name, incomplete_stories=incomplete_stories
             )
             if not commit_success:
                 return False, f"Failed to commit changes: {commit_msg}"
@@ -386,6 +393,12 @@ class WorktreeManager:
             # Non-fatal: merge succeeded but cleanup failed
             return True, f"Merged successfully, but cleanup failed: {cleanup_msg}"
 
+        # Build completion message
+        if incomplete_stories:
+            return True, (
+                f"Task '{task_name}' force-completed and merged into '{target_branch}' "
+                f"({len(incomplete_stories)} incomplete stories)"
+            )
         return True, f"Task '{task_name}' completed and merged into '{target_branch}'"
 
     def _detect_current_task(self) -> str | None:
@@ -435,6 +448,34 @@ class WorktreeManager:
 
         return True, f"All {len(stories)} stories complete"
 
+    def _get_incomplete_stories(self, worktree_path: Path) -> list[str]:
+        """
+        Get list of incomplete story IDs from the PRD.
+
+        Args:
+            worktree_path: Path to the worktree
+
+        Returns:
+            List of incomplete story IDs with their status (e.g., ["story-001: pending"])
+        """
+        prd_path = worktree_path / "prd.json"
+
+        if not prd_path.exists():
+            return []
+
+        with open(prd_path, encoding="utf-8") as f:
+            prd = json.load(f)
+
+        stories = prd.get("stories", [])
+        incomplete = []
+        for story in stories:
+            status = story.get("status", "pending")
+            if status != "complete":
+                story_id = story.get("id", "unknown")
+                incomplete.append(f"{story_id}: {status}")
+
+        return incomplete
+
     def _has_uncommitted_changes(self, worktree_path: Path) -> bool:
         """Check if there are uncommitted changes in the worktree."""
         try:
@@ -446,9 +487,22 @@ class WorktreeManager:
             return False
 
     def _commit_changes(
-        self, worktree_path: Path, task_name: str
+        self,
+        worktree_path: Path,
+        task_name: str,
+        incomplete_stories: list[str] | None = None,
     ) -> tuple[bool, str]:
-        """Commit changes in the worktree (excluding planning files)."""
+        """
+        Commit changes in the worktree (excluding planning files).
+
+        Args:
+            worktree_path: Path to the worktree
+            task_name: Name of the task for commit message
+            incomplete_stories: List of incomplete story IDs to include in commit message footer
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
         try:
             # Get list of changed files
             result = self._run_git_command(
@@ -485,8 +539,16 @@ class WorktreeManager:
             for f in files_to_add:
                 self._run_git_command(["add", f], cwd=worktree_path)
 
-            # Commit
-            commit_msg = f"feat({task_name}): complete task implementation"
+            # Build commit message
+            if incomplete_stories:
+                # Force completion: include incomplete stories in footer
+                commit_msg = f"feat({task_name}): force-complete task implementation\n\n"
+                commit_msg += "WARN: Force-completed with incomplete stories:\n"
+                for story in incomplete_stories:
+                    commit_msg += f"  - {story}\n"
+            else:
+                commit_msg = f"feat({task_name}): complete task implementation"
+
             self._run_git_command(
                 ["commit", "-m", commit_msg], cwd=worktree_path
             )
@@ -766,20 +828,30 @@ if HAS_TYPER:
                 f"Completing task: {task_name or '(auto-detect)'}"
             )
 
-            success, message = manager.complete(task_name, target_branch)
+            # If force is requested, show warning about incomplete stories first
+            if force:
+                # Detect task name for warning display
+                detected_task = task_name or manager._detect_current_task()
+                if detected_task:
+                    worktree_path = manager.worktree_dir / detected_task
+                    incomplete = manager._get_incomplete_stories(worktree_path)
+                    if incomplete:
+                        output.print_warning(
+                            "WARNING: Force-completing with incomplete stories!"
+                        )
+                        output.print("[yellow]Incomplete stories:[/yellow]")
+                        for story in incomplete:
+                            output.print(f"  [dim]-[/dim] {story}")
+                        output.print()
+
+            success, message = manager.complete(task_name, target_branch, force=force)
 
             if success:
                 output.print_success(message)
             else:
-                if force:
-                    output.print_warning(f"Forcing completion despite: {message}")
-                    # TODO: Implement forced completion
-                    output.print_error("Forced completion not yet implemented")
-                    raise typer.Exit(1)
-                else:
-                    output.print_error(message)
-                    output.print("[dim]Use --force to complete anyway[/dim]")
-                    raise typer.Exit(1)
+                output.print_error(message)
+                output.print("[dim]Use --force to complete anyway[/dim]")
+                raise typer.Exit(1)
 
         except subprocess.CalledProcessError as e:
             output.print_error(f"Git error: {e.stderr or e}")

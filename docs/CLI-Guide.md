@@ -2,7 +2,7 @@
 
 # Plan Cascade - CLI Guide
 
-**Version**: 4.3.0
+**Version**: 4.3.3
 **Last Updated**: 2026-02-02
 
 This document provides detailed instructions for using the Plan Cascade standalone CLI tool.
@@ -79,6 +79,20 @@ Expert mode supports:
 - Specify Agent for each Story
 - Adjust dependencies
 - Configure quality gates
+
+---
+
+## Global Options
+
+The following options are available for all commands:
+
+```bash
+--legacy-mode            Use legacy path mode (store files in project root instead of user directory)
+--project <path>         Project path (default: current directory)
+--verbose                Enable verbose output
+```
+
+**Legacy Mode**: By default, Plan Cascade stores planning files in a platform-specific user directory (`~/.plan-cascade/<project-id>/` on Unix or `%APPDATA%/plan-cascade/<project-id>/` on Windows). Use `--legacy-mode` to store files in the project root directory instead (compatible with older versions).
 
 ---
 
@@ -211,8 +225,11 @@ Options:
   --retry-agent <name>     Agent to use for retry attempts
   --dry-run                Show execution plan without running
   --no-quality-gates       Disable quality gates (typecheck, test, lint)
+  --verify                 Enable AI verification gate (default: from config)
   --no-verify              Disable AI verification gate
   --verify-agent <name>    Agent for AI verification (default: from config)
+  --no-review              Disable AI code review gate
+  --review-agent <name>    Agent for AI code review (default: from config)
   --no-fallback            Disable agent fallback on failure
   --parallel               Execute stories within batches in parallel
   --max-concurrency <n>    Maximum parallel stories (default: CPU count)
@@ -279,8 +296,12 @@ plan-cascade worktree <subcommand> [options]
 
 Subcommands:
   create <name> <branch> [desc]   Create isolated worktree
-  complete [name]                  Merge and cleanup worktree
+  complete [name] [options]        Merge and cleanup worktree
   list                             List active worktrees
+
+Complete Options:
+  --force                  Force completion even with uncommitted changes (changes will be lost)
+  --no-merge               Skip merge to target branch
 ```
 
 Examples:

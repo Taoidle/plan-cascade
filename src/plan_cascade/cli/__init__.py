@@ -10,8 +10,10 @@ Contains the command-line interface:
 - Mega: Multi-feature project orchestration
 - Design: Design document management
 - Migrate: Migration of planning files to user directory
+- Context: Global CLI state management (legacy_mode, project_root)
 """
 
+from .context import CLIContext, get_cli_context
 from .main import app, main
 
 try:
@@ -42,6 +44,8 @@ except ImportError:
 __all__ = [
     "app",
     "main",
+    "CLIContext",
+    "get_cli_context",
     "WorktreeManager",
     "WorktreeState",
     "WorktreeStatus",

@@ -420,6 +420,213 @@ class TestWorktreeManager:
         assert info.progress_percentage == 50.0
 
 
+    def test_get_incomplete_stories_no_prd(self, tmp_path: Path):
+        """Test getting incomplete stories when no PRD exists."""
+        manager = WorktreeManager(tmp_path)
+        worktree_path = tmp_path / ".worktree" / "test-task"
+        worktree_path.mkdir(parents=True)
+
+        result = manager._get_incomplete_stories(worktree_path)
+
+        assert result == []
+
+    def test_get_incomplete_stories_all_complete(self, tmp_path: Path):
+        """Test getting incomplete stories when all are complete."""
+        manager = WorktreeManager(tmp_path)
+        worktree_path = tmp_path / ".worktree" / "test-task"
+        worktree_path.mkdir(parents=True)
+
+        # Create PRD with all stories complete
+        prd = {
+            "metadata": {},
+            "stories": [
+                {"id": "story-001", "status": "complete"},
+                {"id": "story-002", "status": "complete"},
+            ],
+        }
+        with open(worktree_path / "prd.json", "w") as f:
+            json.dump(prd, f)
+
+        result = manager._get_incomplete_stories(worktree_path)
+
+        assert result == []
+
+    def test_get_incomplete_stories_with_incomplete(self, tmp_path: Path):
+        """Test getting incomplete stories when some are incomplete."""
+        manager = WorktreeManager(tmp_path)
+        worktree_path = tmp_path / ".worktree" / "test-task"
+        worktree_path.mkdir(parents=True)
+
+        # Create PRD with incomplete stories
+        prd = {
+            "metadata": {},
+            "stories": [
+                {"id": "story-001", "status": "complete"},
+                {"id": "story-002", "status": "pending"},
+                {"id": "story-003", "status": "in_progress"},
+            ],
+        }
+        with open(worktree_path / "prd.json", "w") as f:
+            json.dump(prd, f)
+
+        result = manager._get_incomplete_stories(worktree_path)
+
+        assert len(result) == 2
+        assert "story-002: pending" in result
+        assert "story-003: in_progress" in result
+
+    @patch.object(WorktreeManager, "_run_git_command")
+    @patch.object(WorktreeManager, "_cleanup_worktree")
+    @patch.object(WorktreeManager, "_merge_branch")
+    def test_complete_force_with_incomplete_stories(
+        self, mock_merge, mock_cleanup, mock_git, tmp_path: Path
+    ):
+        """Test force completion with incomplete stories."""
+        manager = WorktreeManager(tmp_path)
+        worktree_path = tmp_path / ".worktree" / "test-task"
+        worktree_path.mkdir(parents=True)
+
+        # Create config file
+        config = {
+            "task_name": "test-task",
+            "target_branch": "main",
+            "branch_name": "task/test-task",
+        }
+        with open(worktree_path / ".planning-config.json", "w") as f:
+            json.dump(config, f)
+
+        # Create PRD with incomplete stories
+        prd = {
+            "metadata": {},
+            "stories": [
+                {"id": "story-001", "status": "complete"},
+                {"id": "story-002", "status": "pending"},
+            ],
+        }
+        with open(worktree_path / "prd.json", "w") as f:
+            json.dump(prd, f)
+
+        # Mock git commands - no uncommitted changes
+        mock_git.return_value = MagicMock(stdout="", returncode=0)
+        mock_merge.return_value = (True, "Merged successfully")
+        mock_cleanup.return_value = (True, "Cleanup successful")
+
+        # Without force, should fail
+        success, message = manager.complete("test-task", "main", force=False)
+        assert success is False
+        assert "story-002" in message
+
+        # With force, should succeed
+        success, message = manager.complete("test-task", "main", force=True)
+        assert success is True
+        assert "force-completed" in message
+        assert "1 incomplete stories" in message
+
+    @patch.object(WorktreeManager, "_run_git_command")
+    @patch.object(WorktreeManager, "_cleanup_worktree")
+    @patch.object(WorktreeManager, "_merge_branch")
+    def test_complete_force_commits_with_incomplete_info(
+        self, mock_merge, mock_cleanup, mock_git, tmp_path: Path
+    ):
+        """Test that force completion includes incomplete stories in commit message."""
+        manager = WorktreeManager(tmp_path)
+        worktree_path = tmp_path / ".worktree" / "test-task"
+        worktree_path.mkdir(parents=True)
+
+        # Create config file
+        config = {
+            "task_name": "test-task",
+            "target_branch": "main",
+            "branch_name": "task/test-task",
+        }
+        with open(worktree_path / ".planning-config.json", "w") as f:
+            json.dump(config, f)
+
+        # Create PRD with incomplete stories
+        prd = {
+            "metadata": {},
+            "stories": [
+                {"id": "story-001", "status": "complete"},
+                {"id": "story-002", "status": "pending"},
+                {"id": "story-003", "status": "in_progress"},
+            ],
+        }
+        with open(worktree_path / "prd.json", "w") as f:
+            json.dump(prd, f)
+
+        # Track commit message
+        commit_messages = []
+
+        def mock_git_side_effect(args, cwd=None, check=True, capture_output=True):
+            if args[0] == "commit":
+                commit_messages.append(args[2])  # -m is at index 1, message at 2
+            return MagicMock(stdout=" M file.py", returncode=0)
+
+        mock_git.side_effect = mock_git_side_effect
+        mock_merge.return_value = (True, "Merged successfully")
+        mock_cleanup.return_value = (True, "Cleanup successful")
+
+        success, message = manager.complete("test-task", "main", force=True)
+
+        assert success is True
+        assert len(commit_messages) == 1
+        assert "force-complete" in commit_messages[0]
+        assert "story-002: pending" in commit_messages[0]
+        assert "story-003: in_progress" in commit_messages[0]
+
+    @patch.object(WorktreeManager, "_run_git_command")
+    def test_commit_changes_with_incomplete_stories(self, mock_git, tmp_path: Path):
+        """Test commit message includes incomplete stories when provided."""
+        manager = WorktreeManager(tmp_path)
+        worktree_path = tmp_path / ".worktree" / "test-task"
+        worktree_path.mkdir(parents=True)
+
+        commit_messages = []
+
+        def mock_git_side_effect(args, cwd=None, check=True, capture_output=True):
+            if args[0] == "commit":
+                commit_messages.append(args[2])
+            return MagicMock(stdout=" M file.py", returncode=0)
+
+        mock_git.side_effect = mock_git_side_effect
+
+        incomplete = ["story-001: pending", "story-002: in_progress"]
+        success, message = manager._commit_changes(
+            worktree_path, "test-task", incomplete_stories=incomplete
+        )
+
+        assert success is True
+        assert len(commit_messages) == 1
+        assert "force-complete" in commit_messages[0]
+        assert "story-001: pending" in commit_messages[0]
+        assert "story-002: in_progress" in commit_messages[0]
+
+    @patch.object(WorktreeManager, "_run_git_command")
+    def test_commit_changes_without_incomplete_stories(self, mock_git, tmp_path: Path):
+        """Test commit message is normal when no incomplete stories."""
+        manager = WorktreeManager(tmp_path)
+        worktree_path = tmp_path / ".worktree" / "test-task"
+        worktree_path.mkdir(parents=True)
+
+        commit_messages = []
+
+        def mock_git_side_effect(args, cwd=None, check=True, capture_output=True):
+            if args[0] == "commit":
+                commit_messages.append(args[2])
+            return MagicMock(stdout=" M file.py", returncode=0)
+
+        mock_git.side_effect = mock_git_side_effect
+
+        success, message = manager._commit_changes(
+            worktree_path, "test-task", incomplete_stories=None
+        )
+
+        assert success is True
+        assert len(commit_messages) == 1
+        assert "complete task implementation" in commit_messages[0]
+        assert "force-complete" not in commit_messages[0]
+
+
 class TestWorktreeInfo:
     """Tests for WorktreeInfo dataclass."""
 

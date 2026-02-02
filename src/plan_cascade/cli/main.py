@@ -29,6 +29,10 @@ Commands:
 import asyncio
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..state.path_resolver import PathResolver
 
 try:
     import typer
@@ -39,6 +43,7 @@ except ImportError:
     HAS_TYPER = False
 
 from .. import __version__
+from .context import CLIContext
 from .output import OutputManager
 
 if HAS_TYPER:
@@ -50,6 +55,32 @@ if HAS_TYPER:
     )
     console = Console()
     output = OutputManager(console)
+
+    @app.callback()
+    def main_callback(
+        ctx: typer.Context,
+        legacy_mode: bool = typer.Option(
+            False,
+            "--legacy-mode/--no-legacy-mode",
+            help="Use legacy mode for file paths (store files in project root instead of user directory)",
+            envvar="PLAN_CASCADE_LEGACY_MODE",
+        ),
+    ):
+        """
+        Plan Cascade - AI-driven development made simple.
+
+        Global Options:
+            --legacy-mode: Store planning files (prd.json, mega-plan.json, etc.)
+                           in the project root directory instead of the platform-specific
+                           user directory (~/.plan-cascade on Unix, %APPDATA%/plan-cascade on Windows).
+                           This is useful for backward compatibility with existing projects
+                           or when you want planning files to be part of the project.
+        """
+        # Create CLI context with global options
+        ctx.obj = CLIContext.from_options(
+            legacy_mode=legacy_mode,
+            project_root=Path.cwd(),
+        )
 
     @app.command()
     def run(
@@ -638,6 +669,7 @@ if HAS_TYPER:
 
     @app.command()
     def status(
+        ctx: typer.Context,
         project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
     ):
         """
@@ -645,11 +677,23 @@ if HAS_TYPER:
 
         Shows the current state of any running or recent tasks.
         """
+        from .context import get_cli_context
+
         project = Path(project_path) if project_path else Path.cwd()
+
+        # Get CLI context and configure PathResolver for correct project
+        cli_ctx = get_cli_context(ctx)
+        # Update project root if specified via --project
+        if project_path:
+            cli_ctx = CLIContext.from_options(
+                legacy_mode=cli_ctx.legacy_mode,
+                project_root=project,
+            )
+        path_resolver = cli_ctx.get_path_resolver()
 
         try:
             from ..state.state_manager import StateManager
-            state_manager = StateManager(project)
+            state_manager = StateManager(project, path_resolver=path_resolver)
 
             # Read PRD status
             prd = state_manager.read_prd()
@@ -978,6 +1022,7 @@ if HAS_TYPER:
 
     @app.command(name="auto-run")
     def auto_run(
+        ctx: typer.Context,
         mode: str = typer.Option(
             "until_complete",
             "--mode", "-m",
@@ -1033,6 +1078,16 @@ if HAS_TYPER:
             "--project", "-p",
             help="Project path"
         ),
+        verify: bool = typer.Option(
+            False,
+            "--verify/--no-verify",
+            help="Enable AI verification gate after quality gates pass"
+        ),
+        no_review: bool = typer.Option(
+            False,
+            "--no-review",
+            help="Skip PRD display/confirmation prompts (useful for CI/CD)"
+        ),
     ):
         """
         Auto-iterate through PRD batches until completion.
@@ -1045,6 +1100,8 @@ if HAS_TYPER:
         - batch_complete: Run a single batch only
 
         Use --parallel to execute stories within a batch concurrently.
+        Use --verify to enable AI verification after quality gates pass.
+        Use --no-review to skip PRD confirmation prompts (useful for CI/CD).
 
         Examples:
             plan-cascade auto-run
@@ -1053,8 +1110,22 @@ if HAS_TYPER:
             plan-cascade auto-run --no-quality-gates
             plan-cascade auto-run --agent aider --retry-agent claude-code
             plan-cascade auto-run --parallel --max-concurrency 4
+            plan-cascade auto-run --verify
+            plan-cascade auto-run --no-review
         """
+        from .context import get_cli_context
+
         project = Path(project_path) if project_path else Path.cwd()
+
+        # Get CLI context and configure PathResolver for correct project
+        cli_ctx = get_cli_context(ctx)
+        # Update project root if specified via --project
+        if project_path:
+            cli_ctx = CLIContext.from_options(
+                legacy_mode=cli_ctx.legacy_mode,
+                project_root=project,
+            )
+        path_resolver = cli_ctx.get_path_resolver()
 
         # Print header
         output.print_header(
@@ -1065,6 +1136,7 @@ if HAS_TYPER:
         # Run the auto-run logic
         asyncio.run(_run_auto(
             project=project,
+            path_resolver=path_resolver,
             mode=mode,
             max_iterations=max_iterations,
             agent=agent,
@@ -1075,10 +1147,13 @@ if HAS_TYPER:
             fallback_enabled=not no_fallback,
             parallel=parallel,
             max_concurrency=max_concurrency,
+            verify_enabled=verify,
+            no_review=no_review,
         ))
 
     async def _run_auto(
         project: Path,
+        path_resolver: "PathResolver",
         mode: str,
         max_iterations: int,
         agent: str | None,
@@ -1089,6 +1164,8 @@ if HAS_TYPER:
         fallback_enabled: bool,
         parallel: bool = False,
         max_concurrency: int | None = None,
+        verify_enabled: bool = False,
+        no_review: bool = False,
     ):
         """Execute auto-run iteration loop."""
         from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
@@ -1126,8 +1203,8 @@ if HAS_TYPER:
         if iteration_mode == IterationMode.MAX_ITERATIONS:
             output.print_info(f"Max Iterations: {max_iterations}")
 
-        # Initialize state manager
-        state_manager = StateManager(project)
+        # Initialize state manager with PathResolver from CLI context
+        state_manager = StateManager(project, path_resolver=path_resolver)
 
         # Load PRD
         prd = state_manager.read_prd()
@@ -1142,6 +1219,18 @@ if HAS_TYPER:
             sys.exit(1)
 
         output.print_info(f"PRD loaded: {len(stories)} stories")
+
+        # Show PRD details unless --no-review is specified
+        if not no_review:
+            output.print()
+            output.print("[bold]Stories:[/bold]")
+            for story in stories[:10]:  # Show first 10 stories
+                status = story.get("status", "pending")
+                status_icon = {"complete": "[green]v[/green]", "in_progress": "[yellow]>[/yellow]"}.get(status, "[dim]o[/dim]")
+                output.print(f"  {status_icon} {story.get('id', '?')}: {story.get('title', 'Untitled')}")
+            if len(stories) > 10:
+                output.print(f"  ... and {len(stories) - 10} more stories")
+
         output.print()
 
         # Build agent selection configuration
@@ -1188,8 +1277,22 @@ if HAS_TYPER:
         if quality_gates_enabled:
             quality_gate = QualityGate.create_default(project)
             output.print_info("Quality gates: enabled (typecheck, test, lint)")
+
+            # Add AI verification gate if --verify is enabled
+            if verify_enabled:
+                verify_gate_config = GateConfig(
+                    name="ai-verification",
+                    type=GateType.IMPLEMENTATION_VERIFY,
+                    enabled=True,
+                    required=True,
+                    confidence_threshold=0.7,
+                )
+                quality_gate.gates.append(verify_gate_config)
+                output.print_info("AI verification: [green]enabled[/green]")
         else:
             output.print_info("Quality gates: [yellow]disabled[/yellow]")
+            if verify_enabled:
+                output.print_warning("AI verification requires quality gates - use without --no-quality-gates")
 
         # Create retry manager
         retry_config = RetryConfig(
@@ -2173,6 +2276,7 @@ if HAS_TYPER:
 
     @app.command()
     def resume(
+        ctx: typer.Context,
         auto: bool = typer.Option(
             False,
             "--auto", "-a",
@@ -2219,7 +2323,19 @@ if HAS_TYPER:
         """
         import json as json_module
 
+        from .context import get_cli_context
+
         project = Path(project_path) if project_path else Path.cwd()
+
+        # Get CLI context and configure PathResolver for correct project
+        cli_ctx = get_cli_context(ctx)
+        # Update project root if specified via --project
+        if project_path:
+            cli_ctx = CLIContext.from_options(
+                legacy_mode=cli_ctx.legacy_mode,
+                project_root=project,
+            )
+        path_resolver = cli_ctx.get_path_resolver()
 
         # Import context recovery
         try:
@@ -2232,8 +2348,8 @@ if HAS_TYPER:
             output.print_error(f"Context recovery module not available: {e}")
             raise typer.Exit(1)
 
-        # Create recovery manager and detect context
-        recovery_manager = ContextRecoveryManager(project)
+        # Create recovery manager with PathResolver from CLI context
+        recovery_manager = ContextRecoveryManager(project, path_resolver=path_resolver)
         state = recovery_manager.detect_context()
         plan = recovery_manager.generate_recovery_plan(state)
 
@@ -2283,7 +2399,7 @@ if HAS_TYPER:
             recovery_manager.update_context_file(state)
 
             # Execute the primary recovery action
-            _execute_recovery_action(state, plan, project, output)
+            _execute_recovery_action(state, plan, project, output, path_resolver)
 
         elif not auto:
             output.print()
@@ -2295,7 +2411,7 @@ if HAS_TYPER:
                     recovery_manager.update_context_file(state)
 
                     # Execute recovery
-                    _execute_recovery_action(state, plan, project, output)
+                    _execute_recovery_action(state, plan, project, output, path_resolver)
             else:
                 output.print_info("Manual intervention required. See actions above.")
 
@@ -2410,7 +2526,7 @@ if HAS_TYPER:
             elif state.pending_stories:
                 output.print(f"[bold dim]Pending:[/bold dim] {len(state.pending_stories)} stories")
 
-    def _execute_recovery_action(state, plan, project: Path, output):
+    def _execute_recovery_action(state, plan, project: Path, output, path_resolver: "PathResolver"):
         """Execute the primary recovery action based on context type."""
         from ..state.context_recovery import ContextType, TaskState
 
@@ -2424,20 +2540,20 @@ if HAS_TYPER:
 
         # Route to appropriate handler based on context type
         if state.context_type == ContextType.MEGA_PLAN:
-            _resume_mega_plan(state, project, output)
+            _resume_mega_plan(state, project, output, path_resolver)
 
         elif state.context_type == ContextType.HYBRID_WORKTREE:
             if state.worktree_path:
-                _resume_hybrid_worktree(state, state.worktree_path, output)
+                _resume_hybrid_worktree(state, state.worktree_path, output, path_resolver)
             else:
                 output.print_warning("Multiple worktrees found. Please change to a worktree directory.")
                 for wt in state.mega_plan_features[:3]:
                     output.print(f"  [cyan]cd {wt['path']}[/cyan]")
 
         elif state.context_type == ContextType.HYBRID_AUTO:
-            _resume_hybrid_auto(state, project, output)
+            _resume_hybrid_auto(state, project, output, path_resolver)
 
-    def _resume_mega_plan(state, project: Path, output):
+    def _resume_mega_plan(state, project: Path, output, path_resolver: "PathResolver"):
         """Resume mega-plan execution."""
         from ..state.context_recovery import TaskState
 
@@ -2448,8 +2564,8 @@ if HAS_TYPER:
                 from ..state.mega_state import MegaStateManager
                 from ..core.mega_generator import MegaPlanGenerator
 
-                generator = MegaPlanGenerator(project)
-                state_manager = MegaStateManager(project)
+                generator = MegaPlanGenerator(project, path_resolver=path_resolver)
+                state_manager = MegaStateManager(project, path_resolver=path_resolver)
 
                 mega_plan = state_manager.read_mega_plan()
                 if mega_plan:
@@ -2473,8 +2589,8 @@ if HAS_TYPER:
                 from ..state.mega_state import MegaStateManager
                 from ..core.mega_generator import MegaPlanGenerator
 
-                state_manager = MegaStateManager(project)
-                generator = MegaPlanGenerator(project)
+                state_manager = MegaStateManager(project, path_resolver=path_resolver)
+                generator = MegaPlanGenerator(project, path_resolver=path_resolver)
 
                 # Sync status from worktrees
                 worktree_status = state_manager.sync_status_from_worktrees()
@@ -2516,9 +2632,10 @@ if HAS_TYPER:
                 output.print_error(f"Could not load mega-plan modules: {e}")
                 output.print_info("Run manually: [cyan]plan-cascade mega resume[/cyan]")
 
-    def _resume_hybrid_worktree(state, worktree_path: Path, output):
+    def _resume_hybrid_worktree(state, worktree_path: Path, output, path_resolver: "PathResolver"):
         """Resume hybrid-worktree execution."""
         from ..state.context_recovery import TaskState
+        # Note: path_resolver available for future use but not currently needed here
 
         if state.task_state == TaskState.COMPLETE:
             output.print_success("All stories complete!")
@@ -2550,9 +2667,10 @@ if HAS_TYPER:
             output.print()
             output.print_info(f"Run [cyan]plan-cascade auto-run --project {worktree_path}[/cyan]")
 
-    def _resume_hybrid_auto(state, project: Path, output):
+    def _resume_hybrid_auto(state, project: Path, output, path_resolver: "PathResolver"):
         """Resume hybrid-auto execution."""
         from ..state.context_recovery import TaskState
+        # Note: path_resolver available for future use but not currently needed here
 
         if state.task_state == TaskState.COMPLETE:
             output.print_success("All stories complete!")

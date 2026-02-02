@@ -6,15 +6,58 @@ Generates project-level mega-plan from user descriptions.
 Breaks down complex projects into features that can be executed as hybrid:worktree tasks.
 """
 
+import asyncio
 import json
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ..llm.base import LLMProvider
     from ..state.path_resolver import PathResolver
+
+
+# Feature decomposition prompt template
+FEATURE_DECOMPOSITION_PROMPT = """You are a technical project planner. Analyze the following project description and break it down into independent features that can be developed in parallel.
+
+## Project Description
+{description}
+
+## Additional Context
+{context}
+
+## Instructions
+Break down this project into 2-8 features. Each feature should be:
+- Self-contained and independently deployable
+- Small enough to complete in 1-3 days of work
+- Named with lowercase alphanumeric characters and hyphens only (e.g., "user-auth", "api-endpoints")
+
+For each feature, identify:
+1. A clear title and description
+2. Priority (high/medium/low) based on business value and technical dependencies
+3. Dependencies on other features (by feature name)
+
+## Output Format
+Return ONLY a JSON array of features:
+```json
+[
+  {{
+    "name": "feature-name",
+    "title": "Human Readable Title",
+    "description": "Detailed description of the feature scope and requirements",
+    "priority": "high|medium|low",
+    "dependencies": ["other-feature-name"]
+  }}
+]
+```
+
+Important:
+- Use lowercase with hyphens for names (e.g., "user-auth" not "UserAuth")
+- Dependencies should reference feature names, not IDs
+- High priority features should be foundational (auth, database, etc.)
+- Return ONLY the JSON array, no additional text"""
 
 
 class MegaPlanGenerator:
@@ -99,6 +142,173 @@ class MegaPlanGenerator:
         }
 
         return mega_plan
+
+    async def generate_features_with_llm(
+        self,
+        plan: dict,
+        llm: "LLMProvider",
+        context: dict | None = None
+    ) -> tuple[dict, list[str]]:
+        """
+        Generate features for a mega-plan using LLM analysis.
+
+        Args:
+            plan: Mega-plan dictionary to populate with features
+            llm: LLM provider instance
+            context: Optional additional context (design docs, constraints, etc.)
+
+        Returns:
+            Tuple of (updated plan, list of any errors/warnings)
+        """
+        errors: list[str] = []
+
+        # Build context string
+        context_str = "No additional context provided."
+        if context:
+            context_parts = []
+            if context.get("design_doc"):
+                context_parts.append(f"Design Document: {context.get('design_doc')}")
+            if context.get("existing_features"):
+                context_parts.append(f"Existing Features: {', '.join(context.get('existing_features', []))}")
+            if context.get("constraints"):
+                context_parts.append(f"Constraints: {context.get('constraints')}")
+            if context.get("tech_stack"):
+                context_parts.append(f"Tech Stack: {context.get('tech_stack')}")
+            if context_parts:
+                context_str = "\n".join(context_parts)
+
+        # Build the prompt
+        prompt = FEATURE_DECOMPOSITION_PROMPT.format(
+            description=plan.get("description", ""),
+            context=context_str
+        )
+
+        try:
+            # Call LLM
+            response = await llm.complete(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,  # Lower temperature for more consistent output
+                max_tokens=4096
+            )
+
+            # Parse the response
+            features_data = self._parse_llm_features_response(response.content)
+
+            if not features_data:
+                errors.append("LLM returned no valid features")
+                return plan, errors
+
+            # Add features to the plan
+            name_to_id: dict[str, str] = {}
+            for feature_data in features_data:
+                name = feature_data.get("name", "")
+                if not name:
+                    errors.append(f"Feature missing name: {feature_data}")
+                    continue
+
+                # Normalize name (ensure lowercase with hyphens)
+                name = self._normalize_feature_name(name)
+
+                # Add the feature
+                plan = self.add_feature(
+                    plan=plan,
+                    name=name,
+                    title=feature_data.get("title", name.replace("-", " ").title()),
+                    description=feature_data.get("description", ""),
+                    priority=feature_data.get("priority", "medium"),
+                    dependencies=[]  # Will resolve after all features added
+                )
+
+                # Map name to ID for dependency resolution
+                added_feature = plan["features"][-1]
+                name_to_id[name] = added_feature["id"]
+
+            # Resolve dependencies (convert names to IDs)
+            for i, feature_data in enumerate(features_data):
+                if i >= len(plan["features"]):
+                    break
+
+                feature = plan["features"][i]
+                dep_names = feature_data.get("dependencies", [])
+
+                resolved_deps = []
+                for dep_name in dep_names:
+                    dep_name = self._normalize_feature_name(dep_name)
+                    if dep_name in name_to_id:
+                        resolved_deps.append(name_to_id[dep_name])
+                    else:
+                        errors.append(f"Feature '{feature['name']}' has unknown dependency: '{dep_name}'")
+
+                feature["dependencies"] = resolved_deps
+
+        except Exception as e:
+            errors.append(f"LLM generation failed: {str(e)}")
+
+        return plan, errors
+
+    def _parse_llm_features_response(self, content: str) -> list[dict[str, Any]]:
+        """
+        Parse LLM response to extract features JSON.
+
+        Args:
+            content: Raw LLM response content
+
+        Returns:
+            List of feature dictionaries
+        """
+        if not content:
+            return []
+
+        # Try to extract JSON from markdown code block
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+        if json_match:
+            content = json_match.group(1).strip()
+
+        # Try to find JSON array directly
+        array_match = re.search(r'\[\s*\{[\s\S]*\}\s*\]', content)
+        if array_match:
+            content = array_match.group(0)
+
+        try:
+            data = json.loads(content)
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict) and "features" in data:
+                return data["features"]
+            return []
+        except json.JSONDecodeError:
+            return []
+
+    def _normalize_feature_name(self, name: str) -> str:
+        """
+        Normalize feature name to lowercase with hyphens.
+
+        Args:
+            name: Feature name to normalize
+
+        Returns:
+            Normalized name
+        """
+        # Remove 'feature-' prefix if present (will be added back)
+        if name.startswith("feature-"):
+            name = name[8:]
+
+        # Convert to lowercase
+        name = name.lower()
+
+        # Replace spaces and underscores with hyphens
+        name = re.sub(r'[\s_]+', '-', name)
+
+        # Remove any non-alphanumeric characters except hyphens
+        name = re.sub(r'[^a-z0-9-]', '', name)
+
+        # Remove consecutive hyphens
+        name = re.sub(r'-+', '-', name)
+
+        # Remove leading/trailing hyphens
+        name = name.strip('-')
+
+        return name
 
     def add_feature(
         self,

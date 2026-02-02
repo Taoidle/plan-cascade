@@ -15,7 +15,10 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..state.path_resolver import PathResolver
 
 try:
     import typer
@@ -114,16 +117,30 @@ class DependencyGraphAnalyzer:
 
     BOTTLENECK_THRESHOLD = 2  # Number of dependents to be considered a bottleneck
 
-    def __init__(self, project_root: Path):
+    def __init__(
+        self,
+        project_root: Path,
+        path_resolver: "PathResolver | None" = None,
+    ):
         """
         Initialize the dependency graph analyzer.
 
         Args:
             project_root: Root directory of the project
+            path_resolver: Optional PathResolver instance for locating plan files.
+                          If not provided, uses legacy behavior (files in project_root).
         """
         self.project_root = Path(project_root)
-        self.prd_path = self.project_root / "prd.json"
-        self.mega_plan_path = self.project_root / "mega-plan.json"
+        self._path_resolver = path_resolver
+
+        # Use PathResolver if provided, otherwise fall back to legacy paths
+        if path_resolver is not None:
+            self.prd_path = path_resolver.get_prd_path()
+            self.mega_plan_path = path_resolver.get_mega_plan_path()
+        else:
+            # Legacy mode: files in project root
+            self.prd_path = self.project_root / "prd.json"
+            self.mega_plan_path = self.project_root / "mega-plan.json"
 
     def analyze(self) -> DependencyGraphResult:
         """
@@ -693,6 +710,7 @@ if HAS_TYPER:
         console.print(table)
 
     def dependencies_command(
+        ctx: typer.Context,
         format: str = typer.Option(
             "tree",
             "--format",
@@ -732,10 +750,27 @@ if HAS_TYPER:
             plan-cascade deps --format json
             plan-cascade deps --no-critical-path --no-check
         """
+        from .context import get_cli_context
+
         project = Path(project_path) if project_path else Path.cwd()
 
+        # Get PathResolver from CLI context (if available)
+        # This respects --legacy-mode flag and auto-detection
+        cli_ctx = get_cli_context(ctx)
+
+        # If project_path is explicitly provided, create a new PathResolver for that path
+        # Otherwise, use the context's path resolver (which respects --legacy-mode)
+        if project_path:
+            from ..state.path_resolver import PathResolver, detect_project_mode
+
+            detected_mode = detect_project_mode(project)
+            path_resolver = PathResolver(project, legacy_mode=detected_mode == "legacy")
+        else:
+            path_resolver = cli_ctx.get_path_resolver()
+            project = cli_ctx.project_root
+
         try:
-            analyzer = DependencyGraphAnalyzer(project)
+            analyzer = DependencyGraphAnalyzer(project, path_resolver=path_resolver)
             result = analyzer.analyze()
 
             # JSON output

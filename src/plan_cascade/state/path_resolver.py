@@ -13,11 +13,17 @@ Follows ADR-F001 (hash-based project IDs) and ADR-F002 (platform paths):
 
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
 import time
 from pathlib import Path
+
+# Link file name constant (same as in project_link.py)
+LINK_FILE_NAME = ".plan-cascade-link.json"
+
+logger = logging.getLogger(__name__)
 
 
 class PathResolver:
@@ -417,6 +423,78 @@ class PathResolver:
         project_dir = self.get_project_dir()
         if project_dir.exists():
             shutil.rmtree(project_dir)
+
+
+def detect_project_mode(project_root: Path) -> str:
+    """
+    Detect if a project has been migrated by checking for the migration link file.
+
+    This function checks for the presence of .plan-cascade-link.json in the project
+    root and validates its contents. If the file exists and is valid (contains
+    required fields: version, project_id, data_dir), returns 'migrated'.
+    Otherwise returns 'legacy'.
+
+    This implements ADR-F002: When --legacy-mode flag is not specified, auto-detect
+    by checking for .plan-cascade-link.json. If found and valid, use new mode.
+    Otherwise, default to legacy mode for backward compatibility.
+
+    Args:
+        project_root: Root directory of the project
+
+    Returns:
+        'migrated' if .plan-cascade-link.json exists and is valid
+        'legacy' otherwise
+    """
+    project_root = Path(project_root).resolve()
+    link_path = project_root / LINK_FILE_NAME
+
+    if not link_path.exists():
+        logger.debug(f"No migration link file found at {link_path}")
+        return "legacy"
+
+    try:
+        with open(link_path, encoding="utf-8") as f:
+            link_data = json.load(f)
+
+        # Validate required fields
+        # Note: The link file format uses 'data_path' as the key (from project_link.py)
+        # but the design doc mentions 'data_dir'. We support both for compatibility.
+        required_fields = ["project_id"]
+        has_data_field = "data_path" in link_data or "data_dir" in link_data
+
+        for field in required_fields:
+            if field not in link_data:
+                logger.warning(
+                    f"Migration link file at {link_path} is missing required field: {field}"
+                )
+                return "legacy"
+
+        if not has_data_field:
+            logger.warning(
+                f"Migration link file at {link_path} is missing data_path or data_dir field"
+            )
+            return "legacy"
+
+        # Verify the data directory exists
+        data_path = link_data.get("data_path") or link_data.get("data_dir")
+        if not Path(data_path).exists():
+            logger.warning(
+                f"Migration link file points to non-existent data directory: {data_path}"
+            )
+            return "legacy"
+
+        logger.info(
+            f"Detected migrated project: {link_data.get('project_id')} "
+            f"(data: {data_path})"
+        )
+        return "migrated"
+
+    except json.JSONDecodeError as e:
+        logger.warning(f"Migration link file at {link_path} contains invalid JSON: {e}")
+        return "legacy"
+    except OSError as e:
+        logger.warning(f"Error reading migration link file at {link_path}: {e}")
+        return "legacy"
 
 
 def main():

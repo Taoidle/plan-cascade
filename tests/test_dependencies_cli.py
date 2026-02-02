@@ -10,6 +10,7 @@ from src.plan_cascade.cli.dependencies import (
     DependencyNode,
     OutputFormat,
 )
+from src.plan_cascade.state.path_resolver import PathResolver
 
 try:
     import typer
@@ -435,3 +436,127 @@ class TestDependenciesCLI:
         assert "--project" in result.output
         assert "--critical-path" in result.output
         assert "--check" in result.output
+
+
+class TestDependencyGraphAnalyzerWithPathResolver:
+    """Tests for DependencyGraphAnalyzer with PathResolver integration."""
+
+    def test_analyzer_with_legacy_path_resolver(self, tmp_path, sample_prd):
+        """Test analyzer using PathResolver in legacy mode (files in project root)."""
+        # Create PRD in project root (legacy location)
+        prd_path = tmp_path / "prd.json"
+        with open(prd_path, "w") as f:
+            json.dump(sample_prd, f)
+
+        # Create PathResolver in legacy mode
+        path_resolver = PathResolver(tmp_path, legacy_mode=True)
+
+        analyzer = DependencyGraphAnalyzer(tmp_path, path_resolver=path_resolver)
+        result = analyzer.analyze()
+
+        assert result.source_type == "prd"
+        assert len(result.nodes) == 4
+        assert "story-001" in result.nodes
+
+    def test_analyzer_with_migrated_path_resolver(self, tmp_path, sample_prd):
+        """Test analyzer using PathResolver in new mode (files in user data directory)."""
+        # Create a separate data directory to simulate migration
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        # Create PathResolver with data_dir_override (simulating migrated project)
+        path_resolver = PathResolver(
+            tmp_path,
+            legacy_mode=False,
+            data_dir_override=data_dir,
+        )
+
+        # Create PRD in the path resolver's location (not project root)
+        prd_path = path_resolver.get_prd_path()
+        prd_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(prd_path, "w") as f:
+            json.dump(sample_prd, f)
+
+        analyzer = DependencyGraphAnalyzer(tmp_path, path_resolver=path_resolver)
+        result = analyzer.analyze()
+
+        assert result.source_type == "prd"
+        assert len(result.nodes) == 4
+        assert "story-001" in result.nodes
+
+    def test_analyzer_with_mega_plan_migrated(self, tmp_path, sample_mega_plan):
+        """Test analyzer using PathResolver in new mode for mega-plan files."""
+        # Create a separate data directory to simulate migration
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        # Create PathResolver with data_dir_override
+        path_resolver = PathResolver(
+            tmp_path,
+            legacy_mode=False,
+            data_dir_override=data_dir,
+        )
+
+        # Create mega-plan in the path resolver's location
+        mega_path = path_resolver.get_mega_plan_path()
+        mega_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(mega_path, "w") as f:
+            json.dump(sample_mega_plan, f)
+
+        analyzer = DependencyGraphAnalyzer(tmp_path, path_resolver=path_resolver)
+        result = analyzer.analyze()
+
+        assert result.source_type == "mega-plan"
+        assert len(result.nodes) == 3
+        assert "feature-001" in result.nodes
+
+    def test_analyzer_without_path_resolver_uses_legacy(self, tmp_path, sample_prd):
+        """Test that analyzer without PathResolver uses legacy behavior."""
+        # Create PRD in project root
+        prd_path = tmp_path / "prd.json"
+        with open(prd_path, "w") as f:
+            json.dump(sample_prd, f)
+
+        # Create analyzer without PathResolver (legacy behavior)
+        analyzer = DependencyGraphAnalyzer(tmp_path)
+
+        assert analyzer.prd_path == tmp_path / "prd.json"
+        assert analyzer.mega_plan_path == tmp_path / "mega-plan.json"
+
+        result = analyzer.analyze()
+        assert result.source_type == "prd"
+
+    def test_analyzer_file_not_found_in_migrated_location(self, tmp_path):
+        """Test error when files don't exist in migrated location."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        path_resolver = PathResolver(
+            tmp_path,
+            legacy_mode=False,
+            data_dir_override=data_dir,
+        )
+
+        # Don't create any files
+        analyzer = DependencyGraphAnalyzer(tmp_path, path_resolver=path_resolver)
+
+        with pytest.raises(FileNotFoundError):
+            analyzer.analyze()
+
+    def test_analyzer_path_resolver_paths_are_correct(self, tmp_path):
+        """Test that analyzer uses PathResolver paths correctly."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        path_resolver = PathResolver(
+            tmp_path,
+            legacy_mode=False,
+            data_dir_override=data_dir,
+        )
+
+        analyzer = DependencyGraphAnalyzer(tmp_path, path_resolver=path_resolver)
+
+        # Verify paths are from PathResolver, not project root
+        assert analyzer.prd_path == path_resolver.get_prd_path()
+        assert analyzer.mega_plan_path == path_resolver.get_mega_plan_path()
+        assert analyzer.prd_path != tmp_path / "prd.json"

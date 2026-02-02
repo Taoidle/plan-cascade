@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from plan_cascade.state.path_resolver import PathResolver
+from plan_cascade.state.path_resolver import (
+    LINK_FILE_NAME,
+    PathResolver,
+    detect_project_mode,
+)
 
 
 class TestPathResolverBasic:
@@ -708,3 +712,127 @@ class TestFindProjectById:
 
         result = PathResolver.find_project_by_id("nonexistent-12345678", data_dir=data_dir)
         assert result is None
+
+
+class TestDetectProjectMode:
+    """Tests for detect_project_mode function."""
+
+    def test_no_link_file_returns_legacy(self, tmp_path: Path):
+        """Test that missing link file returns legacy mode."""
+        result = detect_project_mode(tmp_path)
+        assert result == "legacy"
+
+    def test_valid_link_file_returns_migrated(self, tmp_path: Path):
+        """Test that valid link file returns migrated mode."""
+        # Create data directory
+        data_dir = tmp_path / "data" / "my-project-12345678"
+        data_dir.mkdir(parents=True)
+
+        # Create valid link file
+        link_data = {
+            "project_id": "my-project-12345678",
+            "data_path": str(data_dir),
+            "created_at": "2024-01-01T00:00:00Z",
+            "last_accessed": "2024-01-01T00:00:00Z",
+        }
+        link_path = tmp_path / LINK_FILE_NAME
+        link_path.write_text(json.dumps(link_data))
+
+        result = detect_project_mode(tmp_path)
+        assert result == "migrated"
+
+    def test_link_file_with_data_dir_field(self, tmp_path: Path):
+        """Test link file using data_dir field (alternative format)."""
+        # Create data directory
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        # Create link file with data_dir instead of data_path
+        link_data = {
+            "version": "1.0",
+            "project_id": "test-proj",
+            "data_dir": str(data_dir),
+            "migrated_at": "2024-01-01T00:00:00Z",
+        }
+        link_path = tmp_path / LINK_FILE_NAME
+        link_path.write_text(json.dumps(link_data))
+
+        result = detect_project_mode(tmp_path)
+        assert result == "migrated"
+
+    def test_missing_project_id_returns_legacy(self, tmp_path: Path):
+        """Test that link file without project_id returns legacy mode."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        # Create link file without project_id
+        link_data = {
+            "data_path": str(data_dir),
+        }
+        link_path = tmp_path / LINK_FILE_NAME
+        link_path.write_text(json.dumps(link_data))
+
+        result = detect_project_mode(tmp_path)
+        assert result == "legacy"
+
+    def test_missing_data_path_returns_legacy(self, tmp_path: Path):
+        """Test that link file without data_path or data_dir returns legacy mode."""
+        # Create link file without data path
+        link_data = {
+            "project_id": "test-proj",
+        }
+        link_path = tmp_path / LINK_FILE_NAME
+        link_path.write_text(json.dumps(link_data))
+
+        result = detect_project_mode(tmp_path)
+        assert result == "legacy"
+
+    def test_nonexistent_data_dir_returns_legacy(self, tmp_path: Path):
+        """Test that link file pointing to nonexistent data dir returns legacy mode."""
+        # Create link file with nonexistent data path
+        link_data = {
+            "project_id": "test-proj",
+            "data_path": str(tmp_path / "nonexistent" / "data"),
+        }
+        link_path = tmp_path / LINK_FILE_NAME
+        link_path.write_text(json.dumps(link_data))
+
+        result = detect_project_mode(tmp_path)
+        assert result == "legacy"
+
+    def test_invalid_json_returns_legacy(self, tmp_path: Path):
+        """Test that invalid JSON link file returns legacy mode."""
+        link_path = tmp_path / LINK_FILE_NAME
+        link_path.write_text("not valid json {{{")
+
+        result = detect_project_mode(tmp_path)
+        assert result == "legacy"
+
+    def test_empty_json_returns_legacy(self, tmp_path: Path):
+        """Test that empty JSON object returns legacy mode."""
+        link_path = tmp_path / LINK_FILE_NAME
+        link_path.write_text("{}")
+
+        result = detect_project_mode(tmp_path)
+        assert result == "legacy"
+
+    def test_resolves_relative_path(self, tmp_path: Path):
+        """Test that function resolves relative paths."""
+        # Create data directory and link file
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        link_data = {
+            "project_id": "test-proj",
+            "data_path": str(data_dir),
+        }
+        link_path = tmp_path / LINK_FILE_NAME
+        link_path.write_text(json.dumps(link_data))
+
+        # Should work even with Path object
+        result = detect_project_mode(Path(tmp_path))
+        assert result == "migrated"
+
+    def test_link_file_name_constant(self):
+        """Test that the link file name constant is correct."""
+        assert LINK_FILE_NAME == ".plan-cascade-link.json"

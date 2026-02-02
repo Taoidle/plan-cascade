@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.3.2
+**Version**: 4.3.3
 **Last Updated**: 2026-02-02
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
@@ -536,7 +536,7 @@ Suitable for single complex feature development requiring branch isolation.
 /plan-cascade:approve [--auto-run]                    # Execute PRD
 /plan-cascade:hybrid-resume --auto                    # Resume interrupted execution
 /plan-cascade:hybrid-status                           # View status
-/plan-cascade:hybrid-complete [branch]                # Complete and merge
+/plan-cascade:hybrid-complete [branch] [--force]      # Complete and merge (--force skips uncommitted check)
 ```
 
 ### Usage Example
@@ -691,6 +691,12 @@ Configure in `prd.json`:
 # Disable auto-fallback
 /plan-cascade:approve --agent=codex --no-fallback
 
+# Enable AI verification gate explicitly
+/plan-cascade:approve --verify
+
+# Disable AI verification gate
+/plan-cascade:approve --no-verify
+
 # Disable AI code review (enabled by default)
 /plan-cascade:approve --no-review
 
@@ -783,14 +789,14 @@ Configure in `prd.json`:
 ```bash
 /plan-cascade:hybrid-worktree <name> <branch> <desc>  # Create development environment
 /plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD
-/plan-cascade:approve [--agent <name>] [--auto-run]   # Execute
+/plan-cascade:approve [--agent <name>] [--auto-run] [--verify] [--no-verify] [--no-review]  # Execute
 /plan-cascade:hybrid-resume --auto                    # Resume interrupted execution
-/plan-cascade:auto-run [--mode <mode>]                # Auto-iteration
+/plan-cascade:auto-run [--mode <mode>] [--verify] [--no-verify] [--no-review]  # Auto-iteration
 /plan-cascade:iteration-status [--verbose]            # Iteration status
 /plan-cascade:agent-config [--action <action>]        # Agent configuration
 /plan-cascade:hybrid-status                           # Status
 /plan-cascade:agent-status [--story-id <id>]          # Agent status
-/plan-cascade:hybrid-complete [branch]                # Complete
+/plan-cascade:hybrid-complete [branch] [--force]      # Complete (--force skips uncommitted check)
 /plan-cascade:edit                                    # Edit PRD
 /plan-cascade:show-dependencies                       # Dependency graph
 ```
@@ -808,7 +814,7 @@ Configure in `prd.json`:
 ```bash
 /plan-cascade:start                      # Start basic planning
 /plan-cascade:worktree <name> <branch>   # Create Worktree
-/plan-cascade:complete [branch]          # Complete
+/plan-cascade:complete [branch] [--force]  # Complete (--force skips uncommitted check)
 ```
 
 ---

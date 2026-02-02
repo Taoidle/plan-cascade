@@ -15,7 +15,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 try:
     import typer
@@ -28,6 +28,9 @@ try:
     HAS_TYPER = True
 except ImportError:
     HAS_TYPER = False
+
+if TYPE_CHECKING:
+    from ..state.path_resolver import PathResolver
 
 if HAS_TYPER:
     # Create Typer app for mega commands
@@ -44,18 +47,41 @@ if HAS_TYPER:
         """Get the project path from argument or cwd."""
         return Path(project_path) if project_path else Path.cwd()
 
-    def _load_mega_plan(project: Path) -> dict | None:
-        """Load mega-plan.json from project directory."""
+    def _load_mega_plan(
+        project: Path,
+        path_resolver: "PathResolver | None" = None,
+    ) -> dict | None:
+        """Load mega-plan.json from project directory.
+
+        Args:
+            project: Project root path.
+            path_resolver: Optional PathResolver instance for unified path resolution.
+                          If not provided, uses legacy mode for backward compatibility.
+
+        Returns:
+            Mega-plan dictionary or None if not found.
+        """
         from ..state.mega_state import MegaStateManager
 
-        state_manager = MegaStateManager(project)
+        state_manager = MegaStateManager(project, path_resolver=path_resolver)
         return state_manager.read_mega_plan()
 
-    def _save_mega_plan(project: Path, plan: dict) -> None:
-        """Save mega-plan.json to project directory."""
+    def _save_mega_plan(
+        project: Path,
+        plan: dict,
+        path_resolver: "PathResolver | None" = None,
+    ) -> None:
+        """Save mega-plan.json to project directory.
+
+        Args:
+            project: Project root path.
+            plan: Mega-plan dictionary to save.
+            path_resolver: Optional PathResolver instance for unified path resolution.
+                          If not provided, uses legacy mode for backward compatibility.
+        """
         from ..state.mega_state import MegaStateManager
 
-        state_manager = MegaStateManager(project)
+        state_manager = MegaStateManager(project, path_resolver=path_resolver)
         state_manager.write_mega_plan(plan)
 
     def _print_header(title: str, subtitle: str | None = None) -> None:
@@ -195,6 +221,7 @@ if HAS_TYPER:
 
     @mega_app.command("plan")
     def plan(
+        ctx: typer.Context,
         description: str = typer.Argument(..., help="Project description for mega-plan generation"),
         project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
         target_branch: str = typer.Option("main", "--target", "-t", help="Target branch for merging"),
@@ -202,6 +229,8 @@ if HAS_TYPER:
         prd_agent: Optional[str] = typer.Option(None, "--prd-agent", help="Agent for PRD generation"),
         story_agent: Optional[str] = typer.Option(None, "--story-agent", help="Agent for story execution"),
         design_doc: Optional[str] = typer.Option(None, "--design-doc", "-d", help="Path to design document"),
+        no_llm: bool = typer.Option(False, "--no-llm", help="Skip LLM analysis and use manual feature entry"),
+        llm_provider: Optional[str] = typer.Option(None, "--llm-provider", help="LLM provider (claude, openai, etc.)"),
     ):
         """
         Generate a mega-plan from a project description.
@@ -209,11 +238,21 @@ if HAS_TYPER:
         Creates a multi-feature development plan with dependencies and execution batches.
         The plan breaks down the project into features that can be worked on in parallel.
 
+        By default, uses LLM analysis to automatically decompose the project into features.
+        Use --no-llm to skip LLM analysis and add features manually.
+
         Examples:
             plan-cascade mega plan "Build an e-commerce platform with auth, products, cart, and orders"
             plan-cascade mega plan "Add user dashboard" --target develop
             plan-cascade mega plan "Build API" --design-doc design.json
+            plan-cascade mega plan "Build API" --no-llm
         """
+        from .context import get_cli_context
+
+        # Get CLI context for path resolution
+        cli_ctx = get_cli_context(ctx)
+        path_resolver = cli_ctx.get_path_resolver()
+
         project = _get_project_path(project_path)
 
         _print_header(
@@ -222,7 +261,7 @@ if HAS_TYPER:
         )
 
         # Check if mega-plan already exists
-        existing_plan = _load_mega_plan(project)
+        existing_plan = _load_mega_plan(project, path_resolver=path_resolver)
         if existing_plan:
             _print_warning("A mega-plan.json already exists in this project")
             if not Confirm.ask("Overwrite existing plan?", default=False):
@@ -253,29 +292,88 @@ if HAS_TYPER:
         if design_doc:
             plan["metadata"]["design_doc"] = design_doc
 
-        # TODO: In a full implementation, this would call an LLM to analyze
-        # the description and generate features. For now, we create a placeholder
-        # that prompts for manual feature entry or uses a sample.
+        # Use LLM to generate features unless --no-llm is specified
+        if not no_llm:
+            _print_info("Analyzing project with LLM to generate features...")
 
-        _print_info("Note: Mega-plan requires AI analysis to break down into features.")
-        _print_info("You can add features manually with 'mega edit' after creation.")
+            try:
+                # Initialize LLM provider
+                from ..llm import LLMFactory
+                from ..llm.base import LLMError
+
+                provider_name = llm_provider or "claude"
+
+                try:
+                    llm = LLMFactory.create(provider_name)
+                except (LLMError, ValueError) as e:
+                    _print_warning(f"Could not initialize LLM provider '{provider_name}': {e}")
+                    _print_info("Falling back to manual feature entry.")
+                    no_llm = True
+
+                if not no_llm:
+                    # Build context for LLM
+                    context = {}
+                    if design_doc:
+                        # Try to read design document content
+                        design_path = Path(design_doc)
+                        if design_path.exists():
+                            try:
+                                with open(design_path) as f:
+                                    context["design_doc"] = f.read()[:5000]  # Limit context size
+                            except Exception:
+                                context["design_doc"] = str(design_path)
+                        else:
+                            context["design_doc"] = design_doc
+
+                    # Run async LLM generation
+                    plan, errors = asyncio.run(
+                        generator.generate_features_with_llm(plan, llm, context)
+                    )
+
+                    if errors:
+                        for error in errors:
+                            _print_warning(f"LLM warning: {error}")
+
+                    if plan.get("features"):
+                        _print_success(f"Generated {len(plan['features'])} feature(s) with LLM analysis")
+                    else:
+                        _print_warning("LLM did not generate any features")
+                        _print_info("You can add features manually with 'mega edit' after creation.")
+
+            except Exception as e:
+                _print_error(f"LLM analysis failed: {e}")
+                _print_info("Falling back to manual feature entry.")
+                no_llm = True
+
+        if no_llm:
+            _print_info("Skipping LLM analysis. You can add features manually with 'mega edit'.")
 
         # Save the plan
-        _save_mega_plan(project, plan)
-        _print_success(f"Mega-plan saved to {project / 'mega-plan.json'}")
+        _save_mega_plan(project, plan, path_resolver=path_resolver)
+        # Show the actual save location based on path resolver mode
+        from ..state.mega_state import MegaStateManager
+        state_manager = MegaStateManager(project, path_resolver=path_resolver)
+        _print_success(f"Mega-plan saved to {state_manager.mega_plan_path}")
 
         # Display the plan
         console.print()
         _display_mega_plan(plan)
 
         console.print()
-        _print_info("Next steps:")
-        console.print("  1. Add features with: [cyan]plan-cascade mega edit[/cyan]")
-        console.print("  2. Review the plan: [cyan]plan-cascade mega status[/cyan]")
-        console.print("  3. Start execution: [cyan]plan-cascade mega approve[/cyan]")
+        if plan.get("features"):
+            _print_info("Next steps:")
+            console.print("  1. Review the plan: [cyan]plan-cascade mega status[/cyan]")
+            console.print("  2. Edit if needed: [cyan]plan-cascade mega edit[/cyan]")
+            console.print("  3. Start execution: [cyan]plan-cascade mega approve[/cyan]")
+        else:
+            _print_info("Next steps:")
+            console.print("  1. Add features with: [cyan]plan-cascade mega edit[/cyan]")
+            console.print("  2. Review the plan: [cyan]plan-cascade mega status[/cyan]")
+            console.print("  3. Start execution: [cyan]plan-cascade mega approve[/cyan]")
 
     @mega_app.command("approve")
     def approve(
+        ctx: typer.Context,
         project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
         auto_prd: bool = typer.Option(False, "--auto-prd", help="Auto-approve generated PRDs"),
         batch: Optional[int] = typer.Option(None, "--batch", "-b", help="Execute specific batch only"),
@@ -291,6 +389,12 @@ if HAS_TYPER:
             plan-cascade mega approve --auto-prd
             plan-cascade mega approve --batch 1
         """
+        from .context import get_cli_context
+
+        # Get CLI context for path resolution
+        cli_ctx = get_cli_context(ctx)
+        path_resolver = cli_ctx.get_path_resolver()
+
         project = _get_project_path(project_path)
 
         _print_header(
@@ -299,7 +403,7 @@ if HAS_TYPER:
         )
 
         # Load mega-plan
-        plan = _load_mega_plan(project)
+        plan = _load_mega_plan(project, path_resolver=path_resolver)
         if not plan:
             _print_error("No mega-plan.json found. Run 'mega plan' first.")
             raise typer.Exit(1)
@@ -388,6 +492,7 @@ if HAS_TYPER:
 
     @mega_app.command("status")
     def status(
+        ctx: typer.Context,
         project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed status"),
     ):
@@ -400,6 +505,12 @@ if HAS_TYPER:
             plan-cascade mega status
             plan-cascade mega status --verbose
         """
+        from .context import get_cli_context
+
+        # Get CLI context for path resolution
+        cli_ctx = get_cli_context(ctx)
+        path_resolver = cli_ctx.get_path_resolver()
+
         project = _get_project_path(project_path)
 
         _print_header(
@@ -408,7 +519,7 @@ if HAS_TYPER:
         )
 
         # Load mega-plan
-        plan = _load_mega_plan(project)
+        plan = _load_mega_plan(project, path_resolver=path_resolver)
         if not plan:
             _print_error("No mega-plan.json found. Run 'mega plan' first.")
             raise typer.Exit(1)
@@ -440,7 +551,7 @@ if HAS_TYPER:
         if verbose:
             from ..state.mega_state import MegaStateManager
 
-            state_manager = MegaStateManager(project)
+            state_manager = MegaStateManager(project, path_resolver=path_resolver)
             worktree_status = state_manager.sync_status_from_worktrees()
 
             if worktree_status:
@@ -473,6 +584,7 @@ if HAS_TYPER:
 
     @mega_app.command("complete")
     def complete(
+        ctx: typer.Context,
         project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
         force: bool = typer.Option(False, "--force", "-f", help="Force completion even if features incomplete"),
         cleanup: bool = typer.Option(True, "--cleanup/--no-cleanup", help="Clean up planning files after completion"),
@@ -487,6 +599,12 @@ if HAS_TYPER:
             plan-cascade mega complete --no-cleanup
             plan-cascade mega complete --force
         """
+        from .context import get_cli_context
+
+        # Get CLI context for path resolution
+        cli_ctx = get_cli_context(ctx)
+        path_resolver = cli_ctx.get_path_resolver()
+
         project = _get_project_path(project_path)
 
         _print_header(
@@ -495,7 +613,7 @@ if HAS_TYPER:
         )
 
         # Load mega-plan
-        plan = _load_mega_plan(project)
+        plan = _load_mega_plan(project, path_resolver=path_resolver)
         if not plan:
             _print_error("No mega-plan.json found.")
             raise typer.Exit(1)
@@ -526,7 +644,7 @@ if HAS_TYPER:
         # Merge features
         from ..state.mega_state import MegaStateManager
 
-        state_manager = MegaStateManager(project)
+        state_manager = MegaStateManager(project, path_resolver=path_resolver)
         target_branch = plan.get("target_branch", "main")
 
         completed_features = generator.get_features_by_status(plan, "complete")
@@ -556,6 +674,7 @@ if HAS_TYPER:
 
     @mega_app.command("edit")
     def edit(
+        ctx: typer.Context,
         project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
     ):
         """
@@ -566,6 +685,12 @@ if HAS_TYPER:
         Examples:
             plan-cascade mega edit
         """
+        from .context import get_cli_context
+
+        # Get CLI context for path resolution
+        cli_ctx = get_cli_context(ctx)
+        path_resolver = cli_ctx.get_path_resolver()
+
         project = _get_project_path(project_path)
 
         _print_header(
@@ -574,7 +699,7 @@ if HAS_TYPER:
         )
 
         # Load mega-plan
-        plan = _load_mega_plan(project)
+        plan = _load_mega_plan(project, path_resolver=path_resolver)
         if not plan:
             _print_error("No mega-plan.json found. Run 'mega plan' first.")
             raise typer.Exit(1)
@@ -597,12 +722,12 @@ if HAS_TYPER:
 
             if choice == "quit":
                 if Confirm.ask("Save changes before quitting?", default=True):
-                    _save_mega_plan(project, plan)
+                    _save_mega_plan(project, plan, path_resolver=path_resolver)
                     _print_success("Changes saved")
                 break
 
             elif choice == "save":
-                _save_mega_plan(project, plan)
+                _save_mega_plan(project, plan, path_resolver=path_resolver)
                 _print_success("Changes saved")
 
             elif choice == "add":
@@ -730,6 +855,7 @@ if HAS_TYPER:
 
     @mega_app.command("resume")
     def resume(
+        ctx: typer.Context,
         project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
         auto_prd: bool = typer.Option(False, "--auto-prd", help="Auto-approve PRDs for pending features"),
     ):
@@ -742,6 +868,12 @@ if HAS_TYPER:
             plan-cascade mega resume
             plan-cascade mega resume --auto-prd
         """
+        from .context import get_cli_context
+
+        # Get CLI context for path resolution
+        cli_ctx = get_cli_context(ctx)
+        path_resolver = cli_ctx.get_path_resolver()
+
         project = _get_project_path(project_path)
 
         _print_header(
@@ -750,7 +882,7 @@ if HAS_TYPER:
         )
 
         # Load mega-plan
-        plan = _load_mega_plan(project)
+        plan = _load_mega_plan(project, path_resolver=path_resolver)
         if not plan:
             _print_error("No mega-plan.json found.")
             raise typer.Exit(1)
@@ -760,7 +892,7 @@ if HAS_TYPER:
         from ..state.mega_state import MegaStateManager
 
         generator = MegaPlanGenerator(project)
-        state_manager = MegaStateManager(project)
+        state_manager = MegaStateManager(project, path_resolver=path_resolver)
 
         progress = generator.calculate_progress(plan)
         batches = generator.generate_feature_batches(plan)
@@ -790,7 +922,7 @@ if HAS_TYPER:
                     updated = True
 
         if updated:
-            _save_mega_plan(project, plan)
+            _save_mega_plan(project, plan, path_resolver=path_resolver)
 
         # Recalculate progress
         progress = generator.calculate_progress(plan)

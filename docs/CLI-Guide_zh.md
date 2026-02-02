@@ -2,7 +2,7 @@
 
 # Plan Cascade - CLI Guide
 
-**版本**: 4.3.0
+**版本**: 4.3.3
 **最后更新**: 2026-02-02
 
 本文档详细介绍 Plan Cascade 独立 CLI 工具的使用方法。
@@ -79,6 +79,20 @@ plan-cascade run "实现用户登录" --expert
 - 指定每个 Story 的 Agent
 - 调整依赖关系
 - 配置质量门控
+
+---
+
+## 全局选项
+
+以下选项适用于所有命令：
+
+```bash
+--legacy-mode            使用旧版路径模式（将文件存储在项目根目录而非用户目录）
+--project <path>         项目路径（默认：当前目录）
+--verbose                启用详细输出
+```
+
+**旧版模式**：默认情况下，Plan Cascade 将规划文件存储在平台特定的用户目录中（Unix 上为 `~/.plan-cascade/<project-id>/`，Windows 上为 `%APPDATA%/plan-cascade/<project-id>/`）。使用 `--legacy-mode` 可将文件存储在项目根目录中（与旧版本兼容）。
 
 ---
 
@@ -211,8 +225,11 @@ Options:
   --retry-agent <name>     重试时使用的 Agent
   --dry-run                显示执行计划但不实际运行
   --no-quality-gates       禁用质量门控（类型检查、测试、lint）
+  --verify                 启用 AI 验证门（默认：从配置读取）
   --no-verify              禁用 AI 验证门
   --verify-agent <name>    AI 验证 Agent（默认：从配置读取）
+  --no-review              禁用 AI 代码审查门
+  --review-agent <name>    AI 代码审查 Agent（默认：从配置读取）
   --no-fallback            禁用 Agent 失败回退
   --parallel               批次内并行执行 Stories
   --max-concurrency <n>    最大并行 Stories 数（默认：CPU 核心数）
@@ -279,8 +296,12 @@ plan-cascade worktree <subcommand> [options]
 
 子命令:
   create <name> <branch> [desc]   创建隔离 worktree
-  complete [name]                  合并并清理 worktree
+  complete [name] [options]        合并并清理 worktree
   list                             列出活跃的 worktrees
+
+Complete 选项:
+  --force                  强制完成，即使有未提交的更改（更改将丢失）
+  --no-merge               跳过合并到目标分支
 ```
 
 示例：

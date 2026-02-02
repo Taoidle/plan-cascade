@@ -2,7 +2,7 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**版本**: 4.3.2
+**版本**: 4.3.3
 **最后更新**: 2026-02-02
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
@@ -536,7 +536,7 @@ mega-complete → 清理计划文件
 /plan-cascade:approve [--auto-run]                    # 执行 PRD
 /plan-cascade:hybrid-resume --auto                    # 恢复中断的执行
 /plan-cascade:hybrid-status                           # 查看状态
-/plan-cascade:hybrid-complete [branch]                # 完成并合并
+/plan-cascade:hybrid-complete [branch] [--force]      # 完成并合并（--force 跳过未提交检查）
 ```
 
 ### 使用示例
@@ -691,6 +691,12 @@ mega-complete → 清理计划文件
 # 禁用自动降级
 /plan-cascade:approve --agent=codex --no-fallback
 
+# 显式启用 AI 验证门
+/plan-cascade:approve --verify
+
+# 禁用 AI 验证门
+/plan-cascade:approve --no-verify
+
 # 禁用 AI 代码审查（默认启用）
 /plan-cascade:approve --no-review
 
@@ -783,14 +789,14 @@ mega-complete → 清理计划文件
 ```bash
 /plan-cascade:hybrid-worktree <name> <branch> <desc>  # 创建开发环境
 /plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD
-/plan-cascade:approve [--agent <name>] [--auto-run]   # 执行
+/plan-cascade:approve [--agent <name>] [--auto-run] [--verify] [--no-verify] [--no-review]  # 执行
 /plan-cascade:hybrid-resume --auto                    # 恢复中断的执行
-/plan-cascade:auto-run [--mode <mode>]                # 自动迭代
+/plan-cascade:auto-run [--mode <mode>] [--verify] [--no-verify] [--no-review]  # 自动迭代
 /plan-cascade:iteration-status [--verbose]            # 迭代状态
 /plan-cascade:agent-config [--action <action>]        # Agent 配置
 /plan-cascade:hybrid-status                           # 状态
 /plan-cascade:agent-status [--story-id <id>]          # Agent 状态
-/plan-cascade:hybrid-complete [branch]                # 完成
+/plan-cascade:hybrid-complete [branch] [--force]      # 完成（--force 跳过未提交检查）
 /plan-cascade:edit                                    # 编辑 PRD
 /plan-cascade:show-dependencies                       # 依赖图
 ```
@@ -808,7 +814,7 @@ mega-complete → 清理计划文件
 ```bash
 /plan-cascade:start                      # 开始基础规划
 /plan-cascade:worktree <name> <branch>   # 创建 Worktree
-/plan-cascade:complete [branch]          # 完成
+/plan-cascade:complete [branch] [--force]  # 完成（--force 跳过未提交检查）
 ```
 
 ---
