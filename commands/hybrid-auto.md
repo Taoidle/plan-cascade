@@ -95,22 +95,55 @@ Optional arguments:
 
 ### 1.1: Resolve PRD Generation Agent
 
+**CRITICAL**: You MUST read `agents.json` to get the configured default agent:
+
 ```
-If PRD_AGENT specified:
+# Step 1: Read agents.json configuration
+Read("agents.json")
+
+# Step 2: Parse and select agent
+agents_config = parse_json(agents.json content)
+
+If PRD_AGENT specified (from --agent flag):
     agent = PRD_AGENT
-Elif phase_defaults.planning.default_agent in agents.json:
-    agent = phase_defaults.planning.default_agent
+Elif agents_config.phase_defaults.planning.default_agent exists:
+    agent = agents_config.phase_defaults.planning.default_agent
 Else:
     agent = "claude-code"
 
-# Verify CLI agent availability
-If agent != "claude-code" AND agents[agent].type == "cli":
-    If not is_command_available(agents[agent].command):
-        echo "⚠️ {agent} not available, falling back to claude-code"
-        agent = "claude-code"
+# Step 3: Get agent configuration
+agent_config = agents_config.agents[agent]
+agent_type = agent_config.type  # "task-tool" or "cli"
 
-echo "PRD Generation Agent: {agent}"
+# Step 4: Verify CLI agent availability (only for CLI agents)
+If agent_type == "cli":
+    command = agent_config.command  # e.g., "codex", "aider"
+
+    # Check if command is available
+    Bash("which {command} 2>/dev/null || where {command} 2>nul || echo 'NOT_FOUND'")
+
+    If command not found:
+        echo "⚠️ {agent} ({command}) not available, checking fallback chain..."
+        fallback_chain = agents_config.phase_defaults.planning.fallback_chain
+
+        For fallback in fallback_chain:
+            If fallback == "claude-code" OR is_command_available(agents[fallback].command):
+                agent = fallback
+                agent_config = agents_config.agents[agent]
+                agent_type = agent_config.type
+                break
+
+        If no fallback found:
+            agent = "claude-code"
+            agent_type = "task-tool"
+
+echo "PRD Generation Agent: {agent} (type: {agent_type})"
 ```
+
+**Example**: If `agents.json` has `phase_defaults.planning.default_agent: "codex"`, then:
+- Agent will be `codex`
+- Type will be `cli`
+- Command will be `codex` (from `agents.codex.command`)
 
 ## Step 2: Generate PRD with Selected Agent
 
@@ -165,26 +198,64 @@ Launch with Task tool:
 task_id = Task(
     prompt=<above prompt>,
     subagent_type="general-purpose",
-    run_in_background=true
+    run_in_background=true,
+    allowed_tools=["Write", "Edit", "Read", "Glob", "Grep"]
 )
 ```
 
+**IMPORTANT**: The `allowed_tools` parameter grants the subagent permission to write files. Without this, the agent can only read files and the main agent must write the output.
+
 ### If agent is CLI (codex, aider, etc.):
 
-```
-agent_config = agents[agent]
-command = agent_config.command  # e.g., "codex"
-args = agent_config.args        # e.g., ["--prompt", "{prompt}"]
+Based on `agent_config` from Step 1.1, build and execute the CLI command:
 
-# Build command with prompt substitution
-full_command = build_cli_command(agent_config, prompt)
+```
+# Get agent configuration (already loaded in Step 1.1)
+command = agent_config.command      # e.g., "codex"
+args = agent_config.args            # e.g., ["--prompt", "{prompt}"]
+working_dir = agent_config.working_dir or "."
+timeout = agent_config.timeout or 600  # seconds
+
+# Build the prompt for PRD generation
+prd_prompt = """
+You are a PRD generation specialist. Analyze the task and generate a PRD.
+
+Task: $TASK_DESC
+
+Generate prd.json with:
+- metadata (created_at, version, description)
+- goal (one sentence)
+- objectives (list)
+- stories (3-7 stories with id, title, description, priority, dependencies, status, acceptance_criteria, context_estimate, tags)
+
+Save the result to prd.json in the current directory.
+"""
+
+# Substitute {prompt} in args with actual prompt
+full_args = []
+for arg in args:
+    if "{prompt}" in arg:
+        full_args.append(arg.replace("{prompt}", prd_prompt))
+    else:
+        full_args.append(arg)
+
+# Build full command
+full_command = command + " " + " ".join(full_args)
+
+# Example for codex: codex --prompt "..."
+# Example for aider: aider --message "..." --yes
 
 task_id = Bash(
     command=full_command,
     run_in_background=true,
-    timeout=agent_config.timeout or 600000
+    timeout=timeout * 1000  # Convert to milliseconds
 )
 ```
+
+**CLI Agent Examples**:
+- `codex`: `codex --prompt "Generate PRD for: ..."`
+- `aider`: `aider --message "Generate PRD for: ..." --yes`
+- `claude-cli`: `claude -p "Generate PRD for: ..."`
 
 ## Step 3: Wait for PRD Generation
 
@@ -318,7 +389,19 @@ You are a technical design specialist. Your task is to generate a design_doc.jso
 5. SAVE to design_doc.json in the current directory
 ```
 
-Launch this as a background task with `run_in_background: true`, then use TaskOutput to wait.
+Launch with Task tool (with write permissions):
+```
+task_id = Task(
+    prompt=<above prompt>,
+    subagent_type="general-purpose",
+    run_in_background=true,
+    allowed_tools=["Write", "Edit", "Read", "Glob", "Grep"]
+)
+
+TaskOutput(task_id=task_id, block=true, timeout=600000)
+```
+
+**IMPORTANT**: The `allowed_tools` parameter is required for the subagent to write `design_doc.json` directly. Without it, you must write the file yourself after the agent returns the content.
 
 ## Step 5: Display Unified Review
 
