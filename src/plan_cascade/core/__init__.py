@@ -88,6 +88,23 @@ from .stage_state import (
     StageStateMachine,
     get_contract_registry,
 )
+from .dashboard import (
+    ExecutionStatus,
+    StoryStatus as DashboardStoryStatus,
+    ActionType,
+    StoryInfo,
+    BatchStatus,
+    GateSummary,
+    FailureInfo,
+    RecommendedAction,
+    DashboardState,
+    DashboardAggregator,
+    DashboardFormatter,
+    read_progress_status,
+    get_dashboard,
+    format_dashboard,
+    show_dashboard,
+)
 from .strategy import ExecutionStrategy, StrategyDecision
 from .user_skill_config import UserSkillConfig, UserSkillEntry
 
