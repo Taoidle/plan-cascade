@@ -66,6 +66,33 @@ Confirmation points are generated when:
 /plan-cascade:auto --confirm "Major refactoring of payment module"
 ```
 
+### `--tdd <off|on|auto>`
+
+Control Test-Driven Development (TDD) mode for story execution.
+
+| Mode | Description | When to Use |
+|------|-------------|-------------|
+| `off` | TDD disabled | Simple changes, documentation, non-code tasks |
+| `on` | TDD enabled with prompts and compliance checks | Critical features, security-related code |
+| `auto` | Automatically decide based on risk assessment (default) | Most development tasks |
+
+When TDD mode is enabled (on or auto-enabled):
+1. **Red Phase**: AI writes failing tests first based on acceptance criteria
+2. **Green Phase**: Minimal implementation to make tests pass
+3. **Refactor Phase**: Improve code while keeping tests green
+
+TDD compliance is checked via quality gates after story completion:
+- Verifies test files were modified alongside code changes
+- High-risk stories (security, auth, database) enforce test requirements
+- Warnings generated for code changes without corresponding tests
+
+**Usage:**
+```
+/plan-cascade:auto --tdd on "Implement payment processing module"
+/plan-cascade:auto --tdd off "Update README documentation"
+/plan-cascade:auto --tdd auto "Add user profile feature"
+```
+
 ### Combining Flags
 
 Flags can be combined for customized behavior:
@@ -76,6 +103,9 @@ Flags can be combined for customized behavior:
 
 # Quick analysis without execution
 /plan-cascade:auto --flow quick --explain "Simple config update"
+
+# Force TDD mode with full flow for security feature
+/plan-cascade:auto --flow full --tdd on "Implement OAuth2 authentication"
 ```
 
 ## Path Storage Modes
@@ -141,12 +171,14 @@ FLOW_OVERRIDE = null     # --flow <quick|standard|full>
 EXPLAIN_MODE = false     # --explain
 CONFIRM_MODE = false     # --confirm
 JSON_OUTPUT = false      # --json
+TDD_OVERRIDE = null      # --tdd <off|on|auto>
 
 # Extract flags using pattern matching:
 # --flow quick|standard|full -> FLOW_OVERRIDE = "quick" | "standard" | "full"
 # --explain -> EXPLAIN_MODE = true
 # --confirm -> CONFIRM_MODE = true
 # --json -> JSON_OUTPUT = true
+# --tdd off|on|auto -> TDD_OVERRIDE = "off" | "on" | "auto"
 
 # Remove flags from ARGS to get TASK_DESC
 TASK_DESC = (ARGS with flags removed)
@@ -157,7 +189,8 @@ Parse the arguments:
 2. Check for `--explain` flag
 3. Check for `--confirm` flag
 4. Check for `--json` flag (only meaningful with --explain)
-5. Remaining text is the task description
+5. Check for `--tdd` followed by `off`, `on`, or `auto`
+6. Remaining text is the task description
 
 If no description provided, ask the user:
 ```
@@ -629,6 +662,36 @@ This will:
 
 ### TDD Recommendations
 
-- **off**: For simple, low-risk changes (DIRECT strategy)
-- **on**: For high-risk tasks or FULL flow - write tests before implementation
-- **auto**: Let the executing agent decide based on context (default for STANDARD flow)
+The `tdd_recommendation` field in the analysis output suggests whether TDD should be used:
+
+- **off**: For simple, low-risk changes (DIRECT strategy) - no TDD overhead needed
+- **on**: For high-risk tasks or FULL flow - write tests before implementation to ensure correctness
+- **auto**: Let the executing agent decide based on story context (default for STANDARD flow)
+
+#### Auto Mode Risk Detection
+
+When `--tdd auto` (or no flag), TDD is automatically enabled for stories that:
+- Have high-risk tags: `security`, `auth`, `database`, `payment`, `migration`
+- Contain high-risk keywords in title/description: `authentication`, `authorization`, `encrypt`, `credential`, `delete`, etc.
+- Have `test_expectations.required = true` in the story definition
+- Have context_estimate of `large` or `xlarge`
+
+#### TDD Compliance Gate
+
+When TDD is enabled, a `TDD_COMPLIANCE` quality gate runs after story completion:
+- Checks if test files were modified alongside code changes
+- For high-risk stories: errors if no test changes detected
+- For other stories: warnings for missing test coverage
+- Provides suggestions for following TDD workflow
+
+Example gate output:
+```
+[PASSED] tdd_compliance
+  Test files changed: 2
+  Code files changed: 3
+  Message: TDD compliance check passed
+
+[FAILED] tdd_compliance
+  ERROR: Story story-001: Code changes detected but no test files modified.
+  Suggestion: Follow TDD workflow: 1) Write failing test, 2) Implement to pass, 3) Refactor
+```

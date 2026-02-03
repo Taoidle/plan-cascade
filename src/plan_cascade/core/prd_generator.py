@@ -100,7 +100,8 @@ class PRDGenerator:
         dependencies: list[str] | None = None,
         acceptance_criteria: list[str] | None = None,
         context_estimate: str = "medium",
-        tags: list[str] | None = None
+        tags: list[str] | None = None,
+        test_expectations: dict | None = None,
     ) -> dict:
         """
         Add a user story to the PRD.
@@ -114,6 +115,11 @@ class PRDGenerator:
             acceptance_criteria: List of acceptance criteria
             context_estimate: Estimated context size (small, medium, large, xlarge)
             tags: Optional tags for categorization
+            test_expectations: Optional test expectations for TDD mode. Dictionary with:
+                - required: bool - Whether tests are required for this story
+                - test_types: list[str] - Types of tests expected (unit, integration, e2e)
+                - coverage_areas: list[str] - Areas that should be covered by tests
+                - min_tests: int - Minimum number of test cases expected
 
         Returns:
             Updated PRD dictionary
@@ -132,6 +138,10 @@ class PRDGenerator:
             "context_estimate": context_estimate,
             "tags": tags or []
         }
+
+        # Add test_expectations if provided
+        if test_expectations is not None:
+            story["test_expectations"] = test_expectations
 
         prd["stories"].append(story)
         return prd
@@ -320,6 +330,21 @@ class PRDGenerator:
                 for dep in story.get("dependencies", []):
                     if dep not in story_ids:
                         errors.append(f"Story {story.get('id', i)}: Unknown dependency '{dep}'")
+
+                # Validate test_expectations if present
+                test_expectations = story.get("test_expectations")
+                if test_expectations is not None:
+                    if not isinstance(test_expectations, dict):
+                        errors.append(f"Story {story.get('id', i)}: test_expectations must be a dictionary")
+                    else:
+                        # Validate test_types if present
+                        test_types = test_expectations.get("test_types")
+                        if test_types is not None and not isinstance(test_types, list):
+                            errors.append(f"Story {story.get('id', i)}: test_expectations.test_types must be a list")
+                        # Validate coverage_areas if present
+                        coverage_areas = test_expectations.get("coverage_areas")
+                        if coverage_areas is not None and not isinstance(coverage_areas, list):
+                            errors.append(f"Story {story.get('id', i)}: test_expectations.coverage_areas must be a list")
 
         return (len(errors) == 0, errors)
 

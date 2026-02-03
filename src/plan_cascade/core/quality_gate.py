@@ -44,6 +44,7 @@ class GateType(Enum):
     CUSTOM = "custom"
     IMPLEMENTATION_VERIFY = "implementation_verify"
     CODE_REVIEW = "code_review"
+    TDD_COMPLIANCE = "tdd_compliance"
 
 
 class GateGroup(Enum):
@@ -957,6 +958,7 @@ class QualityGate:
         GateType.CUSTOM: GateGroup.VALIDATION,
         GateType.IMPLEMENTATION_VERIFY: GateGroup.POST_VALIDATION,
         GateType.CODE_REVIEW: GateGroup.POST_VALIDATION,
+        GateType.TDD_COMPLIANCE: GateGroup.POST_VALIDATION,
     }
 
     @classmethod
@@ -984,6 +986,12 @@ class QualityGate:
             from .code_review_gate import CodeReviewGate
             cls.GATE_CLASSES[GateType.CODE_REVIEW] = CodeReviewGate
             return CodeReviewGate
+
+        # Lazy load TDDComplianceGate to avoid circular imports
+        if gate_type == GateType.TDD_COMPLIANCE:
+            from .tdd_compliance_gate import TDDComplianceGate
+            cls.GATE_CLASSES[GateType.TDD_COMPLIANCE] = TDDComplianceGate
+            return TDDComplianceGate
 
         return None
 
