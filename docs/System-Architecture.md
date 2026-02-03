@@ -2,8 +2,8 @@
 
 # Plan Cascade - System Architecture and Workflow Design
 
-**Version**: 4.3.2
-**Last Updated**: 2026-02-02
+**Version**: 4.4.0
+**Last Updated**: 2026-02-03
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
 
@@ -89,6 +89,7 @@ graph LR
     subgraph "Orchestration Layer"
         O[Orchestrator<br/>Orchestrator]
         IL[IterationLoop<br/>Iteration Loop]
+        SA[StrategyAnalyzer<br/>Strategy Analyzer]
     end
 
     subgraph "Execution Layer"
@@ -104,25 +105,36 @@ graph LR
         GC[GateCache<br/>Gate Cache]
         EP[ErrorParser<br/>Error Parser]
         CFD[ChangedFilesDetector<br/>Changed Files]
+        DOR[ReadinessGate<br/>DoR Gate]
+        DOD[DoneGate<br/>DoD Gate]
+        TDD[TDDComplianceGate<br/>TDD Gate]
     end
 
     subgraph "State Layer"
         SM[StateManager<br/>State Manager]
         CF[ContextFilter<br/>Context Filter]
         ESL[ExternalSkillLoader<br/>External Skills]
+        RD[ResumeDetector<br/>Resume Detector]
+        DA[DashboardAggregator<br/>Dashboard]
     end
 
-    O --> IL
+    O --> SA
+    SA --> IL
     IL --> AE
     AE --> PM
     PM --> CPD
-    IL --> QG
+    IL --> DOR
+    DOR --> QG
     QG --> RM
     QG --> GC
     QG --> EP
     QG --> CFD
+    QG --> TDD
+    IL --> DOD
     O --> SM
     SM --> CF
+    SM --> RD
+    SM --> DA
     CF --> ESL
 ```
 
@@ -131,6 +143,7 @@ graph LR
 | Component | Responsibility |
 |-----------|----------------|
 | **Orchestrator** | Core orchestrator, coordinates all components |
+| **StrategyAnalyzer** | Analyzes task and selects strategy (DIRECT, HYBRID_AUTO, HYBRID_WORKTREE, MEGA_PLAN) and ExecutionFlow (QUICK, STANDARD, FULL) |
 | **IterationLoop** | Auto-iteration loop, manages batch execution |
 | **AgentExecutor** | Agent execution abstraction, supports multiple Agents |
 | **PhaseManager** | Phase management, selects Agent based on phase |
@@ -138,6 +151,9 @@ graph LR
 | **FormatGate** | Code formatting gate (PRE_VALIDATION), auto-formats code using ruff/prettier/cargo fmt/gofmt based on project type. Supports check-only mode |
 | **CodeReviewGate** | AI-powered code review (POST_VALIDATION), evaluates 5 dimensions: Code Quality (25pts), Naming & Clarity (20pts), Complexity (20pts), Pattern Adherence (20pts), Security (15pts). Blocks on critical findings |
 | **VerificationGate** | AI-powered implementation verification, detects skeleton code and validates acceptance criteria |
+| **ReadinessGate** | Definition of Ready (DoR) gate, validates prerequisites before execution. Supports SOFT (warnings) and HARD (blocking) modes |
+| **DoneGate** | Definition of Done (DoD) gate, validates completion after execution. Supports STANDARD and FULL levels |
+| **TDDComplianceGate** | TDD compliance checking, verifies test files modified alongside code changes |
 | **RetryManager** | Retry management, handles failure retries with structured error context |
 | **GateCache** | Gate result caching based on git commit + working tree hash, avoids redundant checks |
 | **ErrorParser** | Structured error parsing for mypy, ruff, pytest, eslint, tsc with ErrorInfo extraction |
@@ -145,6 +161,8 @@ graph LR
 | **StateManager** | State management, persists execution state |
 | **ContextFilter** | Context filter, optimizes Agent input |
 | **ExternalSkillLoader** | Three-tier skill loading (builtin/external/user), auto-detects and injects best practices with priority-based override. Supports phase-based injection (planning, implementation, retry) |
+| **ResumeDetector** | Detects incomplete execution state and generates resume suggestions |
+| **DashboardAggregator** | Aggregates status from multiple state files for unified dashboard view |
 
 ---
 
@@ -310,6 +328,36 @@ The AI outputs structured analysis in JSON format:
 | 2-3 functional areas, 3-7 steps, has dependencies | **HYBRID_AUTO** | "Implement user authentication with OAuth" |
 | HYBRID_AUTO + high risk or experimental | **HYBRID_WORKTREE** | "Experimental refactoring of payment module" |
 | 4+ functional areas, multiple independent features | **MEGA_PLAN** | "Build e-commerce platform with users, products, cart, orders" |
+
+### ExecutionFlow Depth
+
+The `/plan-cascade:auto` command selects both a strategy AND an ExecutionFlow depth:
+
+```mermaid
+graph TD
+    A[Strategy Analysis] --> B{Risk Level?}
+    B -->|Low| C[QUICK Flow]
+    B -->|Medium| D[STANDARD Flow]
+    B -->|High| E[FULL Flow]
+
+    C --> C1[Soft DoR Gates]
+    C --> C2[AI Verify Disabled]
+    C --> C3[No Confirmation]
+
+    D --> D1[Soft DoR Gates]
+    D --> D2[AI Verify Enabled]
+    D --> D3[No Confirmation]
+
+    E --> E1[Hard DoR Gates]
+    E --> E2[AI Verify + Review]
+    E --> E3[Confirmation Required]
+```
+
+| Flow | Gate Mode | AI Verification | Code Review | Confirmation |
+|------|-----------|-----------------|-------------|--------------|
+| `quick` | soft | disabled | disabled | no |
+| `standard` | soft | enabled | optional | no |
+| `full` | hard | enabled | enabled | yes |
 
 ---
 
@@ -1086,6 +1134,242 @@ flowchart TD
 
 ---
 
+## 10.5 DoR/DoD Gates Architecture
+
+Plan Cascade uses Definition of Ready (DoR) and Definition of Done (DoD) gates to ensure quality at execution boundaries.
+
+### Gate Flow
+
+```mermaid
+flowchart TD
+    subgraph "Pre-Execution: DoR Gate"
+        A[Story Ready?] --> B{DoR Checks}
+        B --> B1[Acceptance Criteria Testable?]
+        B --> B2[Dependencies Valid?]
+        B --> B3[Risks Documented?]
+        B --> B4[Verification Hints Present?]
+        B1 --> C{Gate Mode?}
+        B2 --> C
+        B3 --> C
+        B4 --> C
+        C -->|SOFT| D[Log Warnings<br/>Continue Execution]
+        C -->|HARD| E{All Passed?}
+        E -->|Yes| D
+        E -->|No| F[Block Execution]
+    end
+
+    D --> G[Execute Story]
+
+    subgraph "Post-Execution: DoD Gate"
+        G --> H{DoD Level?}
+        H -->|STANDARD| I[Standard Checks]
+        H -->|FULL| J[Full Checks]
+
+        I --> I1[Quality Gates Passed?]
+        I --> I2[AI Verification Passed?]
+        I --> I3[No Skeleton Code?]
+        I --> I4[Change Summary Generated?]
+
+        J --> J1[All Standard Checks]
+        J --> J2[Code Review Passed?]
+        J --> J3[Test Changes Present?]
+        J --> J4[Deployment Notes?]
+
+        I1 --> K{All Passed?}
+        I2 --> K
+        I3 --> K
+        I4 --> K
+        J1 --> K
+        J2 --> K
+        J3 --> K
+        J4 --> K
+
+        K -->|Yes| L[Mark Complete]
+        K -->|No| M[Retry or Fail]
+    end
+```
+
+### DoR Check Types
+
+| Check | Description | Default Mode |
+|-------|-------------|--------------|
+| `acceptance_criteria` | Verifies criteria are testable and measurable | SOFT |
+| `dependencies_valid` | All story dependencies are resolved | SOFT |
+| `risks_explicit` | Risk assessment is documented | SOFT |
+| `verification_hints` | AI verification hints are present | SOFT |
+
+### DoD Check Types
+
+| Level | Checks | Description |
+|-------|--------|-------------|
+| **STANDARD** | quality_gates | TypeCheck, Test, Lint passed |
+| | ai_verification | No skeleton code detected |
+| | change_summary | Summary of changes generated |
+| **FULL** | (all standard) | Plus additional checks below |
+| | code_review | AI code review passed (score >= 70) |
+| | test_changes | Test files modified with code changes |
+| | deployment_notes | Deployment considerations documented |
+
+---
+
+## 10.6 TDD Support Architecture
+
+Plan Cascade supports optional Test-Driven Development (TDD) at the story level.
+
+### TDD Flow
+
+```mermaid
+flowchart TD
+    A[Story Start] --> B{TDD Mode?}
+    B -->|OFF| C[Normal Implementation]
+    B -->|ON| D[TDD Workflow]
+    B -->|AUTO| E{Risk Assessment}
+
+    E -->|High Risk| D
+    E -->|Low Risk| C
+
+    D --> D1[RED: Write Failing Tests]
+    D1 --> D2[GREEN: Minimal Implementation]
+    D2 --> D3[REFACTOR: Improve Code]
+    D3 --> D4[TDD Compliance Check]
+
+    C --> F[Implementation Complete]
+    D4 --> F
+
+    F --> G{TDD Compliance Gate}
+    G -->|Enabled| H[Check Test Changes]
+    G -->|Disabled| I[Skip Check]
+
+    H --> J{Tests Modified?}
+    J -->|Yes| K[Pass]
+    J -->|No + High Risk| L[Warning/Fail]
+    J -->|No + Low Risk| M[Warning Only]
+```
+
+### TDD Modes
+
+| Mode | Description | When Enabled |
+|------|-------------|--------------|
+| `off` | TDD disabled | Documentation, config changes |
+| `on` | TDD always enabled | Security features, critical code |
+| `auto` | Risk-based enablement | Default for most tasks |
+
+### TDD Compliance Checking
+
+When TDD is enabled, the compliance gate verifies:
+- Test files were modified alongside code changes
+- High-risk stories (security, auth, database) have corresponding tests
+- Test file patterns: `test_`, `_test.`, `.test.`, `tests/`, `test/`, `spec/`
+
+---
+
+## 10.7 Dashboard Architecture
+
+The `/plan-cascade:dashboard` command provides an aggregated status view.
+
+### Data Aggregation Flow
+
+```mermaid
+flowchart LR
+    subgraph "State Files"
+        A[prd.json]
+        B[mega-plan.json]
+        C[.iteration-state.json]
+        D[.agent-status.json]
+        E[progress.txt]
+        F[.mega-status.json]
+    end
+
+    subgraph "Dashboard Aggregator"
+        G[DashboardAggregator]
+        G --> H[ExecutionStatus]
+        G --> I[StoryStatus]
+        G --> J[BatchStatus]
+        G --> K[ActionSuggestions]
+    end
+
+    subgraph "Output"
+        L[DashboardFormatter]
+        L --> M[Terminal Output]
+        L --> N[JSON Output]
+    end
+
+    A --> G
+    B --> G
+    C --> G
+    D --> G
+    E --> G
+    F --> G
+
+    H --> L
+    I --> L
+    J --> L
+    K --> L
+```
+
+### Dashboard Data Model
+
+| Component | Description |
+|-----------|-------------|
+| `ExecutionStatus` | Overall execution state (NOT_STARTED, IN_PROGRESS, COMPLETED, FAILED, PAUSED) |
+| `StoryStatus` | Per-story state (PENDING, IN_PROGRESS, COMPLETE, FAILED, SKIPPED) |
+| `BatchStatus` | Batch-level progress with story list and timestamps |
+| `ActionType` | Suggested actions (RETRY, SWITCH_AGENT, MANUAL_FIX, CONTINUE, RESUME) |
+
+---
+
+## 10.8 Resume Detection Architecture
+
+The `/plan-cascade:resume` command uses unified detection to find incomplete executions.
+
+### Resume Detection Flow
+
+```mermaid
+flowchart TD
+    A["resume command"] --> B[ResumeDetector]
+    B --> C{Check State Files}
+
+    C --> D[stage-state.json]
+    C --> E[.iteration-state.json]
+    C --> F[.mega-status.json]
+    C --> G[prd.json]
+
+    D --> H{Stage Status?}
+    H -->|in_progress| I[Resume from Stage]
+    H -->|failed| J[Retry from Stage]
+
+    E --> K{Iteration State?}
+    K -->|incomplete| L[Resume Iteration]
+
+    F --> M{Mega Status?}
+    M -->|batch incomplete| N[Resume Mega Plan]
+
+    G --> O{PRD State?}
+    O -->|needs approval| P[Resume at Approval]
+
+    I --> Q[IncompleteStateInfo]
+    J --> Q
+    L --> Q
+    N --> Q
+    P --> Q
+
+    Q --> R[ResumeSuggestion]
+    R --> S[Display Resume Options]
+    S --> T[Execute Resume Command]
+```
+
+### Resume Reason Types
+
+| Reason | Description | Suggested Action |
+|--------|-------------|------------------|
+| `STAGE_IN_PROGRESS` | Execution interrupted mid-stage | Resume from current stage |
+| `STAGE_FAILED` | Stage failed, needs retry | Retry from failed stage |
+| `EXECUTION_INCOMPLETE` | Stories incomplete | Resume iteration |
+| `PRD_NEEDS_APPROVAL` | PRD generated, not approved | Run /plan-cascade:approve |
+| `MEGA_PLAN_INCOMPLETE` | Features incomplete | Run /plan-cascade:mega-resume |
+
+---
+
 ## 11. Path Storage Modes
 
 Plan Cascade supports two path storage modes for runtime files:
@@ -1207,6 +1491,10 @@ graph TB
 | `.iteration-state.json` | State | Auto-iteration progress and batch results |
 | `.retry-state.json` | State | Retry history and failure records |
 | `.mega-status.json` | State | Mega-plan execution status |
+| `.state/stage-state.json` | State | Stage state machine state (v4.4.0+) |
+| `.state/dor-results.json` | State | DoR gate check results (v4.4.0+) |
+| `.state/dod-results.json` | State | DoD gate check results (v4.4.0+) |
+| `.state/tdd-compliance.json` | State | TDD compliance check results (v4.4.0+) |
 | `.agent-detection.json` | Cache | Cross-platform Agent detection results (1-hour TTL) |
 | `.state/gate-cache.json` | Cache | Gate execution results cache (keyed by git commit + tree hash) |
 | `.hybrid-execution-context.md` | Context | Hybrid task context for AI recovery after session interruption |

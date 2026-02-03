@@ -2,8 +2,8 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**Version**: 4.3.7
-**Last Updated**: 2026-02-02
+**Version**: 4.4.0
+**Last Updated**: 2026-02-03
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
 
@@ -42,14 +42,15 @@ This command:
 
 ## Command Overview
 
-Plan Cascade provides four main entry commands, suitable for development scenarios of different scales:
+Plan Cascade provides five main entry commands, suitable for development scenarios of different scales:
 
 | Entry Command | Use Case | Features |
 |--------------|----------|----------|
-| `/plan-cascade:auto` | Any task (AI auto-selects strategy) | Automatic strategy selection + Direct execution |
+| `/plan-cascade:auto` | Any task (AI auto-selects strategy) | Automatic strategy selection + ExecutionFlow depth |
 | `/plan-cascade:mega-plan` | Large projects (multiple related features) | Feature-level parallel + Story-level parallel |
 | `/plan-cascade:hybrid-worktree` | Single complex feature | Worktree isolation + Story parallel |
 | `/plan-cascade:hybrid-auto` | Simple features | Quick PRD generation + Story parallel |
+| `/plan-cascade:dashboard` | Status monitoring | Aggregated status view across all executions |
 
 ---
 
@@ -408,7 +409,17 @@ The easiest entry point. AI analyzes your task description and automatically sel
    - **Risk**: Could it break existing functionality? Needs isolation?
    - **Parallelization**: Can work be parallelized for efficiency?
 3. AI outputs structured analysis with confidence score
-4. AI selects optimal strategy and executes without confirmation
+4. AI selects optimal strategy and ExecutionFlow depth, then executes
+
+### ExecutionFlow Depth
+
+Plan Cascade uses three workflow depth levels that control gating strictness:
+
+| Flow | Description | Gate Mode | AI Verification | Confirm Required |
+|------|-------------|-----------|-----------------|------------------|
+| `quick` | Fastest path, minimal gating | soft | disabled | no |
+| `standard` | Balanced speed and quality (default) | soft | enabled | no |
+| `full` | Strict methodology + strict gating | hard | enabled + review | yes |
 
 ### Strategy Selection
 
@@ -419,21 +430,35 @@ The easiest entry point. AI analyzes your task description and automatically sel
 | hybrid-auto + high risk or experimental | **hybrid-worktree** | "Experimental refactoring of payment module" |
 | 4+ areas, multiple independent features | **mega-plan** | "Build e-commerce platform with users, products, orders" |
 
+### Command-Line Flags
+
+| Flag | Description | Example |
+|------|-------------|---------|
+| `--flow <quick\|standard\|full>` | Override execution flow depth | `--flow full` |
+| `--explain` | Show analysis without executing | `--explain` |
+| `--confirm` | Wait for user confirmation | `--confirm` |
+| `--tdd <off\|on\|auto>` | Control TDD mode | `--tdd on` |
+
 ### Usage Example
 
 ```bash
 # AI automatically determines strategy
 /plan-cascade:auto "Fix the typo in README"
-# → Uses direct strategy
+# → Uses direct strategy with quick flow
 
 /plan-cascade:auto "Implement user login with OAuth"
-# → Uses hybrid-auto strategy
+# → Uses hybrid-auto strategy with standard flow
 
 /plan-cascade:auto "Experimental refactoring of the API layer"
 # → Uses hybrid-worktree strategy
 
 /plan-cascade:auto "Build a blog platform with users, posts, comments, and RSS"
 # → Uses mega-plan strategy
+
+# With flags
+/plan-cascade:auto --flow full --tdd on "Implement payment processing"
+/plan-cascade:auto --explain "Build user authentication"
+/plan-cascade:auto --confirm "Critical database migration"
 ```
 
 ---
@@ -612,6 +637,149 @@ Suitable for quick development of simple features without Worktree isolation.
 
 # Approve and auto-execute
 /plan-cascade:approve --auto-run
+```
+
+---
+
+## `/plan-cascade:dashboard` - Status Monitoring
+
+Provides an aggregated status view across all Plan Cascade executions.
+
+### What It Shows
+
+- **Execution Status**: Current state of mega-plan, hybrid, or direct executions
+- **Story Progress**: Completion percentage, batch progress, pending/failed stories
+- **Recent Activity**: Timeline of recent actions with timestamps
+- **Suggested Actions**: Context-aware recommendations for next steps
+
+### Usage
+
+```bash
+# Show aggregated status
+/plan-cascade:dashboard
+
+# Show verbose output with details
+/plan-cascade:dashboard --verbose
+```
+
+### Output Example
+
+```
+============================================================
+PLAN CASCADE DASHBOARD
+============================================================
+
+Current Execution: hybrid-auto
+Status: IN_PROGRESS (62%)
+Flow: standard
+
+Story Progress:
+  ✓ story-001: Completed
+  ✓ story-002: Completed
+  → story-003: In Progress (claude-code)
+  ○ story-004: Pending
+  ○ story-005: Pending
+
+Recent Activity:
+  [10:30] story-002 completed via claude-code
+  [10:28] story-002 started via claude-code
+  [10:25] story-001 completed via claude-code
+
+Suggested Actions:
+  • Continue: Wait for story-003 to complete
+  • Review: Check progress.txt for details
+============================================================
+```
+
+---
+
+## DoR/DoD Gates (Definition of Ready/Done)
+
+Plan Cascade provides validation gates to ensure quality at execution boundaries.
+
+### Definition of Ready (DoR)
+
+DoR gates run **before** story/feature execution to validate prerequisites:
+
+| Check | Description | Mode |
+|-------|-------------|------|
+| Acceptance Criteria | Verifies criteria are testable and clear | SOFT/HARD |
+| Dependencies Valid | Ensures all dependencies are resolved | SOFT/HARD |
+| Risks Explicit | Validates risk assessment is documented | SOFT/HARD |
+| Verification Prompt | Checks AI verification hints are present | SOFT/HARD |
+
+**Gate Modes:**
+- **SOFT**: Warnings only, execution continues
+- **HARD**: Blocking, execution halts on failures (used in Full flow)
+
+### Definition of Done (DoD)
+
+DoD gates run **after** story/feature execution to validate completion:
+
+| Level | Checks | When Used |
+|-------|--------|-----------|
+| **STANDARD** | Quality gates pass, AI verification, change summary | Default |
+| **FULL** | Above + code review, test changes, deployment notes | Full flow |
+
+**DoD Checks:**
+- Quality gates (typecheck, test, lint) passed
+- No skeleton code detected
+- Acceptance criteria verified
+- Change summary generated
+- Code review passed (Full level)
+
+### Gate Configuration in PRD
+
+```json
+{
+  "execution_config": {
+    "flow": "standard",
+    "dor_mode": "soft",
+    "dod_level": "standard"
+  }
+}
+```
+
+---
+
+## TDD Support
+
+Plan Cascade supports optional Test-Driven Development (TDD) rhythm at the story level.
+
+### TDD Modes
+
+| Mode | Description | When to Use |
+|------|-------------|-------------|
+| `off` | TDD disabled | Simple changes, documentation |
+| `on` | TDD with prompts and compliance checks | Critical features, security code |
+| `auto` | Auto-enable based on risk assessment | Most development tasks (default) |
+
+### TDD Workflow
+
+When TDD is enabled:
+
+1. **Red Phase**: Write failing tests based on acceptance criteria
+2. **Green Phase**: Minimal implementation to pass tests
+3. **Refactor Phase**: Improve code while keeping tests green
+
+### TDD Compliance Checking
+
+After story completion, quality gates verify:
+- Test files were modified alongside code changes
+- High-risk stories have corresponding tests
+- Test coverage requirements met (if configured)
+
+### Usage
+
+```bash
+# Enable TDD for a critical feature
+/plan-cascade:auto --tdd on "Implement payment processing"
+
+# Disable TDD for documentation
+/plan-cascade:auto --tdd off "Update README"
+
+# Let auto-detection decide (default)
+/plan-cascade:auto "Add user profile feature"
 ```
 
 ---
@@ -795,7 +963,19 @@ Configure in `prd.json`:
 ### Auto Strategy
 
 ```bash
-/plan-cascade:auto <description>             # AI auto-select and execute strategy
+/plan-cascade:auto <description> [options]   # AI auto-select and execute strategy
+
+Options:
+  --flow <quick|standard|full>    Override execution flow depth
+  --explain                       Show analysis without executing
+  --confirm                       Wait for user confirmation
+  --tdd <off|on|auto>             Control TDD mode
+```
+
+### Status Monitoring
+
+```bash
+/plan-cascade:dashboard [--verbose]          # Show aggregated status view
 ```
 
 ### Project-Level (Mega Plan)
@@ -859,6 +1039,9 @@ Configure in `prd.json`:
 | `.agent-status.json` | Status | Agent status |
 | `.iteration-state.json` | Status | Iteration state |
 | `.retry-state.json` | Status | Retry record |
+| `.state/stage-state.json` | Status | Stage state machine state (v4.4.0+) |
+| `.state/dor-results.json` | Status | DoR gate results (v4.4.0+) |
+| `.state/dod-results.json` | Status | DoD gate results (v4.4.0+) |
 | `.hybrid-execution-context.md` | Context | Hybrid task context for AI recovery |
 | `.mega-execution-context.md` | Context | Mega-plan context for AI recovery |
 | `.agent-outputs/` | Output | Agent logs |

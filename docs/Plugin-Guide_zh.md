@@ -2,8 +2,8 @@
 
 # Plan Cascade - Claude Code Plugin Guide
 
-**版本**: 4.3.7
-**最后更新**: 2026-02-02
+**版本**: 4.4.0
+**最后更新**: 2026-02-03
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
 
@@ -42,14 +42,15 @@ claude plugins install ./plan-cascade
 
 ## 命令概览
 
-Plan Cascade 提供四个主要入口命令，适用于不同规模的开发场景：
+Plan Cascade 提供五个主要入口命令，适用于不同规模的开发场景：
 
 | 入口命令 | 适用场景 | 特点 |
 |----------|----------|------|
-| `/plan-cascade:auto` | 任意任务（AI 自动选择策略） | 自动策略选择 + 直接执行 |
+| `/plan-cascade:auto` | 任意任务（AI 自动选择策略） | 自动策略选择 + 执行流程深度 |
 | `/plan-cascade:mega-plan` | 大型项目（多个相关功能） | Feature 级并行 + Story 级并行 |
 | `/plan-cascade:hybrid-worktree` | 单个复杂功能 | Worktree 隔离 + Story 并行 |
 | `/plan-cascade:hybrid-auto` | 简单功能 | 快速 PRD 生成 + Story 并行 |
+| `/plan-cascade:dashboard` | 状态监控 | 跨所有执行的聚合状态视图 |
 
 ---
 
@@ -408,7 +409,17 @@ plan-cascade skills refresh --all --clear
    - **风险**：可能破坏现有功能吗？需要隔离测试吗？
    - **并行化**：能否并行执行以提高效率？
 3. AI 输出结构化分析结果和置信度分数
-4. AI 选择最优策略并直接执行
+4. AI 选择最优策略和执行流程深度，然后执行
+
+### 执行流程深度
+
+Plan Cascade 使用三个工作流深度级别来控制门控严格程度：
+
+| 流程 | 描述 | 门控模式 | AI 验证 | 需要确认 |
+|------|------|----------|---------|----------|
+| `quick` | 最快路径，最小门控 | soft | 禁用 | 否 |
+| `standard` | 平衡速度和质量（默认） | soft | 启用 | 否 |
+| `full` | 严格方法论 + 严格门控 | hard | 启用 + 代码审查 | 是 |
 
 ### 策略选择
 
@@ -419,21 +430,35 @@ plan-cascade skills refresh --all --clear
 | hybrid-auto + 高风险或实验性 | **hybrid-worktree** | "实验性重构支付模块" |
 | 4+个区域，多个独立特性 | **mega-plan** | "构建电商平台：用户、商品、订单" |
 
+### 命令行参数
+
+| 参数 | 描述 | 示例 |
+|------|------|------|
+| `--flow <quick\|standard\|full>` | 覆盖执行流程深度 | `--flow full` |
+| `--explain` | 显示分析结果但不执行 | `--explain` |
+| `--confirm` | 等待用户确认后执行 | `--confirm` |
+| `--tdd <off\|on\|auto>` | 控制 TDD 模式 | `--tdd on` |
+
 ### 使用示例
 
 ```bash
 # AI 自动判断策略
 /plan-cascade:auto "修复 README 中的拼写错误"
-# → 使用 direct 策略
+# → 使用 direct 策略，quick 流程
 
 /plan-cascade:auto "实现 OAuth 用户登录"
-# → 使用 hybrid-auto 策略
+# → 使用 hybrid-auto 策略，standard 流程
 
 /plan-cascade:auto "实验性重构 API 层"
 # → 使用 hybrid-worktree 策略
 
 /plan-cascade:auto "构建博客平台：用户、文章、评论、RSS"
 # → 使用 mega-plan 策略
+
+# 带参数使用
+/plan-cascade:auto --flow full --tdd on "实现支付处理"
+/plan-cascade:auto --explain "构建用户认证"
+/plan-cascade:auto --confirm "关键数据库迁移"
 ```
 
 ---
@@ -612,6 +637,149 @@ mega-complete → 清理计划文件
 
 # 批准并自动执行
 /plan-cascade:approve --auto-run
+```
+
+---
+
+## `/plan-cascade:dashboard` - 状态监控
+
+提供跨所有 Plan Cascade 执行的聚合状态视图。
+
+### 显示内容
+
+- **执行状态**：当前 mega-plan、hybrid 或 direct 执行的状态
+- **Story 进度**：完成百分比、批次进度、待处理/失败的 Story
+- **最近活动**：带时间戳的最近操作时间线
+- **建议操作**：根据上下文推荐的下一步操作
+
+### 使用
+
+```bash
+# 显示聚合状态
+/plan-cascade:dashboard
+
+# 显示详细输出
+/plan-cascade:dashboard --verbose
+```
+
+### 输出示例
+
+```
+============================================================
+PLAN CASCADE DASHBOARD
+============================================================
+
+当前执行: hybrid-auto
+状态: IN_PROGRESS (62%)
+流程: standard
+
+Story 进度:
+  ✓ story-001: 已完成
+  ✓ story-002: 已完成
+  → story-003: 进行中 (claude-code)
+  ○ story-004: 待处理
+  ○ story-005: 待处理
+
+最近活动:
+  [10:30] story-002 通过 claude-code 完成
+  [10:28] story-002 通过 claude-code 开始
+  [10:25] story-001 通过 claude-code 完成
+
+建议操作:
+  • 继续: 等待 story-003 完成
+  • 查看: 检查 progress.txt 了解详情
+============================================================
+```
+
+---
+
+## DoR/DoD 门控（就绪定义/完成定义）
+
+Plan Cascade 提供验证门控以确保执行边界的质量。
+
+### 就绪定义（DoR）
+
+DoR 门控在 Story/Feature 执行**之前**运行，验证先决条件：
+
+| 检查 | 描述 | 模式 |
+|------|------|------|
+| 验收标准 | 验证标准可测试且明确 | SOFT/HARD |
+| 依赖有效 | 确保所有依赖已解决 | SOFT/HARD |
+| 风险显式 | 验证风险评估已记录 | SOFT/HARD |
+| 验证提示 | 检查 AI 验证提示是否存在 | SOFT/HARD |
+
+**门控模式：**
+- **SOFT**：仅警告，执行继续
+- **HARD**：阻塞，失败时停止执行（用于 Full 流程）
+
+### 完成定义（DoD）
+
+DoD 门控在 Story/Feature 执行**之后**运行，验证完成条件：
+
+| 级别 | 检查 | 使用场景 |
+|------|------|----------|
+| **STANDARD** | 质量门控通过、AI 验证、变更摘要 | 默认 |
+| **FULL** | 上述 + 代码审查、测试变更、部署说明 | Full 流程 |
+
+**DoD 检查：**
+- 质量门控（typecheck、test、lint）通过
+- 未检测到骨架代码
+- 验收标准已验证
+- 变更摘要已生成
+- 代码审查通过（Full 级别）
+
+### 在 PRD 中配置门控
+
+```json
+{
+  "execution_config": {
+    "flow": "standard",
+    "dor_mode": "soft",
+    "dod_level": "standard"
+  }
+}
+```
+
+---
+
+## TDD 支持
+
+Plan Cascade 支持在 Story 级别使用可选的测试驱动开发（TDD）节奏。
+
+### TDD 模式
+
+| 模式 | 描述 | 使用场景 |
+|------|------|----------|
+| `off` | 禁用 TDD | 简单变更、文档 |
+| `on` | 启用 TDD，带提示和合规检查 | 关键功能、安全代码 |
+| `auto` | 基于风险评估自动启用 | 大多数开发任务（默认） |
+
+### TDD 工作流
+
+当 TDD 启用时：
+
+1. **红灯阶段**：根据验收标准编写失败的测试
+2. **绿灯阶段**：最小实现以通过测试
+3. **重构阶段**：改进代码同时保持测试通过
+
+### TDD 合规检查
+
+Story 完成后，质量门控验证：
+- 测试文件与代码变更一起修改
+- 高风险 Story 有对应的测试
+- 满足测试覆盖率要求（如果配置）
+
+### 使用
+
+```bash
+# 为关键功能启用 TDD
+/plan-cascade:auto --tdd on "实现支付处理"
+
+# 为文档禁用 TDD
+/plan-cascade:auto --tdd off "更新 README"
+
+# 让自动检测决定（默认）
+/plan-cascade:auto "添加用户资料功能"
 ```
 
 ---
@@ -795,7 +963,19 @@ mega-complete → 清理计划文件
 ### 自动策略
 
 ```bash
-/plan-cascade:auto <描述>                # AI 自动选择并执行策略
+/plan-cascade:auto <描述> [选项]         # AI 自动选择并执行策略
+
+选项:
+  --flow <quick|standard|full>    覆盖执行流程深度
+  --explain                       显示分析结果但不执行
+  --confirm                       等待用户确认后执行
+  --tdd <off|on|auto>             控制 TDD 模式
+```
+
+### 状态监控
+
+```bash
+/plan-cascade:dashboard [--verbose]      # 显示聚合状态视图
 ```
 
 ### 项目级（Mega Plan）
@@ -859,6 +1039,9 @@ mega-complete → 清理计划文件
 | `.agent-status.json` | 状态 | Agent 状态 |
 | `.iteration-state.json` | 状态 | 迭代状态 |
 | `.retry-state.json` | 状态 | 重试记录 |
+| `.state/stage-state.json` | 状态 | 阶段状态机状态 (v4.4.0+) |
+| `.state/dor-results.json` | 状态 | DoR 门控结果 (v4.4.0+) |
+| `.state/dod-results.json` | 状态 | DoD 门控结果 (v4.4.0+) |
 | `.hybrid-execution-context.md` | 上下文 | Hybrid 任务上下文，用于 AI 恢复 |
 | `.mega-execution-context.md` | 上下文 | Mega-plan 上下文，用于 AI 恢复 |
 | `.agent-outputs/` | 输出 | Agent 日志 |

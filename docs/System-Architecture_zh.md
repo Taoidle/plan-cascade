@@ -2,8 +2,8 @@
 
 # Plan Cascade - 系统架构与流程设计
 
-**版本**: 4.3.2
-**最后更新**: 2026-02-02
+**版本**: 4.4.0
+**最后更新**: 2026-02-03
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
 
@@ -89,6 +89,7 @@ graph LR
     subgraph "编排层"
         O[Orchestrator<br/>编排器]
         IL[IterationLoop<br/>迭代循环]
+        SA[StrategyAnalyzer<br/>策略分析器]
     end
 
     subgraph "执行层"
@@ -104,25 +105,36 @@ graph LR
         GC[GateCache<br/>门控缓存]
         EP[ErrorParser<br/>错误解析器]
         CFD[ChangedFilesDetector<br/>变更文件检测]
+        DOR[ReadinessGate<br/>DoR门控]
+        DOD[DoneGate<br/>DoD门控]
+        TDD[TDDComplianceGate<br/>TDD门控]
     end
 
     subgraph "状态层"
         SM[StateManager<br/>状态管理器]
         CF[ContextFilter<br/>上下文过滤]
         ESL[ExternalSkillLoader<br/>外部技能]
+        RD[ResumeDetector<br/>恢复检测器]
+        DA[DashboardAggregator<br/>仪表板]
     end
 
-    O --> IL
+    O --> SA
+    SA --> IL
     IL --> AE
     AE --> PM
     PM --> CPD
-    IL --> QG
+    IL --> DOR
+    DOR --> QG
     QG --> RM
     QG --> GC
     QG --> EP
     QG --> CFD
+    QG --> TDD
+    IL --> DOD
     O --> SM
     SM --> CF
+    SM --> RD
+    SM --> DA
     CF --> ESL
 ```
 
@@ -131,6 +143,7 @@ graph LR
 | 组件 | 职责 |
 |------|------|
 | **Orchestrator** | 核心编排器，协调所有组件 |
+| **StrategyAnalyzer** | 分析任务并选择策略（DIRECT、HYBRID_AUTO、HYBRID_WORKTREE、MEGA_PLAN）和执行流程（QUICK、STANDARD、FULL） |
 | **IterationLoop** | 自动迭代循环，管理批次执行 |
 | **AgentExecutor** | Agent 执行抽象，支持多种 Agent |
 | **PhaseManager** | 阶段管理，根据阶段选择 Agent |
@@ -138,6 +151,9 @@ graph LR
 | **FormatGate** | 代码格式化门控（PRE_VALIDATION），根据项目类型使用 ruff/prettier/cargo fmt/gofmt 自动格式化代码。支持仅检查模式 |
 | **CodeReviewGate** | AI 驱动的代码审查（POST_VALIDATION），评估 5 个维度：代码质量（25分）、命名清晰度（20分）、复杂度（20分）、模式遵循（20分）、安全性（15分）。遇到严重问题时阻止通过 |
 | **VerificationGate** | AI 驱动的实现验证，检测骨架代码并验证验收标准 |
+| **ReadinessGate** | 就绪定义（DoR）门控，在执行前验证先决条件。支持 SOFT（警告）和 HARD（阻塞）模式 |
+| **DoneGate** | 完成定义（DoD）门控，在执行后验证完成条件。支持 STANDARD 和 FULL 级别 |
+| **TDDComplianceGate** | TDD 合规检查，验证测试文件与代码变更一起修改 |
 | **RetryManager** | 重试管理，处理失败重试，传递结构化错误上下文 |
 | **GateCache** | 门控结果缓存，基于 git commit + 工作树哈希，避免重复检查 |
 | **ErrorParser** | 结构化错误解析，支持 mypy、ruff、pytest、eslint、tsc，提取 ErrorInfo |
@@ -145,6 +161,8 @@ graph LR
 | **StateManager** | 状态管理，持久化执行状态 |
 | **ContextFilter** | 上下文过滤，优化 Agent 输入 |
 | **ExternalSkillLoader** | 三层技能加载（内置/外部/用户），自动检测并按优先级覆盖注入最佳实践。支持阶段化注入（planning、implementation、retry） |
+| **ResumeDetector** | 检测未完成的执行状态并生成恢复建议 |
+| **DashboardAggregator** | 从多个状态文件聚合状态，用于统一仪表板视图 |
 
 ---
 
@@ -310,6 +328,36 @@ AI 输出结构化 JSON 格式的分析结果：
 | 2-3 个功能区域, 3-7 步, 有依赖 | **HYBRID_AUTO** | "实现 OAuth 用户认证" |
 | HYBRID_AUTO + 高风险或实验性 | **HYBRID_WORKTREE** | "实验性重构支付模块" |
 | 4+ 功能区域, 多个独立功能 | **MEGA_PLAN** | "构建电商平台：用户、商品、购物车、订单" |
+
+### 执行流程深度
+
+`/plan-cascade:auto` 命令同时选择策略和执行流程深度：
+
+```mermaid
+graph TD
+    A[策略分析] --> B{风险级别?}
+    B -->|低| C[QUICK 流程]
+    B -->|中| D[STANDARD 流程]
+    B -->|高| E[FULL 流程]
+
+    C --> C1[Soft DoR 门控]
+    C --> C2[AI 验证禁用]
+    C --> C3[无需确认]
+
+    D --> D1[Soft DoR 门控]
+    D --> D2[AI 验证启用]
+    D --> D3[无需确认]
+
+    E --> E1[Hard DoR 门控]
+    E --> E2[AI 验证 + 代码审查]
+    E --> E3[需要确认]
+```
+
+| 流程 | 门控模式 | AI 验证 | 代码审查 | 确认 |
+|------|----------|---------|----------|------|
+| `quick` | soft | 禁用 | 禁用 | 否 |
+| `standard` | soft | 启用 | 可选 | 否 |
+| `full` | hard | 启用 | 启用 | 是 |
 
 ---
 
@@ -1086,6 +1134,242 @@ flowchart TD
 
 ---
 
+## 10.5 DoR/DoD 门控架构
+
+Plan Cascade 使用就绪定义（DoR）和完成定义（DoD）门控来确保执行边界的质量。
+
+### 门控流程
+
+```mermaid
+flowchart TD
+    subgraph "执行前: DoR 门控"
+        A[Story 就绪?] --> B{DoR 检查}
+        B --> B1[验收标准可测试?]
+        B --> B2[依赖有效?]
+        B --> B3[风险已记录?]
+        B --> B4[验证提示存在?]
+        B1 --> C{门控模式?}
+        B2 --> C
+        B3 --> C
+        B4 --> C
+        C -->|SOFT| D[记录警告<br/>继续执行]
+        C -->|HARD| E{全部通过?}
+        E -->|是| D
+        E -->|否| F[阻止执行]
+    end
+
+    D --> G[执行 Story]
+
+    subgraph "执行后: DoD 门控"
+        G --> H{DoD 级别?}
+        H -->|STANDARD| I[标准检查]
+        H -->|FULL| J[完整检查]
+
+        I --> I1[质量门控通过?]
+        I --> I2[AI 验证通过?]
+        I --> I3[无骨架代码?]
+        I --> I4[变更摘要已生成?]
+
+        J --> J1[所有标准检查]
+        J --> J2[代码审查通过?]
+        J --> J3[测试变更存在?]
+        J --> J4[部署说明?]
+
+        I1 --> K{全部通过?}
+        I2 --> K
+        I3 --> K
+        I4 --> K
+        J1 --> K
+        J2 --> K
+        J3 --> K
+        J4 --> K
+
+        K -->|是| L[标记完成]
+        K -->|否| M[重试或失败]
+    end
+```
+
+### DoR 检查类型
+
+| 检查 | 描述 | 默认模式 |
+|------|------|----------|
+| `acceptance_criteria` | 验证标准可测试且可衡量 | SOFT |
+| `dependencies_valid` | 所有 Story 依赖已解决 | SOFT |
+| `risks_explicit` | 风险评估已记录 | SOFT |
+| `verification_hints` | AI 验证提示存在 | SOFT |
+
+### DoD 检查类型
+
+| 级别 | 检查 | 描述 |
+|------|------|------|
+| **STANDARD** | quality_gates | TypeCheck、Test、Lint 通过 |
+| | ai_verification | 未检测到骨架代码 |
+| | change_summary | 变更摘要已生成 |
+| **FULL** | (所有标准检查) | 加上以下额外检查 |
+| | code_review | AI 代码审查通过（得分 >= 70） |
+| | test_changes | 测试文件与代码变更一起修改 |
+| | deployment_notes | 部署注意事项已记录 |
+
+---
+
+## 10.6 TDD 支持架构
+
+Plan Cascade 支持在 Story 级别使用可选的测试驱动开发（TDD）。
+
+### TDD 流程
+
+```mermaid
+flowchart TD
+    A[Story 开始] --> B{TDD 模式?}
+    B -->|OFF| C[正常实现]
+    B -->|ON| D[TDD 工作流]
+    B -->|AUTO| E{风险评估}
+
+    E -->|高风险| D
+    E -->|低风险| C
+
+    D --> D1[红灯: 编写失败的测试]
+    D1 --> D2[绿灯: 最小实现]
+    D2 --> D3[重构: 改进代码]
+    D3 --> D4[TDD 合规检查]
+
+    C --> F[实现完成]
+    D4 --> F
+
+    F --> G{TDD 合规门控}
+    G -->|启用| H[检查测试变更]
+    G -->|禁用| I[跳过检查]
+
+    H --> J{测试已修改?}
+    J -->|是| K[通过]
+    J -->|否 + 高风险| L[警告/失败]
+    J -->|否 + 低风险| M[仅警告]
+```
+
+### TDD 模式
+
+| 模式 | 描述 | 启用时机 |
+|------|------|----------|
+| `off` | 禁用 TDD | 文档、配置变更 |
+| `on` | 始终启用 TDD | 安全功能、关键代码 |
+| `auto` | 基于风险评估启用 | 大多数任务的默认设置 |
+
+### TDD 合规检查
+
+当 TDD 启用时，合规门控验证：
+- 测试文件与代码变更一起修改
+- 高风险 Story（安全、认证、数据库）有对应的测试
+- 测试文件模式：`test_`、`_test.`、`.test.`、`tests/`、`test/`、`spec/`
+
+---
+
+## 10.7 仪表板架构
+
+`/plan-cascade:dashboard` 命令提供聚合状态视图。
+
+### 数据聚合流程
+
+```mermaid
+flowchart LR
+    subgraph "状态文件"
+        A[prd.json]
+        B[mega-plan.json]
+        C[.iteration-state.json]
+        D[.agent-status.json]
+        E[progress.txt]
+        F[.mega-status.json]
+    end
+
+    subgraph "仪表板聚合器"
+        G[DashboardAggregator]
+        G --> H[ExecutionStatus]
+        G --> I[StoryStatus]
+        G --> J[BatchStatus]
+        G --> K[ActionSuggestions]
+    end
+
+    subgraph "输出"
+        L[DashboardFormatter]
+        L --> M[终端输出]
+        L --> N[JSON 输出]
+    end
+
+    A --> G
+    B --> G
+    C --> G
+    D --> G
+    E --> G
+    F --> G
+
+    H --> L
+    I --> L
+    J --> L
+    K --> L
+```
+
+### 仪表板数据模型
+
+| 组件 | 描述 |
+|------|------|
+| `ExecutionStatus` | 整体执行状态（NOT_STARTED、IN_PROGRESS、COMPLETED、FAILED、PAUSED） |
+| `StoryStatus` | 每个 Story 的状态（PENDING、IN_PROGRESS、COMPLETE、FAILED、SKIPPED） |
+| `BatchStatus` | 批次级进度，包含 Story 列表和时间戳 |
+| `ActionType` | 建议的操作（RETRY、SWITCH_AGENT、MANUAL_FIX、CONTINUE、RESUME） |
+
+---
+
+## 10.8 恢复检测架构
+
+`/plan-cascade:resume` 命令使用统一检测来查找未完成的执行。
+
+### 恢复检测流程
+
+```mermaid
+flowchart TD
+    A["resume 命令"] --> B[ResumeDetector]
+    B --> C{检查状态文件}
+
+    C --> D[stage-state.json]
+    C --> E[.iteration-state.json]
+    C --> F[.mega-status.json]
+    C --> G[prd.json]
+
+    D --> H{阶段状态?}
+    H -->|in_progress| I[从该阶段恢复]
+    H -->|failed| J[从该阶段重试]
+
+    E --> K{迭代状态?}
+    K -->|incomplete| L[恢复迭代]
+
+    F --> M{Mega 状态?}
+    M -->|batch incomplete| N[恢复 Mega Plan]
+
+    G --> O{PRD 状态?}
+    O -->|needs approval| P[恢复到审批]
+
+    I --> Q[IncompleteStateInfo]
+    J --> Q
+    L --> Q
+    N --> Q
+    P --> Q
+
+    Q --> R[ResumeSuggestion]
+    R --> S[显示恢复选项]
+    S --> T[执行恢复命令]
+```
+
+### 恢复原因类型
+
+| 原因 | 描述 | 建议操作 |
+|------|------|----------|
+| `STAGE_IN_PROGRESS` | 执行在阶段中被中断 | 从当前阶段恢复 |
+| `STAGE_FAILED` | 阶段失败，需要重试 | 从失败阶段重试 |
+| `EXECUTION_INCOMPLETE` | Story 未完成 | 恢复迭代 |
+| `PRD_NEEDS_APPROVAL` | PRD 已生成，未批准 | 运行 /plan-cascade:approve |
+| `MEGA_PLAN_INCOMPLETE` | Feature 未完成 | 运行 /plan-cascade:mega-resume |
+
+---
+
 ## 11. 路径存储模式
 
 Plan Cascade 支持两种运行时文件的路径存储模式：
@@ -1207,6 +1491,10 @@ graph TB
 | `.iteration-state.json` | 状态 | 自动迭代进度和批次结果 |
 | `.retry-state.json` | 状态 | 重试历史和失败记录 |
 | `.mega-status.json` | 状态 | Mega-plan 执行状态 |
+| `.state/stage-state.json` | 状态 | 阶段状态机状态 (v4.4.0+) |
+| `.state/dor-results.json` | 状态 | DoR 门控检查结果 (v4.4.0+) |
+| `.state/dod-results.json` | 状态 | DoD 门控检查结果 (v4.4.0+) |
+| `.state/tdd-compliance.json` | 状态 | TDD 合规检查结果 (v4.4.0+) |
 | `.agent-detection.json` | 缓存 | 跨平台 Agent 检测结果（1小时TTL） |
 | `.state/gate-cache.json` | 缓存 | 门控执行结果缓存（基于 git commit + 工作树哈希） |
 | `.hybrid-execution-context.md` | 上下文 | Hybrid 任务上下文，用于会话中断后 AI 恢复 |
