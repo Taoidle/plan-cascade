@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from plan_cascade.state.path_resolver import PathResolver
@@ -87,7 +87,7 @@ class ContextRecoveryState:
     pending_stories: list[str] = field(default_factory=list)
     last_activity: str = ""
     project_path: Path = field(default_factory=Path)
-    worktree_path: Optional[Path] = None
+    worktree_path: Path | None = None
     task_name: str = ""
     target_branch: str = "main"
     total_stories: int = 0
@@ -97,6 +97,13 @@ class ContextRecoveryState:
     # Additional mega-plan specific fields
     mega_plan_features: list[dict] = field(default_factory=list)
     mega_plan_progress: dict = field(default_factory=dict)
+
+    # Stage state fields (from resume_detector integration)
+    stage_state_info: dict | None = None
+    current_stage: str | None = None
+    stage_progress_percent: int = 0
+    stage_completed_stages: list[str] = field(default_factory=list)
+    stage_failed_stages: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -118,6 +125,11 @@ class ContextRecoveryState:
             "error_message": self.error_message,
             "mega_plan_features": self.mega_plan_features,
             "mega_plan_progress": self.mega_plan_progress,
+            "stage_state_info": self.stage_state_info,
+            "current_stage": self.current_stage,
+            "stage_progress_percent": self.stage_progress_percent,
+            "stage_completed_stages": self.stage_completed_stages,
+            "stage_failed_stages": self.stage_failed_stages,
         }
 
 
@@ -271,6 +283,9 @@ class ContextRecoveryManager:
         """
         state = ContextRecoveryState(project_path=self.project_root)
 
+        # First, enrich state with stage state info if available
+        self._enrich_with_stage_state(state)
+
         # Check for mega-plan context first (using PathResolver path)
         if self.mega_plan_path.exists():
             return self._detect_mega_plan_context(state)
@@ -311,6 +326,13 @@ class ContextRecoveryManager:
         if config_exists:
             return self._detect_from_config(state)
 
+        # Check if we have stage state even without other context files
+        # This can happen if execution started but planning files were cleaned up
+        if state.stage_state_info is not None:
+            state.context_type = ContextType.HYBRID_AUTO
+            state.task_state = TaskState.EXECUTING
+            return state
+
         # No context found
         state.context_type = ContextType.UNKNOWN
         state.task_state = TaskState.NEEDS_PRD
@@ -318,6 +340,41 @@ class ContextRecoveryManager:
         state.error_message = "No task context found in this directory"
 
         return state
+
+    def _enrich_with_stage_state(self, state: ContextRecoveryState) -> None:
+        """
+        Enrich the recovery state with stage state information.
+
+        Uses the resume_detector module to detect incomplete stage state
+        and adds that information to the ContextRecoveryState.
+
+        Args:
+            state: ContextRecoveryState to enrich
+        """
+        try:
+            from .resume_detector import detect_incomplete_state
+
+            incomplete = detect_incomplete_state(
+                self._path_resolver,
+                include_prd_check=False,  # PRD check is done separately
+            )
+
+            if incomplete is not None:
+                state.stage_state_info = incomplete.to_dict()
+                state.current_stage = incomplete.last_stage
+                state.stage_progress_percent = incomplete.progress_percent
+                state.stage_completed_stages = incomplete.completed_stages
+                state.stage_failed_stages = incomplete.failed_stages
+
+                # Update last_activity if stage state has more recent timestamp
+                if incomplete.timestamp and (
+                    not state.last_activity or incomplete.timestamp > state.last_activity
+                ):
+                    state.last_activity = incomplete.timestamp
+
+        except Exception:
+            # Non-critical - continue without stage state info
+            pass
 
     def _is_in_worktree(self) -> bool:
         """Check if current directory is inside a worktree.
@@ -767,7 +824,7 @@ class ContextRecoveryManager:
 
         return state
 
-    def generate_recovery_plan(self, state: Optional[ContextRecoveryState] = None) -> RecoveryPlan:
+    def generate_recovery_plan(self, state: ContextRecoveryState | None = None) -> RecoveryPlan:
         """
         Generate a recovery plan based on detected state.
 
@@ -781,6 +838,9 @@ class ContextRecoveryManager:
             state = self.detect_context()
 
         plan = RecoveryPlan(state=state)
+
+        # Add stage-level information to the plan if available
+        self._enrich_plan_with_stage_info(state, plan)
 
         # Handle each context type
         if state.context_type == ContextType.UNKNOWN:
@@ -994,6 +1054,47 @@ class ContextRecoveryManager:
 
         return plan
 
+    def _enrich_plan_with_stage_info(
+        self,
+        state: ContextRecoveryState,
+        plan: RecoveryPlan,
+    ) -> None:
+        """
+        Enrich recovery plan with stage-level information.
+
+        Adds warnings and actions based on stage state if available.
+
+        Args:
+            state: Recovery state with stage info
+            plan: Recovery plan to enrich
+        """
+        if state.stage_state_info is None:
+            return
+
+        # Add stage progress information
+        if state.stage_progress_percent > 0:
+            stage_info = state.stage_state_info
+            current_stage = stage_info.get("last_stage")
+
+            if current_stage:
+                # Add information about current stage
+                if stage_info.get("last_stage_status") == "failed":
+                    errors = stage_info.get("error_messages", [])
+                    error_preview = errors[0][:50] if errors else "Unknown error"
+                    plan.warnings.append(
+                        f"Stage '{current_stage}' failed: {error_preview}..."
+                    )
+
+        # Add completed stages info to warnings
+        if state.stage_completed_stages:
+            stages_str = ", ".join(state.stage_completed_stages[:3])
+            if len(state.stage_completed_stages) > 3:
+                stages_str += f" (+{len(state.stage_completed_stages) - 3} more)"
+            plan.warnings.insert(
+                0,
+                f"Completed stages: {stages_str}"
+            )
+
     def update_context_file(self, state: ContextRecoveryState) -> None:
         """
         Update context file after resume.
@@ -1065,7 +1166,7 @@ class ContextRecoveryManager:
             content += f"- [{icon}] **{feature.get('id')}**: {feature.get('title', feature.get('name', 'Unknown'))} ({status})\n"
 
         if state.failed_stories:
-            content += f"\n## Failed Features\n\n"
+            content += "\n## Failed Features\n\n"
             for fid in state.failed_stories:
                 content += f"- {fid}\n"
 
@@ -1104,7 +1205,7 @@ class ContextRecoveryManager:
             content += f"- [o] {sid} (pending)\n"
 
         if state.failed_stories:
-            content += f"\n## Failed Stories\n\n"
+            content += "\n## Failed Stories\n\n"
             for sid in state.failed_stories:
                 content += f"- {sid}\n"
 
