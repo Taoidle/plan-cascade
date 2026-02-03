@@ -15,9 +15,26 @@ Contains the core orchestration logic including:
 - DesignDocGenerator: Technical design document generation
 - DesignDocConverter: External document conversion
 - ExternalSkillLoader: Framework-specific skill loading
+- DoneGate: Definition of Done validation gates
 """
 
 from .changed_files import ChangedFilesDetector
+from .done_gate import (
+    ChangeSummaryEntry,
+    DoDCheckResult,
+    DoDLevel,
+    DoneGate,
+    GateSummaryEntry,
+    WrapUpSummary,
+    check_ai_verification,
+    check_change_summary,
+    check_code_review,
+    check_deployment_notes,
+    check_quality_gates_passed,
+    check_skeleton_code_detection,
+    check_test_changes,
+    generate_wrapup_summary,
+)
 from .design_doc_converter import DesignDocConverter
 from .design_doc_generator import DesignDocGenerator
 from .error_parser import (
@@ -190,4 +207,19 @@ __all__ = [
     "StageContractRegistry",
     "StageStateMachine",
     "get_contract_registry",
+    # DoD gates (Definition of Done)
+    "DoDCheckResult",
+    "DoDLevel",
+    "DoneGate",
+    "WrapUpSummary",
+    "GateSummaryEntry",
+    "ChangeSummaryEntry",
+    "check_quality_gates_passed",
+    "check_ai_verification",
+    "check_skeleton_code_detection",
+    "check_change_summary",
+    "check_code_review",
+    "check_test_changes",
+    "check_deployment_notes",
+    "generate_wrapup_summary",
 ]
