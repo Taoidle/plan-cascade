@@ -30,10 +30,13 @@ class TDDTestRequirements:
 
     Attributes:
         require_test_changes: Whether test file changes are required
+        require_test_for_high_risk: Require tests for high-risk stories (even if
+            require_test_changes is False)
         minimum_coverage_delta: Minimum coverage increase expected (0 = no requirement)
         test_patterns: File patterns to identify test files
     """
     require_test_changes: bool = True
+    require_test_for_high_risk: bool = True
     minimum_coverage_delta: float = 0.0
     test_patterns: list[str] = field(default_factory=lambda: [
         "test_", "_test.", ".test.", "tests/", "test/", "spec/",
@@ -43,6 +46,7 @@ class TDDTestRequirements:
         """Convert to dictionary for JSON serialization."""
         return {
             "require_test_changes": self.require_test_changes,
+            "require_test_for_high_risk": self.require_test_for_high_risk,
             "minimum_coverage_delta": self.minimum_coverage_delta,
             "test_patterns": self.test_patterns,
         }
@@ -52,6 +56,7 @@ class TDDTestRequirements:
         """Create from dictionary."""
         return cls(
             require_test_changes=data.get("require_test_changes", True),
+            require_test_for_high_risk=data.get("require_test_for_high_risk", True),
             minimum_coverage_delta=data.get("minimum_coverage_delta", 0.0),
             test_patterns=data.get("test_patterns", [
                 "test_", "_test.", ".test.", "tests/", "test/", "spec/",
@@ -580,32 +585,43 @@ def check_tdd_compliance(
     result.details["test_files"] = test_files
     result.details["code_files"] = code_files
 
-    # Check test requirements
-    if config.test_requirements.require_test_changes:
-        if code_files and not test_files:
-            # Check if this is a high-risk story
-            test_expectations = story.get("test_expectations", {})
-            is_required = isinstance(test_expectations, dict) and test_expectations.get("required", False)
+    # Determine whether tests are required for this story
+    test_expectations = story.get("test_expectations", {})
+    required_by_story = isinstance(test_expectations, dict) and test_expectations.get("required", False)
 
-            tags = story.get("tags", [])
-            is_high_risk = any(
-                isinstance(t, str) and t.lower() in HIGH_RISK_TAGS
-                for t in tags
-            )
+    tags = story.get("tags", [])
+    is_high_risk = any(
+        isinstance(t, str) and t.lower() in HIGH_RISK_TAGS
+        for t in tags
+    )
 
-            if is_required or (is_high_risk and config.enforce_for_high_risk):
-                result.add_error(
-                    f"Story {story_id}: Code changes detected but no test files modified. "
-                    "TDD requires writing tests before or alongside implementation."
-                )
-            else:
-                result.add_warning(
-                    f"Story {story_id}: Code changes without corresponding test changes. "
-                    "Consider adding tests for better coverage."
-                )
-            result.add_suggestion(
-                "Follow TDD workflow: 1) Write failing test, 2) Implement to pass, 3) Refactor"
+    required_by_high_risk = (
+        is_high_risk
+        and config.enforce_for_high_risk
+        and config.test_requirements.require_test_for_high_risk
+    )
+
+    tests_required = (
+        required_by_story
+        or config.test_requirements.require_test_changes
+        or required_by_high_risk
+    )
+
+    # Enforce or warn when code changes exist without tests
+    if code_files and not test_files:
+        if tests_required:
+            result.add_error(
+                f"Story {story_id}: Code changes detected but no test files modified. "
+                "TDD requires writing tests before or alongside implementation."
             )
+        else:
+            result.add_warning(
+                f"Story {story_id}: Code changes without corresponding test changes. "
+                "Consider adding tests for better coverage."
+            )
+        result.add_suggestion(
+            "Follow TDD workflow: 1) Write failing test, 2) Implement to pass, 3) Refactor"
+        )
 
     # Check test expectations if specified
     test_expectations = story.get("test_expectations", {})

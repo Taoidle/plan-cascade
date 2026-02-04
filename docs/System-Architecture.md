@@ -3,9 +3,12 @@
 # Plan Cascade - System Architecture and Workflow Design
 
 **Version**: 4.4.0
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-02-04
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
+
+**Scope (Plugin Only):** This document describes the Claude Code plugin workflows (the `/plan-cascade:*` commands, `commands/`, and `skills/`).
+Standalone CLI and Desktop app workflows are intentionally out of scope here.
 
 ---
 
@@ -43,9 +46,15 @@ graph TB
         F1 --> W1[Worktree 1]
         F2 --> W2[Worktree 2]
         F3 --> W3[Worktree 3]
+        W1 -.-> SPEC1[spec.json/spec.md]
+        W2 -.-> SPEC2[spec.json/spec.md]
+        W3 -.-> SPEC3[spec.json/spec.md]
         W1 --> PRD1[prd.json]
         W2 --> PRD2[prd.json]
         W3 --> PRD3[prd.json]
+        SPEC1 --> PRD1
+        SPEC2 --> PRD2
+        SPEC3 --> PRD3
         PRD1 --> DD2[design_doc.json<br/>Feature-level]
         PRD2 --> DD3[design_doc.json<br/>Feature-level]
         PRD3 --> DD4[design_doc.json<br/>Feature-level]
@@ -77,7 +86,7 @@ graph TB
 | Tier | Name | Responsibility | Artifact |
 |------|------|----------------|----------|
 | **Level 1** | Mega Plan | Project-level orchestration, manages dependencies and execution order of multiple Features | `mega-plan.json`, `design_doc.json` (project-level) |
-| **Level 2** | Hybrid Ralph | Feature-level development, executes in isolated Worktree, auto-generates PRD and design doc | `prd.json`, `design_doc.json` (feature-level), `findings.md` |
+| **Level 2** | Hybrid Ralph | Feature-level development in isolated Worktrees. Optionally runs a planning-time spec interview, then finalizes PRD and design context | `spec.json`/`spec.md` (optional), `prd.json`, `design_doc.json` (feature-level), `findings.md` |
 | **Level 3** | Stories | Story-level execution, processed in parallel by Agents, supports quality gates and retries | Code changes, `progress.txt` |
 
 ---
@@ -90,6 +99,12 @@ graph LR
         O[Orchestrator<br/>Orchestrator]
         IL[IterationLoop<br/>Iteration Loop]
         SA[StrategyAnalyzer<br/>Strategy Analyzer]
+    end
+
+    subgraph "Spec Layer (Planning-time)"
+        SI[SpecInterview<br/>Spec Interview]
+        SQG[SpecQualityGate<br/>Spec Quality Gate]
+        SC[SpecCompiler<br/>Spec → PRD Compiler]
     end
 
     subgraph "Execution Layer"
@@ -120,6 +135,10 @@ graph LR
 
     O --> SA
     SA --> IL
+    SA -.-> SI
+    SI --> SQG
+    SQG --> SC
+    SC --> IL
     IL --> AE
     AE --> PM
     PM --> CPD
@@ -144,6 +163,9 @@ graph LR
 |-----------|----------------|
 | **Orchestrator** | Core orchestrator, coordinates all components |
 | **StrategyAnalyzer** | Analyzes task and selects strategy (DIRECT, HYBRID_AUTO, HYBRID_WORKTREE, MEGA_PLAN) and ExecutionFlow (QUICK, STANDARD, FULL) |
+| **SpecInterview** | Planning-time interview to produce `spec.json` (source of truth) and `spec.md` (rendered), resumable via `.state/spec-interview.json`. Runs in the orchestrator only |
+| **SpecQualityGate** | Planning-time quality checks for `spec.json`. FULL flow enforces verifiable acceptance criteria, verification commands, and right-sized stories |
+| **SpecCompiler** | Compiles `spec.json` into Plan Cascade `prd.json` and embeds `flow_config` / `tdd_config` / `execution_config` as needed |
 | **IterationLoop** | Auto-iteration loop, manages batch execution |
 | **AgentExecutor** | Agent execution abstraction, supports multiple Agents |
 | **PhaseManager** | Phase management, selects Agent based on phase |
@@ -168,6 +190,10 @@ graph LR
 
 ## 3. Complete Workflow
 
+Plan Cascade’s plugin workflows optionally include a **planning-time Spec Interview** (enabled by `--spec on|auto`).
+When enabled, the interview produces `spec.json`/`spec.md` and compiles them into the final `prd.json` before execution begins.
+Related commands: `/plan-cascade:spec-plan`, `/plan-cascade:spec-resume`, `/plan-cascade:spec-cleanup`.
+
 ```mermaid
 flowchart TB
     subgraph "Entry Selection"
@@ -188,13 +214,23 @@ flowchart TB
 
     subgraph "Hybrid Worktree Flow"
         HW --> HW_CREATE[Create Worktree + Branch]
-        HW_CREATE --> HW_PRD[Generate PRD<br/>+ design_doc.json]
-        HW_PRD --> HW_REVIEW[Unified Review Display]
+        HW_CREATE --> HW_SPEC{Spec Interview?}
+        HW_SPEC -->|Yes| HW_SPEC_RUN["/plan-cascade:spec-plan<br/>(in worktree)"]
+        HW_SPEC_RUN --> HW_COMPILE[Compile spec.json → prd.json]
+        HW_SPEC -->|No| HW_PRD[Generate PRD]
+        HW_COMPILE --> HW_DESIGN[Generate design_doc.json]
+        HW_PRD --> HW_DESIGN
+        HW_DESIGN --> HW_REVIEW[Unified Review Display]
     end
 
     subgraph "Hybrid Auto Flow"
-        HA --> HA_GEN[Analyze Task + Generate PRD<br/>+ design_doc.json]
-        HA_GEN --> HA_REVIEW[Unified Review Display]
+        HA --> HA_SPEC{Spec Interview?}
+        HA_SPEC -->|Yes| HA_SPEC_RUN["/plan-cascade:spec-plan"]
+        HA_SPEC_RUN --> HA_COMPILE[Compile spec.json → prd.json]
+        HA_SPEC -->|No| HA_GEN[Analyze Task + Generate PRD]
+        HA_COMPILE --> HA_DESIGN[Generate design_doc.json]
+        HA_GEN --> HA_DESIGN
+        HA_DESIGN --> HA_REVIEW[Unified Review Display]
     end
 
     MP_APPROVE --> BATCH_EXEC
@@ -210,7 +246,7 @@ flowchart TB
     end
 
     subgraph "Execution Phase"
-        APPROVE --> AGENT_CFG[Parse Agent Configuration<br/>--agent, --impl-agent, --verify]
+        APPROVE --> AGENT_CFG[Parse Execution Configuration<br/>flow/tdd/confirm + agent flags]
         AGENT_CFG --> EXEC_MODE{Execution Mode?}
         EXEC_MODE -->|Manual| MANUAL[Manual Batch Progression]
         EXEC_MODE -->|"--auto-run"| AUTO[Auto-Iteration Loop]
@@ -222,7 +258,7 @@ flowchart TB
         CTX --> RESOLVE[Resolve Agent per Story<br/>Priority Chain]
         RESOLVE --> PARALLEL[Start Agents in Parallel<br/>Display Agent Assignment]
         PARALLEL --> WAIT[Wait via TaskOutput]
-        WAIT --> VERIFY{AI Verify?<br/>--verify}
+        WAIT --> VERIFY{AI Verify enabled?<br/>(--no-verify disables)}
         VERIFY -->|Yes| VGATE[AI Verification Gate<br/>Detect Skeleton Code]
         VERIFY -->|No| QG
         VGATE --> QG{Quality Gate}
@@ -247,8 +283,9 @@ flowchart TB
 | Aspect | Previous | Current |
 |--------|----------|---------|
 | **Design Doc** | Not shown | Auto-generated at each level |
+| **Spec Interview** | Not present | Optional planning-time spec interview (`spec.json`/`spec.md`) compiled into `prd.json` |
 | **Review Display** | "Display PRD Preview" | "Unified Review Display" (PRD + Design Doc) |
-| **Agent Config** | Not shown | Explicit `--agent`, `--impl-agent`, `--verify` parsing |
+| **Agent Config** | Not shown | Explicit flow/tdd/confirm handling + agent overrides (e.g. `--agent`, `--impl-agent`, `--no-verify`) |
 | **Agent Assignment** | Implicit | "Resolve Agent per Story" with priority chain |
 | **Verification** | Not shown | Optional "AI Verification Gate" |
 | **Retry** | Simple retry | "Select Retry Agent + Error Context" |
@@ -259,6 +296,7 @@ flowchart TB
 ## 4. Auto Strategy Workflow
 
 The `/plan-cascade:auto` command provides AI-driven automatic strategy selection based on structured task analysis.
+It accepts flow-control flags (e.g. `--flow`, `--tdd`, `--confirm`/`--no-confirm`, `--spec`) and propagates them into the selected workflow.
 
 ### Strategy Selection Flowchart
 
@@ -353,17 +391,20 @@ graph TD
     E --> E3[Confirmation Required]
 ```
 
-| Flow | Gate Mode | AI Verification | Code Review | Confirmation |
-|------|-----------|-----------------|-------------|--------------|
-| `quick` | soft | disabled | disabled | no |
-| `standard` | soft | enabled | optional | no |
-| `full` | hard | enabled | enabled | yes |
+**Spec Interview (shift-left):** When `--spec auto` is in effect (default for FULL flow), the planning-time spec interview runs before final PRD finalization.
+
+| Flow | Gate Mode | Spec Interview | AI Verification | Code Review | Confirmation |
+|------|-----------|----------------|-----------------|-------------|--------------|
+| `quick` | soft | off | disabled | disabled | no |
+| `standard` | soft | off | enabled | optional | no |
+| `full` | hard | auto (default) | enabled | enabled | yes |
 
 ---
 
 ## 5. Design Document System
 
 Plan Cascade automatically generates technical design documents (`design_doc.json`) alongside PRDs to provide architectural context during story execution.
+When Spec Interview is used, `prd.json` is compiled from `spec.json` first, then `design_doc.json` is generated from the finalized PRD.
 
 ### Two-Level Architecture
 
@@ -569,17 +610,27 @@ Suitable for large project development containing multiple related feature modul
 ### Command Parameters
 
 ```bash
-/plan-cascade:mega-plan <project-description> [design-doc-path]
+/plan-cascade:mega-plan [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] \
+  [--spec <off|auto|on>] [--first-principles] [--max-questions N] \
+  <project-description> [design-doc-path]
 
 # Examples:
 /plan-cascade:mega-plan "Build e-commerce platform"
 /plan-cascade:mega-plan "Build e-commerce platform" ./architecture.md
+/plan-cascade:mega-plan --flow full --spec on --first-principles "Build e-commerce platform"
 ```
 
 | Parameter | Description |
 |-----------|-------------|
 | `project-description` | Required. Project description for feature decomposition |
 | `design-doc-path` | Optional. External design document to import (.md/.json/.html) |
+| `--flow` | Optional. Execution flow depth propagated to later execution |
+| `--tdd` | Optional. TDD mode propagated to story execution |
+| `--confirm` | Optional. Require batch confirmation (orchestrator/batch boundary) |
+| `--no-confirm` | Optional. Disable batch confirmation (overrides `--confirm` and FULL defaults) |
+| `--spec` | Optional. Record spec interview config for later orchestrator-only execution in `mega-approve` |
+| `--first-principles` | Optional. Ask first-principles questions first (only when spec interview runs) |
+| `--max-questions` | Optional. Soft cap for interview length (recorded in interview state) |
 
 ### Detailed Flowchart
 
@@ -608,10 +659,13 @@ flowchart TD
     K -->|Approve| M["/plan-cascade:mega-approve"]
 
     subgraph "mega-approve Execution"
-        M --> N[Parse --auto-prd --agent --prd-agent --impl-agent]
+        M --> N[Parse --auto-prd --agent --prd-agent --impl-agent<br/>+ flow/tdd/confirm/no-confirm/spec flags]
         N --> O[Create Batch N Worktrees]
-        O --> P[Generate PRDs for Batch<br/>via selected PRD Agent]
-        P --> Q[Execute Stories for Batch<br/>via selected Impl Agent]
+        O --> PRD_MODE{Spec interview enabled?}
+        PRD_MODE -->|Yes| PRD_SPEC[Run per-feature spec interview (orchestrator-only)<br/>spec.json/spec.md → prd.json]
+        PRD_MODE -->|No| PRD_GEN[Generate PRDs for Batch<br/>via selected PRD Agent]
+        PRD_SPEC --> Q[Execute Stories for Batch<br/>via selected Impl Agent]
+        PRD_GEN --> Q
         Q --> R[Wait via TaskOutput]
         R --> S{Batch Complete?}
         S -->|Yes| T[Merge Batch to Target Branch]
@@ -633,6 +687,8 @@ flowchart TD
 | `design_doc.json` | Project root | Project-level technical design |
 | `mega-findings.md` | Project root | Shared findings across features |
 | `.mega-status.json` | State dir or project root | Execution status |
+| `spec.json` / `spec.md` | Feature worktree (optional) | Planning-time spec interview outputs (source + rendered) |
+| `.state/spec-interview.json` | Feature worktree (optional) | Resumable spec interview state |
 
 ### Recovery
 
@@ -662,13 +718,16 @@ Suitable for single complex feature development requiring branch isolation.
 ### Command Parameters
 
 ```bash
-/plan-cascade:hybrid-worktree <task-name> <target-branch> <prd-or-description> [design-doc-path] [--agent <name>]
+/plan-cascade:hybrid-worktree [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] \
+  [--spec <off|auto|on>] [--first-principles] [--max-questions N] \
+  [--agent <name>] <task-name> <target-branch> <prd-or-description> [design-doc-path]
 
 # Examples:
 /plan-cascade:hybrid-worktree fix-auth main "Fix authentication bug"
 /plan-cascade:hybrid-worktree fix-auth main ./existing-prd.json
 /plan-cascade:hybrid-worktree fix-auth main "Fix auth" ./design-spec.md
 /plan-cascade:hybrid-worktree fix-auth main "Fix auth" --agent=codex
+/plan-cascade:hybrid-worktree --flow full --spec on --first-principles fix-auth main "Fix auth"
 ```
 
 | Parameter | Description |
@@ -678,13 +737,20 @@ Suitable for single complex feature development requiring branch isolation.
 | `prd-or-description` | Required. Existing PRD file path OR task description |
 | `design-doc-path` | Optional. External design document to import |
 | `--agent` | Optional. Agent for PRD generation (overrides agents.json) |
+| `--flow` | Optional. Execution flow depth (propagated into PRD / approve) |
+| `--tdd` | Optional. TDD mode (propagated into PRD / approve) |
+| `--confirm` | Optional. Require batch confirmation (can be overridden by `--no-confirm`) |
+| `--no-confirm` | Optional. Disable batch confirmation (overrides FULL defaults) |
+| `--spec` | Optional. Enable planning-time spec interview before finalizing PRD |
+| `--first-principles` | Optional. Ask first-principles questions first (only when spec interview runs) |
+| `--max-questions` | Optional. Soft cap for interview length (recorded in `.state/spec-interview.json`) |
 
 ### Detailed Flowchart
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-worktree</b><br/>task-name target-branch prd-or-desc [design-doc] [--agent]"] --> A0[Step 0: Configure .gitignore]
-    A0 --> B[Step 1: Parse Parameters<br/>including --agent flag]
+    A["<b>/plan-cascade:hybrid-worktree</b><br/>task-name target-branch prd-or-desc [design-doc] [flags]"] --> A0[Step 0: Configure .gitignore]
+    A0 --> B[Step 1: Parse Parameters<br/>flow/tdd/confirm/spec + agent flags]
     B --> C[Step 2: Detect OS and Shell<br/>Cross-platform support]
     C --> D[Step 3: Verify Git Repository]
     D --> E[Step 4: Detect Default Branch]
@@ -705,12 +771,15 @@ flowchart TD
     M[Step 7: Determine PRD Mode]
     M --> N{PRD_ARG is file?}
     N -->|Yes| O[Load PRD from File]
-    N -->|No| P0[Resolve PRD Agent<br/>--agent > agents.json > default]
+    N -->|No| SPEC_ON{Spec Interview enabled?}
+    SPEC_ON -->|Yes| SPEC_RUN["/plan-cascade:spec-plan --compile"]
+    SPEC_ON -->|No| P0[Resolve PRD Agent<br/>--agent > agents.json > default]
     P0 --> P[Generate PRD via Selected Agent]
 
-    O --> Q
+    O --> R
     P --> Q[Wait via TaskOutput]
     Q --> R[Validate PRD]
+    SPEC_RUN --> R
 
     R --> S{External Design Doc?}
     S -->|Yes| S1[Convert External Doc]
@@ -776,12 +845,15 @@ Suitable for quick development of simple features without Worktree isolation.
 ### Command Parameters
 
 ```bash
-/plan-cascade:hybrid-auto <task-description> [design-doc-path] [--agent <name>]
+/plan-cascade:hybrid-auto [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] \
+  [--spec <off|auto|on>] [--first-principles] [--max-questions N] \
+  <task-description> [design-doc-path] [--agent <name>]
 
 # Examples:
 /plan-cascade:hybrid-auto "Add password reset functionality"
 /plan-cascade:hybrid-auto "Implement auth" ./auth-design.md
 /plan-cascade:hybrid-auto "Fix bug" --agent=codex
+/plan-cascade:hybrid-auto --flow full --spec on --first-principles "Implement auth"
 ```
 
 | Parameter | Description |
@@ -789,14 +861,23 @@ Suitable for quick development of simple features without Worktree isolation.
 | `task-description` | Required. Task description for PRD generation |
 | `design-doc-path` | Optional. External design document to import |
 | `--agent` | Optional. Agent for PRD generation (default: claude-code) |
+| `--flow` | Optional. Execution flow depth (propagated into PRD / approve) |
+| `--tdd` | Optional. TDD mode (propagated into PRD / approve) |
+| `--confirm` | Optional. Require batch confirmation (can be overridden by `--no-confirm`) |
+| `--no-confirm` | Optional. Disable batch confirmation (overrides FULL defaults) |
+| `--spec` | Optional. Enable planning-time spec interview before finalizing PRD |
+| `--first-principles` | Optional. Ask first-principles questions first (only when spec interview runs) |
+| `--max-questions` | Optional. Soft cap for interview length (recorded in `.state/spec-interview.json`) |
 
 ### Detailed Flowchart
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-auto</b><br/>task-desc [design-doc] [--agent]"] --> A0[Step 0: Configure .gitignore]
-    A0 --> B[Step 1: Parse Arguments]
-    B --> C[Step 1.1: Resolve PRD Agent<br/>claude-code / codex / aider]
+    A["<b>/plan-cascade:hybrid-auto</b><br/>task-desc [design-doc] [flags]"] --> A0[Step 0: Configure .gitignore]
+    A0 --> B[Step 1: Parse Arguments<br/>flow/tdd/confirm/spec + agent flags]
+    B --> SPEC_ON{Spec Interview enabled?}
+    SPEC_ON -->|Yes| SPEC_RUN["/plan-cascade:spec-plan --compile"]
+    SPEC_ON -->|No| C[Step 1.1: Resolve PRD Agent<br/>claude-code / codex / aider]
 
     C --> D{CLI Agent Available?}
     D -->|No| D1[Fallback to claude-code]
@@ -806,6 +887,7 @@ flowchart TD
     E[Step 2: Generate PRD via Agent]
     E --> F[Step 3: Wait via TaskOutput]
     F --> G[Step 4: Validate PRD Structure]
+    SPEC_RUN --> G
 
     G --> H{External Design Doc?}
     H -->|Yes| I[Step 4.5.1: Convert External Doc<br/>.md / .json / .html]
@@ -835,6 +917,8 @@ flowchart TD
 |------|-------------|
 | `prd.json` | Product requirements with stories |
 | `design_doc.json` | Technical design with story_mappings |
+| `spec.json` / `spec.md` | Optional. Planning-time spec interview outputs (source + rendered) |
+| `.state/spec-interview.json` | Optional. Resumable interview state |
 
 ### Recovery
 
@@ -855,10 +939,14 @@ The `/plan-cascade:approve` command handles story execution with multi-agent sup
 /plan-cascade:approve [options]
 
 Options:
+  --flow <quick|standard|full>  Execution flow depth (default: standard)
+  --tdd <off|on|auto>           TDD mode (default: auto)
+  --confirm                     Require batch confirmation
+  --no-confirm                  Disable batch confirmation (overrides --confirm and FULL defaults)
   --agent <name>        Global agent override (all stories)
   --impl-agent <name>   Agent for implementation phase
   --retry-agent <name>  Agent for retry phase
-  --verify              Enable AI verification gate
+  --no-verify           Disable AI verification gate (enabled by default)
   --verify-agent <name> Agent for verification (default: claude-code)
   --no-review           Disable AI code review (enabled by default)
   --review-agent <name> Agent for code review (default: claude-code)
@@ -886,8 +974,8 @@ Options:
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:approve</b><br/>[--agent] [--impl-agent] [--verify] [--auto-run]"] --> B[Step 1: Detect OS and Shell]
-    B --> C[Step 2: Parse Agent Parameters]
+    A["<b>/plan-cascade:approve</b><br/>[--flow/--tdd/--confirm/--no-confirm]<br/>[--agent/--impl-agent/--retry-agent]<br/>[--no-verify/--no-review] [--auto-run]"] --> B[Step 1: Detect OS and Shell]
+    B --> C[Step 2: Parse flow/tdd/confirm + agent parameters]
     C --> D[Step 2.5: Load agents.json Config]
     D --> E[Step 3: Verify PRD Exists]
     E --> F[Step 4: Read and Validate PRD]
@@ -899,7 +987,7 @@ flowchart TD
     I --> J[Display Loaded Skills Summary]
 
     J --> K[Step 5: Calculate Execution Batches<br/>Based on Dependencies]
-    K --> L[Step 6: Choose Execution Mode<br/>Auto / Manual]
+    K --> L[Step 6: Choose Execution Mode<br/>Auto / Manual / Full Auto]
     L --> M[Step 7: Initialize progress.txt]
 
     M --> N[Step 8: Launch Batch Agents]
@@ -923,7 +1011,7 @@ flowchart TD
         X --> Y[9.2: Verify Completion<br/>Read progress.txt]
         Y --> FMT[9.2.1: FORMAT Gate<br/>PRE_VALIDATION]
         FMT --> QGV[9.2.2: TYPECHECK + TEST + LINT<br/>VALIDATION - Parallel]
-        QGV --> Z{--verify enabled?}
+        QGV --> Z{AI verify enabled?<br/>(default on; disable with --no-verify)}
         Z -->|Yes| AA[9.2.6: AI Verification Gate<br/>Detect Skeleton Code]
         Z -->|No| CR
         AA --> CR[9.2.7: CODE_REVIEW Gate<br/>POST_VALIDATION]
@@ -963,7 +1051,7 @@ Quality gates execute in three phases:
 
 ### AI Verification Gate
 
-When `--verify` is enabled, each completed story is verified:
+When AI verification is enabled (default; disable with `--no-verify`), each completed story is verified:
 
 ```
 [VERIFIED] story-001 - All acceptance criteria implemented
@@ -1030,7 +1118,8 @@ Waiting for completion...
 
 ## 10. Auto-Iteration Workflow
 
-Auto-iteration loop started by `/plan-cascade:approve --auto-run` or `/plan-cascade:auto-run` command:
+Auto-iteration is the non-interactive, Python-based execution loop used in Full Auto mode (implemented by `scripts/auto-execute.py`).
+It can be started via `/plan-cascade:approve --auto-run` (or by selecting Full Auto inside `/plan-cascade:approve`).
 
 ```mermaid
 flowchart TD
@@ -1392,9 +1481,13 @@ Where `<project-id>` is a unique identifier based on project name and path hash 
 | `prd.json` | `<user-dir>/prd.json` (or worktree if in worktree mode) |
 | `mega-plan.json` | `<user-dir>/mega-plan.json` |
 | `.mega-status.json` | `<user-dir>/.state/.mega-status.json` |
-| `.iteration-state.json` | `<user-dir>/.state/` |
+| `agent-status.json` | `<user-dir>/.state/agent-status.json` |
+| `iteration-state.json` | `<user-dir>/.state/iteration-state.json` |
+| `retry-state.json` | `<user-dir>/.state/retry-state.json` |
 | Worktrees | `<user-dir>/.worktree/<task-name>/` |
 | `design_doc.json` | **Project root** (user-visible) |
+| `spec.json` / `spec.md` | **Working directory / worktree** (user-visible, optional) |
+| `.state/spec-interview.json` | **Working directory / worktree** (`.state/`, optional) |
 | `progress.txt` | **Working directory** (user-visible) |
 | `findings.md` | **Working directory** (user-visible) |
 
@@ -1407,12 +1500,14 @@ All files are stored in the project root (backward compatible):
 | `prd.json` | `<project-root>/prd.json` |
 | `mega-plan.json` | `<project-root>/mega-plan.json` |
 | `.mega-status.json` | `<project-root>/.mega-status.json` |
+| `spec.json` / `spec.md` | `<project-root>/spec.json`, `<project-root>/spec.md` (optional) |
+| `.state/spec-interview.json` | `<project-root>/.state/spec-interview.json` (optional) |
 | Worktrees | `<project-root>/.worktree/<task-name>/` |
 
 ### Checking Current Mode
 
 ```bash
-python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('Mode:', 'legacy' if r.is_legacy_mode() else 'new'); print('PRD path:', r.get_prd_path())"
+uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('Mode:', 'legacy' if r.is_legacy_mode() else 'new'); print('PRD path:', r.get_prd_path())"
 ```
 
 ---
@@ -1429,6 +1524,8 @@ graph TB
 
     subgraph "Planning Files"
         CMD --> PRD[prd.json<br/>PRD Document]
+        CMD -.-> SPEC[spec.json/spec.md<br/>Spec (optional)]
+        SPEC -.-> PRD
         CMD --> MP[mega-plan.json<br/>Project Plan]
         CMD --> DD[design_doc.json<br/>Design Document]
     end
@@ -1456,15 +1553,21 @@ graph TB
         LK[.locks/<br/>File Locks]
     end
 
+    subgraph "Spec State"
+        SIS[.state/spec-interview.json<br/>Interview State]
+    end
+
     subgraph "Context Recovery"
         HEC[.hybrid-execution-context.md]
         MEC[.mega-execution-context.md]
     end
 
     DD --> CF[ContextFilter]
+    SPEC --> SIS
     CF --> AS
 
     style PRD fill:#e1f5fe
+    style SPEC fill:#e1f5fe
     style MP fill:#e1f5fe
     style DD fill:#e1f5fe
     style AS fill:#fff3e0
@@ -1483,18 +1586,18 @@ graph TB
 | `prd.json` | Planning | PRD document, contains goals, stories, dependencies |
 | `mega-plan.json` | Planning | Project-level plan, manages multiple Features |
 | `design_doc.json` | Planning | Technical design document, architecture and decisions |
+| `spec.json` | Planning | Structured planning spec (optional; source of truth when spec interview is used) |
+| `spec.md` | Planning | Rendered spec generated from `spec.json` (optional) |
 | `agents.json` | Configuration | Agent configuration, includes phase defaults and fallback chains |
 | `findings.md` | Shared | Agent findings record, supports tag filtering |
 | `mega-findings.md` | Shared | Project-level findings (mega-plan mode) |
 | `progress.txt` | Shared | Progress timeline, includes Agent execution info |
-| `.agent-status.json` | State | Agent running/completed/failed status |
-| `.iteration-state.json` | State | Auto-iteration progress and batch results |
-| `.retry-state.json` | State | Retry history and failure records |
-| `.mega-status.json` | State | Mega-plan execution status |
+| `.agent-status.json` / `.state/agent-status.json` | State | Agent running/completed/failed status |
+| `.iteration-state.json` / `.state/iteration-state.json` | State | Auto-iteration progress and batch results |
+| `.retry-state.json` / `.state/retry-state.json` | State | Retry history and failure records |
+| `.mega-status.json` / `.state/.mega-status.json` | State | Mega-plan execution status |
+| `.state/spec-interview.json` | State | Resumable spec interview state (optional) |
 | `.state/stage-state.json` | State | Stage state machine state (v4.4.0+) |
-| `.state/dor-results.json` | State | DoR gate check results (v4.4.0+) |
-| `.state/dod-results.json` | State | DoD gate check results (v4.4.0+) |
-| `.state/tdd-compliance.json` | State | TDD compliance check results (v4.4.0+) |
 | `.agent-detection.json` | Cache | Cross-platform Agent detection results (1-hour TTL) |
 | `.state/gate-cache.json` | Cache | Gate execution results cache (keyed by git commit + tree hash) |
 | `.hybrid-execution-context.md` | Context | Hybrid task context for AI recovery after session interruption |
@@ -1513,7 +1616,7 @@ graph TB
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │   ┌─────────────────────────┐     ┌─────────────────────────┐           │
-│   │      Simple Mode         │     │      Expert Mode         │           │
+│   │  Auto Strategy Mode      │     │  Explicit Workflow Mode  │           │
 │   │                         │     │                         │           │
 │   │  User enters description │     │  User enters description │           │
 │   │       ↓                 │     │       ↓                 │           │
@@ -1564,11 +1667,11 @@ graph TB
 │              ┌───────────────┴───────────────┐                          │
 │              ▼                               ▼                          │
 │   ┌─────────────────────────┐    ┌─────────────────────────┐           │
-│   │  Standalone Orchestration│    │  Claude Code GUI Mode   │           │
+│   │  Task-tool Execution     │    │  External CLI Agents    │           │
 │   │  Mode                    │    │                         │           │
 │   ├─────────────────────────┤    ├─────────────────────────┤           │
 │   │                         │    │                         │           │
-│   │   Built-in Tool Engine  │    │   Claude Code CLI       │           │
+│   │   Task tool (built-in)  │    │   codex/aider/amp/etc   │           │
 │   │   ┌───────────────┐     │    │   ┌───────────────┐     │           │
 │   │   │ Read/Write    │     │    │   │ Claude Code   │     │           │
 │   │   │ Edit/Bash     │     │    │   │ Executes Tools│     │           │
@@ -1577,21 +1680,16 @@ graph TB
 │   │          │              │    │          │              │           │
 │   │          ▼              │    │          ▼              │           │
 │   │   ┌───────────────┐     │    │   ┌───────────────┐     │           │
-│   │   │ LLM Abstraction│    │    │   │ Plan Cascade  │     │           │
-│   │   │ Layer          │    │    │   │ Visual UI     │     │           │
-│   │   │ (Multiple)    │     │    │   └───────────────┘     │           │
-│   │   └───────────────┘     │    │                         │           │
-│   │          │              │    │                         │           │
-│   │   ┌──────┴──────┐       │    │                         │           │
-│   │   ▼      ▼      ▼       │    │                         │           │
-│   │ Claude Claude OpenAI    │    │                         │           │
-│   │ Max    API    etc.      │    │                         │           │
+│   │   │ Agent:        │     │    │   │ Agent:        │     │           │
+│   │   │ claude-code   │     │    │   │ codex/aider   │     │           │
+│   │   │ (task-tool)   │     │    │   │ (cli)         │     │           │
+│   │   └───────────────┘     │    │   └───────────────┘     │           │
 │   │                         │    │                         │           │
 │   └─────────────────────────┘    └─────────────────────────┘           │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 
-Both modes support: PRD-driven development, batch execution, quality gates, state tracking
+Both execution backends support: PRD-driven development, batch execution, quality gates, state tracking
 ```
 
 ---
@@ -1615,11 +1713,11 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 │              ┌───────────────┴───────────────┐                          │
 │              ▼                               ▼                          │
 │   ┌─────────────────────────┐    ┌─────────────────────────┐           │
-│   │  Standalone Orchestration│    │  Claude Code GUI Mode   │           │
+│   │  Task-tool Execution     │    │  External CLI Agents    │           │
 │   │  Mode                    │    │                         │           │
 │   │                         │    │                         │           │
 │   │   Default Agent:         │    │   Default Agent:         │           │
-│   │   Built-in ReAct Engine │    │   Claude Code CLI       │           │
+│   │   Task tool (built-in)  │    │   codex/aider/amp/etc   │           │
 │   │                         │    │                         │           │
 │   │   Optional CLI Agents:   │    │   Optional CLI Agents:   │           │
 │   │   codex, aider, amp...  │    │   codex, aider, amp...  │           │
@@ -1648,7 +1746,7 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 | `--agent` | Global agent override (all stories) | `--agent=codex` |
 | `--impl-agent` | Implementation phase agent | `--impl-agent=claude-code` |
 | `--retry-agent` | Retry phase agent | `--retry-agent=aider` |
-| `--verify` | Enable AI verification gate | `--verify` |
+| `--no-verify` | Disable AI verification gate (enabled by default) | `--no-verify` |
 | `--verify-agent` | Verification agent | `--verify-agent=claude-code` |
 | `--no-review` | Disable AI code review (enabled by default) | `--no-review` |
 | `--review-agent` | Code review agent | `--review-agent=claude-code` |
@@ -1720,26 +1818,3 @@ Both modes support: PRD-driven development, batch execution, quality gates, stat
 }
 ```
 
----
-
-## Appendix: Two Working Modes Comparison
-
-| Feature | Standalone Orchestration Mode | Claude Code GUI Mode |
-|---------|------------------------------|----------------------|
-| Orchestration Layer | Plan Cascade | Plan Cascade |
-| Tool Execution | Plan Cascade executes itself | Claude Code CLI executes |
-| LLM Source | Claude Max/API, OpenAI, DeepSeek, Ollama | Claude Code |
-| PRD-Driven | ✅ Full support | ✅ Full support |
-| Batch Execution | ✅ Full support | ✅ Full support |
-| Offline Available | ✅ (using Ollama) | ❌ |
-| Use Case | Need other LLMs or offline use | Have Claude Max/Code subscription |
-
-| Component | Standalone Orchestration Mode | Claude Code GUI Mode |
-|-----------|------------------------------|----------------------|
-| PRD Generation | Plan Cascade (LLM) | Plan Cascade (Claude Code) |
-| Dependency Analysis | Plan Cascade | Plan Cascade |
-| Batch Scheduling | Plan Cascade | Plan Cascade |
-| Story Execution | Plan Cascade (ReAct) | Claude Code CLI |
-| Tool Calls | Built-in Tool Engine | Claude Code |
-| State Tracking | Plan Cascade | Plan Cascade |
-| Quality Gates | Plan Cascade | Plan Cascade |

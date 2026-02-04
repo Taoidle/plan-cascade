@@ -10,7 +10,7 @@ ADR: DoD gates validate completion conditions, complementing DoR (readiness) gat
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -583,7 +583,7 @@ class WrapUpSummary:
     def __post_init__(self) -> None:
         """Set completed_at if not provided."""
         if not self.completed_at:
-            self.completed_at = datetime.utcnow().isoformat() + "Z"
+            self.completed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""

@@ -52,6 +52,8 @@ class ParallelExecutionConfig:
     gate_caching_enabled: bool = True  # Cache gate results across stories in batch
     gate_fail_fast: bool = False  # Stop on first required gate failure
     incremental_gates: bool = True  # Enable incremental checking based on changed files
+    dod_gates_enabled: bool = True  # Enable DoD (Definition of Done) checks
+    dod_level: str = "standard"  # DoD level: "standard" or "full"
 
     def __post_init__(self):
         """Set default concurrency if not specified."""
@@ -71,6 +73,8 @@ class ParallelExecutionConfig:
             "gate_caching_enabled": self.gate_caching_enabled,
             "gate_fail_fast": self.gate_fail_fast,
             "incremental_gates": self.incremental_gates,
+            "dod_gates_enabled": self.dod_gates_enabled,
+            "dod_level": self.dod_level,
         }
 
     @classmethod
@@ -87,6 +91,8 @@ class ParallelExecutionConfig:
             gate_caching_enabled=data.get("gate_caching_enabled", True),
             gate_fail_fast=data.get("gate_fail_fast", False),
             incremental_gates=data.get("incremental_gates", True),
+            dod_gates_enabled=data.get("dod_gates_enabled", True),
+            dod_level=data.get("dod_level", "standard"),
         )
 
 
@@ -333,6 +339,15 @@ class ParallelExecutor:
         self._lock = asyncio.Lock()
         self._story_outputs: dict[str, list[str]] = {}
 
+        # Initialize DoD gate if enabled
+        self._dod_gate = None
+        if self.config.dod_gates_enabled:
+            try:
+                from .done_gate import DoneGate
+                self._dod_gate = DoneGate.from_flow(self.config.dod_level)
+            except ImportError:
+                pass  # DoD gate not available
+
     @property
     def path_resolver(self) -> "PathResolver":
         """Get the PathResolver instance."""
@@ -499,7 +514,10 @@ class ParallelExecutor:
         try:
             # Execute via orchestrator
             if self.orchestrator:
-                success, message = self.orchestrator.execute_story(story)
+                # Orchestrator execution can be blocking (CLI agents, subprocess waits).
+                # Run in a worker thread to avoid blocking the event loop and preserve
+                # parallelism across stories.
+                success, message = await asyncio.to_thread(self.orchestrator.execute_story, story)
             else:
                 # Mock execution for testing
                 await asyncio.sleep(0.1)  # Simulate work
@@ -511,6 +529,14 @@ class ParallelExecutor:
             if success and self.config.quality_gates_enabled and self.quality_gate:
                 # Build context for gate execution
                 gate_context: dict[str, Any] = {"story": story}
+
+                # Include PRD so gates can read flow/tdd configuration
+                try:
+                    prd = self.state_manager.read_prd()
+                    if prd:
+                        gate_context["prd"] = prd
+                except Exception:
+                    pass
 
                 # Get changed files for incremental checking if enabled
                 changed_files: list[str] = []
@@ -574,6 +600,23 @@ class ParallelExecutor:
                             progress = self._current_progress.story_progress.get(story_id)
                             if progress:
                                 progress.error = self.quality_gate.get_failure_summary(gate_results)
+
+            # Run DoD gates if enabled and execution/quality gates passed
+            if success and self.config.dod_gates_enabled and self._dod_gate:
+                dod_passed = await self._run_dod_gate_async(
+                    story_id,
+                    story,
+                    gate_results,
+                    changed_files if "changed_files" in locals() else None,
+                )
+                if not dod_passed:
+                    success = False
+                    message = "DoD gate failed"
+                    async with self._lock:
+                        if self._current_progress:
+                            progress = self._current_progress.story_progress.get(story_id)
+                            if progress:
+                                progress.error = "Definition of Done check failed"
 
             # Handle retry if failed and enabled
             if not success and self.config.auto_retry_enabled and self.retry_manager:
@@ -713,6 +756,57 @@ class ParallelExecutor:
             self.state_manager.write_iteration_state(state)
         except Exception:
             pass  # Non-critical failure
+
+    async def _run_dod_gate_async(
+        self,
+        story_id: str,
+        story: dict,
+        gate_results: dict[str, Any] | None = None,
+        changed_files: list[str] | None = None,
+    ) -> bool:
+        """
+        Run DoD gate asynchronously.
+
+        Args:
+            story_id: ID of the story
+            story: Story dictionary
+            gate_results: Optional quality gate results
+
+        Returns:
+            True if DoD check passed, False otherwise
+        """
+        if not self._dod_gate:
+            return True
+
+        # Run in executor to avoid blocking async loop
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._dod_gate.check(
+                    gate_outputs=gate_results,
+                    verification_result=None,
+                    changed_files=changed_files,
+                )
+            )
+
+            # Log to progress.txt
+            try:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                progress_path = self.project_root / "progress.txt"
+                with open(progress_path, "a", encoding="utf-8") as f:
+                    if result.passed:
+                        f.write(f"[{timestamp}] [DoD_PASSED] {story_id}: Definition of Done check passed\n")
+                    else:
+                        summary = "; ".join(result.errors[:2]) if result.errors else "Check failed"
+                        f.write(f"[{timestamp}] [DoD_FAILED] {story_id}: {summary}\n")
+            except IOError:
+                pass  # Non-critical
+
+            return result.passed
+        except Exception:
+            # On error, default to passing (fail-open)
+            return True
 
     def _get_changed_files_for_story(self, story: dict) -> list[str]:
         """

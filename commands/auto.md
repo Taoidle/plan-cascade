@@ -66,6 +66,28 @@ Confirmation points are generated when:
 /plan-cascade:auto --confirm "Major refactoring of payment module"
 ```
 
+### `--no-confirm`
+
+Explicitly disable batch confirmation during execution, even if FULL flow would normally require it.
+
+This is useful for:
+- CI/CD pipelines where interactive confirmation is not possible
+- Automated testing environments
+- When you want strict quality gates but uninterrupted execution
+
+**Note**: `--no-confirm` only affects batch-level confirmation during story execution. It does NOT disable quality gates (verification, code review, TDD compliance) - those still run and can block on failures in FULL flow.
+
+**Usage:**
+```
+# Strict quality gates but no batch confirmation prompts
+/plan-cascade:auto --flow full --no-confirm "Implement critical feature"
+
+# CI-friendly: strict gates, no interruptions
+/plan-cascade:auto --flow full --tdd on --no-confirm "Security audit fixes"
+```
+
+**Precedence**: `--no-confirm` overrides `--confirm` and FULL flow's default confirmation requirement.
+
 ### `--tdd <off|on|auto>`
 
 Control Test-Driven Development (TDD) mode for story execution.
@@ -170,15 +192,23 @@ ARGS="{{args}}"
 FLOW_OVERRIDE = null     # --flow <quick|standard|full>
 EXPLAIN_MODE = false     # --explain
 CONFIRM_MODE = false     # --confirm
+NO_CONFIRM_MODE = false  # --no-confirm (overrides --confirm and FULL flow default)
 JSON_OUTPUT = false      # --json
 TDD_OVERRIDE = null      # --tdd <off|on|auto>
+SPEC_MODE = null         # --spec <off|auto|on>
+FIRST_PRINCIPLES = false # --first-principles
+MAX_QUESTIONS = null     # --max-questions N
 
 # Extract flags using pattern matching:
 # --flow quick|standard|full -> FLOW_OVERRIDE = "quick" | "standard" | "full"
 # --explain -> EXPLAIN_MODE = true
 # --confirm -> CONFIRM_MODE = true
+# --no-confirm -> NO_CONFIRM_MODE = true
 # --json -> JSON_OUTPUT = true
 # --tdd off|on|auto -> TDD_OVERRIDE = "off" | "on" | "auto"
+# --spec off|auto|on -> SPEC_MODE = "off" | "auto" | "on"
+# --first-principles -> FIRST_PRINCIPLES = true
+# --max-questions N -> MAX_QUESTIONS = <int>
 
 # Remove flags from ARGS to get TASK_DESC
 TASK_DESC = (ARGS with flags removed)
@@ -188,9 +218,15 @@ Parse the arguments:
 1. Check for `--flow` followed by `quick`, `standard`, or `full`
 2. Check for `--explain` flag
 3. Check for `--confirm` flag
-4. Check for `--json` flag (only meaningful with --explain)
-5. Check for `--tdd` followed by `off`, `on`, or `auto`
-6. Remaining text is the task description
+4. Check for `--no-confirm` flag
+5. Check for `--json` flag (only meaningful with --explain)
+6. Check for `--tdd` followed by `off`, `on`, or `auto`
+7. Check for `--spec` followed by `off`, `auto`, or `on`
+8. Check for `--first-principles` flag
+9. Check for `--max-questions` followed by an integer
+10. Remaining text is the task description
+
+**Note**: If both `--confirm` and `--no-confirm` are specified, `--no-confirm` takes precedence.
 
 If no description provided, ask the user:
 ```
@@ -466,6 +502,50 @@ Proceed to Step 5.
 
 **CRITICAL: For any strategy other than DIRECT, you MUST use the Skill tool to invoke the corresponding command. DO NOT attempt to execute the strategy logic yourself - let the specialized skill handle it.**
 
+**IMPORTANT: Pass flow/tdd/confirm parameters to sub-commands to ensure strict execution mode is enforced.**
+
+### Build Parameter String for Sub-Commands
+
+Before routing, build the parameter string to pass to sub-commands:
+
+```
+# Build parameter string
+PARAM_STRING = ""
+
+# Add --flow parameter (use FLOW from analysis, which may be overridden by FLOW_OVERRIDE)
+If FLOW is set:
+    PARAM_STRING = PARAM_STRING + " --flow " + FLOW
+
+# Add --tdd parameter
+If TDD_OVERRIDE is set:
+    PARAM_STRING = PARAM_STRING + " --tdd " + TDD_OVERRIDE
+Elif tdd_recommendation from analysis is "on" or starts with "on ":
+    PARAM_STRING = PARAM_STRING + " --tdd on"
+
+# Add spec interview parameters
+If SPEC_MODE is set:
+    PARAM_STRING = PARAM_STRING + " --spec " + SPEC_MODE
+Elif FLOW is "full":
+    # Default behavior: FULL flow shifts-left via spec interview
+    PARAM_STRING = PARAM_STRING + " --spec auto"
+
+If FIRST_PRINCIPLES is true:
+    PARAM_STRING = PARAM_STRING + " --first-principles"
+
+If MAX_QUESTIONS is set:
+    PARAM_STRING = PARAM_STRING + " --max-questions " + MAX_QUESTIONS
+
+# Add --confirm or --no-confirm parameter
+# --no-confirm takes precedence over --confirm
+If NO_CONFIRM_MODE is true:
+    PARAM_STRING = PARAM_STRING + " --no-confirm"
+Elif CONFIRM_MODE is true:
+    PARAM_STRING = PARAM_STRING + " --confirm"
+
+# Trim leading space
+PARAM_STRING = trim(PARAM_STRING)
+```
+
 Execute the selected strategy:
 
 ### If STRATEGY is "DIRECT":
@@ -484,16 +564,24 @@ Then proceed to analyze the codebase and implement the requested changes directl
 
 ### If STRATEGY is "HYBRID_AUTO":
 
-**MANDATORY: Use the Skill tool to invoke the hybrid-auto command.**
+**MANDATORY: Use the Skill tool to invoke the hybrid-auto command with flow/tdd/confirm parameters.**
 
 Display:
 ```
 Routing to /plan-cascade:hybrid-auto...
+Flow: {FLOW}
+TDD: {TDD_OVERRIDE or tdd_recommendation}
+Confirm: {CONFIRM_MODE}
 ```
 
-Then you MUST call the Skill tool:
+Then you MUST call the Skill tool with parameters:
 ```
-Skill(skill="plan-cascade:hybrid-auto", args="{TASK_DESC}")
+Skill(skill="plan-cascade:hybrid-auto", args="{PARAM_STRING} {TASK_DESC}")
+```
+
+Example with full flow:
+```
+Skill(skill="plan-cascade:hybrid-auto", args="--flow full --tdd on --confirm Implement user authentication")
 ```
 
 **DO NOT proceed to read files or implement the task yourself. The hybrid-auto skill will generate the PRD and handle execution.**
@@ -515,12 +603,20 @@ Display:
 Routing to /plan-cascade:hybrid-worktree...
 Task name: {TASK_NAME}
 Target branch: {DEFAULT_BRANCH}
+Flow: {FLOW}
+TDD: {TDD_OVERRIDE or tdd_recommendation}
+Confirm: {CONFIRM_MODE}
 ```
 
-**MANDATORY: Use the Skill tool to invoke the hybrid-worktree command.**
+**MANDATORY: Use the Skill tool to invoke the hybrid-worktree command with parameters.**
 
 ```
-Skill(skill="plan-cascade:hybrid-worktree", args="{TASK_NAME} {DEFAULT_BRANCH} {TASK_DESC}")
+Skill(skill="plan-cascade:hybrid-worktree", args="{PARAM_STRING} {TASK_NAME} {DEFAULT_BRANCH} {TASK_DESC}")
+```
+
+Example with full flow:
+```
+Skill(skill="plan-cascade:hybrid-worktree", args="--flow full --tdd on fix-auth main Fix authentication bug")
 ```
 
 **DO NOT proceed to create worktrees or implement the task yourself. The hybrid-worktree skill will handle it.**
@@ -530,12 +626,20 @@ Skill(skill="plan-cascade:hybrid-worktree", args="{TASK_NAME} {DEFAULT_BRANCH} {
 Display:
 ```
 Routing to /plan-cascade:mega-plan...
+Flow: {FLOW}
+TDD: {TDD_OVERRIDE or tdd_recommendation}
+Confirm: {CONFIRM_MODE}
 ```
 
-**MANDATORY: Use the Skill tool to invoke the mega-plan command.**
+**MANDATORY: Use the Skill tool to invoke the mega-plan command with parameters.**
 
 ```
-Skill(skill="plan-cascade:mega-plan", args="{TASK_DESC}")
+Skill(skill="plan-cascade:mega-plan", args="{PARAM_STRING} {TASK_DESC}")
+```
+
+Example with full flow:
+```
+Skill(skill="plan-cascade:mega-plan", args="--flow full --tdd on --confirm Build e-commerce platform")
 ```
 
 **DO NOT proceed to create mega-plan.json or implement the task yourself. The mega-plan skill will handle it.**
@@ -544,10 +648,18 @@ Skill(skill="plan-cascade:mega-plan", args="{TASK_DESC}")
 
 **IMPORTANT REMINDER**: After determining the strategy:
 - For DIRECT: Execute the task yourself
-- For HYBRID_AUTO, HYBRID_WORKTREE, MEGA_PLAN: You MUST use the Skill tool. This ensures:
+- For HYBRID_AUTO, HYBRID_WORKTREE, MEGA_PLAN: You MUST use the Skill tool with parameters. This ensures:
   1. The correct PRD/plan files are generated
   2. The proper review/approval workflow is followed
   3. Parallel execution is handled correctly
+  4. **Flow/TDD/Confirm parameters are propagated for strict execution mode**
+
+**CRITICAL**: Always pass `{PARAM_STRING}` to sub-commands. The `--flow full --tdd on --confirm` parameters must be propagated to ensure:
+- Hard quality gates (blocking instead of warnings)
+- Mandatory code review
+- Mandatory test changes
+- TDD compliance checking
+- Batch confirmation prompts
 
 **If you find yourself reading code files or implementing after selecting HYBRID_AUTO/WORKTREE/MEGA_PLAN, STOP and use the Skill tool instead.**
 

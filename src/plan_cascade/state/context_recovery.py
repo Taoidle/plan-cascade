@@ -1099,15 +1099,15 @@ class ContextRecoveryManager:
         """
         Update context file after resume.
 
-        Writes to .hybrid-execution-context.md or .mega-execution-context.md
-        depending on context type.
+        Writes to a hybrid or mega execution context markdown file depending on
+        context type.
 
         For mega-plan: In new mode, written to state directory; in legacy mode,
         written to project root.
 
-        For hybrid (auto/worktree): Always written to project/worktree root
-        to stay consistent with hybrid-context-reminder.py script and keep
-        the file visible to users.
+        For hybrid (auto/worktree): In new mode, written to state directory;
+        in legacy mode, written to project/worktree root for backward
+        compatibility.
 
         Args:
             state: Current recovery state
@@ -1123,19 +1123,31 @@ class ContextRecoveryManager:
                 # Ensure directory exists
                 context_file.parent.mkdir(parents=True, exist_ok=True)
             content = self._generate_mega_context(state)
+            target_files = [context_file]
         else:
-            # For hybrid context files - always write to project/worktree root
-            # This keeps the file visible to users and consistent with
-            # hybrid-context-reminder.py script which also writes to root
-            target_path = state.worktree_path or self.project_root
-            context_file = target_path / ".hybrid-execution-context.md"
             content = self._generate_hybrid_context(state)
 
-        try:
-            with open(context_file, "w", encoding="utf-8") as f:
-                f.write(content)
-        except OSError:
-            pass  # Non-critical operation
+            # Hybrid context file location:
+            # - Legacy mode: project/worktree root (historical behavior)
+            # - New mode: write BOTH
+            #   1) state directory (internal, predictable)
+            #   2) project/worktree root dotfile (user-visible, matches scripts)
+            target_files = []
+            target_path = state.worktree_path or self.project_root
+
+            if self.is_legacy_mode():
+                target_files.append(target_path / ".hybrid-execution-context.md")
+            else:
+                target_files.append(self._path_resolver.get_state_file_path("hybrid-execution-context.md"))
+                target_files.append(target_path / ".hybrid-execution-context.md")
+
+        for context_file in target_files:
+            try:
+                context_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(context_file, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except OSError:
+                pass  # Non-critical operation
 
     def _generate_mega_context(self, state: ContextRecoveryState) -> str:
         """Generate mega-plan execution context markdown."""

@@ -143,7 +143,8 @@ class MegaStateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.mega_plan_path, "r", encoding="utf-8") as f:
+                # Use utf-8-sig to tolerate BOM (common on Windows when files are written via PowerShell)
+                with open(self.mega_plan_path, "r", encoding="utf-8-sig") as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError) as e:
                 raise IOError(f"Could not read mega-plan: {e}")
@@ -200,7 +201,8 @@ class MegaStateManager:
 
         with FileLock(lock_path):
             try:
-                with open(self.mega_status_path, "r", encoding="utf-8") as f:
+                # Use utf-8-sig to tolerate BOM (common on Windows when files are written via PowerShell)
+                with open(self.mega_status_path, "r", encoding="utf-8-sig") as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError) as e:
                 raise IOError(f"Could not read mega-status: {e}")
@@ -296,7 +298,8 @@ class MegaStateManager:
                 # Check PRD and stories if exists
                 if prd_path.exists():
                     try:
-                        with open(prd_path, "r", encoding="utf-8") as f:
+                        # Use utf-8-sig to tolerate BOM (common on Windows when files are written via PowerShell)
+                        with open(prd_path, "r", encoding="utf-8-sig") as f:
                             prd = json.load(f)
                             stories = prd.get("stories", [])
                             all_complete = True

@@ -47,6 +47,26 @@ if HAS_TYPER:
         """Get the project path from argument or cwd."""
         return Path(project_path) if project_path else Path.cwd()
 
+    def _get_path_resolver_for_project(
+        cli_ctx,
+        project: Path,
+        project_path: Optional[str],
+    ):
+        """
+        Resolve a PathResolver for the target project.
+
+        When --project is provided, we must construct a resolver for that path
+        (and its detected mode) instead of reusing the CLI context resolver,
+        which may point at the current working directory.
+        """
+        if project_path:
+            from ..state.path_resolver import PathResolver, detect_project_mode
+
+            detected_mode = detect_project_mode(project)
+            return PathResolver(project, legacy_mode=detected_mode == "legacy")
+
+        return cli_ctx.get_path_resolver()
+
     def _load_mega_plan(
         project: Path,
         path_resolver: "PathResolver | None" = None,
@@ -251,9 +271,8 @@ if HAS_TYPER:
 
         # Get CLI context for path resolution
         cli_ctx = get_cli_context(ctx)
-        path_resolver = cli_ctx.get_path_resolver()
-
-        project = _get_project_path(project_path)
+        project = Path(project_path) if project_path else cli_ctx.project_root
+        path_resolver = _get_path_resolver_for_project(cli_ctx, project, project_path)
 
         _print_header(
             "Mega Plan Generator",
@@ -377,6 +396,41 @@ if HAS_TYPER:
         project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
         auto_prd: bool = typer.Option(False, "--auto-prd", help="Auto-approve generated PRDs"),
         batch: Optional[int] = typer.Option(None, "--batch", "-b", help="Execute specific batch only"),
+        flow: str = typer.Option(
+            "standard",
+            "--flow",
+            help="Execution flow (quick|standard|full)",
+        ),
+        tdd: str = typer.Option(
+            "auto",
+            "--tdd",
+            help="TDD mode (off|on|auto)",
+        ),
+        confirm: bool = typer.Option(
+            False,
+            "--confirm",
+            help="Require confirmation before starting execution",
+        ),
+        no_confirm: bool = typer.Option(
+            False,
+            "--no-confirm",
+            help="Skip confirmation prompts (overrides --confirm)",
+        ),
+        spec: str = typer.Option(
+            "auto",
+            "--spec",
+            help="Run spec interview before PRD compile (off|auto|on)",
+        ),
+        first_principles: bool = typer.Option(
+            False,
+            "--first-principles",
+            help="Ask first-principles questions first (when spec interview runs)",
+        ),
+        max_questions: int = typer.Option(
+            18,
+            "--max-questions",
+            help="Soft cap for spec interview length (record only)",
+        ),
     ):
         """
         Approve and start mega-plan execution.
@@ -393,14 +447,17 @@ if HAS_TYPER:
 
         # Get CLI context for path resolution
         cli_ctx = get_cli_context(ctx)
-        path_resolver = cli_ctx.get_path_resolver()
-
-        project = _get_project_path(project_path)
+        project = Path(project_path) if project_path else cli_ctx.project_root
+        path_resolver = _get_path_resolver_for_project(cli_ctx, project, project_path)
 
         _print_header(
             "Mega Plan Approval",
             f"Project: {project}"
         )
+
+        flow = (flow or "standard").strip().lower()
+        tdd = (tdd or "auto").strip().lower()
+        spec = (spec or "auto").strip().lower()
 
         # Load mega-plan
         plan = _load_mega_plan(project, path_resolver=path_resolver)
@@ -433,10 +490,11 @@ if HAS_TYPER:
 
         console.print()
 
-        # Confirm execution
-        if not Confirm.ask("Start execution?", default=True):
-            _print_info("Aborted")
-            raise typer.Exit(0)
+        # Confirm execution (supports --no-confirm; --confirm is kept for parity)
+        if not no_confirm:
+            if not Confirm.ask("Start execution?", default=True):
+                _print_info("Aborted")
+                raise typer.Exit(0)
 
         # Create worktrees and start execution
         from ..core.feature_orchestrator import FeatureOrchestrator
@@ -476,6 +534,64 @@ if HAS_TYPER:
                 else:
                     _print_error(f"Failed to generate PRD for {feature_id}")
 
+            # Optional spec interview + compile (orchestrator-only interaction)
+            spec_mode = spec
+            should_run_spec = spec_mode == "on" or (spec_mode == "auto" and flow == "full")
+            if should_run_spec:
+                from .spec import run_spec_interview
+                from ..core.spec_compiler import CompileOptions, compile_spec_to_prd
+                from ..core.spec_io import get_spec_paths, load_spec
+
+                _print_info("Running spec interviews (one feature at a time)...")
+                for feature in target_batch:
+                    worktree_path = orchestrator.state_manager.get_worktree_path(feature["name"])
+                    if not worktree_path.exists():
+                        _print_error(f"Worktree not found for feature {feature['name']}")
+                        raise typer.Exit(1)
+
+                    console.print()
+                    console.print(f"[bold]Feature:[/bold] {feature.get('title', feature.get('name', ''))}")
+                    code = run_spec_interview(
+                        description=str(feature.get("description", "")) or str(feature.get("title", "")) or feature.get("name", ""),
+                        output_dir=worktree_path,
+                        flow_level=flow,
+                        mode=spec_mode,
+                        first_principles=first_principles,
+                        max_questions=max_questions,
+                        feature_slug=feature.get("name"),
+                        title_hint=feature.get("title"),
+                        console=console,
+                    )
+                    if code != 0:
+                        raise typer.Exit(code)
+
+                    paths = get_spec_paths(worktree_path)
+                    spec_obj = load_spec(paths)
+                    if not spec_obj:
+                        _print_error(f"spec.json not found in {worktree_path}")
+                        raise typer.Exit(1)
+
+                    prd = compile_spec_to_prd(
+                        spec_obj,
+                        options=CompileOptions(
+                            description=str(feature.get("description", "")),
+                            flow_level=flow,
+                            tdd_mode=tdd,
+                            confirm_mode=confirm,
+                            no_confirm_mode=no_confirm,
+                            additional_metadata={
+                                "mega_feature_id": feature.get("id", ""),
+                                "mega_feature_name": feature.get("name", ""),
+                            },
+                        ),
+                    )
+
+                    paths.prd_json_path.write_text(
+                        json.dumps(prd, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
+                    _print_success(f"Compiled prd.json from spec.json for {feature.get('name', '')}")
+
             # Execute the batch
             if auto_prd:
                 _print_info("Auto-approving PRDs...")
@@ -509,9 +625,8 @@ if HAS_TYPER:
 
         # Get CLI context for path resolution
         cli_ctx = get_cli_context(ctx)
-        path_resolver = cli_ctx.get_path_resolver()
-
-        project = _get_project_path(project_path)
+        project = Path(project_path) if project_path else cli_ctx.project_root
+        path_resolver = _get_path_resolver_for_project(cli_ctx, project, project_path)
 
         _print_header(
             "Mega Plan Status",
@@ -603,9 +718,8 @@ if HAS_TYPER:
 
         # Get CLI context for path resolution
         cli_ctx = get_cli_context(ctx)
-        path_resolver = cli_ctx.get_path_resolver()
-
-        project = _get_project_path(project_path)
+        project = Path(project_path) if project_path else cli_ctx.project_root
+        path_resolver = _get_path_resolver_for_project(cli_ctx, project, project_path)
 
         _print_header(
             "Mega Plan Completion",
@@ -689,9 +803,8 @@ if HAS_TYPER:
 
         # Get CLI context for path resolution
         cli_ctx = get_cli_context(ctx)
-        path_resolver = cli_ctx.get_path_resolver()
-
-        project = _get_project_path(project_path)
+        project = Path(project_path) if project_path else cli_ctx.project_root
+        path_resolver = _get_path_resolver_for_project(cli_ctx, project, project_path)
 
         _print_header(
             "Mega Plan Editor",
@@ -872,9 +985,8 @@ if HAS_TYPER:
 
         # Get CLI context for path resolution
         cli_ctx = get_cli_context(ctx)
-        path_resolver = cli_ctx.get_path_resolver()
-
-        project = _get_project_path(project_path)
+        project = Path(project_path) if project_path else cli_ctx.project_root
+        path_resolver = _get_path_resolver_for_project(cli_ctx, project, project_path)
 
         _print_header(
             "Resume Mega Plan Execution",

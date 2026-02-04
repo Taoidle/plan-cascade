@@ -3,7 +3,7 @@
 # Plan Cascade - Claude Code Plugin Guide
 
 **Version**: 4.4.0
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-02-04
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
 
@@ -51,6 +51,37 @@ Plan Cascade provides five main entry commands, suitable for development scenari
 | `/plan-cascade:hybrid-worktree` | Single complex feature | Worktree isolation + Story parallel |
 | `/plan-cascade:hybrid-auto` | Simple features | Quick PRD generation + Story parallel |
 | `/plan-cascade:dashboard` | Status monitoring | Aggregated status view across all executions |
+
+---
+
+## Specification Interview (Spec)
+
+Plan Cascade can run a short, resumable **spec interview** (planning-time) to reduce ambiguity before `prd.json` is finalized.
+
+- Enabled via `--spec <off|auto|on>` on `/plan-cascade:auto`, `/plan-cascade:hybrid-auto`, `/plan-cascade:hybrid-worktree`, `/plan-cascade:mega-plan`, and `/plan-cascade:mega-approve`.
+- In Mega execution, interviews run in the **orchestrator** (mega-approve), not inside per-feature subagents.
+
+### Trigger Rules
+
+| Mode | Behavior |
+|------|----------|
+| `--spec auto` | Runs only when `--flow full` (default) |
+| `--spec on` | Always run the interview |
+| `--spec off` | Never run the interview |
+
+### Outputs
+
+- `spec.json` (structured spec) + `spec.md` (rendered spec)
+- `.state/spec-interview.json` (resume state)
+- Optional compile to `prd.json`
+
+### Commands
+
+```bash
+/plan-cascade:spec-plan "<desc>" [--compile] [--output-dir <dir>] [--flow <quick|standard|full>] [--first-principles] [--max-questions N] [--feature-slug <slug>]
+/plan-cascade:spec-resume [--output-dir <dir>] [--flow <quick|standard|full>]
+/plan-cascade:spec-cleanup [--output-dir <dir>] [--all]
+```
 
 ---
 
@@ -435,9 +466,14 @@ Plan Cascade uses three workflow depth levels that control gating strictness:
 | Flag | Description | Example |
 |------|-------------|---------|
 | `--flow <quick\|standard\|full>` | Override execution flow depth | `--flow full` |
-| `--explain` | Show analysis without executing | `--explain` |
-| `--confirm` | Wait for user confirmation | `--confirm` |
 | `--tdd <off\|on\|auto>` | Control TDD mode | `--tdd on` |
+| `--spec <off\|auto\|on>` | Planning-time spec interview | `--spec auto` |
+| `--first-principles` | Spec: ask first-principles questions | `--first-principles` |
+| `--max-questions N` | Spec: soft cap interview length | `--max-questions 12` |
+| `--confirm` | Ask for confirmation before execution | `--confirm` |
+| `--no-confirm` | Disable batch confirmations (even in Full flow) | `--no-confirm` |
+| `--explain` | Show analysis without executing | `--explain` |
+| `--json` | JSON output for `--explain` | `--explain --json` |
 
 ### Usage Example
 
@@ -456,9 +492,9 @@ Plan Cascade uses three workflow depth levels that control gating strictness:
 # → Uses mega-plan strategy
 
 # With flags
-/plan-cascade:auto --flow full --tdd on "Implement payment processing"
-/plan-cascade:auto --explain "Build user authentication"
-/plan-cascade:auto --confirm "Critical database migration"
+/plan-cascade:auto --flow full --tdd on --no-confirm "Implement payment processing"
+/plan-cascade:auto --explain --json "Build user authentication"
+/plan-cascade:auto --flow full --spec auto --first-principles "Critical database migration"
 ```
 
 ---
@@ -492,7 +528,7 @@ mega-complete → Clean up planning files
 ```
 
 Key points:
-- `mega-approve` needs to be called multiple times (once per batch)
+- Without `--auto-prd`, call `mega-approve` once per batch; with `--auto-prd`, it runs all batches automatically
 - Each batch creates worktree from **updated target branch**
 - Planning files are not committed (added to .gitignore)
 
@@ -542,14 +578,11 @@ This will:
 # Edit plan (optional)
 /plan-cascade:mega-edit
 
-# Approve first batch
+# Start execution (auto-runs all batches)
 /plan-cascade:mega-approve --auto-prd
 
 # View execution progress
 /plan-cascade:mega-status
-
-# After batch completion, approve next batch
-/plan-cascade:mega-approve
 
 # Cleanup after all complete
 /plan-cascade:mega-complete main
@@ -574,12 +607,13 @@ Suitable for single complex feature development requiring branch isolation.
 ### Command Reference
 
 ```bash
-/plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # Create worktree + PRD
-/plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD (no worktree)
-/plan-cascade:approve [--auto-run]                    # Execute PRD
-/plan-cascade:hybrid-resume --auto                    # Resume interrupted execution
-/plan-cascade:hybrid-status                           # View status
-/plan-cascade:hybrid-complete [branch] [--force]      # Complete and merge (--force skips uncommitted check)
+/plan-cascade:hybrid-worktree <name> <branch> <desc> [options]  # Create worktree + PRD
+/plan-cascade:hybrid-auto <desc> [options]                      # Generate PRD (no worktree)
+/plan-cascade:edit                                              # Edit PRD
+/plan-cascade:approve [options]                                 # Execute PRD stories
+/plan-cascade:hybrid-resume [--auto]                            # Resume interrupted execution
+/plan-cascade:hybrid-status                                     # View status
+/plan-cascade:hybrid-complete [branch] [--force]                # Complete and merge (--force skips uncommitted check)
 ```
 
 | Parameter | Description |
@@ -587,7 +621,7 @@ Suitable for single complex feature development requiring branch isolation.
 | `<name>` | Task name (used for worktree and branch) |
 | `<branch>` | Target branch to merge into when complete |
 | `<desc>` | Task description OR path to existing PRD file |
-| `--agent` | Optional. Agent for PRD generation (overrides agents.json) |
+| `options` | Common: `--flow`, `--tdd`, `--confirm/--no-confirm`, `--spec`, `--first-principles`, `--max-questions`, `--agent` |
 
 ### Usage Example
 
@@ -623,8 +657,8 @@ Suitable for quick development of simple features without Worktree isolation.
 ### Command Reference
 
 ```bash
-/plan-cascade:hybrid-auto <desc> [--agent <name>]  # Generate PRD
-/plan-cascade:approve [--auto-run]                 # Execute
+/plan-cascade:hybrid-auto <desc> [options]         # Generate PRD
+/plan-cascade:approve [options]                    # Execute
 /plan-cascade:edit                                 # Edit PRD
 /plan-cascade:show-dependencies                    # View dependency graph
 ```
@@ -732,11 +766,9 @@ DoD gates run **after** story/feature execution to validate completion:
 
 ```json
 {
-  "execution_config": {
-    "flow": "standard",
-    "dor_mode": "soft",
-    "dod_level": "standard"
-  }
+  "flow_config": { "level": "standard" },
+  "tdd_config": { "mode": "auto" },
+  "execution_config": { "require_batch_confirm": false }
 }
 ```
 
@@ -784,31 +816,23 @@ After story completion, quality gates verify:
 
 ---
 
-## Auto-Iteration and Quality Gates
+## Auto Execution and Quality Gates
 
-### Start Auto-Iteration
+Plan Cascade executes stories batch-by-batch with quality gates and (optionally) automatic retries.
+
+### Full Auto Execution (Recommended)
+
+For unattended runs (CI-friendly), use Full Auto mode from `/plan-cascade:approve`, or run the helper script directly:
 
 ```bash
-# Start auto-iteration immediately after approval
-/plan-cascade:approve --auto-run
-
-# Or start separately
-/plan-cascade:auto-run
-
-# Limit maximum iterations
-/plan-cascade:auto-run --mode max_iterations --max-iterations 10
-
-# Execute current batch only
-/plan-cascade:auto-run --mode batch_complete
+uv run python scripts/auto-execute.py --prd prd.json --flow full --tdd on
 ```
 
-### Iteration Modes
-
-| Mode | Description |
-|------|-------------|
-| `until_complete` | Continue execution until all Stories complete (default) |
-| `max_iterations` | Stop after executing at most N iterations |
-| `batch_complete` | Stop after executing current batch only |
+Common script flags:
+- `--max-retries N` / `--no-retry`
+- `--batch N` (execute only one batch)
+- `--parallel` + `--max-concurrency N`
+- `--state-file <path>` (defaults to `.iteration-state.json`)
 
 ### Quality Gate Configuration
 
@@ -818,12 +842,15 @@ Configure in `prd.json`:
 {
   "quality_gates": {
     "enabled": true,
+    "fail_fast": false,
     "gates": [
       {"name": "format", "type": "format", "required": false, "check_only": false},
       {"name": "typecheck", "type": "typecheck", "required": true},
       {"name": "tests", "type": "test", "required": true},
       {"name": "lint", "type": "lint", "required": false},
-      {"name": "code-review", "type": "code_review", "required": false, "min_score": 0.7, "block_on_critical": true}
+      {"name": "tdd", "type": "tdd_compliance", "required": false},
+      {"name": "code-review", "type": "code_review", "required": false, "min_score": 0.7, "block_on_critical": true},
+      {"name": "implementation_verify", "type": "implementation_verify", "required": false}
     ]
   }
 }
@@ -842,14 +869,14 @@ Configure in `prd.json`:
 | `typecheck` | Type checking (mypy/tsc) | - |
 | `test` | Run tests (pytest/jest) | - |
 | `lint` | Linting (ruff/eslint) | - |
+| `tdd_compliance` | TDD compliance check | - |
 | `code_review` | AI code review | `min_score`, `block_on_critical` |
 | `implementation_verify` | AI implementation verification | - |
+| `custom` | Custom script | `command` |
 
-### View Iteration Status
+### Monitoring
 
-```bash
-/plan-cascade:iteration-status [--verbose]
-```
+Use `/plan-cascade:dashboard` (aggregated), `/plan-cascade:hybrid-status`, `/plan-cascade:mega-status`, and `progress.txt`.
 
 ---
 
@@ -960,88 +987,107 @@ Configure in `prd.json`:
 
 ## Complete Command Reference
 
+### Setup
+
+```bash
+/plan-cascade:init                     # Environment setup (uv/Python checks)
+/plan-cascade:check-gitignore           # Ensure .gitignore entries
+```
+
 ### Auto Strategy
 
 ```bash
-/plan-cascade:auto <description> [options]   # AI auto-select and execute strategy
+/plan-cascade:auto <description> [options]
 
 Options:
   --flow <quick|standard|full>    Override execution flow depth
-  --explain                       Show analysis without executing
-  --confirm                       Wait for user confirmation
   --tdd <off|on|auto>             Control TDD mode
+  --confirm | --no-confirm        Confirmation behavior
+  --spec <off|auto|on>            Planning-time spec interview
+  --first-principles              Spec: ask first-principles questions
+  --max-questions N               Spec: soft cap interview length
+  --explain [--json]              Show analysis without executing
+```
+
+### Spec Interview
+
+```bash
+/plan-cascade:spec-plan "<desc>" [--compile] [--output-dir <dir>] [--flow <quick|standard|full>] [--first-principles] [--max-questions N] [--feature-slug <slug>]
+/plan-cascade:spec-resume [--output-dir <dir>] [--flow <quick|standard|full>]
+/plan-cascade:spec-cleanup [--output-dir <dir>] [--all]
 ```
 
 ### Status Monitoring
 
 ```bash
-/plan-cascade:dashboard [--verbose]          # Show aggregated status view
+/plan-cascade:dashboard [--verbose]
 ```
 
 ### Project-Level (Mega Plan)
 
 ```bash
-/plan-cascade:mega-plan <description>        # Generate project plan
-/plan-cascade:mega-edit                      # Edit plan
-/plan-cascade:mega-approve --auto-prd        # Approve and auto-execute all batches
-/plan-cascade:mega-resume --auto-prd         # Resume interrupted execution
-/plan-cascade:mega-status                    # View progress
-/plan-cascade:mega-complete [branch]         # Merge and cleanup
+/plan-cascade:mega-plan <description> [options]
+/plan-cascade:mega-edit
+/plan-cascade:mega-approve [--auto-prd] [options]
+/plan-cascade:mega-resume [--auto-prd]
+/plan-cascade:mega-status
+/plan-cascade:mega-complete [branch]
 ```
 
-### Feature-Level (Hybrid Ralph)
+### Feature-Level (Hybrid)
 
 ```bash
-/plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # Create worktree + PRD
-/plan-cascade:hybrid-auto <desc> [--agent <name>]     # Generate PRD (no worktree)
-/plan-cascade:approve [--agent <name>] [--auto-run] [--no-verify] [--no-review]  # Execute
-/plan-cascade:hybrid-resume --auto                    # Resume interrupted execution
-/plan-cascade:auto-run [--mode <mode>] [--no-verify] [--no-review]  # Auto-iteration
-/plan-cascade:iteration-status [--verbose]            # Iteration status
-/plan-cascade:agent-config [--action <action>]        # Agent configuration
-/plan-cascade:hybrid-status                           # Status
-/plan-cascade:agent-status [--story-id <id>]          # Agent status
-/plan-cascade:hybrid-complete [branch] [--force]      # Complete (--force skips uncommitted check)
-/plan-cascade:edit                                    # Edit PRD
-/plan-cascade:show-dependencies                       # Dependency graph
+/plan-cascade:hybrid-worktree <name> <branch> <desc> [options]
+/plan-cascade:hybrid-auto <desc> [options]
+/plan-cascade:edit
+/plan-cascade:approve [options]
+/plan-cascade:show-dependencies
+/plan-cascade:hybrid-status
+/plan-cascade:hybrid-resume [--auto]
+/plan-cascade:hybrid-manual
+/plan-cascade:hybrid-complete [branch] [--force]
 ```
 
 ### Design Documents
 
 ```bash
-/plan-cascade:design-generate            # Auto-generate design document
-/plan-cascade:design-import <path>       # Import external design document
-/plan-cascade:design-review              # Review design document
+/plan-cascade:design-generate
+/plan-cascade:design-import <path>
+/plan-cascade:design-review
 ```
 
 ### Basic Planning
 
 ```bash
-/plan-cascade:start                      # Start basic planning
-/plan-cascade:worktree <name> <branch>   # Create Worktree
-/plan-cascade:complete [branch] [--force]  # Complete (--force skips uncommitted check)
+/plan-cascade:start
+/plan-cascade:resume
+/plan-cascade:worktree <name> <branch>
+/plan-cascade:complete [branch] [--force]
 ```
 
 ---
 
 ## Status File Reference
 
+State files may be stored in the project root (legacy mode) or under `<user-dir>/.state/` (new mode).
+
 | File | Type | Description |
 |------|------|-------------|
 | `prd.json` | Planning | PRD document |
 | `mega-plan.json` | Planning | Project plan |
 | `design_doc.json` | Planning | Technical design document |
+| `spec.json` | Planning | Structured planning spec (optional) |
+| `spec.md` | Planning | Rendered spec generated from `spec.json` (optional) |
 | `agents.json` | Configuration | Agent configuration |
 | `findings.md` | Shared | Findings record |
 | `mega-findings.md` | Shared | Project-level findings (mega-plan) |
 | `progress.txt` | Shared | Progress log |
-| `.mega-status.json` | Status | Mega-plan execution status |
-| `.agent-status.json` | Status | Agent status |
-| `.iteration-state.json` | Status | Iteration state |
-| `.retry-state.json` | Status | Retry record |
+| `.mega-status.json` / `.state/.mega-status.json` | Status | Mega-plan execution status |
+| `.agent-status.json` / `.state/agent-status.json` | Status | Agent status |
+| `.iteration-state.json` / `.state/iteration-state.json` | Status | Iteration state |
+| `.retry-state.json` / `.state/retry-state.json` | Status | Retry record |
+| `.state/spec-interview.json` | Status | Spec interview resume state (optional) |
 | `.state/stage-state.json` | Status | Stage state machine state (v4.4.0+) |
-| `.state/dor-results.json` | Status | DoR gate results (v4.4.0+) |
-| `.state/dod-results.json` | Status | DoD gate results (v4.4.0+) |
 | `.hybrid-execution-context.md` | Context | Hybrid task context for AI recovery |
 | `.mega-execution-context.md` | Context | Mega-plan context for AI recovery |
 | `.agent-outputs/` | Output | Agent logs |

@@ -1,10 +1,94 @@
 ---
-description: "Approve the mega-plan and start feature execution. Creates worktrees and generates PRDs for each feature. Usage: /plan-cascade:mega-approve [--auto-prd] [--agent <name>] [--prd-agent <name>] [--impl-agent <name>]"
+description: "Approve the mega-plan and start feature execution. Creates worktrees and generates PRDs for each feature. Usage: /plan-cascade:mega-approve [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] [--spec <off|auto|on>] [--first-principles] [--max-questions N] [--auto-prd] [--agent <name>] [--prd-agent <name>] [--impl-agent <name>]"
 ---
 
 # Approve Mega Plan and Start Execution
 
 Approve the mega-plan and begin executing features in **batch-by-batch** order with **FULL AUTOMATION**.
+
+## Execution Flow Parameters
+
+This command accepts flow control parameters that propagate to ALL feature executions:
+
+### `--flow <quick|standard|full>`
+
+Override the execution flow depth for all feature approve phases.
+
+| Flow | Gate Mode | AI Verification | Code Review | Test Enforcement |
+|------|-----------|-----------------|-------------|------------------|
+| `quick` | soft | disabled | no | no |
+| `standard` | soft | enabled | no | no |
+| `full` | **hard** | enabled | **required** | **required** |
+
+**FULL Flow Enforcement** (propagates to all features):
+- Quality gates BLOCK execution on failure
+- Code review is REQUIRED after each story
+- Test file changes are REQUIRED alongside code changes
+- With `--confirm`: Batch-level confirmation before each feature batch (see below)
+
+### `--tdd <off|on|auto>`
+
+Control Test-Driven Development mode for all feature story executions.
+
+| Mode | Description |
+|------|-------------|
+| `off` | TDD disabled |
+| `on` | TDD enabled with prompts and compliance checks |
+| `auto` | Automatically enable TDD for high-risk stories (default) |
+
+### `--confirm`
+
+Require explicit user confirmation before starting each **feature batch**.
+
+**IMPORTANT: Batch-Level Confirmation Design**
+
+In mega-plan execution, confirmation happens at the **batch level**, not inside sub-agents:
+
+```
+Batch 1: [feature-A, feature-B, feature-C]
+    ↓
+[CONFIRMATION POINT] ← User confirms here (Step 4.5)
+    ↓
+All 3 features execute in parallel (no further confirmation)
+    ↓
+Batch 2: [feature-D, feature-E]
+    ↓
+[CONFIRMATION POINT] ← User confirms here
+    ↓
+...
+```
+
+Why batch-level confirmation:
+- Sub-agents run in background (`run_in_background=true`)
+- Background agents cannot use `AskUserQuestion`
+- Multiple parallel agents requesting confirmation would be chaotic
+- Batch-level provides oversight while preserving parallelism
+
+### `--no-confirm`
+
+Disable batch confirmation, even when using FULL flow.
+
+- Overrides `--confirm` flag
+- Overrides mega-plan.json's `execution_config.require_batch_confirm`
+- Overrides FULL flow's default confirmation behavior
+- Useful for CI pipelines that want strict quality gates without interactive confirmation
+
+### `--spec <off|auto|on>`
+
+Run a planning-time **spec interview** per feature (in the orchestrator only) to produce `spec.json/spec.md`,
+then compile to `prd.json` before story execution starts.
+
+- `auto` (default): enabled when `--flow full`, otherwise disabled
+- `on`: always run interview before PRD finalization
+- `off`: never run interview
+
+### `--first-principles`
+
+Enable first-principles questions (only when spec interview runs).
+
+### `--max-questions N`
+
+Soft cap for interview length (recorded in `.state/spec-interview.json` per feature).
 
 ## Path Storage Modes
 
@@ -103,26 +187,89 @@ fi
 
 ## Step 2: Parse Arguments and State
 
-Parse all command arguments:
+Parse all command arguments including flow control parameters:
 
 ```bash
 # Mode flags
 AUTO_PRD=false
 NO_FALLBACK=false
 
+# Flow control parameters (propagate to all features)
+FLOW_LEVEL=""           # --flow <quick|standard|full>
+TDD_MODE=""             # --tdd <off|on|auto>
+CONFIRM_MODE=false      # --confirm
+NO_CONFIRM_MODE=false   # --no-confirm
+
+# Spec interview parameters (orchestrator-only)
+SPEC_MODE=""            # --spec <off|auto|on>
+FIRST_PRINCIPLES=false  # --first-principles
+MAX_QUESTIONS=""        # --max-questions N
+
 # Agent parameters
 GLOBAL_AGENT=""
 PRD_AGENT=""
 IMPL_AGENT=""
 
+# Parse flags
+NEXT_IS_FLOW=false
+NEXT_IS_TDD=false
+NEXT_IS_SPEC=false
+NEXT_IS_MAXQ=false
+NEXT_IS_AGENT=false
+NEXT_IS_PRD_AGENT=false
+NEXT_IS_IMPL_AGENT=false
+
 # Parse arguments
 for arg in $ARGUMENTS; do
     case "$arg" in
+        # Flow control flags
+        --flow=*) FLOW_LEVEL="${arg#*=}" ;;
+        --flow) NEXT_IS_FLOW=true ;;
+        --tdd=*) TDD_MODE="${arg#*=}" ;;
+        --tdd) NEXT_IS_TDD=true ;;
+        --confirm) CONFIRM_MODE=true ;;
+        --no-confirm) NO_CONFIRM_MODE=true ;;
+        # Spec interview flags
+        --spec=*) SPEC_MODE="${arg#*=}" ;;
+        --spec) NEXT_IS_SPEC=true ;;
+        --first-principles) FIRST_PRINCIPLES=true ;;
+        --max-questions=*) MAX_QUESTIONS="${arg#*=}" ;;
+        --max-questions) NEXT_IS_MAXQ=true ;;
+        # Mode flags
         --auto-prd) AUTO_PRD=true ;;
         --no-fallback) NO_FALLBACK=true ;;
+        # Agent flags
         --agent=*) GLOBAL_AGENT="${arg#*=}" ;;
+        --agent) NEXT_IS_AGENT=true ;;
         --prd-agent=*) PRD_AGENT="${arg#*=}" ;;
+        --prd-agent) NEXT_IS_PRD_AGENT=true ;;
         --impl-agent=*) IMPL_AGENT="${arg#*=}" ;;
+        --impl-agent) NEXT_IS_IMPL_AGENT=true ;;
+        *)
+            # Handle space-separated flag values
+            if [ "$NEXT_IS_FLOW" = true ]; then
+                FLOW_LEVEL="$arg"
+                NEXT_IS_FLOW=false
+            elif [ "$NEXT_IS_TDD" = true ]; then
+                TDD_MODE="$arg"
+                NEXT_IS_TDD=false
+            elif [ "$NEXT_IS_SPEC" = true ]; then
+                SPEC_MODE="$arg"
+                NEXT_IS_SPEC=false
+            elif [ "$NEXT_IS_MAXQ" = true ]; then
+                MAX_QUESTIONS="$arg"
+                NEXT_IS_MAXQ=false
+            elif [ "$NEXT_IS_AGENT" = true ]; then
+                GLOBAL_AGENT="$arg"
+                NEXT_IS_AGENT=false
+            elif [ "$NEXT_IS_PRD_AGENT" = true ]; then
+                PRD_AGENT="$arg"
+                NEXT_IS_PRD_AGENT=false
+            elif [ "$NEXT_IS_IMPL_AGENT" = true ]; then
+                IMPL_AGENT="$arg"
+                NEXT_IS_IMPL_AGENT=false
+            fi
+            ;;
     esac
 done
 
@@ -135,7 +282,18 @@ if [ "$AUTO_PRD" = true ]; then
     echo "============================================"
 fi
 
-# Display agent configuration
+# Display configuration
+echo ""
+echo "============================================================"
+echo "EXECUTION CONFIGURATION"
+echo "============================================================"
+echo "Flow Level: ${FLOW_LEVEL:-"standard (default)"}"
+echo "TDD Mode: ${TDD_MODE:-"auto (default)"}"
+echo "Batch Confirm: ${CONFIRM_MODE}"
+echo "No-Confirm Override: ${NO_CONFIRM_MODE}"
+echo "Spec Interview: ${SPEC_MODE:-"auto (default)"}"
+echo "First Principles: ${FIRST_PRINCIPLES}"
+echo "Max Questions: ${MAX_QUESTIONS:-"18 (default)"}"
 echo ""
 echo "Agent Configuration:"
 echo "  Global Override: ${GLOBAL_AGENT:-"none (use defaults)"}"
@@ -143,6 +301,81 @@ echo "  PRD Generation: ${PRD_AGENT:-"claude-code"}"
 echo "  Implementation: ${IMPL_AGENT:-"per-story resolution"}"
 echo "  Fallback: ${NO_FALLBACK:+"disabled"}"
 echo ""
+echo "These settings will propagate to all feature executions."
+echo "============================================================"
+echo ""
+```
+
+### 2.0.1: Check mega-plan.json for Flow Configuration
+
+**CRITICAL**: If flow/tdd/confirm parameters were not specified on command line, check mega-plan.json for configuration from `/plan-cascade:mega-plan`.
+
+```
+If FLOW_LEVEL is empty:
+    mega_plan = Read("mega-plan.json")
+    If mega_plan has "flow_config" field:
+        FLOW_LEVEL = mega_plan.flow_config.level
+        echo "Note: Using flow level from mega-plan: ${FLOW_LEVEL}"
+
+If TDD_MODE is empty:
+    If mega_plan has "tdd_config" field:
+        TDD_MODE = mega_plan.tdd_config.mode
+        echo "Note: Using TDD mode from mega-plan: ${TDD_MODE}"
+
+If SPEC_MODE is empty:
+    If mega_plan has "spec_config" field:
+        SPEC_MODE = mega_plan.spec_config.mode
+        FIRST_PRINCIPLES = mega_plan.spec_config.first_principles
+        MAX_QUESTIONS = mega_plan.spec_config.max_questions
+        echo "Note: Using spec interview config from mega-plan: ${SPEC_MODE}"
+
+# --no-confirm from command line takes absolute precedence
+If NO_CONFIRM_MODE is true:
+    CONFIRM_MODE = false
+    echo "Note: Batch confirmation DISABLED by --no-confirm flag"
+# Check if mega-plan has no_confirm_override (from mega-plan --no-confirm)
+Elif mega_plan has "execution_config" and execution_config.no_confirm_override == true:
+    CONFIRM_MODE = false
+    NO_CONFIRM_MODE = true  # Mark as explicitly disabled
+    echo "Note: Batch confirmation DISABLED by mega-plan config"
+# Check if mega-plan enables confirmation
+Elif CONFIRM_MODE is false:
+    If mega_plan has "execution_config" and execution_config.require_batch_confirm == true:
+        CONFIRM_MODE = true
+        echo "Note: Batch confirmation enabled by mega-plan config"
+```
+
+### 2.0.2: Build Parameter String for Feature Execution
+
+**CRITICAL**: Build parameter string to pass to hybrid-auto/approve for each feature.
+
+```
+FEATURE_PARAMS = ""
+
+If FLOW_LEVEL is set:
+    FEATURE_PARAMS = FEATURE_PARAMS + " --flow " + FLOW_LEVEL
+
+If TDD_MODE is set:
+    FEATURE_PARAMS = FEATURE_PARAMS + " --tdd " + TDD_MODE
+
+# Spec interview flags (orchestrator-only; will be executed in mega-approve before launching feature agents)
+If SPEC_MODE is set:
+    FEATURE_PARAMS = FEATURE_PARAMS + " --spec " + SPEC_MODE
+If FIRST_PRINCIPLES is true:
+    FEATURE_PARAMS = FEATURE_PARAMS + " --first-principles"
+If MAX_QUESTIONS is set:
+    FEATURE_PARAMS = FEATURE_PARAMS + " --max-questions " + MAX_QUESTIONS
+
+# --no-confirm takes precedence over --confirm
+If NO_CONFIRM_MODE is true:
+    FEATURE_PARAMS = FEATURE_PARAMS + " --no-confirm"
+Elif CONFIRM_MODE is true:
+    FEATURE_PARAMS = FEATURE_PARAMS + " --confirm"
+
+# Trim leading space
+FEATURE_PARAMS = trim(FEATURE_PARAMS)
+
+echo "Feature execution parameters: ${FEATURE_PARAMS}"
 ```
 
 ### 2.1: Load Agent Configuration
@@ -255,6 +488,71 @@ while CURRENT_BATCH <= TOTAL_BATCHES:
 show_completion_status()
 ```
 
+## Step 4.5: Batch-Level Confirmation (CRITICAL)
+
+**IMPORTANT**: Confirmation happens HERE at the mega-approve level, NOT inside sub-agents.
+
+Sub-agents run in background (`run_in_background=true`) and cannot interact with the user. Therefore:
+- Batch confirmation occurs in the main agent before launching sub-agents
+- Sub-agents execute autonomously without waiting for confirmation
+- This preserves parallelism while providing human oversight
+
+```
+If CONFIRM_MODE is true AND NO_CONFIRM_MODE is false:
+    # Display batch information
+    echo ""
+    echo "============================================================"
+    echo "BATCH ${CURRENT_BATCH} OF ${TOTAL_BATCHES} - CONFIRMATION REQUIRED"
+    echo "============================================================"
+    echo ""
+    echo "Features in this batch:"
+    For each feature in current_batch:
+        echo "  - ${feature.id}: ${feature.name}"
+        echo "    Description: ${feature.description}"
+        echo "    Priority: ${feature.priority}"
+    echo ""
+    echo "Execution Configuration:"
+    echo "  Flow Level: ${FLOW_LEVEL}"
+    echo "  TDD Mode: ${TDD_MODE}"
+    echo "  Gate Mode: ${GATE_MODE}"
+    echo ""
+    echo "This will:"
+    echo "  1. Create worktrees for ${batch_size} features"
+    echo "  2. Generate PRDs in parallel"
+    echo "  3. Execute all stories in parallel"
+    echo "  4. Merge completed features to ${TARGET_BRANCH}"
+    echo ""
+
+    # Use AskUserQuestion for confirmation
+    AskUserQuestion(
+        questions=[{
+            "question": "Proceed with Batch ${CURRENT_BATCH}?",
+            "header": "Batch Confirm",
+            "options": [
+                {"label": "Yes, proceed", "description": "Start executing this batch"},
+                {"label": "Skip this batch", "description": "Mark as skipped and continue to next batch"},
+                {"label": "Abort", "description": "Stop mega-plan execution"}
+            ],
+            "multiSelect": false
+        }]
+    )
+
+    # Handle response
+    If response == "Skip this batch":
+        echo "Batch ${CURRENT_BATCH} skipped by user"
+        Update .mega-status.json: mark batch as skipped
+        CURRENT_BATCH += 1
+        Continue to next iteration
+    Elif response == "Abort":
+        echo "Mega-plan execution aborted by user"
+        Exit
+    # Else: proceed with batch execution
+
+    echo ""
+    echo "✓ Batch ${CURRENT_BATCH} confirmed. Starting execution..."
+    echo ""
+```
+
 ## Step 5: Create Worktrees for Batch
 
 For each feature in the current batch:
@@ -295,6 +593,18 @@ Create in each worktree:
 
 ## Step 6: Generate PRDs for Batch (Task Agents)
 
+### 6.0: Optional Spec Interview (Orchestrator-only)
+
+If spec interview is enabled (`SPEC_MODE == on` OR `SPEC_MODE == auto` and `FLOW_LEVEL == full`):
+
+1. **Do NOT launch PRD generation sub-agents** (they must remain non-interactive)
+2. For each feature in the batch, in the **main orchestrator**:
+   - `cd` into the feature worktree
+   - Run `/plan-cascade:spec-plan "<feature description>" --flow <FLOW_LEVEL> --feature-slug <feature-name> --max-questions <N> [--first-principles] --compile --tdd <TDD_MODE> [--confirm|--no-confirm]`
+3. After all features have compiled `prd.json`, proceed to the next step (PRD approvals / execution) using the compiled PRDs
+
+Rationale: All interactive questions must happen in the orchestrator to avoid Mega deadlocks and preserve parallel sub-agent execution.
+
 **CRITICAL**: Launch Task agents IN PARALLEL for ALL features in the batch.
 
 For EACH feature in the current batch, launch a Task agent with `run_in_background: true`:
@@ -326,6 +636,15 @@ Your task:
 7. Save prd.json to {worktree_path}/prd.json
 8. Update progress.txt: echo "[PRD_COMPLETE] {feature_id}" >> {worktree_path}/progress.txt
 
+**CRITICAL**: Include flow/tdd configuration in the generated PRD (passed from FEATURE_PARAMS):
+
+```
+Flow Configuration: {FLOW_LEVEL or "standard"}
+TDD Mode: {TDD_MODE or "auto"}
+Confirm Mode: {CONFIRM_MODE}
+No-Confirm Override: {NO_CONFIRM_MODE}
+```
+
 PRD JSON format:
 {
   "metadata": {
@@ -336,6 +655,18 @@ PRD JSON format:
   },
   "goal": "Feature goal",
   "objectives": ["obj1", "obj2"],
+  "flow_config": {
+    "level": "{FLOW_LEVEL or 'standard'}",
+    "source": "mega-plan"
+  },
+  "tdd_config": {
+    "mode": "{TDD_MODE or 'auto'}",
+    "enforce_for_high_risk": true
+  },
+  "execution_config": {
+    "require_batch_confirm": {CONFIRM_MODE},
+    "no_confirm_override": {NO_CONFIRM_MODE}
+  },
   "stories": [
     {
       "id": "story-001",
@@ -448,49 +779,112 @@ After all PRD agents complete:
 
 ## Step 7: Execute Stories for Batch (Task Agents)
 
-**CRITICAL**: After PRDs are generated, execute stories for ALL features in the batch.
+**CRITICAL**: After PRDs are generated, execute stories for ALL features in the batch. The execution must respect flow/tdd configurations from the PRD.
+
+### 7.0: Sub-Agent Confirmation Policy (CRITICAL)
+
+**Sub-agents MUST NOT wait for user confirmation.** Confirmation is handled at the batch level in Step 4.5.
+
+Reasons:
+- Sub-agents run with `run_in_background=true`
+- Background agents cannot interact with users via AskUserQuestion
+- Batch-level confirmation already occurred before sub-agents were launched
+- Waiting for confirmation would cause sub-agents to hang indefinitely
+
+**The `execution_config.require_batch_confirm` in PRD is for informational purposes only in mega-plan context.**
 
 ### 7.1: For Each Feature, Launch Story Execution
 
-For EACH feature in the batch, launch a Task agent to execute its stories:
+For EACH feature in the batch, launch a Task agent to execute its stories.
+
+**IMPORTANT**: The PRD contains flow_config and tdd_config that the execution agent must follow. Confirmation settings are ignored because confirmation already happened at batch level.
 
 ```
 You are executing all stories for feature: {feature_id} - {feature_title}
 
 Working Directory: {worktree_path}
 
+## EXECUTION CONFIGURATION (from PRD)
+
+Read flow/tdd configuration from prd.json:
+- flow_config.level: {FLOW_LEVEL} → Determines gate strictness
+- tdd_config.mode: {TDD_MODE} → Determines TDD requirements
+
+**CONFIRMATION POLICY (MEGA-PLAN CONTEXT)**:
+- You are running as a background sub-agent in a mega-plan execution
+- User confirmation was already obtained at the batch level (Step 4.5)
+- DO NOT use AskUserQuestion or wait for user input
+- DO NOT pause for confirmation between story batches
+- Execute ALL stories autonomously
+
+**FLOW LEVEL ENFORCEMENT**:
+- If flow_config.level == "full":
+  - Gate mode: HARD (failures block execution)
+  - Code review: REQUIRED after each story
+  - Test changes: REQUIRED with code changes
+  - NO confirmation pauses (already confirmed at batch level)
+
+- If flow_config.level == "standard":
+  - Gate mode: soft (warnings only)
+  - Code review: optional
+  - Test changes: optional
+
+- If flow_config.level == "quick":
+  - Gate mode: soft
+  - Skip AI verification
+  - Skip code review
+
+**TDD MODE ENFORCEMENT**:
+- If tdd_config.mode == "on":
+  - Write tests BEFORE implementation
+  - Verify test changes exist with code changes
+  - Log TDD compliance to progress.txt
+
 EXECUTION RULES:
 1. Read prd.json from {worktree_path}/prd.json
-2. **If design_doc.json exists, read it for architectural context:**
+2. **Apply flow_config, tdd_config settings**
+3. **If design_doc.json exists, read it for architectural context:**
    - Check story_mappings to find relevant components for each story
    - Follow the architectural patterns defined in the document
    - Adhere to the architectural decisions (ADRs)
    - Reference the relevant APIs and data models
-3. Calculate story batches based on dependencies
-4. Execute stories in batch order (parallel within batch, sequential across batches)
-5. For each story:
+4. Calculate story batches based on dependencies
+5. **Execute ALL story batches WITHOUT waiting for confirmation**
+6. Execute stories in batch order (parallel within batch, sequential across batches)
+7. For each story:
    a. **Get design context for this story from design_doc.json (if exists)**
-   b. Implement according to acceptance criteria
-   c. **Follow architectural patterns and decisions from design context**
-   d. Test your implementation
-   e. Mark complete: Update story status to "complete" in prd.json
-   f. Log to progress.txt: echo "[STORY_COMPLETE] {story_id}" >> progress.txt
-6. When ALL stories are complete:
+   b. **If TDD_MODE == "on": Write tests first**
+   c. Implement according to acceptance criteria
+   d. **Follow architectural patterns and decisions from design context**
+   e. Test your implementation
+   f. **If FLOW_LEVEL == "full": Run verification and code review**
+   g. Mark complete: Update story status to "complete" in prd.json
+   h. Log to progress.txt: echo "[STORY_COMPLETE] {story_id}" >> progress.txt
+8. When ALL stories are complete:
    echo "[FEATURE_COMPLETE] {feature_id}" >> progress.txt
 
 IMPORTANT:
 - Execute bash/powershell commands directly
-- Do NOT wait for user confirmation between stories
+- **DO NOT wait for user confirmation - you are a background agent**
+- **If FLOW_LEVEL == "full": DO NOT skip verification/review failures**
 - Update findings.md with important discoveries
-- If a story fails, mark it [STORY_FAILED] and continue to next independent story
-- Only stop on blocking errors
+- If a story fails AND FLOW_LEVEL != "full", mark it [STORY_FAILED] and continue
+- If FLOW_LEVEL == "full" AND story fails, STOP and report
 
-Story execution loop:
+Story execution loop (NO CONFIRMATION - background agent):
   STORY_BATCH = 1
   while stories_remaining:
+      # NO confirmation pause - execute immediately
+      echo "Executing story batch {STORY_BATCH}..."
       for each story in current_batch (no pending dependencies):
+          if TDD_MODE == "on":
+              write_tests_first()
           implement_story()
           test_story()
+          if FLOW_LEVEL == "full":
+              run_verification()
+              run_code_review()
+              check_tdd_compliance()
           mark_complete_in_prd()
           log_to_progress()
       STORY_BATCH += 1

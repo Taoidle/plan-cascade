@@ -453,12 +453,19 @@ class ContextFilter:
         # Get external skill context
         external_skill_context = self.external_loader.get_skill_context("implementation")
 
+        # Include global execution configuration (if present in PRD)
+        prd = self.load_prd() or {}
+        tdd_config = prd.get("tdd_config")
+        flow_config = prd.get("flow_config")
+
         return {
             "story": story,
             "dependencies": dependency_summaries,
             "findings": findings_context,
             "design": design_context,
             "external_skills": external_skill_context,
+            "tdd_config": tdd_config,
+            "flow_config": flow_config,
             "context_estimate": story.get("context_estimate", "medium")
         }
 

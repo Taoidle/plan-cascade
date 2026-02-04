@@ -2,6 +2,7 @@
 
 import json
 import pytest
+import tempfile
 from pathlib import Path
 
 
@@ -114,3 +115,26 @@ def sample_mega_plan():
             }
         ]
     }
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _disable_git_gpg_signing():
+    """
+    Disable git commit signing for the test session.
+
+    Some environments have commit.gpgsign enabled globally, which can make
+    `git commit` hang or fail in headless CI/pytest runs. Tests that create
+    ad-hoc git repos should not depend on user-specific GPG configuration.
+    """
+    config_dir = Path(tempfile.mkdtemp(prefix="plan-cascade-gitconfig-"))
+    config_path = config_dir / "gitconfig"
+    config_path.write_text("[commit]\n\tgpgsign = false\n", encoding="utf-8")
+
+    mp = pytest.MonkeyPatch()
+    mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    mp.setenv("GIT_CONFIG_GLOBAL", str(config_path))
+
+    try:
+        yield
+    finally:
+        mp.undo()

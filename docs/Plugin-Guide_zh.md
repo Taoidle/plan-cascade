@@ -3,7 +3,7 @@
 # Plan Cascade - Claude Code Plugin Guide
 
 **版本**: 4.4.0
-**最后更新**: 2026-02-03
+**最后更新**: 2026-02-04
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
 
@@ -51,6 +51,37 @@ Plan Cascade 提供五个主要入口命令，适用于不同规模的开发场�
 | `/plan-cascade:hybrid-worktree` | 单个复杂功能 | Worktree 隔离 + Story 并行 |
 | `/plan-cascade:hybrid-auto` | 简单功能 | 快速 PRD 生成 + Story 并行 |
 | `/plan-cascade:dashboard` | 状态监控 | 跨所有执行的聚合状态视图 |
+
+---
+
+## Spec 访谈（Specification Interview）
+
+Plan Cascade 可以在 `prd.json` 最终落地前运行一个简短、可恢复的 **Spec 访谈**（规划阶段），以减少需求歧义。
+
+- 可通过 `--spec <off|auto|on>` 启用：`/plan-cascade:auto`、`/plan-cascade:hybrid-auto`、`/plan-cascade:hybrid-worktree`、`/plan-cascade:mega-plan`、`/plan-cascade:mega-approve`。
+- 在 Mega 执行中，访谈只会在 **orchestrator**（mega-approve）中运行，不会在每个 Feature 的并行子 agent 里进行。
+
+### 触发规则
+
+| 模式 | 行为 |
+|------|------|
+| `--spec auto` | 仅在 `--flow full` 时启用（默认） |
+| `--spec on` | 总是运行访谈 |
+| `--spec off` | 从不运行访谈 |
+
+### 产物
+
+- `spec.json`（结构化 spec）+ `spec.md`（渲染文档）
+- `.state/spec-interview.json`（可恢复状态）
+- 可选编译为 `prd.json`
+
+### 命令
+
+```bash
+/plan-cascade:spec-plan "<desc>" [--compile] [--output-dir <dir>] [--flow <quick|standard|full>] [--first-principles] [--max-questions N] [--feature-slug <slug>]
+/plan-cascade:spec-resume [--output-dir <dir>] [--flow <quick|standard|full>]
+/plan-cascade:spec-cleanup [--output-dir <dir>] [--all]
+```
 
 ---
 
@@ -435,9 +466,14 @@ Plan Cascade 使用三个工作流深度级别来控制门控严格程度：
 | 参数 | 描述 | 示例 |
 |------|------|------|
 | `--flow <quick\|standard\|full>` | 覆盖执行流程深度 | `--flow full` |
-| `--explain` | 显示分析结果但不执行 | `--explain` |
-| `--confirm` | 等待用户确认后执行 | `--confirm` |
 | `--tdd <off\|on\|auto>` | 控制 TDD 模式 | `--tdd on` |
+| `--spec <off\|auto\|on>` | 规划期 Spec 访谈 | `--spec auto` |
+| `--first-principles` | Spec：先问 first-principles 问题 | `--first-principles` |
+| `--max-questions N` | Spec：访谈长度软上限 | `--max-questions 12` |
+| `--confirm` | 执行前提示确认 | `--confirm` |
+| `--no-confirm` | 禁用批次确认（即使 Full flow） | `--no-confirm` |
+| `--explain` | 显示分析结果但不执行 | `--explain` |
+| `--json` | `--explain` 的 JSON 输出 | `--explain --json` |
 
 ### 使用示例
 
@@ -456,9 +492,9 @@ Plan Cascade 使用三个工作流深度级别来控制门控严格程度：
 # → 使用 mega-plan 策略
 
 # 带参数使用
-/plan-cascade:auto --flow full --tdd on "实现支付处理"
-/plan-cascade:auto --explain "构建用户认证"
-/plan-cascade:auto --confirm "关键数据库迁移"
+/plan-cascade:auto --flow full --tdd on --no-confirm "实现支付处理"
+/plan-cascade:auto --explain --json "构建用户认证"
+/plan-cascade:auto --flow full --spec auto --first-principles "关键数据库迁移"
 ```
 
 ---
@@ -492,7 +528,7 @@ mega-complete → 清理计划文件
 ```
 
 关键点：
-- `mega-approve` 需要多次调用（每个批次一次）
+- 不带 `--auto-prd` 时需要按批次多次调用 `mega-approve`；带 `--auto-prd` 时会自动跑完所有批次
 - 每个批次从**更新后的目标分支**创建 worktree
 - 计划文件不会被提交（已加入 .gitignore）
 
@@ -542,14 +578,11 @@ mega-complete → 清理计划文件
 # 编辑计划（可选）
 /plan-cascade:mega-edit
 
-# 批准第一批次
+# 启动执行（自动跑完所有批次）
 /plan-cascade:mega-approve --auto-prd
 
 # 查看执行进度
 /plan-cascade:mega-status
-
-# 批次完成后，批准下一批次
-/plan-cascade:mega-approve
 
 # 全部完成后清理
 /plan-cascade:mega-complete main
@@ -574,12 +607,13 @@ mega-complete → 清理计划文件
 ### 命令参考
 
 ```bash
-/plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # 创建 Worktree + PRD
-/plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD（无 Worktree）
-/plan-cascade:approve [--auto-run]                    # 执行 PRD
-/plan-cascade:hybrid-resume --auto                    # 恢复中断的执行
-/plan-cascade:hybrid-status                           # 查看状态
-/plan-cascade:hybrid-complete [branch] [--force]      # 完成并合并（--force 跳过未提交检查）
+/plan-cascade:hybrid-worktree <name> <branch> <desc> [options]  # 创建 Worktree + PRD
+/plan-cascade:hybrid-auto <desc> [options]                      # 生成 PRD（无 Worktree）
+/plan-cascade:edit                                              # 编辑 PRD
+/plan-cascade:approve [options]                                 # 执行 PRD stories
+/plan-cascade:hybrid-resume [--auto]                            # 恢复中断的执行
+/plan-cascade:hybrid-status                                     # 查看状态
+/plan-cascade:hybrid-complete [branch] [--force]                # 完成并合并（--force 跳过未提交检查）
 ```
 
 | 参数 | 说明 |
@@ -587,7 +621,7 @@ mega-complete → 清理计划文件
 | `<name>` | 任务名称（用于 Worktree 和分支） |
 | `<branch>` | 完成后合并到的目标分支 |
 | `<desc>` | 任务描述或现有 PRD 文件路径 |
-| `--agent` | 可选。PRD 生成使用的 Agent（覆盖 agents.json 配置） |
+| `options` | 常见：`--flow`、`--tdd`、`--confirm/--no-confirm`、`--spec`、`--first-principles`、`--max-questions`、`--agent` |
 
 ### 使用示例
 
@@ -623,8 +657,8 @@ mega-complete → 清理计划文件
 ### 命令参考
 
 ```bash
-/plan-cascade:hybrid-auto <desc> [--agent <name>]  # 生成 PRD
-/plan-cascade:approve [--auto-run]                 # 执行
+/plan-cascade:hybrid-auto <desc> [options]         # 生成 PRD
+/plan-cascade:approve [options]                    # 执行
 /plan-cascade:edit                                 # 编辑 PRD
 /plan-cascade:show-dependencies                    # 查看依赖图
 ```
@@ -732,11 +766,9 @@ DoD 门控在 Story/Feature 执行**之后**运行，验证完成条件：
 
 ```json
 {
-  "execution_config": {
-    "flow": "standard",
-    "dor_mode": "soft",
-    "dod_level": "standard"
-  }
+  "flow_config": { "level": "standard" },
+  "tdd_config": { "mode": "auto" },
+  "execution_config": { "require_batch_confirm": false }
 }
 ```
 
@@ -784,31 +816,23 @@ Story 完成后，质量门控验证：
 
 ---
 
-## 自动迭代与质量门控
+## 自动执行与质量门控
 
-### 启动自动迭代
+Plan Cascade 会按批次执行 stories，并可结合质量门控与自动重试。
+
+### 全自动执行（推荐）
+
+对于无人值守（CI 友好）的执行方式，可在 `/plan-cascade:approve` 中选择 Full Auto 模式，或直接运行辅助脚本：
 
 ```bash
-# 批准后立即开始自动迭代
-/plan-cascade:approve --auto-run
-
-# 或单独启动
-/plan-cascade:auto-run
-
-# 限制最大迭代次数
-/plan-cascade:auto-run --mode max_iterations --max-iterations 10
-
-# 仅执行当前批次
-/plan-cascade:auto-run --mode batch_complete
+uv run python scripts/auto-execute.py --prd prd.json --flow full --tdd on
 ```
 
-### 迭代模式
-
-| 模式 | 说明 |
-|------|------|
-| `until_complete` | 持续执行直到所有 Story 完成（默认） |
-| `max_iterations` | 执行最多 N 次迭代后停止 |
-| `batch_complete` | 仅执行当前批次后停止 |
+常用脚本参数：
+- `--max-retries N` / `--no-retry`
+- `--batch N`（只执行某一个 batch）
+- `--parallel` + `--max-concurrency N`
+- `--state-file <path>`（默认 `.iteration-state.json`）
 
 ### 质量门控配置
 
@@ -818,12 +842,15 @@ Story 完成后，质量门控验证：
 {
   "quality_gates": {
     "enabled": true,
+    "fail_fast": false,
     "gates": [
       {"name": "format", "type": "format", "required": false, "check_only": false},
       {"name": "typecheck", "type": "typecheck", "required": true},
       {"name": "tests", "type": "test", "required": true},
       {"name": "lint", "type": "lint", "required": false},
-      {"name": "code-review", "type": "code_review", "required": false, "min_score": 0.7, "block_on_critical": true}
+      {"name": "tdd", "type": "tdd_compliance", "required": false},
+      {"name": "code-review", "type": "code_review", "required": false, "min_score": 0.7, "block_on_critical": true},
+      {"name": "implementation_verify", "type": "implementation_verify", "required": false}
     ]
   }
 }
@@ -842,14 +869,14 @@ Story 完成后，质量门控验证：
 | `typecheck` | 类型检查（mypy/tsc） | - |
 | `test` | 运行测试（pytest/jest） | - |
 | `lint` | 代码检查（ruff/eslint） | - |
+| `tdd_compliance` | TDD 合规检查 | - |
 | `code_review` | AI 代码审查 | `min_score`、`block_on_critical` |
 | `implementation_verify` | AI 实现验证 | - |
+| `custom` | 自定义脚本 | `command` |
 
-### 查看迭代状态
+### 监控
 
-```bash
-/plan-cascade:iteration-status [--verbose]
-```
+使用 `/plan-cascade:dashboard`（聚合）、`/plan-cascade:hybrid-status`、`/plan-cascade:mega-status`，以及查看 `progress.txt`。
 
 ---
 
@@ -960,88 +987,107 @@ Story 完成后，质量门控验证：
 
 ## 完整命令参考
 
+### 设置
+
+```bash
+/plan-cascade:init                     # 环境初始化（uv/Python 检查）
+/plan-cascade:check-gitignore           # 确保 .gitignore 条目
+```
+
 ### 自动策略
 
 ```bash
-/plan-cascade:auto <描述> [选项]         # AI 自动选择并执行策略
+/plan-cascade:auto <描述> [选项]
 
 选项:
   --flow <quick|standard|full>    覆盖执行流程深度
-  --explain                       显示分析结果但不执行
-  --confirm                       等待用户确认后执行
   --tdd <off|on|auto>             控制 TDD 模式
+  --confirm | --no-confirm        确认行为
+  --spec <off|auto|on>            规划期 Spec 访谈
+  --first-principles              Spec：先问 first-principles 问题
+  --max-questions N               Spec：访谈长度软上限
+  --explain [--json]              显示分析结果但不执行
+```
+
+### Spec 访谈
+
+```bash
+/plan-cascade:spec-plan "<desc>" [--compile] [--output-dir <dir>] [--flow <quick|standard|full>] [--first-principles] [--max-questions N] [--feature-slug <slug>]
+/plan-cascade:spec-resume [--output-dir <dir>] [--flow <quick|standard|full>]
+/plan-cascade:spec-cleanup [--output-dir <dir>] [--all]
 ```
 
 ### 状态监控
 
 ```bash
-/plan-cascade:dashboard [--verbose]      # 显示聚合状态视图
+/plan-cascade:dashboard [--verbose]
 ```
 
 ### 项目级（Mega Plan）
 
 ```bash
-/plan-cascade:mega-plan <描述>           # 生成项目计划
-/plan-cascade:mega-edit                  # 编辑计划
-/plan-cascade:mega-approve --auto-prd    # 批准并全自动执行所有批次
-/plan-cascade:mega-resume --auto-prd     # 恢复中断的执行
-/plan-cascade:mega-status                # 查看进度
-/plan-cascade:mega-complete [branch]     # 合并并清理
+/plan-cascade:mega-plan <描述> [选项]
+/plan-cascade:mega-edit
+/plan-cascade:mega-approve [--auto-prd] [选项]
+/plan-cascade:mega-resume [--auto-prd]
+/plan-cascade:mega-status
+/plan-cascade:mega-complete [branch]
 ```
 
-### 功能级（Hybrid Ralph）
+### 功能级（Hybrid）
 
 ```bash
-/plan-cascade:hybrid-worktree <name> <branch> <desc> [--agent <name>]  # 创建 Worktree + PRD
-/plan-cascade:hybrid-auto <desc> [--agent <name>]     # 生成 PRD（无 Worktree）
-/plan-cascade:approve [--agent <name>] [--auto-run] [--no-verify] [--no-review]  # 执行
-/plan-cascade:hybrid-resume --auto                    # 恢复中断的执行
-/plan-cascade:auto-run [--mode <mode>] [--no-verify] [--no-review]  # 自动迭代
-/plan-cascade:iteration-status [--verbose]            # 迭代状态
-/plan-cascade:agent-config [--action <action>]        # Agent 配置
-/plan-cascade:hybrid-status                           # 状态
-/plan-cascade:agent-status [--story-id <id>]          # Agent 状态
-/plan-cascade:hybrid-complete [branch] [--force]      # 完成（--force 跳过未提交检查）
-/plan-cascade:edit                                    # 编辑 PRD
-/plan-cascade:show-dependencies                       # 依赖图
+/plan-cascade:hybrid-worktree <name> <branch> <desc> [选项]
+/plan-cascade:hybrid-auto <desc> [选项]
+/plan-cascade:edit
+/plan-cascade:approve [选项]
+/plan-cascade:show-dependencies
+/plan-cascade:hybrid-status
+/plan-cascade:hybrid-resume [--auto]
+/plan-cascade:hybrid-manual
+/plan-cascade:hybrid-complete [branch] [--force]
 ```
 
 ### 设计文档
 
 ```bash
-/plan-cascade:design-generate            # 自动生成设计文档
-/plan-cascade:design-import <path>       # 导入外部设计文档
-/plan-cascade:design-review              # 审查设计文档
+/plan-cascade:design-generate
+/plan-cascade:design-import <path>
+/plan-cascade:design-review
 ```
 
 ### 基础规划
 
 ```bash
-/plan-cascade:start                      # 开始基础规划
-/plan-cascade:worktree <name> <branch>   # 创建 Worktree
-/plan-cascade:complete [branch] [--force]  # 完成（--force 跳过未提交检查）
+/plan-cascade:start
+/plan-cascade:resume
+/plan-cascade:worktree <name> <branch>
+/plan-cascade:complete [branch] [--force]
 ```
 
 ---
 
 ## 状态文件说明
 
+状态文件可能存放在项目根目录（legacy mode）或 `<user-dir>/.state/`（new mode）。
+
 | 文件 | 类型 | 说明 |
 |------|------|------|
 | `prd.json` | 规划 | PRD 文档 |
 | `mega-plan.json` | 规划 | 项目计划 |
 | `design_doc.json` | 规划 | 技术设计文档 |
+| `spec.json` | 规划 | 结构化 spec（可选） |
+| `spec.md` | 规划 | 从 `spec.json` 渲染生成的文档（可选） |
 | `agents.json` | 配置 | Agent 配置 |
 | `findings.md` | 共享 | 发现记录 |
 | `mega-findings.md` | 共享 | 项目级发现（mega-plan） |
 | `progress.txt` | 共享 | 进度日志 |
-| `.mega-status.json` | 状态 | Mega-plan 执行状态 |
-| `.agent-status.json` | 状态 | Agent 状态 |
-| `.iteration-state.json` | 状态 | 迭代状态 |
-| `.retry-state.json` | 状态 | 重试记录 |
+| `.mega-status.json` / `.state/.mega-status.json` | 状态 | Mega-plan 执行状态 |
+| `.agent-status.json` / `.state/agent-status.json` | 状态 | Agent 状态 |
+| `.iteration-state.json` / `.state/iteration-state.json` | 状态 | 迭代状态 |
+| `.retry-state.json` / `.state/retry-state.json` | 状态 | 重试记录 |
+| `.state/spec-interview.json` | 状态 | Spec 访谈可恢复状态（可选） |
 | `.state/stage-state.json` | 状态 | 阶段状态机状态 (v4.4.0+) |
-| `.state/dor-results.json` | 状态 | DoR 门控结果 (v4.4.0+) |
-| `.state/dod-results.json` | 状态 | DoD 门控结果 (v4.4.0+) |
 | `.hybrid-execution-context.md` | 上下文 | Hybrid 任务上下文，用于 AI 恢复 |
 | `.mega-execution-context.md` | 上下文 | Mega-plan 上下文，用于 AI 恢复 |
 | `.agent-outputs/` | 输出 | Agent 日志 |

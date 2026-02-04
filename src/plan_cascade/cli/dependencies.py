@@ -814,17 +814,22 @@ if HAS_TYPER:
             # Handle circular dependencies
             if result.circular_dependencies:
                 console.print()
-                if strict:
-                    _print_error(
-                        f"Dependency graph has {len(result.circular_dependencies)} circular "
-                        f"dependency cycle(s). Use --no-strict to show warning only."
-                    )
+                if check_issues:
+                    if strict:
+                        _print_error(
+                            f"Dependency graph has {len(result.circular_dependencies)} circular "
+                            "dependency cycle(s)."
+                        )
+                    else:
+                        _print_error(
+                            f"Found {len(result.circular_dependencies)} circular dependency cycle(s). "
+                            "These must be resolved before execution."
+                        )
                     raise typer.Exit(1)
-                else:
-                    _print_warning(
-                        f"Found {len(result.circular_dependencies)} circular dependency cycle(s). "
-                        "These must be resolved before execution."
-                    )
+                _print_warning(
+                    f"Found {len(result.circular_dependencies)} circular dependency cycle(s). "
+                    "These must be resolved before execution."
+                )
 
         except FileNotFoundError as e:
             _print_error(str(e))

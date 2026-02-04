@@ -27,6 +27,42 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
+# Try to use PathResolver and FileLock from plan_cascade for consistency
+_PATH_RESOLVER_AVAILABLE = False
+_FILE_LOCK_AVAILABLE = False
+_PathResolver = None
+_FileLock = None
+
+
+def _setup_import_path():
+    """Setup path to import plan_cascade modules."""
+    global _PATH_RESOLVER_AVAILABLE, _FILE_LOCK_AVAILABLE, _PathResolver, _FileLock
+
+    # Find the plugin root
+    candidates = [
+        Path(__file__).parent.parent.parent.parent / "src",  # Standard location
+        Path.cwd() / "src",  # Development mode
+    ]
+    for src_path in candidates:
+        if src_path.exists():
+            sys.path.insert(0, str(src_path))
+            try:
+                from plan_cascade.state.path_resolver import PathResolver
+                _PathResolver = PathResolver
+                _PATH_RESOLVER_AVAILABLE = True
+            except ImportError:
+                pass
+            try:
+                from plan_cascade.state.state_manager import FileLock
+                _FileLock = FileLock
+                _FILE_LOCK_AVAILABLE = True
+            except ImportError:
+                pass
+            break
+
+_setup_import_path()
+
+
 class AgentWrapper:
     """Wraps CLI agent execution with status tracking."""
 
@@ -43,12 +79,30 @@ class AgentWrapper:
         self.project_root = Path(project_root)
         self.timeout = timeout
 
-        # Paths
-        self.agent_status_path = self.project_root / ".agent-status.json"
+        # Initialize PathResolver if available
+        self._path_resolver = None
+        if _PATH_RESOLVER_AVAILABLE and _PathResolver:
+            self._path_resolver = _PathResolver(self.project_root, legacy_mode=True)
+
+        # Set up paths - use PathResolver if available, fallback to legacy
+        if self._path_resolver and not self._path_resolver.is_legacy_mode():
+            # New mode: internal files in ~/.plan-cascade/<project-id>/.state/
+            state_dir = self._path_resolver.get_state_dir()
+            self.agent_status_path = self._path_resolver.get_state_file_path("agent-status.json")
+            self.output_dir = state_dir / "agent-outputs"
+        else:
+            # Legacy mode: match StateManager legacy layout (project root)
+            self.agent_status_path = self.project_root / ".agent-status.json"
+            self.output_dir = self.project_root / ".agent-outputs"
+
+        # Progress file always in project root (user-visible)
         self.progress_path = self.project_root / "progress.txt"
-        self.output_dir = self.project_root / ".agent-outputs"
         self.output_file = self.output_dir / f"{story_id}.log"
         self.result_file = self.output_dir / f"{story_id}.result.json"
+
+        # Ensure directories exist
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.agent_status_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Load agent config
         self.config = self._load_config(config_path)
@@ -90,13 +144,102 @@ class AgentWrapper:
             return {"running": [], "completed": [], "failed": []}
 
     def _write_status(self, status: Dict) -> None:
-        """Write .agent-status.json."""
+        """Write .agent-status.json with file locking for concurrent safety."""
         status["updated_at"] = self._timestamp()
-        try:
-            with open(self.agent_status_path, "w", encoding="utf-8") as f:
-                json.dump(status, f, indent=2)
-        except IOError as e:
-            print(f"[Warning] Could not write status: {e}", file=sys.stderr)
+
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                # Create parent directory if needed
+                self.agent_status_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # Use unified FileLock from StateManager if available
+                if _FILE_LOCK_AVAILABLE and _FileLock:
+                    if self._path_resolver:
+                        lock_dir = self._path_resolver.get_locks_dir()
+                    else:
+                        lock_dir = self.agent_status_path.parent / ".locks"
+                    lock_dir.mkdir(parents=True, exist_ok=True)
+                    lock_path = lock_dir / f"{self.agent_status_path.stem}.lock"
+
+                    with _FileLock(lock_path, timeout=30):
+                        self._write_status_unlocked(status)
+                    return  # Success
+
+                # Fallback to inline locking
+                mode = "r+" if self.agent_status_path.exists() else "w"
+                with open(self.agent_status_path, mode, encoding="utf-8") as f:
+                    # Acquire exclusive lock
+                    if sys.platform != "win32":
+                        import fcntl
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    else:
+                        import msvcrt
+                        # Use LK_LOCK (blocking) for consistency with Unix
+                        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+
+                    try:
+                        # Read existing content if file existed
+                        if mode == "r+":
+                            f.seek(0)
+                            try:
+                                current = json.load(f)
+                            except json.JSONDecodeError:
+                                current = {"running": [], "completed": [], "failed": []}
+                        else:
+                            current = {"running": [], "completed": [], "failed": []}
+
+                        # Merge status into current
+                        for key in ["running", "completed", "failed"]:
+                            if key in status:
+                                current[key] = status[key]
+                        current["updated_at"] = status["updated_at"]
+
+                        # Write back
+                        f.seek(0)
+                        f.truncate()
+                        json.dump(current, f, indent=2)
+
+                    finally:
+                        # Release lock
+                        if sys.platform != "win32":
+                            import fcntl
+                            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                        else:
+                            import msvcrt
+                            try:
+                                f.seek(0)
+                                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                            except Exception:
+                                pass  # Ignore unlock errors on Windows
+
+                return  # Success
+
+            except (IOError, BlockingIOError, PermissionError) as e:
+                if attempt < max_retries - 1:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                else:
+                    print(f"[Warning] Could not write status after {max_retries} attempts: {e}",
+                          file=sys.stderr)
+
+    def _write_status_unlocked(self, status: Dict) -> None:
+        """Write status file without locking (caller must hold lock)."""
+        current = {"running": [], "completed": [], "failed": []}
+        if self.agent_status_path.exists():
+            try:
+                with open(self.agent_status_path, "r", encoding="utf-8") as f:
+                    current = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        # Merge status into current
+        for key in ["running", "completed", "failed"]:
+            if key in status:
+                current[key] = status[key]
+        current["updated_at"] = status["updated_at"]
+
+        with open(self.agent_status_path, "w", encoding="utf-8") as f:
+            json.dump(current, f, indent=2)
 
     def _append_progress(self, message: str) -> None:
         """Append to progress.txt."""

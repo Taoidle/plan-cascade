@@ -23,6 +23,8 @@ PLAN_CASCADE_GITIGNORE_ENTRIES = [
     ".state/",
     "",
     "# Planning documents (regenerated, not source code)",
+    "spec.json",
+    "spec.md",
     "prd.json",
     "mega-plan.json",
     "design_doc.json",

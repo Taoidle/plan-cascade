@@ -48,6 +48,8 @@ class IterationConfig:
     auto_retry_enabled: bool = True
     stop_on_first_failure: bool = False
     continue_on_optional_failure: bool = True
+    dod_gates_enabled: bool = True
+    dod_level: str = "standard"  # "standard" or "full"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -60,6 +62,8 @@ class IterationConfig:
             "auto_retry_enabled": self.auto_retry_enabled,
             "stop_on_first_failure": self.stop_on_first_failure,
             "continue_on_optional_failure": self.continue_on_optional_failure,
+            "dod_gates_enabled": self.dod_gates_enabled,
+            "dod_level": self.dod_level,
         }
 
     @classmethod
@@ -78,6 +82,8 @@ class IterationConfig:
             auto_retry_enabled=data.get("auto_retry_enabled", True),
             stop_on_first_failure=data.get("stop_on_first_failure", False),
             continue_on_optional_failure=data.get("continue_on_optional_failure", True),
+            dod_gates_enabled=data.get("dod_gates_enabled", True),
+            dod_level=data.get("dod_level", "standard"),
         )
 
 
@@ -204,6 +210,7 @@ class IterationCallbacks:
     on_story_complete: Callable[[str, bool], None] | None = None
     on_story_retry: Callable[[str, int], None] | None = None
     on_quality_gate_run: Callable[[str, dict], None] | None = None
+    on_dod_gate_run: Callable[[str, Any], None] | None = None
     on_iteration_complete: Callable[[IterationState], None] | None = None
     on_error: Callable[[str, Exception], None] | None = None
 
@@ -247,6 +254,15 @@ class IterationLoop:
         self._stop_requested = False
         self._pause_requested = False
         self._callbacks: IterationCallbacks | None = None
+
+        # Initialize DoD gate if enabled
+        self._dod_gate = None
+        if self.config.dod_gates_enabled:
+            try:
+                from .done_gate import DoneGate
+                self._dod_gate = DoneGate.from_flow(self.config.dod_level)
+            except ImportError:
+                pass  # DoD gate not available
 
         # Load existing state
         self._load_state()
@@ -487,8 +503,35 @@ class IterationLoop:
 
                     if story_status == "complete":
                         # Run quality gates if enabled
+                        gate_outputs = None
+                        changed_files: list[str] | None = None
                         if self.config.quality_gates_enabled and self.quality_gate:
-                            gate_passed = self._run_quality_gates(story_id, story)
+                            gate_context: dict[str, Any] = {"story": story}
+
+                            # Include PRD so gates can read flow/tdd configuration
+                            try:
+                                if self.orchestrator:
+                                    prd = self.orchestrator.load_prd()
+                                    if prd:
+                                        gate_context["prd"] = prd
+                            except Exception:
+                                pass
+
+                            # Best-effort changed files detection for incremental gates (TDD, review, etc.)
+                            try:
+                                from .changed_files import ChangedFilesDetector
+
+                                detector = ChangedFilesDetector(self.project_root)
+                                if detector.is_git_repository():
+                                    changed_files = detector.get_changed_files()
+                                    gate_context["changed_files"] = changed_files
+                            except Exception:
+                                pass
+
+                            gate_outputs = self.quality_gate.execute_all(story_id, gate_context)
+                            if self._callbacks.on_quality_gate_run:
+                                self._callbacks.on_quality_gate_run(story_id, gate_outputs)
+                            gate_passed = self.quality_gate.should_allow_progression(gate_outputs)
                             if not gate_passed:
                                 result.quality_gate_failures += 1
                                 if self.config.auto_retry_enabled:
@@ -501,6 +544,22 @@ class IterationLoop:
                                 else:
                                     failed_ids.add(story_id)
                                     result.stories_failed += 1
+                                continue
+
+                        # Run DoD gates after quality gates pass
+                        if self.config.dod_gates_enabled:
+                            dod_passed = self._run_dod_gates(story_id, story, gate_outputs, changed_files)
+                            if not dod_passed:
+                                if self.config.auto_retry_enabled:
+                                    if self._handle_retry(story_id, story, "dod_gate"):
+                                        result.stories_retried += 1
+                                        continue
+                                # If no retry or retry failed, mark as failed
+                                failed_ids.add(story_id)
+                                result.stories_failed += 1
+                                self._state.failed_stories += 1
+                                if self._callbacks.on_story_complete:
+                                    self._callbacks.on_story_complete(story_id, False)
                                 continue
 
                         completed_ids.add(story_id)
@@ -542,6 +601,53 @@ class IterationLoop:
 
         return self.quality_gate.should_allow_progression(results)
 
+    def _run_dod_gates(
+        self,
+        story_id: str,
+        story: dict,
+        gate_outputs: dict | None = None,
+        changed_files: list[str] | None = None,
+    ) -> bool:
+        """
+        Run Definition of Done (DoD) check after story completion.
+
+        Args:
+            story_id: ID of the completed story
+            story: Story dictionary
+            gate_outputs: Optional quality gate outputs to include in DoD check
+            changed_files: Optional list of changed files (for DoD checks like test changes)
+
+        Returns:
+            True if DoD check passed, False otherwise
+        """
+        if not self._dod_gate:
+            return True
+
+        # Build context for DoD check
+        result = self._dod_gate.check(
+            gate_outputs=gate_outputs,
+            verification_result=None,  # Could be added if AI verification is available
+            changed_files=changed_files,
+        )
+
+        if self._callbacks and self._callbacks.on_dod_gate_run:
+            self._callbacks.on_dod_gate_run(story_id, result)
+
+        # Log to progress.txt
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            progress_path = self.project_root / "progress.txt"
+            with open(progress_path, "a", encoding="utf-8") as f:
+                if result.passed:
+                    f.write(f"[{timestamp}] [DoD_PASSED] {story_id}: Definition of Done check passed\n")
+                else:
+                    summary = "; ".join(result.errors[:2]) if result.errors else "Check failed"
+                    f.write(f"[{timestamp}] [DoD_FAILED] {story_id}: {summary}\n")
+        except IOError:
+            pass  # Non-critical
+
+        return result.passed
+
     def _handle_retry(
         self,
         story_id: str,
@@ -557,7 +663,12 @@ class IterationLoop:
 
         # Record the failure
         from .retry_manager import ErrorType
-        error_type = ErrorType.QUALITY_GATE if failure_type == "quality_gate" else ErrorType.EXIT_CODE
+        if failure_type == "quality_gate":
+            error_type = ErrorType.QUALITY_GATE
+        elif failure_type == "dod_gate":
+            error_type = ErrorType.QUALITY_GATE  # DoD is similar to quality gate
+        else:
+            error_type = ErrorType.EXIT_CODE
         self.retry_manager.record_failure(
             story_id=story_id,
             agent="unknown",

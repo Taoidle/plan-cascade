@@ -147,4 +147,6 @@ def get_cli_context(ctx) -> CLIContext:
     if ctx.obj is not None and isinstance(ctx.obj, CLIContext):
         return ctx.obj
     # Return default context if not set
-    return CLIContext()
+    # Default for CLI usage is new mode (legacy_mode=False). Auto-detection is
+    # still available by explicitly passing legacy_mode=None via from_options().
+    return CLIContext(legacy_mode=False)

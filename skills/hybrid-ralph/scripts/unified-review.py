@@ -68,7 +68,8 @@ def load_json_file(filepath: Path) -> dict | None:
     if not filepath.exists():
         return None
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        # Use utf-8-sig to tolerate BOM (common on Windows when files are written via PowerShell)
+        with open(filepath, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None

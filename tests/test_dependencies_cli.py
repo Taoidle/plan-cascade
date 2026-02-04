@@ -1,8 +1,9 @@
 """Tests for the Dependencies CLI command."""
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 from src.plan_cascade.cli.dependencies import (
     DependencyGraphAnalyzer,
@@ -15,11 +16,12 @@ from src.plan_cascade.state.path_resolver import PathResolver
 try:
     import typer
     from typer.testing import CliRunner
+
     from src.plan_cascade.cli.dependencies import dependencies_command
 
     # Create a test app with the command as the default command (no subcommand name)
-    test_app = typer.Typer()
-    test_app.command()(dependencies_command)
+    cli_app = typer.Typer()
+    cli_app.command()(dependencies_command)
 
     HAS_TYPER = True
     runner = CliRunner()
@@ -297,7 +299,7 @@ class TestDependenciesCLI:
     def test_deps_requires_plan_file(self, tmp_path):
         """Test that 'deps' fails without a plan file."""
         result = runner.invoke(
-            test_app,
+            cli_app,
             ["--project", str(tmp_path)]
         )
 
@@ -311,7 +313,7 @@ class TestDependenciesCLI:
             json.dump(sample_prd, f)
 
         result = runner.invoke(
-            test_app,
+            cli_app,
             ["--project", str(tmp_path), "--format", "tree"]
         )
 
@@ -325,7 +327,7 @@ class TestDependenciesCLI:
             json.dump(sample_prd, f)
 
         result = runner.invoke(
-            test_app,
+            cli_app,
             ["--project", str(tmp_path), "--format", "flat"]
         )
 
@@ -339,7 +341,7 @@ class TestDependenciesCLI:
             json.dump(sample_prd, f)
 
         result = runner.invoke(
-            test_app,
+            cli_app,
             ["--project", str(tmp_path), "--format", "table"]
         )
 
@@ -353,7 +355,7 @@ class TestDependenciesCLI:
             json.dump(sample_prd, f)
 
         result = runner.invoke(
-            test_app,
+            cli_app,
             ["--project", str(tmp_path), "--format", "json"]
         )
 
@@ -370,7 +372,7 @@ class TestDependenciesCLI:
             json.dump(sample_mega_plan, f)
 
         result = runner.invoke(
-            test_app,
+            cli_app,
             ["--project", str(tmp_path)]
         )
 
@@ -384,7 +386,7 @@ class TestDependenciesCLI:
             json.dump(sample_prd, f)
 
         result = runner.invoke(
-            test_app,
+            cli_app,
             ["--project", str(tmp_path), "--critical-path"]
         )
 
@@ -398,7 +400,7 @@ class TestDependenciesCLI:
             json.dump(sample_prd, f)
 
         result = runner.invoke(
-            test_app,
+            cli_app,
             ["--project", str(tmp_path), "--no-critical-path", "--no-check"]
         )
 
@@ -420,7 +422,7 @@ class TestDependenciesCLI:
             json.dump(prd, f)
 
         result = runner.invoke(
-            test_app,
+            cli_app,
             ["--project", str(tmp_path), "--check"]
         )
 
@@ -429,7 +431,7 @@ class TestDependenciesCLI:
 
     def test_deps_help(self):
         """Test 'deps --help' shows options."""
-        result = runner.invoke(test_app, ["--help"])
+        result = runner.invoke(cli_app, ["--help"])
 
         assert result.exit_code == 0
         assert "--format" in result.output

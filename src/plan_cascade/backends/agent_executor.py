@@ -257,6 +257,16 @@ class AgentExecutor:
         """
         story_id = story.get("id", "unknown")
 
+        # Default to implementation phase when not specified so we can apply
+        # phase_defaults/fallback_chain logic from agents.json.
+        resolved_phase = phase
+        if resolved_phase is None and self.phase_manager:
+            try:
+                from .phase_config import ExecutionPhase
+                resolved_phase = ExecutionPhase.IMPLEMENTATION
+            except ImportError:
+                resolved_phase = None
+
         # Resolve agent with priority chain
         story_agent = story.get("agent")
         prd_agent = (prd_metadata or {}).get("default_agent")
@@ -265,13 +275,31 @@ class AgentExecutor:
             agent_name=agent_name,
             story_agent=story_agent,
             prd_agent=prd_agent,
-            phase=phase,
+            phase=resolved_phase,
             story=story,
             override=override
         )
 
         # Build prompt
         prompt = self._build_story_prompt(story, context)
+
+        # If we resolved to the Task tool but cannot invoke it (no callback),
+        # fall back to a usable CLI agent when possible.
+        if agent_config.get("type") == "task-tool" and not task_callback:
+            fallback = self._select_cli_fallback(
+                story=story,
+                phase=resolved_phase,
+                override=override,
+            )
+            if fallback:
+                resolved_name, agent_config = fallback
+            else:
+                return {
+                    "success": False,
+                    "story_id": story_id,
+                    "agent": resolved_name,
+                    "error": "Task tool callback not provided and no usable CLI agent found",
+                }
 
         # Execute based on agent type
         if agent_config.get("type") == "task-tool":
@@ -296,6 +324,47 @@ class AgentExecutor:
                 "error": f"Unknown agent type: {agent_config.get('type')}"
             }
 
+    def _select_cli_fallback(
+        self,
+        story: dict[str, Any],
+        phase: Optional["ExecutionPhase"],
+        override: Optional["AgentOverrides"],
+    ) -> tuple[str, dict] | None:
+        """
+        Select a usable CLI agent as a fallback when Task tool is not invokable.
+
+        Strategy:
+        1) Prefer phase fallback_chain order (agents.json)
+        2) Otherwise pick any configured CLI agent whose command is available
+        """
+        # Prefer phase-config fallback chain if available
+        if self.phase_manager and phase is not None:
+            try:
+                phase_config = self.phase_manager.get_phase_config(phase)
+                for name in phase_config.fallback_chain:
+                    agent = self.agents.get(name)
+                    if not agent:
+                        continue
+                    if agent.get("type") != "cli":
+                        continue
+                    command = agent.get("command", "")
+                    if command and self._check_cli_available(name, command):
+                        return name, agent
+            except Exception:
+                pass
+
+        # Otherwise: first available configured CLI agent
+        for name, agent in self.agents.items():
+            if agent.get("type") != "cli":
+                continue
+            command = agent.get("command", "")
+            if not command:
+                continue
+            if self._check_cli_available(name, command):
+                return name, agent
+
+        return None
+
     def _build_story_prompt(self, story: dict, context: dict) -> str:
         """Build the execution prompt for a story."""
         story_id = story.get("id", "unknown")
@@ -318,6 +387,9 @@ class AgentExecutor:
         design_context = context.get("design", {})
         design_section = self._format_design_context(design_context)
 
+        # Build TDD guidance section if enabled
+        tdd_section = self._build_tdd_guidance(story, context)
+
         prompt = f"""You are executing story {story_id}: {title}
 
 Description:
@@ -331,7 +403,7 @@ Dependencies Summary:
 
 Relevant Findings:
 {finding_lines}
-{design_section}
+{design_section}{tdd_section}
 Your task:
 1. Read the relevant code and documentation
 2. Implement the story according to acceptance criteria
@@ -343,6 +415,61 @@ Your task:
 Work methodically and document your progress.
 """
         return prompt
+
+    def _build_tdd_guidance(self, story: dict, context: dict) -> str:
+        """
+        Build TDD guidance section for the story prompt.
+
+        Args:
+            story: Story dictionary
+            context: Execution context (may contain tdd_config)
+
+        Returns:
+            TDD guidance string or empty string if TDD not enabled
+        """
+        # Get TDD config from context or story
+        tdd_config = context.get("tdd_config") or story.get("tdd_config")
+
+        if not tdd_config:
+            return ""
+
+        tdd_mode = tdd_config.get("mode", "off")
+        if tdd_mode == "off":
+            return ""
+
+        # Check if TDD should be enabled for this story
+        try:
+            from ..core.tdd_support import (
+                TDDConfig,
+                should_enable_tdd,
+                get_tdd_prompt_template,
+            )
+
+            config = TDDConfig.from_dict(tdd_config)
+            if not should_enable_tdd(story, config):
+                return ""
+
+            # Generate TDD guidance
+            tdd_guide = get_tdd_prompt_template(story, config)
+            tdd_prompt = tdd_guide.to_prompt()
+
+            return f"""
+## TDD Requirements (IMPORTANT)
+
+{tdd_prompt}
+
+**CRITICAL**: Follow the Red-Green-Refactor cycle strictly for this story.
+- Write failing tests BEFORE implementing code
+- Only write enough code to pass the tests
+- Refactor while keeping tests green
+
+"""
+        except ImportError:
+            # TDD support module not available
+            return ""
+        except Exception:
+            # Any other error, fail silently
+            return ""
 
     def _format_design_context(self, design_context: dict) -> str:
         """
@@ -524,6 +651,20 @@ Work methodically and document your progress.
 
         self.state_manager.record_agent_start(story_id, "claude-code")
 
+        if not task_callback:
+            error = "Task tool execution requires a task_callback (not available in script mode)"
+            self.state_manager.record_agent_failure(story_id, "claude-code", error)
+            return {
+                "success": False,
+                "story_id": story_id,
+                "agent": "claude-code",
+                "agent_type": "task-tool",
+                "subagent_type": subagent_type,
+                "prompt": prompt,
+                "execution_mode": "task-tool",
+                "error": error,
+            }
+
         result = {
             "success": True,
             "story_id": story_id,
@@ -578,6 +719,7 @@ Work methodically and document your progress.
         output_dir = Path(working_dir) / ".agent-outputs"
         output_dir.mkdir(exist_ok=True)
         output_file = output_dir / f"{story_id}.log"
+        result_file = output_dir / f"{story_id}.result.json"
 
         try:
             with open(output_file, "w", encoding="utf-8") as log_file:
@@ -606,14 +748,58 @@ Work methodically and document your progress.
                 output_file=str(output_file)
             )
 
+            exit_code: int | None = None
+            error: str | None = None
+            try:
+                exit_code = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                error = f"Timeout after {timeout} seconds"
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+                exit_code = -1
+
+            success = exit_code == 0
+
+            # Append completion marker to log (used by monitors/tools)
+            try:
+                with open(output_file, "a", encoding="utf-8") as log_file:
+                    log_file.write("\n" + "-" * 60 + "\n")
+                    log_file.write(f"# Exit Code: {exit_code}\n")
+                    log_file.write(f"# Completed: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    if error:
+                        log_file.write(f"# Error: {error}\n")
+            except OSError:
+                pass
+
+            # Write result file for downstream consumers (dashboard/monitor)
+            try:
+                payload = {
+                    "story_id": story_id,
+                    "agent": agent_name,
+                    "success": success,
+                    "exit_code": exit_code,
+                    "error": error,
+                    "output_file": str(output_file),
+                    "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                }
+                with open(result_file, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2)
+            except OSError:
+                pass
+
             return {
-                "success": True,
+                "success": success,
                 "story_id": story_id,
                 "agent": agent_name,
                 "agent_type": "cli",
                 "pid": process.pid,
                 "output_file": str(output_file),
-                "execution_mode": "cli"
+                "execution_mode": "cli",
+                "exit_code": exit_code,
+                "error": error,
+                "result_file": str(result_file),
             }
 
         except FileNotFoundError:

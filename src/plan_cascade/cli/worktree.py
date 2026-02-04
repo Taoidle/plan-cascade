@@ -557,7 +557,7 @@ class WorktreeManager:
                 commit_msg = f"feat({task_name}): complete task implementation"
 
             self._run_git_command(
-                ["commit", "-m", commit_msg], cwd=worktree_path
+                ["commit", "-m", commit_msg, "--no-gpg-sign"], cwd=worktree_path
             )
 
             return True, f"Committed {len(files_to_add)} files"
@@ -744,6 +744,41 @@ if HAS_TYPER:
             "-d",
             help="Task description for auto-generating PRD",
         ),
+        flow: str = typer.Option(
+            "standard",
+            "--flow",
+            help="Execution flow (quick|standard|full)",
+        ),
+        tdd: str = typer.Option(
+            "auto",
+            "--tdd",
+            help="TDD mode (off|on|auto)",
+        ),
+        confirm: bool = typer.Option(
+            False,
+            "--confirm",
+            help="Require batch confirmation during execution",
+        ),
+        no_confirm: bool = typer.Option(
+            False,
+            "--no-confirm",
+            help="Disable batch confirmation (overrides --confirm)",
+        ),
+        spec: str = typer.Option(
+            "auto",
+            "--spec",
+            help="Run spec interview before final PRD (off|auto|on)",
+        ),
+        first_principles: bool = typer.Option(
+            False,
+            "--first-principles",
+            help="Ask first-principles questions first (when spec interview runs)",
+        ),
+        max_questions: int = typer.Option(
+            18,
+            "--max-questions",
+            help="Soft cap for spec interview length (record only)",
+        ),
         project_path: str | None = typer.Option(
             None,
             "--project",
@@ -763,6 +798,9 @@ if HAS_TYPER:
         """
         output = _get_output_manager()
         project = Path(project_path) if project_path else Path.cwd()
+        flow = (flow or "standard").strip().lower()
+        tdd = (tdd or "auto").strip().lower()
+        spec = (spec or "auto").strip().lower()
 
         try:
             manager = WorktreeManager(project)
@@ -782,10 +820,65 @@ if HAS_TYPER:
             output.print("  - progress.txt")
             output.print("  - findings.md")
 
+            # Optional spec interview (shift-left)
+            spec_mode = spec
+            should_run_spec = spec_mode == "on" or (spec_mode == "auto" and flow == "full")
+            if should_run_spec:
+                from .spec import run_spec_interview
+                from ..core.spec_compiler import CompileOptions, compile_spec_to_prd
+                from ..core.spec_io import get_spec_paths, load_spec
+
+                output.print()
+                output.print_info("Running spec interview...")
+
+                spec_desc = description.strip() or f"{task_name}: {target_branch}"
+                code = run_spec_interview(
+                    description=spec_desc,
+                    output_dir=state.worktree_path,
+                    flow_level=flow,
+                    mode=spec_mode,
+                    first_principles=first_principles,
+                    max_questions=max_questions,
+                    feature_slug=task_name,
+                    title_hint=None,
+                    console=output.console,
+                )
+                if code != 0:
+                    output.print_error("Spec interview did not finalize cleanly.")
+                    raise typer.Exit(code)
+
+                # Compile spec.json -> prd.json in the worktree
+                paths = get_spec_paths(state.worktree_path)
+                spec_obj = load_spec(paths)
+                if not spec_obj:
+                    output.print_error("spec.json not found after interview.")
+                    raise typer.Exit(1)
+
+                prd = compile_spec_to_prd(
+                    spec_obj,
+                    options=CompileOptions(
+                        description=spec_desc,
+                        flow_level=flow,
+                        tdd_mode=tdd,
+                        confirm_mode=confirm,
+                        no_confirm_mode=no_confirm,
+                    ),
+                )
+                paths.prd_json_path.write_text(
+                    json.dumps(prd, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+
+                output.print_success("Compiled prd.json from spec.json")
+                output.print_info("Spec files created:")
+                output.print("  - spec.json")
+                output.print("  - spec.md")
+                output.print("  - .state/spec-interview.json")
+
             output.print()
             output.print(f"[bold]Next steps:[/bold]")
             output.print(f"  cd {state.worktree_path}")
-            output.print("  # Edit prd.json to add stories")
+            output.print("  # Review/edit prd.json (and spec.json/spec.md if used)")
             output.print("  # Or run: plan-cascade run '<task description>'")
 
         except ValueError as e:

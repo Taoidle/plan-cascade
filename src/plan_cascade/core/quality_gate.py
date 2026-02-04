@@ -308,6 +308,22 @@ class Gate(ABC):
             duration = (datetime.now() - start_time).total_seconds()
             return -1, "", f"Command timed out after {timeout} seconds", duration
         except FileNotFoundError as e:
+            # On Windows, common commands like `echo` are cmd.exe built-ins and are not
+            # directly executable via subprocess without a shell. For testability and
+            # better cross-platform behavior, try a narrow cmd.exe fallback.
+            if sys.platform == "win32" and command:
+                builtin_allowlist = {"echo"}
+                if command[0].lower() in builtin_allowlist:
+                    try:
+                        cmdline = subprocess.list2cmdline(command)
+                        cmd = ["cmd.exe", "/c", cmdline]
+                        result = subprocess.run(cmd, **kwargs)
+                        duration = (datetime.now() - start_time).total_seconds()
+                        return result.returncode, result.stdout, result.stderr, duration
+                    except Exception as e2:
+                        duration = (datetime.now() - start_time).total_seconds()
+                        return -1, "", f"Error running command via cmd.exe: {e2}", duration
+
             duration = (datetime.now() - start_time).total_seconds()
             return -1, "", f"Command not found: {e}", duration
         except Exception as e:
@@ -453,6 +469,7 @@ class TypeCheckGate(Gate):
 
 class TestGate(Gate):
     """Test gate supporting pytest, jest, npm test."""
+    __test__ = False
 
     # File extensions that trigger test runs
     FILE_EXTENSIONS: dict[ProjectType, list[str]] = {

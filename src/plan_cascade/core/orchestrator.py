@@ -18,6 +18,7 @@ from ..state.context_filter import ContextFilter
 from ..state.state_manager import StateManager
 
 if TYPE_CHECKING:
+    from ..backends.agent_executor import AgentExecutor
     from ..state.path_resolver import PathResolver
     from .stage_state import StageStateMachine, ExecutionStage
 
@@ -79,6 +80,7 @@ class Orchestrator:
         path_resolver: "PathResolver | None" = None,
         legacy_mode: bool | None = None,
         stage_machine: "StageStateMachine | None" = None,
+        agent_executor: "AgentExecutor | None" = None,
     ):
         """
         Initialize the orchestrator.
@@ -95,10 +97,14 @@ class Orchestrator:
             stage_machine: Optional StageStateMachine for unified stage tracking.
                 When provided, the orchestrator will update stage states during execution.
                 When None (default), the orchestrator behaves as before (backward compatible).
+            agent_executor: Optional AgentExecutor for actual story execution.
+                When provided, execute_story will use this to actually run stories.
+                When None (default), stories are only marked as started (legacy behavior).
         """
         self.project_root = Path(project_root)
         self.agents = agents or self.DEFAULT_AGENTS
         self._stage_machine = stage_machine
+        self._agent_executor = agent_executor
 
         # Set up PathResolver
         if path_resolver is not None:
@@ -141,6 +147,20 @@ class Orchestrator:
             machine: StageStateMachine instance to use
         """
         self._stage_machine = machine
+
+    @property
+    def agent_executor(self) -> "AgentExecutor | None":
+        """Get the AgentExecutor instance if configured."""
+        return self._agent_executor
+
+    def set_agent_executor(self, executor: "AgentExecutor") -> None:
+        """
+        Set or update the agent executor.
+
+        Args:
+            executor: AgentExecutor instance to use for story execution
+        """
+        self._agent_executor = executor
 
     def get_stage_status(self) -> dict[str, Any] | None:
         """
@@ -338,6 +358,7 @@ class Orchestrator:
         story: dict,
         agent: StoryAgent | None = None,
         dry_run: bool = False,
+        task_callback: Callable | None = None,
     ) -> tuple[bool, str]:
         """
         Execute a single story.
@@ -346,36 +367,76 @@ class Orchestrator:
             story: Story dictionary
             agent: Agent to use (auto-selected if not provided)
             dry_run: If True, don't actually execute
+            task_callback: Optional callback for Task tool execution (for claude-code)
 
         Returns:
             Tuple of (success, message)
         """
         story_id = story.get("id", "unknown")
 
-        # Get or select agent
-        if not agent:
-            agent = self.get_available_agent()
-
-        if not agent:
-            return False, "No agent available"
-
-        # Build prompt
-        prompt = self.build_story_prompt(story)
-
         if dry_run:
-            return True, f"[DRY RUN] Would execute {story_id} with {agent.name}"
+            agent_label = agent.name if agent else "auto"
+            return True, f"[DRY RUN] Would execute {story_id} with {agent_label}"
 
-        # Mark story as in progress
-        self.state_manager.record_agent_start(story_id, agent.name)
-
-        # Execute (in real implementation, this would launch the agent)
-        # For now, we just return success to allow the structure to work
         try:
-            # The actual execution is handled by the backend layer
-            # This method just coordinates the high-level flow
-            return True, f"Started {story_id} with {agent.name}"
+            # Use AgentExecutor if available for actual execution
+            if self._agent_executor:
+                # Get context for the story
+                context = self.context_filter.get_context_for_story(story_id)
+
+                # Load PRD metadata (optional hints for backend selection)
+                prd = self.state_manager.read_prd() or {}
+                prd_metadata = prd.get("metadata", {}) if isinstance(prd, dict) else {}
+
+                # Default to implementation phase for backend agent selection
+                phase = None
+                try:
+                    from ..backends.phase_config import ExecutionPhase
+
+                    phase = ExecutionPhase.IMPLEMENTATION
+                except Exception:
+                    phase = None
+
+                # Execute via the backend (let it resolve the agent unless explicitly provided)
+                requested_agent = agent.name if agent else None
+                result = self._agent_executor.execute_story(
+                    story=story,
+                    context=context,
+                    agent_name=requested_agent,
+                    prd_metadata=prd_metadata,
+                    task_callback=task_callback,
+                    phase=phase,
+                )
+
+                success = result.get("success", False)
+                resolved_agent = result.get("agent") or requested_agent or "unknown"
+                message = result.get("error") or f"Executed {story_id} with {resolved_agent}"
+
+                if success:
+                    self.state_manager.record_agent_complete(story_id, resolved_agent)
+                else:
+                    self.state_manager.record_agent_failure(story_id, resolved_agent, message)
+
+                return success, message
+            else:
+                # Get or select agent
+                if not agent:
+                    agent = self.get_available_agent()
+
+                if not agent:
+                    return False, "No agent available"
+
+                # Mark story as in progress
+                self.state_manager.record_agent_start(story_id, agent.name)
+
+                # Legacy behavior: just mark as started (for polling-based execution)
+                return True, f"Started {story_id} with {agent.name}"
         except Exception as e:
-            self.state_manager.record_agent_failure(story_id, agent.name, str(e))
+            self.state_manager.record_agent_failure(
+                story_id,
+                agent.name if agent else "unknown",
+                str(e),
+            )
             return False, str(e)
 
     def execute_batch(

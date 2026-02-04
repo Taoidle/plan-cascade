@@ -1,10 +1,64 @@
 ---
-description: "Generate a mega-plan for project-level multi-feature orchestration. Breaks a complex project into parallel features with dependencies. Usage: /plan-cascade:mega-plan <project description> [design-doc-path]"
+description: "Generate a mega-plan for project-level multi-feature orchestration. Breaks a complex project into parallel features with dependencies. Usage: /plan-cascade:mega-plan [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] [--spec <off|auto|on>] [--first-principles] [--max-questions N] <project description> [design-doc-path]"
 ---
 
 # Mega Plan - Project-Level Feature Orchestration
 
 You are creating a **Mega Plan** - a project-level plan that orchestrates multiple features in parallel.
+
+## Execution Flow Parameters
+
+This command accepts flow control parameters that propagate to all feature executions:
+
+### `--flow <quick|standard|full>`
+
+Override the execution flow depth for all feature approve phases.
+
+| Flow | Gate Mode | AI Verification | Code Review | Test Enforcement |
+|------|-----------|-----------------|-------------|------------------|
+| `quick` | soft | disabled | no | no |
+| `standard` | soft | enabled | no | no |
+| `full` | **hard** | enabled | **required** | **required** |
+
+### `--tdd <off|on|auto>`
+
+Control Test-Driven Development mode for all feature story executions.
+
+| Mode | Description |
+|------|-------------|
+| `off` | TDD disabled |
+| `on` | TDD enabled with prompts and compliance checks |
+| `auto` | Automatically decide based on risk assessment (default) |
+
+### `--confirm`
+
+Require confirmation before each **feature batch** execution.
+
+**Batch-Level Confirmation**: In mega-plan execution, confirmation happens at the batch level (before launching parallel sub-agents), not inside individual feature executions. This allows human oversight while preserving parallelism.
+
+### `--no-confirm`
+
+Disable batch-level confirmation, even when using FULL flow.
+
+- Overrides `--confirm` flag
+- Overrides FULL flow's default confirmation behavior
+- Useful for CI pipelines that want strict quality gates without interactive confirmation
+
+### `--spec <off|auto|on>`
+
+Record spec interview configuration for later execution in `mega-approve` (interviews must run in the orchestrator, never inside per-feature subagents).
+
+- `auto` (default): enabled when `--flow full`, otherwise disabled
+- `on`: always run spec interview per feature before PRD finalization
+- `off`: never run spec interview
+
+### `--first-principles`
+
+Enable first-principles questions (only when spec interview runs).
+
+### `--max-questions N`
+
+Soft cap for interview length (recorded in `.state/spec-interview.json` per feature).
 
 ## Prerequisites Check
 
@@ -63,12 +117,85 @@ This prevents planning files (mega-plan.json, .worktree/, etc.) from being accid
 ## Step 1: Parse Arguments
 
 Parse user arguments:
-- **Project description**: First argument (required)
-- **Design doc path**: Second argument (optional) - external design document to convert
+- **Project description**: First positional argument (required)
+- **Design doc path**: Second positional argument (optional) - external design document to convert
+- **--flow**: Execution flow depth (quick|standard|full) - propagates to all features
+- **--tdd**: TDD mode (off|on|auto) - propagates to all features
+- **--confirm**: Require batch confirmation - propagates to all features
+- **--no-confirm**: Disable batch confirmation (overrides --confirm and FULL flow default) - propagates to all features
+- **--spec**: Spec interview mode (off|auto|on) - recorded for mega-approve
+- **--first-principles**: Enable first-principles questions (when spec interview runs)
+- **--max-questions**: Soft cap for interview length (recorded)
 
 ```bash
-PROJECT_DESC="{{args|arg 1}}"
-DESIGN_DOC_ARG="{{args|arg 2 or empty}}"
+PROJECT_DESC=""
+DESIGN_DOC_ARG=""
+FLOW_LEVEL=""           # --flow <quick|standard|full>
+TDD_MODE=""             # --tdd <off|on|auto>
+CONFIRM_MODE=false      # --confirm
+NO_CONFIRM_MODE=false   # --no-confirm
+SPEC_MODE=""            # --spec <off|auto|on>
+FIRST_PRINCIPLES=false  # --first-principles
+MAX_QUESTIONS=""        # --max-questions N
+
+# Track positional argument index
+POS_INDEX=0
+NEXT_IS_FLOW=false
+NEXT_IS_TDD=false
+NEXT_IS_SPEC=false
+NEXT_IS_MAXQ=false
+
+# Parse flags and positional arguments
+for arg in $ARGUMENTS; do
+    case "$arg" in
+        --flow=*) FLOW_LEVEL="${arg#*=}" ;;
+        --flow) NEXT_IS_FLOW=true ;;
+        --tdd=*) TDD_MODE="${arg#*=}" ;;
+        --tdd) NEXT_IS_TDD=true ;;
+        --confirm) CONFIRM_MODE=true ;;
+        --no-confirm) NO_CONFIRM_MODE=true ;;
+        --spec=*) SPEC_MODE="${arg#*=}" ;;
+        --spec) NEXT_IS_SPEC=true ;;
+        --first-principles) FIRST_PRINCIPLES=true ;;
+        --max-questions=*) MAX_QUESTIONS="${arg#*=}" ;;
+        --max-questions) NEXT_IS_MAXQ=true ;;
+        *)
+            # Handle space-separated flag values
+            if [ "$NEXT_IS_FLOW" = true ]; then
+                FLOW_LEVEL="$arg"
+                NEXT_IS_FLOW=false
+            elif [ "$NEXT_IS_TDD" = true ]; then
+                TDD_MODE="$arg"
+                NEXT_IS_TDD=false
+            elif [ "$NEXT_IS_SPEC" = true ]; then
+                SPEC_MODE="$arg"
+                NEXT_IS_SPEC=false
+            elif [ "$NEXT_IS_MAXQ" = true ]; then
+                MAX_QUESTIONS="$arg"
+                NEXT_IS_MAXQ=false
+            else
+                # Positional arguments
+                POS_INDEX=$((POS_INDEX + 1))
+                case $POS_INDEX in
+                    1) PROJECT_DESC="$arg" ;;
+                    2) DESIGN_DOC_ARG="$arg" ;;
+                esac
+            fi
+            ;;
+    esac
+done
+
+# Display parsed parameters
+echo "Parsed Parameters:"
+echo "  Project: ${PROJECT_DESC:-"(will prompt)"}"
+echo "  Design Doc: ${DESIGN_DOC_ARG:-"(none)"}"
+echo "  Flow: ${FLOW_LEVEL:-"(default)"}"
+echo "  TDD: ${TDD_MODE:-"(default)"}"
+echo "  Confirm: $CONFIRM_MODE"
+echo "  No-Confirm: $NO_CONFIRM_MODE"
+echo "  Spec: ${SPEC_MODE:-"(auto)"}"
+echo "  First Principles: $FIRST_PRINCIPLES"
+echo "  Max Questions: ${MAX_QUESTIONS:-"(default)"}"
 ```
 
 If no description provided, ask the user:
@@ -76,8 +203,21 @@ If no description provided, ask the user:
 Please provide a project description. What do you want to build?
 Example: "Build an e-commerce platform with user authentication, product catalog, shopping cart, and order processing"
 
-Optional: You can also provide an external design document path as second argument:
-/plan-cascade:mega-plan "Build e-commerce platform..." ./architecture.md
+Optional arguments:
+  - Flow control: /plan-cascade:mega-plan --flow full "Build platform..."
+  - TDD mode: /plan-cascade:mega-plan --tdd on "Build platform..."
+  - Confirm mode: /plan-cascade:mega-plan --confirm "Build platform..."
+  - No-confirm (CI): /plan-cascade:mega-plan --no-confirm "Build platform..."
+  - Spec interview: /plan-cascade:mega-plan --flow full --spec on "Build platform..."
+  - First principles: /plan-cascade:mega-plan --flow full --spec on --first-principles "Build platform..."
+  - Limit interview: /plan-cascade:mega-plan --flow full --spec on --max-questions 12 "Build platform..."
+  - Design document: /plan-cascade:mega-plan "Build platform..." ./architecture.md
+
+Example with full flow:
+  /plan-cascade:mega-plan --flow full --tdd on --confirm "Build e-commerce platform with users, products, cart, and orders"
+
+Example with full flow in CI (no confirmation prompts):
+  /plan-cascade:mega-plan --flow full --tdd on --no-confirm "Build e-commerce platform with users, products, cart, and orders"
 ```
 
 ## Step 2: Check for Existing Mega Plan
@@ -130,6 +270,99 @@ Create `mega-plan.json` with 2-6 features:
       "status": "pending"
     }
   ]
+}
+```
+
+**CRITICAL**: If flow/tdd/confirm parameters were specified, add them to the mega-plan:
+
+```
+# After generating basic mega-plan structure, add flow configuration
+If FLOW_LEVEL is set:
+    mega_plan["flow_config"] = {
+        "level": FLOW_LEVEL,  # "quick", "standard", or "full"
+        "source": "command-line",
+        "propagate_to_features": true
+    }
+
+If TDD_MODE is set:
+    mega_plan["tdd_config"] = {
+        "mode": TDD_MODE,  # "off", "on", or "auto"
+        "propagate_to_features": true
+    }
+
+# Record spec interview configuration for mega-approve (optional)
+If SPEC_MODE is set OR FIRST_PRINCIPLES is true OR MAX_QUESTIONS is set:
+    mega_plan["spec_config"] = {
+        "mode": (SPEC_MODE or "auto"),  # "off", "auto", or "on"
+        "first_principles": FIRST_PRINCIPLES,
+        "max_questions": (MAX_QUESTIONS or 18),
+        "propagate_to_features": true
+    }
+
+# --no-confirm takes precedence over --confirm
+mega_plan["execution_config"] = mega_plan.get("execution_config", {})
+mega_plan["execution_config"]["propagate_to_features"] = true
+If NO_CONFIRM_MODE is true:
+    mega_plan["execution_config"]["require_batch_confirm"] = false
+    mega_plan["execution_config"]["no_confirm_override"] = true  # Explicit override marker
+Elif CONFIRM_MODE is true:
+    mega_plan["execution_config"]["require_batch_confirm"] = true
+```
+
+Example mega-plan.json with full flow configuration:
+```json
+{
+  "metadata": { ... },
+  "goal": "Build e-commerce platform",
+  "flow_config": {
+    "level": "full",
+    "source": "command-line",
+    "propagate_to_features": true
+  },
+  "tdd_config": {
+    "mode": "on",
+    "propagate_to_features": true
+  },
+  "spec_config": {
+    "mode": "auto",
+    "first_principles": false,
+    "max_questions": 18,
+    "propagate_to_features": true
+  },
+  "execution_config": {
+    "require_batch_confirm": true,
+    "propagate_to_features": true
+  },
+  "features": [ ... ]
+}
+```
+
+Example mega-plan.json with CI mode (full flow, no confirmation):
+```json
+{
+  "metadata": { ... },
+  "goal": "Build e-commerce platform",
+  "flow_config": {
+    "level": "full",
+    "source": "command-line",
+    "propagate_to_features": true
+  },
+  "tdd_config": {
+    "mode": "on",
+    "propagate_to_features": true
+  },
+  "spec_config": {
+    "mode": "auto",
+    "first_principles": false,
+    "max_questions": 18,
+    "propagate_to_features": true
+  },
+  "execution_config": {
+    "require_batch_confirm": false,
+    "no_confirm_override": true,
+    "propagate_to_features": true
+  },
+  "features": [ ... ]
 }
 ```
 
@@ -352,9 +585,9 @@ Batch 2 (After Batch 1):
 ============================================================
 ```
 
-## Step 9: Show Files Created
+## Step 9: Show Files Created and Next Steps
 
-After unified review, confirm created files:
+After unified review, confirm created files and show execution configuration:
 
 ```
 Files created:
@@ -364,7 +597,47 @@ Files created:
   - .mega-status.json    (execution status - in .state/ dir or project root)
 
 Note: Use PathResolver to find exact file locations based on storage mode.
+
+============================================================
+EXECUTION CONFIGURATION
+============================================================
+  Flow Level: {FLOW_LEVEL or "standard (default)"}
+  TDD Mode: {TDD_MODE or "auto (default)"}
+  Batch Confirm: {CONFIRM_MODE}
+
+  These settings will propagate to all feature executions.
+============================================================
+
+NEXT STEPS:
+
+  Review and edit (optional):
+    /plan-cascade:mega-edit
+
+  Approve and execute:
 ```
+
+**CRITICAL**: Build the approve command with preserved parameters:
+
+```
+# Build mega-approve command with flow/tdd parameters
+APPROVE_CMD = "/plan-cascade:mega-approve"
+
+If FLOW_LEVEL is set:
+    APPROVE_CMD = APPROVE_CMD + " --flow " + FLOW_LEVEL
+
+If TDD_MODE is set:
+    APPROVE_CMD = APPROVE_CMD + " --tdd " + TDD_MODE
+
+If CONFIRM_MODE is true:
+    APPROVE_CMD = APPROVE_CMD + " --confirm"
+
+echo "    " + APPROVE_CMD
+```
+
+Example outputs:
+- Standard flow: `/plan-cascade:mega-approve`
+- Full flow with TDD: `/plan-cascade:mega-approve --flow full --tdd on`
+- Full flow with confirm: `/plan-cascade:mega-approve --flow full --tdd on --confirm`
 
 ## Example
 

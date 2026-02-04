@@ -1,10 +1,60 @@
 ---
-description: "Generate PRD from task description and enter review mode. Auto-generates user stories with priorities, dependencies, and acceptance criteria for parallel execution. Usage: /plan-cascade:hybrid-auto <task description> [design-doc-path] [--agent <name>]"
+description: "Generate PRD from task description and enter review mode. Auto-generates user stories with priorities, dependencies, and acceptance criteria for parallel execution. Usage: /plan-cascade:hybrid-auto [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] [--spec <off|auto|on>] [--first-principles] [--max-questions N] [--agent <name>] <task description> [design-doc-path]"
 ---
 
 # Hybrid Ralph - Auto Generate PRD
 
 You are automatically generating a Product Requirements Document (PRD) from the task description.
+
+## Execution Flow Parameters
+
+This command accepts flow control parameters that affect story execution:
+
+### `--flow <quick|standard|full>`
+
+Override the execution flow depth for the approve phase.
+
+| Flow | Gate Mode | AI Verification | Code Review | Test Enforcement |
+|------|-----------|-----------------|-------------|------------------|
+| `quick` | soft | disabled | no | no |
+| `standard` | soft | enabled | no | no |
+| `full` | **hard** | enabled | **required** | **required** |
+
+### `--tdd <off|on|auto>`
+
+Control Test-Driven Development mode for story execution.
+
+| Mode | Description |
+|------|-------------|
+| `off` | TDD disabled |
+| `on` | TDD enabled with prompts and compliance checks |
+| `auto` | Automatically decide based on risk assessment (default) |
+
+### `--confirm`
+
+Require confirmation before each batch execution in the approve phase.
+
+### `--no-confirm`
+
+Explicitly disable batch confirmation, even if FULL flow would normally require it. Useful for CI/automated environments where you want strict quality gates but no interactive prompts.
+
+**Precedence**: `--no-confirm` overrides `--confirm` and FULL flow's default confirmation requirement.
+
+### `--spec <off|auto|on>`
+
+Enable a planning-time **spec interview** to produce `spec.json/spec.md` before finalizing `prd.json`.
+
+- `auto` (default): enabled when `--flow full`, otherwise disabled
+- `on`: always run interview before PRD finalization
+- `off`: never run interview
+
+### `--first-principles`
+
+Ask 3–5 first-principles questions before detailed spec questions (only when spec interview runs).
+
+### `--max-questions N`
+
+Soft cap for interview length (recorded in `.state/spec-interview.json`).
 
 ## Prerequisites Check
 
@@ -76,21 +126,86 @@ This prevents planning files from being accidentally committed to version contro
 ## Step 1: Parse Arguments
 
 Parse user arguments:
-- **Task description**: First argument (required)
-- **Design doc path**: Second argument (optional) - external design document to convert
+- **Task description**: First positional argument (required)
+- **Design doc path**: Second positional argument (optional) - external design document to convert
+- **--flow**: Execution flow depth (quick|standard|full)
+- **--tdd**: TDD mode (off|on|auto)
+- **--confirm**: Require batch confirmation
+- **--no-confirm**: Disable batch confirmation (overrides --confirm and FULL flow default)
+- **--spec**: Spec interview mode (off|auto|on)
+- **--first-principles**: Enable first-principles questions (when spec interview runs)
+- **--max-questions**: Soft cap for interview length
 - **--agent**: Optional agent override for PRD generation
 
 ```
-TASK_DESC="{{args|arg 1}}"
-DESIGN_DOC_ARG="{{args|arg 2 or empty}}"
+TASK_DESC=""
+DESIGN_DOC_ARG=""
 PRD_AGENT=""
+FLOW_LEVEL=""           # --flow <quick|standard|full>
+TDD_MODE=""             # --tdd <off|on|auto>
+CONFIRM_MODE=false      # --confirm
+NO_CONFIRM_MODE=false   # --no-confirm (overrides --confirm and FULL flow default)
+SPEC_MODE=""            # --spec <off|auto|on>
+FIRST_PRINCIPLES=false  # --first-principles
+MAX_QUESTIONS=""        # --max-questions N
 
-# Parse --agent flag
+# Parse flags and positional arguments
 for arg in $ARGUMENTS; do
     case "$arg" in
+        --flow=*) FLOW_LEVEL="${arg#*=}" ;;
+        --flow) NEXT_IS_FLOW=true ;;
+        --tdd=*) TDD_MODE="${arg#*=}" ;;
+        --tdd) NEXT_IS_TDD=true ;;
+        --confirm) CONFIRM_MODE=true ;;
+        --no-confirm) NO_CONFIRM_MODE=true ;;
+        --spec=*) SPEC_MODE="${arg#*=}" ;;
+        --spec) NEXT_IS_SPEC=true ;;
+        --first-principles) FIRST_PRINCIPLES=true ;;
+        --max-questions=*) MAX_QUESTIONS="${arg#*=}" ;;
+        --max-questions) NEXT_IS_MAXQ=true ;;
         --agent=*) PRD_AGENT="${arg#*=}" ;;
+        --agent) NEXT_IS_AGENT=true ;;
+        *)
+            # Handle space-separated flag values
+            if [ "$NEXT_IS_FLOW" = true ]; then
+                FLOW_LEVEL="$arg"
+                NEXT_IS_FLOW=false
+            elif [ "$NEXT_IS_TDD" = true ]; then
+                TDD_MODE="$arg"
+                NEXT_IS_TDD=false
+            elif [ "$NEXT_IS_SPEC" = true ]; then
+                SPEC_MODE="$arg"
+                NEXT_IS_SPEC=false
+            elif [ "$NEXT_IS_MAXQ" = true ]; then
+                MAX_QUESTIONS="$arg"
+                NEXT_IS_MAXQ=false
+            elif [ "$NEXT_IS_AGENT" = true ]; then
+                PRD_AGENT="$arg"
+                NEXT_IS_AGENT=false
+            elif [ -z "$TASK_DESC" ]; then
+                TASK_DESC="$arg"
+            elif [ -z "$DESIGN_DOC_ARG" ]; then
+                DESIGN_DOC_ARG="$arg"
+            fi
+            ;;
     esac
 done
+
+# --no-confirm takes precedence
+If NO_CONFIRM_MODE is true:
+    CONFIRM_MODE = false
+
+# Display parsed parameters
+echo "Parsed Parameters:"
+echo "  Task: $TASK_DESC"
+echo "  Flow: ${FLOW_LEVEL:-"(default)"}"
+echo "  TDD: ${TDD_MODE:-"(default)"}"
+echo "  Confirm: $CONFIRM_MODE"
+echo "  No-Confirm: $NO_CONFIRM_MODE"
+echo "  Spec: ${SPEC_MODE:-"(auto)"}"
+echo "  First Principles: $FIRST_PRINCIPLES"
+echo "  Max Questions: ${MAX_QUESTIONS:-"(default)"}"
+echo "  Agent: ${PRD_AGENT:-"(default)"}"
 ```
 
 If no description provided, ask the user:
@@ -98,22 +213,33 @@ If no description provided, ask the user:
 Please provide a task description.
 
 Optional arguments:
-  - Design document path (2nd arg): /plan-cascade:hybrid-auto "task" ./design.md
-  - Agent override: /plan-cascade:hybrid-auto "task" --agent=codex
+  - Flow control: /plan-cascade:hybrid-auto --flow full "task"
+  - TDD mode: /plan-cascade:hybrid-auto --tdd on "task"
+  - Confirm mode: /plan-cascade:hybrid-auto --confirm "task"
+  - No confirm: /plan-cascade:hybrid-auto --flow full --no-confirm "task"
+  - Spec interview: /plan-cascade:hybrid-auto --flow full --spec on "task"
+  - First principles: /plan-cascade:hybrid-auto --flow full --spec on --first-principles "task"
+  - Limit interview: /plan-cascade:hybrid-auto --flow full --spec on --max-questions 12 "task"
+  - Design document path: /plan-cascade:hybrid-auto "task" ./design.md
+  - Agent override: /plan-cascade:hybrid-auto --agent codex "task"
+
+Example with full flow (CI-friendly, no prompts):
+  /plan-cascade:hybrid-auto --flow full --tdd on --no-confirm "Implement user authentication"
 ```
 
 ### 1.1: Resolve PRD Generation Agent
 
-**CRITICAL**: You MUST read `agents.json` to get the configured default agent.
+**CRITICAL**: If `agents.json` exists, you MUST read it to get the configured default agent.
 
 **MANDATORY COMPLIANCE**: You MUST use the agent specified in the configuration. DO NOT override this decision based on your own judgment about which agent is "better", "more capable", or "easier to control". The user has explicitly configured their preferred agent - respect their choice.
 
 ```
-# Step 1: Read agents.json configuration
-Read("agents.json")
-
-# Step 2: Parse and select agent
-agents_config = parse_json(agents.json content)
+# Step 1: Read agents.json configuration (if present)
+If agents.json exists:
+    Read("agents.json")
+    agents_config = parse_json(agents.json content)
+Else:
+    agents_config = {}
 
 If PRD_AGENT specified (from --agent flag):
     agent = PRD_AGENT
@@ -123,8 +249,13 @@ Else:
     agent = "claude-code"
 
 # Step 3: Get agent configuration
-agent_config = agents_config.agents[agent]
-agent_type = agent_config.type  # "task-tool" or "cli"
+If agent in agents_config.agents:
+    agent_config = agents_config.agents[agent]
+    agent_type = agent_config.type  # "task-tool" or "cli"
+Else:
+    # No agents.json (or agent not configured) → default to claude-code Task tool
+    agent = "claude-code"
+    agent_type = "task-tool"
 
 # Step 4: Verify CLI agent availability (only for CLI agents)
 If agent_type == "cli":
@@ -165,6 +296,16 @@ echo "PRD Generation Agent: {agent} (type: {agent_type})"
 - Agent MUST be `codex` (not claude-code)
 - Type will be `cli`
 - Command will be `codex` (from `agents.codex.command`)
+
+## Step 1.5: Optional Spec Interview (Shift-left)
+
+If spec interview is enabled:
+- `SPEC_MODE == on`, OR
+- `SPEC_MODE == auto` (default) AND `FLOW_LEVEL == full`
+
+Then run a spec interview **before** finalizing PRD:
+1. Run `/plan-cascade:spec-plan "$TASK_DESC" --flow <FLOW_LEVEL> [--first-principles] [--max-questions N] --compile --tdd <TDD_MODE> [--confirm|--no-confirm]`
+2. Use the compiled `prd.json` and skip Step 2 PRD generation below.
 
 ## Step 2: Generate PRD with Selected Agent
 
@@ -428,7 +569,57 @@ TaskOutput(task_id=task_id, block=true, timeout=600000)
 
 **IMPORTANT**: The `allowed_tools` parameter is required for the subagent to write `design_doc.json` directly. Without it, you must write the file yourself after the agent returns the content.
 
-## Step 5: Display Unified Review
+## Step 5: Write Flow and TDD Configuration to PRD
+
+**CRITICAL**: If flow or TDD parameters were specified, add them to the PRD for the approve phase.
+
+```
+# Read the generated prd.json
+prd_content = Read("prd.json")
+prd = parse_json(prd_content)
+
+# Add flow configuration if specified
+If FLOW_LEVEL is set:
+    prd["flow_config"] = {
+        "level": FLOW_LEVEL,  # "quick", "standard", or "full"
+        "source": "command-line"
+    }
+
+    # For FULL flow, set strict gate settings
+    If FLOW_LEVEL == "full":
+        prd["verification_gate"] = {"enabled": true, "required": true}
+        prd["code_review"] = {"enabled": true, "required": true}
+
+# Add TDD configuration if specified
+If TDD_MODE is set:
+    prd["tdd_config"] = {
+        "mode": TDD_MODE,  # "off", "on", or "auto"
+        "enforce_for_high_risk": true,
+        "test_requirements": {
+            # In ON mode, always require tests
+            # In AUTO mode, require tests for high-risk stories
+            "require_test_changes": (TDD_MODE == "on"),
+            "require_test_for_high_risk": true,  # Always require tests for high-risk stories
+            "minimum_coverage_delta": 0.0,
+            "test_patterns": ["test_", "_test.", ".test.", "tests/", "test/", "spec/"]
+        }
+    }
+
+# Add confirm mode flag (--no-confirm takes precedence)
+prd["execution_config"] = prd.get("execution_config", {})
+If NO_CONFIRM_MODE is true:
+    prd["execution_config"]["require_batch_confirm"] = false
+    prd["execution_config"]["no_confirm_override"] = true  # Explicit override marker
+Elif CONFIRM_MODE is true:
+    prd["execution_config"]["require_batch_confirm"] = true
+
+# Write updated PRD
+Write("prd.json", json.dumps(prd, indent=2))
+
+echo "✓ Flow/TDD configuration written to PRD"
+```
+
+## Step 5.5: Display Unified Review
 
 **CRITICAL**: Use Bash to display the unified PRD + Design Document review:
 
@@ -441,16 +632,19 @@ This displays:
 - Design document with components, patterns, and architectural decisions
 - Story-to-design mappings (showing which stories are linked to which components)
 - Warnings for any unmapped stories
+- Flow/TDD configuration summary (if set)
 - Available next steps
 
 If the script is not available, display a manual summary showing:
 - Goal and objectives
 - All stories with IDs, titles, priorities
 - Design document summary (components, patterns, decisions)
+- Flow configuration: {FLOW_LEVEL or "standard (default)"}
+- TDD mode: {TDD_MODE or "auto (default)"}
 
-## Step 6: Confirm Generation Complete
+## Step 6: Confirm Generation Complete and Show Next Steps
 
-After displaying the unified review, confirm:
+After displaying the unified review, confirm and show how to proceed:
 
 ```
 PRD and Design Document generated successfully!
@@ -458,7 +652,49 @@ PRD and Design Document generated successfully!
 Files created:
   - prd.json          (product requirements document)
   - design_doc.json   (technical design document)
+
+============================================================
+EXECUTION CONFIGURATION
+============================================================
+  Flow Level: {FLOW_LEVEL or "standard (default)"}
+  TDD Mode: {TDD_MODE or "auto (default)"}
+  Batch Confirm: {NO_CONFIRM_MODE ? "disabled (--no-confirm)" : (CONFIRM_MODE ? "enabled" : "default")}
+============================================================
+
+NEXT STEPS:
+
+  Review and edit (optional):
+    /plan-cascade:edit
+
+  Approve and execute:
 ```
+
+**CRITICAL**: Build the approve command with preserved parameters:
+
+```
+# Build approve command with flow/tdd parameters
+APPROVE_CMD = "/plan-cascade:approve"
+
+If FLOW_LEVEL is set:
+    APPROVE_CMD = APPROVE_CMD + " --flow " + FLOW_LEVEL
+
+If TDD_MODE is set:
+    APPROVE_CMD = APPROVE_CMD + " --tdd " + TDD_MODE
+
+# --no-confirm takes precedence over --confirm
+If NO_CONFIRM_MODE is true:
+    APPROVE_CMD = APPROVE_CMD + " --no-confirm"
+Elif CONFIRM_MODE is true:
+    APPROVE_CMD = APPROVE_CMD + " --confirm"
+
+echo "    " + APPROVE_CMD
+```
+
+Example outputs:
+- Standard flow: `/plan-cascade:approve`
+- Full flow with TDD: `/plan-cascade:approve --flow full --tdd on`
+- Full flow with confirm: `/plan-cascade:approve --flow full --tdd on --confirm`
+- Full flow CI-friendly: `/plan-cascade:approve --flow full --tdd on --no-confirm`
 
 ## Notes
 

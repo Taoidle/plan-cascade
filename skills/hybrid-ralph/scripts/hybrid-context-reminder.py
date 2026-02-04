@@ -18,11 +18,47 @@ import re
 import sys
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+# Try to use PathResolver for path consistency
+_PATH_RESOLVER_AVAILABLE = False
+_PathResolver = None
+
+def _setup_import_path():
+    """Setup path to import plan_cascade modules."""
+    global _PATH_RESOLVER_AVAILABLE, _PathResolver
+
+    # Find the plugin root
+    candidates = [
+        Path(__file__).parent.parent.parent.parent / "src",  # Standard location
+        Path.cwd() / "src",  # Development mode
+    ]
+    for src_path in candidates:
+        if src_path.exists():
+            sys.path.insert(0, str(src_path))
+            try:
+                from plan_cascade.state.path_resolver import PathResolver
+                _PathResolver = PathResolver
+                _PATH_RESOLVER_AVAILABLE = True
+                return True
+            except ImportError:
+                pass
+    return False
+
+_setup_import_path()
 
 
 def get_data_dir() -> Path:
     """Get the platform-specific data directory for Plan Cascade."""
+    if _PATH_RESOLVER_AVAILABLE and _PathResolver:
+        # Use PathResolver's implementation if available
+        try:
+            return _PathResolver(Path.cwd(), legacy_mode=False).get_data_dir()
+        except Exception:
+            pass
+
+    # Fallback to inline implementation
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         if appdata:
@@ -33,14 +69,27 @@ def get_data_dir() -> Path:
 
 
 def get_project_id(project_root: Path) -> str:
-    """Compute a unique, filesystem-safe project ID from the project root path."""
+    """Compute a unique, filesystem-safe project ID from the project root path.
+
+    Uses PathResolver if available, otherwise falls back to inline implementation.
+    """
+    if _PATH_RESOLVER_AVAILABLE and _PathResolver:
+        resolver = _PathResolver(project_root, legacy_mode=True)
+        return resolver.get_project_id()
+
+    # Fallback implementation (must match PathResolver exactly)
+    project_root = project_root.resolve()
+
     name = project_root.name
-    # Sanitize name
+    # Sanitize name - must match PathResolver._sanitize_name() exactly
     sanitized = name.replace(" ", "-")
     sanitized = re.sub(r"[^a-zA-Z0-9\-_]", "", sanitized)
+    sanitized = sanitized.lower()  # Convert to lowercase
+    sanitized = re.sub(r"-+", "-", sanitized)  # Remove consecutive hyphens
+    sanitized = sanitized.strip("-")  # Remove leading/trailing hyphens
     if not sanitized:
         sanitized = "project"
-    sanitized = sanitized[:32]
+    sanitized = sanitized[:50]  # Match PathResolver limit (was 32, now 50)
 
     # Compute hash
     path_str = str(project_root)
@@ -52,6 +101,11 @@ def get_project_id(project_root: Path) -> str:
 
 def get_new_mode_prd_path(project_root: Path) -> Path:
     """Get the prd.json path in new mode (user data directory)."""
+    if _PATH_RESOLVER_AVAILABLE and _PathResolver:
+        resolver = _PathResolver(project_root, legacy_mode=False)
+        return resolver.get_prd_path()
+
+    # Fallback implementation
     data_dir = get_data_dir()
     project_id = get_project_id(project_root)
     return data_dir / project_id / "prd.json"
@@ -97,7 +151,8 @@ def read_planning_config(root: Path):
         return None
 
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
+        # Use utf-8-sig to tolerate BOM (common on Windows when files are written via PowerShell)
+        with open(config_path, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     except Exception:
         return None
@@ -109,7 +164,8 @@ def read_prd(root: Path):
     prd_path = root / "prd.json"
     if prd_path.exists():
         try:
-            with open(prd_path, "r", encoding="utf-8") as f:
+            # Use utf-8-sig to tolerate BOM (common on Windows when files are written via PowerShell)
+            with open(prd_path, "r", encoding="utf-8-sig") as f:
                 return json.load(f)
         except Exception:
             pass
@@ -118,7 +174,8 @@ def read_prd(root: Path):
     new_mode_prd = get_new_mode_prd_path(root)
     if new_mode_prd.exists():
         try:
-            with open(new_mode_prd, "r", encoding="utf-8") as f:
+            # Use utf-8-sig to tolerate BOM (common on Windows when files are written via PowerShell)
+            with open(new_mode_prd, "r", encoding="utf-8-sig") as f:
                 return json.load(f)
         except Exception:
             pass
@@ -218,7 +275,7 @@ def generate_context_file(root: Path, context_type: str, config: dict,
                           current_batch: list, pending_stories: list,
                           progress: dict) -> str:
     """Generate the .hybrid-execution-context.md content."""
-    timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     total_batches = len(batches)
     total_stories = len(prd.get("stories", []))
     complete_count = len(progress["complete"])

@@ -19,9 +19,9 @@ def load_story_context(story_id: str, project_root: Path) -> dict:
 
     # Load PRD
     try:
-        with open(prd_path, "r", encoding="utf-8") as f:
+        with open(prd_path, encoding="utf-8") as f:
             prd = json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return {"error": "Could not load PRD"}
 
     # Find the story
@@ -50,13 +50,13 @@ def load_story_context(story_id: str, project_root: Path) -> dict:
             status = "unknown"
             if progress_path.exists():
                 try:
-                    with open(progress_path, "r", encoding="utf-8") as f:
+                    with open(progress_path, encoding="utf-8") as f:
                         content = f.read()
                     if f"[COMPLETE] {dep_id}" in content:
                         status = "complete"
                     elif f"[IN_PROGRESS] {dep_id}" in content:
                         status = "in_progress"
-                except IOError:
+                except OSError:
                     pass
 
             dependency_summaries.append({
@@ -70,7 +70,7 @@ def load_story_context(story_id: str, project_root: Path) -> dict:
     findings_sections = []
     if findings_path.exists():
         try:
-            with open(findings_path, "r", encoding="utf-8") as f:
+            with open(findings_path, encoding="utf-8") as f:
                 content = f.read()
 
             # Simple extraction of tagged sections
@@ -78,7 +78,7 @@ def load_story_context(story_id: str, project_root: Path) -> dict:
             tag_pattern = rf'<!--\s*@tags:\s*([^>]*{re.escape(story_id)}[^>]*)\s*-->'
             matches = re.finditer(tag_pattern, content)
 
-            for match in matches():
+            for match in matches:
                 # Get content after this tag until next tag or end
                 start = match.end()
                 next_tag = content.find("<!-- @tags:", start)
@@ -89,7 +89,7 @@ def load_story_context(story_id: str, project_root: Path) -> dict:
 
                 findings_sections.append(section.strip()[:500])
 
-        except IOError:
+        except OSError:
             pass
 
     return {
@@ -169,7 +169,7 @@ def mark_story_in_progress(story_id: str, project_root: Path):
     try:
         with open(progress_path, "a", encoding="utf-8") as f:
             f.write(f"[{timestamp}] {story_id}: [IN_PROGRESS] {story_id}\n")
-    except IOError:
+    except OSError:
         pass
 
 
@@ -183,7 +183,7 @@ def mark_story_complete(story_id: str, project_root: Path):
     try:
         with open(progress_path, "a", encoding="utf-8") as f:
             f.write(f"[{timestamp}] {story_id}: [COMPLETE] {story_id}\n")
-    except IOError:
+    except OSError:
         pass
 
 

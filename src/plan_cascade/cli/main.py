@@ -2732,6 +2732,19 @@ if HAS_TYPER:
     except ImportError:
         pass  # worktree module not available
 
+    # Import and register spec interview commands
+    try:
+        from .spec import spec_app
+
+        if spec_app:
+            app.add_typer(
+                spec_app,
+                name="spec",
+                help="Spec interview workflow (spec.json/spec.md -> prd.json)",
+            )
+    except ImportError:
+        pass  # spec module not available
+
     # Import and register design document commands
     try:
         from .design import design_app

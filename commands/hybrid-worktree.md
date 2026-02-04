@@ -1,10 +1,60 @@
 ---
-description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, loads existing PRD or auto-generates from description. Usage: /plan-cascade:hybrid-worktree <task-name> <target-branch> <prd-path-or-description> [design-doc-path] [--agent <name>]"
+description: "Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, loads existing PRD or auto-generates from description. Usage: /plan-cascade:hybrid-worktree [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] [--spec <off|auto|on>] [--first-principles] [--max-questions N] [--agent <name>] <task-name> <target-branch> <prd-path-or-description> [design-doc-path]"
 ---
 
 # Hybrid Ralph + Worktree Mode (Fully Automated)
 
 You are starting a task in **Git Worktree + Hybrid Ralph mode**. This will create the worktree and handle the PRD automatically.
+
+## Execution Flow Parameters
+
+This command accepts flow control parameters that affect story execution:
+
+### `--flow <quick|standard|full>`
+
+Override the execution flow depth for the approve phase.
+
+| Flow | Gate Mode | AI Verification | Code Review | Test Enforcement |
+|------|-----------|-----------------|-------------|------------------|
+| `quick` | soft | disabled | no | no |
+| `standard` | soft | enabled | no | no |
+| `full` | **hard** | enabled | **required** | **required** |
+
+### `--tdd <off|on|auto>`
+
+Control Test-Driven Development mode for story execution.
+
+| Mode | Description |
+|------|-------------|
+| `off` | TDD disabled |
+| `on` | TDD enabled with prompts and compliance checks |
+| `auto` | Automatically decide based on risk assessment (default) |
+
+### `--confirm`
+
+Require confirmation before each batch execution in the approve phase.
+
+### `--no-confirm`
+
+Explicitly disable batch confirmation, even if FULL flow would normally require it. Useful for CI/automated environments.
+
+**Precedence**: `--no-confirm` overrides `--confirm` and FULL flow's default confirmation requirement.
+
+### `--spec <off|auto|on>`
+
+Enable a planning-time **spec interview** to produce `spec.json/spec.md` before finalizing `prd.json`.
+
+- `auto` (default): enabled when `--flow full`, otherwise disabled
+- `on`: always run interview before PRD finalization
+- `off`: never run interview
+
+### `--first-principles`
+
+Ask 3–5 first-principles questions before detailed spec questions (only when spec interview runs).
+
+### `--max-questions N`
+
+Soft cap for interview length (recorded in `.state/spec-interview.json`).
 
 ## Path Storage Modes
 
@@ -48,28 +98,109 @@ All files stored in project root (backward compatible):
 ## Step 1: Parse Parameters
 
 Parse user arguments:
-- **Task name**: First arg (or `task-YYYY-MM-DD-HHMM`)
-- **Target branch**: Second arg (or auto-detect `main`/`master`)
-- **PRD path OR description**: Third arg
+- **Task name**: First positional arg (or `task-YYYY-MM-DD-HHMM`)
+- **Target branch**: Second positional arg (or auto-detect `main`/`master`)
+- **PRD path OR description**: Third positional arg
   - If it's an existing file path → Load that PRD
   - Otherwise → Use as task description to auto-generate PRD
-- **Design doc path**: Fourth arg (optional)
+- **Design doc path**: Fourth positional arg (optional)
   - If provided → Convert external doc to design_doc.json format
+- **--flow**: Execution flow depth (quick|standard|full)
+- **--tdd**: TDD mode (off|on|auto)
+- **--confirm**: Require batch confirmation
+- **--no-confirm**: Disable batch confirmation (overrides --confirm and FULL flow default)
+- **--spec**: Spec interview mode (off|auto|on)
+- **--first-principles**: Enable first-principles questions (when spec interview runs)
+- **--max-questions**: Soft cap for interview length
 - **--agent**: Optional agent override for PRD generation
 
 ```bash
-TASK_NAME="{{args|arg 1 or 'task-' + date + '-' + time}}"
-TARGET_BRANCH="{{args|arg 2 or auto-detect}}"
-PRD_ARG="{{args|arg 3 or ask user 'Provide PRD file path or task description'}}"
-DESIGN_ARG="{{args|arg 4 or empty}}"
+TASK_NAME=""
+TARGET_BRANCH=""
+PRD_ARG=""
+DESIGN_ARG=""
 PRD_AGENT=""
+FLOW_LEVEL=""           # --flow <quick|standard|full>
+TDD_MODE=""             # --tdd <off|on|auto>
+CONFIRM_MODE=false      # --confirm
+NO_CONFIRM_MODE=false   # --no-confirm
+SPEC_MODE=""            # --spec <off|auto|on>
+FIRST_PRINCIPLES=false  # --first-principles
+MAX_QUESTIONS=""        # --max-questions N
 
-# Parse --agent flag
+# Track positional argument index
+POS_INDEX=0
+NEXT_IS_FLOW=false
+NEXT_IS_TDD=false
+NEXT_IS_AGENT=false
+NEXT_IS_SPEC=false
+NEXT_IS_MAXQ=false
+
+# Parse flags and positional arguments
 for arg in $ARGUMENTS; do
     case "$arg" in
+        --flow=*) FLOW_LEVEL="${arg#*=}" ;;
+        --flow) NEXT_IS_FLOW=true ;;
+        --tdd=*) TDD_MODE="${arg#*=}" ;;
+        --tdd) NEXT_IS_TDD=true ;;
+        --confirm) CONFIRM_MODE=true ;;
+        --no-confirm) NO_CONFIRM_MODE=true ;;
+        --spec=*) SPEC_MODE="${arg#*=}" ;;
+        --spec) NEXT_IS_SPEC=true ;;
+        --first-principles) FIRST_PRINCIPLES=true ;;
+        --max-questions=*) MAX_QUESTIONS="${arg#*=}" ;;
+        --max-questions) NEXT_IS_MAXQ=true ;;
         --agent=*) PRD_AGENT="${arg#*=}" ;;
+        --agent) NEXT_IS_AGENT=true ;;
+        *)
+            # Handle space-separated flag values
+            if [ "$NEXT_IS_FLOW" = true ]; then
+                FLOW_LEVEL="$arg"
+                NEXT_IS_FLOW=false
+            elif [ "$NEXT_IS_TDD" = true ]; then
+                TDD_MODE="$arg"
+                NEXT_IS_TDD=false
+            elif [ "$NEXT_IS_SPEC" = true ]; then
+                SPEC_MODE="$arg"
+                NEXT_IS_SPEC=false
+            elif [ "$NEXT_IS_MAXQ" = true ]; then
+                MAX_QUESTIONS="$arg"
+                NEXT_IS_MAXQ=false
+            elif [ "$NEXT_IS_AGENT" = true ]; then
+                PRD_AGENT="$arg"
+                NEXT_IS_AGENT=false
+            else
+                # Positional arguments
+                POS_INDEX=$((POS_INDEX + 1))
+                case $POS_INDEX in
+                    1) TASK_NAME="$arg" ;;
+                    2) TARGET_BRANCH="$arg" ;;
+                    3) PRD_ARG="$arg" ;;
+                    4) DESIGN_ARG="$arg" ;;
+                esac
+            fi
+            ;;
     esac
 done
+
+# Default task name if not provided
+if [ -z "$TASK_NAME" ]; then
+    TASK_NAME="task-$(date +%Y%m%d-%H%M)"
+fi
+
+# Display parsed parameters
+echo "Parsed Parameters:"
+echo "  Task Name: $TASK_NAME"
+echo "  Target Branch: ${TARGET_BRANCH:-"(auto-detect)"}"
+echo "  PRD/Description: ${PRD_ARG:-"(will prompt)"}"
+echo "  Flow: ${FLOW_LEVEL:-"(default)"}"
+echo "  TDD: ${TDD_MODE:-"(default)"}"
+echo "  Confirm: $CONFIRM_MODE"
+echo "  No-Confirm: $NO_CONFIRM_MODE"
+echo "  Spec: ${SPEC_MODE:-"(auto)"}"
+echo "  First Principles: $FIRST_PRINCIPLES"
+echo "  Max Questions: ${MAX_QUESTIONS:-"(default)"}"
+echo "  Agent: ${PRD_AGENT:-"(default)"}"
 ```
 
 ## Step 2: Detect Operating System and Shell
@@ -124,7 +255,7 @@ Ensure command auto-approval settings are configured (merges with existing setti
 
 ```bash
 # Run the settings merge script
-uv run python scripts/ensure-settings.py || echo "Warning: Could not update settings, continuing..."
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-settings.py" 2>/dev/null || uv run python scripts/ensure-settings.py 2>/dev/null || echo "Warning: Could not update settings, continuing..."
 ```
 
 This script intelligently merges required auto-approval patterns with any existing `.claude/settings.local.json`, preserving user customizations.
@@ -279,16 +410,17 @@ fi
 
 #### Resolve PRD Generation Agent
 
-**CRITICAL**: You MUST read `agents.json` to get the configured default agent.
+**CRITICAL**: If `agents.json` exists, you MUST read it to get the configured default agent.
 
 **MANDATORY COMPLIANCE**: You MUST use the agent specified in the configuration. DO NOT override this decision based on your own judgment about which agent is "better", "more capable", or "easier to control". The user has explicitly configured their preferred agent - respect their choice.
 
 ```
-# Step 1: Read agents.json configuration
-Read("agents.json")
-
-# Step 2: Parse and select agent
-agents_config = parse_json(agents.json content)
+# Step 1: Read agents.json configuration (if present)
+If agents.json exists:
+    Read("agents.json")
+    agents_config = parse_json(agents.json content)
+Else:
+    agents_config = {}
 
 # Priority chain: --agent flag > agents.json config > default
 If PRD_AGENT specified (from --agent flag):
@@ -299,8 +431,13 @@ Else:
     prd_agent = "claude-code"
 
 # Step 3: Get agent configuration
-agent_config = agents_config.agents[prd_agent]
-agent_type = agent_config.type  # "task-tool" or "cli"
+If prd_agent in agents_config.agents:
+    agent_config = agents_config.agents[prd_agent]
+    agent_type = agent_config.type  # "task-tool" or "cli"
+Else:
+    # No agents.json (or agent not configured) → default to claude-code Task tool
+    prd_agent = "claude-code"
+    agent_type = "task-tool"
 
 # Step 4: Verify CLI agent availability (only for CLI agents)
 If agent_type == "cli":
@@ -340,6 +477,20 @@ echo "PRD Generation Agent: {prd_agent} (type: {agent_type})"
 
 **Example**: `/plan-cascade:hybrid-worktree fix-auth main "Fix auth" --agent=codex`
 - Agent will be `codex` regardless of agents.json config
+
+#### Optional: Spec Interview (Shift-left)
+
+If spec interview is enabled, run it in the worktree **before** finalizing the PRD:
+
+- Effective spec mode:
+  - If `SPEC_MODE` is set: use it
+  - Else default `auto`
+  - `auto` ⇒ enabled when `FLOW_LEVEL == full`
+
+If enabled:
+1. `cd` into the worktree directory
+2. Run `/plan-cascade:spec-plan` with `--compile` to produce `spec.json/spec.md` and compile `prd.json`
+3. Skip the LLM PRD-generation step below (the PRD is already compiled)
 
 #### Generate PRD with Selected Agent
 
@@ -595,6 +746,53 @@ uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-
 
 This file helps AI recover execution context after context compression/truncation.
 
+## Step 13.7: Write Flow and TDD Configuration to PRD
+
+**CRITICAL**: If flow or TDD parameters were specified, add them to the PRD for the approve phase.
+
+```
+# Read the generated/loaded prd.json
+prd_content = Read("prd.json")
+prd = parse_json(prd_content)
+
+# Add flow configuration if specified
+If FLOW_LEVEL is set:
+    prd["flow_config"] = {
+        "level": FLOW_LEVEL,  # "quick", "standard", or "full"
+        "source": "command-line"
+    }
+
+    # For FULL flow, set strict gate settings
+    If FLOW_LEVEL == "full":
+        prd["verification_gate"] = {"enabled": true, "required": true}
+        prd["code_review"] = {"enabled": true, "required": true}
+
+# Add TDD configuration if specified
+If TDD_MODE is set:
+    prd["tdd_config"] = {
+        "mode": TDD_MODE,  # "off", "on", or "auto"
+        "enforce_for_high_risk": true,
+        "test_requirements": {
+            "require_test_changes": (TDD_MODE == "on"),
+            "minimum_coverage_delta": 0.0,
+            "test_patterns": ["test_", "_test.", ".test.", "tests/", "test/", "spec/"]
+        }
+    }
+
+# Add confirm mode flag (--no-confirm takes precedence)
+prd["execution_config"] = prd.get("execution_config", {})
+If NO_CONFIRM_MODE is true:
+    prd["execution_config"]["require_batch_confirm"] = false
+    prd["execution_config"]["no_confirm_override"] = true  # Explicit override marker
+Elif CONFIRM_MODE is true:
+    prd["execution_config"]["require_batch_confirm"] = true
+
+# Write updated PRD
+Write("prd.json", json.dumps(prd, indent=2))
+
+echo "✓ Flow/TDD configuration written to PRD"
+```
+
 ## Step 14: Display Unified Review
 
 **CRITICAL**: Use Bash to display the unified PRD + Design Document review:
@@ -615,9 +813,9 @@ If the script is not available, manually display:
 2. Validate the structure (check for required fields)
 3. Display PRD review with stories, dependency graph, execution batches
 
-## Step 15: Show Worktree Summary
+## Step 15: Show Worktree Summary and Next Steps
 
-After unified review, show worktree-specific information:
+After unified review, show worktree-specific information with execution configuration:
 
 ```
 ============================================================
@@ -632,7 +830,51 @@ Target: $TARGET_BRANCH
 ✓ Design Document: $DESIGN_SOURCE
 
 ============================================================
+EXECUTION CONFIGURATION
+============================================================
+  Flow Level: {FLOW_LEVEL or "standard (default)"}
+  TDD Mode: {TDD_MODE or "auto (default)"}
+  Batch Confirm: {CONFIRM_MODE}
+  No-Confirm Override: {NO_CONFIRM_MODE}
+============================================================
 
+NEXT STEPS:
+
+  Review and edit (optional):
+    /plan-cascade:edit
+
+  Approve and execute:
+```
+
+**CRITICAL**: Build the approve command with preserved parameters:
+
+```
+# Build approve command with flow/tdd parameters
+APPROVE_CMD = "/plan-cascade:approve"
+
+If FLOW_LEVEL is set:
+    APPROVE_CMD = APPROVE_CMD + " --flow " + FLOW_LEVEL
+
+If TDD_MODE is set:
+    APPROVE_CMD = APPROVE_CMD + " --tdd " + TDD_MODE
+
+# --no-confirm takes precedence over --confirm
+If NO_CONFIRM_MODE is true:
+    APPROVE_CMD = APPROVE_CMD + " --no-confirm"
+Elif CONFIRM_MODE is true:
+    APPROVE_CMD = APPROVE_CMD + " --confirm"
+
+echo "    " + APPROVE_CMD
+```
+
+Example outputs:
+- Standard flow: `/plan-cascade:approve`
+- Full flow with TDD: `/plan-cascade:approve --flow full --tdd on`
+- Full flow with confirm: `/plan-cascade:approve --flow full --tdd on --confirm`
+- Full flow without confirm (CI mode): `/plan-cascade:approve --flow full --tdd on --no-confirm`
+
+```
+============================================================
 WORKTREE-SPECIFIC COMMANDS:
 
 When complete:
@@ -663,10 +905,16 @@ Active Worktrees:
 /plan-cascade:hybrid-worktree fix-auth main "Fix auth flow" ./architecture.md
 
 # Specify agent for PRD generation (overrides agents.json config)
-/plan-cascade:hybrid-worktree fix-auth main "Fix auth" --agent=codex
+/plan-cascade:hybrid-worktree --agent codex fix-auth main "Fix auth"
 
-# Combine with external design doc and agent override
-/plan-cascade:hybrid-worktree fix-auth main "Refactor payment" ./design.md --agent=aider
+# Full flow with TDD enabled (strict quality gates)
+/plan-cascade:hybrid-worktree --flow full --tdd on fix-auth main "Implement OAuth2 authentication"
+
+# Full flow with confirmation required before each batch
+/plan-cascade:hybrid-worktree --flow full --tdd on --confirm critical-refactor main "Refactor payment processing"
+
+# Combine all options
+/plan-cascade:hybrid-worktree --flow full --tdd on --confirm --agent codex refactor-db main "Migrate database schema" ./design.md
 ```
 
 ## Notes

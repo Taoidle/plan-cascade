@@ -14,8 +14,12 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .mega_state import MegaStateManager
-from .mega_generator import MegaPlanGenerator
+try:
+    from .mega_state import MegaStateManager
+    from .mega_generator import MegaPlanGenerator
+except ImportError:  # Allow direct script execution
+    from mega_state import MegaStateManager
+    from mega_generator import MegaPlanGenerator
 
 
 class MergeCoordinator:

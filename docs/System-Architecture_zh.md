@@ -3,9 +3,12 @@
 # Plan Cascade - 系统架构与流程设计
 
 **版本**: 4.4.0
-**最后更新**: 2026-02-03
+**最后更新**: 2026-02-04
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
+
+**范围（仅插件）：** 本文档仅描述 Claude Code 插件模式下的工作流（`/plan-cascade:*` 命令、`commands/` 与 `skills/`）。
+Standalone CLI 与 Desktop 应用的流程刻意不在本文档范围内。
 
 ---
 
@@ -43,9 +46,15 @@ graph TB
         F1 --> W1[Worktree 1]
         F2 --> W2[Worktree 2]
         F3 --> W3[Worktree 3]
+        W1 -.-> SPEC1[spec.json/spec.md]
+        W2 -.-> SPEC2[spec.json/spec.md]
+        W3 -.-> SPEC3[spec.json/spec.md]
         W1 --> PRD1[prd.json]
         W2 --> PRD2[prd.json]
         W3 --> PRD3[prd.json]
+        SPEC1 --> PRD1
+        SPEC2 --> PRD2
+        SPEC3 --> PRD3
         PRD1 --> DD2[design_doc.json<br/>功能级]
         PRD2 --> DD3[design_doc.json<br/>功能级]
         PRD3 --> DD4[design_doc.json<br/>功能级]
@@ -77,7 +86,7 @@ graph TB
 | 层级 | 名称 | 职责 | 产物 |
 |------|------|------|------|
 | **Level 1** | Mega Plan | 项目级编排，管理多个 Feature 的依赖和执行顺序 | `mega-plan.json`, `design_doc.json` (项目级) |
-| **Level 2** | Hybrid Ralph | 功能级开发，在独立 Worktree 中执行，自动生成 PRD 和设计文档 | `prd.json`, `design_doc.json` (功能级), `findings.md` |
+| **Level 2** | Hybrid Ralph | 功能级开发（独立 Worktree）。可选在规划阶段进行 spec 访谈，再落地 PRD 与设计上下文 | `spec.json`/`spec.md`（可选）, `prd.json`, `design_doc.json` (功能级), `findings.md` |
 | **Level 3** | Stories | 故事级执行，由 Agent 并行处理，支持质量门控和重试 | 代码变更, `progress.txt` |
 
 ---
@@ -90,6 +99,12 @@ graph LR
         O[Orchestrator<br/>编排器]
         IL[IterationLoop<br/>迭代循环]
         SA[StrategyAnalyzer<br/>策略分析器]
+    end
+
+    subgraph "Spec 层（规划阶段）"
+        SI[SpecInterview<br/>规格访谈]
+        SQG[SpecQualityGate<br/>规格质量门控]
+        SC[SpecCompiler<br/>Spec → PRD 编译器]
     end
 
     subgraph "执行层"
@@ -120,6 +135,10 @@ graph LR
 
     O --> SA
     SA --> IL
+    SA -.-> SI
+    SI --> SQG
+    SQG --> SC
+    SC --> IL
     IL --> AE
     AE --> PM
     PM --> CPD
@@ -144,6 +163,9 @@ graph LR
 |------|------|
 | **Orchestrator** | 核心编排器，协调所有组件 |
 | **StrategyAnalyzer** | 分析任务并选择策略（DIRECT、HYBRID_AUTO、HYBRID_WORKTREE、MEGA_PLAN）和执行流程（QUICK、STANDARD、FULL） |
+| **SpecInterview** | 规划阶段的规格访谈，产出 `spec.json`（单一事实源）与 `spec.md`（渲染文档），并可通过 `.state/spec-interview.json` 恢复。仅在 orchestrator 层运行 |
+| **SpecQualityGate** | 对 `spec.json` 的规划期质量检查；在 FULL flow 下强制可验证验收标准、验证命令与合适的 story 粒度 |
+| **SpecCompiler** | 将 `spec.json` 编译为 `prd.json`，并按需写入 `flow_config` / `tdd_config` / `execution_config` |
 | **IterationLoop** | 自动迭代循环，管理批次执行 |
 | **AgentExecutor** | Agent 执行抽象，支持多种 Agent |
 | **PhaseManager** | 阶段管理，根据阶段选择 Agent |
@@ -168,6 +190,10 @@ graph LR
 
 ## 3. 完整工作流
 
+Plan Cascade 插件工作流可选包含 **规划阶段的 Spec 访谈**（由 `--spec on|auto` 启用）。
+启用后会产出 `spec.json`/`spec.md`，并在进入执行前将其编译为最终的 `prd.json`。
+相关命令：`/plan-cascade:spec-plan`、`/plan-cascade:spec-resume`、`/plan-cascade:spec-cleanup`。
+
 ```mermaid
 flowchart TB
     subgraph "入口选择"
@@ -188,13 +214,23 @@ flowchart TB
 
     subgraph "Hybrid Worktree 流程"
         HW --> HW_CREATE[创建 Worktree + 分支]
-        HW_CREATE --> HW_PRD[生成 PRD<br/>+ design_doc.json]
-        HW_PRD --> HW_REVIEW[统一审查显示]
+        HW_CREATE --> HW_SPEC{Spec 访谈?}
+        HW_SPEC -->|是| HW_SPEC_RUN["/plan-cascade:spec-plan<br/>(在 worktree 中)"]
+        HW_SPEC_RUN --> HW_COMPILE[编译 spec.json → prd.json]
+        HW_SPEC -->|否| HW_PRD[生成 PRD]
+        HW_COMPILE --> HW_DESIGN[生成 design_doc.json]
+        HW_PRD --> HW_DESIGN
+        HW_DESIGN --> HW_REVIEW[统一审查显示]
     end
 
     subgraph "Hybrid Auto 流程"
-        HA --> HA_GEN[分析任务 + 生成 PRD<br/>+ design_doc.json]
-        HA_GEN --> HA_REVIEW[统一审查显示]
+        HA --> HA_SPEC{Spec 访谈?}
+        HA_SPEC -->|是| HA_SPEC_RUN["/plan-cascade:spec-plan"]
+        HA_SPEC_RUN --> HA_COMPILE[编译 spec.json → prd.json]
+        HA_SPEC -->|否| HA_GEN[分析任务 + 生成 PRD]
+        HA_COMPILE --> HA_DESIGN[生成 design_doc.json]
+        HA_GEN --> HA_DESIGN
+        HA_DESIGN --> HA_REVIEW[统一审查显示]
     end
 
     MP_APPROVE --> BATCH_EXEC
@@ -210,7 +246,7 @@ flowchart TB
     end
 
     subgraph "执行阶段"
-        APPROVE --> AGENT_CFG[解析 Agent 配置<br/>--agent, --impl-agent, --verify]
+        APPROVE --> AGENT_CFG[解析执行配置<br/>flow/tdd/confirm + agent 参数]
         AGENT_CFG --> EXEC_MODE{执行模式?}
         EXEC_MODE -->|手动| MANUAL[手动推进批次]
         EXEC_MODE -->|"--auto-run"| AUTO[自动迭代循环]
@@ -222,7 +258,7 @@ flowchart TB
         CTX --> RESOLVE[解析每个 Story 的 Agent<br/>优先级链]
         RESOLVE --> PARALLEL[并行启动 Agent<br/>显示 Agent 分配]
         PARALLEL --> WAIT[通过 TaskOutput 等待]
-        WAIT --> VERIFY{AI 验证?<br/>--verify}
+        WAIT --> VERIFY{AI 验证启用?<br/>(--no-verify 禁用)}
         VERIFY -->|是| VGATE[AI 验证门<br/>检测骨架代码]
         VERIFY -->|否| QG
         VGATE --> QG{质量门控}
@@ -247,8 +283,9 @@ flowchart TB
 | 方面 | 旧版本 | 当前版本 |
 |------|--------|----------|
 | **设计文档** | 未显示 | 每个层级自动生成 |
+| **Spec 访谈** | 无 | 可选的规划期 spec 访谈（`spec.json`/`spec.md`）并编译为 `prd.json` |
 | **审查显示** | "显示 PRD 预览" | "统一审查显示"（PRD + 设计文档） |
-| **Agent 配置** | 未显示 | 显式解析 `--agent`, `--impl-agent`, `--verify` |
+| **Agent 配置** | 未显示 | 显式处理 flow/tdd/confirm + Agent 覆盖（如 `--agent`, `--impl-agent`, `--no-verify`） |
 | **Agent 分配** | 隐式 | "解析每个 Story 的 Agent" + 优先级链 |
 | **验证** | 未显示 | 可选的 "AI 验证门" |
 | **重试** | 简单重试 | "选择重试 Agent + 错误上下文" |
@@ -259,6 +296,7 @@ flowchart TB
 ## 4. Auto 自动策略流程
 
 `/plan-cascade:auto` 命令提供基于结构化任务分析的 AI 驱动自动策略选择。
+它支持并会传播 flow 控制参数（如 `--flow`、`--tdd`、`--confirm`/`--no-confirm`、`--spec`）到最终选择的工作流中。
 
 ### 策略选择流程图
 
@@ -353,17 +391,20 @@ graph TD
     E --> E3[需要确认]
 ```
 
-| 流程 | 门控模式 | AI 验证 | 代码审查 | 确认 |
-|------|----------|---------|----------|------|
-| `quick` | soft | 禁用 | 禁用 | 否 |
-| `standard` | soft | 启用 | 可选 | 否 |
-| `full` | hard | 启用 | 启用 | 是 |
+**Spec 访谈（shift-left）：** 当 `--spec auto` 生效（FULL flow 默认）时，会在 PRD 最终落地前先进行规划期 spec 访谈。
+
+| 流程 | 门控模式 | Spec 访谈 | AI 验证 | 代码审查 | 确认 |
+|------|----------|-----------|---------|----------|------|
+| `quick` | soft | 关闭 | 禁用 | 禁用 | 否 |
+| `standard` | soft | 关闭 | 启用 | 可选 | 否 |
+| `full` | hard | auto（默认） | 启用 | 启用 | 是 |
 
 ---
 
 ## 5. 设计文档系统
 
 Plan Cascade 自动生成技术设计文档 (`design_doc.json`)，与 PRD 并行，在故事执行时提供架构上下文。
+若启用 Spec 访谈，则先由 `spec.json` 编译得到最终 `prd.json`，再基于该 PRD 生成 `design_doc.json`。
 
 ### 两级架构
 
@@ -569,17 +610,27 @@ flowchart TD
 ### 命令参数
 
 ```bash
-/plan-cascade:mega-plan <项目描述> [设计文档路径]
+/plan-cascade:mega-plan [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] \
+  [--spec <off|auto|on>] [--first-principles] [--max-questions N] \
+  <项目描述> [设计文档路径]
 
 # 示例：
 /plan-cascade:mega-plan "构建电商平台"
 /plan-cascade:mega-plan "构建电商平台" ./architecture.md
+/plan-cascade:mega-plan --flow full --spec on --first-principles "构建电商平台"
 ```
 
 | 参数 | 说明 |
 |------|------|
 | `项目描述` | 必填。用于功能分解的项目描述 |
 | `设计文档路径` | 可选。要导入的外部设计文档（.md/.json/.html） |
+| `--flow` | 可选。执行流程深度（后续执行会传播） |
+| `--tdd` | 可选。TDD 模式（传播到 story 执行） |
+| `--confirm` | 可选。启用批次级确认（orchestrator/批次边界） |
+| `--no-confirm` | 可选。禁用批次级确认（覆盖 `--confirm` 与 FULL 默认） |
+| `--spec` | 可选。记录 spec 访谈配置，供 `mega-approve` 在 orchestrator 层执行 |
+| `--first-principles` | 可选。启用 first-principles 问题（仅 spec 访谈运行时生效） |
+| `--max-questions` | 可选。访谈长度软上限（记录在状态文件中） |
 
 ### 详细流程图
 
@@ -608,10 +659,13 @@ flowchart TD
     K -->|批准| M["/plan-cascade:mega-approve"]
 
     subgraph "mega-approve 执行"
-        M --> N[解析 --auto-prd --agent --prd-agent --impl-agent]
+        M --> N[解析 --auto-prd --agent --prd-agent --impl-agent<br/>+ flow/tdd/confirm/no-confirm/spec 参数]
         N --> O[创建批次 N 的 Worktrees]
-        O --> P[为批次生成 PRDs<br/>使用选定的 PRD Agent]
-        P --> Q[为批次执行 Stories<br/>使用选定的 Impl Agent]
+        O --> PRD_MODE{启用 spec 访谈?}
+        PRD_MODE -->|是| PRD_SPEC[按 Feature 逐个执行 spec 访谈（仅 orchestrator）<br/>spec.json/spec.md → prd.json]
+        PRD_MODE -->|否| PRD_GEN[为批次生成 PRDs<br/>使用选定的 PRD Agent]
+        PRD_SPEC --> Q[为批次执行 Stories<br/>使用选定的 Impl Agent]
+        PRD_GEN --> Q
         Q --> R[通过 TaskOutput 等待]
         R --> S{批次完成?}
         S -->|是| T[合并批次到目标分支]
@@ -633,6 +687,8 @@ flowchart TD
 | `design_doc.json` | 项目根目录 | 项目级技术设计 |
 | `mega-findings.md` | 项目根目录 | 跨 Feature 共享发现 |
 | `.mega-status.json` | 状态目录或项目根目录 | 执行状态 |
+| `spec.json` / `spec.md` | Feature worktree（可选） | 规划期 spec 访谈产物（结构化/渲染） |
+| `.state/spec-interview.json` | Feature worktree（可选） | 可恢复的 spec 访谈状态 |
 
 ### 恢复
 
@@ -662,13 +718,16 @@ flowchart TD
 ### 命令参数
 
 ```bash
-/plan-cascade:hybrid-worktree <任务名> <目标分支> <PRD或描述> [设计文档路径] [--agent <名称>]
+/plan-cascade:hybrid-worktree [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] \
+  [--spec <off|auto|on>] [--first-principles] [--max-questions N] \
+  [--agent <名称>] <任务名> <目标分支> <PRD或描述> [设计文档路径]
 
 # 示例：
 /plan-cascade:hybrid-worktree fix-auth main "修复认证 bug"
 /plan-cascade:hybrid-worktree fix-auth main ./existing-prd.json
 /plan-cascade:hybrid-worktree fix-auth main "修复认证" ./design-spec.md
 /plan-cascade:hybrid-worktree fix-auth main "修复认证" --agent=codex
+/plan-cascade:hybrid-worktree --flow full --spec on --first-principles fix-auth main "修复认证"
 ```
 
 | 参数 | 说明 |
@@ -678,13 +737,20 @@ flowchart TD
 | `PRD或描述` | 必填。现有 PRD 文件路径或任务描述 |
 | `设计文档路径` | 可选。要导入的外部设计文档 |
 | `--agent` | 可选。PRD 生成使用的 Agent（覆盖 agents.json 配置） |
+| `--flow` | 可选。执行流程深度（写入 PRD / 传播到 approve） |
+| `--tdd` | 可选。TDD 模式（写入 PRD / 传播到 approve） |
+| `--confirm` | 可选。启用批次级确认（可被 `--no-confirm` 覆盖） |
+| `--no-confirm` | 可选。禁用批次级确认（覆盖 FULL 默认） |
+| `--spec` | 可选。规划期 spec 访谈：在 PRD 最终落地前先产出 `spec.json/spec.md` 并编译为 `prd.json` |
+| `--first-principles` | 可选。先问 first-principles 问题（仅 spec 访谈运行时生效） |
+| `--max-questions` | 可选。访谈长度软上限（记录在 `.state/spec-interview.json`） |
 
 ### 详细流程图
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-worktree</b><br/>任务名 目标分支 PRD或描述 [设计文档] [--agent]"] --> A0[Step 0: 配置 .gitignore]
-    A0 --> B[Step 1: 解析参数<br/>包括 --agent 标志]
+    A["<b>/plan-cascade:hybrid-worktree</b><br/>任务名 目标分支 PRD或描述 [设计文档] [flags]"] --> A0[Step 0: 配置 .gitignore]
+    A0 --> B[Step 1: 解析参数<br/>flow/tdd/confirm/spec + agent 参数]
     B --> C[Step 2: 检测操作系统和 Shell<br/>跨平台支持]
     C --> D[Step 3: 验证 Git 仓库]
     D --> E[Step 4: 检测默认分支]
@@ -705,12 +771,15 @@ flowchart TD
     M[Step 7: 确定 PRD 模式]
     M --> N{PRD_ARG 是文件?}
     N -->|是| O[从文件加载 PRD]
-    N -->|否| P0[解析 PRD Agent<br/>--agent > agents.json > 默认]
+    N -->|否| SPEC_ON{启用 Spec 访谈?}
+    SPEC_ON -->|是| SPEC_RUN["/plan-cascade:spec-plan --compile"]
+    SPEC_ON -->|否| P0[解析 PRD Agent<br/>--agent > agents.json > 默认]
     P0 --> P[通过选定 Agent 生成 PRD]
 
-    O --> Q
+    O --> R
     P --> Q[通过 TaskOutput 等待]
     Q --> R[验证 PRD]
+    SPEC_RUN --> R
 
     R --> S{外部设计文档?}
     S -->|是| S1[转换外部文档]
@@ -776,12 +845,15 @@ flowchart TD
 ### 命令参数
 
 ```bash
-/plan-cascade:hybrid-auto <任务描述> [设计文档路径] [--agent <名称>]
+/plan-cascade:hybrid-auto [--flow <quick|standard|full>] [--tdd <off|on|auto>] [--confirm] [--no-confirm] \
+  [--spec <off|auto|on>] [--first-principles] [--max-questions N] \
+  <任务描述> [设计文档路径] [--agent <名称>]
 
 # 示例：
 /plan-cascade:hybrid-auto "添加密码重置功能"
 /plan-cascade:hybrid-auto "实现认证" ./auth-design.md
 /plan-cascade:hybrid-auto "修复 bug" --agent=codex
+/plan-cascade:hybrid-auto --flow full --spec on --first-principles "实现认证"
 ```
 
 | 参数 | 说明 |
@@ -789,14 +861,23 @@ flowchart TD
 | `任务描述` | 必填。用于 PRD 生成的任务描述 |
 | `设计文档路径` | 可选。要导入的外部设计文档 |
 | `--agent` | 可选。PRD 生成使用的 Agent（默认：claude-code） |
+| `--flow` | 可选。执行流程深度（写入 PRD / 传播到 approve） |
+| `--tdd` | 可选。TDD 模式（写入 PRD / 传播到 approve） |
+| `--confirm` | 可选。启用批次级确认（可被 `--no-confirm` 覆盖） |
+| `--no-confirm` | 可选。禁用批次级确认（覆盖 FULL 默认） |
+| `--spec` | 可选。规划期 spec 访谈：在 PRD 最终落地前先产出 `spec.json/spec.md` 并编译为 `prd.json` |
+| `--first-principles` | 可选。先问 first-principles 问题（仅 spec 访谈运行时生效） |
+| `--max-questions` | 可选。访谈长度软上限（记录在 `.state/spec-interview.json`） |
 
 ### 详细流程图
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:hybrid-auto</b><br/>任务描述 [设计文档] [--agent]"] --> A0[Step 0: 配置 .gitignore]
-    A0 --> B[Step 1: 解析参数]
-    B --> C[Step 1.1: 解析 PRD Agent<br/>claude-code / codex / aider]
+    A["<b>/plan-cascade:hybrid-auto</b><br/>任务描述 [设计文档] [flags]"] --> A0[Step 0: 配置 .gitignore]
+    A0 --> B[Step 1: 解析参数<br/>flow/tdd/confirm/spec + agent 参数]
+    B --> SPEC_ON{启用 Spec 访谈?}
+    SPEC_ON -->|是| SPEC_RUN["/plan-cascade:spec-plan --compile"]
+    SPEC_ON -->|否| C[Step 1.1: 解析 PRD Agent<br/>claude-code / codex / aider]
 
     C --> D{CLI Agent 可用?}
     D -->|否| D1[降级到 claude-code]
@@ -806,6 +887,7 @@ flowchart TD
     E[Step 2: 通过 Agent 生成 PRD]
     E --> F[Step 3: 通过 TaskOutput 等待]
     F --> G[Step 4: 验证 PRD 结构]
+    SPEC_RUN --> G
 
     G --> H{外部设计文档?}
     H -->|是| I[Step 4.5.1: 转换外部文档<br/>.md / .json / .html]
@@ -835,6 +917,8 @@ flowchart TD
 |------|------|
 | `prd.json` | 包含 Stories 的产品需求 |
 | `design_doc.json` | 包含 story_mappings 的技术设计 |
+| `spec.json` / `spec.md` | 可选。规划期 spec 访谈产物（结构化/渲染） |
+| `.state/spec-interview.json` | 可选。可恢复的 spec 访谈状态 |
 
 ### 恢复
 
@@ -855,10 +939,14 @@ flowchart TD
 /plan-cascade:approve [选项]
 
 选项：
+  --flow <quick|standard|full>  执行流程深度（默认：standard）
+  --tdd <off|on|auto>           TDD 模式（默认：auto）
+  --confirm                     启用批次级确认
+  --no-confirm                  禁用批次级确认（覆盖 --confirm 与 FULL 默认）
   --agent <名称>        全局 Agent 覆盖（所有 Stories）
   --impl-agent <名称>   实现阶段 Agent
   --retry-agent <名称>  重试阶段 Agent
-  --verify              启用 AI 验证门
+  --no-verify           禁用 AI 验证门（默认启用）
   --verify-agent <名称> 验证 Agent（默认：claude-code）
   --no-review           禁用 AI 代码审查（默认启用）
   --review-agent <名称> 代码审查 Agent（默认：claude-code）
@@ -886,8 +974,8 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["<b>/plan-cascade:approve</b><br/>[--agent] [--impl-agent] [--verify] [--auto-run]"] --> B[Step 1: 检测操作系统和 Shell]
-    B --> C[Step 2: 解析 Agent 参数]
+    A["<b>/plan-cascade:approve</b><br/>[--flow/--tdd/--confirm/--no-confirm]<br/>[--agent/--impl-agent/--retry-agent]<br/>[--no-verify/--no-review] [--auto-run]"] --> B[Step 1: 检测操作系统和 Shell]
+    B --> C[Step 2: 解析 flow/tdd/confirm + agent 参数]
     C --> D[Step 2.5: 加载 agents.json 配置]
     D --> E[Step 3: 验证 PRD 存在]
     E --> F[Step 4: 读取并验证 PRD]
@@ -899,7 +987,7 @@ flowchart TD
     I --> J[显示加载的技能摘要]
 
     J --> K[Step 5: 计算执行批次<br/>基于依赖关系]
-    K --> L[Step 6: 选择执行模式<br/>自动 / 手动]
+    K --> L[Step 6: 选择执行模式<br/>自动 / 手动 / Full Auto]
     L --> M[Step 7: 初始化 progress.txt]
 
     M --> N[Step 8: 启动批次 Agents]
@@ -923,7 +1011,7 @@ flowchart TD
         X --> Y[9.2: 验证完成<br/>读取 progress.txt]
         Y --> FMT[9.2.1: FORMAT 门控<br/>PRE_VALIDATION]
         FMT --> QGV[9.2.2: TYPECHECK + TEST + LINT<br/>VALIDATION - 并行]
-        QGV --> Z{启用 --verify?}
+        QGV --> Z{AI 验证启用?<br/>(默认启用；--no-verify 禁用)}
         Z -->|是| AA[9.2.6: AI 验证门<br/>检测骨架代码]
         Z -->|否| CR
         AA --> CR[9.2.7: CODE_REVIEW 门控<br/>POST_VALIDATION]
@@ -963,7 +1051,7 @@ flowchart TD
 
 ### AI 验证门
 
-当启用 `--verify` 时，验证每个完成的 Story：
+当 AI 验证启用（默认；`--no-verify` 禁用）时，验证每个完成的 Story：
 
 ```
 [VERIFIED] story-001 - 所有验收标准已实现
@@ -1030,7 +1118,8 @@ Stories 和分配的 Agents：
 
 ## 10. 自动迭代流程
 
-`/plan-cascade:approve --auto-run` 或 `/plan-cascade:auto-run` 命令启动的自动迭代循环：
+自动迭代是 Full Auto 模式使用的非交互、Python 驱动执行循环（由 `scripts/auto-execute.py` 实现）。
+可通过 `/plan-cascade:approve --auto-run` 启动（或在 `/plan-cascade:approve` 中选择 Full Auto）。
 
 ```mermaid
 flowchart TD
@@ -1392,9 +1481,13 @@ Plan Cascade 支持两种运行时文件的路径存储模式：
 | `prd.json` | `<user-dir>/prd.json`（或 worktree 模式下在 worktree 中） |
 | `mega-plan.json` | `<user-dir>/mega-plan.json` |
 | `.mega-status.json` | `<user-dir>/.state/.mega-status.json` |
-| `.iteration-state.json` | `<user-dir>/.state/` |
+| `agent-status.json` | `<user-dir>/.state/agent-status.json` |
+| `iteration-state.json` | `<user-dir>/.state/iteration-state.json` |
+| `retry-state.json` | `<user-dir>/.state/retry-state.json` |
 | Worktrees | `<user-dir>/.worktree/<task-name>/` |
 | `design_doc.json` | **项目根目录**（用户可见） |
+| `spec.json` / `spec.md` | **工作目录 / worktree**（用户可见，可选） |
+| `.state/spec-interview.json` | **工作目录 / worktree**（`.state/`，可选） |
 | `progress.txt` | **工作目录**（用户可见） |
 | `findings.md` | **工作目录**（用户可见） |
 
@@ -1407,12 +1500,14 @@ Plan Cascade 支持两种运行时文件的路径存储模式：
 | `prd.json` | `<project-root>/prd.json` |
 | `mega-plan.json` | `<project-root>/mega-plan.json` |
 | `.mega-status.json` | `<project-root>/.mega-status.json` |
+| `spec.json` / `spec.md` | `<project-root>/spec.json`、`<project-root>/spec.md`（可选） |
+| `.state/spec-interview.json` | `<project-root>/.state/spec-interview.json`（可选） |
 | Worktrees | `<project-root>/.worktree/<task-name>/` |
 
 ### 检查当前模式
 
 ```bash
-python3 -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('模式:', 'legacy' if r.is_legacy_mode() else 'new'); print('PRD 路径:', r.get_prd_path())"
+uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print('模式:', 'legacy' if r.is_legacy_mode() else 'new'); print('PRD 路径:', r.get_prd_path())"
 ```
 
 ---
@@ -1429,6 +1524,8 @@ graph TB
 
     subgraph "规划文件"
         CMD --> PRD[prd.json<br/>PRD文档]
+        CMD -.-> SPEC[spec.json/spec.md<br/>Spec（可选）]
+        SPEC -.-> PRD
         CMD --> MP[mega-plan.json<br/>项目计划]
         CMD --> DD[design_doc.json<br/>设计文档]
     end
@@ -1456,15 +1553,21 @@ graph TB
         LK[.locks/<br/>文件锁]
     end
 
+    subgraph "Spec 状态"
+        SIS[.state/spec-interview.json<br/>访谈状态]
+    end
+
     subgraph "上下文恢复"
         HEC[.hybrid-execution-context.md]
         MEC[.mega-execution-context.md]
     end
 
     DD --> CF[ContextFilter]
+    SPEC --> SIS
     CF --> AS
 
     style PRD fill:#e1f5fe
+    style SPEC fill:#e1f5fe
     style MP fill:#e1f5fe
     style DD fill:#e1f5fe
     style AS fill:#fff3e0
@@ -1483,18 +1586,18 @@ graph TB
 | `prd.json` | 规划 | PRD 文档，包含目标、故事、依赖关系 |
 | `mega-plan.json` | 规划 | 项目级计划，管理多个 Feature |
 | `design_doc.json` | 规划 | 技术设计文档，架构和决策 |
+| `spec.json` | 规划 | 结构化 spec（可选；启用 spec 访谈时作为单一事实源） |
+| `spec.md` | 规划 | 从 `spec.json` 渲染生成的可读规格文档（可选） |
 | `agents.json` | 配置 | Agent 配置，包含阶段默认和降级链 |
 | `findings.md` | 共享 | Agent 发现记录，支持标签过滤 |
 | `mega-findings.md` | 共享 | 项目级发现记录（mega-plan 模式） |
 | `progress.txt` | 共享 | 进度时间线，包含 Agent 执行信息 |
-| `.agent-status.json` | 状态 | Agent 运行/完成/失败状态 |
-| `.iteration-state.json` | 状态 | 自动迭代进度和批次结果 |
-| `.retry-state.json` | 状态 | 重试历史和失败记录 |
-| `.mega-status.json` | 状态 | Mega-plan 执行状态 |
+| `.agent-status.json` / `.state/agent-status.json` | 状态 | Agent 运行/完成/失败状态 |
+| `.iteration-state.json` / `.state/iteration-state.json` | 状态 | 自动迭代进度和批次结果 |
+| `.retry-state.json` / `.state/retry-state.json` | 状态 | 重试历史和失败记录 |
+| `.mega-status.json` / `.state/.mega-status.json` | 状态 | Mega-plan 执行状态 |
+| `.state/spec-interview.json` | 状态 | 可恢复的 spec 访谈状态（可选） |
 | `.state/stage-state.json` | 状态 | 阶段状态机状态 (v4.4.0+) |
-| `.state/dor-results.json` | 状态 | DoR 门控检查结果 (v4.4.0+) |
-| `.state/dod-results.json` | 状态 | DoD 门控检查结果 (v4.4.0+) |
-| `.state/tdd-compliance.json` | 状态 | TDD 合规检查结果 (v4.4.0+) |
 | `.agent-detection.json` | 缓存 | 跨平台 Agent 检测结果（1小时TTL） |
 | `.state/gate-cache.json` | 缓存 | 门控执行结果缓存（基于 git commit + 工作树哈希） |
 | `.hybrid-execution-context.md` | 上下文 | Hybrid 任务上下文，用于会话中断后 AI 恢复 |
@@ -1513,7 +1616,7 @@ graph TB
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │   ┌─────────────────────────┐     ┌─────────────────────────┐           │
-│   │      简单模式            │     │      专家模式            │           │
+│   │  Auto 自动策略模式       │     │  显式工作流模式          │           │
 │   │                         │     │                         │           │
 │   │  用户输入描述            │     │  用户输入描述            │           │
 │   │       ↓                 │     │       ↓                 │           │
@@ -1560,10 +1663,10 @@ graph TB
 │              ┌───────────────┴───────────────┐                          │
 │              ▼                               ▼                          │
 │   ┌─────────────────────────┐    ┌─────────────────────────┐           │
-│   │    独立编排模式          │    │  Claude Code GUI 模式   │           │
+│   │   Task 工具执行          │    │   外部 CLI Agents       │           │
 │   ├─────────────────────────┤    ├─────────────────────────┤           │
 │   │                         │    │                         │           │
-│   │   内置工具执行引擎       │    │   Claude Code CLI       │           │
+│   │   内置 Task 工具         │    │   外部 CLI Agents       │           │
 │   │   ┌───────────────┐     │    │   ┌───────────────┐     │           │
 │   │   │ Read/Write    │     │    │   │ Claude Code   │     │           │
 │   │   │ Edit/Bash     │     │    │   │ 执行工具      │     │           │
@@ -1572,20 +1675,16 @@ graph TB
 │   │          │              │    │          │              │           │
 │   │          ▼              │    │          ▼              │           │
 │   │   ┌───────────────┐     │    │   ┌───────────────┐     │           │
-│   │   │ LLM 抽象层    │     │    │   │ Plan Cascade  │     │           │
-│   │   │ (多种选择)    │     │    │   │ 可视化界面    │     │           │
+│   │   │ Agent:        │     │    │   │ Agent:        │     │           │
+│   │   │ claude-code   │     │    │   │ codex/aider   │     │           │
+│   │   │ (task-tool)   │     │    │   │ (cli)         │     │           │
 │   │   └───────────────┘     │    │   └───────────────┘     │           │
-│   │          │              │    │                         │           │
-│   │   ┌──────┴──────┐       │    │                         │           │
-│   │   ▼      ▼      ▼       │    │                         │           │
-│   │ Claude Claude OpenAI    │    │                         │           │
-│   │ Max    API    etc.      │    │                         │           │
 │   │                         │    │                         │           │
 │   └─────────────────────────┘    └─────────────────────────┘           │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 
-两种模式都支持：PRD 驱动开发、批次执行、质量门控、状态追踪
+两类执行后端都支持：PRD 驱动开发、批次执行、质量门控、状态追踪
 ```
 
 ---
@@ -1609,10 +1708,10 @@ graph TB
 │              ┌───────────────┴───────────────┐                          │
 │              ▼                               ▼                          │
 │   ┌─────────────────────────┐    ┌─────────────────────────┐           │
-│   │    独立编排模式          │    │  Claude Code GUI 模式   │           │
+│   │   Task 工具执行          │    │   外部 CLI Agents       │           │
 │   │                         │    │                         │           │
 │   │   默认 Agent:            │    │   默认 Agent:            │           │
-│   │   内置 ReAct 引擎        │    │   Claude Code CLI       │           │
+│   │   内置 Task 工具         │    │   外部 CLI Agents       │           │
 │   │                         │    │                         │           │
 │   │   可选 CLI Agents:       │    │   可选 CLI Agents:       │           │
 │   │   codex, aider, amp...  │    │   codex, aider, amp...  │           │
@@ -1641,7 +1740,7 @@ graph TB
 | `--agent` | 全局 Agent 覆盖（所有 Stories） | `--agent=codex` |
 | `--impl-agent` | 实现阶段 Agent | `--impl-agent=claude-code` |
 | `--retry-agent` | 重试阶段 Agent | `--retry-agent=aider` |
-| `--verify` | 启用 AI 验证门 | `--verify` |
+| `--no-verify` | 禁用 AI 验证门（默认启用） | `--no-verify` |
 | `--verify-agent` | 验证 Agent | `--verify-agent=claude-code` |
 | `--no-review` | 禁用 AI 代码审查（默认启用） | `--no-review` |
 | `--review-agent` | 代码审查 Agent | `--review-agent=claude-code` |
@@ -1713,26 +1812,3 @@ graph TB
 }
 ```
 
----
-
-## 附录：两种工作模式对比
-
-| 特性 | 独立编排模式 | Claude Code GUI 模式 |
-|------|--------------|----------------------|
-| 编排层 | Plan Cascade | Plan Cascade |
-| 工具执行 | Plan Cascade 自己执行 | Claude Code CLI 执行 |
-| LLM 来源 | Claude Max/API, OpenAI, DeepSeek, Ollama | Claude Code |
-| PRD 驱动 | ✅ 完整支持 | ✅ 完整支持 |
-| 批次执行 | ✅ 完整支持 | ✅ 完整支持 |
-| 离线可用 | ✅ (使用 Ollama) | ❌ |
-| 适用场景 | 需要其他 LLM 或离线使用 | 有 Claude Max/Code 订阅 |
-
-| 组件 | 独立编排模式 | Claude Code GUI 模式 |
-|------|--------------|----------------------|
-| PRD 生成 | Plan Cascade (LLM) | Plan Cascade (Claude Code) |
-| 依赖分析 | Plan Cascade | Plan Cascade |
-| 批次调度 | Plan Cascade | Plan Cascade |
-| Story 执行 | Plan Cascade (ReAct) | Claude Code CLI |
-| 工具调用 | 内置工具引擎 | Claude Code |
-| 状态追踪 | Plan Cascade | Plan Cascade |
-| 质量门控 | Plan Cascade | Plan Cascade |

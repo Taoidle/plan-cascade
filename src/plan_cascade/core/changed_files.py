@@ -101,9 +101,12 @@ class ChangedFilesDetector:
 
         if include_staged:
             # Get staged changes (diff against base_ref)
-            exit_code, stdout, _ = self._run_git_command(
-                ["diff", "--name-only", "--cached", base_ref]
-            )
+            exit_code, stdout, _ = self._run_git_command(["diff", "--name-only", "--cached", base_ref])
+            if exit_code != 0 and base_ref == "HEAD":
+                # Unborn HEAD (e.g., initial commit not created yet) can make
+                # `git diff --cached HEAD` fail with "ambiguous argument 'HEAD'".
+                # Fall back to comparing index against the empty tree.
+                exit_code, stdout, _ = self._run_git_command(["diff", "--name-only", "--cached"])
             if exit_code == 0 and stdout.strip():
                 changed_files.update(stdout.strip().split("\n"))
 
