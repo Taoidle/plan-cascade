@@ -258,7 +258,7 @@ flowchart TB
         CTX --> RESOLVE[解析每个 Story 的 Agent<br/>优先级链]
         RESOLVE --> PARALLEL[并行启动 Agent<br/>显示 Agent 分配]
         PARALLEL --> WAIT[通过 TaskOutput 等待]
-        WAIT --> VERIFY{AI 验证启用?<br/>(--no-verify 禁用)}
+        WAIT --> VERIFY{AI 验证启用?<br/>（--no-verify 禁用）}
         VERIFY -->|是| VGATE[AI 验证门<br/>检测骨架代码]
         VERIFY -->|否| QG
         VGATE --> QG{质量门控}
@@ -1011,7 +1011,7 @@ flowchart TD
         X --> Y[9.2: 验证完成<br/>读取 progress.txt]
         Y --> FMT[9.2.1: FORMAT 门控<br/>PRE_VALIDATION]
         FMT --> QGV[9.2.2: TYPECHECK + TEST + LINT<br/>VALIDATION - 并行]
-        QGV --> Z{AI 验证启用?<br/>(默认启用；--no-verify 禁用)}
+        QGV --> Z{AI 验证启用?<br/>（默认启用；--no-verify 禁用）}
         Z -->|是| AA[9.2.6: AI 验证门<br/>检测骨架代码]
         Z -->|否| CR
         AA --> CR[9.2.7: CODE_REVIEW 门控<br/>POST_VALIDATION]

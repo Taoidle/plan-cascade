@@ -258,7 +258,7 @@ flowchart TB
         CTX --> RESOLVE[Resolve Agent per Story<br/>Priority Chain]
         RESOLVE --> PARALLEL[Start Agents in Parallel<br/>Display Agent Assignment]
         PARALLEL --> WAIT[Wait via TaskOutput]
-        WAIT --> VERIFY{AI Verify enabled?<br/>(--no-verify disables)}
+        WAIT --> VERIFY{AI Verify enabled?<br/>（--no-verify disables）}
         VERIFY -->|Yes| VGATE[AI Verification Gate<br/>Detect Skeleton Code]
         VERIFY -->|No| QG
         VGATE --> QG{Quality Gate}
@@ -1011,7 +1011,7 @@ flowchart TD
         X --> Y[9.2: Verify Completion<br/>Read progress.txt]
         Y --> FMT[9.2.1: FORMAT Gate<br/>PRE_VALIDATION]
         FMT --> QGV[9.2.2: TYPECHECK + TEST + LINT<br/>VALIDATION - Parallel]
-        QGV --> Z{AI verify enabled?<br/>(default on; disable with --no-verify)}
+        QGV --> Z{AI verify enabled?<br/>（default on; disable with --no-verify）}
         Z -->|Yes| AA[9.2.6: AI Verification Gate<br/>Detect Skeleton Code]
         Z -->|No| CR
         AA --> CR[9.2.7: CODE_REVIEW Gate<br/>POST_VALIDATION]
