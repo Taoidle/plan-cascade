@@ -10,6 +10,41 @@ You are approving the PRD and starting parallel execution of user stories.
 
 This command accepts flow control parameters that affect quality gates and execution:
 
+### Parameter Priority
+
+Parameters can be specified in three places. When the same parameter is defined in multiple sources, the following priority order applies:
+
+1. **Command-line flags** (highest priority)
+   - Example: `/plan-cascade:approve --flow full`
+   - Overrides all other sources
+
+2. **PRD configuration** (prd.json)
+   - `flow_config.level`, `tdd_config.mode`, `execution_config.require_batch_confirm`
+   - Used when no command-line flag is provided
+
+3. **Default values** (lowest priority)
+   - Used when no command-line flag or PRD config is present
+
+**Example Priority Resolution:**
+```bash
+# Scenario 1: Command-line overrides PRD
+prd.json contains: flow_config.level = "standard"
+You run: /plan-cascade:approve --flow full
+Result: FLOW = "full" (command-line wins)
+
+# Scenario 2: PRD config used when no command-line flag
+prd.json contains: tdd_config.mode = "on"
+You run: /plan-cascade:approve
+Result: TDD = "on" (from PRD)
+
+# Scenario 3: Default used when neither specified
+prd.json has no tdd_config
+You run: /plan-cascade:approve
+Result: TDD = "auto" (default)
+```
+
+**Debugging Tip:** The command displays resolved parameter values at Step 2.1, showing which source each parameter came from.
+
 ### `--flow <quick|standard|full>`
 
 Override the execution flow depth. This controls quality gate strictness.
@@ -316,27 +351,79 @@ Elif FLOW_LEVEL == "standard" or FLOW_LEVEL is empty:
 # --no-review overrides even full flow
 ```
 
-Display configuration:
+Display configuration with parameter sources:
 ```
 ============================================================
-EXECUTION CONFIGURATION
+EXECUTION CONFIGURATION (with sources)
 ============================================================
 Flow Level: ${FLOW_LEVEL:-"standard"}
-Gate Mode: ${GATE_MODE}
+  Source: ${FLOW_LEVEL_SOURCE:-"default"}
+  Gate Mode: ${GATE_MODE}
+
 TDD Mode: ${TDD_MODE:-"auto"}
+  Source: ${TDD_MODE_SOURCE:-"default"}
+
 Batch Confirm: ${NO_CONFIRM_MODE ? "DISABLED (--no-confirm)" : (CONFIRM_MODE ? "enabled" : "disabled")}
+  Source: ${CONFIRM_SOURCE:-"default"}
 
 Quality Gates:
   AI Verification: ${ENABLE_VERIFY ? "enabled" : "disabled"}
+    ${NO_VERIFY_EXPLICIT ? "(disabled by --no-verify)" : ""}
   Code Review: ${ENABLE_REVIEW ? "enabled" : "disabled"}${REQUIRE_REVIEW ? " (REQUIRED)" : ""}
+    ${NO_REVIEW_EXPLICIT ? "(disabled by --no-review)" : ""}
   Test Enforcement: ${ENFORCE_TEST_CHANGES ? "enabled" : "disabled"}
 
 Agent Configuration:
   Global Override: ${GLOBAL_AGENT:-"none (use priority chain)"}
-  Implementation: ${IMPL_AGENT:-"default"}
-  Retry: ${RETRY_AGENT:-"default"}
+  Implementation: ${IMPL_AGENT:-"per-story resolution"}
+  Retry: ${RETRY_AGENT:-"per-story resolution"}
+  Verify: ${VERIFY_AGENT:-"claude-code (default)"}
+  Review: ${REVIEW_AGENT:-"claude-code (default)"}
   Fallback: ${NO_FALLBACK ? "disabled" : "enabled"}
+
+Parameter Sources Legend:
+  [CLI]     - Command-line flag (highest priority)
+  [PRD]     - prd.json configuration
+  [DEFAULT] - Built-in default value
 ============================================================
+```
+
+**Parameter Source Tracking (for debugging):**
+
+Track the source of each parameter as it's resolved:
+
+```bash
+# Track flow level source
+If FLOW_LEVEL set from command-line:
+    FLOW_LEVEL_SOURCE="CLI (--flow ${FLOW_LEVEL})"
+Elif FLOW_LEVEL set from prd.json:
+    FLOW_LEVEL_SOURCE="PRD (flow_config.level)"
+Else:
+    FLOW_LEVEL_SOURCE="DEFAULT"
+
+# Track TDD mode source
+If TDD_MODE set from command-line:
+    TDD_MODE_SOURCE="CLI (--tdd ${TDD_MODE})"
+Elif TDD_MODE set from prd.json:
+    TDD_MODE_SOURCE="PRD (tdd_config.mode)"
+Else:
+    TDD_MODE_SOURCE="DEFAULT"
+
+# Track confirm mode source
+If NO_CONFIRM_EXPLICIT:
+    CONFIRM_SOURCE="CLI (--no-confirm)"
+Elif CONFIRM_EXPLICIT:
+    CONFIRM_SOURCE="CLI (--confirm)"
+Elif CONFIRM_MODE set from prd.json:
+    CONFIRM_SOURCE="PRD (execution_config.require_batch_confirm)"
+Elif FLOW_LEVEL == "full":
+    CONFIRM_SOURCE="FULL flow default"
+Else:
+    CONFIRM_SOURCE="DEFAULT (disabled)"
+
+# Track gate override flags
+NO_VERIFY_EXPLICIT = (--no-verify flag provided)
+NO_REVIEW_EXPLICIT = (--no-review flag provided)
 ```
 
 ## Step 2.5: Load Agent Configuration

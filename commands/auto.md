@@ -10,6 +10,26 @@ AI automatically analyzes the task and executes the optimal strategy without use
 
 The auto command supports the following flags to customize execution:
 
+### Parameter Priority
+
+When parameters are specified in multiple places, the following priority order applies:
+
+1. **Command-line flags** (highest priority) - Override all other sources
+2. **Configuration files** (prd.json, mega-plan.json) - Used when no command-line flag provided
+3. **Default values** (lowest priority) - Used when no other source provides the parameter
+
+**Example:**
+```bash
+# If prd.json contains: flow_config.level = "standard"
+# And you run: /plan-cascade:auto --flow full "task"
+# Result: FLOW = "full" (command-line overrides configuration)
+```
+
+**Note:** Parameters are propagated through the execution chain:
+- `auto` → passes parameters to `hybrid-auto`/`hybrid-worktree`/`mega-plan`
+- These commands → save parameters to `prd.json`/`mega-plan.json`
+- `approve` → reads parameters from configuration files (can be overridden by command-line)
+
 ### `--flow <quick|standard|full>`
 
 Override the execution flow depth (**default: `full`**).
@@ -449,6 +469,44 @@ Use this decision matrix based on your analysis:
 - Multiple independent features can be developed in parallel
 - Project-level scope (platform, system, infrastructure)
 - Significant parallelization benefit identified
+
+## Step 3.5: Display Parameter Configuration
+
+Before analyzing the task, display the parsed parameter configuration for transparency:
+
+```
+============================================================
+PARAMETER CONFIGURATION
+============================================================
+Flow: ${FLOW_OVERRIDE:-"full (default)"}
+  Source: ${FLOW_OVERRIDE ? "[CLI] --flow ${FLOW_OVERRIDE}" : "[DEFAULT]"}
+  Description: ${FLOW == "quick" ? "Fast execution, soft gates" :
+                 FLOW == "standard" ? "Balanced speed and quality" :
+                 "Strict methodology + strict gating"}
+
+TDD: ${TDD_OVERRIDE:-"on (FULL flow default)"}
+  Source: ${TDD_OVERRIDE ? "[CLI] --tdd ${TDD_OVERRIDE}" :
+           (FLOW == "full" ? "[DEFAULT] FULL flow" : "[DEFAULT]")}
+
+Confirm: ${CONFIRM_MODE ? "enabled" : "disabled"}
+  Source: ${NO_CONFIRM_MODE ? "[CLI] --no-confirm" :
+           CONFIRM_MODE ? "[CLI] --confirm" :
+           (FLOW == "full" ? "[DEFAULT] FULL flow" : "[DEFAULT]")}
+
+Spec Interview: ${SPEC_MODE:-"auto (default)"}
+  Source: ${SPEC_MODE ? "[CLI] --spec ${SPEC_MODE}" : "[DEFAULT]"}
+  First Principles: ${FIRST_PRINCIPLES}
+  Max Questions: ${MAX_QUESTIONS:-"18 (default)"}
+
+Explain Mode: ${EXPLAIN_MODE ? "enabled (no execution)" : "disabled"}
+JSON Output: ${JSON_OUTPUT ? "enabled" : "disabled"}
+
+These parameters will be:
+  1. Used to select the appropriate strategy
+  2. Passed to the selected sub-command via PARAM_STRING
+  3. Saved in the generated configuration files (prd.json, mega-plan.json)
+============================================================
+```
 
 ## Step 4: Display Analysis Result
 

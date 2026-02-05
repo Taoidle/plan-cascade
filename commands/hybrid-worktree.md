@@ -10,6 +10,34 @@ You are starting a task in **Git Worktree + Hybrid Ralph mode**. This will creat
 
 This command accepts flow control parameters that affect story execution:
 
+### Parameter Priority
+
+Parameters are saved to `prd.json` in the worktree and later used by `/plan-cascade:approve`. Priority order:
+
+1. **Command-line flags to THIS command** (highest priority)
+   - Example: `/plan-cascade:hybrid-worktree --flow full fix-auth main "Fix bug"`
+   - Saved to `<worktree>/prd.json` as `flow_config`, `tdd_config`, etc.
+
+2. **Command-line flags to `/plan-cascade:approve`** (when run in worktree)
+   - Can override values saved in `prd.json`
+
+3. **Default values** (lowest priority)
+
+**Worktree Isolation:** Parameters are stored in the worktree's `prd.json`, ensuring complete isolation from other tasks. When you run `/plan-cascade:approve` in the worktree, it automatically finds and uses this PRD.
+
+**Example:**
+```bash
+# Create worktree with strict flow
+/plan-cascade:hybrid-worktree --flow full --tdd on fix-auth main "Fix authentication bug"
+# → Creates worktree at .worktree/fix-auth/
+# → Saves prd.json with flow_config.level="full", tdd_config.mode="on"
+
+# Later, in the worktree directory:
+cd .worktree/fix-auth/
+/plan-cascade:approve
+# → Uses flow="full", tdd="on" from prd.json in current worktree
+```
+
 ### `--flow <quick|standard|full>`
 
 Override the execution flow depth for the approve phase.

@@ -10,6 +10,47 @@ You are creating a **Mega Plan** - a project-level plan that orchestrates multip
 
 This command accepts flow control parameters that propagate to all feature executions:
 
+### Parameter Priority
+
+Parameters flow through three stages in mega-plan execution:
+
+1. **Command-line flags to THIS command** (highest priority)
+   - Example: `/plan-cascade:mega-plan --flow full --tdd on "Build platform"`
+   - Saved to `mega-plan.json` as `flow_config`, `tdd_config`, `spec_config`, etc.
+
+2. **Command-line flags to `/plan-cascade:mega-approve`**
+   - Can override values saved in `mega-plan.json`
+   - Propagated to all feature PRDs
+
+3. **PRD-level overrides** (per feature, if needed)
+   - Individual features can have custom parameters in their PRDs
+   - Rarely used; usually all features use mega-plan settings
+
+4. **Default values** (lowest priority)
+
+**Parameter Propagation Chain:**
+```bash
+# Step 1: Create mega-plan with parameters
+/plan-cascade:mega-plan --flow full --tdd on --spec auto "Build e-commerce"
+# → Saves to mega-plan.json:
+#   flow_config: {level: "full", propagate_to_features: true}
+#   tdd_config: {mode: "on", propagate_to_features: true}
+#   spec_config: {mode: "auto", ...}
+
+# Step 2: Execute with saved parameters
+/plan-cascade:mega-approve
+# → Reads from mega-plan.json
+# → For each feature: creates PRD with inherited flow/tdd settings
+# → Sub-agents execute stories with these settings
+
+# Step 3: Execute with override
+/plan-cascade:mega-approve --flow standard
+# → Uses flow="standard" (overrides mega-plan.json)
+# → All features get flow="standard", tdd="on" (from mega-plan.json)
+```
+
+**Note:** Spec interview parameters (--spec, --first-principles, --max-questions) are used by the orchestrator in `mega-approve` Step 6.0, NOT propagated to feature agents.
+
 ### `--flow <quick|standard|full>`
 
 Override the execution flow depth for all feature approve phases.

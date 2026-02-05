@@ -10,6 +10,38 @@ You are automatically generating a Product Requirements Document (PRD) from the 
 
 This command accepts flow control parameters that affect story execution:
 
+### Parameter Priority
+
+Parameters are saved to `prd.json` and later used by `/plan-cascade:approve`. Priority order:
+
+1. **Command-line flags to THIS command** (highest priority)
+   - Example: `/plan-cascade:hybrid-auto --flow full "task"`
+   - Saved to `prd.json` as `flow_config`, `tdd_config`, etc.
+
+2. **Command-line flags to `/plan-cascade:approve`**
+   - Can override values saved in `prd.json`
+   - Example: Even if prd.json has `flow_config.level="standard"`, running `/plan-cascade:approve --flow full` will use `full`
+
+3. **Default values** (lowest priority)
+   - Used when no flags provided to either command
+
+**Example Flow:**
+```bash
+# Step 1: Generate PRD with parameters
+/plan-cascade:hybrid-auto --flow full --tdd on "Build auth"
+# → Saves to prd.json: flow_config.level="full", tdd_config.mode="on"
+
+# Step 2a: Approve with saved parameters
+/plan-cascade:approve
+# → Uses flow="full", tdd="on" from prd.json
+
+# Step 2b: Approve with override
+/plan-cascade:approve --flow standard
+# → Uses flow="standard" (overrides prd.json), tdd="on" (from prd.json)
+```
+
+**Note:** This command writes parameters to `prd.json` in Step 5. The recommended `/plan-cascade:approve` command (shown in Step 6) includes the same parameters for clarity, but they're already in prd.json.
+
 ### `--flow <quick|standard|full>`
 
 Override the execution flow depth for the approve phase.
@@ -200,17 +232,26 @@ Elif FLOW_LEVEL == "full" AND CONFIRM_EXPLICIT is false:
     # Default confirmations in FULL flow
     CONFIRM_MODE = true
 
-# Display parsed parameters
-echo "Parsed Parameters:"
-echo "  Task: $TASK_DESC"
-echo "  Flow: ${FLOW_LEVEL:-"(default)"}"
-echo "  TDD: ${TDD_MODE:-"(default)"}"
-echo "  Confirm: $CONFIRM_MODE"
-echo "  No-Confirm: $NO_CONFIRM_MODE"
-echo "  Spec: ${SPEC_MODE:-"(auto)"}"
-echo "  First Principles: $FIRST_PRINCIPLES"
-echo "  Max Questions: ${MAX_QUESTIONS:-"(default)"}"
-echo "  Agent: ${PRD_AGENT:-"(default)"}"
+# Display parsed parameters with sources
+echo "============================================================"
+echo "PARSED PARAMETERS (all from command-line)"
+echo "============================================================"
+echo "Task: $TASK_DESC"
+echo "Flow: ${FLOW_LEVEL:-"(not specified - will use default)"}"
+echo "TDD: ${TDD_MODE:-"(not specified - will use default)"}"
+echo "Confirm: $CONFIRM_MODE"
+echo "No-Confirm: $NO_CONFIRM_MODE"
+echo "Spec: ${SPEC_MODE:-"(not specified - will use auto)"}"
+echo "First Principles: $FIRST_PRINCIPLES"
+echo "Max Questions: ${MAX_QUESTIONS:-"(not specified - will use default)"}"
+echo "Agent: ${PRD_AGENT:-"(not specified - will resolve from agents.json)"}"
+echo ""
+echo "These parameters will be:"
+echo "  1. Used during PRD generation (if applicable)"
+echo "  2. Saved to prd.json (Step 5)"
+echo "  3. Used by /plan-cascade:approve when executing stories"
+echo "============================================================"
+echo ""
 ```
 
 If no description provided, ask the user:

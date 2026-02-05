@@ -10,6 +10,48 @@ Approve the mega-plan and begin executing features in **batch-by-batch** order w
 
 This command accepts flow control parameters that propagate to ALL feature executions:
 
+### Parameter Priority
+
+Parameters are resolved in the following order when multiple sources exist:
+
+1. **Command-line flags to THIS command** (highest priority)
+   - Example: `/plan-cascade:mega-approve --flow full --tdd on`
+   - Overrides all other sources
+
+2. **mega-plan.json configuration** (saved by `/plan-cascade:mega-plan`)
+   - `flow_config`, `tdd_config`, `spec_config`, `execution_config`
+   - Used when no command-line flag is provided
+
+3. **Default values** (lowest priority)
+
+**Priority Resolution Example:**
+```bash
+# Scenario 1: Command-line overrides mega-plan
+mega-plan.json contains: flow_config.level = "standard"
+You run: /plan-cascade:mega-approve --flow full
+Result: All features use FLOW = "full"
+
+# Scenario 2: Use mega-plan config
+mega-plan.json contains: tdd_config.mode = "on"
+You run: /plan-cascade:mega-approve
+Result: All features use TDD = "on"
+
+# Scenario 3: Partial override
+mega-plan.json contains: flow="full", tdd="on"
+You run: /plan-cascade:mega-approve --flow standard
+Result: All features use FLOW = "standard", TDD = "on"
+```
+
+**Parameter Propagation to Features:**
+- Resolved parameters are passed to PRD generation agents via prompt
+- PRD generation agents write these parameters to each feature's `prd.json`
+- Story execution agents read parameters from their feature's `prd.json`
+
+**Special Case - Spec Interview Parameters:**
+- `--spec`, `--first-principles`, `--max-questions` are orchestrator-only
+- Used in Step 6.0 (this command) to run spec interviews
+- NOT propagated to feature agents (see Step 2.0.2 notes)
+
 ### `--flow <quick|standard|full>`
 
 Override the execution flow depth for all feature approve phases.
@@ -284,24 +326,36 @@ if [ "$AUTO_PRD" = true ]; then
     echo "============================================"
 fi
 
-# Display configuration
+# Display configuration with parameter sources
 echo ""
 echo "============================================================"
-echo "EXECUTION CONFIGURATION"
+echo "EXECUTION CONFIGURATION (with sources)"
 echo "============================================================"
 echo "Flow Level: ${FLOW_LEVEL:-"standard (default)"}"
+echo "  Source: ${FLOW_LEVEL_SOURCE:-"[DEFAULT]"}"
+echo ""
 echo "TDD Mode: ${TDD_MODE:-"auto (default)"}"
+echo "  Source: ${TDD_MODE_SOURCE:-"[DEFAULT]"}"
+echo ""
 echo "Batch Confirm: ${CONFIRM_MODE}"
-echo "No-Confirm Override: ${NO_CONFIRM_MODE}"
+echo "  No-Confirm Override: ${NO_CONFIRM_MODE}"
+echo "  Source: ${CONFIRM_SOURCE:-"[DEFAULT]"}"
+echo ""
 echo "Spec Interview: ${SPEC_MODE:-"auto (default)"}"
-echo "First Principles: ${FIRST_PRINCIPLES}"
-echo "Max Questions: ${MAX_QUESTIONS:-"18 (default)"}"
+echo "  First Principles: ${FIRST_PRINCIPLES}"
+echo "  Max Questions: ${MAX_QUESTIONS:-"18 (default)"}"
+echo "  Source: ${SPEC_MODE_SOURCE:-"[DEFAULT]"}"
 echo ""
 echo "Agent Configuration:"
 echo "  Global Override: ${GLOBAL_AGENT:-"none (use defaults)"}"
 echo "  PRD Generation: ${PRD_AGENT:-"claude-code"}"
 echo "  Implementation: ${IMPL_AGENT:-"per-story resolution"}"
 echo "  Fallback: ${NO_FALLBACK:+"disabled"}"
+echo ""
+echo "Parameter Sources Legend:"
+echo "  [CLI]     - Command-line flag (highest priority)"
+echo "  [MEGA]    - mega-plan.json configuration"
+echo "  [DEFAULT] - Built-in default value"
 echo ""
 echo "These settings will propagate to all feature executions."
 echo "============================================================"
@@ -312,51 +366,86 @@ echo ""
 
 **CRITICAL**: If flow/tdd/confirm parameters were not specified on command line, check mega-plan.json for configuration from `/plan-cascade:mega-plan`.
 
+**Parameter source tracking is added for debugging.**
+
 ```
-If FLOW_LEVEL is empty:
-    mega_plan = Read("mega-plan.json")
-    If mega_plan has "flow_config" field:
-        FLOW_LEVEL = mega_plan.flow_config.level
-        echo "Note: Using flow level from mega-plan: ${FLOW_LEVEL}"
+# Read mega-plan.json once
+mega_plan = Read("mega-plan.json")
 
-If TDD_MODE is empty:
-    If mega_plan has "tdd_config" field:
-        TDD_MODE = mega_plan.tdd_config.mode
-        echo "Note: Using TDD mode from mega-plan: ${TDD_MODE}"
+# Resolve FLOW_LEVEL with source tracking
+If FLOW_LEVEL is set from command-line:
+    FLOW_LEVEL_SOURCE="[CLI] --flow ${FLOW_LEVEL}"
+    echo "Note: Using flow level from command-line: ${FLOW_LEVEL}"
+Elif mega_plan has "flow_config" field:
+    FLOW_LEVEL = mega_plan.flow_config.level
+    FLOW_LEVEL_SOURCE="[MEGA] flow_config.level"
+    echo "Note: Using flow level from mega-plan: ${FLOW_LEVEL}"
+Else:
+    FLOW_LEVEL = "standard"
+    FLOW_LEVEL_SOURCE="[DEFAULT]"
 
-If SPEC_MODE is empty:
-    If mega_plan has "spec_config" field:
-        SPEC_MODE = mega_plan.spec_config.mode
-        FIRST_PRINCIPLES = mega_plan.spec_config.first_principles
-        MAX_QUESTIONS = mega_plan.spec_config.max_questions
-        echo "Note: Using spec interview config from mega-plan: ${SPEC_MODE}"
+# Resolve TDD_MODE with source tracking
+If TDD_MODE is set from command-line:
+    TDD_MODE_SOURCE="[CLI] --tdd ${TDD_MODE}"
+    echo "Note: Using TDD mode from command-line: ${TDD_MODE}"
+Elif mega_plan has "tdd_config" field:
+    TDD_MODE = mega_plan.tdd_config.mode
+    TDD_MODE_SOURCE="[MEGA] tdd_config.mode"
+    echo "Note: Using TDD mode from mega-plan: ${TDD_MODE}"
+Else:
+    TDD_MODE = "auto"
+    TDD_MODE_SOURCE="[DEFAULT]"
 
-# --no-confirm from command line takes absolute precedence
-If NO_CONFIRM_MODE is true:
+# Resolve SPEC_MODE with source tracking
+If SPEC_MODE is set from command-line:
+    SPEC_MODE_SOURCE="[CLI] --spec ${SPEC_MODE}"
+    echo "Note: Using spec interview config from command-line: ${SPEC_MODE}"
+Elif mega_plan has "spec_config" field:
+    SPEC_MODE = mega_plan.spec_config.mode
+    FIRST_PRINCIPLES = mega_plan.spec_config.first_principles
+    MAX_QUESTIONS = mega_plan.spec_config.max_questions
+    SPEC_MODE_SOURCE="[MEGA] spec_config"
+    echo "Note: Using spec interview config from mega-plan: ${SPEC_MODE}"
+Else:
+    SPEC_MODE = "auto"
+    SPEC_MODE_SOURCE="[DEFAULT]"
+
+# Resolve CONFIRM_MODE with source tracking (complex priority chain)
+If NO_CONFIRM_MODE is true:  # --no-confirm from command line takes absolute precedence
     CONFIRM_MODE = false
+    CONFIRM_SOURCE="[CLI] --no-confirm (overrides all)"
     echo "Note: Batch confirmation DISABLED by --no-confirm flag"
-# If user explicitly requested --confirm, respect it (do not override from mega-plan)
-Elif CONFIRM_EXPLICIT is true:
+Elif CONFIRM_EXPLICIT is true:  # --confirm from command line
     CONFIRM_MODE = true
+    CONFIRM_SOURCE="[CLI] --confirm"
     echo "Note: Batch confirmation enabled by --confirm flag"
-# Check if mega-plan has no_confirm_override (from mega-plan --no-confirm)
 Elif mega_plan has "execution_config" and execution_config.no_confirm_override == true:
     CONFIRM_MODE = false
-    NO_CONFIRM_MODE = true  # Mark as explicitly disabled
+    NO_CONFIRM_MODE = true
+    CONFIRM_SOURCE="[MEGA] execution_config.no_confirm_override"
     echo "Note: Batch confirmation DISABLED by mega-plan config"
-# Check if mega-plan enables confirmation
 Elif mega_plan has "execution_config" and execution_config.require_batch_confirm == true:
     CONFIRM_MODE = true
+    CONFIRM_SOURCE="[MEGA] execution_config.require_batch_confirm"
     echo "Note: Batch confirmation enabled by mega-plan config"
-# Default confirmations in FULL flow (after flow config is resolved)
-Elif FLOW_LEVEL == "full":
+Elif FLOW_LEVEL == "full":  # FULL flow default (after flow config is resolved)
     CONFIRM_MODE = true
+    CONFIRM_SOURCE="[DEFAULT] FULL flow default"
     echo "Note: Batch confirmation enabled by FULL flow default"
+Else:
+    CONFIRM_MODE = false
+    CONFIRM_SOURCE="[DEFAULT]"
 ```
 
 ### 2.0.2: Build Parameter String for Feature Execution
 
-**CRITICAL**: Build parameter string to pass to hybrid-auto/approve for each feature.
+**CRITICAL**: Build parameter string to pass to PRD generation and story execution agents for each feature.
+
+**IMPORTANT**: Spec interview parameters (--spec, --first-principles, --max-questions) are NOT included in FEATURE_PARAMS because:
+1. Spec interview is executed in the orchestrator (Step 6.0) BEFORE feature agents are launched
+2. Feature agents receive PRDs that are already compiled from spec.json
+3. Including these parameters would cause feature agents to attempt duplicate spec interviews
+4. Spec interview parameters are recorded in SPEC_MODE, FIRST_PRINCIPLES, MAX_QUESTIONS variables for orchestrator use
 
 ```
 FEATURE_PARAMS = ""
@@ -367,13 +456,9 @@ If FLOW_LEVEL is set:
 If TDD_MODE is set:
     FEATURE_PARAMS = FEATURE_PARAMS + " --tdd " + TDD_MODE
 
-# Spec interview flags (orchestrator-only; will be executed in mega-approve before launching feature agents)
-If SPEC_MODE is set:
-    FEATURE_PARAMS = FEATURE_PARAMS + " --spec " + SPEC_MODE
-If FIRST_PRINCIPLES is true:
-    FEATURE_PARAMS = FEATURE_PARAMS + " --first-principles"
-If MAX_QUESTIONS is set:
-    FEATURE_PARAMS = FEATURE_PARAMS + " --max-questions " + MAX_QUESTIONS
+# NOTE: Spec interview parameters are NOT propagated to feature agents
+# They are used only in Step 6.0 (orchestrator-level spec interview)
+# The variables SPEC_MODE, FIRST_PRINCIPLES, MAX_QUESTIONS are preserved for orchestrator use
 
 # --no-confirm takes precedence over --confirm
 If NO_CONFIRM_MODE is true:
@@ -385,6 +470,12 @@ Elif CONFIRM_MODE is true:
 FEATURE_PARAMS = trim(FEATURE_PARAMS)
 
 echo "Feature execution parameters: ${FEATURE_PARAMS}"
+echo ""
+echo "Orchestrator-only parameters (not propagated to features):"
+echo "  Spec Mode: ${SPEC_MODE:-"none"}"
+echo "  First Principles: ${FIRST_PRINCIPLES}"
+echo "  Max Questions: ${MAX_QUESTIONS:-"none"}"
+echo ""
 ```
 
 ### 2.1: Load Agent Configuration
@@ -604,15 +695,50 @@ Create in each worktree:
 
 ### 6.0: Optional Spec Interview (Orchestrator-only)
 
+**CRITICAL**: Spec interview runs in the orchestrator (THIS command) BEFORE launching feature agents.
+
 If spec interview is enabled (`SPEC_MODE == on` OR `SPEC_MODE == auto` and `FLOW_LEVEL == full`):
 
-1. **Do NOT launch PRD generation sub-agents** (they must remain non-interactive)
-2. For each feature in the batch, in the **main orchestrator**:
-   - `cd` into the feature worktree
-   - Run `/plan-cascade:spec-plan "<feature description>" --flow <FLOW_LEVEL> --feature-slug <feature-name> --max-questions <N> [--first-principles] --compile --tdd <TDD_MODE> [--confirm|--no-confirm]`
-3. After all features have compiled `prd.json`, proceed to the next step (PRD approvals / execution) using the compiled PRDs
+1. **Do NOT launch PRD generation sub-agents yet** (they must remain non-interactive)
+2. For each feature in the batch, in the **main orchestrator** (current command context):
+   ```bash
+   # Build spec-plan command with orchestrator-only parameters
+   SPEC_CMD="/plan-cascade:spec-plan \"<feature description>\""
+   SPEC_CMD="${SPEC_CMD} --flow ${FLOW_LEVEL}"
+   SPEC_CMD="${SPEC_CMD} --feature-slug <feature-name>"
+   SPEC_CMD="${SPEC_CMD} --compile"  # CRITICAL: Compile to prd.json
 
-Rationale: All interactive questions must happen in the orchestrator to avoid Mega deadlocks and preserve parallel sub-agent execution.
+   # Add TDD mode from orchestrator config
+   If TDD_MODE is set:
+       SPEC_CMD="${SPEC_CMD} --tdd ${TDD_MODE}"
+
+   # Add confirm mode from orchestrator config
+   If NO_CONFIRM_MODE is true:
+       SPEC_CMD="${SPEC_CMD} --no-confirm"
+   Elif CONFIRM_MODE is true:
+       SPEC_CMD="${SPEC_CMD} --confirm"
+
+   # Add first-principles flag (orchestrator-only parameter)
+   If FIRST_PRINCIPLES is true:
+       SPEC_CMD="${SPEC_CMD} --first-principles"
+
+   # Add max-questions limit (orchestrator-only parameter)
+   If MAX_QUESTIONS is set:
+       SPEC_CMD="${SPEC_CMD} --max-questions ${MAX_QUESTIONS}"
+
+   # Navigate to feature worktree and run spec interview
+   cd "<worktree-path>"
+   ${SPEC_CMD}
+   cd -  # Return to project root
+   ```
+
+3. After all features have compiled `prd.json` via spec-plan, **SKIP Step 6.1-6.4** (PRD generation agents) and proceed directly to Step 7 (story execution) using the compiled PRDs
+
+**Rationale**:
+- All interactive questions must happen in the orchestrator to avoid deadlocks
+- Feature PRD agents cannot ask questions (they run with `run_in_background=true`)
+- Spec interview parameters (--spec, --first-principles, --max-questions) are orchestrator-only
+- Compiled PRDs already contain flow/tdd configuration from spec interview
 
 **CRITICAL**: Launch Task agents IN PARALLEL for ALL features in the batch.
 
