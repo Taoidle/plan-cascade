@@ -124,6 +124,8 @@ FLOW_LEVEL=""           # --flow <quick|standard|full>
 TDD_MODE=""             # --tdd <off|on|auto>
 CONFIRM_MODE=false      # --confirm
 NO_CONFIRM_MODE=false   # --no-confirm
+CONFIRM_EXPLICIT=false  # set when --confirm is provided
+NO_CONFIRM_EXPLICIT=false  # set when --no-confirm is provided
 SPEC_MODE=""            # --spec <off|auto|on>
 FIRST_PRINCIPLES=false  # --first-principles
 MAX_QUESTIONS=""        # --max-questions N
@@ -143,8 +145,8 @@ for arg in $ARGUMENTS; do
         --flow) NEXT_IS_FLOW=true ;;
         --tdd=*) TDD_MODE="${arg#*=}" ;;
         --tdd) NEXT_IS_TDD=true ;;
-        --confirm) CONFIRM_MODE=true ;;
-        --no-confirm) NO_CONFIRM_MODE=true ;;
+        --confirm) CONFIRM_MODE=true; CONFIRM_EXPLICIT=true ;;
+        --no-confirm) NO_CONFIRM_MODE=true; NO_CONFIRM_EXPLICIT=true ;;
         --spec=*) SPEC_MODE="${arg#*=}" ;;
         --spec) NEXT_IS_SPEC=true ;;
         --first-principles) FIRST_PRINCIPLES=true ;;
@@ -182,6 +184,13 @@ for arg in $ARGUMENTS; do
             ;;
     esac
 done
+
+# --no-confirm takes precedence
+If NO_CONFIRM_MODE is true:
+    CONFIRM_MODE = false
+Elif FLOW_LEVEL == "full" AND CONFIRM_EXPLICIT is false:
+    # Default confirmations in FULL flow
+    CONFIRM_MODE = true
 
 # Default task name if not provided
 if [ -z "$TASK_NAME" ]; then

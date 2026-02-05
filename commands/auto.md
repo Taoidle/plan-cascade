@@ -234,7 +234,17 @@ Parse the arguments:
 
 **Note**: If both `--confirm` and `--no-confirm` are specified, `--no-confirm` takes precedence.
 
-If no description provided, ask the user:
+If no description provided:
+
+1. **DO NOT** analyze or create a new plan.
+2. Check whether there is an existing execution state (any of: `prd.json`, `mega-plan.json`, `.worktree/`, `.hybrid-execution-context.md`, `.mega-execution-context.md`).
+3. If state exists, suggest resuming instead:
+   - `/plan-cascade:resume` (recommended)
+4. Otherwise, ask the user for a task description.
+
+Always STOP after showing the guidance.
+
+Ask the user:
 ```
 Please provide a task description. What do you want to accomplish?
 Example: "Fix the login button styling" or "Build a user authentication system"

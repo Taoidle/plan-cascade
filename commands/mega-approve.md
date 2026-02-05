@@ -199,6 +199,8 @@ FLOW_LEVEL=""           # --flow <quick|standard|full>
 TDD_MODE=""             # --tdd <off|on|auto>
 CONFIRM_MODE=false      # --confirm
 NO_CONFIRM_MODE=false   # --no-confirm
+CONFIRM_EXPLICIT=false  # set when --confirm is provided
+NO_CONFIRM_EXPLICIT=false  # set when --no-confirm is provided
 
 # Spec interview parameters (orchestrator-only)
 SPEC_MODE=""            # --spec <off|auto|on>
@@ -227,8 +229,8 @@ for arg in $ARGUMENTS; do
         --flow) NEXT_IS_FLOW=true ;;
         --tdd=*) TDD_MODE="${arg#*=}" ;;
         --tdd) NEXT_IS_TDD=true ;;
-        --confirm) CONFIRM_MODE=true ;;
-        --no-confirm) NO_CONFIRM_MODE=true ;;
+        --confirm) CONFIRM_MODE=true; CONFIRM_EXPLICIT=true ;;
+        --no-confirm) NO_CONFIRM_MODE=true; NO_CONFIRM_EXPLICIT=true ;;
         # Spec interview flags
         --spec=*) SPEC_MODE="${arg#*=}" ;;
         --spec) NEXT_IS_SPEC=true ;;
@@ -333,16 +335,23 @@ If SPEC_MODE is empty:
 If NO_CONFIRM_MODE is true:
     CONFIRM_MODE = false
     echo "Note: Batch confirmation DISABLED by --no-confirm flag"
+# If user explicitly requested --confirm, respect it (do not override from mega-plan)
+Elif CONFIRM_EXPLICIT is true:
+    CONFIRM_MODE = true
+    echo "Note: Batch confirmation enabled by --confirm flag"
 # Check if mega-plan has no_confirm_override (from mega-plan --no-confirm)
 Elif mega_plan has "execution_config" and execution_config.no_confirm_override == true:
     CONFIRM_MODE = false
     NO_CONFIRM_MODE = true  # Mark as explicitly disabled
     echo "Note: Batch confirmation DISABLED by mega-plan config"
 # Check if mega-plan enables confirmation
-Elif CONFIRM_MODE is false:
-    If mega_plan has "execution_config" and execution_config.require_batch_confirm == true:
-        CONFIRM_MODE = true
-        echo "Note: Batch confirmation enabled by mega-plan config"
+Elif mega_plan has "execution_config" and execution_config.require_batch_confirm == true:
+    CONFIRM_MODE = true
+    echo "Note: Batch confirmation enabled by mega-plan config"
+# Default confirmations in FULL flow (after flow config is resolved)
+Elif FLOW_LEVEL == "full":
+    CONFIRM_MODE = true
+    echo "Note: Batch confirmation enabled by FULL flow default"
 ```
 
 ### 2.0.2: Build Parameter String for Feature Execution

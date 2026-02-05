@@ -201,6 +201,8 @@ FLOW_LEVEL=""           # --flow <quick|standard|full>
 TDD_MODE=""             # --tdd <off|on|auto>
 CONFIRM_MODE=false      # --confirm
 NO_CONFIRM_MODE=false   # --no-confirm (overrides --confirm and FULL flow default)
+CONFIRM_EXPLICIT=false  # set when --confirm is provided
+NO_CONFIRM_EXPLICIT=false  # set when --no-confirm is provided
 
 # Quality gate defaults (may be overridden by flow level)
 ENABLE_VERIFY=true      # Default: enabled
@@ -224,8 +226,8 @@ for arg in $ARGUMENTS; do
         --flow) NEXT_IS_FLOW=true ;;
         --tdd=*) TDD_MODE="${arg#*=}" ;;
         --tdd) NEXT_IS_TDD=true ;;
-        --confirm) CONFIRM_MODE=true ;;
-        --no-confirm) NO_CONFIRM_MODE=true ;;
+        --confirm) CONFIRM_MODE=true; CONFIRM_EXPLICIT=true ;;
+        --no-confirm) NO_CONFIRM_MODE=true; NO_CONFIRM_EXPLICIT=true ;;
         # Agent flags
         --agent=*) GLOBAL_AGENT="${arg#*=}" ;;
         --agent) NEXT_IS_AGENT=true ;;
@@ -295,7 +297,7 @@ Elif FLOW_LEVEL == "full":
     If NO_CONFIRM_MODE is true:
         CONFIRM_MODE = false    # Explicitly disabled
         echo "Flow Level: FULL - Strict gating (batch confirm DISABLED by --no-confirm)"
-    Elif CONFIRM_MODE is not explicitly set:
+    Elif CONFIRM_EXPLICIT is false:
         CONFIRM_MODE = true     # Default to confirm for full flow
         echo "Flow Level: FULL - Strict gating, all quality checks required"
     Else:
@@ -478,7 +480,7 @@ If FLOW_LEVEL is empty AND prd has "flow_config" field:
         ENABLE_REVIEW = true
         REQUIRE_REVIEW = true
         ENFORCE_TEST_CHANGES = true
-        If CONFIRM_MODE is not explicitly set:
+        If NO_CONFIRM_MODE is false AND CONFIRM_EXPLICIT is false:
             CONFIRM_MODE = true
     Elif prd_flow == "standard":
         GATE_MODE = "soft"
@@ -498,6 +500,10 @@ If TDD_MODE is empty AND prd has "tdd_config" field:
 If NO_CONFIRM_MODE is true:
     CONFIRM_MODE = false
     echo "Note: Batch confirmation DISABLED by --no-confirm flag"
+# If user explicitly requested --confirm, respect it (do not override from PRD)
+Elif CONFIRM_EXPLICIT is true:
+    CONFIRM_MODE = true
+    echo "Note: Batch confirmation enabled by --confirm flag"
 # Check if PRD has no_confirm_override (from hybrid-auto --no-confirm)
 Elif prd has "execution_config" AND prd.execution_config.no_confirm_override == true:
     CONFIRM_MODE = false
