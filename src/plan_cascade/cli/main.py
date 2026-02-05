@@ -1821,6 +1821,387 @@ if HAS_TYPER:
         output.print(f"Plan Cascade v{ver}")
         output.print("[dim]AI-driven development made simple[/dim]")
 
+    @app.command(name="check-gitignore")
+    def check_gitignore(
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path to check"),
+        update: bool = typer.Option(False, "--update", help="Add missing Plan Cascade entries to .gitignore"),
+        dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be changed without modifying files"),
+    ):
+        """
+        Check and update .gitignore for Plan Cascade files.
+
+        Validates that the project's .gitignore contains entries to exclude
+        Plan Cascade temporary files from version control.
+
+        Examples:
+            plan-cascade check-gitignore
+            plan-cascade check-gitignore --update
+            plan-cascade check-gitignore --dry-run
+            plan-cascade check-gitignore --project ./my-project --update
+        """
+        from ..utils.gitignore import GitignoreManager
+
+        project = Path(project_path) if project_path else Path.cwd()
+        manager = GitignoreManager(project)
+
+        # Check current status
+        check_result = manager.check()
+
+        # Display status header
+        output.print_header("Gitignore Status", f"Project: {project}")
+
+        if not check_result.gitignore_exists:
+            output.print_warning(f".gitignore not found at {check_result.gitignore_path}")
+        else:
+            output.print_info(f".gitignore found at {check_result.gitignore_path}")
+
+        # Show Plan Cascade section status
+        if check_result.has_plan_cascade_section:
+            output.print_success("Plan Cascade section is present")
+        else:
+            output.print_warning("Plan Cascade section is missing")
+
+        # Show missing entries if any
+        if check_result.missing_entries:
+            output.print()
+            output.print(f"[bold]Missing entries ({len(check_result.missing_entries)}):[/bold]")
+            for entry in check_result.missing_entries:
+                output.print(f"  [dim]-[/dim] {entry}")
+
+        # Handle dry-run mode (takes precedence over update)
+        if dry_run:
+            output.print()
+            if check_result.needs_update:
+                update_result = manager.update(dry_run=True)
+                output.print_info(f"[Dry run] {update_result.message}")
+                if update_result.entries_added:
+                    output.print("[dim]Entries that would be added:[/dim]")
+                    for entry in update_result.entries_added:
+                        output.print(f"  [green]+[/green] {entry}")
+            else:
+                output.print_info("[Dry run] No changes needed - .gitignore is already configured")
+            return
+
+        # Handle update mode
+        if update:
+            output.print()
+            if check_result.needs_update:
+                update_result = manager.update()
+                if update_result.success:
+                    if update_result.action == "created":
+                        output.print_success("Created .gitignore with Plan Cascade entries")
+                    elif update_result.action == "updated":
+                        output.print_success(f"Updated .gitignore - added {len(update_result.entries_added)} entries")
+                else:
+                    output.print_error(f"Failed to update: {update_result.message}")
+            else:
+                output.print_info("Skipped - .gitignore is already properly configured")
+            return
+
+        # Status-only mode: show summary
+        output.print()
+        if check_result.needs_update:
+            output.print_warning("Run with --update to add missing entries, or --dry-run to preview changes")
+        else:
+            output.print_success(".gitignore is properly configured for Plan Cascade")
+
+    # ==================== Start Command (planning-with-files) ====================
+
+    @app.command()
+    def start(
+        description: str = typer.Argument(
+            None,
+            help="Task description for the planning session"
+        ),
+        output_dir: str | None = typer.Option(
+            None,
+            "--output-dir", "-o",
+            help="Directory for planning files (defaults to current directory)"
+        ),
+        resume: bool = typer.Option(
+            False,
+            "--resume", "-r",
+            help="Resume an existing planning session instead of starting fresh"
+        ),
+        force: bool = typer.Option(
+            False,
+            "--force", "-f",
+            help="Force overwrite existing planning files without prompting"
+        ),
+    ):
+        """
+        Initialize a planning-with-files session for Manus-style file-based planning.
+
+        Creates task_plan.md, findings.md, and progress.md files to track
+        complex multi-step tasks with persistent working memory.
+
+        The planning-with-files workflow uses these files as "working memory on disk"
+        to maintain context across tool calls and sessions.
+
+        Examples:
+            plan-cascade start "Implement REST API with authentication"
+            plan-cascade start "Build data pipeline" --output-dir ./planning
+            plan-cascade start --resume                     # Resume existing session
+            plan-cascade start "New task" --force           # Overwrite existing files
+        """
+        from datetime import datetime
+
+        target_dir = Path(output_dir) if output_dir else Path.cwd()
+
+        # Create output directory if it doesn't exist
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check for existing planning files
+        task_plan_path = target_dir / "task_plan.md"
+        findings_path = target_dir / "findings.md"
+        progress_path = target_dir / "progress.md"
+
+        existing_files = []
+        if task_plan_path.exists():
+            existing_files.append("task_plan.md")
+        if findings_path.exists():
+            existing_files.append("findings.md")
+        if progress_path.exists():
+            existing_files.append("progress.md")
+
+        # Handle resume mode
+        if resume:
+            if not existing_files:
+                output.print_error("No existing planning session found.")
+                output.print_info(f"Directory: {target_dir}")
+                output.print()
+                output.print("[dim]Start a new session with: plan-cascade start '<description>'[/dim]")
+                raise typer.Exit(1)
+
+            # Show current session state
+            output.print_header("Planning Session Resumed", f"Directory: {target_dir}")
+            output.print()
+
+            if task_plan_path.exists():
+                content = task_plan_path.read_text()
+                # Extract task name from first header
+                import re
+                match = re.search(r"#\s*Task Plan:\s*(.+)", content)
+                task_name = match.group(1).strip() if match else "Unknown task"
+                output.print_info(f"Task: {task_name}")
+
+                # Extract current phase
+                phase_match = re.search(r"##\s*Current Phase\s*\n+(.+)", content)
+                if phase_match:
+                    output.print_info(f"Current Phase: {phase_match.group(1).strip()}")
+
+            output.print()
+            output.print("[bold]Planning Files:[/bold]")
+            for fname in existing_files:
+                output.print(f"  [green]v[/green] {fname}")
+
+            output.print()
+            output.print("[bold]Next Steps:[/bold]")
+            output.print("  1. Read task_plan.md to review current phase")
+            output.print("  2. Continue executing the plan")
+            output.print("  3. Update progress.md as you complete tasks")
+            return
+
+        # Handle existing files (non-resume mode)
+        if existing_files and not force:
+            output.print_warning(f"Existing planning files found in {target_dir}:")
+            for fname in existing_files:
+                output.print(f"  - {fname}")
+            output.print()
+
+            # Prompt user for action
+            overwrite = Confirm.ask(
+                "Overwrite existing files and start fresh?",
+                default=False
+            )
+
+            if not overwrite:
+                output.print()
+                output.print_info("To resume the existing session:")
+                output.print("  [cyan]plan-cascade start --resume[/cyan]")
+                output.print()
+                output.print_info("To force overwrite:")
+                output.print("  [cyan]plan-cascade start '<description>' --force[/cyan]")
+                return
+
+        # Validate description for new sessions
+        if not description or not description.strip():
+            output.print_error("A task description is required to start a new planning session.")
+            output.print()
+            output.print("[dim]Usage: plan-cascade start '<description>'[/dim]")
+            output.print("[dim]Example: plan-cascade start 'Build a REST API with authentication'[/dim]")
+            raise typer.Exit(1)
+
+        # Generate planning files
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        # Create task_plan.md
+        task_plan_content = f"""# Task Plan: {description}
+
+## Goal
+{description}
+
+## Current Phase
+Phase 1
+
+## Phases
+
+### Phase 1: Requirements & Discovery
+- [ ] Understand user intent
+- [ ] Identify constraints and requirements
+- [ ] Document findings in findings.md
+- **Status:** in_progress
+
+### Phase 2: Planning & Structure
+- [ ] Define technical approach
+- [ ] Create project structure if needed
+- [ ] Document decisions with rationale
+- **Status:** pending
+
+### Phase 3: Implementation
+- [ ] Execute the plan step by step
+- [ ] Write code to files before executing
+- [ ] Test incrementally
+- **Status:** pending
+
+### Phase 4: Testing & Verification
+- [ ] Verify all requirements met
+- [ ] Document test results in progress.md
+- [ ] Fix any issues found
+- **Status:** pending
+
+### Phase 5: Delivery
+- [ ] Review all output files
+- [ ] Ensure deliverables are complete
+- [ ] Deliver to user
+- **Status:** pending
+
+## Key Questions
+1. [Question to answer]
+2. [Question to answer]
+
+## Decisions Made
+| Decision | Rationale |
+|----------|-----------|
+|          |           |
+
+## Errors Encountered
+| Error | Attempt | Resolution |
+|-------|---------|------------|
+|       | 1       |            |
+
+## Notes
+- Update phase status as you progress: pending -> in_progress -> complete
+- Re-read this plan before major decisions (attention manipulation)
+- Log ALL errors - they help avoid repetition
+"""
+
+        # Create findings.md
+        findings_content = f"""# Findings & Decisions
+
+## Requirements
+<!-- Captured from user request -->
+- {description}
+
+## Research Findings
+<!-- Key discoveries during exploration -->
+-
+
+## Technical Decisions
+<!-- Decisions made with rationale -->
+| Decision | Rationale |
+|----------|-----------|
+|          |           |
+
+## Issues Encountered
+<!-- Errors and how they were resolved -->
+| Issue | Resolution |
+|-------|------------|
+|       |            |
+
+## Resources
+<!-- URLs, file paths, API references -->
+-
+
+## Visual/Browser Findings
+<!-- CRITICAL: Update after every 2 view/browser operations -->
+<!-- Multimodal content must be captured as text immediately -->
+-
+
+---
+*Update this file after every 2 view/browser/search operations*
+*This prevents visual information from being lost*
+"""
+
+        # Create progress.md
+        progress_content = f"""# Progress Log
+
+## Session: {date_str}
+
+### Phase 1: Requirements & Discovery
+- **Status:** in_progress
+- **Started:** {timestamp}
+- Actions taken:
+  -
+- Files created/modified:
+  -
+
+### Phase 2: Planning & Structure
+- **Status:** pending
+- Actions taken:
+  -
+- Files created/modified:
+  -
+
+## Test Results
+| Test | Input | Expected | Actual | Status |
+|------|-------|----------|--------|--------|
+|      |       |          |        |        |
+
+## Error Log
+<!-- Keep ALL errors - they help avoid repetition -->
+| Timestamp | Error | Attempt | Resolution |
+|-----------|-------|---------|------------|
+|           |       | 1       |            |
+
+## 5-Question Reboot Check
+<!-- If you can answer these, context is solid -->
+| Question | Answer |
+|----------|--------|
+| Where am I? | Phase 1 - Requirements & Discovery |
+| Where am I going? | Phases 2-5 |
+| What's the goal? | {description} |
+| What have I learned? | See findings.md |
+| What have I done? | See above |
+
+---
+*Update after completing each phase or encountering errors*
+"""
+
+        # Write files
+        task_plan_path.write_text(task_plan_content, encoding="utf-8")
+        findings_path.write_text(findings_content, encoding="utf-8")
+        progress_path.write_text(progress_content, encoding="utf-8")
+
+        # Success output
+        output.print_header("Planning Session Initialized", f"Directory: {target_dir}")
+        output.print()
+        output.print_success(f"Task: {description}")
+        output.print()
+        output.print("[bold]Created Files:[/bold]")
+        output.print(f"  [green]v[/green] task_plan.md - Phase tracking and decisions")
+        output.print(f"  [green]v[/green] findings.md  - Research and discoveries")
+        output.print(f"  [green]v[/green] progress.md  - Session log and test results")
+        output.print()
+        output.print("[bold]Next Steps:[/bold]")
+        output.print("  1. Read task_plan.md to understand the phases")
+        output.print("  2. Begin Phase 1: Requirements & Discovery")
+        output.print("  3. Document findings in findings.md")
+        output.print("  4. Update phase status as you progress")
+        output.print()
+        output.print("[dim]Tip: Re-read task_plan.md before major decisions to keep goals in focus[/dim]")
+
     @app.command()
     def chat(
         project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
@@ -2703,6 +3084,492 @@ if HAS_TYPER:
 
             output.print()
             output.print_info("Run [cyan]plan-cascade auto-run[/cyan] to continue")
+
+    # ==================== Hybrid-Manual Command ====================
+
+    @app.command(name="hybrid-manual")
+    def hybrid_manual(
+        ctx: typer.Context,
+        prd_path: str = typer.Argument(
+            "prd.json",
+            help="Path to PRD file to load (defaults to prd.json)",
+        ),
+        project_path: str | None = typer.Option(
+            None,
+            "--project", "-p",
+            help="Project path (defaults to current directory)",
+        ),
+    ):
+        """
+        Load an existing PRD file and enter review mode.
+
+        Loads a Product Requirements Document (PRD) from a file, validates its
+        structure, and displays a comprehensive review with execution batches.
+
+        The PRD must have:
+        - metadata.description
+        - goal
+        - stories array with id, title, description, priority, dependencies, acceptance_criteria
+
+        Examples:
+            plan-cascade hybrid-manual
+            plan-cascade hybrid-manual ./custom_prd.json
+            plan-cascade hybrid-manual prds/feature.json --project /path/to/project
+        """
+        import json
+        import shutil
+        from .context import get_cli_context
+
+        project = Path(project_path) if project_path else Path.cwd()
+        prd_file = Path(prd_path)
+
+        # Get CLI context and configure PathResolver
+        cli_ctx = get_cli_context(ctx)
+        if project_path:
+            cli_ctx = CLIContext.from_options(
+                legacy_mode=cli_ctx.legacy_mode,
+                project_root=project,
+            )
+        path_resolver = cli_ctx.get_path_resolver()
+
+        # Print header
+        output.print_header(
+            f"Plan Cascade v{__version__} - Hybrid Manual",
+            f"Project: {project}"
+        )
+
+        # Step 1: Verify PRD exists
+        if not prd_file.is_absolute():
+            # Check relative to current dir first, then project dir
+            if not prd_file.exists():
+                prd_file = project / prd_path
+
+        if not prd_file.exists():
+            output.print_error(f"PRD file not found: {prd_path}")
+            output.print_info("Please provide a valid path to a prd.json file")
+            raise typer.Exit(1)
+
+        # Step 2: Read and validate PRD
+        try:
+            with open(prd_file, encoding="utf-8") as f:
+                prd = json.load(f)
+        except json.JSONDecodeError as e:
+            output.print_error(f"Invalid JSON in PRD file: {e}")
+            raise typer.Exit(1)
+
+        # Validate PRD structure
+        validation_errors = _validate_prd_structure(prd)
+        if validation_errors:
+            output.print_error("PRD validation failed:")
+            for error in validation_errors:
+                output.print(f"  [red]-[/red] {error}")
+            output.print()
+            output.print_info("Please fix the PRD file and try again.")
+            raise typer.Exit(1)
+
+        output.print_success(f"PRD loaded from {prd_file}")
+
+        # Step 3: Copy PRD to current directory if needed
+        target_prd_path = project / "prd.json"
+        if prd_file.resolve() != target_prd_path.resolve():
+            shutil.copy(prd_file, target_prd_path)
+            output.print_info(f"Copied PRD to {target_prd_path}")
+
+        # Step 4: Initialize supporting files
+        _init_supporting_files(project)
+
+        # Step 5: Display PRD review
+        output.print()
+        _display_prd_review(prd, output, console)
+
+        # Step 6: Analyze and display execution batches
+        output.print()
+        batches, issues = _analyze_story_dependencies(prd)
+        _display_execution_batches(batches, issues, output, console)
+
+        # Step 7: Show next steps
+        output.print()
+        output.print_success("PRD loaded successfully!")
+        output.print()
+        output.print_info("Next steps:")
+        output.print("  - [cyan]plan-cascade auto-run[/cyan] - Approve PRD and start execution")
+        output.print("  - [cyan]plan-cascade deps[/cyan] - View dependency graph")
+        output.print("  - [cyan]plan-cascade status[/cyan] - View current status")
+
+    def _validate_prd_structure(prd: dict) -> list[str]:
+        """
+        Validate PRD structure and return list of errors.
+
+        Required fields:
+        - metadata.description
+        - goal
+        - stories array
+        Each story must have: id, title, description, priority, dependencies, acceptance_criteria
+        """
+        errors = []
+
+        # Check metadata.description
+        if "metadata" not in prd:
+            errors.append("Missing 'metadata' field")
+        elif not isinstance(prd["metadata"], dict):
+            errors.append("'metadata' must be an object")
+        elif "description" not in prd["metadata"]:
+            errors.append("Missing 'metadata.description' field")
+
+        # Check goal
+        if "goal" not in prd:
+            errors.append("Missing 'goal' field")
+
+        # Check stories array
+        if "stories" not in prd:
+            errors.append("Missing 'stories' array")
+        elif not isinstance(prd["stories"], list):
+            errors.append("'stories' must be an array")
+        else:
+            story_ids = set()
+            required_story_fields = ["id", "title", "description", "priority", "dependencies", "acceptance_criteria"]
+
+            for i, story in enumerate(prd["stories"]):
+                if not isinstance(story, dict):
+                    errors.append(f"Story {i} must be an object")
+                    continue
+
+                story_id = story.get("id", f"story at index {i}")
+
+                for field in required_story_fields:
+                    if field not in story:
+                        errors.append(f"Story '{story_id}' missing '{field}' field")
+
+                # Track story IDs for dependency validation
+                if "id" in story:
+                    story_ids.add(story["id"])
+
+            # Validate dependency references
+            for story in prd.get("stories", []):
+                if not isinstance(story, dict):
+                    continue
+                story_id = story.get("id", "unknown")
+                for dep_id in story.get("dependencies", []):
+                    if dep_id not in story_ids:
+                        errors.append(f"Story '{story_id}' has invalid dependency '{dep_id}' (not found)")
+
+        return errors
+
+    def _init_supporting_files(project: Path) -> None:
+        """Initialize supporting files if they don't exist."""
+        # Create findings.md if it doesn't exist
+        findings_path = project / "findings.md"
+        if not findings_path.exists():
+            findings_path.write_text(
+                "# Findings\n\n"
+                "Research and discovery notes will be accumulated here.\n\n"
+                "Use <!-- @tags: story-id --> to tag sections for specific stories.\n"
+            )
+
+        # Create progress.txt if it doesn't exist
+        progress_path = project / "progress.txt"
+        if not progress_path.exists():
+            progress_path.write_text(
+                "# Progress Log\n\n"
+                "Story execution progress will be tracked here.\n"
+            )
+
+    def _display_prd_review(prd: dict, output, console) -> None:
+        """Display comprehensive PRD review."""
+        from rich.panel import Panel
+        from rich.table import Table
+
+        # Header panel with goal
+        goal = prd.get("goal", "No goal specified")
+        description = prd.get("metadata", {}).get("description", "")
+
+        header_content = f"[bold]{goal}[/bold]"
+        if description:
+            header_content += f"\n\n[dim]{description}[/dim]"
+
+        console.print(Panel(
+            header_content,
+            title="PRD REVIEW",
+            border_style="blue"
+        ))
+
+        # Objectives
+        objectives = prd.get("objectives", [])
+        if objectives:
+            console.print()
+            console.print("[bold]Objectives[/bold]")
+            for obj in objectives:
+                console.print(f"  - {obj}")
+
+        # Story summary
+        stories = prd.get("stories", [])
+        console.print()
+        console.print("[bold]Stories Summary[/bold]")
+        console.print(f"  Total Stories: {len(stories)}")
+
+        # Count by priority
+        priority_counts = {"high": 0, "medium": 0, "low": 0}
+        for story in stories:
+            priority = story.get("priority", "medium").lower()
+            if priority in priority_counts:
+                priority_counts[priority] += 1
+
+        console.print("  By Priority:")
+        console.print(f"    [red]High:[/red] {priority_counts['high']}")
+        console.print(f"    [yellow]Medium:[/yellow] {priority_counts['medium']}")
+        console.print(f"    [dim]Low:[/dim] {priority_counts['low']}")
+
+        # Story details table
+        console.print()
+        console.print("[bold]All Stories[/bold]")
+
+        for story in stories:
+            story_id = story.get("id", "unknown")
+            title = story.get("title", "Untitled")
+            description = story.get("description", "")
+            priority = story.get("priority", "medium")
+            dependencies = story.get("dependencies", [])
+            acceptance_criteria = story.get("acceptance_criteria", [])
+            status = story.get("status", "pending")
+
+            # Priority color
+            priority_color = {"high": "red", "medium": "yellow", "low": "dim"}.get(priority.lower(), "white")
+
+            console.print()
+            console.print(f"  [bold cyan]{story_id}[/bold cyan]: {title} [{priority_color}][{priority.upper()}][/{priority_color}]")
+
+            if description:
+                console.print(f"    [dim]Description:[/dim] {description[:100]}{'...' if len(description) > 100 else ''}")
+
+            deps_str = ", ".join(dependencies) if dependencies else "none"
+            console.print(f"    [dim]Dependencies:[/dim] {deps_str}")
+
+            if acceptance_criteria:
+                console.print(f"    [dim]Acceptance Criteria:[/dim]")
+                for ac in acceptance_criteria[:3]:  # Show first 3
+                    console.print(f"      - {ac}")
+                if len(acceptance_criteria) > 3:
+                    console.print(f"      [dim]... and {len(acceptance_criteria) - 3} more[/dim]")
+
+    def _analyze_story_dependencies(prd: dict) -> tuple[list[list[dict]], list[str]]:
+        """
+        Analyze story dependencies and return execution batches and issues.
+
+        Returns:
+            Tuple of (batches, issues) where:
+            - batches: List of story lists, each batch can run in parallel
+            - issues: List of dependency issues found
+        """
+        stories = prd.get("stories", [])
+        issues = []
+
+        # Build story map
+        story_map = {s["id"]: s for s in stories if "id" in s}
+        story_ids = set(story_map.keys())
+
+        # Check for invalid dependencies
+        for story in stories:
+            story_id = story.get("id", "unknown")
+            for dep_id in story.get("dependencies", []):
+                if dep_id not in story_ids:
+                    issues.append(f"Story '{story_id}' depends on non-existent story '{dep_id}'")
+
+        # Detect circular dependencies
+        cycles = _detect_circular_dependencies(stories)
+        for cycle in cycles:
+            cycle_str = " -> ".join(cycle)
+            issues.append(f"Circular dependency detected: {cycle_str}")
+
+        # Build batches using topological sort
+        batches = []
+        completed = set()
+        remaining = set(story_ids)
+
+        while remaining:
+            # Find stories whose dependencies are all complete
+            ready = []
+            for story_id in remaining:
+                story = story_map[story_id]
+                deps = set(story.get("dependencies", []))
+                if deps.issubset(completed):
+                    ready.append(story)
+
+            if not ready:
+                # No progress possible - circular dependency or all remaining have unmet deps
+                if remaining:
+                    # Add remaining as final batch with warning
+                    issues.append(f"Cannot schedule {len(remaining)} story(ies) - may have circular or unmet dependencies")
+                    batches.append([story_map[sid] for sid in remaining])
+                break
+
+            batches.append(ready)
+            for story in ready:
+                completed.add(story["id"])
+                remaining.discard(story["id"])
+
+        return batches, issues
+
+    def _detect_circular_dependencies(stories: list[dict]) -> list[list[str]]:
+        """Detect circular dependencies using DFS."""
+        cycles = []
+        story_map = {s["id"]: s for s in stories if "id" in s}
+        visited = set()
+        rec_stack = set()
+
+        def dfs(story_id: str, path: list[str]) -> None:
+            visited.add(story_id)
+            rec_stack.add(story_id)
+            path.append(story_id)
+
+            story = story_map.get(story_id)
+            if story:
+                for dep_id in story.get("dependencies", []):
+                    if dep_id not in visited:
+                        dfs(dep_id, path)
+                    elif dep_id in rec_stack:
+                        # Found a cycle
+                        cycle_start = path.index(dep_id)
+                        cycle = path[cycle_start:] + [dep_id]
+                        if cycle not in cycles:
+                            cycles.append(cycle)
+
+            path.pop()
+            rec_stack.remove(story_id)
+
+        for story_id in story_map:
+            if story_id not in visited:
+                dfs(story_id, [])
+
+        return cycles
+
+    def _display_execution_batches(
+        batches: list[list[dict]],
+        issues: list[str],
+        output,
+        console,
+    ) -> None:
+        """Display execution batches and any issues found."""
+        console.print("[bold]Execution Batches[/bold]")
+        console.print()
+
+        if not batches:
+            output.print_warning("No stories to execute")
+            return
+
+        for i, batch in enumerate(batches, 1):
+            story_ids = [s.get("id", "?") for s in batch]
+            parallel_note = " (parallel)" if len(batch) > 1 else ""
+            console.print(f"  [bold]Batch {i}{parallel_note}:[/bold]")
+            for story in batch:
+                story_id = story.get("id", "?")
+                deps = story.get("dependencies", [])
+                if deps:
+                    deps_str = f" [dim](depends on: {', '.join(deps)})[/dim]"
+                else:
+                    deps_str = ""
+                console.print(f"    - {story_id}{deps_str}")
+
+        # Display issues
+        if issues:
+            console.print()
+            console.print("[bold red]Dependency Issues[/bold red]")
+            for issue in issues:
+                if "circular" in issue.lower():
+                    output.print_error(issue)
+                else:
+                    output.print_warning(issue)
+
+    # ==================== Dashboard Command ====================
+
+    @app.command()
+    def dashboard(
+        ctx: typer.Context,
+        verbose: bool = typer.Option(
+            False,
+            "--verbose", "-v",
+            help="Show detailed story and batch breakdown"
+        ),
+        json_output: bool = typer.Option(
+            False,
+            "--json",
+            help="Output status as JSON for programmatic consumption"
+        ),
+        project_path: str | None = typer.Option(
+            None,
+            "--project", "-p",
+            help="Project path (defaults to current directory)"
+        ),
+    ):
+        """
+        Display aggregated execution status for the current Plan Cascade task.
+
+        Shows the current execution status, progress, and recommended next actions
+        for any active Plan Cascade task (MEGA or HYBRID mode).
+
+        The dashboard aggregates information from:
+        - prd.json (HYBRID mode) or mega-plan.json (MEGA mode)
+        - progress.txt for story completion markers
+        - .agent-status.json for running agents
+        - .retry-state.json for failure information
+
+        Examples:
+            plan-cascade dashboard                    # Concise status
+            plan-cascade dashboard --verbose          # Detailed breakdown
+            plan-cascade dashboard --json             # JSON output
+            plan-cascade dashboard -v -p /path/to/project
+        """
+        import json as json_module
+
+        from .context import get_cli_context
+
+        project = Path(project_path) if project_path else Path.cwd()
+
+        # Get CLI context and configure PathResolver for correct project
+        cli_ctx = get_cli_context(ctx)
+        # Update project root if specified via --project
+        if project_path:
+            cli_ctx = CLIContext.from_options(
+                legacy_mode=cli_ctx.legacy_mode,
+                project_root=project,
+            )
+        path_resolver = cli_ctx.get_path_resolver()
+
+        # Import dashboard components
+        try:
+            from ..core.dashboard import (
+                DashboardAggregator,
+                DashboardFormatter,
+                get_dashboard,
+                format_dashboard,
+            )
+        except ImportError as e:
+            output.print_error(f"Dashboard module not available: {e}")
+            raise typer.Exit(1)
+
+        # Create aggregator and get dashboard state
+        aggregator = DashboardAggregator(
+            project_root=project,
+            path_resolver=path_resolver,
+            legacy_mode=cli_ctx.get_resolved_legacy_mode(),
+        )
+        state = aggregator.aggregate()
+
+        # Handle JSON output
+        if json_output:
+            console.print_json(json_module.dumps(state.to_dict(), indent=2))
+            return
+
+        # Format and display dashboard
+        formatter = DashboardFormatter(use_unicode=True)
+
+        if verbose:
+            # Verbose mode: full detailed output
+            formatted = formatter.format_verbose(state)
+            console.print(formatted)
+        else:
+            # Concise mode: single-line summary
+            formatted = formatter.format_concise(state)
+            console.print(formatted)
 
     # ==================== Register Subcommands ====================
 
