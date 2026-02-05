@@ -135,8 +135,9 @@ If user selected "Yes, cleanup":
 MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
 MEGA_STATUS_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
 MEGA_FINDINGS_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_findings_path())" 2>/dev/null || echo "mega-findings.md")
+USER_STATE_DIR=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_state_dir())" 2>/dev/null || echo "")
 
-# Remove mega-plan files
+# Remove mega-plan core files
 rm -f "$MEGA_PLAN_PATH"
 rm -f "$MEGA_FINDINGS_PATH"
 rm -f "$MEGA_STATUS_PATH"
@@ -144,6 +145,45 @@ rm -f "$MEGA_STATUS_PATH"
 echo "[OK] Removed mega-plan.json from: $MEGA_PLAN_PATH"
 echo "[OK] Removed mega-findings.md from: $MEGA_FINDINGS_PATH"
 echo "[OK] Removed .mega-status.json from: $MEGA_STATUS_PATH"
+
+# Remove additional planning files from project root
+echo "Cleaning up additional planning files..."
+
+# Design and spec files
+rm -f design_doc.json spec.json spec.md
+echo "[OK] Removed design_doc.json, spec.json, spec.md"
+
+# Context recovery files
+rm -f .mega-execution-context.md .hybrid-execution-context.md
+echo "[OK] Removed context recovery files"
+
+# Status and state files in project root
+rm -f .agent-status.json .iteration-state.json .retry-state.json
+echo "[OK] Removed status files"
+
+# Agent outputs directory
+rm -rf .agent-outputs
+echo "[OK] Removed .agent-outputs/"
+
+# Locks directory
+rm -rf .locks
+echo "[OK] Removed .locks/"
+
+# State directory in project root (legacy mode)
+rm -rf .state
+echo "[OK] Removed .state/"
+
+# Clean up state files from user data directory (new mode)
+if [ -n "$USER_STATE_DIR" ] && [ -d "$USER_STATE_DIR" ]; then
+    echo "Cleaning up state files from user data directory..."
+    rm -f "$USER_STATE_DIR/.iteration-state.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/.agent-status.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/.retry-state.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/spec-interview.json" 2>/dev/null || true
+    # Remove .state directory if empty
+    rmdir "$USER_STATE_DIR" 2>/dev/null || true
+    echo "[OK] State files cleaned from user data directory"
+fi
 ```
 
 ### 6.2: Cleanup Any Remaining Worktrees
@@ -295,15 +335,36 @@ Switch to it: git checkout <target_branch>
 The following files are in `.gitignore` and should never be committed:
 
 ```
+# Runtime directories
 .worktree/              # Git worktree directories
+.locks/                 # Lock files
+.state/                 # State files directory
+
+# Planning documents
 mega-plan.json          # Mega plan definition
-mega-findings.md        # Shared findings
-.mega-status.json       # Execution status
-.planning-config.json   # Per-worktree config
 prd.json                # PRD files
+design_doc.json         # Design document
+spec.json               # Spec interview output
+spec.md                 # Human-readable spec
+
+# Status and state files
+.mega-status.json       # Mega execution status
+.planning-config.json   # Per-worktree config
+.agent-status.json      # Agent status
+.iteration-state.json   # Iteration state
+.retry-state.json       # Retry state
+
+# Progress tracking
+mega-findings.md        # Shared findings
 findings.md             # Per-feature findings
 progress.txt            # Progress tracking
-.agent-status.json      # Agent status
+
+# Context recovery
+.mega-execution-context.md   # Mega context recovery
+.hybrid-execution-context.md # Hybrid context recovery
+
+# Agent outputs
+.agent-outputs/         # Agent output directory
 ```
 
 These are all planning/execution artifacts that are temporary and should not be part of the codebase.

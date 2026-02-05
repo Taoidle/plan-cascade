@@ -285,16 +285,41 @@ Now that code changes are handled, delete planning files:
 
 ```bash
 echo "Deleting planning files..."
+
+# Core planning files
 for file in task_plan.md findings.md progress.md; do
     if [ -f "$file" ]; then
         rm "$file"
         echo "  Deleted: $file"
     fi
 done
+
+# Config file
 if [ -f ".planning-config.json" ]; then
     rm ".planning-config.json"
     echo "  Deleted: .planning-config.json"
 fi
+
+# State directory (if exists)
+if [ -d ".state" ]; then
+    rm -rf ".state"
+    echo "  Deleted: .state/"
+fi
+
+# Locks directory (if exists)
+if [ -d ".locks" ]; then
+    rm -rf ".locks"
+    echo "  Deleted: .locks/"
+fi
+
+# Clean up state files from user data directory (new mode)
+USER_STATE_DIR=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_state_dir())" 2>/dev/null || echo "")
+if [ -n "$USER_STATE_DIR" ] && [ -d "$USER_STATE_DIR" ]; then
+    echo "Cleaning up state files from user data directory..."
+    rm -rf "$USER_STATE_DIR" 2>/dev/null || true
+    echo "  Cleaned: user state directory"
+fi
+
 echo "✓ Planning files deleted"
 ```
 
@@ -423,7 +448,10 @@ Next:
 
 ## Safety Features
 
-- **Planning files excluded**: task_plan.md, findings.md, progress.md, .planning-config.json are never committed
+- **Planning files excluded**: The following are never committed and are cleaned up:
+  - Planning files: `task_plan.md`, `findings.md`, `progress.md`
+  - Config: `.planning-config.json`
+  - Directories: `.state/`, `.locks/`
 - **Only code changes**: Actual code changes are detected and committed
 - **Auto-commit option**: Automatically commits code with generated message
 - **Stash option**: Can stash changes if needed

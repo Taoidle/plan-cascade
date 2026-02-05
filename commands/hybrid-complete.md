@@ -284,8 +284,21 @@ Now that code changes are handled, delete planning files from both worktree and 
 echo "Deleting planning files..."
 
 # Delete files from current worktree directory
-rm -f prd.json findings.md progress.txt .planning-config.json mega-findings.md .agent-status.json
+# Planning documents
+rm -f prd.json findings.md progress.txt .planning-config.json mega-findings.md
+rm -f design_doc.json spec.json spec.md
+
+# Status and state files
+rm -f .agent-status.json .iteration-state.json .retry-state.json
+
+# Context recovery files
+rm -f .hybrid-execution-context.md .mega-execution-context.md
+
+# Directories
 rm -rf .agent-outputs
+rm -rf .locks
+rm -rf .state
+
 echo "✓ Planning files deleted from worktree"
 
 # Also clean up state files from user data directory (new mode)
@@ -294,6 +307,10 @@ if [ -n "$USER_STATE_DIR" ] && [ -d "$USER_STATE_DIR" ]; then
     echo "Cleaning up state files from user data directory..."
     rm -f "$USER_STATE_DIR/.iteration-state.json" 2>/dev/null || true
     rm -f "$USER_STATE_DIR/.agent-status.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/.retry-state.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/spec-interview.json" 2>/dev/null || true
+    # Remove .state directory if empty
+    rmdir "$USER_STATE_DIR" 2>/dev/null || true
     echo "✓ State files cleaned"
 fi
 ```
@@ -421,14 +438,13 @@ cd .worktree/feature-auth
 
 - **Smart directory detection**: Works from any directory
 - **Auto worktree detection**: Lists all hybrid worktrees for selection
-- **Planning files excluded**: The following files are NEVER committed:
-  - `prd.json` - PRD definition
-  - `findings.md` - Development findings
-  - `progress.txt` - Progress tracking
-  - `.planning-config.json` - Worktree config
-  - `.agent-outputs/` - Agent output directory
-  - `mega-findings.md` - Mega plan shared findings
-  - `.agent-status.json` - Agent status
+- **Planning files excluded**: The following files are NEVER committed and are cleaned up:
+  - Planning documents: `prd.json`, `findings.md`, `progress.txt`, `mega-findings.md`
+  - Design/spec files: `design_doc.json`, `spec.json`, `spec.md`
+  - Config files: `.planning-config.json`
+  - Status files: `.agent-status.json`, `.iteration-state.json`, `.retry-state.json`
+  - Context files: `.hybrid-execution-context.md`, `.mega-execution-context.md`
+  - Directories: `.agent-outputs/`, `.locks/`, `.state/`
 - **Only code changes**: Actual code changes are detected and committed
 - **Auto-commit option**: Automatically commits code with generated message
 - **Stash option**: Can stash changes if needed

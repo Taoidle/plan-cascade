@@ -299,10 +299,11 @@ If TDD_MODE is set:
         "propagate_to_features": true
     }
 
-# Record spec interview configuration for mega-approve (optional)
-If SPEC_MODE is set OR FIRST_PRINCIPLES is true OR MAX_QUESTIONS is set:
+# Record spec interview configuration for mega-approve
+# Always save when FLOW_LEVEL == "full" (spec auto-enables in full flow)
+If SPEC_MODE is set OR FIRST_PRINCIPLES is true OR MAX_QUESTIONS is set OR FLOW_LEVEL == "full":
     mega_plan["spec_config"] = {
-        "mode": (SPEC_MODE or "auto"),  # "off", "auto", or "on"
+        "mode": (SPEC_MODE or "auto"),  # "off", "auto", or "on" (defaults to auto)
         "first_principles": FIRST_PRINCIPLES,
         "max_questions": (MAX_QUESTIONS or 18),
         "propagate_to_features": true

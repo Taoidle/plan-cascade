@@ -304,9 +304,17 @@ echo "PRD Generation Agent: {agent} (type: {agent_type})"
 
 ## Step 1.5: Optional Spec Interview (Shift-left)
 
+Determine effective spec mode (handles empty default):
+```
+If SPEC_MODE is set (non-empty):
+    EFFECTIVE_SPEC_MODE = SPEC_MODE
+Else:
+    EFFECTIVE_SPEC_MODE = "auto"  # Default when not specified
+```
+
 If spec interview is enabled:
-- `SPEC_MODE == on`, OR
-- `SPEC_MODE == auto` (default) AND `FLOW_LEVEL == full`
+- `EFFECTIVE_SPEC_MODE == "on"`, OR
+- `EFFECTIVE_SPEC_MODE == "auto" AND FLOW_LEVEL == "full"`
 
 Then run a spec interview **before** finalizing PRD:
 1. Run `/plan-cascade:spec-plan "$TASK_DESC" --flow <FLOW_LEVEL> [--first-principles] [--max-questions N] --compile --tdd <TDD_MODE> [--confirm|--no-confirm]`
