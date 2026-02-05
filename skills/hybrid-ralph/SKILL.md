@@ -41,15 +41,16 @@ hooks:
             fi
   PostToolUse:
     # Update context file and remind to update findings after significant operations
-    - matcher: "Write|Edit"
+    - matcher: "Write|Edit|Bash|Task"
       hooks:
         - type: command
           command: |
             # Update execution context file
-            if [ -f "prd.json" ]; then
-              if command -v uv &> /dev/null; then
-                uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update 2>/dev/null || true
-              fi
+            # Best-effort: script exits silently if no hybrid context is detected.
+            if command -v uv &> /dev/null; then
+              uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update 2>/dev/null || true
+            elif command -v python &> /dev/null; then
+              python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" update 2>/dev/null || true
             fi
             # Remind about findings
             if [ -f ".current-story" ]; then

@@ -20,10 +20,15 @@ PLANNING_FILES = ['task_plan.md', 'progress.md', 'findings.md']
 
 def get_project_dir(project_path: str) -> Path:
     """Convert project path to Claude's storage path format."""
-    sanitized = project_path.replace('/', '-')
-    if not sanitized.startswith('-'):
-        sanitized = '-' + sanitized
-    sanitized = sanitized.replace('_', '-')
+    try:
+        raw = str(Path(project_path).expanduser().resolve())
+    except Exception:
+        raw = os.path.abspath(project_path)
+
+    # Claude Code project dir names vary by platform/version; this heuristic
+    # matches observed behavior on Windows (e.g. D:\Repo -> D--Repo) and keeps
+    # Unix paths stable (leading "/" becomes leading "-").
+    sanitized = raw.replace(":", "-").replace("\\", "-").replace("/", "-").replace("_", "-")
     return Path.home() / '.claude' / 'projects' / sanitized
 
 

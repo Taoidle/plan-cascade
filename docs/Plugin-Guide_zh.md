@@ -3,7 +3,7 @@
 # Plan Cascade - Claude Code Plugin Guide
 
 **版本**: 4.4.0
-**最后更新**: 2026-02-04
+**最后更新**: 2026-02-05
 
 本文档详细介绍 Plan Cascade 作为 Claude Code 插件的使用方法。
 
@@ -65,7 +65,7 @@ Plan Cascade 可以在 `prd.json` 最终落地前运行一个简短、可恢复�
 
 | 模式 | 行为 |
 |------|------|
-| `--spec auto` | 仅在 `--flow full` 时启用（默认） |
+| `--spec auto` | 仅在 `--flow full` 时启用（在 `/plan-cascade:auto` 中为默认） |
 | `--spec on` | 总是运行访谈 |
 | `--spec off` | 从不运行访谈 |
 
@@ -449,8 +449,8 @@ Plan Cascade 使用三个工作流深度级别来控制门控严格程度：
 | 流程 | 描述 | 门控模式 | AI 验证 | 需要确认 |
 |------|------|----------|---------|----------|
 | `quick` | 最快路径，最小门控 | soft | 禁用 | 否 |
-| `standard` | 平衡速度和质量（默认） | soft | 启用 | 否 |
-| `full` | 严格方法论 + 严格门控 | hard | 启用 + 代码审查 | 是 |
+| `standard` | 平衡速度和质量 | soft | 启用 | 否 |
+| `full` | 严格方法论 + 严格门控（默认） | hard | 启用 + 代码审查 | 是 |
 
 ### 策略选择
 
@@ -465,12 +465,12 @@ Plan Cascade 使用三个工作流深度级别来控制门控严格程度：
 
 | 参数 | 描述 | 示例 |
 |------|------|------|
-| `--flow <quick\|standard\|full>` | 覆盖执行流程深度 | `--flow full` |
-| `--tdd <off\|on\|auto>` | 控制 TDD 模式 | `--tdd on` |
+| `--flow <quick\|standard\|full>` | 覆盖执行流程深度（默认 full） | `--flow full` |
+| `--tdd <off\|on\|auto>` | 控制 TDD 模式（在 `/plan-cascade:auto` 中默认 on） | `--tdd on` |
 | `--spec <off\|auto\|on>` | 规划期 Spec 访谈 | `--spec auto` |
 | `--first-principles` | Spec：先问 first-principles 问题 | `--first-principles` |
 | `--max-questions N` | Spec：访谈长度软上限 | `--max-questions 12` |
-| `--confirm` | 执行前提示确认 | `--confirm` |
+| `--confirm` | 执行前提示确认（Full flow 默认启用） | `--confirm` |
 | `--no-confirm` | 禁用批次确认（即使 Full flow） | `--no-confirm` |
 | `--explain` | 显示分析结果但不执行 | `--explain` |
 | `--json` | `--explain` 的 JSON 输出 | `--explain --json` |
@@ -480,16 +480,18 @@ Plan Cascade 使用三个工作流深度级别来控制门控严格程度：
 ```bash
 # AI 自动判断策略
 /plan-cascade:auto "修复 README 中的拼写错误"
-# → 使用 direct 策略，quick 流程
+# → 默认 full 流程；简单任务会升级为 hybrid-auto 以走完整流程
+# → 同时默认 `--tdd on` + `--confirm`（可用 `--tdd off` / `--no-confirm` 覆盖）
+# → 如需 direct 快速执行：加 `--flow quick`
 
 /plan-cascade:auto "实现 OAuth 用户登录"
-# → 使用 hybrid-auto 策略，standard 流程
+# → 使用 hybrid-auto 策略，full 流程（默认）+ `--tdd on` + `--confirm`
 
 /plan-cascade:auto "实验性重构 API 层"
-# → 使用 hybrid-worktree 策略
+# → 使用 hybrid-worktree 策略（默认 full）
 
 /plan-cascade:auto "构建博客平台：用户、文章、评论、RSS"
-# → 使用 mega-plan 策略
+# → 使用 mega-plan 策略（默认 full）
 
 # 带参数使用
 /plan-cascade:auto --flow full --tdd on --no-confirm "实现支付处理"

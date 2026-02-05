@@ -38,15 +38,17 @@ hooks:
             fi
   PostToolUse:
     # Sync status and update context file after significant operations
-    - matcher: "Write|Edit"
+    - matcher: "Write|Edit|Bash|Task"
       hooks:
         - type: command
           command: |
-            if [ -f "mega-plan.json" ]; then
-              if command -v uv &> /dev/null; then
-                uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-sync.py" 2>/dev/null || true
-                uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update 2>/dev/null || true
-              fi
+            # Best-effort: scripts exit silently if no mega-plan context is detected.
+            if command -v uv &> /dev/null; then
+              uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-sync.py" 2>/dev/null || true
+              uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update 2>/dev/null || true
+            elif command -v python &> /dev/null; then
+              python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-sync.py" 2>/dev/null || true
+              python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" update 2>/dev/null || true
             fi
 ---
 

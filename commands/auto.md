@@ -12,16 +12,17 @@ The auto command supports the following flags to customize execution:
 
 ### `--flow <quick|standard|full>`
 
-Override the automatically selected execution flow depth.
+Override the execution flow depth (**default: `full`**).
 
 | Flow | Description | Gate Mode | AI Verification | Confirm Required |
 |------|-------------|-----------|-----------------|------------------|
 | `quick` | Fastest path, minimal gating | soft | disabled | no |
-| `standard` | Balanced speed and quality (default) | soft | enabled | no |
-| `full` | Strict methodology + strict gating | hard | enabled + review | yes |
+| `standard` | Balanced speed and quality | soft | enabled | no |
+| `full` | Strict methodology + strict gating (default) | hard | enabled + review | yes |
 
 **Usage:**
 ```
+/plan-cascade:auto "Implement critical security feature"          # defaults to FULL flow (TDD on + confirm)
 /plan-cascade:auto --flow full "Implement critical security feature"
 /plan-cascade:auto --flow quick "Fix typo in documentation"
 ```
@@ -50,6 +51,8 @@ The output is human-readable by default. For machine-readable JSON output, combi
 ### `--confirm`
 
 Display confirmation points before execution and wait for user acknowledgment.
+
+**Default**: enabled in `--flow full` (the default flow for `/plan-cascade:auto`) unless `--no-confirm` is set.
 
 When this flag is set:
 1. Analysis is performed and displayed
@@ -96,7 +99,9 @@ Control Test-Driven Development (TDD) mode for story execution.
 |------|-------------|-------------|
 | `off` | TDD disabled | Simple changes, documentation, non-code tasks |
 | `on` | TDD enabled with prompts and compliance checks | Critical features, security-related code |
-| `auto` | Automatically decide based on risk assessment (default) | Most development tasks |
+| `auto` | Automatically decide based on risk assessment | Mixed-risk tasks, faster iteration |
+
+**Default**: `/plan-cascade:auto` uses `--tdd on` in FULL flow unless explicitly overridden via `--tdd`.
 
 When TDD mode is enabled (on or auto-enabled):
 1. **Red Phase**: AI writes failing tests first based on acceptance criteria
@@ -126,8 +131,9 @@ Flags can be combined for customized behavior:
 # Quick analysis without execution
 /plan-cascade:auto --flow quick --explain "Simple config update"
 
-# Force TDD mode with full flow for security feature
-/plan-cascade:auto --flow full --tdd on "Implement OAuth2 authentication"
+# Override defaults
+/plan-cascade:auto --flow full --tdd off --no-confirm "Update README wording"
+/plan-cascade:auto --flow standard --tdd auto "Add user profile feature"
 ```
 
 ## Path Storage Modes
@@ -191,10 +197,10 @@ ARGS="{{args}}"
 # Parse flags from arguments
 FLOW_OVERRIDE = null     # --flow <quick|standard|full>
 EXPLAIN_MODE = false     # --explain
-CONFIRM_MODE = false     # --confirm
+CONFIRM_MODE = false     # --confirm (default: enabled in FULL flow unless --no-confirm)
 NO_CONFIRM_MODE = false  # --no-confirm (overrides --confirm and FULL flow default)
 JSON_OUTPUT = false      # --json
-TDD_OVERRIDE = null      # --tdd <off|on|auto>
+TDD_OVERRIDE = null      # --tdd <off|on|auto> (default: on in FULL flow)
 SPEC_MODE = null         # --spec <off|auto|on>
 FIRST_PRINCIPLES = false # --first-principles
 MAX_QUESTIONS = null     # --max-questions N
@@ -359,15 +365,30 @@ Produce a JSON analysis of your assessment:
 
 ### 3.2.1: Flow Selection Logic
 
-The execution flow is automatically selected based on analysis:
+**Default behavior:** Use **FULL** flow (strict gating) unless the user explicitly overrides via `--flow`.
 
 | Condition | Flow | Rationale |
 |-----------|------|-----------|
-| `risk_level='low' AND confidence>0.85 AND estimated_stories<=2` | **QUICK** | Fast path for simple, confident tasks |
-| `risk_level='high' OR confidence<0.7 OR requires_architecture_decisions=true` | **FULL** | Extra safeguards for risky/uncertain tasks |
-| All other cases | **STANDARD** | Balanced approach (default) |
+| `FLOW_OVERRIDE` is set (via `--flow`) | `FLOW_OVERRIDE` | User intent overrides defaults |
+| Otherwise | **FULL** | Ensure strict methodology + maximum stability by default |
 
-If `FLOW_OVERRIDE` was set via `--flow` flag, use that instead of auto-selection.
+### 3.2.1.1: Default Safety Settings (Auto)
+
+When running in FULL flow (default), enable the strictest safe defaults unless the user explicitly overrides:
+
+```
+# --no-confirm takes precedence over everything
+If NO_CONFIRM_MODE is true:
+    CONFIRM_MODE = false
+
+# Default confirmations in FULL flow (needed for mega-plan batch confirmation too)
+Elif FLOW == "full" AND CONFIRM_MODE is false:
+    CONFIRM_MODE = true
+
+# Default TDD in FULL flow
+If FLOW == "full" AND TDD_OVERRIDE is null:
+    TDD_OVERRIDE = "on"
+```
 
 ### 3.2.2: Confirmation Points Generation
 
@@ -383,8 +404,8 @@ Use this decision matrix based on your analysis:
 
 | Analysis Result | Strategy | When to Use |
 |-----------------|----------|-------------|
-| 1 area, 1-2 steps, low risk, no parallelization | **DIRECT** | Quick fixes, config changes, simple updates |
-| 2-3 areas, 3-7 steps, has dependencies | **HYBRID_AUTO** | Feature development with clear stories |
+| 1 area, 1-2 steps, low risk, no parallelization **AND** `FLOW != full` | **DIRECT** | Quick fixes, config changes, simple updates |
+| 1-3 areas, 1-7 steps **OR** `FLOW == full` (default) | **HYBRID_AUTO** | Full pipeline with PRD + strict gates |
 | HYBRID_AUTO conditions + high risk OR experimental | **HYBRID_WORKTREE** | Risky changes needing isolation |
 | 4+ areas, 8+ steps, significant parallelization | **MEGA_PLAN** | Multiple independent features, platform work |
 
@@ -396,6 +417,7 @@ Use this decision matrix based on your analysis:
 - Low to medium risk
 - No subtask dependencies
 - No architecture decisions needed
+ - **AND flow is NOT `full`** (DIRECT is only allowed in `quick`/`standard`)
 
 **HYBRID_AUTO** - Choose when ANY of these are true:
 - 2-3 functional areas involved
@@ -546,6 +568,17 @@ Elif CONFIRM_MODE is true:
 PARAM_STRING = trim(PARAM_STRING)
 ```
 
+### FULL Flow Default Guardrails
+
+**CRITICAL**: FULL flow is the default and is intended to run the **complete methodology** (planning artifacts + strict gates).
+
+If the analysis selected `DIRECT` while `FLOW == "full"`, upgrade to `HYBRID_AUTO`:
+```
+If STRATEGY == "DIRECT" AND FLOW == "full":
+    echo "Note: FULL flow default requires full pipeline. Upgrading DIRECT -> HYBRID_AUTO."
+    STRATEGY = "HYBRID_AUTO"
+```
+
 Execute the selected strategy:
 
 ### If STRATEGY is "DIRECT":
@@ -667,8 +700,8 @@ Skill(skill="plan-cascade:mega-plan", args="--flow full --tdd on --confirm Build
 
 | Strategy | Trigger | Execution | Default Flow |
 |----------|---------|-----------|--------------|
-| **DIRECT** | Simple fixes, single-file changes, trivial tasks | Execute immediately | QUICK |
-| **HYBRID_AUTO** | Feature development keywords (no isolation) | Generate PRD, parallel stories | STANDARD |
+| **DIRECT** | Simple fixes when explicitly using `--flow quick` or `--flow standard` | Execute immediately | QUICK / STANDARD (explicit) |
+| **HYBRID_AUTO** | Default for most tasks (including simple tasks under FULL flow default) | Generate PRD, parallel stories | FULL (default) |
 | **HYBRID_WORKTREE** | Feature keywords + isolation keywords | Isolated worktree + PRD | STANDARD/FULL |
 | **MEGA_PLAN** | Platform/system keywords or 3+ modules | Multi-feature orchestration | STANDARD/FULL |
 
@@ -677,14 +710,14 @@ Skill(skill="plan-cascade:mega-plan", args="--flow full --tdd on --confirm Build
 | Flow | Gate Mode | AI Verification | Code Review | Test Enforcement | Use When |
 |------|-----------|-----------------|-------------|------------------|----------|
 | **QUICK** | soft | disabled | no | no | Low-risk, high-confidence, small tasks |
-| **STANDARD** | soft | enabled | no | no | Normal development (default) |
-| **FULL** | hard | enabled | required | required | High-risk, architecture decisions, low confidence |
+| **STANDARD** | soft | enabled | no | no | Faster iteration when explicitly requested |
+| **FULL** | hard | enabled | required | required | Default: strict methodology, maximum safety/stability |
 
 ## Examples
 
 ### Example 1: Direct Execution
 ```
-/plan-cascade:auto "Fix the typo in the README"
+/plan-cascade:auto --flow quick "Fix the typo in the README"
 ```
 **Analysis**: scope=single_file, risk=low, confidence=0.9
 **Decision**: Strategy=DIRECT, Flow=QUICK
@@ -695,7 +728,7 @@ Skill(skill="plan-cascade:mega-plan", args="--flow full --tdd on --confirm Build
 /plan-cascade:auto "Implement user authentication with login and registration"
 ```
 **Analysis**: scope=multiple_modules, risk=medium, confidence=0.8
-**Decision**: Strategy=HYBRID_AUTO, Flow=STANDARD
+**Decision**: Strategy=HYBRID_AUTO, Flow=FULL (default)
 **Action**: Route to `/plan-cascade:hybrid-auto`
 
 ### Example 3: Hybrid Worktree (High Risk)
@@ -712,7 +745,7 @@ Skill(skill="plan-cascade:mega-plan", args="--flow full --tdd on --confirm Build
 /plan-cascade:auto "Build an e-commerce platform with users, products, cart, and orders"
 ```
 **Analysis**: scope=cross_cutting, risk=medium, confidence=0.85
-**Decision**: Strategy=MEGA_PLAN, Flow=STANDARD
+**Decision**: Strategy=MEGA_PLAN, Flow=FULL (default)
 **Action**: Route to `/plan-cascade:mega-plan`
 
 ### Example 5: Using --explain Flag
@@ -724,11 +757,11 @@ Skill(skill="plan-cascade:mega-plan", args="--flow full --tdd on --confirm Build
 
 ### Example 6: Using --flow Override
 ```
-/plan-cascade:auto --flow full "Add new API endpoint for user preferences"
+/plan-cascade:auto --flow standard "Add new API endpoint for user preferences"
 ```
-**Analysis**: Would normally select HYBRID_AUTO with STANDARD flow
-**Decision**: Strategy=HYBRID_AUTO, Flow=FULL (overridden)
-**Action**: Execute with strict gating and code review required
+**Analysis**: Would normally run FULL flow by default
+**Decision**: Strategy=HYBRID_AUTO, Flow=STANDARD (overridden)
+**Action**: Execute with faster, softer gating
 
 ### Example 7: Using --confirm for Critical Changes
 ```
@@ -757,7 +790,7 @@ This will:
 
 ## Notes
 
-- Strategy selection is fully automatic - no user confirmation required (unless `--confirm` is used)
+- Strategy selection is automatic; **FULL flow (default)** may prompt for batch confirmations during execution unless `--no-confirm` is used
 - The AI performs structured complexity analysis, not keyword matching
 - Analysis considers scope, complexity, risk, and parallelization benefit
 - Existing planning files (prd.json, mega-plan.json) are detected but don't change strategy selection
@@ -766,8 +799,8 @@ This will:
 
 ### Flow Behavior Notes
 
-- **Flow auto-selection**: The flow is automatically chosen based on risk, confidence, and architecture requirements
-- **--flow override**: Users can override the auto-selected flow for more/less strict execution
+- **Default flow**: `full` (strict methodology + strict gating)
+- **--flow override**: Users can explicitly select `quick` or `standard` for faster/less strict execution
 - **Confirmation points**: Generated automatically for low-confidence, high-risk, or architecture-heavy tasks
 - **--explain mode**: Useful for understanding what the AI would do without actually executing
 - **--confirm mode**: Recommended for critical changes to ensure human oversight

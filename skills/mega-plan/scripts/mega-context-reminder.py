@@ -25,6 +25,10 @@ from datetime import datetime, timezone
 _PATH_RESOLVER_AVAILABLE = False
 _PathResolver = None
 
+# Optional: Claude session journal (compaction-safe tool output persistence)
+_JOURNAL_AVAILABLE = False
+_ClaudeSessionJournal = None
+
 def _setup_import_path():
     """Setup path to import plan_cascade modules."""
     global _PATH_RESOLVER_AVAILABLE, _PathResolver
@@ -47,6 +51,45 @@ def _setup_import_path():
     return False
 
 _setup_import_path()
+
+
+# Try to import ClaudeSessionJournal (best-effort)
+try:
+    from plan_cascade.state.claude_journal import ClaudeSessionJournal
+
+    _ClaudeSessionJournal = ClaudeSessionJournal
+    _JOURNAL_AVAILABLE = True
+except Exception:
+    _JOURNAL_AVAILABLE = False
+    _ClaudeSessionJournal = None
+
+
+def _relpath_or_abs(path_str: str | None, root: Path) -> str | None:
+    if not path_str:
+        return None
+    try:
+        p = Path(path_str)
+        return str(p.relative_to(root))
+    except Exception:
+        return path_str
+
+
+def sync_claude_journal(project_root: Path, max_events: int = 12) -> list[dict]:
+    """
+    Sync Claude Code session logs into a durable journal and return recent events.
+
+    Best-effort: returns [] if unavailable.
+    """
+    if not _JOURNAL_AVAILABLE or _ClaudeSessionJournal is None:
+        return []
+
+    journal_dir = project_root / ".state" / "claude-session"
+    try:
+        journal = _ClaudeSessionJournal(project_root=project_root, journal_dir=journal_dir)
+        journal.sync()
+        return journal.read_recent(max_events=max_events)
+    except Exception:
+        return []
 
 
 def get_data_dir() -> Path:
@@ -114,6 +157,24 @@ def get_new_mode_path(project_root: Path, filename: str) -> Path:
     data_dir = get_data_dir()
     project_id = get_project_id(project_root)
     return data_dir / project_id / filename
+
+
+def get_worktree_dir(project_root: Path) -> Path:
+    """Get worktree directory for legacy or new mode."""
+    legacy = project_root / ".worktree"
+    if legacy.exists():
+        return legacy
+
+    if _PATH_RESOLVER_AVAILABLE and _PathResolver:
+        try:
+            resolver = _PathResolver(project_root, legacy_mode=False)
+            return resolver.get_worktree_dir()
+        except Exception:
+            pass
+
+    data_dir = get_data_dir()
+    project_id = get_project_id(project_root)
+    return data_dir / project_id / ".worktree"
 
 
 def get_project_root():
@@ -248,7 +309,7 @@ def get_current_batch_info(plan: dict, batches: list) -> tuple:
 def get_active_worktrees(project_root: Path, current_batch: list) -> list:
     """Get list of active worktrees for current batch."""
     worktrees = []
-    worktree_dir = project_root / ".worktree"
+    worktree_dir = get_worktree_dir(project_root)
 
     for feature in current_batch:
         name = feature["name"]
@@ -269,8 +330,9 @@ def get_active_worktrees(project_root: Path, current_batch: list) -> list:
 
 
 def generate_context_file(project_root: Path, plan: dict, batches: list,
-                          current_batch_num: int, current_batch: list,
-                          active_worktrees: list) -> str:
+                           current_batch_num: int, current_batch: list,
+                           active_worktrees: list,
+                           recent_events: list[dict] | None = None) -> str:
     """Generate the .mega-execution-context.md content."""
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     total_batches = len(batches)
@@ -350,6 +412,31 @@ This will:
 Run `/plan-cascade:mega-status` to see detailed progress.
 """
 
+    # Add recent tool activity from durable journal (helps recover after compaction)
+    recent_events = recent_events or []
+    if recent_events:
+        content += "\n## Recent Tool Activity (Durable Journal)\n\n"
+        content += f"Journal dir: `{project_root / '.state' / 'claude-session'}`\n\n"
+
+        for ev in reversed(recent_events[-12:]):
+            kind = ev.get("kind")
+            ts = ev.get("ts", "")
+            if kind == "tool_use":
+                tool_name = ev.get("tool_name", "tool")
+                tool_use_id = ev.get("tool_use_id", "")
+                content += f"- `{ts}` tool_use {tool_name} (`{tool_use_id}`)\n"
+            elif kind == "tool_result":
+                tool_use_id = ev.get("tool_use_id", "")
+                content_file = _relpath_or_abs(ev.get("content_file"), project_root)
+                preview = (ev.get("preview") or "").replace("\n", " ").strip()
+                preview = preview[:140] + ("..." if len(preview) > 140 else "")
+                if content_file:
+                    content += f"- `{ts}` tool_result (`{tool_use_id}`) -> `{content_file}`\n"
+                else:
+                    content += f"- `{ts}` tool_result (`{tool_use_id}`)\n"
+                if preview:
+                    content += f"  - {preview}\n"
+
     return content
 
 
@@ -390,6 +477,8 @@ def main():
     if not plan:
         sys.exit(0)
 
+    recent_events = sync_claude_journal(project_root)
+
     # Calculate batches and current state
     batches = get_feature_batches(plan)
     current_batch_num, current_batch = get_current_batch_info(plan, batches)
@@ -402,7 +491,8 @@ def main():
         # Generate and write context file
         content = generate_context_file(
             project_root, plan, batches,
-            current_batch_num, current_batch, active_worktrees
+            current_batch_num, current_batch, active_worktrees,
+            recent_events=recent_events,
         )
         context_file = project_root / ".mega-execution-context.md"
         try:

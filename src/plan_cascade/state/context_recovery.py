@@ -731,6 +731,37 @@ class ContextRecoveryManager:
         except OSError:
             return
 
+        def _move_story(story_id: str, target: str) -> None:
+            """Move story_id into the target list and remove from others."""
+            if not story_id:
+                return
+
+            if target == "complete":
+                if story_id not in state.completed_stories:
+                    state.completed_stories.append(story_id)
+                for bucket in (state.pending_stories, state.in_progress_stories, state.failed_stories):
+                    if story_id in bucket:
+                        bucket.remove(story_id)
+                return
+
+            if target == "failed":
+                if story_id not in state.failed_stories:
+                    state.failed_stories.append(story_id)
+                for bucket in (state.pending_stories, state.in_progress_stories, state.completed_stories):
+                    if story_id in bucket:
+                        bucket.remove(story_id)
+                return
+
+            if target == "in_progress":
+                # Don't downgrade terminal states
+                if story_id in state.completed_stories or story_id in state.failed_stories:
+                    return
+                if story_id not in state.in_progress_stories:
+                    state.in_progress_stories.append(story_id)
+                if story_id in state.pending_stories:
+                    state.pending_stories.remove(story_id)
+                return
+
         # Parse progress file for markers
         lines = content.split("\n")
         last_timestamp = ""
@@ -745,8 +776,7 @@ class ContextRecoveryManager:
             story_complete_match = re.search(r"\[STORY_COMPLETE:\s*(story-[\w-]+)\]", line)
             if story_complete_match:
                 story_id = story_complete_match.group(1)
-                if story_id not in state.completed_stories:
-                    state.completed_stories.append(story_id)
+                _move_story(story_id, "complete")
                 continue
 
             # Check for old-style complete markers
@@ -755,8 +785,19 @@ class ContextRecoveryManager:
                 story_match = re.search(r"(story-[\w-]+)", line)
                 if story_match:
                     story_id = story_match.group(1)
-                    if story_id not in state.completed_stories:
-                        state.completed_stories.append(story_id)
+                    _move_story(story_id, "complete")
+
+            # Failed markers
+            if "[FAILED]" in line or "[ERROR]" in line:
+                story_match = re.search(r"(story-[\w-]+)", line)
+                if story_match:
+                    _move_story(story_match.group(1), "failed")
+
+            # In-progress markers
+            if "[IN_PROGRESS]" in line or "[START]" in line or "[EXECUTING]" in line:
+                story_match = re.search(r"(story-[\w-]+)", line)
+                if story_match:
+                    _move_story(story_match.group(1), "in_progress")
 
             # Check for feature completion markers
             feature_complete_match = re.search(r"\[FEATURE_COMPLETE:\s*(feature-[\w-]+)\]", line)
@@ -767,6 +808,10 @@ class ContextRecoveryManager:
                     state.completed_stories.append(feature_id)
 
         state.last_activity = last_timestamp
+
+        # Recalculate completion percentage after reconciliation
+        if state.total_stories > 0:
+            state.completion_percentage = len(state.completed_stories) / state.total_stories * 100
 
     def _scan_worktrees_for_recovery(self, state: ContextRecoveryState) -> ContextRecoveryState:
         """Scan worktree directory for interrupted tasks.

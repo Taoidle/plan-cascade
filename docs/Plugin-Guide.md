@@ -3,7 +3,7 @@
 # Plan Cascade - Claude Code Plugin Guide
 
 **Version**: 4.4.0
-**Last Updated**: 2026-02-04
+**Last Updated**: 2026-02-05
 
 This document provides detailed instructions for using Plan Cascade as a Claude Code plugin.
 
@@ -65,7 +65,7 @@ Plan Cascade can run a short, resumable **spec interview** (planning-time) to re
 
 | Mode | Behavior |
 |------|----------|
-| `--spec auto` | Runs only when `--flow full` (default) |
+| `--spec auto` | Runs only when `--flow full` (default in `/plan-cascade:auto`) |
 | `--spec on` | Always run the interview |
 | `--spec off` | Never run the interview |
 
@@ -449,8 +449,8 @@ Plan Cascade uses three workflow depth levels that control gating strictness:
 | Flow | Description | Gate Mode | AI Verification | Confirm Required |
 |------|-------------|-----------|-----------------|------------------|
 | `quick` | Fastest path, minimal gating | soft | disabled | no |
-| `standard` | Balanced speed and quality (default) | soft | enabled | no |
-| `full` | Strict methodology + strict gating | hard | enabled + review | yes |
+| `standard` | Balanced speed and quality | soft | enabled | no |
+| `full` | Strict methodology + strict gating (default) | hard | enabled + review | yes |
 
 ### Strategy Selection
 
@@ -465,12 +465,12 @@ Plan Cascade uses three workflow depth levels that control gating strictness:
 
 | Flag | Description | Example |
 |------|-------------|---------|
-| `--flow <quick\|standard\|full>` | Override execution flow depth | `--flow full` |
-| `--tdd <off\|on\|auto>` | Control TDD mode | `--tdd on` |
+| `--flow <quick\|standard\|full>` | Override execution flow depth (default: full) | `--flow full` |
+| `--tdd <off\|on\|auto>` | Control TDD mode (default: on in `/plan-cascade:auto`) | `--tdd on` |
 | `--spec <off\|auto\|on>` | Planning-time spec interview | `--spec auto` |
 | `--first-principles` | Spec: ask first-principles questions | `--first-principles` |
 | `--max-questions N` | Spec: soft cap interview length | `--max-questions 12` |
-| `--confirm` | Ask for confirmation before execution | `--confirm` |
+| `--confirm` | Ask for confirmation before execution (default in Full flow) | `--confirm` |
 | `--no-confirm` | Disable batch confirmations (even in Full flow) | `--no-confirm` |
 | `--explain` | Show analysis without executing | `--explain` |
 | `--json` | JSON output for `--explain` | `--explain --json` |
@@ -480,16 +480,18 @@ Plan Cascade uses three workflow depth levels that control gating strictness:
 ```bash
 # AI automatically determines strategy
 /plan-cascade:auto "Fix the typo in README"
-# → Uses direct strategy with quick flow
+# → Defaults to full flow; simple tasks are upgraded to hybrid-auto for full pipeline
+# → Also defaults to `--tdd on` and `--confirm` (use `--tdd off` / `--no-confirm` to override)
+# → Use `--flow quick` for direct execution
 
 /plan-cascade:auto "Implement user login with OAuth"
-# → Uses hybrid-auto strategy with standard flow
+# → Uses hybrid-auto strategy with full flow (default) + `--tdd on` + `--confirm`
 
 /plan-cascade:auto "Experimental refactoring of the API layer"
-# → Uses hybrid-worktree strategy
+# → Uses hybrid-worktree strategy (full flow by default)
 
 /plan-cascade:auto "Build a blog platform with users, posts, comments, and RSS"
-# → Uses mega-plan strategy
+# → Uses mega-plan strategy (full flow by default)
 
 # With flags
 /plan-cascade:auto --flow full --tdd on --no-confirm "Implement payment processing"

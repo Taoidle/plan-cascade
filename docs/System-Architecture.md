@@ -3,7 +3,7 @@
 # Plan Cascade - System Architecture and Workflow Design
 
 **Version**: 4.4.0
-**Last Updated**: 2026-02-04
+**Last Updated**: 2026-02-05
 
 This document contains detailed architecture diagrams, flowcharts, and system design for Plan Cascade.
 
@@ -297,6 +297,7 @@ flowchart TB
 
 The `/plan-cascade:auto` command provides AI-driven automatic strategy selection based on structured task analysis.
 It accepts flow-control flags (e.g. `--flow`, `--tdd`, `--confirm`/`--no-confirm`, `--spec`) and propagates them into the selected workflow.
+By default, `/plan-cascade:auto` runs in **FULL** flow with `--tdd on` and batch confirmation enabled (disable with `--no-confirm`). Use `--flow quick` or `--flow standard` to opt out.
 
 ### Strategy Selection Flowchart
 
@@ -323,12 +324,14 @@ flowchart TD
     G -->|"4+ areas, multiple features"| H[MEGA_PLAN]
     G -->|"2-3 areas + high risk"| I[HYBRID_WORKTREE]
     G -->|"2-3 areas, 3-7 steps"| J[HYBRID_AUTO]
-    G -->|"1 area, 1-2 steps, low risk"| K[DIRECT]
+    G -->|"1 area, 1-2 steps, low risk"| K[DIRECT (candidate)]
 
     H --> L["/plan-cascade:mega-plan"]
     I --> M["/plan-cascade:hybrid-worktree"]
     J --> N["/plan-cascade:hybrid-auto"]
-    K --> O[Direct Execution]
+    K --> X{Flow == full?}
+    X -->|"Yes (default)"| N
+    X -->|"No (quick/standard)"| O[Direct Execution]
 
     L --> P[Multi-Feature Orchestration]
     M --> Q[Isolated Development]
@@ -362,21 +365,21 @@ The AI outputs structured analysis in JSON format:
 
 | Analysis Result | Strategy | Example |
 |----------------|----------|---------|
-| 1 functional area, 1-2 steps, low risk | **DIRECT** | "Fix the typo in README" |
+| 1 functional area, 1-2 steps, low risk **AND** (`--flow quick` or `--flow standard`) | **DIRECT** | "Fix the typo in README" |
 | 2-3 functional areas, 3-7 steps, has dependencies | **HYBRID_AUTO** | "Implement user authentication with OAuth" |
 | HYBRID_AUTO + high risk or experimental | **HYBRID_WORKTREE** | "Experimental refactoring of payment module" |
 | 4+ functional areas, multiple independent features | **MEGA_PLAN** | "Build e-commerce platform with users, products, cart, orders" |
 
 ### ExecutionFlow Depth
 
-The `/plan-cascade:auto` command selects both a strategy AND an ExecutionFlow depth:
+The `/plan-cascade:auto` command defaults to **FULL** ExecutionFlow depth unless overridden by `--flow`:
 
 ```mermaid
 graph TD
-    A[Strategy Analysis] --> B{Risk Level?}
-    B -->|Low| C[QUICK Flow]
-    B -->|Medium| D[STANDARD Flow]
-    B -->|High| E[FULL Flow]
+    A[Strategy Analysis] --> B{--flow override?}
+    B -->|quick| C[QUICK Flow]
+    B -->|standard| D[STANDARD Flow]
+    B -->|none| E[FULL Flow (default)]
 
     C --> C1[Soft DoR Gates]
     C --> C2[AI Verify Disabled]
@@ -1522,6 +1525,10 @@ graph TB
         EXT[External Design Doc<br/>.md/.json/.html] -.-> CMD
     end
 
+    subgraph "Claude Code Logs"
+        CL[~/.claude/projects/PROJECT/*.jsonl<br/>Session Logs]
+    end
+
     subgraph "Planning Files"
         CMD --> PRD[prd.json<br/>PRD Document]
         CMD -.-> SPEC[spec.json/spec.md<br/>Spec (optional)]
@@ -1558,6 +1565,7 @@ graph TB
     end
 
     subgraph "Context Recovery"
+        CSJ[.state/claude-session/<br/>Tool Journal]
         HEC[.hybrid-execution-context.md]
         MEC[.mega-execution-context.md]
     end
@@ -1565,6 +1573,9 @@ graph TB
     DD --> CF[ContextFilter]
     SPEC --> SIS
     CF --> AS
+    CL -.-> CSJ
+    CSJ -.-> HEC
+    CSJ -.-> MEC
 
     style PRD fill:#e1f5fe
     style SPEC fill:#e1f5fe
@@ -1600,6 +1611,7 @@ graph TB
 | `.state/stage-state.json` | State | Stage state machine state (v4.4.0+) |
 | `.agent-detection.json` | Cache | Cross-platform Agent detection results (1-hour TTL) |
 | `.state/gate-cache.json` | Cache | Gate execution results cache (keyed by git commit + tree hash) |
+| `.state/claude-session/` | Context | Compaction-safe tool I/O journal (tails Claude session logs); referenced from execution context files |
 | `.hybrid-execution-context.md` | Context | Hybrid task context for AI recovery after session interruption |
 | `.mega-execution-context.md` | Context | Mega-plan context for AI recovery after session interruption |
 | `.agent-outputs/` | Output | Agent logs, prompts, verification reports, and result files |
@@ -1817,4 +1829,3 @@ Both execution backends support: PRD-driven development, batch execution, qualit
   }
 }
 ```
-

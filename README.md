@@ -9,7 +9,7 @@
 *Decompose complex projects into parallel executable tasks with multi-agent collaboration*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.3.2-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.4.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -32,7 +32,7 @@ Traditional AI coding assistants struggle with large, complex projects. Plan Cas
 
 - **Breaking down complexity** — Automatically decompose projects into manageable stories
 - **Parallel execution** — Run independent tasks simultaneously with multiple agents
-- **Maintaining context** — Design documents and PRDs keep AI focused on architecture
+- **Maintaining context** — Design docs/PRDs plus execution context (with a durable tool journal) survive compaction/truncation
 - **Quality assurance** — Automated testing and linting at each step
 
 ## Features
@@ -228,11 +228,13 @@ plan-cascade/
 | DeepSeek | Yes | DeepSeek Chat/Coder |
 | Ollama | No | Local models |
 
-## What's New in v4.3.6
+## What's New in v4.4.0
 
 - **`--agent` for hybrid-worktree** — PRD generation agent selection: `/plan-cascade:hybrid-worktree task branch "desc" --agent=codex`
-- **MANDATORY COMPLIANCE** — AI agents now strictly follow configured agent selection, no subjective overrides
-- **Multi-command Enforcement** — Agent selection rules enforced across hybrid-auto, mega-approve, approve, and hybrid-worktree
+- **Spec Interview (optional)** — Planning-time `spec.json/spec.md` workflow that compiles into PRD
+- **Universal Resume** — `/plan-cascade:resume` auto-detects mode and routes to the right resume command
+- **Dashboard + Gates** — Aggregated status view plus DoR/DoD/TDD quality gates
+- **Compaction-Safe Session Journal** — Recent tool activity is persisted and referenced from `.hybrid/.mega-execution-context.md`
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

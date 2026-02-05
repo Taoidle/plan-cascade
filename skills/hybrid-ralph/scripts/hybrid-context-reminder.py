@@ -25,6 +25,10 @@ from datetime import datetime, timezone
 _PATH_RESOLVER_AVAILABLE = False
 _PathResolver = None
 
+# Optional: Claude session journal (compaction-safe tool output persistence)
+_JOURNAL_AVAILABLE = False
+_ClaudeSessionJournal = None
+
 def _setup_import_path():
     """Setup path to import plan_cascade modules."""
     global _PATH_RESOLVER_AVAILABLE, _PathResolver
@@ -47,6 +51,44 @@ def _setup_import_path():
     return False
 
 _setup_import_path()
+
+# Try to import ClaudeSessionJournal (best-effort)
+try:
+    from plan_cascade.state.claude_journal import ClaudeSessionJournal
+
+    _ClaudeSessionJournal = ClaudeSessionJournal
+    _JOURNAL_AVAILABLE = True
+except Exception:
+    _JOURNAL_AVAILABLE = False
+    _ClaudeSessionJournal = None
+
+
+def _relpath_or_abs(path_str: str | None, root: Path) -> str | None:
+    if not path_str:
+        return None
+    try:
+        p = Path(path_str)
+        return str(p.relative_to(root))
+    except Exception:
+        return path_str
+
+
+def sync_claude_journal(root: Path, max_events: int = 12) -> list[dict]:
+    """
+    Sync Claude Code session logs into a durable journal and return recent events.
+
+    Best-effort: returns [] if unavailable.
+    """
+    if not _JOURNAL_AVAILABLE or _ClaudeSessionJournal is None:
+        return []
+
+    journal_dir = root / ".state" / "claude-session"
+    try:
+        journal = _ClaudeSessionJournal(project_root=root, journal_dir=journal_dir)
+        journal.sync()
+        return journal.read_recent(max_events=max_events)
+    except Exception:
+        return []
 
 
 def get_data_dir() -> Path:
@@ -271,9 +313,10 @@ def get_current_batch_info(prd: dict, batches: list, progress: dict) -> tuple:
 
 
 def generate_context_file(root: Path, context_type: str, config: dict,
-                          prd: dict, batches: list, current_batch_num: int,
-                          current_batch: list, pending_stories: list,
-                          progress: dict) -> str:
+                           prd: dict, batches: list, current_batch_num: int,
+                           current_batch: list, pending_stories: list,
+                           progress: dict,
+                           recent_events: list[dict] | None = None) -> str:
     """Generate the .hybrid-execution-context.md content."""
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     total_batches = len(batches)
@@ -386,6 +429,31 @@ This will:
         content += f"""- Complete and merge: `/plan-cascade:hybrid-complete`
 """
 
+    # Add recent tool activity from durable journal (helps recover after compaction)
+    recent_events = recent_events or []
+    if recent_events:
+        content += "\n## Recent Tool Activity (Durable Journal)\n\n"
+        content += f"Journal dir: `{root / '.state' / 'claude-session'}`\n\n"
+
+        for ev in reversed(recent_events[-12:]):
+            kind = ev.get("kind")
+            ts = ev.get("ts", "")
+            if kind == "tool_use":
+                tool_name = ev.get("tool_name", "tool")
+                tool_use_id = ev.get("tool_use_id", "")
+                content += f"- `{ts}` tool_use {tool_name} (`{tool_use_id}`)\n"
+            elif kind == "tool_result":
+                tool_use_id = ev.get("tool_use_id", "")
+                content_file = _relpath_or_abs(ev.get("content_file"), root)
+                preview = (ev.get("preview") or "").replace("\n", " ").strip()
+                preview = preview[:140] + ("..." if len(preview) > 140 else "")
+                if content_file:
+                    content += f"- `{ts}` tool_result (`{tool_use_id}`) -> `{content_file}`\n"
+                else:
+                    content += f"- `{ts}` tool_result (`{tool_use_id}`)\n"
+                if preview:
+                    content += f"  - {preview}\n"
+
     return content
 
 
@@ -437,6 +505,8 @@ def main():
     if not prd:
         sys.exit(0)
 
+    recent_events = sync_claude_journal(root)
+
     progress = read_progress(root)
     batches = get_story_batches(prd)
     current_batch_num, current_batch, pending_stories = get_current_batch_info(prd, batches, progress)
@@ -450,7 +520,8 @@ def main():
     if mode in ["update", "both"]:
         content = generate_context_file(
             root, context_type, config, prd, batches,
-            current_batch_num, current_batch, pending_stories, progress
+            current_batch_num, current_batch, pending_stories, progress,
+            recent_events=recent_events,
         )
         context_file = root / ".hybrid-execution-context.md"
         try:

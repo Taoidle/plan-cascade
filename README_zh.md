@@ -9,7 +9,7 @@
 *将复杂项目分解为可并行执行的任务，支持多 Agent 协作*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.3.2-brightgreen)](https://github.com/Taoidle/plan-cascade)
+[![Version](https://img.shields.io/badge/version-4.4.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
 [![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
@@ -32,7 +32,7 @@
 
 - **分解复杂性** — 自动将项目分解为可管理的 Story
 - **并行执行** — 使用多个 Agent 同时执行独立任务
-- **保持上下文** — 设计文档和 PRD 让 AI 始终聚焦于架构
+- **保持上下文** — 设计文档/PRD + 执行上下文（含持久化工具日志）可抵御压缩/截断
 - **质量保障** — 每一步都有自动化测试和代码检查
 
 ## 功能特性
@@ -228,11 +228,13 @@ plan-cascade/
 | DeepSeek | 是 | DeepSeek Chat/Coder |
 | Ollama | 否 | 本地模型 |
 
-## v4.3.6 更新内容
+## v4.4.0 更新内容
 
 - **hybrid-worktree `--agent` 参数** — PRD 生成代理选择：`/plan-cascade:hybrid-worktree task branch "desc" --agent=codex`
-- **强制合规执行** — AI 代理现在严格遵循配置的代理选择，不再进行主观覆盖
-- **多命令强制执行** — 代理选择规则在 hybrid-auto、mega-approve、approve 和 hybrid-worktree 中统一执行
+- **Spec 访谈（可选）** — 规划期 `spec.json/spec.md` 工作流，并编译为 PRD
+- **通用恢复** — `/plan-cascade:resume` 自动识别模式并路由到对应 resume 命令
+- **Dashboard + Gates** — 聚合状态视图 + DoR/DoD/TDD 质量门控
+- **抗压缩会话日志** — 最近工具活动会持久化，并被引用到 `.hybrid/.mega-execution-context.md`
 
 完整历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 

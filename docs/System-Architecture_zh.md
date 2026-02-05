@@ -3,7 +3,7 @@
 # Plan Cascade - 系统架构与流程设计
 
 **版本**: 4.4.0
-**最后更新**: 2026-02-04
+**最后更新**: 2026-02-05
 
 本文档包含 Plan Cascade 的详细架构图、流程图和系统设计。
 
@@ -297,6 +297,7 @@ flowchart TB
 
 `/plan-cascade:auto` 命令提供基于结构化任务分析的 AI 驱动自动策略选择。
 它支持并会传播 flow 控制参数（如 `--flow`、`--tdd`、`--confirm`/`--no-confirm`、`--spec`）到最终选择的工作流中。
+默认情况下，`/plan-cascade:auto` 使用 **FULL** flow，并默认启用 `--tdd on` 与批次确认（可用 `--no-confirm` 禁用）。如需更快执行，可显式指定 `--flow quick` 或 `--flow standard`。
 
 ### 策略选择流程图
 
@@ -323,12 +324,14 @@ flowchart TD
     G -->|"4+ 区域, 多个功能"| H[MEGA_PLAN]
     G -->|"2-3 区域 + 高风险"| I[HYBRID_WORKTREE]
     G -->|"2-3 区域, 3-7 步"| J[HYBRID_AUTO]
-    G -->|"1 区域, 1-2 步, 低风险"| K[DIRECT]
+    G -->|"1 区域, 1-2 步, 低风险"| K[DIRECT（候选）]
 
     H --> L["/plan-cascade:mega-plan"]
     I --> M["/plan-cascade:hybrid-worktree"]
     J --> N["/plan-cascade:hybrid-auto"]
-    K --> O[直接执行]
+    K --> X{Flow == full?}
+    X -->|"是（默认）"| N
+    X -->|"否（quick/standard）"| O[直接执行]
 
     L --> P[多功能编排]
     M --> Q[隔离开发]
@@ -362,21 +365,21 @@ AI 输出结构化 JSON 格式的分析结果：
 
 | 分析结果 | 策略 | 示例 |
 |----------|------|------|
-| 1 个功能区域, 1-2 步, 低风险 | **DIRECT** | "修复 README 中的拼写错误" |
+| 1 个功能区域, 1-2 步, 低风险，且使用 `--flow quick` 或 `--flow standard` | **DIRECT** | "修复 README 中的拼写错误" |
 | 2-3 个功能区域, 3-7 步, 有依赖 | **HYBRID_AUTO** | "实现 OAuth 用户认证" |
 | HYBRID_AUTO + 高风险或实验性 | **HYBRID_WORKTREE** | "实验性重构支付模块" |
 | 4+ 功能区域, 多个独立功能 | **MEGA_PLAN** | "构建电商平台：用户、商品、购物车、订单" |
 
 ### 执行流程深度
 
-`/plan-cascade:auto` 命令同时选择策略和执行流程深度：
+`/plan-cascade:auto` 命令默认使用 **FULL** 执行流程深度，除非通过 `--flow` 覆盖：
 
 ```mermaid
 graph TD
-    A[策略分析] --> B{风险级别?}
-    B -->|低| C[QUICK 流程]
-    B -->|中| D[STANDARD 流程]
-    B -->|高| E[FULL 流程]
+    A[策略分析] --> B{--flow 覆盖?}
+    B -->|quick| C[QUICK 流程]
+    B -->|standard| D[STANDARD 流程]
+    B -->|未设置| E[FULL 流程（默认）]
 
     C --> C1[Soft DoR 门控]
     C --> C2[AI 验证禁用]
@@ -1522,6 +1525,10 @@ graph TB
         EXT[外部设计文档<br/>.md/.json/.html] -.-> CMD
     end
 
+    subgraph "Claude Code 日志"
+        CL[~/.claude/projects/PROJECT/*.jsonl<br/>会话日志]
+    end
+
     subgraph "规划文件"
         CMD --> PRD[prd.json<br/>PRD文档]
         CMD -.-> SPEC[spec.json/spec.md<br/>Spec（可选）]
@@ -1558,6 +1565,7 @@ graph TB
     end
 
     subgraph "上下文恢复"
+        CSJ[.state/claude-session/<br/>工具日志]
         HEC[.hybrid-execution-context.md]
         MEC[.mega-execution-context.md]
     end
@@ -1565,6 +1573,9 @@ graph TB
     DD --> CF[ContextFilter]
     SPEC --> SIS
     CF --> AS
+    CL -.-> CSJ
+    CSJ -.-> HEC
+    CSJ -.-> MEC
 
     style PRD fill:#e1f5fe
     style SPEC fill:#e1f5fe
@@ -1600,6 +1611,7 @@ graph TB
 | `.state/stage-state.json` | 状态 | 阶段状态机状态 (v4.4.0+) |
 | `.agent-detection.json` | 缓存 | 跨平台 Agent 检测结果（1小时TTL） |
 | `.state/gate-cache.json` | 缓存 | 门控执行结果缓存（基于 git commit + 工作树哈希） |
+| `.state/claude-session/` | 上下文 | 抗压缩的工具 I/O 持久化日志（从 Claude 会话日志增量同步）；会被引用到执行上下文文件中 |
 | `.hybrid-execution-context.md` | 上下文 | Hybrid 任务上下文，用于会话中断后 AI 恢复 |
 | `.mega-execution-context.md` | 上下文 | Mega-plan 上下文，用于会话中断后 AI 恢复 |
 | `.agent-outputs/` | 输出 | Agent 日志、Prompt、验证报告和结果文件 |
@@ -1811,4 +1823,3 @@ graph TB
   }
 }
 ```
-
