@@ -129,6 +129,7 @@ claude plugins install Taoidle/plan-cascade
 
 # 让 AI 选择最佳策略
 /plan-cascade:auto "构建一个带用户认证和 JWT 的 REST API"
+# → 默认 FULL flow（spec auto + TDD on + 确认）。可用 --flow/--tdd/--no-confirm 覆盖。
 
 # 或手动选择
 /plan-cascade:hybrid-auto "添加密码重置功能"
@@ -161,10 +162,12 @@ plan-cascade run "实现用户认证" --expert
 
 ## 使用示例
 
-### 简单任务（直接执行）
+> **说明**：`/plan-cascade:auto` 默认使用 **FULL** flow（spec auto + TDD on + 确认）。如需更快执行，可用 `--flow standard|quick`、`--tdd auto|off`、或 `--no-confirm` 覆盖。
+
+### 简单任务（快速直接执行）
 ```bash
-/plan-cascade:auto "修复登录按钮的拼写错误"
-# → 无需规划，直接执行
+/plan-cascade:auto --flow quick "修复登录按钮的拼写错误"
+# → quick flow 下无需规划，直接执行
 ```
 
 ### 中等功能（Hybrid Auto）
@@ -234,7 +237,8 @@ plan-cascade/
 - **Spec 访谈（可选）** — 规划期 `spec.json/spec.md` 工作流，并编译为 PRD
 - **通用恢复** — `/plan-cascade:resume` 自动识别模式并路由到对应 resume 命令
 - **Dashboard + Gates** — 聚合状态视图 + DoR/DoD/TDD 质量门控
-- **抗压缩会话日志** — 最近工具活动会持久化，并被引用到 `.hybrid/.mega-execution-context.md`
+- **抗压缩会话日志** — 最近工具活动会持久化到 `.state/claude-session/`，并在 `.hybrid-execution-context.md` / `.mega-execution-context.md` 中展示
+- **更安全的 Auto 默认配置** — `/plan-cascade:auto` 默认 FULL flow，并默认启用 `--spec auto`、`--tdd on` 和确认（可通过 `--flow`、`--tdd`、`--no-confirm` 覆盖）
 
 完整历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 

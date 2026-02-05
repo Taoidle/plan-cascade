@@ -786,7 +786,9 @@ Plan Cascade supports optional Test-Driven Development (TDD) rhythm at the story
 |------|-------------|-------------|
 | `off` | TDD disabled | Simple changes, documentation |
 | `on` | TDD with prompts and compliance checks | Critical features, security code |
-| `auto` | Auto-enable based on risk assessment | Most development tasks (default) |
+| `auto` | Auto-enable based on risk assessment | Most development tasks (default when `--tdd` not set) |
+
+> **Note**: `/plan-cascade:auto` defaults to `--tdd on` in FULL flow. Use `--tdd auto` to opt into risk-based auto-enabling.
 
 ### TDD Workflow
 
@@ -806,14 +808,14 @@ After story completion, quality gates verify:
 ### Usage
 
 ```bash
-# Enable TDD for a critical feature
-/plan-cascade:auto --tdd on "Implement payment processing"
+# Default in /plan-cascade:auto (FULL flow): TDD is on
+/plan-cascade:auto "Add user profile feature"
 
 # Disable TDD for documentation
 /plan-cascade:auto --tdd off "Update README"
 
-# Let auto-detection decide (default)
-/plan-cascade:auto "Add user profile feature"
+# Let risk-based auto-detection decide
+/plan-cascade:auto --tdd auto "Add user profile feature"
 ```
 
 ---

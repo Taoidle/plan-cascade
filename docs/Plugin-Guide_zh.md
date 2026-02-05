@@ -786,7 +786,9 @@ Plan Cascade 支持在 Story 级别使用可选的测试驱动开发（TDD）节
 |------|------|----------|
 | `off` | 禁用 TDD | 简单变更、文档 |
 | `on` | 启用 TDD，带提示和合规检查 | 关键功能、安全代码 |
-| `auto` | 基于风险评估自动启用 | 大多数开发任务（默认） |
+| `auto` | 基于风险评估自动启用 | 大多数开发任务（未设置 `--tdd` 时默认） |
+
+> **说明**：`/plan-cascade:auto` 在 FULL flow 下默认使用 `--tdd on`。如需风险驱动自动启用，请显式使用 `--tdd auto`。
 
 ### TDD 工作流
 
@@ -806,14 +808,14 @@ Story 完成后，质量门控验证：
 ### 使用
 
 ```bash
-# 为关键功能启用 TDD
-/plan-cascade:auto --tdd on "实现支付处理"
+# /plan-cascade:auto 默认（FULL flow）：TDD 为 on
+/plan-cascade:auto "添加用户资料功能"
 
 # 为文档禁用 TDD
 /plan-cascade:auto --tdd off "更新 README"
 
-# 让自动检测决定（默认）
-/plan-cascade:auto "添加用户资料功能"
+# 让风险评估自动决定
+/plan-cascade:auto --tdd auto "添加用户资料功能"
 ```
 
 ---

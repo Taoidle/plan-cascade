@@ -129,6 +129,7 @@ claude plugins install Taoidle/plan-cascade
 
 # Let AI choose the best strategy
 /plan-cascade:auto "Build a REST API with user authentication and JWT tokens"
+# → Defaults to FULL flow (spec auto + TDD on + confirmations). Override with --flow/--tdd/--no-confirm as needed.
 
 # Or choose manually
 /plan-cascade:hybrid-auto "Add password reset functionality"
@@ -161,10 +162,12 @@ Download from [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases
 
 ## Usage Examples
 
-### Simple Task (Direct Execution)
+> **Note**: `/plan-cascade:auto` defaults to **FULL** flow (spec auto + TDD on + confirmations). Use `--flow standard|quick`, `--tdd auto|off`, or `--no-confirm` to opt out.
+
+### Simple Task (Quick Direct Execution)
 ```bash
-/plan-cascade:auto "Fix the typo in the login button"
-# → Executes directly without planning
+/plan-cascade:auto --flow quick "Fix the typo in the login button"
+# → Executes directly without planning (quick flow)
 ```
 
 ### Medium Feature (Hybrid Auto)
@@ -234,7 +237,8 @@ plan-cascade/
 - **Spec Interview (optional)** — Planning-time `spec.json/spec.md` workflow that compiles into PRD
 - **Universal Resume** — `/plan-cascade:resume` auto-detects mode and routes to the right resume command
 - **Dashboard + Gates** — Aggregated status view plus DoR/DoD/TDD quality gates
-- **Compaction-Safe Session Journal** — Recent tool activity is persisted and referenced from `.hybrid/.mega-execution-context.md`
+- **Compaction-Safe Session Journal** — Recent tool activity is persisted to `.state/claude-session/` and surfaced in `.hybrid-execution-context.md` / `.mega-execution-context.md`
+- **Safer Auto Defaults** — `/plan-cascade:auto` defaults to FULL flow with `--spec auto`, `--tdd on`, and confirmations (override via `--flow`, `--tdd`, `--no-confirm`)
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
