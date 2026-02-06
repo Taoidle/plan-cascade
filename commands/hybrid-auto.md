@@ -353,6 +353,8 @@ Else:
     EFFECTIVE_SPEC_MODE = "auto"  # Default when not specified
 ```
 
+**CRITICAL**: If the conditions below are met, you MUST run the spec interview. Do NOT skip it based on your own judgment of task complexity, description detail, or perceived redundancy. The spec interview is a mandatory shift-left gate when enabled.
+
 If spec interview is enabled:
 - `EFFECTIVE_SPEC_MODE == "on"`, OR
 - `EFFECTIVE_SPEC_MODE == "auto" AND FLOW_LEVEL == "full"`

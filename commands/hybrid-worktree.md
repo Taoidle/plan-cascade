@@ -517,6 +517,8 @@ echo "PRD Generation Agent: {prd_agent} (type: {agent_type})"
 
 #### Optional: Spec Interview (Shift-left)
 
+**CRITICAL**: If the conditions below are met, you MUST run the spec interview. Do NOT skip it based on your own judgment of task complexity, description detail, or perceived redundancy. The spec interview is a mandatory shift-left gate when enabled.
+
 If spec interview is enabled, run it in the worktree **before** finalizing the PRD:
 
 - Effective spec mode:

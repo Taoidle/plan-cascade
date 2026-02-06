@@ -695,7 +695,7 @@ Create in each worktree:
 
 ### 6.0: Optional Spec Interview (Orchestrator-only)
 
-**CRITICAL**: Spec interview runs in the orchestrator (THIS command) BEFORE launching feature agents.
+**CRITICAL**: Spec interview runs in the orchestrator (THIS command) BEFORE launching feature agents. If the conditions below are met, you MUST run the spec interview for each feature. Do NOT skip it based on your own judgment of task complexity, description detail, or perceived redundancy. The spec interview is a mandatory shift-left gate when enabled.
 
 If spec interview is enabled (`SPEC_MODE == on` OR `SPEC_MODE == auto` and `FLOW_LEVEL == full`):
 
