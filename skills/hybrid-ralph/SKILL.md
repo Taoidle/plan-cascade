@@ -34,7 +34,7 @@ hooks:
                 echo "=== Current Story: $STORY_ID ==="
                 # Show story details from prd.json if available
                 if command -v uv &> /dev/null; then
-                  uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/core/context_filter.py" get-story "$STORY_ID" 2>/dev/null | head -20 || true
+                  (cd "${CLAUDE_PLUGIN_ROOT}" && uv run python -m plan_cascade.state.context_filter get-story "$STORY_ID" 2>/dev/null | head -20) || true
                 fi
                 echo ""
               fi
@@ -203,22 +203,22 @@ This keeps context windows focused and efficient.
 
 ## Core Python Modules
 
-### context_filter.py
+### context_filter (migrated to src/plan_cascade/state/)
 
-Filters and extracts relevant context for specific stories.
+Context filtering functionality is now provided by the main package.
 
 ```bash
 # Get story details
-uv run python context_filter.py get-story story-001
+uv run python -m plan_cascade.state.context_filter get-story story-001
 
 # Get context for a story
-uv run python context_filter.py get-context story-001
+uv run python -m plan_cascade.state.context_filter get-context story-001
 
 # Get execution batch
-uv run python context_filter.py get-batch 1
+uv run python -m plan_cascade.state.context_filter get-batch 1
 
 # Show full execution plan
-uv run python context_filter.py plan-batches
+uv run python -m plan_cascade.state.context_filter plan-batches
 ```
 
 ### state_manager.py

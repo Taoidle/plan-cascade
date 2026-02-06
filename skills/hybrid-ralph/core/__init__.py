@@ -9,9 +9,10 @@ Extended with multi-agent collaboration support including:
 - Retry management
 - Cross-platform agent detection
 - Phase-based agent assignment
+
+Note: ContextFilter has been migrated to src/plan_cascade/state/context_filter.py
 """
 
-from .context_filter import ContextFilter
 from .state_manager import StateManager, FileLock
 from .prd_generator import PRDGenerator, create_sample_prd
 from .orchestrator import Orchestrator, StoryAgent
@@ -66,8 +67,7 @@ from .phase_config import (
 )
 
 __all__ = [
-    # Original modules
-    "ContextFilter",
+    # Original modules (ContextFilter migrated to src/plan_cascade/state/)
     "StateManager",
     "FileLock",
     "PRDGenerator",
