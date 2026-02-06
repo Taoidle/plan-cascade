@@ -1,106 +1,156 @@
 ---
-name: hybrid:status
-description: Show execution status of all stories in the PRD
+description: "Show execution status of all stories in the PRD. Displays batch progress, individual story states, completion percentage, and recent activity logs."
 ---
 
-# /status
+# Hybrid Ralph - Show Execution Status
 
-Show the current execution status of all stories in the PRD, including batch progress and individual story states.
+You are displaying the current execution status of all stories in the PRD.
 
-## Usage
+## Path Storage Modes
 
+This command works with both new and legacy path storage modes:
+
+### New Mode (Default)
+- PRD file: In worktree or `~/.plan-cascade/<project-id>/prd.json`
+- Progress file: Always in working directory `progress.txt`
+- Agent outputs: `.agent-outputs/` in working directory
+
+### Legacy Mode
+- PRD file: In worktree or project root `prd.json`
+- Progress file: `progress.txt` in working directory
+
+User-visible files always remain in the working directory for easy access.
+
+## Tool Usage Policy (CRITICAL)
+
+**To avoid command confirmation prompts:**
+
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - Read("prd.json"), Read("progress.txt")
+
+2. **Use Grep tool for content search** - NEVER use `grep` via Bash
+   - Grep("[COMPLETE]", path="progress.txt")
+
+3. **Parse file contents in your response** - After reading with Read tool, count markers yourself
+
+## Step 1: Verify PRD Exists
+
+```bash
+if [ ! -f "prd.json" ]; then
+    echo "ERROR: No PRD found."
+    exit 1
+fi
 ```
-/status
-```
 
-## What It Shows
+## Step 2: Read PRD and Progress Files
 
-### Agent Summary
-- Running agents count
-- Completed agents count
-- Failed agents count
+Read `prd.json` to get all stories.
+Read `progress.txt` to get completion status.
 
-### Summary
-- Total stories and batches
-- Stories by status (complete, in progress, pending, failed)
-- Overall progress percentage
+## Step 3: Calculate Story Status
 
-### Current Batch
-- Which batch is currently executing
-- Stories in the current batch with their statuses
-- Agent used for each story
+For each story in the PRD, determine its status:
+- **Complete**: If `progress.txt` contains `[COMPLETE] {story_id}` or `[STORY_COMPLETE] {story_id}`
+- **In Progress**: If `progress.txt` contains `[IN_PROGRESS] {story_id}`
+- **Pending**: If no entry in `progress.txt`
+- **Failed**: If `progress.txt` contains `[FAILED] {story_id}` or `[STORY_FAILED] {story_id}` or `[ERROR] {story_id}`
 
-### All Batches
-- All batches with their stories
-- Status of each story
-- Agent info (e.g., `[via codex]`)
+## Step 4: Calculate Execution Batches
 
-### Recent Activity
-- Last 10 entries from progress.txt (includes agent info)
+Re-calculate batches based on story dependencies.
 
-### Failed Stories
-- List of any failed stories (if applicable)
-- Agent and error information
-
-## Status Indicators
-
-| Symbol | Meaning |
-|--------|---------|
-| ● | Complete |
-| ◐ | In Progress |
-| ○ | Pending |
-| ✗ | Failed |
-
-## Example Output
+## Step 5: Display Status Report
 
 ```
 ============================================================
 EXECUTION STATUS
 ============================================================
 
-Agents: 2 running, 2 completed, 0 failed
-
 ## Summary
-  Total Stories: 4
-  Total Batches: 2
+  Total Stories: {count}
+  Total Batches: {batch_count}
 
-  Complete:     2 ✓
-  In Progress:  2 ◐
-  Pending:      0 ○
-  Failed:       0 ✗
+  Complete:     {complete_count} ●
+  In Progress:  {in_progress_count} ◐
+  Pending:      {pending_count} ○
+  Failed:       {failed_count} ✗
 
 ## Progress
-  [██████████████░░░░░░░░░░░░░░░] 50.0%
+  [{progress_bar}] {percentage}%
 
-## Current Batch: 2
+## Current Batch: {current_batch_number}
 
-  ◐ story-003: Implement user login [in_progress] [via codex]
-  ◐ story-004: Implement password reset [in_progress] [via amp-code]
+  {stories in current batch with their statuses}
 
 ## All Batches
 
-  Batch 1: ✓ (2 stories)
-    ● story-001: Design database schema [via claude-code]
-    ● story-002: Design API endpoints [via claude-code]
+  Batch 1: {status} ({count} stories)
+    {story statuses}
 
-  Batch 2: ○ (2 stories)
-    ◐ story-003: Implement user login [via codex]
-    ◐ story-004: Implement password reset [via amp-code]
+  Batch 2: {status} ({count} stories)
+    {story statuses}
+
+...
 
 ============================================================
 ```
 
-## Completion
+Status indicators:
+- `●` Complete
+- `◐` In Progress
+- `○` Pending
+- `✗` Failed
 
-When all stories are complete, you'll see:
+## Step 6: Show Recent Activity
+
+Display the last 10 entries from `progress.txt`:
 
 ```
-✓ All stories complete!
+## Recent Activity
+
+{last 10 lines from progress.txt}
 ```
 
-## See Also
+## Step 7: Show Failed Stories (if any)
 
-- `/hybrid:auto` - Start a new task
-- `/hybrid:manual` - Load existing PRD
-- `/approve` - Approve PRD and begin execution
-- `/agent-status` - View detailed agent status
+If there are failed stories, show them:
+
+```
+## Failed Stories
+
+  ✗ {story_id}: {title}
+     {error details from progress.txt}
+```
+
+## Step 8: Show Completion Status
+
+If all stories are complete:
+
+```
+All stories complete!
+
+Next:
+  - /hybrid:complete - Complete and merge (if in worktree)
+  - /show-dependencies - Review final state
+```
+
+If some stories are still pending/in-progress:
+
+```
+Next:
+  - Continue monitoring with: /status
+  - View progress details in: progress.txt
+  - View agent logs in: .agent-outputs/
+```
+
+If execution was interrupted:
+
+```
+To resume an interrupted task:
+  /hybrid:resume --auto
+
+This will:
+  - Auto-detect current state from files
+  - Skip already-completed stories
+  - Resume execution from where it left off
+```

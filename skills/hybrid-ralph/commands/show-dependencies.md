@@ -1,34 +1,69 @@
 ---
-name: hybrid:show-dependencies
-description: Display the dependency graph for all stories in the PRD
+description: "Display the dependency graph for all stories in the PRD. Shows visual ASCII graph, dependency details, critical path analysis, and detects issues like circular dependencies or bottlenecks."
 ---
 
-# /show-dependencies
+# Hybrid Ralph - Show Dependencies
 
-Display a visual representation of the dependency graph for all stories in the PRD.
+You are displaying the dependency graph and analysis for all stories in the PRD.
 
-## Usage
+## Path Storage Modes
+
+PRD file location depends on the storage mode:
+- **New Mode**: `~/.plan-cascade/<project-id>/prd.json` or in worktree directory
+- **Legacy Mode**: `prd.json` in project root or worktree
+
+## Step 1: Verify PRD Exists
+
+```bash
+# Get PRD path from PathResolver
+PRD_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_prd_path())" 2>/dev/null || echo "prd.json")
+
+# Also check local prd.json (in worktree)
+if [ -f "prd.json" ]; then
+    PRD_PATH="prd.json"
+elif [ ! -f "$PRD_PATH" ]; then
+    echo "ERROR: No PRD found at: $PRD_PATH"
+    exit 1
+fi
+```
+
+## Step 2: Read PRD
+
+Read the PRD file at `$PRD_PATH` to get all stories and their dependencies.
+
+## Step 3: Build Dependency Graph
+
+Create a mapping of:
+- Story → Dependencies (what this story depends on)
+- Story → Dependents (what depends on this story)
+- Story → Depth (how many levels from root)
+
+## Step 4: Detect Issues
+
+### Check for Circular Dependencies
+
+Use depth-first search to detect cycles:
 
 ```
-/show-dependencies
+For each story:
+  Mark as visiting
+  For each dependency:
+    If dependency is visiting → CYCLE DETECTED
+    If dependency not visited → recurse
+  Mark as visited
 ```
 
-## What It Shows
+### Check for Orphan Stories
 
-### ASCII Dependency Graph
-Visual representation of how stories depend on each other using ASCII art.
+Find stories with:
+- No dependencies
+- No dependents
 
-### Dependency Details
-- Each story's dependencies
-- Dependency depth (how many levels deep)
-- Critical path (stories that block others)
+### Check for Bottlenecks
 
-### Potential Issues
-- Circular dependencies
-- Orphan stories (no dependencies, nothing depends on them)
-- Bottleneck stories (many stories depend on them)
+Find stories with many dependents (threshold: 4+).
 
-## Example Output
+## Step 5: Display Dependency Report
 
 ```
 ============================================================
@@ -37,6 +72,9 @@ DEPENDENCY GRAPH
 
 ## Visual Graph
 
+{ASCII tree showing dependencies}
+
+Example:
 story-001 (Database Schema)
     │
     ├─── story-002 (User Registration)
@@ -49,99 +87,67 @@ story-001 (Database Schema)
 
 ## Dependency Details
 
-story-001: Design database schema
-  Dependencies: None
-  Depth: 0 (Root)
-  Dependents: story-002, story-003
-  └─ Critical path story
-
-story-002: Implement user registration
-  Dependencies: story-001
-  Depth: 1
-  Dependents: story-004
-
-story-003: Implement user login
-  Dependencies: story-001
-  Depth: 1
-  Dependents: story-004
-
-story-004: Implement password reset
-  Dependencies: story-002, story-003
-  Depth: 2
-  Dependents: None
-  └─ Endpoint story
+{For each story, show:
+  - ID and title
+  - Dependencies (if any)
+  - Depth level
+  - Dependents (if any)
+  - Type (root, intermediate, endpoint, orphan, bottleneck)
+}
 
 ## Analysis
 
-- Maximum depth: 2 levels
-- Critical path length: 3 stories
-- Bottleneck stories: story-001 (2 dependents)
-- No circular dependencies detected
-- No orphan stories detected
+- Maximum depth: {depth} levels
+- Critical path length: {count} stories
+- Bottleneck stories: {list}
+- Circular dependencies: {count or "none detected"}
+- Orphan stories: {count or "none detected"}
 
 ============================================================
 ```
 
-## Reading the Graph
+## Step 6: Show Warnings (if any)
 
-### Arrows (│, ├───, └───)
-Show the dependency relationship:
-- `│` - Vertical connection
-- `├───` - Horizontal branch
-- `└───` - Last branch
+If issues detected, show them:
 
-### Depth Levels
-- **Depth 0**: Root stories (no dependencies)
-- **Depth 1**: Stories that depend on root stories
-- **Depth 2+**: Stories with chained dependencies
-
-### Story Types
-
-| Type | Description |
-|------|-------------|
-| Root story | No dependencies, can start immediately |
-| Intermediate story | Has dependencies and dependents |
-| Endpoint story | Has dependencies, no dependents |
-| Orphan story | No dependencies, nothing depends on it |
-| Bottleneck story | Many stories depend on it |
-
-## Issue Detection
-
-### Circular Dependencies
+### Circular Dependency Warning
 ```
-⚠️ Circular dependency detected:
+Circular dependency detected:
   story-001 → story-002 → story-003 → story-001
-```
 
 This will prevent any story from starting. Break the cycle by removing a dependency.
-
-### Bottleneck Warnings
 ```
-⚠️ Bottleneck warning:
+
+### Bottleneck Warning
+```
+Bottleneck warning:
   story-001 has 5 dependents
   Consider breaking this story into smaller pieces
 ```
 
-### Orphan Stories
+### Orphan Story Info
 ```
-ℹ️ Orphan story:
+Orphan story:
   story-005 has no dependencies and nothing depends on it
   This story may not be part of the main workflow
 ```
 
-## Using This Information
+## Step 7: Show Usage Tips
 
-### For Parallel Execution
-Root stories (depth 0) can all run in parallel.
+```
+Using This Information:
 
-### For Optimization
-Bottleneck stories should be kept small to avoid blocking others.
+For Parallel Execution:
+  Root stories (depth 0) can all run in parallel.
 
-### For Planning
-The critical path shows the minimum number of sequential steps.
+For Optimization:
+  Bottleneck stories should be kept small to avoid blocking others.
 
-## See Also
+For Planning:
+  The critical path shows the minimum number of sequential steps.
 
-- `/approve` - See execution plan with batches
-- `/status` - Check execution progress
-- `/edit` - Modify dependencies
+Next steps:
+  - /approve - See execution plan with batches
+  - /edit - Modify dependencies
+  - /status - Check execution progress
+```

@@ -1,57 +1,103 @@
 ---
-name: mega:status
-description: Show detailed status of mega-plan execution
+description: "Show detailed status of mega-plan execution including feature progress and story completion."
 ---
 
-# /mega:status
+# Mega Plan Status
 
 Display comprehensive status of the mega-plan execution.
 
-## Your Task
+## Path Storage Modes
 
-### Step 1: Check for Mega Plan
+This command works with both new and legacy path storage modes:
 
-**Use Read tool (NOT Bash) to check if mega-plan.json exists:**
+### New Mode (Default)
+- `mega-plan.json`: `~/.plan-cascade/<project-id>/mega-plan.json`
+- `.mega-status.json`: `~/.plan-cascade/<project-id>/.state/.mega-status.json`
+- Worktrees: `~/.plan-cascade/<project-id>/.worktree/<feature>/`
 
-```
-Read("mega-plan.json")
-```
+### Legacy Mode
+- All files in project root
 
-If the file doesn't exist (Read returns error), inform the user:
-```
-No mega-plan.json found.
-Use /mega:plan <description> to create one first.
-```
+The command uses PathResolver to find files in the correct locations.
 
-### Step 2: Read Current State
+## Tool Usage Policy (CRITICAL)
 
-**Use Read tool (NOT Bash) to read state files:**
+**To avoid command confirmation prompts:**
 
-```
-Read("mega-plan.json")       # Already read in Step 1
-Read(".mega-status.json")    # May not exist, that's OK
-```
+1. **Use Read tool for file reading** - NEVER use `cat` via Bash
+   - ✅ `Read("mega-plan.json")`, `Read(".mega-status.json")`
+   - ❌ `Bash("cat mega-plan.json")`
 
-Execute these Read calls to get the current plan and status data.
+2. **Use Glob tool for finding files** - NEVER use `ls` or `find` via Bash
+   - ✅ `Glob(".worktree/*/progress.txt")`
+   - ❌ `Bash("ls .worktree/")`
 
-### Step 3: Sync Status from Worktrees
+3. **Use Grep tool for content search** - NEVER use `grep` via Bash
+   - ✅ `Grep("[FEATURE_COMPLETE]", path="...")`
+   - ❌ `Bash("grep '[FEATURE_COMPLETE]' ...")`
 
-Update status by checking each worktree:
+4. **Only use Bash for actual system commands** (git, mkdir, etc.)
+
+## Step 1: Verify Mega Plan Exists
 
 ```bash
-uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-sync.py"
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+
+if [ ! -f "$MEGA_PLAN_PATH" ]; then
+    echo "No mega-plan.json found at: $MEGA_PLAN_PATH"
+    echo "Use /mega:plan <description> to create one first."
+    exit 1
+fi
 ```
 
-### Step 4: Calculate Progress
+## Step 2: Read Current State
 
-For each feature, check:
+Read the mega-plan and sync status from worktrees:
+
+```bash
+# Get file paths from PathResolver
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+MEGA_STATUS_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
+
+cat "$MEGA_PLAN_PATH"
+cat "$MEGA_STATUS_PATH" 2>/dev/null || echo "{}"
+```
+
+## Step 3: Sync Status from Worktrees
+
+For each feature with a worktree, check:
 - Does the worktree exist?
-- Does prd.json exist in the worktree?
+- Does prd.json exist?
 - What's the story completion status?
+- Check progress.txt for markers:
+  - `[PRD_COMPLETE] {feature_id}` - PRD generation done
+  - `[STORY_COMPLETE] {story_id}` - Story done
+  - `[STORY_FAILED] {story_id}` - Story failed
+  - `[FEATURE_COMPLETE] {feature_id}` - All stories done
+  - `[FEATURE_FAILED] {feature_id}` - Feature failed
 
-### Step 5: Display Comprehensive Status
+Update .mega-status.json with current statuses.
 
-Show a detailed status report:
+## Step 4: Calculate Progress
+
+- Total features
+- Completed features
+- In-progress features
+- Pending features
+- Failed features (if any)
+
+Calculate percentage: `(completed / total) * 100`
+
+## Step 5: Generate Progress Bar
+
+```
+Progress: ████████████░░░░░░░░ 60%
+```
+
+Use filled blocks for complete percentage, empty for remaining.
+
+## Step 6: Display Comprehensive Status
 
 ```
 ============================================================
@@ -59,10 +105,10 @@ MEGA PLAN STATUS
 ============================================================
 
 Project: <goal>
-Mode: <execution_mode>
+Mode: <auto|manual>
 Target: <target_branch>
 
-Overall Progress: ██████████░░░░░░░░░░ 50% (2/4 features)
+Overall Progress: ████████████░░░░░░░░ 50% (2/4 features)
 
 ============================================================
 FEATURE STATUS
@@ -78,7 +124,7 @@ Batch 1 (Parallel):
       Worktree: .worktree/feature-products/
       Stories: 2/5 complete (40%)
       Status: in_progress
-      Current: story-003 - Implement search functionality
+      Current: story-003 - Implement search
 
 Batch 2 (Waiting for Batch 1):
   [ ] feature-003: Shopping Cart
@@ -108,20 +154,36 @@ NEXT ACTIONS
 
 Current work:
   cd .worktree/feature-products
-  # Continue story-003 execution
+  # Continue story execution
 
-When Batch 1 completes:
-  Batch 2 will start automatically (auto mode)
+When current batch completes:
+  /mega:approve
+  # This will merge current batch and start next batch
 
-When all complete:
+When all batches complete:
   /mega:complete
+  # This will cleanup planning files
 
 ============================================================
 ```
 
-### Status Symbols
+## Batch-by-Batch Execution Model
 
-Use these symbols for feature status:
+```
+Batch 1: feature-001, feature-002 (parallel, from target_branch)
+    │
+    └─→ When ALL complete: mega-approve merges to target_branch
+                                │
+Batch 2: feature-003, feature-004 (parallel, from UPDATED target_branch)
+    │                           ↑ includes Batch 1 code
+    └─→ When ALL complete: mega-approve merges to target_branch
+                                │
+Final: mega-complete (cleanup only)
+```
+
+This ensures each batch's features have access to code from previous batches.
+
+## Status Symbols
 
 | Symbol | Meaning |
 |--------|---------|
@@ -131,52 +193,29 @@ Use these symbols for feature status:
 | `[X]` | Complete |
 | `[!]` | Failed |
 
-### Progress Bar
-
-Generate a visual progress bar:
-
-```
-Progress: ████████████░░░░░░░░ 60%
-```
-
-Use filled blocks (█) for complete percentage, empty blocks (░) for remaining.
-
-### Step 6: Show Worktree Details
-
-For each active worktree, show:
-
-```
-Worktree Details:
-  .worktree/feature-products/
-    Branch: mega-feature-products
-    PRD: 5 stories
-    Findings: 12 entries
-    Last activity: 2 minutes ago
-```
-
-### Step 7: Check for Issues
+## Step 7: Check for Issues
 
 Identify and highlight any issues:
 
 ```
 ============================================================
-ISSUES
+ISSUES DETECTED
 ============================================================
 
 [WARN] feature-002 has been in_progress for 2 hours
-[WARN] Stale lock file detected: .locks/prd.json.lock
+[WARN] Stale lock file: .locks/prd.json.lock
 [ERROR] feature-003 failed - check .worktree/feature-cart/progress.txt
 
 ============================================================
 ```
 
-### Step 8: Offer Actions
+## Step 8: Suggest Actions
 
-Based on status, suggest relevant actions:
+Based on current status:
 
 **If features are in progress:**
 ```
-To check a feature's progress:
+To check a feature's detailed progress:
   cd .worktree/<feature-name>
   /status
 
@@ -197,3 +236,40 @@ Feature <name> failed. To investigate:
   cat progress.txt
   # Fix issues and re-run /approve
 ```
+
+**If execution was interrupted:**
+```
+To resume an interrupted mega-plan:
+  /mega:resume --auto-prd
+
+This will:
+  - Auto-detect current state from files
+  - Skip already-completed work
+  - Resume from where it left off
+```
+
+**If PRDs awaiting approval:**
+```
+PRDs waiting for approval:
+  cd .worktree/<feature-name>
+  cat prd.json
+  /approve
+```
+
+## Automated Execution Mode
+
+When running `/mega:approve --auto-prd`, the execution is fully automated:
+- PRDs are generated automatically for each feature
+- Stories are executed automatically
+- Progress is monitored continuously
+- Batches merge and transition automatically
+
+To check progress during automated execution:
+```
+/mega:status
+```
+
+Progress markers in worktree progress.txt files:
+- `[PRD_COMPLETE] feature-xxx` - PRD generation finished
+- `[STORY_COMPLETE] story-xxx` - Individual story completed
+- `[FEATURE_COMPLETE] feature-xxx` - All stories done, ready for merge

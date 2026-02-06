@@ -90,7 +90,7 @@ A hybrid architecture combining the best of three approaches:
    - Display: "Detected ongoing hybrid task execution"
    - Show current batch and pending stories from the file
    - Resume story execution based on the state
-   - If unsure of state, suggest: `/plan-cascade:hybrid-resume --auto`
+   - If unsure of state, suggest: `/hybrid:resume --auto`
 
 3. If NO but `prd.json` exists:
    - Run: `uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/hybrid-context-reminder.py" both`
@@ -270,15 +270,31 @@ uv run python orchestrator.py execute-batch 1
 
 ### /hybrid:auto
 
-Generate PRD from task description.
+Generate PRD from task description and enter review mode. Auto-generates user stories with priorities, dependencies, and acceptance criteria for parallel execution.
 
 ```
-/hybrid:auto <task description>
+/hybrid:auto [options] <task description> [design-doc-path]
 ```
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `--flow <quick\|standard\|full>` | Execution flow depth controlling quality gate strictness |
+| `--tdd <off\|on\|auto>` | Test-Driven Development mode |
+| `--confirm` | Require batch confirmation during execution |
+| `--no-confirm` | Disable batch confirmation |
+| `--spec <off\|auto\|on>` | Spec interview before PRD generation |
+| `--first-principles` | Enable first-principles questioning in spec interview |
+| `--max-questions N` | Max questions in spec interview |
+| `--agent <name>` | Agent to use for PRD generation |
+| `design-doc-path` | Optional path to existing design document |
+
+Parameters are saved to `prd.json` and propagated to `/approve`.
 
 ### /hybrid:manual
 
-Load existing PRD file.
+Load an existing PRD file and enter review mode.
 
 ```
 /hybrid:manual [path/to/prd.json]
@@ -286,163 +302,85 @@ Load existing PRD file.
 
 ### /hybrid:worktree
 
-Create a new Git worktree with isolated environment and initialize Hybrid Ralph mode. This is the **primary command** for multi-task parallel development.
+Start a new task in an isolated Git worktree with Hybrid Ralph PRD mode. Creates worktree, branch, loads existing PRD or auto-generates from description.
 
 ```
-/hybrid:worktree <task-name> <target-branch> <task-description-or-prd-path>
+/hybrid:worktree [options] <task-name> <target-branch> <prd-path-or-description> [design-doc-path]
 ```
 
 **Arguments:**
 - `task-name`: Name for the worktree (e.g., "feature-auth", "fix-api-bug")
 - `target-branch`: Branch to merge into (default: auto-detect main/master)
-- `task-description-or-prd-path`: Either a task description to generate PRD, or path to existing PRD file
+- `prd-path-or-description`: Either a task description to generate PRD, or path to existing PRD file
 
-**Execution Steps:**
+**Parameters:**
 
-When `/hybrid:worktree` is invoked, execute the following:
+| Parameter | Description |
+|-----------|-------------|
+| `--flow <quick\|standard\|full>` | Execution flow depth controlling quality gate strictness |
+| `--tdd <off\|on\|auto>` | Test-Driven Development mode |
+| `--confirm` | Require batch confirmation during execution |
+| `--no-confirm` | Disable batch confirmation |
+| `--spec <off\|auto\|on>` | Spec interview before PRD generation |
+| `--first-principles` | Enable first-principles questioning in spec interview |
+| `--max-questions N` | Max questions in spec interview |
+| `--agent <name>` | Agent to use for PRD generation |
+| `design-doc-path` | Optional path to existing design document |
 
-1. **Parse Parameters**: Extract task-name, target-branch, and PRD argument
-
-2. **Verify Git Repository**: Ensure we're in a git repository
-
-3. **Detect Default Branch**: Auto-detect main/master branch
-
-4. **Set Variables**:
-```bash
-TASK_BRANCH="$TASK_NAME"
-ORIGINAL_BRANCH=$(git branch --show-current)
-ROOT_DIR=$(pwd)
-WORKTREE_DIR="$ROOT_DIR/.worktree/$(basename $TASK_NAME)"
-```
-
-5. **Determine PRD Mode**: Check if third argument is existing file or task description
-
-6. **Check for Existing Worktree**: If worktree exists, navigate to it; otherwise create new worktree
-
-7. **Create Git Worktree** (if new):
-```bash
-git worktree add -b "$TASK_BRANCH" "$WORKTREE_DIR" "$TARGET_BRANCH"
-```
-
-8. **Create Planning Configuration** in worktree:
-```bash
-cat > "$WORKTREE_DIR/.planning-config.json" << EOF
-{
-  "mode": "hybrid",
-  "task_name": "$TASK_NAME",
-  "task_branch": "$TASK_BRANCH",
-  "target_branch": "$TARGET_BRANCH",
-  "worktree_dir": "$WORKTREE_DIR",
-  "original_branch": "$ORIGINAL_BRANCH",
-  "root_dir": "$ROOT_DIR",
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-EOF
-```
-
-9. **Create Initial Files** in worktree (findings.md, progress.txt)
-
-10. **Navigate to Worktree**:
-```bash
-cd "$WORKTREE_DIR"
-```
-
-11. **Handle PRD**:
-    - If `PRD_MODE` is "load": Copy PRD file to worktree
-    - If `PRD_MODE` is "generate": Use Task tool with run_in_background=true to generate PRD
-      - IMPORTANT: After launching Task, immediately use TaskOutput with block=true to wait for completion
-      - DO NOT use sleep loops
-
-12. **Validate and Display PRD**: Show the generated/loaded PRD with review
-
-13. **Show Ready Summary** with next steps
-
-**Smart PRD Detection:**
-- If third argument is an existing file → Load that PRD
-- If third argument is not a file → Use as task description to generate PRD
+Parameters are saved to the worktree's `prd.json`, ensuring isolation from other tasks.
 
 ### /approve
 
-Approve PRD and begin parallel story execution with batch progression.
+Approve PRD and begin parallel story execution. Analyzes dependencies, creates execution batches, launches background Task agents, and monitors progress.
 
 ```
-/approve
+/approve [options]
 ```
 
-**Execution Steps:**
+**Parameters:**
 
-1. **Verify PRD Exists**: Check if `prd.json` exists in current directory
+| Parameter | Description |
+|-----------|-------------|
+| `--flow <quick\|standard\|full>` | Override execution flow depth (quality gate strictness) |
+| `--tdd <off\|on\|auto>` | Control TDD mode for story execution |
+| `--confirm` | Require confirmation before each batch |
+| `--no-confirm` | Disable batch confirmation (even in full flow) |
+| `--agent <name>` | Global agent override for all stories |
+| `--impl-agent <name>` | Agent for implementation phase |
+| `--retry-agent <name>` | Agent for retry phase (after failures) |
+| `--no-verify` | Skip AI verification gate |
+| `--verify-agent <name>` | Agent for verification phase |
+| `--no-review` | Skip code review gate |
+| `--no-fallback` | Disable agent fallback chain |
+| `--auto-run` | Use Python-based full-auto execution with retry |
 
-2. **Read and Validate PRD**: Validate structure and required fields
+**Flow Levels:**
 
-3. **Calculate Execution Batches**: Analyze dependencies and create parallel execution batches
-   - Batch 1: Stories with no dependencies (can run in parallel)
-   - Batch 2+: Stories whose dependencies are complete
+| Flow | Gate Mode | AI Verification | Code Review | Test Enforcement |
+|------|-----------|-----------------|-------------|------------------|
+| `quick` | soft (warnings) | disabled | no | no |
+| `standard` | soft (warnings) | enabled | no | no |
+| `full` | hard (blocking) | enabled | required | required |
 
-4. **Choose Execution Mode**: Ask user to select execution mode:
-   ```
-   ==========================================
-   Select Execution Mode
-   ==========================================
+**Execution Modes:**
 
-     [1] Auto Mode  - Automatically progress through batches
-                         Pause only on errors
+| Mode | Description |
+|------|-------------|
+| Auto | Automatically progresses through batches, pauses on errors |
+| Manual | Requires user approval before each batch |
+| Full Auto | Python-based execution with auto-retry (up to 3 attempts) |
 
-     [2] Manual Mode - Require approval before each batch
-                         Full control and review
+### /hybrid:complete
 
-   ==========================================
-   Enter choice [1/2] (default: 1):
-   ```
+Complete a worktree task. Verifies all stories are complete, commits code changes (excluding planning files), merges to target branch, and removes worktree.
 
-5. **Initialize Progress Tracking**: Create/initialize `progress.txt` with execution mode
-
-6. **Launch Batch 1 Agents**: For each story in Batch 1, launch a background Task agent with this prompt:
-   ```
-   You are executing story {story_id}: {title}
-
-   Description: {description}
-   Acceptance Criteria: {criteria}
-
-   Your task:
-   1. Read relevant code and documentation
-   2. Implement the story according to acceptance criteria
-   3. Test your implementation
-   4. Update findings.md with discoveries (use <!-- @tags: {story_id} -->)
-   5. Mark complete by appending to progress.txt: [COMPLETE] {story_id}
-
-   Execute all necessary bash/powershell commands directly to complete the story.
-   Work methodically and document your progress.
-   ```
-
-7. **Monitor and Progress Through Batches**:
-
-   Based on selected mode:
-
-   **Auto Mode:**
-   - Poll progress.txt for completion every 10 seconds
-   - When Batch 1 completes, automatically launch Batch 2
-   - Continue until all batches complete or error detected
-   - Pause only on [ERROR] or [FAILED] markers
-
-   **Manual Mode:**
-   - Poll progress.txt for completion every 10 seconds
-   - When Batch 1 completes, prompt user for confirmation
-   - Ask: "Launch Batch 2? [Y/n]:"
-   - If confirmed, launch Batch 2
-   - Continue until all batches complete or error detected
-   - Pause only on [ERROR] or [FAILED] markers
-
-8. **Show Completion Status**: When all batches complete, show summary
-
-**Important:**
-- In both modes, agents execute commands directly without confirmation
-- Execution mode ONLY controls batch-to-batch progression
-- DO NOT add timeout or iteration limits to polling loops
+```
+/hybrid:complete [target-branch]
+```
 
 ### /edit
 
-Edit the PRD in your default editor.
+Edit the PRD in your default editor. Opens prd.json, validates after saving, and re-displays review.
 
 ```
 /edit
@@ -450,10 +388,18 @@ Edit the PRD in your default editor.
 
 ### /status
 
-Show execution status.
+Show execution status of all stories. Displays batch progress, individual story states, completion percentage, and recent activity.
 
 ```
 /status
+```
+
+### /show-dependencies
+
+Display the dependency graph for all stories in the PRD. Shows visual ASCII graph, critical path analysis, and detects issues like circular dependencies.
+
+```
+/show-dependencies
 ```
 
 ## Workflows

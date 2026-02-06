@@ -1,35 +1,41 @@
 ---
-name: mega:edit
-description: Edit the mega-plan in your default editor
+description: "Edit the mega-plan interactively. Add, remove, or modify features."
 ---
 
-# /mega:edit
+# Edit Mega Plan
 
-Edit the mega-plan.json file interactively.
+Edit the mega-plan.json file interactively to add, remove, or modify features.
 
-## Your Task
+## Path Storage Modes
 
-### Step 1: Check for Mega Plan
+Mega-plan file location depends on the storage mode:
+- **New Mode**: `~/.plan-cascade/<project-id>/mega-plan.json`
+- **Legacy Mode**: `mega-plan.json` in project root
 
-**Use Read tool (NOT Bash) to check if mega-plan.json exists:**
+The command uses PathResolver to find the correct file location.
 
+## Step 1: Verify Mega Plan Exists
+
+```bash
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+
+if [ ! -f "$MEGA_PLAN_PATH" ]; then
+    echo "No mega-plan.json found at: $MEGA_PLAN_PATH"
+    echo "Use /mega:plan <description> to create one first."
+    exit 1
+fi
 ```
-Read("mega-plan.json")
+
+## Step 2: Read Current Plan
+
+Read and parse mega-plan.json:
+
+```bash
+cat "$MEGA_PLAN_PATH"
 ```
 
-If the file doesn't exist (Read returns error), inform the user:
-```
-No mega-plan.json found.
-Use /mega:plan <description> to create one first.
-```
-
-### Step 2: Read Current Plan
-
-The mega-plan was already read in Step 1 using the Read tool. Parse the JSON content from that result.
-
-### Step 3: Display Current Structure
-
-Show the user the current plan structure:
+## Step 3: Display Current Structure
 
 ```
 ============================================================
@@ -42,6 +48,7 @@ Target Branch: <branch>
 
 Features:
   1. [feature-001] <title>
+     - Name: <name>
      - Priority: <priority>
      - Status: <status>
      - Dependencies: <deps or "none">
@@ -52,40 +59,40 @@ Features:
 ============================================================
 ```
 
-### Step 4: Ask What to Edit
+## Step 4: Ask What to Edit
 
-Use AskUserQuestion to ask what the user wants to edit:
+Use AskUserQuestion to present options:
 
-**Options:**
+**What would you like to edit?**
+
+Options:
 1. **Add a new feature** - Add another feature to the plan
 2. **Remove a feature** - Remove an existing feature
 3. **Edit a feature** - Modify an existing feature's details
 4. **Change execution mode** - Switch between auto/manual
 5. **Change target branch** - Modify the merge target
-6. **Edit in text editor** - Open in $EDITOR
 
-### Step 5: Perform the Edit
+## Step 5: Perform the Edit
 
-Based on user selection:
-
-#### Add a New Feature
+### Option 1: Add a New Feature
 
 Ask for:
-- Feature name (lowercase-hyphenated)
+- Feature name (lowercase-hyphenated, e.g., "feature-analytics")
 - Title (human readable)
 - Description (detailed for PRD generation)
 - Priority (high/medium/low)
-- Dependencies (existing feature IDs)
+- Dependencies (comma-separated feature IDs, or "none")
 
-Then add to the features array with the next sequential ID.
+Generate the next sequential ID and add to features array.
 
-#### Remove a Feature
+### Option 2: Remove a Feature
 
-Show list of features, let user select one to remove.
-Warn if other features depend on it.
-Remove the feature and update any dependencies.
+Show list of features, let user select one.
+- Warn if other features depend on it
+- Ask for confirmation
+- Remove and update dependent features' dependencies
 
-#### Edit a Feature
+### Option 3: Edit a Feature
 
 Show list of features, let user select one.
 Then ask what to edit:
@@ -94,48 +101,37 @@ Then ask what to edit:
 - Description
 - Priority
 - Dependencies
-- Status
 
-#### Change Execution Mode
+### Option 4: Change Execution Mode
 
-Toggle between "auto" and "manual".
+Toggle between "auto" and "manual":
+- Auto: Batches progress automatically
+- Manual: Confirm before each batch
 
-#### Change Target Branch
+### Option 5: Change Target Branch
 
-Ask for new target branch name.
+Ask for new branch name and validate it exists.
 
-#### Edit in Text Editor
-
-```bash
-${EDITOR:-code} mega-plan.json
-```
-
-After editor closes, validate the file.
-
-### Step 6: Validate Changes
+## Step 6: Validate Changes
 
 After any edit, validate the mega-plan:
+- Check all required fields
+- Verify dependencies exist
+- Check for circular dependencies
+- Validate feature names format
 
-```bash
-uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/mega_generator.py" validate
-```
+## Step 7: Save and Display
 
-If validation fails, show errors and offer to fix.
-
-### Step 7: Show Updated Plan
-
-Display the updated plan structure and batch analysis:
+Save the updated mega-plan.json to `$MEGA_PLAN_PATH` and show:
 
 ```
 ============================================================
-UPDATED MEGA PLAN
+MEGA PLAN UPDATED
 ============================================================
 
-Goal: <goal>
-Execution Mode: <mode>
-Target Branch: <branch>
+Changes saved to mega-plan.json
 
-Feature Batches:
+Updated Feature Batches:
 
 Batch 1 (Parallel):
   - feature-001: <title>
@@ -147,57 +143,15 @@ Batch 2 (After Batch 1):
 
 ============================================================
 
-Changes saved to mega-plan.json
+Next steps:
+  - Review changes: cat mega-plan.json
+  - Start execution: /mega:approve
 ```
 
-## Quick Edit Examples
+## Validation Rules
 
-### Adding a Feature
-
-User selects "Add a new feature":
-
-```
-Feature name: feature-analytics
-Title: Analytics Dashboard
-Description: Implement analytics tracking and dashboard for monitoring user engagement, page views, and conversion metrics.
-Priority: low
-Dependencies: feature-users
-
-Added feature-005: Analytics Dashboard
-Dependencies: feature-users
-```
-
-### Changing Dependencies
-
-User selects "Edit a feature" → "feature-003" → "Dependencies":
-
-```
-Current dependencies: feature-001
-
-Available features:
-  - feature-001: User Authentication
-  - feature-002: Product Catalog
-
-Enter new dependencies (comma-separated IDs, or 'none'):
-> feature-001, feature-002
-
-Updated dependencies for feature-003
-```
-
-### Removing a Feature
-
-User selects "Remove a feature" → "feature-004":
-
-```
-Warning: The following features depend on feature-004:
-  - feature-005
-
-Do you want to:
-1. Remove feature-004 and update dependents
-2. Cancel
-
-> 1
-
-Removed feature-004
-Updated feature-005 dependencies
-```
+- Feature names: `^[a-z0-9][a-z0-9-]*$`
+- Feature IDs: Must be unique
+- Dependencies: Must reference existing feature IDs
+- No circular dependencies allowed
+- At least one feature required

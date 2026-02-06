@@ -66,7 +66,7 @@ A project-level orchestration system that sits above `hybrid-ralph` to manage mu
    - Display: "Detected ongoing mega-plan execution"
    - Show current batch and active worktrees from the file
    - **CRITICAL**: All feature work MUST happen in worktrees, NOT main branch
-   - If unsure of state, suggest: `/plan-cascade:mega-resume --auto-prd`
+   - If unsure of state, suggest: `/mega:resume --auto-prd`
 
 3. If NO but `mega-plan.json` exists:
    - Run: `uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/scripts/mega-context-reminder.py" both`
@@ -172,20 +172,35 @@ project-root/
 
 ### /mega:plan
 
-Generate a mega-plan from project description.
+Generate a mega-plan for project-level multi-feature orchestration. Breaks a complex project into parallel features with dependencies.
 
 ```
-/mega:plan <project description>
+/mega:plan [options] <project description> [design-doc-path]
 ```
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `--flow <quick\|standard\|full>` | Execution flow depth controlling quality gate strictness |
+| `--tdd <off\|on\|auto>` | Test-Driven Development mode for feature execution |
+| `--confirm` | Require confirmation before each batch |
+| `--no-confirm` | Disable batch confirmation |
+| `--spec <off\|auto\|on>` | Spec interview before plan generation |
+| `--first-principles` | Enable first-principles questioning in spec interview |
+| `--max-questions N` | Max questions in spec interview |
+| `design-doc-path` | Optional path to existing design document |
+
+Parameters are saved to `mega-plan.json` and propagated to `/mega:approve` and feature-level `/approve` commands.
 
 **Example:**
 ```
-/mega:plan Create a blog platform with user accounts, article management, comments, and RSS feeds
+/mega:plan --flow full --tdd auto Create a blog platform with user accounts, article management, comments, and RSS feeds
 ```
 
 ### /mega:edit
 
-Edit the mega-plan in your default editor.
+Edit the mega-plan interactively. Add, remove, or modify features.
 
 ```
 /mega:edit
@@ -193,25 +208,38 @@ Edit the mega-plan in your default editor.
 
 ### /mega:approve
 
-Approve the mega-plan and begin execution.
+Approve the mega-plan and start feature execution. Creates worktrees and generates PRDs for each feature in batch-by-batch order.
 
 ```
-/mega:approve [--auto-prd]
+/mega:approve [options]
 ```
 
-**Options:**
-- `--auto-prd`: Automatically approve all generated PRDs (skip manual review)
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `--flow <quick\|standard\|full>` | Execution flow depth for feature execution |
+| `--tdd <off\|on\|auto>` | TDD mode propagated to feature execution |
+| `--confirm` | Require confirmation before each batch |
+| `--no-confirm` | Disable batch confirmation |
+| `--spec <off\|auto\|on>` | Spec interview for feature PRD generation |
+| `--first-principles` | First-principles questioning for spec interviews |
+| `--max-questions N` | Max questions in spec interviews |
+| `--auto-prd` | Auto-approve all generated PRDs (skip manual review) |
+| `--agent <name>` | Global agent override |
+| `--prd-agent <name>` | Agent for PRD generation phase |
+| `--impl-agent <name>` | Agent for story implementation phase |
 
 **Approval Modes:**
 
 | Mode | Trigger | Use Case |
 |------|---------|----------|
-| Manual PRD Review | `/mega:approve` | Need to review each feature's PRD |
-| Auto PRD Approval | `/mega:approve --auto-prd` | Trust PRD generation, want fast execution |
+| Manual PRD Review | `/mega:approve` | Review each feature's PRD before execution |
+| Auto PRD Approval | `/mega:approve --auto-prd` | Trust PRD generation, fully automated execution |
 
 ### /mega:status
 
-Show detailed execution status.
+Show detailed status of mega-plan execution including feature progress, story completion, and batch summary.
 
 ```
 /mega:status
@@ -219,14 +247,11 @@ Show detailed execution status.
 
 ### /mega:complete
 
-Complete the mega-plan and merge all features.
+Complete the mega-plan by cleaning up planning files. All features should already be merged via `/mega:approve`.
 
 ```
-/mega:complete [target-branch]
+/mega:complete
 ```
-
-**Arguments:**
-- `target-branch` (optional): Override the target branch from mega-plan
 
 ## mega-plan.json Format
 

@@ -1,332 +1,370 @@
 ---
-name: mega:complete
-description: Complete the mega-plan - merge all features and clean up
-arguments:
-  - name: target-branch
-    description: Target branch to merge into (optional, uses plan's target_branch if not specified)
-    required: false
+description: "Complete the mega-plan by cleaning up planning files. All features should already be merged via /mega:approve."
 ---
 
-# /mega:complete
+# Complete Mega Plan
 
-Complete the mega-plan by merging all features in dependency order and cleaning up.
+Complete the mega-plan by cleaning up remaining planning files.
 
-## Your Task
+**Note**: In the new batch-by-batch execution model, code merging happens automatically when each batch completes (via `/mega:approve`). This command only performs final cleanup.
 
-### Step 1: Check for Mega Plan
+## Path Storage Modes
 
-**Use Read tool (NOT Bash) to check if mega-plan.json exists:**
+This command works with both new and legacy path storage modes:
 
-```
-Read("mega-plan.json")
-```
+### New Mode (Default)
+Cleanup removes files from user data directory:
+- `~/.plan-cascade/<project-id>/mega-plan.json`
+- `~/.plan-cascade/<project-id>/.state/.mega-status.json`
+- `~/.plan-cascade/<project-id>/.worktree/` (remaining worktrees)
+- `<project-root>/mega-findings.md` (user-visible file in project root)
 
-If the file doesn't exist (Read returns error):
-```
-No mega-plan.json found.
-Nothing to complete.
-```
+### Legacy Mode
+Cleanup removes files from project root:
+- `<project-root>/mega-plan.json`
+- `<project-root>/.mega-status.json`
+- `<project-root>/.worktree/`
+- `<project-root>/mega-findings.md`
 
-### Step 2: Verify All Features Complete
+The command auto-detects which mode is active.
 
-Check each feature's status:
-
-```bash
-uv run python "${CLAUDE_PLUGIN_ROOT}/skills/mega-plan/core/merge_coordinator.py" verify
-```
-
-If any features are not complete:
-
-```
-============================================================
-CANNOT COMPLETE - FEATURES INCOMPLETE
-============================================================
-
-The following features are not yet complete:
-
-  [>] feature-002: Product Catalog
-      Status: in_progress
-      Stories: 3/5 complete
-      Location: .worktree/feature-products/
-
-  [ ] feature-003: Shopping Cart
-      Status: pending
-      Blocked by: feature-002
-
-============================================================
-
-Complete the remaining features first:
-  cd .worktree/feature-products
-  /status
-
-Then run /mega:complete again.
-```
-
-Exit without making changes.
-
-### Step 3: Determine Target Branch
-
-Check if target branch was specified in arguments:
-- If `$ARGUMENTS` contains a branch name, use that
-- Otherwise, use the target_branch from mega-plan.json
+## Step 1: Verify Mega Plan Exists
 
 ```bash
-TARGET_BRANCH="${ARGUMENTS:-$(cat mega-plan.json | uv run python -c "import json,sys; print(json.load(sys.stdin)['target_branch'])")}"
+# Get mega-plan path from PathResolver
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+
+if [ ! -f "$MEGA_PLAN_PATH" ]; then
+    echo "No mega-plan.json found at: $MEGA_PLAN_PATH"
+    echo "Nothing to complete."
+    exit 0
+fi
 ```
 
-### Step 4: Show Merge Plan
+## Step 2: Check Completion Status
 
-Display what will happen:
+Read `.mega-status.json` and `mega-plan.json` to verify:
+1. All batches have been completed
+2. All features have been merged
+
+If any batches are still pending:
+
+```
+============================================================
+CANNOT COMPLETE - BATCHES PENDING
+============================================================
+
+The following batches have not been completed:
+
+  Batch 2:
+    [ ] feature-003: Shopping Cart
+    [ ] feature-004: Order Processing
+
+Complete remaining batches first:
+  /mega:approve
+
+Then run this command again.
+============================================================
+```
+
+Exit without changes.
+
+## Step 3: Verify Current Branch
+
+```bash
+# Check we're on the target branch
+TARGET_BRANCH=$(read from mega-plan.json)
+CURRENT_BRANCH=$(git branch --show-current)
+
+if [ "$CURRENT_BRANCH" != "$TARGET_BRANCH" ]; then
+    echo "Warning: Not on target branch ($TARGET_BRANCH)"
+    echo "Currently on: $CURRENT_BRANCH"
+fi
+```
+
+## Step 4: Show Completion Summary
 
 ```
 ============================================================
 MEGA PLAN COMPLETION
 ============================================================
 
-All features are complete!
+All features have been merged!
 
 Target Branch: <target_branch>
 
-Merge Order (dependency-based):
-  1. feature-001: User Authentication
-  2. feature-002: Product Catalog
-  3. feature-003: Shopping Cart (after 1, 2)
-  4. feature-004: Order Processing (after 3)
+Completed Features:
+  Batch 1:
+    [X] feature-001: User Authentication
+    [X] feature-002: Product Catalog
 
-Cleanup:
-  - Remove .worktree/feature-* directories
-  - Delete mega-feature-* branches
+  Batch 2:
+    [X] feature-003: Shopping Cart
+    [X] feature-004: Order Processing
+
+Total: 4 features merged
+
+Remaining cleanup:
   - Remove mega-plan.json
-  - Remove .mega-status.json
   - Remove mega-findings.md
+  - Remove .mega-status.json
+  - Prune any remaining worktrees
 
 ============================================================
-
-Proceed with merge and cleanup? (This cannot be undone)
 ```
 
-Use AskUserQuestion to confirm:
+## Step 5: Confirm Cleanup
 
-**Options:**
-1. **Yes, merge and cleanup** - Proceed with full completion
-2. **Merge only** - Merge but keep worktrees and files
-3. **Cancel** - Don't do anything
+Use AskUserQuestion:
 
-### Step 5: Ensure on Target Branch
-
-```bash
-git checkout <target_branch>
-git pull origin <target_branch>  # Optional: sync with remote
-```
-
-### Step 6: Merge Features in Order
-
-For each feature in dependency order:
-
-```bash
-# Merge feature branch
-git merge mega-<feature-name> --no-ff -m "Merge feature: <title>
-
-<description summary>
-
-Mega-plan feature: <feature-id>
-Stories completed: N"
-```
-
-Show progress:
-
-```
-Merging features...
-
-[OK] feature-001: User Authentication
-     Merged mega-feature-auth into <target>
-
-[OK] feature-002: Product Catalog
-     Merged mega-feature-products into <target>
-
-[OK] feature-003: Shopping Cart
-     Merged mega-feature-cart into <target>
-
-[OK] feature-004: Order Processing
-     Merged mega-feature-orders into <target>
-
-All features merged successfully!
-```
-
-### Step 7: Handle Merge Conflicts
-
-If a merge conflict occurs:
-
-```
-============================================================
-MERGE CONFLICT
-============================================================
-
-Conflict while merging feature-002: Product Catalog
-
-Conflicting files:
-  - src/api/products.ts
-  - src/models/product.ts
+**Proceed with cleanup?**
 
 Options:
-1. Resolve conflicts manually, then run /mega:complete again
-2. Abort this merge: git merge --abort
+1. **Yes, cleanup** - Remove planning files
+2. **Keep files** - Keep planning files for reference
+3. **Cancel** - Do nothing
 
-To resolve:
-  git status
-  # Edit conflicting files
-  git add <resolved files>
-  git commit
-  /mega:complete
-```
+## Step 6: Cleanup Planning Files
 
-Exit and let user resolve.
+If user selected "Yes, cleanup":
 
-### Step 8: Cleanup Worktrees
-
-Remove each worktree:
+### 6.1: Remove Planning Files
 
 ```bash
-# For each feature
-git worktree remove .worktree/<feature-name> --force
+# Get file paths from PathResolver (handles new vs legacy mode)
+MEGA_PLAN_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_plan_path())" 2>/dev/null || echo "mega-plan.json")
+MEGA_STATUS_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_status_path())" 2>/dev/null || echo ".mega-status.json")
+MEGA_FINDINGS_PATH=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_mega_findings_path())" 2>/dev/null || echo "mega-findings.md")
+USER_STATE_DIR=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_state_dir())" 2>/dev/null || echo "")
+
+# Remove mega-plan core files
+rm -f "$MEGA_PLAN_PATH"
+rm -f "$MEGA_FINDINGS_PATH"
+rm -f "$MEGA_STATUS_PATH"
+
+echo "[OK] Removed mega-plan.json from: $MEGA_PLAN_PATH"
+echo "[OK] Removed mega-findings.md from: $MEGA_FINDINGS_PATH"
+echo "[OK] Removed .mega-status.json from: $MEGA_STATUS_PATH"
+
+# Remove additional planning files from project root
+echo "Cleaning up additional planning files..."
+
+# Design and spec files
+rm -f design_doc.json spec.json spec.md
+echo "[OK] Removed design_doc.json, spec.json, spec.md"
+
+# Context recovery files
+rm -f .mega-execution-context.md .hybrid-execution-context.md
+echo "[OK] Removed context recovery files"
+
+# Status and state files in project root
+rm -f .agent-status.json .iteration-state.json .retry-state.json
+echo "[OK] Removed status files"
+
+# Agent outputs directory
+rm -rf .agent-outputs
+echo "[OK] Removed .agent-outputs/"
+
+# Locks directory
+rm -rf .locks
+echo "[OK] Removed .locks/"
+
+# State directory in project root (legacy mode)
+rm -rf .state
+echo "[OK] Removed .state/"
+
+# Clean up state files from user data directory (new mode)
+if [ -n "$USER_STATE_DIR" ] && [ -d "$USER_STATE_DIR" ]; then
+    echo "Cleaning up state files from user data directory..."
+    rm -f "$USER_STATE_DIR/.iteration-state.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/.agent-status.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/.retry-state.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/spec-interview.json" 2>/dev/null || true
+    # Remove .state directory if empty
+    rmdir "$USER_STATE_DIR" 2>/dev/null || true
+    echo "[OK] State files cleaned from user data directory"
+fi
 ```
 
-Show progress:
-
-```
-Cleaning up worktrees...
-
-[OK] Removed .worktree/feature-auth
-[OK] Removed .worktree/feature-products
-[OK] Removed .worktree/feature-cart
-[OK] Removed .worktree/feature-orders
-[OK] Removed .worktree/ directory
-```
-
-### Step 9: Delete Feature Branches
+### 6.2: Cleanup Any Remaining Worktrees
 
 ```bash
-# For each feature
-git branch -d mega-<feature-name>
-```
+# Get worktree base directory from PathResolver
+WORKTREE_BASE=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_worktree_dir())" 2>/dev/null || echo ".worktree")
 
-Show progress:
+# Check for any remaining worktrees in the resolved location
+if [ -d "$WORKTREE_BASE" ]; then
+    # List and remove any remaining worktrees
+    for dir in "$WORKTREE_BASE"/*/; do
+        if [ -d "$dir" ]; then
+            FEATURE_NAME=$(basename "$dir")
+            git worktree remove "$dir" --force 2>/dev/null || rm -rf "$dir"
+            echo "[OK] Removed worktree: $dir"
+        fi
+    done
 
-```
-Deleting feature branches...
+    # Remove the worktree directory if empty
+    rmdir "$WORKTREE_BASE" 2>/dev/null || true
+fi
 
-[OK] Deleted mega-feature-auth
-[OK] Deleted mega-feature-products
-[OK] Deleted mega-feature-cart
-[OK] Deleted mega-feature-orders
-```
+# Also check legacy location if different
+if [ "$WORKTREE_BASE" != ".worktree" ] && [ -d ".worktree" ]; then
+    for dir in .worktree/*/; do
+        if [ -d "$dir" ]; then
+            FEATURE_NAME=$(basename "$dir")
+            git worktree remove "$dir" --force 2>/dev/null || rm -rf "$dir"
+            echo "[OK] Removed legacy worktree: $dir"
+        fi
+    done
+    rmdir .worktree 2>/dev/null || rm -rf .worktree
+fi
 
-### Step 10: Cleanup Mega Files
-
-Remove mega-plan related files:
-
-```bash
-rm -f mega-plan.json
-rm -f .mega-status.json
-rm -f mega-findings.md
-```
-
-### Step 11: Prune Git
-
-Clean up any stale references:
-
-```bash
+# Prune git worktree list
 git worktree prune
+echo "[OK] Pruned git worktree list"
+
+# Optionally clean up project data directory in new mode
+PROJECT_DIR=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; r=PathResolver(Path.cwd()); print(r.get_project_dir()) if not r.is_legacy_mode() else print('')" 2>/dev/null || echo "")
+if [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ]; then
+    # Check if directory is empty (only manifest.json might remain)
+    FILE_COUNT=$(find "$PROJECT_DIR" -type f ! -name "manifest.json" | wc -l)
+    if [ "$FILE_COUNT" -eq 0 ]; then
+        echo "Project data directory is empty, cleaning up..."
+        rm -rf "$PROJECT_DIR"
+        echo "[OK] Removed project data directory: $PROJECT_DIR"
+    fi
+fi
 ```
 
-### Step 12: Show Completion Summary
+### 6.3: Cleanup Remaining Feature Branches
+
+```bash
+# Delete any remaining mega-* branches
+for branch in $(git branch --list "mega-*"); do
+    git branch -d "$branch" 2>/dev/null || git branch -D "$branch"
+    echo "[OK] Deleted branch: $branch"
+done
+```
+
+## Step 7: Show Final Summary
 
 ```
 ============================================================
-MEGA PLAN COMPLETED
+MEGA PLAN COMPLETED SUCCESSFULLY
 ============================================================
 
-All features have been merged into <target_branch>!
+All features have been merged to <target_branch>!
 
 Summary:
-  Features merged: 4
-  Target branch: main
-
-Merged Features:
-  1. feature-001: User Authentication
-  2. feature-002: Product Catalog
-  3. feature-003: Shopping Cart
-  4. feature-004: Order Processing
+  Total features: 4
+  Total batches: 2
+  Target branch: <target_branch>
 
 Cleanup completed:
-  [X] Worktrees removed
+  [X] Planning files removed
+  [X] Worktrees cleaned up
   [X] Feature branches deleted
-  [X] Mega-plan files removed
 
 ============================================================
 
-Your code is now on the <target_branch> branch.
+Your code is now on the <target_branch> branch with all features.
 
 Next steps:
-  - Review the merged code: git log --oneline -10
-  - Run tests: <your test command>
+  - Review merged code: git log --oneline -10
+  - Run tests to verify integration
   - Push to remote: git push origin <target_branch>
+
+============================================================
+```
+
+## Keep Files Option
+
+If user selected "Keep files":
+
+```
+============================================================
+MEGA PLAN COMPLETED (Files Kept)
+============================================================
+
+All features have been merged to <target_branch>!
+
+Planning files kept for reference:
+  - mega-plan.json
+  - mega-findings.md
+  - .mega-status.json
+
+Note: These files are in .gitignore and won't be committed.
+
+To cleanup later:
+  rm mega-plan.json mega-findings.md .mega-status.json
 
 ============================================================
 ```
 
 ## Error Handling
 
-### Feature Not Complete
-
-```
-Error: Cannot complete - feature-002 is not complete
-
-To check status:
-  /mega:status
-
-To complete the feature:
-  cd .worktree/feature-products
-  /status
-```
-
 ### Worktree Removal Fails
 
 ```
-Warning: Could not remove .worktree/feature-auth
-Reason: Directory not empty or in use
-
+Warning: Could not remove .worktree/<name>
 Manual cleanup:
-  rm -rf .worktree/feature-auth
+  rm -rf .worktree/<name>
   git worktree prune
 ```
 
 ### Branch Deletion Fails
 
 ```
-Warning: Could not delete branch mega-feature-auth
-Reason: Not fully merged
-
-Force delete (if needed):
-  git branch -D mega-feature-auth
+Warning: Could not delete branch mega-<name>
+This branch may have unmerged changes.
+Force delete: git branch -D mega-<name>
 ```
 
-## Partial Completion (Merge Only)
-
-If user selected "Merge only":
+### Not on Target Branch
 
 ```
-============================================================
-MERGE COMPLETED (Cleanup Skipped)
-============================================================
+Warning: You are not on the target branch (<target_branch>).
+Current branch: <current>
 
-All features merged into <target_branch>.
-
-Remaining cleanup (when ready):
-  git worktree remove .worktree/<name> --force
-  git branch -d mega-<name>
-  rm mega-plan.json .mega-status.json mega-findings.md
-
-Or run /mega:complete again to cleanup.
-============================================================
+The features were merged to <target_branch>.
+Switch to it: git checkout <target_branch>
 ```
+
+## Files That Should NOT Be Committed
+
+The following files are in `.gitignore` and should never be committed:
+
+```
+# Runtime directories
+.worktree/              # Git worktree directories
+.locks/                 # Lock files
+.state/                 # State files directory
+
+# Planning documents
+mega-plan.json          # Mega plan definition
+prd.json                # PRD files
+design_doc.json         # Design document
+spec.json               # Spec interview output
+spec.md                 # Human-readable spec
+
+# Status and state files
+.mega-status.json       # Mega execution status
+.planning-config.json   # Per-worktree config
+.agent-status.json      # Agent status
+.iteration-state.json   # Iteration state
+.retry-state.json       # Retry state
+
+# Progress tracking
+mega-findings.md        # Shared findings
+findings.md             # Per-feature findings
+progress.txt            # Progress tracking
+
+# Context recovery
+.mega-execution-context.md   # Mega context recovery
+.hybrid-execution-context.md # Hybrid context recovery
+
+# Agent outputs
+.agent-outputs/         # Agent output directory
+```
+
+These are all planning/execution artifacts that are temporary and should not be part of the codebase.
