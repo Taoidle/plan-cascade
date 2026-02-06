@@ -6,6 +6,14 @@ description: "AI auto strategy executor. Analyzes task and automatically selects
 
 AI automatically analyzes the task and executes the optimal strategy without user confirmation.
 
+## CRITICAL CONSTRAINTS (READ FIRST)
+
+**NEVER use `EnterPlanMode`.** This command has its own planning and execution flow. Using Claude's native plan mode bypasses Plan Cascade entirely and defeats the purpose of this command. If you feel the urge to "enter plan mode" or "design an implementation approach", STOP — that is exactly what the Skill tool routing in Step 5 handles.
+
+**NEVER use the `Task` tool with `subagent_type=Explore` or `subagent_type=Plan`** during this command's execution. Context gathering in Step 2 must use only Glob, Read, Grep, and Bash (for git commands only). Launching exploration agents delays routing and causes fallthrough to native plan mode.
+
+**After completing Step 3 (strategy analysis), you MUST proceed directly to Step 5 (Skill tool routing).** Do not pause to "think about the approach", "gather more context", or "design a solution". The specialized skill invoked in Step 5 handles all of that.
+
 ## Command-Line Flags
 
 The auto command supports the following flags to customize execution:
@@ -274,6 +282,8 @@ Example: "Fix the login button styling" or "Build a user authentication system"
 
 Collect project context for strategy analysis.
 
+**IMPORTANT: This step is ONLY for lightweight project detection (git info, file markers, project type). Do NOT explore the codebase, read source files, or analyze implementation details. The specialized skill invoked in Step 5 will handle deep codebase analysis.**
+
 **IMPORTANT: Use the correct tools to avoid command confirmation prompts:**
 
 ### 2.1: Check Git Repository (Bash - unavoidable)
@@ -470,6 +480,16 @@ Use this decision matrix based on your analysis:
 - Project-level scope (platform, system, infrastructure)
 - Significant parallelization benefit identified
 
+### 3.5: Post-Analysis Guardrail
+
+**At this point you have completed the analysis. Do NOT:**
+- Launch any exploration or planning agents
+- Call `EnterPlanMode`
+- Start reading source code to "understand the codebase"
+- Begin implementing anything
+
+**Proceed directly to Step 3.5 (parameter display), then Step 4 (display analysis), then Step 5 (Skill tool routing).**
+
 ## Step 3.5: Display Parameter Configuration
 
 Before analyzing the task, display the parsed parameter configuration for transparency:
@@ -591,6 +611,8 @@ Proceed to Step 5.
 ## Step 5: Route to Appropriate Strategy (MANDATORY SKILL TOOL USAGE)
 
 **CRITICAL: For any strategy other than DIRECT, you MUST use the Skill tool to invoke the corresponding command. DO NOT attempt to execute the strategy logic yourself - let the specialized skill handle it.**
+
+**CRITICAL: Do NOT use `EnterPlanMode`, `Task(subagent_type=Plan)`, `Task(subagent_type=Explore)`, or any other planning/exploration mechanism here. The Skill tool invocation IS the routing — invoke it immediately after displaying the routing message.**
 
 **IMPORTANT: Pass flow/tdd/confirm parameters to sub-commands to ensure strict execution mode is enforced.**
 
@@ -762,7 +784,13 @@ Skill(skill="plan-cascade:mega-plan", args="--flow full --tdd on --confirm Build
 - TDD compliance checking
 - Batch confirmation prompts
 
-**If you find yourself reading code files or implementing after selecting HYBRID_AUTO/WORKTREE/MEGA_PLAN, STOP and use the Skill tool instead.**
+**STOP CHECKS — if any of these are true, you have gone off-track:**
+- ❌ You called `EnterPlanMode` → WRONG. This command never uses native plan mode.
+- ❌ You launched a `Task(subagent_type=Explore)` or `Task(subagent_type=Plan)` agent → WRONG. Step 2 uses only Glob/Read/Grep/Bash(git).
+- ❌ You are reading source code files to understand the implementation → WRONG. The Skill tool handles codebase analysis.
+- ❌ You are writing code or making changes after selecting HYBRID_AUTO/WORKTREE/MEGA_PLAN → WRONG. Use the Skill tool instead.
+
+**If any stop check is triggered: STOP immediately and invoke the Skill tool for the selected strategy.**
 
 ## Strategy Summary Table
 
