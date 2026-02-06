@@ -153,7 +153,7 @@ orchestrator.py
     └── 生成 Agent Prompt → Task Agent 执行
 ```
 
-**文件**: `skills/hybrid-ralph/core/context_filter.py`
+**文件**: `src/plan_cascade/state/context_filter.py` (原为 skills/hybrid-ralph/core/context_filter.py)
 
 ```python
 def get_context_for_story(self, story_id: str) -> Dict:
