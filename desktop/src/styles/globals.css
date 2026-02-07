@@ -1,8 +1,10 @@
 /**
  * Global Styles
  *
- * Tailwind CSS imports and custom styles.
+ * Tailwind CSS imports, design tokens, and custom styles.
  */
+
+@import './tokens.css';
 
 @tailwind base;
 @tailwind components;
@@ -44,12 +46,14 @@
   .btn {
     @apply px-4 py-2 rounded-lg font-medium transition-colors;
     @apply focus:outline-none focus:ring-2 focus:ring-offset-2;
+    @apply dark:focus:ring-offset-gray-900;
   }
 
   .btn-primary {
     @apply btn bg-primary-600 text-white;
     @apply hover:bg-primary-700;
     @apply focus:ring-primary-500;
+    @apply dark:focus:ring-primary-400;
   }
 
   .btn-secondary {
@@ -57,6 +61,7 @@
     @apply dark:bg-gray-800 dark:text-gray-300;
     @apply hover:bg-gray-200 dark:hover:bg-gray-700;
     @apply focus:ring-gray-500;
+    @apply dark:focus:ring-gray-400;
   }
 
   /* Card */
@@ -175,26 +180,16 @@
     }
   }
 
-  /* Skeleton loading animation */
+  /* Skeleton loading animation - uses design token variables */
   .animate-skeleton {
     background: linear-gradient(
       90deg,
-      theme('colors.gray.200') 0%,
-      theme('colors.gray.100') 50%,
-      theme('colors.gray.200') 100%
+      var(--skeleton-base) 0%,
+      var(--skeleton-shine) 50%,
+      var(--skeleton-base) 100%
     );
     background-size: 200% 100%;
     animation: skeleton 1.5s ease-in-out infinite;
-  }
-
-  .dark .animate-skeleton {
-    background: linear-gradient(
-      90deg,
-      theme('colors.gray.700') 0%,
-      theme('colors.gray.600') 50%,
-      theme('colors.gray.700') 100%
-    );
-    background-size: 200% 100%;
   }
 
   @keyframes skeleton {
@@ -226,5 +221,51 @@
       opacity: 1;
       transform: scale(1);
     }
+  }
+
+  /* Shake X animation (for error/failure feedback) */
+  @keyframes shakeX {
+    0%, 100% {
+      transform: translateX(0);
+    }
+    10%, 30%, 50%, 70%, 90% {
+      transform: translateX(-3px);
+    }
+    20%, 40%, 60%, 80% {
+      transform: translateX(3px);
+    }
+  }
+
+  /* ============================================================
+     Responsive Container Utilities
+     ============================================================ */
+
+  /* Responsive padding that scales with viewport */
+  .container-responsive {
+    @apply px-4 sm:px-6 lg:px-8 3xl:px-12 5xl:px-16;
+  }
+
+  /* Auto-scaling max-width containers */
+  .content-narrow {
+    @apply max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full;
+  }
+
+  .content-medium {
+    @apply max-w-3xl 3xl:max-w-4xl 5xl:max-w-5xl mx-auto w-full;
+  }
+
+  .content-wide {
+    @apply max-w-5xl 3xl:max-w-6xl 5xl:max-w-7xl mx-auto w-full;
+  }
+
+  /* Dark mode focus ring fix - ensure visible on dark backgrounds */
+  .dark .focus-ring {
+    @apply focus:ring-primary-400 focus:ring-offset-gray-900;
+  }
+
+  /* Ensure select/option elements have proper dark mode styling */
+  .dark select option {
+    background-color: #1f2937;
+    color: #f9fafb;
   }
 }

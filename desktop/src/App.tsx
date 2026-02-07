@@ -5,11 +5,13 @@
  * Supports Simple, Expert, and Claude Code modes.
  *
  * Story 004: Command Palette Enhancement - Global command palette integration
+ * Story 005: Navigation Flow Refinement - Breadcrumb, contextual actions, shortcut overlay
+ * Story 004 (Recovery): Resume & Recovery System - Detect and resume interrupted executions
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ModeSwitch } from './components/ModeSwitch';
+import { ModeSwitch, AnimatedModeContent } from './components/ModeSwitch';
 import { SettingsButton } from './components/SettingsButton';
 import { SimpleMode } from './components/SimpleMode';
 import { ExpertMode } from './components/ExpertMode';
@@ -17,11 +19,18 @@ import { ClaudeCodeMode } from './components/ClaudeCodeMode';
 import { Projects } from './components/Projects';
 import { Dashboard } from './components/Analytics';
 import { SetupWizard } from './components/Settings';
+import { FeatureTour } from './components/shared/FeatureTour';
 import { GlobalCommandPaletteProvider, useGlobalCommandPalette } from './components/shared/CommandPalette';
+import { Breadcrumb } from './components/shared/Breadcrumb';
+import { ContextualActions } from './components/shared/ContextualActions';
+import { ShortcutOverlay } from './components/shared/ShortcutOverlay';
+import { RecoveryPrompt } from './components/shared/RecoveryPrompt';
 import { useGlobalCommands } from './hooks/useGlobalCommands';
 import { ShortcutsHelpDialog } from './components/ClaudeCodeMode/KeyboardShortcuts';
 import { useModeStore } from './store/mode';
 import { useExecutionStore } from './store/execution';
+import { useOnboardingStore } from './store/onboarding';
+import { useRecoveryStore } from './store/recovery';
 import { clsx } from 'clsx';
 
 // ============================================================================
@@ -31,10 +40,37 @@ import { clsx } from 'clsx';
 function AppContent() {
   const { t } = useTranslation();
   const { mode, setMode } = useModeStore();
-  const { status } = useExecutionStore();
+  const { status, pause, resume, cancel, reset } = useExecutionStore();
   const { open: openCommandPalette } = useGlobalCommandPalette();
 
+  const { detectIncompleteTasks, initializeListener, cleanupListener } = useRecoveryStore();
+
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const {
+    forceShowWizard,
+    clearWizardTrigger,
+    tourActive,
+    startTour,
+    endTour,
+  } = useOnboardingStore();
+  // ShortcutOverlay manages its own open/close state via mod+shift+/ hotkey
+
+  // Check for incomplete executions on app mount (Story-004 Recovery)
+  useEffect(() => {
+    // Initialize recovery event listener
+    initializeListener();
+
+    // Detect incomplete tasks after a short delay to let init_app complete
+    const timer = setTimeout(() => {
+      detectIncompleteTasks();
+    }, 500);
+
+    return () => {
+      clearTimeout(timer);
+      cleanupListener();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isRunning = status === 'running';
 
@@ -56,24 +92,45 @@ function AppContent() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-950">
+      {/* Recovery Prompt - shows when interrupted executions are detected (Story-004) */}
+      <RecoveryPrompt />
+
       {/* First-time Setup Wizard */}
-      <SetupWizard />
+      <SetupWizard
+        forceShow={forceShowWizard}
+        onComplete={(launchTour) => {
+          clearWizardTrigger();
+          if (launchTour) {
+            // Delay tour start to let wizard close animation finish
+            setTimeout(() => startTour(), 400);
+          }
+        }}
+      />
+
+      {/* Feature Tour (triggered after wizard or from Settings) */}
+      <FeatureTour
+        active={tourActive}
+        onFinish={endTour}
+      />
 
       {/* Header */}
       <header
         className={clsx(
-          'h-14 flex items-center justify-between px-4',
+          'h-14 3xl:h-16 flex items-center justify-between px-4 3xl:px-6 5xl:px-8',
           'bg-white dark:bg-gray-900',
           'border-b border-gray-200 dark:border-gray-800',
           'shrink-0'
         )}
       >
-        {/* Logo / Title */}
-        <div className="flex items-center gap-3">
+        {/* Logo / Title + Breadcrumb */}
+        <div className="flex items-center gap-3 min-w-0">
           <Logo />
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white shrink-0">
             {t('appName')}
           </h1>
+
+          {/* Breadcrumb Navigation */}
+          <Breadcrumb className="hidden md:flex ml-2" />
 
           {/* Status Badge */}
           {status !== 'idle' && (
@@ -82,7 +139,16 @@ function AppContent() {
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* Contextual Actions */}
+          <ContextualActions
+            className="hidden lg:flex"
+            onPauseExecution={pause}
+            onResumeExecution={resume}
+            onCancelExecution={cancel}
+            onResetExecution={reset}
+          />
+
           {/* Command Palette Trigger */}
           <button
             onClick={openCommandPalette}
@@ -111,19 +177,21 @@ function AppContent() {
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Main Content with animated transitions */}
       <main className="flex-1 overflow-hidden">
-        {mode === 'simple' && <SimpleMode />}
-        {mode === 'expert' && <ExpertMode />}
-        {mode === 'claude-code' && <ClaudeCodeMode />}
-        {mode === 'projects' && <Projects />}
-        {mode === 'analytics' && <Dashboard />}
+        <AnimatedModeContent mode={mode}>
+          {mode === 'simple' && <div data-tour="mode-simple" className="h-full"><SimpleMode /></div>}
+          {mode === 'expert' && <div data-tour="mode-expert" className="h-full"><ExpertMode /></div>}
+          {mode === 'claude-code' && <div data-tour="mode-claude-code" className="h-full"><ClaudeCodeMode /></div>}
+          {mode === 'projects' && <div data-tour="mode-projects" className="h-full"><Projects /></div>}
+          {mode === 'analytics' && <div data-tour="mode-analytics" className="h-full"><Dashboard /></div>}
+        </AnimatedModeContent>
       </main>
 
       {/* Footer (optional status bar) */}
       <footer
         className={clsx(
-          'h-6 flex items-center justify-between px-4',
+          'h-6 3xl:h-7 flex items-center justify-between px-4 3xl:px-6 5xl:px-8',
           'bg-white dark:bg-gray-900',
           'border-t border-gray-200 dark:border-gray-800',
           'text-xs text-gray-500 dark:text-gray-400',
@@ -134,11 +202,14 @@ function AppContent() {
         <span>{t('ready')}</span>
       </footer>
 
-      {/* Keyboard Shortcuts Help Dialog */}
+      {/* Keyboard Shortcuts Help Dialog (legacy, from Story 004) */}
       <ShortcutsHelpDialog
         isOpen={showShortcuts}
         onClose={() => setShowShortcuts(false)}
       />
+
+      {/* Shortcut Overlay (Story 005) - toggled via Ctrl+Shift+/ */}
+      <ShortcutOverlay />
     </div>
   );
 }

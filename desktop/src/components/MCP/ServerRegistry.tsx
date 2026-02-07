@@ -136,6 +136,7 @@ export function ServerRegistry() {
               className={clsx(
                 'p-2 rounded-md',
                 'bg-gray-100 dark:bg-gray-800',
+                'text-gray-600 dark:text-gray-400',
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
                 'disabled:opacity-50',
                 'transition-colors'
@@ -151,6 +152,7 @@ export function ServerRegistry() {
               className={clsx(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-md',
                 'bg-gray-100 dark:bg-gray-800',
+                'text-gray-700 dark:text-gray-300',
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
                 'text-sm font-medium',
                 'transition-colors'
@@ -218,6 +220,7 @@ export function ServerRegistry() {
                 className={clsx(
                   'flex items-center gap-1.5 px-3 py-2 rounded-md',
                   'bg-gray-100 dark:bg-gray-800',
+                  'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-200 dark:hover:bg-gray-700',
                   'text-sm font-medium',
                   'transition-colors'
@@ -242,7 +245,7 @@ export function ServerRegistry() {
           </div>
         ) : (
           // Server cards
-          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 3xl:grid-cols-3">
             {servers.map((server) => (
               <ServerCard
                 key={server.id}
@@ -279,21 +282,21 @@ export function ServerRegistry() {
 
 function ServerSkeleton() {
   return (
-    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 animate-pulse">
+    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700" aria-hidden="true">
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
-          <div className="w-2.5 h-2.5 rounded-full bg-gray-200 dark:bg-gray-700" />
+          <div className="w-2.5 h-2.5 rounded-full bg-gray-200 dark:bg-gray-700 animate-skeleton" />
           <div>
-            <div className="h-5 w-32 bg-gray-200 dark:bg-gray-700 rounded mb-1" />
-            <div className="h-4 w-20 bg-gray-100 dark:bg-gray-800 rounded" />
+            <div className="h-5 w-32 bg-gray-200 dark:bg-gray-700 rounded mb-1 animate-skeleton" />
+            <div className="h-4 w-20 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
           </div>
         </div>
-        <div className="h-5 w-9 bg-gray-200 dark:bg-gray-700 rounded-full" />
+        <div className="h-5 w-9 bg-gray-200 dark:bg-gray-700 rounded-full animate-skeleton" />
       </div>
-      <div className="h-4 w-48 bg-gray-100 dark:bg-gray-800 rounded mb-3" />
+      <div className="h-4 w-48 bg-gray-100 dark:bg-gray-800 rounded mb-3 animate-skeleton" />
       <div className="flex gap-2">
-        <div className="h-7 w-16 bg-gray-100 dark:bg-gray-800 rounded" />
-        <div className="h-7 w-14 bg-gray-100 dark:bg-gray-800 rounded" />
+        <div className="h-7 w-16 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
+        <div className="h-7 w-14 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
       </div>
     </div>
   );

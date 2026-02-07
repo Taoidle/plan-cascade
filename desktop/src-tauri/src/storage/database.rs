@@ -9,6 +9,37 @@ use rusqlite::params;
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::paths::database_path;
 
+/// Raw execution row from the database
+#[derive(Debug, Clone)]
+pub struct ExecutionRow {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub name: String,
+    pub execution_mode: String,
+    pub status: String,
+    pub project_path: String,
+    pub total_stories: i32,
+    pub completed_stories: i32,
+    pub current_story_id: Option<String>,
+    pub progress: f64,
+    pub context_snapshot: String,
+    pub error_message: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+/// Raw checkpoint row from the database
+#[derive(Debug, Clone)]
+pub struct CheckpointRow {
+    pub id: String,
+    pub session_id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub snapshot: String,
+    pub created_at: Option<String>,
+}
+
 /// Type alias for the connection pool
 pub type DbPool = Pool<SqliteConnectionManager>;
 
@@ -18,6 +49,22 @@ pub struct Database {
 }
 
 impl Database {
+    /// Create an in-memory database for testing.
+    ///
+    /// Uses an in-memory SQLite database with the same schema as the
+    /// production database. Useful for integration and unit tests.
+    pub fn new_in_memory() -> AppResult<Self> {
+        let manager = SqliteConnectionManager::memory();
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| AppError::database(format!("Failed to create connection pool: {}", e)))?;
+
+        let db = Self { pool };
+        db.init_schema()?;
+        Ok(db)
+    }
+
     /// Create a new database instance with connection pooling
     pub fn new() -> AppResult<Self> {
         let db_path = database_path()?;
@@ -176,6 +223,94 @@ impl Database {
             [],
         )?;
 
+        // Create interviews table for spec interview persistence
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS interviews (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'in_progress',
+                phase TEXT NOT NULL DEFAULT 'overview',
+                flow_level TEXT NOT NULL DEFAULT 'standard',
+                first_principles INTEGER NOT NULL DEFAULT 0,
+                max_questions INTEGER NOT NULL DEFAULT 18,
+                question_cursor INTEGER NOT NULL DEFAULT 0,
+                description TEXT NOT NULL DEFAULT '',
+                project_path TEXT,
+                spec_data TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        // Create interview_turns table for conversation history
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS interview_turns (
+                id TEXT PRIMARY KEY,
+                interview_id TEXT NOT NULL,
+                turn_number INTEGER NOT NULL,
+                phase TEXT NOT NULL,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL DEFAULT '',
+                field_name TEXT NOT NULL DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (interview_id) REFERENCES interviews(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        // Create executions table for tracking execution lifecycle
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS executions (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                name TEXT NOT NULL DEFAULT '',
+                execution_mode TEXT NOT NULL DEFAULT 'direct',
+                status TEXT NOT NULL DEFAULT 'pending',
+                project_path TEXT NOT NULL DEFAULT '',
+                total_stories INTEGER NOT NULL DEFAULT 0,
+                completed_stories INTEGER NOT NULL DEFAULT 0,
+                current_story_id TEXT,
+                progress REAL NOT NULL DEFAULT 0.0,
+                context_snapshot TEXT NOT NULL DEFAULT '{}',
+                error_message TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            )",
+            [],
+        )?;
+
+        // Indexes for execution queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_executions_session_id ON executions(session_id)",
+            [],
+        )?;
+
+        // Indexes for interview queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_interview_turns_interview_id
+             ON interview_turns(interview_id)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_interview_turns_turn_number
+             ON interview_turns(interview_id, turn_number)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_interviews_status
+             ON interviews(status)",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -231,6 +366,170 @@ impl Database {
         let conn = self.get_connection()?;
         conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
         Ok(())
+    }
+
+    // ========================================================================
+    // Execution Operations
+    // ========================================================================
+
+    /// Insert a new execution record
+    pub fn insert_execution(
+        &self,
+        id: &str,
+        session_id: Option<&str>,
+        name: &str,
+        execution_mode: &str,
+        project_path: &str,
+        total_stories: i32,
+        context_snapshot: &str,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "INSERT INTO executions (id, session_id, name, execution_mode, status, project_path, total_stories, context_snapshot, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?6, ?7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            params![id, session_id, name, execution_mode, project_path, total_stories, context_snapshot],
+        )?;
+        Ok(())
+    }
+
+    /// Update execution progress
+    pub fn update_execution_progress(
+        &self,
+        id: &str,
+        completed_stories: i32,
+        current_story_id: Option<&str>,
+        progress: f64,
+        context_snapshot: &str,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE executions SET completed_stories = ?2, current_story_id = ?3, progress = ?4,
+             context_snapshot = ?5, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![id, completed_stories, current_story_id, progress, context_snapshot],
+        )?;
+        Ok(())
+    }
+
+    /// Update execution status
+    pub fn update_execution_status(&self, id: &str, status: &str, error_message: Option<&str>) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        let completed_at = if status == "completed" || status == "cancelled" || status == "failed" {
+            Some(chrono::Utc::now().to_rfc3339())
+        } else {
+            None
+        };
+        conn.execute(
+            "UPDATE executions SET status = ?2, error_message = ?3, completed_at = ?4, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![id, status, error_message, completed_at],
+        )?;
+        Ok(())
+    }
+
+    /// Get all incomplete executions (status not completed or cancelled)
+    pub fn get_incomplete_executions(&self) -> AppResult<Vec<ExecutionRow>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, name, execution_mode, status, project_path,
+                    total_stories, completed_stories, current_story_id, progress,
+                    context_snapshot, error_message, created_at, updated_at, completed_at
+             FROM executions
+             WHERE status NOT IN ('completed', 'cancelled')
+             ORDER BY updated_at DESC"
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(ExecutionRow {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                name: row.get(2)?,
+                execution_mode: row.get(3)?,
+                status: row.get(4)?,
+                project_path: row.get(5)?,
+                total_stories: row.get(6)?,
+                completed_stories: row.get(7)?,
+                current_story_id: row.get(8)?,
+                progress: row.get(9)?,
+                context_snapshot: row.get(10)?,
+                error_message: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
+                completed_at: row.get(14)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        Ok(rows)
+    }
+
+    /// Get a single execution by ID
+    pub fn get_execution(&self, id: &str) -> AppResult<Option<ExecutionRow>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT id, session_id, name, execution_mode, status, project_path,
+                    total_stories, completed_stories, current_story_id, progress,
+                    context_snapshot, error_message, created_at, updated_at, completed_at
+             FROM executions WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(ExecutionRow {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    name: row.get(2)?,
+                    execution_mode: row.get(3)?,
+                    status: row.get(4)?,
+                    project_path: row.get(5)?,
+                    total_stories: row.get(6)?,
+                    completed_stories: row.get(7)?,
+                    current_story_id: row.get(8)?,
+                    progress: row.get(9)?,
+                    context_snapshot: row.get(10)?,
+                    error_message: row.get(11)?,
+                    created_at: row.get(12)?,
+                    updated_at: row.get(13)?,
+                    completed_at: row.get(14)?,
+                })
+            },
+        );
+
+        match result {
+            Ok(row) => Ok(Some(row)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// Delete an execution record
+    pub fn delete_execution(&self, id: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute("DELETE FROM executions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Get incomplete checkpoint chains for a session
+    pub fn get_checkpoints_for_session(&self, session_id: &str) -> AppResult<Vec<CheckpointRow>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, name, description, snapshot, created_at
+             FROM checkpoints
+             WHERE session_id = ?1
+             ORDER BY created_at DESC"
+        )?;
+
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok(CheckpointRow {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                name: row.get(2)?,
+                description: row.get(3)?,
+                snapshot: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        Ok(rows)
     }
 
     // ========================================================================

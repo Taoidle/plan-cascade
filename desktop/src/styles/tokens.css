@@ -1,0 +1,212 @@
+/**
+ * Design Tokens - CSS Custom Properties
+ *
+ * Semantic tokens for the Plan Cascade design system.
+ * These map to Tailwind utility classes and provide a single
+ * source of truth for the visual language.
+ *
+ * Token Categories:
+ *   --color-*     : Semantic color tokens
+ *   --surface-*   : Background surface levels
+ *   --border-*    : Border color tokens
+ *   --text-*      : Text color tokens
+ *   --radius-*    : Border radius tokens
+ *   --spacing-*   : Spacing scale tokens
+ *   --shadow-*    : Elevation shadow tokens
+ *   --font-*      : Typography tokens
+ *   --transition-*: Animation/transition tokens
+ *
+ * Usage:
+ *   Prefer Tailwind utility classes. Use CSS custom properties
+ *   only when dynamic theming or JS access is required.
+ */
+
+/* ================================================================
+   Light Theme (default)
+   ================================================================ */
+:root {
+  /* -- Surfaces -------------------------------------------------- */
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-overlay: #ffffff;
+  --surface-sunken: #f9fafb;
+
+  /* -- Backgrounds ----------------------------------------------- */
+  --bg-app: #f9fafb;
+  --bg-subtle: #f3f4f6;
+  --bg-muted: #e5e7eb;
+
+  /* -- Borders --------------------------------------------------- */
+  --border-default: #e5e7eb;
+  --border-subtle: #f3f4f6;
+  --border-strong: #d1d5db;
+
+  /* -- Text ------------------------------------------------------ */
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-tertiary: #6b7280;
+  --text-muted: #9ca3af;
+  --text-inverted: #ffffff;
+
+  /* -- Primary --------------------------------------------------- */
+  --color-primary: #0284c7;
+  --color-primary-hover: #0369a1;
+  --color-primary-subtle: #e0f2fe;
+  --color-primary-text: #0c4a6e;
+
+  /* -- Secondary ------------------------------------------------- */
+  --color-secondary: #64748b;
+  --color-secondary-hover: #475569;
+  --color-secondary-subtle: #f1f5f9;
+  --color-secondary-text: #334155;
+
+  /* -- Accent ---------------------------------------------------- */
+  --color-accent: #9333ea;
+  --color-accent-hover: #7e22ce;
+  --color-accent-subtle: #f3e8ff;
+  --color-accent-text: #581c87;
+
+  /* -- Success --------------------------------------------------- */
+  --color-success: #16a34a;
+  --color-success-hover: #15803d;
+  --color-success-subtle: #dcfce7;
+  --color-success-text: #166534;
+
+  /* -- Warning --------------------------------------------------- */
+  --color-warning: #d97706;
+  --color-warning-hover: #b45309;
+  --color-warning-subtle: #fef3c7;
+  --color-warning-text: #92400e;
+
+  /* -- Error ----------------------------------------------------- */
+  --color-error: #dc2626;
+  --color-error-hover: #b91c1c;
+  --color-error-subtle: #fee2e2;
+  --color-error-text: #991b1b;
+
+  /* -- Spacing (4px grid) ---------------------------------------- */
+  --spacing-0: 0;
+  --spacing-0-5: 0.125rem;  /* 2px */
+  --spacing-1: 0.25rem;     /* 4px */
+  --spacing-1-5: 0.375rem;  /* 6px */
+  --spacing-2: 0.5rem;      /* 8px */
+  --spacing-2-5: 0.625rem;  /* 10px */
+  --spacing-3: 0.75rem;     /* 12px */
+  --spacing-4: 1rem;        /* 16px */
+  --spacing-5: 1.25rem;     /* 20px */
+  --spacing-6: 1.5rem;      /* 24px */
+  --spacing-8: 2rem;        /* 32px */
+  --spacing-10: 2.5rem;     /* 40px */
+  --spacing-12: 3rem;       /* 48px */
+  --spacing-16: 4rem;       /* 64px */
+  --spacing-20: 5rem;       /* 80px */
+  --spacing-24: 6rem;       /* 96px */
+
+  /* -- Border Radius --------------------------------------------- */
+  --radius-sm: 0.25rem;     /* 4px */
+  --radius-md: 0.375rem;    /* 6px */
+  --radius-default: 0.5rem; /* 8px */
+  --radius-lg: 0.75rem;     /* 12px */
+  --radius-xl: 1rem;        /* 16px */
+  --radius-2xl: 1.5rem;     /* 24px */
+  --radius-full: 9999px;
+
+  /* -- Shadows --------------------------------------------------- */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+
+  /* -- Typography ------------------------------------------------ */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', Menlo, Consolas, monospace;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* -- Transitions ----------------------------------------------- */
+  --transition-fast: 100ms;
+  --transition-default: 200ms;
+  --transition-slow: 300ms;
+
+  /* -- Skeleton / Loading ---------------------------------------- */
+  --skeleton-base: #e5e7eb;
+  --skeleton-shine: #f3f4f6;
+}
+
+/* ================================================================
+   Dark Theme
+   ================================================================ */
+.dark {
+  /* -- Surfaces -------------------------------------------------- */
+  --surface: #1f2937;
+  --surface-raised: #1f2937;
+  --surface-overlay: #1f2937;
+  --surface-sunken: #111827;
+
+  /* -- Backgrounds ----------------------------------------------- */
+  --bg-app: #030712;
+  --bg-subtle: #111827;
+  --bg-muted: #1f2937;
+
+  /* -- Borders --------------------------------------------------- */
+  --border-default: #374151;
+  --border-subtle: #1f2937;
+  --border-strong: #4b5563;
+
+  /* -- Text ------------------------------------------------------ */
+  --text-primary: #f9fafb;
+  --text-secondary: #d1d5db;
+  --text-tertiary: #9ca3af;
+  --text-muted: #6b7280;
+  --text-inverted: #111827;
+
+  /* -- Primary --------------------------------------------------- */
+  --color-primary: #38bdf8;
+  --color-primary-hover: #7dd3fc;
+  --color-primary-subtle: rgba(14, 165, 233, 0.15);
+  --color-primary-text: #bae6fd;
+
+  /* -- Secondary ------------------------------------------------- */
+  --color-secondary: #94a3b8;
+  --color-secondary-hover: #cbd5e1;
+  --color-secondary-subtle: rgba(100, 116, 139, 0.15);
+  --color-secondary-text: #e2e8f0;
+
+  /* -- Accent ---------------------------------------------------- */
+  --color-accent: #c084fc;
+  --color-accent-hover: #d8b4fe;
+  --color-accent-subtle: rgba(147, 51, 234, 0.15);
+  --color-accent-text: #e9d5ff;
+
+  /* -- Success --------------------------------------------------- */
+  --color-success: #4ade80;
+  --color-success-hover: #86efac;
+  --color-success-subtle: rgba(34, 197, 94, 0.15);
+  --color-success-text: #bbf7d0;
+
+  /* -- Warning --------------------------------------------------- */
+  --color-warning: #fbbf24;
+  --color-warning-hover: #fcd34d;
+  --color-warning-subtle: rgba(245, 158, 11, 0.15);
+  --color-warning-text: #fde68a;
+
+  /* -- Error ----------------------------------------------------- */
+  --color-error: #f87171;
+  --color-error-hover: #fca5a5;
+  --color-error-subtle: rgba(239, 68, 68, 0.15);
+  --color-error-text: #fecaca;
+
+  /* -- Shadows (darker in dark mode) ----------------------------- */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.2);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.4), 0 8px 10px -6px rgb(0 0 0 / 0.3);
+
+  /* -- Skeleton / Loading ---------------------------------------- */
+  --skeleton-base: #374151;
+  --skeleton-shine: #4b5563;
+}

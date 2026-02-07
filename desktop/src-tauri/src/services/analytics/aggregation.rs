@@ -3,8 +3,6 @@
 //! Provides aggregation queries for analytics by model, project, and time period.
 //! Supports flexible filtering and grouping options.
 
-use rusqlite::params;
-
 use crate::models::analytics::{
     AggregationPeriod, DashboardSummary, ModelUsage, ProjectUsage, TimeSeriesPoint,
     UsageFilter, UsageStats,
@@ -374,7 +372,7 @@ impl AnalyticsService {
 
     /// Get top N most expensive requests
     pub fn get_top_expensive_requests(&self, filter: &UsageFilter, limit: i64) -> AppResult<Vec<crate::models::analytics::UsageRecord>> {
-        let mut modified_filter = filter.clone();
+        let modified_filter = filter.clone();
         self.list_usage_records(&modified_filter, Some(limit), None)
     }
 

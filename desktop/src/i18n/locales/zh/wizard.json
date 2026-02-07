@@ -1,73 +1,88 @@
 {
   "steps": {
     "welcome": "欢迎",
-    "mode": "工作模式",
-    "backend": "LLM后端",
-    "agents": "代理",
+    "provider": "LLM提供商",
+    "apiKey": "API密钥",
+    "workspace": "工作区",
     "complete": "完成"
   },
 
   "welcome": {
     "title": "欢迎使用 Plan Cascade",
-    "description": "让我们设置你的开发编排环境。此向导将引导你完成基本配置步骤。"
+    "description": "AI驱动的级联开发框架。将复杂项目分解为可并行执行的任务，支持多代理协作。",
+    "subtitle": "让我们通过几个简单步骤完成设置。"
   },
 
-  "mode": {
-    "title": "选择工作模式",
-    "description": "选择你想要如何使用 Plan Cascade。",
-    "simple": {
-      "name": "Claude Code GUI 模式",
-      "description": "Claude Code 的简单界面。只需描述任务并让它执行。最适合快速任务和入门使用。"
-    },
-    "expert": {
-      "name": "独立编排模式",
-      "description": "完整的 PRD 生成、多代理协调和执行策略。最适合需要多个代理的复杂项目。"
-    }
-  },
-
-  "backend": {
-    "title": "选择LLM后端",
-    "description": "选择用于代码生成的AI提供商。",
+  "provider": {
+    "title": "选择LLM提供商",
+    "description": "选择为代码生成和编排提供支持的AI提供商。",
     "options": {
       "claudeCode": {
-        "name": "Claude Code（推荐）",
-        "description": "使用你现有的 Claude Code 订阅。无需额外的API密钥。"
+        "name": "Claude Code",
+        "description": "使用你现有的 Claude Code 订阅。无需额外的API密钥。",
+        "tag": "推荐"
       },
       "claudeApi": {
-        "name": "Claude API",
-        "description": "直接访问 Anthropic API。需要API密钥。"
+        "name": "Anthropic API",
+        "description": "直接访问 Anthropic API，使用 Claude 模型。需要API密钥。"
       },
       "openai": {
         "name": "OpenAI",
-        "description": "使用 OpenAI GPT 模型。需要API密钥。"
+        "description": "使用 OpenAI GPT 模型进行代码生成。需要API密钥。"
       },
       "deepseek": {
         "name": "DeepSeek",
-        "description": "DeepSeek 编程模型。需要API密钥。"
+        "description": "DeepSeek 专业编程模型。需要API密钥。"
       },
       "ollama": {
         "name": "Ollama（本地）",
-        "description": "使用 Ollama 在本地运行模型。无需API密钥。"
+        "description": "使用 Ollama 在本地运行模型。无需API密钥，完全私密。",
+        "tag": "本地"
       }
-    },
-    "apiKey": {
-      "label": "API密钥",
-      "placeholder": "输入你的 {{provider}} API密钥",
-      "description": "你的API密钥将被安全存储，绝不会被共享。"
     }
   },
 
-  "agents": {
-    "title": "执行代理",
-    "description": "Plan Cascade 可以使用多个AI代理执行不同任务。以下是预配置的代理。",
-    "command": "命令：{{command}}",
-    "default": "默认",
-    "hint": "你可以稍后在设置中添加、删除或配置代理。"
+  "apiKey": {
+    "title": "输入API密钥",
+    "description": "提供 {{provider}} 的API密钥。你的密钥存储在本地，绝不会传输给第三方。",
+    "noKeyRequired": "{{provider}} 不需要API密钥。你可以继续下一步。",
+    "label": "API密钥",
+    "placeholder": "输入你的 {{provider}} API密钥",
+    "hint": "你的API密钥将被安全存储在本地设置中。",
+    "show": "显示API密钥",
+    "hide": "隐藏API密钥",
+    "validating": "验证中...",
+    "valid": "API密钥有效",
+    "invalid": "API密钥似乎无效",
+    "formatError": "API密钥格式不符合预期模式"
+  },
+
+  "workspace": {
+    "title": "设置默认工作区",
+    "description": "选择 Plan Cascade 查找项目的默认目录。",
+    "label": "工作区目录",
+    "placeholder": "选择工作区目录...",
+    "browse": "浏览",
+    "hint": "你随时可以在设置中更改。",
+    "selected": "已选择：{{path}}",
+    "skipHint": "你可以跳过此步骤，稍后设置工作区。"
   },
 
   "complete": {
     "title": "全部设置完成！",
-    "description": "Plan Cascade 已配置完成，可以使用了。你随时可以通过点击页头的齿轮图标调整这些设置。"
+    "description": "Plan Cascade 已配置完成，可以使用了。以下是你的选择摘要：",
+    "summary": {
+      "provider": "LLM提供商",
+      "apiKey": "API密钥",
+      "apiKeyConfigured": "已配置",
+      "apiKeyNotRequired": "不需要",
+      "apiKeyNotSet": "未设置",
+      "workspace": "工作区",
+      "workspaceNotSet": "未设置"
+    },
+    "tourPrompt": "是否需要快速了解应用程序功能？",
+    "launchTour": "启动功能导览",
+    "skipTour": "跳过导览"
   },
 
   "actions": {
@@ -75,6 +90,45 @@
     "back": "返回",
     "next": "下一步",
     "getStarted": "开始使用",
-    "finishing": "正在完成..."
+    "finishing": "正在完成...",
+    "finishSetup": "完成设置"
+  },
+
+  "tour": {
+    "title": "功能导览",
+    "skipTour": "跳过导览",
+    "nextStop": "下一步",
+    "prevStop": "上一步",
+    "finish": "完成导览",
+    "stepOf": "第 {{current}} 步，共 {{total}} 步",
+    "stops": {
+      "simple": {
+        "title": "简单模式",
+        "description": "一键执行AI驱动的自动化。只需描述任务，Plan Cascade 将处理从PRD生成到代码交付的全部工作。"
+      },
+      "expert": {
+        "title": "专家模式",
+        "description": "完全控制PRD编辑、代理选择和执行策略。适合需要精细编排的复杂项目。"
+      },
+      "claudeCode": {
+        "title": "Claude Code模式",
+        "description": "与 Claude Code CLI 的交互式聊天界面。发送消息、附加文件，并实时查看带工具使用的流式响应。"
+      },
+      "projects": {
+        "title": "项目",
+        "description": "浏览和恢复 Claude Code 会话。查看项目历史、管理检查点，在多个工作区间无缝衔接。"
+      },
+      "analytics": {
+        "title": "分析仪表板",
+        "description": "追踪API使用情况、成本和执行指标。监控所有项目的令牌消耗、响应时间和成功率。"
+      }
+    }
+  },
+
+  "settings": {
+    "rerunWizard": "重新运行设置向导",
+    "rerunWizardDescription": "重新完成初始配置向导。",
+    "replayTour": "重播功能导览",
+    "replayTourDescription": "重新体验应用程序功能的引导导览。"
   }
 }

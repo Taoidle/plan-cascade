@@ -26,11 +26,14 @@ pub mod sync;
 pub mod timeline;
 pub mod tools;
 pub mod worktree;
+pub mod spec_interview;
+pub mod strategy;
+pub mod recovery;
 
 pub use agent::AgentService;
 pub use agent_executor::{AgentExecutor, ExecutorConfig, AgentEvent, ExecutionHandle, ToolFilter};
 pub use dependency::{DependencyAnalyzer, Batch, DependencyError};
-pub use design::{DesignDocLoader, DESIGN_DOC_FILENAME, WORKTREES_DIR};
+pub use design::{DesignDocLoader, DesignDocGenerator, DesignDocImporter, DESIGN_DOC_FILENAME, WORKTREES_DIR};
 pub use iteration::{IterationLoop, IterationLoopConfig, IterationLoopError, IterationEvent};
 pub use mega::{MegaOrchestrator, MegaOrchestratorConfig, MegaOrchestratorError};
 pub use phase::{Phase, PhaseConfig, PhaseManager, PhaseError};
@@ -39,3 +42,5 @@ pub use fallback::{AgentFallbackChain, FallbackConfig, FallbackError, FailureRea
 pub use quality_gates::{ProjectDetector, ValidatorRegistry, QualityGateRunner, QualityGatesStore};
 pub use sync::{FileWatcherService, WatcherConfig, WatchTarget, start_default_watches};
 pub use worktree::{WorktreeManager, PlanningConfigService, GitOps};
+pub use strategy::{StrategyAnalyzer, StrategyDecision, ExecutionStrategy, IntentClassifier, IntentResult, Intent};
+pub use recovery::{RecoveryDetector, IncompleteTask, ResumeEngine, ResumeResult, ResumeEvent};

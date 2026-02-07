@@ -131,7 +131,7 @@ pub async fn track_usage(
     session_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<CommandResponse<bool>, String> {
-    let result = analytics_state.with_tracker(|tracker| {
+    let result = analytics_state.with_tracker(|_tracker| {
         // We need to run this in a blocking context since the tracker is async
         Ok(())
     }).await;
@@ -166,7 +166,7 @@ pub async fn track_usage(
 /// Get current session for tracking
 #[tauri::command]
 pub async fn get_tracking_session(
-    analytics_state: State<'_, AnalyticsState>,
+    _analytics_state: State<'_, AnalyticsState>,
 ) -> Result<CommandResponse<Option<String>>, String> {
     // Return None for now - session is managed separately
     Ok(CommandResponse::ok(None))
@@ -175,8 +175,8 @@ pub async fn get_tracking_session(
 /// Set current session for tracking
 #[tauri::command]
 pub async fn set_tracking_session(
-    analytics_state: State<'_, AnalyticsState>,
-    session_id: Option<String>,
+    _analytics_state: State<'_, AnalyticsState>,
+    _session_id: Option<String>,
 ) -> Result<CommandResponse<bool>, String> {
     // Session management would go here
     Ok(CommandResponse::ok(true))

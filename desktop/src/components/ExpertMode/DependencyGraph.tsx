@@ -7,6 +7,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { usePRDStore, PRDStory, StoryStatus } from '../../store/prd';
+import { useDesignDocStore } from '../../store/designDoc';
 
 interface NodePosition {
   x: number;
@@ -14,10 +15,10 @@ interface NodePosition {
   story: PRDStory;
 }
 
-const NODE_WIDTH = 180;
-const NODE_HEIGHT = 60;
+const NODE_WIDTH = 200;
+const NODE_HEIGHT = 72;
 const NODE_MARGIN_X = 50;
-const NODE_MARGIN_Y = 30;
+const NODE_MARGIN_Y = 36;
 const PADDING = 40;
 
 const statusColors: Record<StoryStatus, { bg: string; border: string; text: string }> = {
@@ -45,8 +46,10 @@ const statusColors: Record<StoryStatus, { bg: string; border: string; text: stri
 
 export function DependencyGraph() {
   const { prd } = usePRDStore();
+  const { designDoc } = useDesignDocStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedStory, setSelectedStory] = useState<string | null>(null);
+  const [hoveredStory, setHoveredStory] = useState<string | null>(null);
 
   // Calculate node positions using a simple layered layout
   const { nodes, edges, width, height } = useMemo(() => {
@@ -217,13 +220,18 @@ export function DependencyGraph() {
         {nodes.map(({ x, y, story }) => {
           const colors = statusColors[story.status];
           const isSelected = selectedStory === story.id;
+          const isHovered = hoveredStory === story.id;
           const storyIndex = prd.stories.findIndex((s) => s.id === story.id) + 1;
+          const mapping = designDoc?.feature_mappings?.[story.id];
+          const componentCount = mapping?.components?.length ?? 0;
 
           return (
             <g
               key={story.id}
               transform={`translate(${x}, ${y})`}
               onClick={() => setSelectedStory(isSelected ? null : story.id)}
+              onMouseEnter={() => setHoveredStory(story.id)}
+              onMouseLeave={() => setHoveredStory(null)}
               className="cursor-pointer"
             >
               {/* Node background */}
@@ -242,13 +250,13 @@ export function DependencyGraph() {
               {/* Story number badge */}
               <circle
                 cx={20}
-                cy={NODE_HEIGHT / 2}
+                cy={24}
                 r={12}
                 fill={colors.border}
               />
               <text
                 x={20}
-                y={NODE_HEIGHT / 2 + 4}
+                y={28}
                 textAnchor="middle"
                 fontSize={10}
                 fontWeight="bold"
@@ -260,15 +268,14 @@ export function DependencyGraph() {
               {/* Story title */}
               <text
                 x={40}
-                y={NODE_HEIGHT / 2 - 4}
+                y={20}
                 fontSize={12}
                 fontWeight="500"
                 fill={colors.text}
-                className="truncate"
               >
                 <tspan>
-                  {story.title.length > 16
-                    ? story.title.substring(0, 16) + '...'
+                  {story.title.length > 18
+                    ? story.title.substring(0, 18) + '...'
                     : story.title}
                 </tspan>
               </text>
@@ -276,12 +283,35 @@ export function DependencyGraph() {
               {/* Status label */}
               <text
                 x={40}
-                y={NODE_HEIGHT / 2 + 12}
+                y={36}
                 fontSize={10}
                 fill={colors.border}
               >
                 {story.status.replace('_', ' ')}
               </text>
+
+              {/* Component mapping indicator */}
+              {componentCount > 0 && (
+                <>
+                  <rect
+                    x={40}
+                    y={46}
+                    width={componentCount * 8 + 40}
+                    height={16}
+                    rx={8}
+                    fill="#818cf8"
+                    opacity={0.2}
+                  />
+                  <text
+                    x={48}
+                    y={57}
+                    fontSize={9}
+                    fill="#6366f1"
+                  >
+                    {componentCount} component{componentCount !== 1 ? 's' : ''}
+                  </text>
+                </>
+              )}
 
               {/* Dependency count badge */}
               {story.dependencies.length > 0 && (
@@ -303,6 +333,35 @@ export function DependencyGraph() {
                     {story.dependencies.length}
                   </text>
                 </>
+              )}
+
+              {/* Hover tooltip with component details */}
+              {isHovered && mapping && componentCount > 0 && (
+                <g transform={`translate(${NODE_WIDTH + 8}, 0)`}>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={160}
+                    height={16 + componentCount * 14 + 8}
+                    rx={6}
+                    fill="#1e1b4b"
+                    opacity={0.95}
+                  />
+                  <text x={8} y={14} fontSize={9} fontWeight="bold" fill="#c7d2fe">
+                    Components
+                  </text>
+                  {mapping.components.map((comp, i) => (
+                    <text
+                      key={i}
+                      x={12}
+                      y={28 + i * 14}
+                      fontSize={9}
+                      fill="#e0e7ff"
+                    >
+                      {'• ' + (comp.length > 18 ? comp.substring(0, 18) + '…' : comp)}
+                    </text>
+                  ))}
+                </g>
               )}
             </g>
           );

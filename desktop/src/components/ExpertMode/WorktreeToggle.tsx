@@ -91,7 +91,9 @@ export function WorktreeToggle() {
             'w-11 h-6 rounded-full relative transition-colors',
             worktree.enabled
               ? 'bg-primary-600'
-              : 'bg-gray-200 dark:bg-gray-700'
+              : 'bg-gray-200 dark:bg-gray-700',
+            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+            'dark:focus:ring-offset-gray-900'
           )}
         >
           <Switch.Thumb
@@ -141,7 +143,7 @@ export function WorktreeToggle() {
                   'border transition-colors',
                   branchError
                     ? 'border-red-500 focus:ring-red-500'
-                    : 'border-gray-300 dark:border-gray-600 focus:ring-primary-500',
+                    : 'border-gray-200 dark:border-gray-700 focus:ring-primary-500',
                   'focus:outline-none focus:ring-2'
                 )}
               />
@@ -165,7 +167,8 @@ export function WorktreeToggle() {
               className={clsx(
                 'w-full px-3 py-2 rounded-lg text-sm',
                 'bg-gray-50 dark:bg-gray-900',
-                'border border-gray-300 dark:border-gray-600',
+                'text-gray-900 dark:text-white',
+                'border border-gray-200 dark:border-gray-700',
                 'focus:outline-none focus:ring-2 focus:ring-primary-500'
               )}
             >

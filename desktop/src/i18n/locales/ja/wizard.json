@@ -1,73 +1,88 @@
 {
   "steps": {
     "welcome": "ようこそ",
-    "mode": "動作モード",
-    "backend": "LLMバックエンド",
-    "agents": "エージェント",
+    "provider": "LLMプロバイダー",
+    "apiKey": "APIキー",
+    "workspace": "ワークスペース",
     "complete": "完了"
   },
 
   "welcome": {
     "title": "Plan Cascade へようこそ",
-    "description": "開発オーケストレーション環境をセットアップしましょう。このウィザードが基本的な設定手順をご案内します。"
+    "description": "AI駆動のカスケード開発フレームワーク。複雑なプロジェクトを並列実行可能なタスクに分解し、マルチエージェント協調を実現します。",
+    "subtitle": "いくつかの簡単なステップでセットアップを完了しましょう。"
   },
 
-  "mode": {
-    "title": "動作モードを選択",
-    "description": "Plan Cascade の使用方法を選択してください。",
-    "simple": {
-      "name": "Claude Code GUIモード",
-      "description": "Claude Code のシンプルなインターフェース。タスクを説明するだけで実行されます。素早いタスクや入門に最適です。"
-    },
-    "expert": {
-      "name": "スタンドアロン編成モード",
-      "description": "完全なPRD生成、マルチエージェント調整、実行戦略。複数のエージェントを必要とする複雑なプロジェクトに最適です。"
-    }
-  },
-
-  "backend": {
-    "title": "LLMバックエンドを選択",
-    "description": "コード生成用のAIプロバイダーを選択してください。",
+  "provider": {
+    "title": "LLMプロバイダーを選択",
+    "description": "コード生成とオーケストレーションを支えるAIプロバイダーを選択してください。",
     "options": {
       "claudeCode": {
-        "name": "Claude Code（推奨）",
-        "description": "既存の Claude Code サブスクリプションを使用。追加のAPIキーは不要です。"
+        "name": "Claude Code",
+        "description": "既存の Claude Code サブスクリプションを使用。追加のAPIキーは不要です。",
+        "tag": "推奨"
       },
       "claudeApi": {
-        "name": "Claude API",
-        "description": "Anthropic APIに直接アクセス。APIキーが必要です。"
+        "name": "Anthropic API",
+        "description": "Anthropic APIに直接アクセスし、Claudeモデルを使用。APIキーが必要です。"
       },
       "openai": {
         "name": "OpenAI",
-        "description": "OpenAI GPTモデルを使用。APIキーが必要です。"
+        "description": "OpenAI GPTモデルでコード生成。APIキーが必要です。"
       },
       "deepseek": {
         "name": "DeepSeek",
-        "description": "DeepSeekコーディングモデル。APIキーが必要です。"
+        "description": "DeepSeek専用コーディングモデル。APIキーが必要です。"
       },
       "ollama": {
         "name": "Ollama（ローカル）",
-        "description": "Ollamaでモデルをローカル実行。APIキーは不要です。"
+        "description": "Ollamaでモデルをローカル実行。APIキー不要、完全プライベート。",
+        "tag": "ローカル"
       }
-    },
-    "apiKey": {
-      "label": "APIキー",
-      "placeholder": "{{provider}} のAPIキーを入力",
-      "description": "APIキーは安全に保存され、共有されることはありません。"
     }
   },
 
-  "agents": {
-    "title": "実行エージェント",
-    "description": "Plan Cascade は異なるタスクに複数のAIエージェントを使用できます。以下は事前設定されたエージェントです。",
-    "command": "コマンド：{{command}}",
-    "default": "デフォルト",
-    "hint": "エージェントの追加、削除、設定は後で設定から行えます。"
+  "apiKey": {
+    "title": "APIキーを入力",
+    "description": "{{provider}} のAPIキーを入力してください。キーはローカルに保存され、第三者に送信されることはありません。",
+    "noKeyRequired": "{{provider}} にはAPIキーは必要ありません。次のステップに進めます。",
+    "label": "APIキー",
+    "placeholder": "{{provider}} のAPIキーを入力",
+    "hint": "APIキーはローカル設定に安全に保存されます。",
+    "show": "APIキーを表示",
+    "hide": "APIキーを非表示",
+    "validating": "検証中...",
+    "valid": "APIキーは有効です",
+    "invalid": "APIキーが無効のようです",
+    "formatError": "APIキーの形式が予期されるパターンと一致しません"
+  },
+
+  "workspace": {
+    "title": "デフォルトワークスペースを設定",
+    "description": "Plan Cascade がプロジェクトを探すデフォルトディレクトリを選択してください。",
+    "label": "ワークスペースディレクトリ",
+    "placeholder": "ワークスペースディレクトリを選択...",
+    "browse": "参照",
+    "hint": "設定からいつでも変更できます。",
+    "selected": "選択済み：{{path}}",
+    "skipHint": "このステップをスキップして、後でワークスペースを設定できます。"
   },
 
   "complete": {
     "title": "準備完了！",
-    "description": "Plan Cascade の設定が完了し、使用できる状態になりました。ヘッダーの歯車アイコンをクリックすれば、いつでもこれらの設定を調整できます。"
+    "description": "Plan Cascade の設定が完了し、使用できる状態になりました。選択内容の概要：",
+    "summary": {
+      "provider": "LLMプロバイダー",
+      "apiKey": "APIキー",
+      "apiKeyConfigured": "設定済み",
+      "apiKeyNotRequired": "不要",
+      "apiKeyNotSet": "未設定",
+      "workspace": "ワークスペース",
+      "workspaceNotSet": "未設定"
+    },
+    "tourPrompt": "アプリケーションの簡単なツアーをご覧になりますか？",
+    "launchTour": "機能ツアーを開始",
+    "skipTour": "ツアーをスキップ"
   },
 
   "actions": {
@@ -75,6 +90,45 @@
     "back": "戻る",
     "next": "次へ",
     "getStarted": "始める",
-    "finishing": "完了中..."
+    "finishing": "完了中...",
+    "finishSetup": "セットアップ完了"
+  },
+
+  "tour": {
+    "title": "機能ツアー",
+    "skipTour": "ツアーをスキップ",
+    "nextStop": "次へ",
+    "prevStop": "戻る",
+    "finish": "ツアー完了",
+    "stepOf": "{{total}} 中 {{current}}",
+    "stops": {
+      "simple": {
+        "title": "シンプルモード",
+        "description": "ワンクリックでAI駆動の自動化を実行。タスクを記述するだけで、Plan Cascade がPRD生成からコード配信まで処理します。"
+      },
+      "expert": {
+        "title": "エキスパートモード",
+        "description": "PRD編集、エージェント選択、実行戦略を完全制御。精密なオーケストレーションが必要な複雑なプロジェクトに最適です。"
+      },
+      "claudeCode": {
+        "title": "Claude Codeモード",
+        "description": "Claude Code CLIとのインタラクティブチャットインターフェース。メッセージの送信、ファイルの添付、ツール使用付きのリアルタイムストリーミング応答を確認できます。"
+      },
+      "projects": {
+        "title": "プロジェクト",
+        "description": "Claude Codeセッションの閲覧と再開。プロジェクト履歴の表示、チェックポイントの管理、複数のワークスペースにわたる作業の継続が可能です。"
+      },
+      "analytics": {
+        "title": "分析ダッシュボード",
+        "description": "API使用状況、コスト、実行メトリクスを追跡。すべてのプロジェクトにわたるトークン消費、応答時間、成功率を監視できます。"
+      }
+    }
+  },
+
+  "settings": {
+    "rerunWizard": "セットアップウィザードを再実行",
+    "rerunWizardDescription": "初期設定ウィザードを再度実行します。",
+    "replayTour": "機能ツアーを再生",
+    "replayTourDescription": "アプリケーション機能のガイドツアーを再体験します。"
   }
 }

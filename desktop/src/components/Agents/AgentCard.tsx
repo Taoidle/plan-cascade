@@ -163,20 +163,20 @@ export function AgentCard({
 
 export function AgentCardSkeleton() {
   return (
-    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 animate-pulse">
+    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700" aria-hidden="true">
       <div className="flex items-start justify-between mb-3">
         <div>
-          <div className="h-5 w-32 bg-gray-200 dark:bg-gray-700 rounded mb-2" />
+          <div className="h-5 w-32 bg-gray-200 dark:bg-gray-700 rounded mb-2 animate-skeleton" />
           <div className="flex gap-2">
-            <div className="h-5 w-16 bg-gray-100 dark:bg-gray-800 rounded" />
-            <div className="h-5 w-10 bg-gray-100 dark:bg-gray-800 rounded" />
+            <div className="h-5 w-16 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
+            <div className="h-5 w-10 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
           </div>
         </div>
       </div>
-      <div className="h-4 w-48 bg-gray-100 dark:bg-gray-800 rounded mb-3" />
+      <div className="h-4 w-48 bg-gray-100 dark:bg-gray-800 rounded mb-3 animate-skeleton" />
       <div className="flex gap-2">
-        <div className="h-7 w-14 bg-gray-100 dark:bg-gray-800 rounded" />
-        <div className="h-7 w-12 bg-gray-100 dark:bg-gray-800 rounded" />
+        <div className="h-7 w-14 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
+        <div className="h-7 w-12 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
       </div>
     </div>
   );

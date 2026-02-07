@@ -1,7 +1,8 @@
 //! Integration Tests Module
 //!
 //! This module contains comprehensive integration tests for Plan Cascade Desktop v5.0.
-//! Tests cover quality gates, worktree management, standalone execution, and Claude Code integration.
+//! Tests cover quality gates, worktree management, standalone execution, Claude Code integration,
+//! strategy analysis, spec interviews, design document generation/import, and recovery system.
 
 // Quality gates detection and execution tests
 mod quality_gates_test;
@@ -14,3 +15,15 @@ mod standalone_test;
 
 // Claude Code integration tests
 mod claude_code_test;
+
+// Strategy analyzer integration tests (story-010)
+mod strategy_test;
+
+// Spec interview service integration tests (story-010)
+mod spec_interview_test;
+
+// Design document generator/importer integration tests (story-010)
+mod design_doc_test;
+
+// Recovery system integration tests (story-010)
+mod recovery_test;

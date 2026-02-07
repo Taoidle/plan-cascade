@@ -17,7 +17,7 @@ pub mod utils;
 // Re-export commonly used items from commands
 pub use commands::{
     // Init commands
-    init_app, get_version,
+    init_app, get_version, InitResult,
     // Health commands
     get_health,
     // Settings commands
@@ -66,6 +66,13 @@ pub use commands::{
     get_available_gates, list_all_gates, run_quality_gates, run_specific_gates,
     run_custom_gates, get_gate_results, get_session_gate_results, get_gate_result,
     cleanup_gate_results, get_default_gates_for_type, check_quality_gates_health,
+    // Spec Interview commands
+    SpecInterviewState, start_spec_interview, submit_interview_answer,
+    get_interview_state, compile_spec,
+    // Recovery commands
+    detect_incomplete_tasks, resume_task, discard_task,
+    // Design Document commands
+    generate_design_doc, import_design_doc, get_design_doc,
 };
 // Re-export models (avoiding settings module conflict)
 pub use models::response::*;

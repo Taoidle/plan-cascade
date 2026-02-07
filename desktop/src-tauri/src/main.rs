@@ -8,6 +8,7 @@ use plan_cascade_desktop::commands::analytics::AnalyticsState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
 use plan_cascade_desktop::commands::standalone::StandaloneState;
+use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
 
 use tauri::Manager;
 
@@ -20,6 +21,7 @@ fn main() {
         .manage(QualityGatesState::new())
         .manage(WorktreeState::new())
         .manage(StandaloneState::new())
+        .manage(SpecInterviewState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -151,6 +153,24 @@ fn main() {
             plan_cascade_desktop::commands::standalone::list_standalone_sessions,
             plan_cascade_desktop::commands::standalone::delete_standalone_session,
             plan_cascade_desktop::commands::standalone::cleanup_standalone_sessions,
+            // Strategy commands
+            plan_cascade_desktop::commands::strategy::analyze_task_strategy,
+            plan_cascade_desktop::commands::strategy::get_strategy_options,
+            plan_cascade_desktop::commands::strategy::classify_intent,
+            plan_cascade_desktop::commands::strategy::override_task_strategy,
+            // Spec Interview commands
+            plan_cascade_desktop::commands::spec_interview::start_spec_interview,
+            plan_cascade_desktop::commands::spec_interview::submit_interview_answer,
+            plan_cascade_desktop::commands::spec_interview::get_interview_state,
+            plan_cascade_desktop::commands::spec_interview::compile_spec,
+            // Recovery commands
+            plan_cascade_desktop::commands::recovery::detect_incomplete_tasks,
+            plan_cascade_desktop::commands::recovery::resume_task,
+            plan_cascade_desktop::commands::recovery::discard_task,
+            // Design Document commands
+            plan_cascade_desktop::commands::design::generate_design_doc,
+            plan_cascade_desktop::commands::design::import_design_doc,
+            plan_cascade_desktop::commands::design::get_design_doc,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

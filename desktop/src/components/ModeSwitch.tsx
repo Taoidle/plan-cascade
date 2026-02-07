@@ -5,8 +5,11 @@
  * Simple mode: One-click execution with AI-driven automation
  * Expert mode: Full control over PRD editing, agent selection, and execution
  * Claude Code mode: Interactive chat with Claude Code CLI
+ *
+ * Story 005: Navigation Flow Refinement - Added animated mode transitions
  */
 
+import { useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -19,7 +22,7 @@ import {
   FileIcon,
   BarChartIcon,
 } from '@radix-ui/react-icons';
-import { Mode, MODES } from '../store/mode';
+import { Mode, MODES, useModeStore } from '../store/mode';
 
 // Re-export Mode type for backwards compatibility
 export type { Mode };
@@ -40,7 +43,9 @@ const MODE_ICONS: Record<Mode, typeof LightningBoltIcon> = {
 
 export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps) {
   const { t } = useTranslation();
+  const { isTransitioning } = useModeStore();
   const CurrentIcon = MODE_ICONS[mode];
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const getModeLabel = (m: Mode) => {
     const labels: Record<Mode, string> = {
@@ -64,22 +69,51 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
     return descriptions[m];
   };
 
+  // Trigger a subtle scale pulse on mode change for visual feedback
+  useEffect(() => {
+    if (isTransitioning && triggerRef.current) {
+      triggerRef.current.animate(
+        [
+          { transform: 'scale(1)' },
+          { transform: 'scale(0.95)' },
+          { transform: 'scale(1)' },
+        ],
+        { duration: 200, easing: 'ease-out' }
+      );
+    }
+  }, [isTransitioning, mode]);
+
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild disabled={disabled}>
         <button
+          ref={triggerRef}
           className={clsx(
             'flex items-center gap-2 px-3 py-1.5 rounded-lg',
             'bg-gray-100 dark:bg-gray-800',
             'hover:bg-gray-200 dark:hover:bg-gray-700',
             'border border-gray-200 dark:border-gray-700',
             'text-sm font-medium text-gray-700 dark:text-gray-300',
-            'transition-colors',
+            'transition-all duration-200 ease-out',
             'disabled:opacity-50 disabled:cursor-not-allowed'
           )}
         >
-          <CurrentIcon className="w-4 h-4" />
-          <span>{getModeLabel(mode)}</span>
+          <span
+            className={clsx(
+              'inline-flex transition-transform duration-200 ease-out',
+              isTransitioning && 'rotate-12'
+            )}
+          >
+            <CurrentIcon className="w-4 h-4" />
+          </span>
+          <span
+            className={clsx(
+              'transition-opacity duration-200 ease-out',
+              isTransitioning ? 'opacity-0' : 'opacity-100'
+            )}
+          >
+            {getModeLabel(mode)}
+          </span>
           <ChevronDownIcon className="w-4 h-4 text-gray-500" />
         </button>
       </DropdownMenu.Trigger>
@@ -91,7 +125,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
             'bg-white dark:bg-gray-800',
             'border border-gray-200 dark:border-gray-700',
             'shadow-lg',
-            'animate-in fade-in-0 zoom-in-95',
+            'animate-in fade-in-0 zoom-in-95 duration-200',
             'data-[side=bottom]:slide-in-from-top-2',
             'data-[side=top]:slide-in-from-bottom-2'
           )}
@@ -113,6 +147,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
                 className={clsx(
                   'flex items-start gap-3 px-3 py-2.5 rounded-md',
                   'cursor-pointer outline-none',
+                  'transition-colors duration-150',
                   isSelected
                     ? 'bg-primary-50 dark:bg-primary-900/30'
                     : 'hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -120,7 +155,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
               >
                 <div
                   className={clsx(
-                    'p-1.5 rounded-md',
+                    'p-1.5 rounded-md transition-colors duration-150',
                     isSelected
                       ? 'bg-primary-100 dark:bg-primary-900/50'
                       : 'bg-gray-100 dark:bg-gray-700'
@@ -128,7 +163,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
                 >
                   <Icon
                     className={clsx(
-                      'w-4 h-4',
+                      'w-4 h-4 transition-colors duration-150',
                       isSelected
                         ? 'text-primary-600 dark:text-primary-400'
                         : 'text-gray-500 dark:text-gray-400'
@@ -139,7 +174,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
                 <div className="flex-1 min-w-0">
                   <div
                     className={clsx(
-                      'font-medium text-sm',
+                      'font-medium text-sm transition-colors duration-150',
                       isSelected
                         ? 'text-primary-700 dark:text-primary-300'
                         : 'text-gray-900 dark:text-white'
@@ -153,7 +188,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
                 </div>
 
                 {isSelected && (
-                  <CheckIcon className="w-5 h-5 text-primary-600 dark:text-primary-400 mt-0.5" />
+                  <CheckIcon className="w-5 h-5 text-primary-600 dark:text-primary-400 mt-0.5 animate-in fade-in-0 zoom-in-50 duration-200" />
                 )}
               </DropdownMenu.Item>
             );
@@ -161,6 +196,49 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
+  );
+}
+
+// ============================================================================
+// AnimatedModeContent Component
+// ============================================================================
+
+/**
+ * Wraps mode content with fade/slide transition animations.
+ * Completes within 200ms without layout shifts by using fixed positioning
+ * during transitions.
+ */
+interface AnimatedModeContentProps {
+  children: React.ReactNode;
+  mode: Mode;
+}
+
+export function AnimatedModeContent({ children, mode }: AnimatedModeContentProps) {
+  const { isTransitioning, transitionDirection } = useModeStore();
+
+  const enterClass = (() => {
+    if (!isTransitioning) return 'opacity-100 translate-x-0';
+    switch (transitionDirection) {
+      case 'left':
+        return 'animate-in fade-in-0 slide-in-from-right-4 duration-200 ease-out';
+      case 'right':
+        return 'animate-in fade-in-0 slide-in-from-left-4 duration-200 ease-out';
+      default:
+        return 'animate-in fade-in-0 duration-200 ease-out';
+    }
+  })();
+
+  return (
+    <div
+      key={mode}
+      className={clsx(
+        'flex-1 overflow-hidden',
+        'will-change-transform',
+        enterClass
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -217,7 +295,8 @@ export function ModeTabs({ mode, onChange, disabled = false }: ModeTabsProps) {
             onClick={() => onChange(modeOption)}
             disabled={disabled}
             className={clsx(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+              'relative flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium',
+              'transition-all duration-200 ease-out',
               isSelected
                 ? 'bg-white dark:bg-gray-700 text-primary-600 dark:text-primary-400 shadow-sm'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'

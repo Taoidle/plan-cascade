@@ -5,7 +5,7 @@
  */
 
 export { useModeStore, MODES, MODE_LABELS, MODE_DESCRIPTIONS } from './mode';
-export type { Mode } from './mode';
+export type { Mode, BreadcrumbItem, TransitionDirection } from './mode';
 
 export { useExecutionStore } from './execution';
 export type {
@@ -66,3 +66,44 @@ export type {
   AgentStats,
   RunStatus,
 } from '../types/agent';
+
+export { useSpecInterviewStore, getPhaseLabel, getPhaseOrder } from './specInterview';
+export type {
+  InterviewPhase,
+  InterviewQuestion,
+  InterviewHistoryEntry,
+  InterviewSession,
+  InterviewConfig,
+  CompiledSpec,
+  CompileOptions,
+} from './specInterview';
+
+export { useRecoveryStore, EXECUTION_MODE_LABELS } from './recovery';
+export type {
+  ExecutionMode,
+  IncompleteTask,
+  RestoredContext,
+  ResumeResult as RecoveryResumeResult,
+  ResumeEvent,
+  RecoveryState,
+} from './recovery';
+
+export { useDesignDocStore } from './designDoc';
+export type {
+  DesignDocLevel,
+  DecisionStatus,
+  DesignDocMetadata,
+  Overview,
+  DesignComponent,
+  DesignPattern,
+  DesignDecision,
+  FeatureMapping,
+  Architecture,
+  Interfaces,
+  DesignDoc,
+  GenerateResult,
+  ImportResult,
+  ImportWarning,
+  GenerationInfo,
+  GenerateOptions,
+} from './designDoc';

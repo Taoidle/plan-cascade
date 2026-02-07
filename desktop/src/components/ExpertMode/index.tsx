@@ -6,7 +6,10 @@
  * - Strategy and agent selection
  * - Quality gates and worktree configuration
  * - Dependency visualization
- * - Detailed execution logs
+ * - Detailed execution logs with real-time streaming
+ * - Quality gate badges and error feedback
+ *
+ * Story 008: Added StreamingOutput, GlobalProgressBar, QualityGateBadge, ErrorState
  */
 
 import { useState, useEffect } from 'react';
@@ -26,6 +29,14 @@ import { WorktreeToggle } from './WorktreeToggle';
 import { BulkAgentSelector } from './AgentSelector';
 import { DraftManager } from './DraftManager';
 import { PRDPreviewPanel } from './DependencyGraph';
+import { SpecInterviewPanel } from './SpecInterviewPanel';
+import { DesignDocPanel } from './DesignDocPanel';
+import {
+  StreamingOutput,
+  GlobalProgressBar,
+  QualityGateBadge,
+  ErrorState,
+} from '../shared';
 import {
   PlayIcon,
   ResetIcon,
@@ -57,6 +68,13 @@ export function ExpertMode() {
     }
   }, [hasStories]);
 
+  // Auto-switch to execution tab when execution starts
+  useEffect(() => {
+    if (status === 'running' && activeTab !== 'execution') {
+      setActiveTab('execution');
+    }
+  }, [status]);
+
   const handleStartExecution = async () => {
     if (!hasStories) return;
     // Convert PRD stories to execution format
@@ -87,6 +105,8 @@ export function ExpertMode() {
         )}>
           <Tabs.List className="flex gap-1">
             <TabTrigger value="generate">{t('tabs.generate')}</TabTrigger>
+            <TabTrigger value="interview">Spec Interview</TabTrigger>
+            <TabTrigger value="design-doc">Design Doc</TabTrigger>
             <TabTrigger value="prd" disabled={!hasStories}>
               {t('tabs.prdEditor')} {hasStories && t('prdEditor.storyCount', { count: prd.stories.length })}
             </TabTrigger>
@@ -162,8 +182,8 @@ export function ExpertMode() {
             'flex-1 overflow-auto',
             showSettings && hasStories ? 'w-2/3' : 'w-full'
           )}>
-            <Tabs.Content value="generate" className="h-full p-6">
-              <div className="max-w-2xl mx-auto">
+            <Tabs.Content value="generate" className="h-full p-6 3xl:p-8">
+              <div className="max-w-2xl 3xl:max-w-3xl mx-auto">
                 <div className="mb-6">
                   <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                     {t('generate.title')}
@@ -176,8 +196,16 @@ export function ExpertMode() {
               </div>
             </Tabs.Content>
 
-            <Tabs.Content value="prd" className="h-full p-6">
-              <div className="max-w-3xl mx-auto">
+            <Tabs.Content value="interview" className="h-full">
+              <SpecInterviewPanel />
+            </Tabs.Content>
+
+            <Tabs.Content value="design-doc" className="h-full">
+              <DesignDocPanel />
+            </Tabs.Content>
+
+            <Tabs.Content value="prd" className="h-full p-6 3xl:p-8">
+              <div className="max-w-3xl 3xl:max-w-4xl mx-auto">
                 <div className="mb-6 flex items-center justify-between">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">
@@ -259,7 +287,7 @@ function TabTrigger({ value, children, disabled = false }: TabTriggerProps) {
 
 function ExecutionView() {
   const { t } = useTranslation('expertMode');
-  const { stories, progress, currentStoryId } = useExecutionStore();
+  const { stories, progress, currentStoryId, status, qualityGateResults } = useExecutionStore();
 
   if (stories.length === 0) {
     return (
@@ -270,65 +298,95 @@ function ExecutionView() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-          {t('execution.title')}
-        </h2>
-        <span className="text-2xl font-bold text-primary-600">
-          {Math.round(progress)}%
-        </span>
-      </div>
+    <div className="max-w-4xl 3xl:max-w-5xl mx-auto space-y-6">
+      {/* Global progress bar at the top */}
+      <GlobalProgressBar showStoryLabels />
 
-      {/* Progress bar */}
-      <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-primary-600 transition-all duration-300"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
+      {/* Error states */}
+      <ErrorState maxErrors={5} />
 
-      {/* Stories list */}
-      <div className="space-y-2">
-        {stories.map((story, index) => (
-          <div
-            key={story.id}
-            className={clsx(
-              'p-4 rounded-lg border transition-all',
-              story.id === currentStoryId
-                ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                : story.status === 'completed'
-                ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                : story.status === 'failed'
-                ? 'border-red-500 bg-red-50 dark:bg-red-900/20'
-                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
-            )}
-          >
-            <div className="flex items-center gap-3">
-              <span className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 text-sm font-medium">
-                {index + 1}
-              </span>
-              <div className="flex-1">
-                <p className="font-medium text-gray-900 dark:text-white">
-                  {story.title}
-                </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {story.status === 'in_progress'
-                    ? `${story.progress}% complete`
-                    : story.status.replace('_', ' ')}
-                </p>
-              </div>
-              {story.status === 'in_progress' && (
-                <div className="w-20 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary-600 transition-all"
-                    style={{ width: `${story.progress}%` }}
-                  />
+      {/* Two-column layout: stories + streaming output */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left column: Stories with inline quality gate badges */}
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            Stories
+          </h3>
+          {stories.map((story, index) => {
+            const storyGates = qualityGateResults.filter((r) => r.storyId === story.id);
+
+            return (
+              <div
+                key={story.id}
+                className={clsx(
+                  'p-4 rounded-lg border transition-all',
+                  story.id === currentStoryId
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 ring-1 ring-primary-300 dark:ring-primary-700'
+                    : story.status === 'completed'
+                    ? 'border-success-300 dark:border-success-700 bg-success-50 dark:bg-success-950'
+                    : story.status === 'failed'
+                    ? 'border-error-300 dark:border-error-700 bg-error-50 dark:bg-error-950'
+                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <span className={clsx(
+                    'flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium shrink-0',
+                    story.status === 'completed' && 'bg-success-100 dark:bg-success-900 text-success-700 dark:text-success-300',
+                    story.status === 'failed' && 'bg-error-100 dark:bg-error-900 text-error-700 dark:text-error-300',
+                    story.status === 'in_progress' && 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300',
+                    story.status === 'pending' && 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                  )}>
+                    {index + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900 dark:text-white truncate">
+                      {story.title}
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {story.status === 'in_progress'
+                        ? `${story.progress}% complete`
+                        : story.status.replace('_', ' ')}
+                    </p>
+                  </div>
+                  {story.status === 'in_progress' && (
+                    <div className="w-20 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden shrink-0">
+                      <div
+                        className="h-full bg-primary-600 transition-all animate-progress-pulse"
+                        style={{ width: `${story.progress}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
-        ))}
+
+                {/* Quality gate badges inline after each story */}
+                {storyGates.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/50">
+                    <QualityGateBadge storyId={story.id} />
+                  </div>
+                )}
+
+                {/* Error message for failed stories */}
+                {story.status === 'failed' && story.error && (
+                  <div className="mt-2 p-2 rounded bg-error-50 dark:bg-error-900/30 text-xs text-error-600 dark:text-error-400 font-mono">
+                    {story.error}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Right column: Streaming output */}
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            Live Output
+          </h3>
+          <StreamingOutput
+            maxHeight="600px"
+            showClear
+          />
+        </div>
       </div>
     </div>
   );
@@ -336,7 +394,7 @@ function ExecutionView() {
 
 function LogsView() {
   const { t } = useTranslation('expertMode');
-  const { logs } = useExecutionStore();
+  const { logs, streamingOutput } = useExecutionStore();
 
   return (
     <div className="h-full flex flex-col">
@@ -346,22 +404,44 @@ function LogsView() {
         </h2>
         <span className="text-sm text-gray-500 dark:text-gray-400">
           {t('logs.entries', { count: logs.length })}
+          {streamingOutput.length > 0 && (
+            <span className="ml-2">
+              | {streamingOutput.length} stream events
+            </span>
+          )}
         </span>
       </div>
-      <div
-        className={clsx(
-          'flex-1 p-4 rounded-lg font-mono text-sm',
-          'bg-gray-900 text-gray-100',
-          'overflow-auto'
-        )}
-      >
-        {logs.length === 0 ? (
-          <span className="text-gray-500">{t('logs.empty')}</span>
-        ) : (
-          <pre className="whitespace-pre-wrap">
-            {logs.join('\n')}
-          </pre>
-        )}
+
+      {/* Streaming output (primary display) */}
+      {streamingOutput.length > 0 && (
+        <div className="mb-4">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Streaming Output
+          </h3>
+          <StreamingOutput maxHeight="400px" showClear />
+        </div>
+      )}
+
+      {/* Traditional log entries */}
+      <div className="flex-1 min-h-0">
+        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          Event Log
+        </h3>
+        <div
+          className={clsx(
+            'h-full p-4 rounded-lg font-mono text-sm',
+            'bg-gray-900 text-gray-100',
+            'overflow-auto'
+          )}
+        >
+          {logs.length === 0 ? (
+            <span className="text-gray-500">{t('logs.empty')}</span>
+          ) : (
+            <pre className="whitespace-pre-wrap">
+              {logs.join('\n')}
+            </pre>
+          )}
+        </div>
       </div>
     </div>
   );

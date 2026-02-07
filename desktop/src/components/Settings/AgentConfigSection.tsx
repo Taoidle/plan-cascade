@@ -160,7 +160,8 @@ export function AgentConfigSection() {
                     'w-10 h-6 rounded-full relative',
                     'bg-gray-200 dark:bg-gray-700',
                     'data-[state=checked]:bg-primary-600',
-                    'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2'
+                    'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    'dark:focus:ring-offset-gray-800'
                   )}
                 >
                   <Switch.Thumb
@@ -472,7 +473,7 @@ function AgentFormDialog({
               )}
               aria-label="Close"
             >
-              <Cross2Icon className="w-4 h-4 text-gray-500" />
+              <Cross2Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
             </button>
           </Dialog.Close>
         </Dialog.Content>

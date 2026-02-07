@@ -1,73 +1,88 @@
 {
   "steps": {
     "welcome": "Welcome",
-    "mode": "Working Mode",
-    "backend": "LLM Backend",
-    "agents": "Agents",
+    "provider": "LLM Provider",
+    "apiKey": "API Key",
+    "workspace": "Workspace",
     "complete": "Complete"
   },
 
   "welcome": {
     "title": "Welcome to Plan Cascade",
-    "description": "Let's set up your development orchestration environment. This wizard will guide you through the essential configuration steps."
+    "description": "Your AI-powered cascading development framework. Decompose complex projects into parallel executable tasks with multi-agent collaboration.",
+    "subtitle": "Let's get you set up in just a few steps."
   },
 
-  "mode": {
-    "title": "Choose Your Working Mode",
-    "description": "Select how you want to use Plan Cascade.",
-    "simple": {
-      "name": "Claude Code GUI Mode",
-      "description": "Simple interface for Claude Code. Just describe your task and let it execute. Best for quick tasks and getting started."
-    },
-    "expert": {
-      "name": "Standalone Orchestration Mode",
-      "description": "Full PRD generation, multi-agent coordination, and execution strategies. Best for complex projects requiring multiple agents."
-    }
-  },
-
-  "backend": {
-    "title": "Select LLM Backend",
-    "description": "Choose the AI provider for code generation.",
+  "provider": {
+    "title": "Choose Your LLM Provider",
+    "description": "Select the AI provider that will power your code generation and orchestration.",
     "options": {
       "claudeCode": {
-        "name": "Claude Code (Recommended)",
-        "description": "Uses your existing Claude Code subscription. No additional API key needed."
+        "name": "Claude Code",
+        "description": "Uses your existing Claude Code subscription. No additional API key needed.",
+        "tag": "Recommended"
       },
       "claudeApi": {
-        "name": "Claude API",
-        "description": "Direct Anthropic API access. Requires an API key."
+        "name": "Anthropic API",
+        "description": "Direct Anthropic API access with Claude models. Requires an API key."
       },
       "openai": {
         "name": "OpenAI",
-        "description": "Use OpenAI GPT models. Requires an API key."
+        "description": "Use OpenAI GPT models for code generation. Requires an API key."
       },
       "deepseek": {
         "name": "DeepSeek",
-        "description": "DeepSeek coding models. Requires an API key."
+        "description": "DeepSeek specialized coding models. Requires an API key."
       },
       "ollama": {
         "name": "Ollama (Local)",
-        "description": "Run models locally with Ollama. No API key needed."
+        "description": "Run models locally with Ollama. No API key needed, fully private.",
+        "tag": "Local"
       }
-    },
-    "apiKey": {
-      "label": "API Key",
-      "placeholder": "Enter your {{provider}} API key",
-      "description": "Your API key will be stored securely and never shared."
     }
   },
 
-  "agents": {
-    "title": "Execution Agents",
-    "description": "Plan Cascade can use multiple AI agents for different tasks. Here are the pre-configured agents.",
-    "command": "Command: {{command}}",
-    "default": "Default",
-    "hint": "You can add, remove, or configure agents later in Settings."
+  "apiKey": {
+    "title": "Enter Your API Key",
+    "description": "Provide the API key for {{provider}}. Your key is stored locally and never transmitted to third parties.",
+    "noKeyRequired": "No API key is required for {{provider}}. You can proceed to the next step.",
+    "label": "API Key",
+    "placeholder": "Enter your {{provider}} API key",
+    "hint": "Your API key will be stored securely in your local settings.",
+    "show": "Show API key",
+    "hide": "Hide API key",
+    "validating": "Validating...",
+    "valid": "API key is valid",
+    "invalid": "API key appears to be invalid",
+    "formatError": "API key format does not match expected pattern"
+  },
+
+  "workspace": {
+    "title": "Set Your Default Workspace",
+    "description": "Choose the default directory where Plan Cascade will look for your projects.",
+    "label": "Workspace Directory",
+    "placeholder": "Select a workspace directory...",
+    "browse": "Browse",
+    "hint": "You can always change this later in Settings.",
+    "selected": "Selected: {{path}}",
+    "skipHint": "You can skip this step and set a workspace later."
   },
 
   "complete": {
     "title": "You're All Set!",
-    "description": "Plan Cascade is configured and ready to use. You can always adjust these settings later by clicking the gear icon in the header."
+    "description": "Plan Cascade is configured and ready to use. Here's a summary of your choices:",
+    "summary": {
+      "provider": "LLM Provider",
+      "apiKey": "API Key",
+      "apiKeyConfigured": "Configured",
+      "apiKeyNotRequired": "Not required",
+      "apiKeyNotSet": "Not set",
+      "workspace": "Workspace",
+      "workspaceNotSet": "Not set"
+    },
+    "tourPrompt": "Would you like a quick tour of the application?",
+    "launchTour": "Launch Feature Tour",
+    "skipTour": "Skip Tour"
   },
 
   "actions": {
@@ -75,6 +90,45 @@
     "back": "Back",
     "next": "Next",
     "getStarted": "Get Started",
-    "finishing": "Finishing..."
+    "finishing": "Finishing...",
+    "finishSetup": "Finish Setup"
+  },
+
+  "tour": {
+    "title": "Feature Tour",
+    "skipTour": "Skip Tour",
+    "nextStop": "Next",
+    "prevStop": "Back",
+    "finish": "Finish Tour",
+    "stepOf": "{{current}} of {{total}}",
+    "stops": {
+      "simple": {
+        "title": "Simple Mode",
+        "description": "One-click execution with AI-driven automation. Just describe your task and Plan Cascade handles the rest, from PRD generation to code delivery."
+      },
+      "expert": {
+        "title": "Expert Mode",
+        "description": "Full control over PRD editing, agent selection, and execution strategies. Perfect for complex projects requiring fine-grained orchestration."
+      },
+      "claudeCode": {
+        "title": "Claude Code Mode",
+        "description": "Interactive chat interface with Claude Code CLI. Send messages, attach files, and watch real-time streaming responses with tool usage."
+      },
+      "projects": {
+        "title": "Projects",
+        "description": "Browse and resume Claude Code sessions. View project history, manage checkpoints, and pick up where you left off across multiple workspaces."
+      },
+      "analytics": {
+        "title": "Analytics Dashboard",
+        "description": "Track API usage, costs, and execution metrics. Monitor token consumption, response times, and success rates across all your projects."
+      }
+    }
+  },
+
+  "settings": {
+    "rerunWizard": "Re-run Setup Wizard",
+    "rerunWizardDescription": "Walk through the initial configuration wizard again.",
+    "replayTour": "Replay Feature Tour",
+    "replayTourDescription": "Take the guided tour of application features."
   }
 }

@@ -114,7 +114,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                   type="button"
                   className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
-                  <Cross2Icon className="w-5 h-5" />
+                  <Cross2Icon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                 </button>
               </Dialog.Close>
             </div>
@@ -243,6 +243,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                             className={clsx(
                               'flex-1 px-2 py-1.5 rounded-md font-mono text-xs',
                               'bg-gray-100 dark:bg-gray-800',
+                              'text-gray-900 dark:text-white',
                               'border border-gray-200 dark:border-gray-700'
                             )}
                           />
@@ -254,6 +255,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                             className={clsx(
                               'flex-1 px-2 py-1.5 rounded-md font-mono text-xs',
                               'bg-gray-100 dark:bg-gray-800',
+                              'text-gray-900 dark:text-white',
                               'border border-gray-200 dark:border-gray-700'
                             )}
                           />
@@ -310,6 +312,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                   className={clsx(
                     'px-4 py-2 rounded-md',
                     'bg-gray-100 dark:bg-gray-800',
+                    'text-gray-700 dark:text-gray-300',
                     'hover:bg-gray-200 dark:hover:bg-gray-700',
                     'text-sm font-medium'
                   )}

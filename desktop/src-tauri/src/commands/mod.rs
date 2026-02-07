@@ -17,6 +17,10 @@ pub mod settings;
 pub mod standalone;
 pub mod timeline;
 pub mod worktree;
+pub mod spec_interview;
+pub mod strategy;
+pub mod recovery;
+pub mod design;
 
 pub use agents::*;
 pub use analytics::*;
@@ -32,3 +36,7 @@ pub use settings::*;
 pub use standalone::*;
 pub use timeline::*;
 pub use worktree::*;
+pub use spec_interview::*;
+pub use strategy::*;
+pub use recovery::*;
+pub use design::*;

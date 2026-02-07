@@ -177,12 +177,12 @@ export function AgentLibrary() {
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('searchPlaceholder')}
             className={clsx(
-              'w-full pl-10 pr-4 py-2 rounded-md border',
-              'border-gray-300 dark:border-gray-600',
+              'w-full pl-10 pr-4 py-2 rounded-lg border',
+              'border-gray-200 dark:border-gray-700',
               'bg-white dark:bg-gray-800',
               'text-gray-900 dark:text-white',
-              'placeholder-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'placeholder-gray-400 dark:placeholder-gray-500',
+              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
             )}
           />
         </div>
@@ -211,7 +211,7 @@ export function AgentLibrary() {
       <div className="flex-1 overflow-y-auto p-4">
         {loading.agents && agents.length === 0 ? (
           // Loading state
-          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
             <AgentCardSkeleton />
             <AgentCardSkeleton />
             <AgentCardSkeleton />
@@ -247,7 +247,7 @@ export function AgentLibrary() {
           </div>
         ) : (
           // Agent cards
-          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
             {filteredAgents.map((agent) => (
               <AgentCard
                 key={agent.id}

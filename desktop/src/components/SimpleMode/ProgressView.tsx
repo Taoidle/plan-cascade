@@ -50,7 +50,7 @@ export function ProgressView() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto w-full space-y-6">
+    <div className="max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full space-y-6">
       {/* Strategy Badge */}
       {strategy && (
         <div className="flex items-center justify-center">

@@ -89,7 +89,9 @@ export function ServerCard({
             'bg-gray-300 dark:bg-gray-600',
             'data-[state=checked]:bg-primary-600',
             'transition-colors',
-            'disabled:opacity-50'
+            'disabled:opacity-50',
+            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+            'dark:focus:ring-offset-gray-800'
           )}
         >
           <Switch.Thumb

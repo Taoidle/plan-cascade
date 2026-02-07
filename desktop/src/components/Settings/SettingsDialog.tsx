@@ -81,7 +81,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 )}
                 aria-label="Close"
               >
-                <Cross2Icon className="w-5 h-5 text-gray-500" />
+                <Cross2Icon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
               </button>
             </Dialog.Close>
           </div>
@@ -121,7 +121,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             {/* Tab Content */}
             <div className="flex-1 overflow-auto p-6">
               <Tabs.Content value="general" className="outline-none">
-                <GeneralSection />
+                <GeneralSection onCloseDialog={() => onOpenChange(false)} />
               </Tabs.Content>
               <Tabs.Content value="llm" className="outline-none">
                 <LLMBackendSection />

@@ -25,3 +25,9 @@ export { DraftManager } from './DraftManager';
 
 // Visualization
 export { DependencyGraph, PRDPreviewPanel } from './DependencyGraph';
+
+// Spec Interview
+export { SpecInterviewPanel } from './SpecInterviewPanel';
+
+// Design Document
+export { DesignDocPanel } from './DesignDocPanel';

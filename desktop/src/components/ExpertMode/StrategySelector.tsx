@@ -2,17 +2,22 @@
  * Strategy Selector Component
  *
  * Radio button group for selecting execution strategy
- * with descriptions and recommendations.
+ * with descriptions, recommendations, and AI-powered analysis.
+ * In Expert mode, displays the auto-analyzer recommendation
+ * with confidence score and allows manual override.
  */
 
+import { useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { usePRDStore, ExecutionStrategy } from '../../store/prd';
+import { useExecutionStore, StrategyAnalysis } from '../../store/execution';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import {
   RocketIcon,
   LayersIcon,
   CubeIcon,
   InfoCircledIcon,
+  MixIcon,
 } from '@radix-ui/react-icons';
 
 interface StrategyOption {
@@ -23,6 +28,8 @@ interface StrategyOption {
   icon: React.ReactNode;
   minStories: number;
   maxStories: number;
+  /** Strategy key used by the Rust analyzer */
+  analyzerKey: string;
 }
 
 const strategyOptions: StrategyOption[] = [
@@ -34,6 +41,7 @@ const strategyOptions: StrategyOption[] = [
     icon: <RocketIcon className="w-5 h-5" />,
     minStories: 0,
     maxStories: 1,
+    analyzerKey: 'direct',
   },
   {
     value: 'hybrid_auto',
@@ -43,6 +51,7 @@ const strategyOptions: StrategyOption[] = [
     icon: <LayersIcon className="w-5 h-5" />,
     minStories: 2,
     maxStories: 10,
+    analyzerKey: 'hybrid_auto',
   },
   {
     value: 'mega_plan',
@@ -52,17 +61,71 @@ const strategyOptions: StrategyOption[] = [
     icon: <CubeIcon className="w-5 h-5" />,
     minStories: 10,
     maxStories: Infinity,
+    analyzerKey: 'mega_plan',
   },
 ];
 
-export function StrategySelector() {
+/** Map analyzer strategy key to the PRD store ExecutionStrategy value */
+function mapAnalyzerStrategy(analyzerStrategy: string): ExecutionStrategy | null {
+  switch (analyzerStrategy) {
+    case 'direct': return 'direct';
+    case 'hybrid_auto': return 'hybrid_auto';
+    case 'hybrid_worktree': return 'hybrid_auto'; // Worktree mapped to hybrid_auto in PRD store
+    case 'mega_plan': return 'mega_plan';
+    default: return null;
+  }
+}
+
+/** Format strategy name for display */
+function formatStrategyName(strategy: string): string {
+  return strategy
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Confidence level label */
+function confidenceLabel(confidence: number): { text: string; color: string } {
+  if (confidence >= 0.8) return { text: 'High', color: 'text-green-600 dark:text-green-400' };
+  if (confidence >= 0.6) return { text: 'Medium', color: 'text-yellow-600 dark:text-yellow-400' };
+  return { text: 'Low', color: 'text-red-600 dark:text-red-400' };
+}
+
+interface StrategySelectorProps {
+  /** Task description for auto-analysis (optional) */
+  taskDescription?: string;
+}
+
+export function StrategySelector({ taskDescription }: StrategySelectorProps) {
   const { prd, setStrategy } = usePRDStore();
+  const {
+    strategyAnalysis,
+    isAnalyzingStrategy,
+    analyzeStrategy,
+  } = useExecutionStore();
   const storyCount = prd.stories.length;
 
-  // Determine recommended strategy based on story count
-  const recommendedStrategy = strategyOptions.find(
-    (opt) => storyCount >= opt.minStories && storyCount <= opt.maxStories
-  )?.value || 'hybrid_auto';
+  // Auto-analyze when task description changes (debounced)
+  const runAnalysis = useCallback(async () => {
+    if (taskDescription && taskDescription.trim().length > 10) {
+      await analyzeStrategy(taskDescription);
+    }
+  }, [taskDescription, analyzeStrategy]);
+
+  useEffect(() => {
+    const timer = setTimeout(runAnalysis, 500);
+    return () => clearTimeout(timer);
+  }, [runAnalysis]);
+
+  // Determine recommended strategy: use analyzer result if available, else story count heuristic
+  const analyzerRecommendation = strategyAnalysis
+    ? mapAnalyzerStrategy(strategyAnalysis.strategy)
+    : null;
+
+  const recommendedStrategy = analyzerRecommendation
+    || strategyOptions.find(
+      (opt) => storyCount >= opt.minStories && storyCount <= opt.maxStories
+    )?.value
+    || 'hybrid_auto';
 
   return (
     <div className="space-y-3">
@@ -77,10 +140,19 @@ export function StrategySelector() {
         )}
       </div>
 
+      {/* AI Analysis Banner */}
+      {(isAnalyzingStrategy || strategyAnalysis) && (
+        <AnalysisBanner
+          analysis={strategyAnalysis}
+          isAnalyzing={isAnalyzingStrategy}
+        />
+      )}
+
       <div className="space-y-2">
         {strategyOptions.map((option) => {
           const isSelected = prd.strategy === option.value;
-          const isRecommended = option.value === recommendedStrategy && storyCount > 0;
+          const isRecommended = option.value === recommendedStrategy;
+          const isAnalyzerPick = analyzerRecommendation === option.value;
 
           return (
             <label
@@ -140,7 +212,13 @@ export function StrategySelector() {
                   >
                     {option.label}
                   </span>
-                  {isRecommended && (
+                  {isAnalyzerPick && strategyAnalysis && (
+                    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 flex items-center gap-1">
+                      <MixIcon className="w-3 h-3" />
+                      AI Pick ({(strategyAnalysis.confidence * 100).toFixed(0)}%)
+                    </span>
+                  )}
+                  {isRecommended && !isAnalyzerPick && storyCount > 0 && (
                     <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
                       Recommended
                     </span>
@@ -175,6 +253,84 @@ export function StrategySelector() {
             </label>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/** Banner showing the AI analysis result with dimension scores */
+function AnalysisBanner({
+  analysis,
+  isAnalyzing,
+}: {
+  analysis: StrategyAnalysis | null;
+  isAnalyzing: boolean;
+}) {
+  if (isAnalyzing) {
+    return (
+      <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 flex items-center gap-2">
+        <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+        <p className="text-sm text-blue-600 dark:text-blue-400">
+          Analyzing task complexity...
+        </p>
+      </div>
+    );
+  }
+
+  if (!analysis) return null;
+
+  const { text: confLabel, color: confColor } = confidenceLabel(analysis.confidence);
+
+  return (
+    <div className="p-3 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <MixIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+          <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
+            AI Recommendation: {formatStrategyName(analysis.strategy)}
+          </span>
+        </div>
+        <span className={clsx('text-xs font-medium', confColor)}>
+          {confLabel} confidence ({(analysis.confidence * 100).toFixed(0)}%)
+        </span>
+      </div>
+
+      <p className="text-xs text-indigo-600 dark:text-indigo-400 mb-2">
+        {analysis.reasoning}
+      </p>
+
+      {/* Dimension scores bar chart */}
+      <div className="grid grid-cols-4 gap-2">
+        {[
+          { label: 'Scope', value: analysis.dimension_scores.scope },
+          { label: 'Complexity', value: analysis.dimension_scores.complexity },
+          { label: 'Risk', value: analysis.dimension_scores.risk },
+          { label: 'Parallel', value: analysis.dimension_scores.parallelization },
+        ].map((dim) => (
+          <div key={dim.label}>
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[10px] text-indigo-500 dark:text-indigo-400">{dim.label}</span>
+              <span className="text-[10px] text-indigo-500 dark:text-indigo-400">
+                {(dim.value * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-indigo-100 dark:bg-indigo-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-indigo-500 dark:bg-indigo-400 transition-all"
+                style={{ width: `${dim.value * 100}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Estimates */}
+      <div className="flex gap-4 mt-2 text-[10px] text-indigo-500 dark:text-indigo-400">
+        <span>~{analysis.estimated_stories} stories</span>
+        {analysis.estimated_features > 1 && (
+          <span>~{analysis.estimated_features} features</span>
+        )}
+        <span>~{analysis.estimated_duration_hours}h estimated</span>
       </div>
     </div>
   );

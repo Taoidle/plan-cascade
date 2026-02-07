@@ -4,6 +4,10 @@
  * Exports reusable components that are used across multiple modes.
  *
  * Story 004: Command Palette Enhancement
+ * Story 005: Navigation Flow Refinement
+ * Story 006: Visual Design Polish - Skeleton component
+ * Story 007: Onboarding & Setup Wizard - FeatureTour component
+ * Story 008: Real-time Execution Feedback
  */
 
 export {
@@ -15,3 +19,24 @@ export {
   type CommandGroup,
   type GlobalCommandPaletteContext,
 } from './CommandPalette';
+
+export { Breadcrumb } from './Breadcrumb';
+export { ContextualActions } from './ContextualActions';
+export { ShortcutOverlay } from './ShortcutOverlay';
+export { FeatureTour } from './FeatureTour';
+
+export {
+  Skeleton,
+  SkeletonGroup,
+  SettingsSkeleton,
+  ListItemSkeleton,
+  TableSkeleton,
+  MCPServerSkeleton,
+  ExpertModeSkeleton,
+} from './Skeleton';
+
+export { StreamingOutput } from './StreamingOutput';
+export { GlobalProgressBar } from './GlobalProgressBar';
+export { QualityGateBadge } from './QualityGateBadge';
+export { ErrorState } from './ErrorState';
+export { RecoveryPrompt } from './RecoveryPrompt';

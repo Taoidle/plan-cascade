@@ -179,7 +179,7 @@ export function Dashboard() {
             <OverviewCards summary={summary} isLoading={isLoading} />
 
             {/* Charts Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 3xl:grid-cols-2 gap-6">
               {/* Cost Over Time Chart */}
               <div
                 className={clsx(

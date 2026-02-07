@@ -17,8 +17,6 @@ use crate::models::checkpoint::{
 };
 use crate::utils::error::{AppError, AppResult};
 
-/// Default name for the main branch
-const MAIN_BRANCH_NAME: &str = "main";
 /// Checkpoints directory name within project
 const CHECKPOINTS_DIR: &str = "checkpoints";
 /// Metadata file name
@@ -841,7 +839,7 @@ impl TimelineService {
         }
 
         // Restore files from checkpoint
-        let project_root = PathBuf::from(project_path);
+        let _project_root = PathBuf::from(project_path);
         let mut restored_files = Vec::new();
         let mut removed_files = Vec::new();
 

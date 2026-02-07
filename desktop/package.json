@@ -34,6 +34,7 @@
     "@radix-ui/react-tabs": "^1.1.2",
     "@radix-ui/react-tooltip": "^1.1.5",
     "@tauri-apps/api": "^2.1.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-shell": "^2.0.1",
     "@types/node": "^25.1.0",
     "class-variance-authority": "^0.7.1",

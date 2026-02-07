@@ -358,7 +358,7 @@ export function ImportExportSection() {
                 )}
                 aria-label="Close"
               >
-                <Cross2Icon className="w-4 h-4 text-gray-500" />
+                <Cross2Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
               </button>
             </Dialog.Close>
           </Dialog.Content>

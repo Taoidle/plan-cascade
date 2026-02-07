@@ -106,7 +106,8 @@ export function QualityGatesSection() {
                       'w-10 h-6 rounded-full relative shrink-0',
                       'bg-gray-200 dark:bg-gray-700',
                       'data-[state=checked]:bg-primary-600',
-                      'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2'
+                      'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                      'dark:focus:ring-offset-gray-800'
                     )}
                   >
                     <Switch.Thumb

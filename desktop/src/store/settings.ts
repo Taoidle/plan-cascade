@@ -59,6 +59,11 @@ interface SettingsState {
   enableMarkdownMath: boolean;
   enableCodeBlockCopy: boolean;
 
+  // Onboarding settings
+  onboardingCompleted: boolean;
+  tourCompleted: boolean;
+  workspacePath: string;
+
   // Actions
   setBackend: (backend: Backend) => void;
   setProvider: (provider: string) => void;
@@ -76,6 +81,11 @@ interface SettingsState {
   setMaxFileAttachmentSize: (size: number) => void;
   setEnableMarkdownMath: (enable: boolean) => void;
   setEnableCodeBlockCopy: (enable: boolean) => void;
+
+  // Onboarding actions
+  setOnboardingCompleted: (completed: boolean) => void;
+  setTourCompleted: (completed: boolean) => void;
+  setWorkspacePath: (path: string) => void;
 }
 
 const defaultSettings = {
@@ -119,6 +129,11 @@ const defaultSettings = {
   maxFileAttachmentSize: 10 * 1024 * 1024, // 10MB
   enableMarkdownMath: true,
   enableCodeBlockCopy: true,
+
+  // Onboarding
+  onboardingCompleted: false,
+  tourCompleted: false,
+  workspacePath: '',
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -167,6 +182,10 @@ export const useSettingsStore = create<SettingsState>()(
       setMaxFileAttachmentSize: (maxFileAttachmentSize) => set({ maxFileAttachmentSize }),
       setEnableMarkdownMath: (enableMarkdownMath) => set({ enableMarkdownMath }),
       setEnableCodeBlockCopy: (enableCodeBlockCopy) => set({ enableCodeBlockCopy }),
+
+      setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
+      setTourCompleted: (tourCompleted) => set({ tourCompleted }),
+      setWorkspacePath: (workspacePath) => set({ workspacePath }),
     }),
     {
       name: 'plan-cascade-settings',

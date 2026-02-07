@@ -26,7 +26,7 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
   const { history, clearHistory } = useExecutionStore();
 
   return (
-    <div className="max-w-2xl mx-auto w-full animate-fade-in">
+    <div className="max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
