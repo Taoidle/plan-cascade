@@ -1759,7 +1759,7 @@ if more batches remain:
 
 TaskOutput is the correct way to wait for background agents.
 
-## Step 10: Show Final Status
+## Step 10: Show Final Status and Cleanup
 
 ```
 === All Batches Complete ===
@@ -1768,10 +1768,76 @@ Total Stories: X
 Completed: X
 
 All batches have been executed successfully.
+```
 
+### Step 10.1: Detect Execution Mode
+
+Check if the current execution is in a worktree or in-place (non-worktree) mode:
+
+```bash
+if [ -f ".planning-config.json" ]; then
+    EXECUTION_MODE="worktree"
+else
+    EXECUTION_MODE="in-place"
+fi
+```
+
+### Step 10.2: Cleanup Based on Mode
+
+**If `EXECUTION_MODE == "worktree"`**:
+
+Worktree mode requires merge before cleanup. Show next steps and let the user run hybrid-complete:
+
+```
 Next steps:
   - /plan-cascade:hybrid-status - Verify completion
-  - /plan-cascade:hybrid-complete - Finalize and merge
+  - /plan-cascade:hybrid-complete - Finalize, merge, and cleanup
+```
+
+**If `EXECUTION_MODE == "in-place"`**:
+
+**CRITICAL**: In non-worktree mode, planning files remain in the project root after execution. You MUST clean them up automatically. Do NOT skip this cleanup or defer it to the user.
+
+```bash
+echo "Cleaning up planning files..."
+
+# Planning documents
+rm -f prd.json findings.md progress.txt mega-findings.md
+rm -f design_doc.json spec.json spec.md
+
+# Status and state files
+rm -f .agent-status.json .iteration-state.json .retry-state.json
+
+# Context recovery files
+rm -f .hybrid-execution-context.md .mega-execution-context.md
+
+# Directories
+rm -rf .agent-outputs
+rm -rf .locks
+rm -rf .state
+
+echo "✓ Planning files cleaned up"
+
+# Also clean up state files from user data directory (new mode)
+USER_STATE_DIR=$(uv run python -c "from plan_cascade.state.path_resolver import PathResolver; from pathlib import Path; print(PathResolver(Path.cwd()).get_state_dir())" 2>/dev/null || echo "")
+if [ -n "$USER_STATE_DIR" ] && [ -d "$USER_STATE_DIR" ]; then
+    echo "Cleaning up state files from user data directory..."
+    rm -f "$USER_STATE_DIR/.iteration-state.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/.agent-status.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/.retry-state.json" 2>/dev/null || true
+    rm -f "$USER_STATE_DIR/spec-interview.json" 2>/dev/null || true
+    # Remove .state directory if empty
+    rmdir "$USER_STATE_DIR" 2>/dev/null || true
+    echo "✓ State files cleaned"
+fi
+```
+
+Then show:
+
+```
+=== Execution Complete ===
+
+All stories executed and planning files cleaned up.
 ```
 
 ## Notes
