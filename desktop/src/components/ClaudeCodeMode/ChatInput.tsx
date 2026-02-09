@@ -220,7 +220,7 @@ export function ChatInput({
   );
 
   return (
-    <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+    <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shrink-0">
       {/* File attachment drop zone */}
       <FileAttachmentDropZone
         attachments={attachments}

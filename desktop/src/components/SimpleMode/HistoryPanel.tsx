@@ -2,9 +2,11 @@
  * HistoryPanel Component
  *
  * Displays recent task executions with timestamp, description,
- * status, and duration. Allows clearing history.
+ * status, and duration. Allows clearing history, expanding
+ * conversation content, and restoring conversations.
  */
 
+import { useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import {
@@ -13,6 +15,9 @@ import {
   CheckCircledIcon,
   CrossCircledIcon,
   ClockIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  ResetIcon,
 } from '@radix-ui/react-icons';
 import { useExecutionStore } from '../../store/execution';
 import type { ExecutionHistoryItem } from '../../store/execution';
@@ -23,7 +28,13 @@ interface HistoryPanelProps {
 
 export function HistoryPanel({ onClose }: HistoryPanelProps) {
   const { t } = useTranslation('simpleMode');
-  const { history, clearHistory } = useExecutionStore();
+  const { history, clearHistory, restoreFromHistory } = useExecutionStore();
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const handleRestore = (id: string) => {
+    restoreFromHistory(id);
+    onClose();
+  };
 
   return (
     <div className="max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full animate-fade-in">
@@ -75,7 +86,15 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
       ) : (
         <div className="space-y-3">
           {history.map((item) => (
-            <HistoryItem key={item.id} item={item} />
+            <HistoryItem
+              key={item.id}
+              item={item}
+              isExpanded={expandedId === item.id}
+              onToggleExpand={() =>
+                setExpandedId(expandedId === item.id ? null : item.id)
+              }
+              onRestore={item.conversationContent ? () => handleRestore(item.id) : undefined}
+            />
           ))}
         </div>
       )}
@@ -85,9 +104,12 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
 
 interface HistoryItemProps {
   item: ExecutionHistoryItem;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onRestore?: () => void;
 }
 
-function HistoryItem({ item }: HistoryItemProps) {
+function HistoryItem({ item, isExpanded, onToggleExpand, onRestore }: HistoryItemProps) {
   const { t } = useTranslation('simpleMode');
 
   const getStatusIcon = () => {
@@ -161,6 +183,8 @@ function HistoryItem({ item }: HistoryItemProps) {
     }
   };
 
+  const hasContent = !!item.conversationContent;
+
   return (
     <div
       className={clsx(
@@ -204,6 +228,56 @@ function HistoryItem({ item }: HistoryItemProps) {
             <p className="mt-2 text-sm text-red-500 dark:text-red-400 truncate">
               {item.error}
             </p>
+          )}
+
+          {/* Action buttons */}
+          {hasContent && (
+            <div className="flex items-center gap-2 mt-3">
+              <button
+                onClick={onToggleExpand}
+                className={clsx(
+                  'flex items-center gap-1 px-2 py-1 rounded text-xs',
+                  'text-gray-500 dark:text-gray-400',
+                  'hover:bg-gray-100 dark:hover:bg-gray-700',
+                  'transition-colors'
+                )}
+              >
+                {isExpanded ? (
+                  <ChevronUpIcon className="w-3 h-3" />
+                ) : (
+                  <ChevronDownIcon className="w-3 h-3" />
+                )}
+                {isExpanded ? 'Collapse' : 'View conversation'}
+              </button>
+
+              {onRestore && (
+                <button
+                  onClick={onRestore}
+                  className={clsx(
+                    'flex items-center gap-1 px-2 py-1 rounded text-xs',
+                    'text-primary-600 dark:text-primary-400',
+                    'hover:bg-primary-50 dark:hover:bg-primary-900/20',
+                    'transition-colors'
+                  )}
+                >
+                  <ResetIcon className="w-3 h-3" />
+                  Restore
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Expanded conversation content */}
+          {isExpanded && item.conversationContent && (
+            <div
+              className={clsx(
+                'mt-3 p-3 rounded-lg max-h-64 overflow-y-auto',
+                'bg-gray-950 border border-gray-800',
+                'font-mono text-xs text-gray-300 whitespace-pre-wrap'
+              )}
+            >
+              {item.conversationContent}
+            </div>
           )}
         </div>
       </div>

@@ -9,8 +9,9 @@
  * Story 004 (Recovery): Resume & Recovery System - Detect and resume interrupted executions
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import { ModeSwitch, AnimatedModeContent } from './components/ModeSwitch';
 import { SettingsButton } from './components/SettingsButton';
 import { SimpleMode } from './components/SimpleMode';
@@ -55,18 +56,26 @@ function AppContent() {
   } = useOnboardingStore();
   // ShortcutOverlay manages its own open/close state via mod+shift+/ hotkey
 
-  // Check for incomplete executions on app mount (Story-004 Recovery)
+  const initCalled = useRef(false);
+
+  // Initialize Tauri backend on mount
   useEffect(() => {
+    if (initCalled.current) return;
+    initCalled.current = true;
+
+    invoke('init_app')
+      .then(() => {
+        // After backend is ready, detect incomplete tasks
+        detectIncompleteTasks();
+      })
+      .catch((err) => {
+        console.warn('Backend initialization failed:', err);
+      });
+
     // Initialize recovery event listener
     initializeListener();
 
-    // Detect incomplete tasks after a short delay to let init_app complete
-    const timer = setTimeout(() => {
-      detectIncompleteTasks();
-    }, 500);
-
     return () => {
-      clearTimeout(timer);
       cleanupListener();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,7 +187,7 @@ function AppContent() {
       </header>
 
       {/* Main Content with animated transitions */}
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden flex flex-col">
         <AnimatedModeContent mode={mode}>
           {mode === 'simple' && <div data-tour="mode-simple" className="h-full"><SimpleMode /></div>}
           {mode === 'expert' && <div data-tour="mode-expert" className="h-full"><ExpertMode /></div>}

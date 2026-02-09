@@ -21,6 +21,23 @@ import {
 } from '../lib/claudeCodeClient';
 
 // ============================================================================
+// Module-level listener tracking (prevents duplicates from React StrictMode)
+// ============================================================================
+
+let _streamUnlisten: (() => void) | null = null;
+let _toolUnlisten: (() => void) | null = null;
+let _sessionUnlisten: (() => void) | null = null;
+let _statusUnsubscribe: (() => void) | null = null;
+let _lifecycleVersion = 0;
+
+function cleanupEventListeners() {
+  if (_statusUnsubscribe) { _statusUnsubscribe(); _statusUnsubscribe = null; }
+  if (_streamUnlisten) { _streamUnlisten(); _streamUnlisten = null; }
+  if (_toolUnlisten) { _toolUnlisten(); _toolUnlisten = null; }
+  if (_sessionUnlisten) { _sessionUnlisten(); _sessionUnlisten = null; }
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -250,31 +267,29 @@ function parseToolType(name: string): ToolType {
 }
 
 function parseStreamEvent(event: UnifiedStreamEvent): { type: string; data: Record<string, unknown> } {
-  if ('TextDelta' in event) {
-    return { type: 'text_delta', data: { content: event.TextDelta.content } };
+  switch (event.type) {
+    case 'text_delta':
+      return { type: 'text_delta', data: { content: event.content } };
+    case 'thinking_delta':
+      return { type: 'thinking_delta', data: { content: event.content } };
+    case 'tool_start': {
+      let input = {};
+      if (event.arguments) {
+        try { input = JSON.parse(event.arguments); } catch { /* keep empty */ }
+      }
+      return { type: 'tool_use', data: { tool_use_id: event.tool_id, name: event.tool_name, input } };
+    }
+    case 'tool_result':
+      return { type: 'tool_result', data: { tool_use_id: event.tool_id, success: !event.error, output: event.result || event.error || '' } };
+    case 'usage':
+      return { type: 'usage', data: { input_tokens: event.input_tokens, output_tokens: event.output_tokens } };
+    case 'error':
+      return { type: 'error', data: { message: event.message } };
+    case 'complete':
+      return { type: 'done', data: { stop_reason: event.stop_reason } };
+    default:
+      return { type: 'unknown', data: {} };
   }
-  if ('ThinkingDelta' in event) {
-    return { type: 'thinking_delta', data: { content: event.ThinkingDelta.content } };
-  }
-  if ('ToolUse' in event) {
-    return { type: 'tool_use', data: event.ToolUse };
-  }
-  if ('ToolResult' in event) {
-    return { type: 'tool_result', data: event.ToolResult };
-  }
-  if ('InputTokens' in event) {
-    return { type: 'input_tokens', data: { count: event.InputTokens.count } };
-  }
-  if ('OutputTokens' in event) {
-    return { type: 'output_tokens', data: { count: event.OutputTokens.count } };
-  }
-  if ('Error' in event) {
-    return { type: 'error', data: { message: event.Error.message } };
-  }
-  if ('Done' in event) {
-    return { type: 'done', data: {} };
-  }
-  return { type: 'unknown', data: {} };
 }
 
 // ============================================================================
@@ -304,16 +319,31 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
       workspaceFiles: [],
 
       initialize: async (projectPath?: string) => {
+        const initializeVersion = ++_lifecycleVersion;
+
         try {
+          // Clean up any existing event listeners first
+          // (prevents duplicates from React StrictMode double-mount)
+          cleanupEventListeners();
+
           const client = await initClaudeCodeClient();
+          if (initializeVersion !== _lifecycleVersion) {
+            return;
+          }
 
           // Subscribe to connection status changes
-          client.onStatusChange((status) => {
+          _statusUnsubscribe = client.onStatusChange((status) => {
+            if (initializeVersion !== _lifecycleVersion) {
+              return;
+            }
             set({ connectionStatus: status });
           });
 
-          // Subscribe to stream events
-          await client.onStreamEvent((payload: StreamEventPayload) => {
+          // Subscribe to stream events (tracked at module level)
+          _streamUnlisten = await client.onStreamEvent((payload: StreamEventPayload) => {
+            if (initializeVersion !== _lifecycleVersion) {
+              return;
+            }
             const { event, session_id } = payload;
             const state = get();
 
@@ -389,9 +419,16 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
               }
             }
           });
+          if (initializeVersion !== _lifecycleVersion) {
+            cleanupEventListeners();
+            return;
+          }
 
-          // Subscribe to tool events
-          await client.onToolEvent((payload: ToolUpdateEvent) => {
+          // Subscribe to tool events (tracked at module level)
+          _toolUnlisten = await client.onToolEvent((payload: ToolUpdateEvent) => {
+            if (initializeVersion !== _lifecycleVersion) {
+              return;
+            }
             const { execution, update_type, session_id } = payload;
             const state = get();
 
@@ -419,9 +456,16 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
               });
             }
           });
+          if (initializeVersion !== _lifecycleVersion) {
+            cleanupEventListeners();
+            return;
+          }
 
-          // Subscribe to session events
-          await client.onSessionEvent((payload: SessionUpdateEvent) => {
+          // Subscribe to session events (tracked at module level)
+          _sessionUnlisten = await client.onSessionEvent((payload: SessionUpdateEvent) => {
+            if (initializeVersion !== _lifecycleVersion) {
+              return;
+            }
             const { session, update_type } = payload;
 
             if (update_type === 'state_changed') {
@@ -441,17 +485,27 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
               }
             }
           });
+          if (initializeVersion !== _lifecycleVersion) {
+            cleanupEventListeners();
+            return;
+          }
 
           // Start a chat session if project path is provided
-          if (projectPath) {
+          if (projectPath && initializeVersion === _lifecycleVersion) {
             try {
               const response = await client.startChat({ project_path: projectPath });
+              if (initializeVersion !== _lifecycleVersion) {
+                return;
+              }
               set({ currentSessionId: response.session_id });
             } catch (err) {
               console.error('Failed to start chat session:', err);
             }
           }
         } catch (err) {
+          if (initializeVersion !== _lifecycleVersion) {
+            return;
+          }
           console.error('Failed to initialize Claude Code client:', err);
           set({
             connectionStatus: 'disconnected',
@@ -461,7 +515,12 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
       },
 
       cleanup: async () => {
+        const cleanupVersion = ++_lifecycleVersion;
+        cleanupEventListeners();
         await closeClaudeCodeClient();
+        if (cleanupVersion !== _lifecycleVersion) {
+          return;
+        }
         set({ connectionStatus: 'disconnected', currentSessionId: null });
       },
 
@@ -542,6 +601,12 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
       },
 
       clearConversation: () => {
+        // Auto-save current conversation before clearing
+        const state = get();
+        if (state.messages.length > 0) {
+          state.saveConversation();
+        }
+
         set({
           messages: [],
           toolCallHistory: [],

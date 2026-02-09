@@ -209,10 +209,11 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     try {
       const response = await invoke<CommandResponse<boolean>>('init_analytics');
       if (!response.success) {
-        console.error('Failed to initialize analytics:', response.error);
+        console.warn('Analytics initialization deferred:', response.error);
       }
     } catch (error) {
-      console.error('Failed to initialize analytics:', error);
+      // Backend may not be ready yet; analytics will retry on next interaction
+      console.warn('Analytics initialization deferred:', error);
     }
   },
 

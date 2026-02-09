@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { GeneralSection } from '../Settings/GeneralSection';
 import { LLMBackendSection } from '../Settings/LLMBackendSection';
 import { SettingsDialog } from '../Settings/SettingsDialog';
@@ -53,14 +53,58 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+const mockProviderKeys: Record<string, string> = {};
+
+const mockInvoke = vi.fn(async (command: string, args?: { provider?: string; apiKey?: string; api_key?: string }) => {
+  switch (command) {
+    case 'list_configured_api_key_providers':
+      return { success: true, data: Object.keys(mockProviderKeys), error: null };
+    case 'list_providers':
+      return {
+        success: true,
+        data: [
+          { provider_type: 'anthropic', models: [{ id: 'claude-3-5-sonnet-20241022' }] },
+          { provider_type: 'glm', models: [{ id: 'glm-4.7' }, { id: 'glm-4.6' }] },
+        ],
+        error: null,
+      };
+    case 'configure_provider':
+      {
+        const provider = args?.provider || '';
+        const key = args?.apiKey ?? args?.api_key ?? '';
+        if (provider) {
+          if (typeof key === 'string' && key.trim().length > 0) {
+            mockProviderKeys[provider] = key.trim();
+          } else {
+            delete mockProviderKeys[provider];
+          }
+        }
+      }
+      return { success: true, data: true, error: null };
+    case 'get_provider_api_key':
+      return { success: true, data: args?.provider ? (mockProviderKeys[args.provider] || null) : null, error: null };
+    default:
+      return { success: true, data: null, error: null };
+  }
+});
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...(args as [string])),
+}));
+
 // Mock settings store
 const mockSetDefaultMode = vi.fn();
 const mockSetTheme = vi.fn();
 const mockSetBackend = vi.fn();
 const mockSetModel = vi.fn();
 const mockSetProvider = vi.fn();
+const mockSetStandaloneContextTurns = vi.fn();
+const mockSetEnableContextCompaction = vi.fn();
+const mockSetShowReasoningOutput = vi.fn();
+const mockSetShowSubAgentEvents = vi.fn();
+const mockSetSearchProvider = vi.fn();
 
-let mockSettingsState = {
+const mockSettingsState = {
   backend: 'claude-code' as string,
   provider: 'claude',
   model: '',
@@ -68,6 +112,11 @@ let mockSettingsState = {
   defaultMode: 'simple' as string,
   theme: 'system' as string,
   language: 'en' as string,
+  standaloneContextTurns: 8 as number,
+  enableContextCompaction: true,
+  showReasoningOutput: false,
+  showSubAgentEvents: true,
+  searchProvider: 'duckduckgo' as string,
   agents: [
     { name: 'claude-code', enabled: true, command: 'claude', isDefault: true },
     { name: 'aider', enabled: false, command: 'aider', isDefault: false },
@@ -83,6 +132,11 @@ let mockSettingsState = {
   setBackend: mockSetBackend,
   setModel: mockSetModel,
   setProvider: mockSetProvider,
+  setStandaloneContextTurns: mockSetStandaloneContextTurns,
+  setEnableContextCompaction: mockSetEnableContextCompaction,
+  setShowReasoningOutput: mockSetShowReasoningOutput,
+  setShowSubAgentEvents: mockSetShowSubAgentEvents,
+  setSearchProvider: mockSetSearchProvider,
 };
 
 vi.mock('../../store/settings', () => ({
@@ -119,7 +173,7 @@ vi.mock('@radix-ui/react-dialog', () => ({
 
 // Mock Radix Tabs
 vi.mock('@radix-ui/react-tabs', () => ({
-  Root: ({ children, value, onValueChange }: { children: React.ReactNode; value: string; onValueChange: (v: string) => void }) => (
+  Root: ({ children, value, onValueChange: _onValueChange }: { children: React.ReactNode; value: string; onValueChange: (v: string) => void }) => (
     <div data-testid="tabs-root" data-active-tab={value}>{children}</div>
   ),
   List: ({ children, className }: { children: React.ReactNode; className: string }) => (
@@ -161,6 +215,7 @@ vi.mock('../Settings/LanguageSelector', () => ({
 describe('GeneralSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     mockSettingsState.defaultMode = 'simple';
     mockSettingsState.theme = 'system';
   });
@@ -247,8 +302,12 @@ describe('GeneralSection', () => {
 describe('LLMBackendSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    mockInvoke.mockClear();
+    Object.keys(mockProviderKeys).forEach((key) => delete mockProviderKeys[key]);
     mockSettingsState.backend = 'claude-code';
     mockSettingsState.model = '';
+    mockSettingsState.standaloneContextTurns = 8;
   });
 
   it('renders LLM backend title and description', () => {
@@ -289,14 +348,42 @@ describe('LLMBackendSection', () => {
     render(<LLMBackendSection />);
 
     const apiKeyBadges = screen.getAllByText('API Key Required');
-    // Claude API, OpenAI, DeepSeek require keys
-    expect(apiKeyBadges.length).toBe(3);
+    // Claude API, OpenAI, DeepSeek, GLM, Qwen require keys
+    expect(apiKeyBadges.length).toBe(5);
   });
 
-  it('renders model input field', () => {
+  it('updates standalone context turns setting', () => {
+    render(<LLMBackendSection />);
+
+    const contextTurnsSelect = screen.getByDisplayValue('8');
+    fireEvent.change(contextTurnsSelect, { target: { value: '20' } });
+
+    expect(mockSetStandaloneContextTurns).toHaveBeenCalledWith(20);
+  });
+
+  it('renders streaming output toggles and updates preferences', () => {
+    render(<LLMBackendSection />);
+
+    const subAgentLabel = screen.getByText('Show sub-agent progress events');
+    const reasoningLabel = screen.getByText('Show model reasoning/thinking traces');
+    const subAgentToggle = subAgentLabel.closest('label')?.querySelector('input') as HTMLInputElement | null;
+    const reasoningToggle = reasoningLabel.closest('label')?.querySelector('input') as HTMLInputElement | null;
+
+    expect(subAgentToggle).toBeTruthy();
+    expect(reasoningToggle).toBeTruthy();
+
+    fireEvent.click(subAgentToggle!);
+    fireEvent.click(reasoningToggle!);
+
+    expect(mockSetShowSubAgentEvents).toHaveBeenCalledWith(false);
+    expect(mockSetShowReasoningOutput).toHaveBeenCalledWith(true);
+  });
+
+  it('renders model selector and custom model input', () => {
     render(<LLMBackendSection />);
 
     expect(screen.getByText('Model')).toBeInTheDocument();
+    expect(screen.getByText('Use provider default')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Model name')).toBeInTheDocument();
   });
 
@@ -307,6 +394,28 @@ describe('LLMBackendSection', () => {
 
     expect(screen.queryByText(/API Key for/)).not.toBeInTheDocument();
   });
+
+  it('keeps API key status scoped by provider', async () => {
+    mockSettingsState.backend = 'glm';
+    const { rerender } = render(<LLMBackendSection />);
+
+    const glmInput = screen.getByPlaceholderText('Enter your API key');
+    fireEvent.change(glmInput, { target: { value: 'glm-secret-key' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => {
+      expect(screen.getByText('API key saved successfully')).toBeInTheDocument();
+    });
+
+    mockSettingsState.backend = 'deepseek';
+    rerender(<LLMBackendSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText('API Key for DeepSeek')).toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText('Enter your API key')).toBeInTheDocument();
+    expect(screen.queryByText('Remove')).not.toBeInTheDocument();
+  });
 });
 
 // --------------------------------------------------------------------------
@@ -316,6 +425,8 @@ describe('LLMBackendSection', () => {
 describe('SettingsDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    mockSettingsState.backend = 'claude-code';
   });
 
   it('renders dialog with title when open', () => {

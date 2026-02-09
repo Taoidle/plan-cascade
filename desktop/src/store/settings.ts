@@ -8,9 +8,10 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import i18n from '../i18n';
 
-export type Backend = 'claude-code' | 'claude-api' | 'openai' | 'deepseek' | 'ollama';
+export type Backend = 'claude-code' | 'claude-api' | 'openai' | 'deepseek' | 'glm' | 'qwen' | 'ollama';
 export type Theme = 'system' | 'light' | 'dark';
 export type Language = 'en' | 'zh' | 'ja';
+export type StandaloneContextTurns = 2 | 4 | 6 | 8 | 10 | 20 | 50 | 100 | 200 | 500 | -1;
 
 interface Agent {
   name: string;
@@ -52,6 +53,7 @@ interface SettingsState {
   defaultMode: 'simple' | 'expert';
   theme: Theme;
   language: Language;
+  standaloneContextTurns: StandaloneContextTurns;
 
   // Chat UI settings
   showLineNumbers: boolean;
@@ -64,6 +66,14 @@ interface SettingsState {
   tourCompleted: boolean;
   workspacePath: string;
 
+  // Context compaction
+  enableContextCompaction: boolean;
+  showReasoningOutput: boolean;
+  showSubAgentEvents: boolean;
+
+  // Search provider settings
+  searchProvider: 'tavily' | 'brave' | 'duckduckgo';
+
   // Actions
   setBackend: (backend: Backend) => void;
   setProvider: (provider: string) => void;
@@ -72,9 +82,14 @@ interface SettingsState {
   setTheme: (theme: Theme) => void;
   setLanguage: (language: Language) => void;
   setDefaultMode: (mode: 'simple' | 'expert') => void;
+  setStandaloneContextTurns: (turns: StandaloneContextTurns) => void;
   updateAgent: (name: string, updates: Partial<Agent>) => void;
   updateQualityGates: (updates: Partial<QualityGates>) => void;
   resetToDefaults: () => void;
+  setEnableContextCompaction: (enable: boolean) => void;
+  setShowReasoningOutput: (show: boolean) => void;
+  setShowSubAgentEvents: (show: boolean) => void;
+  setSearchProvider: (provider: 'tavily' | 'brave' | 'duckduckgo') => void;
 
   // Chat UI actions
   setShowLineNumbers: (show: boolean) => void;
@@ -91,7 +106,7 @@ interface SettingsState {
 const defaultSettings = {
   // Backend
   backend: 'claude-code' as Backend,
-  provider: 'claude',
+  provider: 'anthropic',
   model: '',
   apiKey: '',
 
@@ -123,6 +138,7 @@ const defaultSettings = {
   defaultMode: 'simple' as const,
   theme: 'system' as Theme,
   language: 'en' as Language,
+  standaloneContextTurns: 8 as StandaloneContextTurns,
 
   // Chat UI
   showLineNumbers: true,
@@ -134,6 +150,14 @@ const defaultSettings = {
   onboardingCompleted: false,
   tourCompleted: false,
   workspacePath: '',
+
+  // Context compaction
+  enableContextCompaction: true,
+  showReasoningOutput: false,
+  showSubAgentEvents: true,
+
+  // Search provider
+  searchProvider: 'duckduckgo' as const,
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -163,6 +187,7 @@ export const useSettingsStore = create<SettingsState>()(
       },
 
       setDefaultMode: (defaultMode) => set({ defaultMode }),
+      setStandaloneContextTurns: (standaloneContextTurns) => set({ standaloneContextTurns }),
 
       updateAgent: (name, updates) =>
         set((state) => ({
@@ -178,14 +203,28 @@ export const useSettingsStore = create<SettingsState>()(
 
       resetToDefaults: () => set(defaultSettings),
 
+      setEnableContextCompaction: (enableContextCompaction) => set({ enableContextCompaction }),
+      setShowReasoningOutput: (showReasoningOutput) => set({ showReasoningOutput }),
+      setShowSubAgentEvents: (showSubAgentEvents) => set({ showSubAgentEvents }),
+
       setShowLineNumbers: (showLineNumbers) => set({ showLineNumbers }),
       setMaxFileAttachmentSize: (maxFileAttachmentSize) => set({ maxFileAttachmentSize }),
       setEnableMarkdownMath: (enableMarkdownMath) => set({ enableMarkdownMath }),
       setEnableCodeBlockCopy: (enableCodeBlockCopy) => set({ enableCodeBlockCopy }),
 
+      setSearchProvider: (searchProvider) => set({ searchProvider }),
+
       setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
       setTourCompleted: (tourCompleted) => set({ tourCompleted }),
-      setWorkspacePath: (workspacePath) => set({ workspacePath }),
+      setWorkspacePath: (workspacePath) => {
+        set({ workspacePath });
+        // Sync to backend StandaloneState for tool executor working directory
+        if (workspacePath) {
+          import('@tauri-apps/api/core').then(({ invoke }) => {
+            invoke('set_working_directory', { path: workspacePath }).catch(() => {});
+          });
+        }
+      },
     }),
     {
       name: 'plan-cascade-settings',

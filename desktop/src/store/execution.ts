@@ -8,6 +8,8 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { useSettingsStore } from './settings';
+import type { StreamEventPayload } from '../lib/claudeCodeClient';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
@@ -61,7 +63,17 @@ export interface Story {
 // Streaming Output Types
 // ============================================================================
 
-export type StreamLineType = 'text' | 'info' | 'error' | 'success' | 'warning' | 'tool' | 'thinking' | 'code';
+export type StreamLineType =
+  | 'text'
+  | 'info'
+  | 'error'
+  | 'success'
+  | 'warning'
+  | 'tool'
+  | 'tool_result'
+  | 'sub_agent'
+  | 'thinking'
+  | 'code';
 
 export interface StreamLine {
   id: number;
@@ -135,12 +147,42 @@ export interface ExecutionHistoryItem {
   totalStories: number;
   success: boolean;
   error?: string;
+  /** Serialized conversation content from streamingOutput */
+  conversationContent?: string;
+  /** Session ID for potential reconnection */
+  sessionId?: string;
 }
 
 interface CommandResponse<T> {
   success: boolean;
   data: T | null;
   error: string | null;
+}
+
+interface StandaloneTurn {
+  user: string;
+  assistant: string;
+  createdAt: number;
+}
+
+interface LegacyTaskStartData {
+  task_id: string;
+}
+
+interface BackendUsageStats {
+  input_tokens: number;
+  output_tokens: number;
+  thinking_tokens?: number | null;
+  cache_read_tokens?: number | null;
+  cache_creation_tokens?: number | null;
+}
+
+interface BackendStandaloneExecutionResult {
+  response?: string | null;
+  usage: BackendUsageStats;
+  iterations: number;
+  success: boolean;
+  error?: string | null;
 }
 
 interface ExecutionState {
@@ -216,6 +258,12 @@ interface ExecutionState {
   /** Estimated time remaining in milliseconds */
   estimatedTimeRemaining: number | null;
 
+  /** Whether we're in an active Claude Code chat session (supports multi-turn) */
+  isChatSession: boolean;
+
+  /** Local multi-turn context for standalone providers (glm/openai/deepseek/qwen/ollama) */
+  standaloneTurns: StandaloneTurn[];
+
   // Actions
   /** Initialize Tauri event listeners */
   initialize: () => void;
@@ -234,6 +282,9 @@ interface ExecutionState {
 
   /** Cancel execution */
   cancel: () => Promise<void>;
+
+  /** Send a follow-up message in an existing Claude Code chat session */
+  sendFollowUp: (prompt: string) => Promise<void>;
 
   /** Reset state */
   reset: () => void;
@@ -258,6 +309,9 @@ interface ExecutionState {
 
   /** Clear history */
   clearHistory: () => void;
+
+  /** Restore a conversation from history into the streaming output view */
+  restoreFromHistory: (historyId: string) => void;
 
   /** Analyze task strategy via Rust backend */
   analyzeStrategy: (description: string) => Promise<StrategyAnalysis | null>;
@@ -292,9 +346,168 @@ interface ExecutionState {
 
 const HISTORY_KEY = 'plan-cascade-execution-history';
 const MAX_HISTORY_ITEMS = 10;
+const DEFAULT_STANDALONE_CONTEXT_TURNS = 8;
+const STANDALONE_CONTEXT_UNLIMITED = -1;
+const LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY = 'plan-cascade-provider-api-key-cache';
+
+const PROVIDER_ALIASES: Record<string, string> = {
+  anthropic: 'anthropic',
+  claude: 'anthropic',
+  'claude-api': 'anthropic',
+  openai: 'openai',
+  deepseek: 'deepseek',
+  glm: 'glm',
+  'glm-api': 'glm',
+  zhipu: 'glm',
+  zhipuai: 'glm',
+  qwen: 'qwen',
+  'qwen-api': 'qwen',
+  dashscope: 'qwen',
+  alibaba: 'qwen',
+  aliyun: 'qwen',
+  ollama: 'ollama',
+};
+
+function normalizeProviderName(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return PROVIDER_ALIASES[normalized] || null;
+}
+
+function isClaudeCodeBackend(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'claude-code' || normalized === 'claude_code' || normalized === 'claudecode';
+}
+
+function inferProviderFromModel(model: string | null | undefined): string | null {
+  if (!model) return null;
+  const normalized = model.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized.includes('glm')) return 'glm';
+  if (normalized.includes('qwen') || normalized.includes('qwq')) return 'qwen';
+  if (normalized.includes('deepseek')) return 'deepseek';
+  if (normalized.includes('claude')) return 'anthropic';
+  if (normalized.startsWith('gpt') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'openai';
+  return null;
+}
+
+function resolveStandaloneProvider(
+  rawBackend: string | null | undefined,
+  rawProvider: string | null | undefined,
+  rawModel: string | null | undefined
+): string {
+  const backendCandidate = normalizeProviderName(rawBackend);
+  const providerCandidate = normalizeProviderName(rawProvider);
+  const modelCandidate = inferProviderFromModel(rawModel);
+
+  // When backend/provider conflict, trust model hint first, then provider setting.
+  if (backendCandidate && providerCandidate && backendCandidate !== providerCandidate) {
+    if (modelCandidate === providerCandidate) return providerCandidate;
+    if (modelCandidate === backendCandidate) return backendCandidate;
+    return providerCandidate;
+  }
+
+  return backendCandidate || providerCandidate || modelCandidate || 'anthropic';
+}
+
+function getLocalProviderApiKey(provider: string): string | undefined {
+  try {
+    if (typeof localStorage === 'undefined') return undefined;
+    const raw = localStorage.getItem(LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const normalizedProvider = normalizeProviderName(provider) || provider.trim().toLowerCase();
+    const value = parsed[normalizedProvider];
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getStandaloneContextTurnsLimit(): number {
+  const rawValue = (useSettingsStore.getState() as { standaloneContextTurns?: unknown }).standaloneContextTurns;
+  const value = Number(rawValue);
+  if (value === STANDALONE_CONTEXT_UNLIMITED) return STANDALONE_CONTEXT_UNLIMITED;
+  if (Number.isFinite(value) && value > 0) return Math.floor(value);
+  return DEFAULT_STANDALONE_CONTEXT_TURNS;
+}
+
+function trimStandaloneTurns(turns: StandaloneTurn[], limit: number): StandaloneTurn[] {
+  if (limit === STANDALONE_CONTEXT_UNLIMITED) return turns;
+  return turns.slice(-limit);
+}
+
+function buildStandaloneConversationMessage(turns: StandaloneTurn[], userInput: string, contextTurnsLimit: number): string {
+  const recent = trimStandaloneTurns(turns, contextTurnsLimit);
+  const history = recent
+    .map((turn) => `User: ${turn.user}\nAssistant: ${turn.assistant}`)
+    .join('\n\n');
+
+  return [
+    'Continue the same conversation. Keep consistency with previous context.',
+    '',
+    'Conversation history:',
+    history,
+    '',
+    `User: ${userInput}`,
+  ].join('\n');
+}
+
+/** Format tool arguments for display in a human-readable way */
+function formatToolArgs(toolName: string, rawArgs?: string): string {
+  if (!rawArgs) return '';
+  try {
+    const args = JSON.parse(rawArgs) as Record<string, unknown>;
+    switch (toolName) {
+      case 'Read':
+        return String(args.file_path || '');
+      case 'Write':
+        return String(args.file_path || '');
+      case 'Edit':
+        return String(args.file_path || '');
+      case 'Bash':
+        return String(args.command || '').substring(0, 120);
+      case 'Glob':
+        return `${args.pattern || ''}${args.path ? ` in ${args.path}` : ''}`;
+      case 'Grep':
+        return `/${args.pattern || ''}/${args.path ? ` in ${args.path}` : ''}`;
+      case 'LS':
+        return String(args.path || '');
+      case 'Cwd':
+        return '';
+      case 'Task':
+        return String(args.prompt || '').substring(0, 120);
+      default: {
+        const compact = JSON.stringify(args);
+        return compact.length > 120 ? compact.substring(0, 120) + '...' : compact;
+      }
+    }
+  } catch {
+    return rawArgs.length > 120 ? rawArgs.substring(0, 120) + '...' : rawArgs;
+  }
+}
+
+function isLegacyTaskStartData(data: unknown): data is LegacyTaskStartData {
+  return typeof data === 'object' && data !== null && typeof (data as { task_id?: unknown }).task_id === 'string';
+}
+
+function isBackendStandaloneExecutionResult(data: unknown): data is BackendStandaloneExecutionResult {
+  if (typeof data !== 'object' || data === null) return false;
+  const value = data as { iterations?: unknown; success?: unknown; usage?: unknown };
+  return typeof value.iterations === 'number' && typeof value.success === 'boolean' && typeof value.usage === 'object' && value.usage !== null;
+}
+
+function hasAssistantTextLine(lines: StreamLine[]): boolean {
+  return lines.some((line) => line.type === 'text' && line.content.trim().length > 0);
+}
 
 // Track event unlisteners
 let unlisteners: UnlistenFn[] = [];
+let listenerSetupVersion = 0;
 
 const initialState = {
   status: 'idle' as ExecutionStatus,
@@ -321,6 +534,8 @@ const initialState = {
   qualityGateResults: [] as QualityGateResult[],
   executionErrors: [] as ExecutionError[],
   estimatedTimeRemaining: null as number | null,
+  isChatSession: false,
+  standaloneTurns: [] as StandaloneTurn[],
 };
 
 export const useExecutionStore = create<ExecutionState>()((set, get) => ({
@@ -339,6 +554,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   cleanup: () => {
+    // Invalidate in-flight async listener setup to prevent duplicate registration.
+    listenerSetupVersion++;
+
     // Clean up all event listeners
     for (const unlisten of unlisteners) {
       unlisten();
@@ -348,6 +566,14 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   start: async (description, mode) => {
+    const settingsSnapshot = useSettingsStore.getState();
+    const backendSnapshot = String((settingsSnapshot as { backend?: unknown }).backend || '');
+    const existingStandaloneTurns = get().standaloneTurns;
+    const preserveSimpleConversation =
+      mode === 'simple' &&
+      get().streamingOutput.length > 0 &&
+      !isClaudeCodeBackend(backendSnapshot);
+
     set({
       isSubmitting: true,
       apiError: null,
@@ -361,8 +587,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       currentBatch: 0,
       currentStoryId: null,
       progress: 0,
-      streamingOutput: [],
-      streamLineCounter: 0,
+      streamingOutput: preserveSimpleConversation ? get().streamingOutput : [],
+      streamLineCounter: preserveSimpleConversation ? get().streamLineCounter : 0,
       qualityGateResults: [],
       executionErrors: [],
       estimatedTimeRemaining: null,
@@ -370,24 +596,207 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
     get().addLog(`Starting execution in ${mode} mode...`);
     get().addLog(`Task: ${description}`);
+    if (preserveSimpleConversation) {
+      // Keep simple-mode conversation visible and append user turn.
+      get().appendStreamLine(description, 'info');
+    }
 
     try {
-      // Use standalone execution via Tauri invoke
-      const result = await invoke<CommandResponse<{ task_id: string }>>('execute_standalone', {
-        message: description,
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-20250514',
-        project_path: '.',
-      });
+      // Read user's backend/provider settings
+      const settings = settingsSnapshot;
+      const backendValue = String((settings as { backend?: unknown }).backend || '');
+      const providerValue = String((settings as { provider?: unknown }).provider || '');
+      const modelValue = String((settings as { model?: unknown }).model || '');
 
-      if (result.success && result.data) {
-        set({
-          taskId: result.data.task_id,
-          isSubmitting: false,
+      if (isClaudeCodeBackend(backendValue)) {
+        // Use Claude Code CLI backend via start_chat + send_message
+        const projectPath = settings.workspacePath || '.';
+        const startResult = await invoke<CommandResponse<{ session_id: string }>>('start_chat', {
+          request: { project_path: projectPath },
         });
-        get().addLog(`Task started with ID: ${result.data.task_id}`);
+
+        if (!startResult.success || !startResult.data) {
+          throw new Error(startResult.error || 'Failed to start Claude Code session');
+        }
+
+        const sessionId = startResult.data.session_id;
+        set({ taskId: sessionId, isSubmitting: false, isChatSession: true });
+        get().addLog(`Claude Code session started: ${sessionId}`);
+
+        // Show user's message in the conversation
+        get().appendStreamLine(description, 'info');
+
+        // Send the message to the session
+        await invoke('send_message', {
+          request: { session_id: sessionId, prompt: description },
+        });
       } else {
-        throw new Error(result.error || 'Failed to start execution');
+        // Use standalone LLM execution
+        const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
+        const model = settings.model || 'claude-sonnet-4-20250514';
+        const providerApiKey = getLocalProviderApiKey(provider);
+        const isSimpleStandalone = mode === 'simple';
+        const contextTurnsLimit = getStandaloneContextTurnsLimit();
+        const recentStandaloneTurns = trimStandaloneTurns(existingStandaloneTurns, contextTurnsLimit);
+        const messageToSend =
+          isSimpleStandalone && recentStandaloneTurns.length > 0
+            ? buildStandaloneConversationMessage(existingStandaloneTurns, description, contextTurnsLimit)
+            : description;
+        get().addLog(
+          `Resolved provider: ${provider} (backend=${backendValue || 'empty'}, setting=${providerValue || 'empty'}, model=${modelValue || 'empty'})`
+        );
+        if (isSimpleStandalone && recentStandaloneTurns.length > 0) {
+          const contextLabel =
+            contextTurnsLimit === STANDALONE_CONTEXT_UNLIMITED ? 'unlimited' : String(contextTurnsLimit);
+          get().addLog(`Using standalone conversation context (${recentStandaloneTurns.length}/${contextLabel} turns)`);
+        }
+
+        const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
+          message: messageToSend,
+          provider,
+          model,
+          projectPath: settings.workspacePath || '.',
+          enableTools: true,
+          apiKey: providerApiKey,
+          enableCompaction: settings.enableContextCompaction ?? true,
+        });
+
+        if (!result.success || !result.data) {
+          throw new Error(result.error || 'Failed to start execution');
+        }
+
+        // Legacy async start contract (kept for backward compatibility).
+        if (isLegacyTaskStartData(result.data)) {
+          set({
+            taskId: result.data.task_id,
+            isSubmitting: false,
+          });
+          get().addLog(`Task started with ID: ${result.data.task_id}`);
+          return;
+        }
+
+        // Current standalone contract: command returns final execution result.
+        if (isBackendStandaloneExecutionResult(result.data)) {
+          const execution = result.data;
+          const assistantResponse = execution.response?.trim() || '';
+
+          if (mode === 'simple' && assistantResponse) {
+            const retentionLimit = getStandaloneContextTurnsLimit();
+            set((state) => ({
+              standaloneTurns: trimStandaloneTurns(
+                [
+                  ...state.standaloneTurns,
+                  {
+                    user: description,
+                    assistant: assistantResponse,
+                    createdAt: Date.now(),
+                  },
+                ],
+                retentionLimit
+              ),
+            }));
+          }
+
+          // Mark submission complete regardless of stream event timing.
+          set({ isSubmitting: false });
+
+          const ensureAssistantResponseVisible = () => {
+            if (!assistantResponse) return;
+            if (!hasAssistantTextLine(get().streamingOutput)) {
+              get().appendStreamLine(assistantResponse, 'text');
+            }
+          };
+
+          // Ensure final response is visible even when only tool/sub-agent
+          // events are streamed.
+          ensureAssistantResponseVisible();
+
+          // The invoke() resolves when the Rust command returns, but streaming
+          // events are forwarded via a separate async task and may still be in
+          // flight.  If we set status immediately, the UI shows "Completed"
+          // while tool-call events are still being rendered.
+          //
+          // Strategy: wait briefly for the streaming `complete` event to arrive
+          // and set the status.  Only fall back to setting status from the
+          // invoke result if no streaming event did so.
+          const finalizeFromInvoke = () => {
+            if (get().status !== 'running') {
+              // Stream event already finalized status. Persist completed runs
+              // once the invoke() response has been reconciled.
+              if (get().status === 'completed') {
+                ensureAssistantResponseVisible();
+                get().saveToHistory();
+              }
+              return;
+            }
+            const succeeded = execution.success;
+            ensureAssistantResponseVisible();
+
+            const duration = Date.now() - (get().startedAt || Date.now());
+            const durationStr = duration >= 60000
+              ? `${Math.floor(duration / 60000)}m ${Math.round((duration % 60000) / 1000)}s`
+              : `${Math.round(duration / 1000)}s`;
+
+            set({
+              taskId: null,
+              status: succeeded ? 'completed' : 'failed',
+              progress: succeeded ? 100 : get().progress,
+              estimatedTimeRemaining: 0,
+              apiError: succeeded ? null : (execution.error || 'Execution failed'),
+              result: {
+                success: succeeded,
+                message: succeeded ? 'Execution completed' : 'Execution failed',
+                completedStories: succeeded ? 1 : 0,
+                totalStories: 1,
+                duration,
+                error: execution.error || undefined,
+              },
+            });
+
+            // Append completion/failure banner as a stream line (always ordered correctly)
+            if (succeeded) {
+              get().appendStreamLine(`Completed (${durationStr})`, 'success');
+            } else {
+              get().appendStreamLine(
+                `Execution finished with failures.${execution.error ? ` ${execution.error}` : ''}`,
+                'error'
+              );
+            }
+
+            if (!succeeded && execution.error) {
+              get().addExecutionError({
+                severity: 'error',
+                title: 'Execution Failed',
+                description: execution.error,
+                suggestedFix: 'Check API key/model settings and retry.',
+              });
+            }
+
+            get().addLog(
+              succeeded
+                ? `Execution completed (iterations: ${execution.iterations})`
+                : `Execution failed: ${execution.error || 'Unknown error'}`
+            );
+            get().saveToHistory();
+          };
+
+          if (get().status === 'running') {
+            if (get().streamingOutput.length > 0) {
+              // Streaming events were received, so the orchestrator's complete
+              // event should arrive via the listener and finalize status.
+              // Use a fallback timeout in case the event is lost.
+              setTimeout(finalizeFromInvoke, 3000);
+            } else {
+              // No streaming events at all; finalize immediately.
+              finalizeFromInvoke();
+            }
+          } else if (get().status === 'completed') {
+            finalizeFromInvoke();
+          }
+          return;
+        }
+
+        throw new Error('Unexpected execute_standalone response shape');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -408,6 +817,41 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
       get().addLog(`Error: ${errorMessage}`);
       get().saveToHistory();
+    }
+  },
+
+  sendFollowUp: async (prompt) => {
+    const sessionId = get().taskId;
+    if (!sessionId || !get().isChatSession) {
+      return;
+    }
+
+    // Add user message as a visual separator in the streaming output.
+    // Using 'info' type ensures it won't concatenate with text deltas,
+    // and the next text_delta will start a fresh text block.
+    get().appendStreamLine(prompt, 'info');
+
+    // Keep existing streaming output (conversation history) and switch to running
+    set({
+      status: 'running',
+      isSubmitting: false,
+      apiError: null,
+      result: null,
+    });
+
+    get().addLog(`Follow-up: ${prompt}`);
+
+    try {
+      await invoke('send_message', {
+        request: { session_id: sessionId, prompt },
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      set({
+        status: 'failed',
+        apiError: errorMessage,
+      });
+      get().addLog(`Error: ${errorMessage}`);
     }
   },
 
@@ -470,9 +914,15 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   reset: () => {
+    // Auto-save conversation to history before clearing
+    const state = get();
+    if (state.isChatSession && state.streamingOutput.length > 0) {
+      get().saveToHistory();
+    }
+
     set({
       ...initialState,
-      connectionStatus: get().connectionStatus,
+      connectionStatus: state.connectionStatus,
       history: get().history,
     });
   },
@@ -525,6 +975,25 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     const state = get();
     if (!state.taskDescription) return;
 
+    // Serialize streaming output into readable conversation content
+    const TYPE_PREFIX: Record<StreamLineType, string> = {
+      text: '[Assistant] ',
+      info: '[User] ',
+      error: '[Error] ',
+      success: '[Success] ',
+      warning: '[Warning] ',
+      tool: '[Tool] ',
+      tool_result: '[ToolResult] ',
+      sub_agent: '[SubAgent] ',
+      thinking: '[Thinking] ',
+      code: '[Code] ',
+    };
+    const conversationContent = state.streamingOutput.length > 0
+      ? state.streamingOutput
+          .map((line) => `${TYPE_PREFIX[line.type]}${line.content}`)
+          .join('\n')
+      : undefined;
+
     const historyItem: ExecutionHistoryItem = {
       id: state.taskId || `local_${Date.now()}`,
       taskDescription: state.taskDescription,
@@ -537,6 +1006,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       totalStories: state.stories.length,
       success: state.status === 'completed',
       error: state.result?.error,
+      conversationContent,
+      sessionId: state.taskId || undefined,
     };
 
     set((prevState) => {
@@ -560,6 +1031,59 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       // Ignore localStorage errors
     }
     set({ history: [] });
+  },
+
+  restoreFromHistory: (historyId: string) => {
+    const item = get().history.find((h) => h.id === historyId);
+    if (!item || !item.conversationContent) return;
+
+    // Parse serialized content back into StreamLine entries
+    const PREFIX_TO_TYPE: Record<string, StreamLineType> = {
+      '[Assistant] ': 'text',
+      '[User] ': 'info',
+      '[Error] ': 'error',
+      '[Success] ': 'success',
+      '[Warning] ': 'warning',
+      '[Tool] ': 'tool',
+      '[ToolResult] ': 'tool_result',
+      '[SubAgent] ': 'sub_agent',
+      '[Thinking] ': 'thinking',
+      '[Code] ': 'code',
+    };
+
+    const lines: StreamLine[] = [];
+    let counter = 0;
+
+    for (const raw of item.conversationContent.split('\n')) {
+      let type: StreamLineType = 'text';
+      let content = raw;
+
+      for (const [prefix, lineType] of Object.entries(PREFIX_TO_TYPE)) {
+        if (raw.startsWith(prefix)) {
+          type = lineType;
+          content = raw.slice(prefix.length);
+          break;
+        }
+      }
+
+      counter++;
+      lines.push({
+        id: counter,
+        content,
+        type,
+        timestamp: item.startedAt,
+      });
+    }
+
+    set({
+      ...initialState,
+      connectionStatus: get().connectionStatus,
+      history: get().history,
+      streamingOutput: lines,
+      streamLineCounter: counter,
+      isChatSession: true,
+      taskDescription: item.taskDescription,
+    });
   },
 
   analyzeStrategy: async (description: string) => {
@@ -615,18 +1139,29 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   appendStreamLine: (content, type) => {
-    const counter = get().streamLineCounter + 1;
-    const line: StreamLine = {
-      id: counter,
-      content,
-      type,
-      timestamp: Date.now(),
-    };
     set((state) => {
+      const lines = state.streamingOutput;
+      const last = lines.length > 0 ? lines[lines.length - 1] : null;
+
+      // For text and thinking deltas, concatenate to the last line of the same type
+      // so streaming chunks form continuous prose instead of one-chunk-per-line
+      if ((type === 'text' || type === 'thinking') && last && last.type === type) {
+        const updated = { ...last, content: last.content + content };
+        return {
+          streamingOutput: [...lines.slice(0, -1), updated],
+        };
+      }
+
+      // For other types or type transitions, append a new line
+      const counter = state.streamLineCounter + 1;
+      const line: StreamLine = {
+        id: counter,
+        content,
+        type,
+        timestamp: Date.now(),
+      };
       // Keep buffer capped at 500 lines by trimming old entries when appending
-      const trimmed = state.streamingOutput.length >= 500
-        ? state.streamingOutput.slice(-499)
-        : state.streamingOutput;
+      const trimmed = lines.length >= 500 ? lines.slice(-499) : lines;
       return {
         streamingOutput: [...trimmed, line],
         streamLineCounter: counter,
@@ -722,22 +1257,339 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 // Tauri Event Handlers
 // ============================================================================
 
+interface UnifiedEventPayload {
+  type: string;
+  session_id?: string;
+  content?: string;
+  prompt?: string;
+  sub_agent_id?: string;
+  task_type?: string;
+  tool_id?: string;
+  tool_name?: string;
+  arguments?: string;
+  result?: string;
+  usage?: Record<string, unknown>;
+  error?: string;
+  message?: string;
+  code?: string;
+  story_id?: string;
+  story_title?: string;
+  story_index?: number;
+  total_stories?: number;
+  success?: boolean;
+  passed?: boolean;
+  summary?: Record<string, unknown>;
+  thinking_id?: string;
+  stop_reason?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  thinking_tokens?: number;
+  messages_compacted?: number;
+  messages_preserved?: number;
+  compaction_tokens?: number;
+}
+
+function parseOptionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function formatSubAgentUsage(usage?: Record<string, unknown>): string {
+  if (!usage || typeof usage !== 'object') return '';
+  const inputTokens = parseOptionalNumber(usage.input_tokens);
+  const outputTokens = parseOptionalNumber(usage.output_tokens);
+  const iterations = parseOptionalNumber(usage.iterations);
+  const fragments: string[] = [];
+
+  if (typeof inputTokens === 'number') {
+    fragments.push(`in=${inputTokens}`);
+  }
+  if (typeof outputTokens === 'number') {
+    fragments.push(`out=${outputTokens}`);
+  }
+  if (typeof iterations === 'number') {
+    fragments.push(`iter=${iterations}`);
+  }
+
+  return fragments.length > 0 ? ` (${fragments.join(', ')})` : '';
+}
+
+function handleUnifiedExecutionEvent(
+  payload: UnifiedEventPayload,
+  get: () => ExecutionState,
+  set: (partial: Partial<ExecutionState>) => void
+) {
+  switch (payload.type) {
+    case 'text_delta':
+      if (payload.content) {
+        get().appendStreamLine(payload.content, 'text');
+      }
+      break;
+
+    case 'text_replace': {
+      // Replace the accumulated text with a cleaned version (e.g., after
+      // prompt-fallback tool call extraction removes raw XML blocks)
+      const lines = get().streamingOutput;
+      const lastTextIdx = lines.length - 1 - [...lines].reverse().findIndex(l => l.type === 'text');
+      if (lastTextIdx >= 0 && lastTextIdx < lines.length) {
+        const cleaned = payload.content || '';
+        if (cleaned) {
+          const updated = [...lines];
+          updated[lastTextIdx] = { ...updated[lastTextIdx], content: cleaned };
+          set({ streamingOutput: updated });
+        } else {
+          // Remove the text line entirely if cleaned is empty
+          set({ streamingOutput: lines.filter((_, i) => i !== lastTextIdx) });
+        }
+      }
+      break;
+    }
+
+    case 'thinking_start':
+      if (useSettingsStore.getState().showReasoningOutput) {
+        get().appendStreamLine('[thinking...]', 'thinking');
+      }
+      break;
+
+    case 'thinking_delta':
+      if (useSettingsStore.getState().showReasoningOutput && payload.content) {
+        get().appendStreamLine(payload.content, 'thinking');
+      }
+      break;
+
+    case 'thinking_end':
+      break;
+
+    case 'tool_start':
+      if (payload.tool_name) {
+        const argsPreview = formatToolArgs(payload.tool_name, payload.arguments);
+        get().appendStreamLine(`[tool:${payload.tool_name}] ${argsPreview}`, 'tool');
+      }
+      break;
+
+    case 'tool_complete':
+      // Tool call arguments fully accumulated; no UI action needed
+      // (tool execution events tool_start/tool_result already render)
+      break;
+
+    case 'tool_result':
+      if (payload.error) {
+        get().appendStreamLine(`[tool_error:${payload.tool_id || ''}] ${payload.error}`, 'error');
+      } else if (payload.result) {
+        const preview = payload.result.length > 500
+          ? payload.result.substring(0, 500) + '...'
+          : payload.result;
+        get().appendStreamLine(`[tool_result:${payload.tool_id || ''}] ${preview}`, 'tool_result');
+      }
+      break;
+
+    case 'sub_agent_start':
+      if (useSettingsStore.getState().showSubAgentEvents) {
+        const promptPreview = (payload.prompt || '').trim().substring(0, 180);
+        const label = promptPreview || payload.sub_agent_id || payload.task_type || 'sub-agent';
+        get().appendStreamLine(`[sub_agent:start] ${label}`, 'sub_agent');
+      }
+      break;
+
+    case 'sub_agent_end':
+      if (payload.success === false || useSettingsStore.getState().showSubAgentEvents) {
+        const usage = formatSubAgentUsage(payload.usage);
+        get().appendStreamLine(
+          `[sub_agent:end] ${payload.success ? 'completed' : 'failed'}${usage}`,
+          'sub_agent'
+        );
+      }
+      break;
+
+    case 'usage':
+      if (typeof payload.input_tokens === 'number' && typeof payload.output_tokens === 'number') {
+        get().addLog(
+          `Usage: in=${payload.input_tokens}, out=${payload.output_tokens}${typeof payload.thinking_tokens === 'number' ? `, thinking=${payload.thinking_tokens}` : ''}`
+        );
+      }
+      break;
+
+    case 'error':
+      if (payload.message) {
+        get().appendStreamLine(`[error] ${payload.message}`, 'error');
+        get().addExecutionError({
+          severity: 'error',
+          title: 'Stream Error',
+          description: payload.message,
+          suggestedFix: 'Check the error details and retry if needed.',
+        });
+      }
+      break;
+
+    case 'complete': {
+      // For standalone one-shot execution, this is the final completion signal.
+      if (get().status === 'running' || get().status === 'paused') {
+        const completedStories = get().stories.filter((s) => s.status === 'completed').length;
+        const totalStories = get().stories.length || 1;
+        const duration = Date.now() - (get().startedAt || Date.now());
+        const durationStr = duration >= 60000
+          ? `${Math.floor(duration / 60000)}m ${Math.round((duration % 60000) / 1000)}s`
+          : `${Math.round(duration / 1000)}s`;
+
+        set({
+          status: 'completed',
+          progress: 100,
+          estimatedTimeRemaining: 0,
+          result: {
+            success: true,
+            message: 'Execution completed',
+            completedStories: completedStories > 0 ? completedStories : 1,
+            totalStories,
+            duration,
+          },
+        });
+        get().appendStreamLine(`Completed (${durationStr})`, 'success');
+        get().addLog('Execution completed');
+      }
+      break;
+    }
+
+    case 'story_start':
+      if (payload.story_id && payload.story_title) {
+        get().appendStreamLine(
+          `Starting story ${(payload.story_index || 0) + 1}/${payload.total_stories || '?'}: ${payload.story_title}`,
+          'info'
+        );
+        get().updateStory(payload.story_id, {
+          status: 'in_progress',
+          startedAt: new Date().toISOString(),
+        });
+        set({ currentStoryId: payload.story_id });
+
+        // Estimate time remaining based on average story completion time
+        const state = get();
+        const completedStories = state.stories.filter((s) => s.status === 'completed');
+        if (completedStories.length > 0 && state.startedAt) {
+          const elapsed = Date.now() - state.startedAt;
+          const avgTimePerStory = elapsed / completedStories.length;
+          const remainingStories = (payload.total_stories || state.stories.length) - completedStories.length;
+          set({ estimatedTimeRemaining: Math.round(avgTimePerStory * remainingStories) });
+        }
+      }
+      break;
+
+    case 'story_complete':
+      if (payload.story_id) {
+        const success = payload.success !== false;
+        get().updateStory(payload.story_id, {
+          status: success ? 'completed' : 'failed',
+          progress: success ? 100 : 0,
+          completedAt: new Date().toISOString(),
+          error: payload.error,
+        });
+        get().appendStreamLine(
+          `Story ${success ? 'completed' : 'failed'}: ${payload.story_id}${payload.error ? ' - ' + payload.error : ''}`,
+          success ? 'success' : 'error'
+        );
+
+        if (!success && payload.error) {
+          const story = get().stories.find((s) => s.id === payload.story_id);
+          get().addExecutionError({
+            storyId: payload.story_id,
+            severity: 'error',
+            title: `Story failed: ${story?.title || payload.story_id}`,
+            description: payload.error,
+            suggestedFix: 'Review the error output and retry this story.',
+          });
+        }
+      }
+      break;
+
+    case 'quality_gates_result':
+      if (payload.story_id && payload.summary) {
+        const summary = payload.summary as Record<string, { passed?: boolean; output?: string; duration?: number }>;
+        const passed = payload.passed !== false;
+
+        // Parse individual gate results from summary
+        for (const [gateName, gateResult] of Object.entries(summary)) {
+          get().updateQualityGate({
+            gateId: gateName.toLowerCase().replace(/\s+/g, '_'),
+            gateName,
+            storyId: payload.story_id,
+            status: gateResult.passed !== false ? 'passed' : 'failed',
+            output: gateResult.output,
+            duration: gateResult.duration,
+            completedAt: Date.now(),
+          });
+        }
+
+        get().appendStreamLine(
+          `Quality gates ${passed ? 'passed' : 'failed'} for story: ${payload.story_id}`,
+          passed ? 'success' : 'warning'
+        );
+      }
+      break;
+
+    case 'context_compaction': {
+      const compacted = (payload as unknown as { messages_compacted?: number }).messages_compacted || 0;
+      const preserved = (payload as unknown as { messages_preserved?: number }).messages_preserved || 0;
+      const tokens = (payload as unknown as { compaction_tokens?: number }).compaction_tokens || 0;
+      get().appendStreamLine(
+        `[context compaction] ${compacted} messages summarized, ${preserved} preserved (${tokens} tokens)`,
+        'info'
+      );
+      get().addLog(`Context compaction: ${compacted} messages compacted, ${preserved} preserved`);
+      break;
+    }
+
+    case 'session_complete':
+      if (payload.success !== undefined) {
+        const completedStories = payload.success
+          ? (payload.total_stories || get().stories.length)
+          : get().stories.filter((s) => s.status === 'completed').length;
+        const totalStories = payload.total_stories || get().stories.length;
+
+        set({
+          status: payload.success ? 'completed' : 'failed',
+          progress: payload.success ? 100 : get().progress,
+          estimatedTimeRemaining: 0,
+          result: {
+            success: payload.success,
+            message: payload.success ? 'Execution completed' : 'Execution failed',
+            completedStories,
+            totalStories,
+            duration: Date.now() - (get().startedAt || Date.now()),
+          },
+        });
+        get().appendStreamLine(
+          payload.success ? 'All stories completed successfully.' : 'Execution finished with failures.',
+          payload.success ? 'success' : 'error'
+        );
+        get().saveToHistory();
+      }
+      break;
+  }
+}
+
 async function setupTauriEventListeners(
   get: () => ExecutionState,
   set: (partial: Partial<ExecutionState>) => void
 ) {
+  const setupVersion = ++listenerSetupVersion;
+
   // Clean up any existing listeners first
   for (const unlisten of unlisteners) {
     unlisten();
   }
   unlisteners = [];
 
+  const registerListener = (unlisten: UnlistenFn): boolean => {
+    if (setupVersion !== listenerSetupVersion) {
+      unlisten();
+      return false;
+    }
+    unlisteners.push(unlisten);
+    return true;
+  };
+
   try {
-    // Listen for stream events (execution progress)
-    const unlistenStream = await listen<{
-      event: { TextDelta?: { content: string }; Done?: Record<string, never>; Error?: { message: string } };
-      session_id: string;
-    }>('claude_code:stream', (event) => {
+    // Listen for stream events from Claude Code backend
+    // UnifiedStreamEvent uses serde tagged enum: { type: "text_delta", content: "..." }
+    const unlistenStream = await listen<StreamEventPayload>('claude_code:stream', (event) => {
       const { event: streamEvent, session_id } = event.payload;
 
       // Only process events for current session
@@ -746,57 +1598,98 @@ async function setupTauriEventListeners(
         return;
       }
 
-      // Feed TextDelta into streaming output buffer
-      if (streamEvent.TextDelta) {
-        get().appendStreamLine(streamEvent.TextDelta.content, 'text');
-      }
+      switch (streamEvent.type) {
+        case 'text_delta':
+          get().appendStreamLine(streamEvent.content, 'text');
+          break;
 
-      if (streamEvent.Error) {
-        get().appendStreamLine(streamEvent.Error.message, 'error');
-        get().addExecutionError({
-          severity: 'critical',
-          title: 'Execution Failed',
-          description: streamEvent.Error.message,
-          suggestedFix: 'Check the error details and retry the execution.',
-        });
-        set({
-          status: 'failed',
-          apiError: streamEvent.Error.message,
-          result: {
-            success: false,
-            message: 'Execution failed',
-            completedStories: get().stories.filter((s) => s.status === 'completed').length,
-            totalStories: get().stories.length,
-            duration: Date.now() - (get().startedAt || Date.now()),
-            error: streamEvent.Error.message,
-          },
-        });
-        get().addLog(`Error: ${streamEvent.Error.message}`);
-        get().saveToHistory();
-      }
+        case 'thinking_start':
+          if (useSettingsStore.getState().showReasoningOutput) {
+            get().appendStreamLine('[thinking...]', 'thinking');
+          }
+          break;
 
-      if (streamEvent.Done) {
-        const completedStories = get().stories.filter((s) => s.status === 'completed').length;
-        const totalStories = get().stories.length;
+        case 'thinking_delta':
+          if (useSettingsStore.getState().showReasoningOutput) {
+            get().appendStreamLine(streamEvent.content, 'thinking');
+          }
+          break;
 
-        get().appendStreamLine('Execution completed successfully.', 'success');
-        set({
-          status: 'completed',
-          progress: 100,
-          estimatedTimeRemaining: 0,
-          result: {
-            success: true,
-            message: 'Execution completed',
-            completedStories,
-            totalStories,
-            duration: Date.now() - (get().startedAt || Date.now()),
-          },
-        });
-        get().addLog('Execution completed');
-        get().saveToHistory();
+        case 'tool_start':
+          get().appendStreamLine(`[tool] ${streamEvent.tool_name} started`, 'tool');
+          get().addLog(`Tool started: ${streamEvent.tool_name}`);
+          break;
+
+        case 'tool_result': {
+          const isError = !!streamEvent.error;
+          get().appendStreamLine(
+            `[tool] ${streamEvent.tool_id} ${isError ? 'failed' : 'completed'}`,
+            isError ? 'error' : 'success'
+          );
+          break;
+        }
+
+        case 'error':
+          get().appendStreamLine(streamEvent.message, 'error');
+          get().addExecutionError({
+            severity: 'critical',
+            title: 'Execution Failed',
+            description: streamEvent.message,
+            suggestedFix: 'Check the error details and retry the execution.',
+          });
+          set({
+            status: 'failed',
+            apiError: streamEvent.message,
+            result: {
+              success: false,
+              message: 'Execution failed',
+              completedStories: get().stories.filter((s) => s.status === 'completed').length,
+              totalStories: get().stories.length,
+              duration: Date.now() - (get().startedAt || Date.now()),
+              error: streamEvent.message,
+            },
+          });
+          get().addLog(`Error: ${streamEvent.message}`);
+          get().saveToHistory();
+          break;
+
+        case 'complete': {
+          if (get().isChatSession) {
+            // Chat session: stay ready for follow-up messages
+            // Keep streamingOutput visible, go back to idle
+            set({
+              status: 'idle',
+              isSubmitting: false,
+              progress: 100,
+              estimatedTimeRemaining: 0,
+            });
+            get().addLog('Response complete — ready for follow-up');
+          } else {
+            // Non-chat execution: show result view
+            const completedStories = get().stories.filter((s) => s.status === 'completed').length;
+            const totalStories = get().stories.length;
+
+            get().appendStreamLine('Execution completed successfully.', 'success');
+            set({
+              status: 'completed',
+              progress: 100,
+              estimatedTimeRemaining: 0,
+              result: {
+                success: true,
+                message: 'Execution completed',
+                completedStories,
+                totalStories,
+                duration: Date.now() - (get().startedAt || Date.now()),
+              },
+            });
+            get().addLog('Execution completed');
+            get().saveToHistory();
+          }
+          break;
+        }
       }
     });
-    unlisteners.push(unlistenStream);
+    if (!registerListener(unlistenStream)) return;
 
     // Listen for tool events
     const unlistenTool = await listen<{
@@ -815,7 +1708,7 @@ async function setupTauriEventListeners(
         get().appendStreamLine(`[tool] ${execution.tool_name} ${status}`, execution.success ? 'success' : 'error');
       }
     });
-    unlisteners.push(unlistenTool);
+    if (!registerListener(unlistenTool)) return;
 
     // Listen for session events
     const unlistenSession = await listen<{
@@ -845,178 +1738,19 @@ async function setupTauriEventListeners(
         }
       }
     });
-    unlisteners.push(unlistenSession);
+    if (!registerListener(unlistenSession)) return;
 
     // Listen for unified stream events (from the unified streaming service)
-    const unlistenUnified = await listen<{
-      type: string;
-      session_id?: string;
-      content?: string;
-      tool_id?: string;
-      tool_name?: string;
-      arguments?: string;
-      result?: string;
-      error?: string;
-      message?: string;
-      story_id?: string;
-      story_title?: string;
-      story_index?: number;
-      total_stories?: number;
-      success?: boolean;
-      passed?: boolean;
-      summary?: Record<string, unknown>;
-      thinking_id?: string;
-    }>('execution:unified_stream', (event) => {
-      const payload = event.payload;
-
-      switch (payload.type) {
-        case 'text_delta':
-          if (payload.content) {
-            get().appendStreamLine(payload.content, 'text');
-          }
-          break;
-
-        case 'thinking_start':
-          get().appendStreamLine('[thinking...]', 'thinking');
-          break;
-
-        case 'thinking_delta':
-          if (payload.content) {
-            get().appendStreamLine(payload.content, 'thinking');
-          }
-          break;
-
-        case 'tool_start':
-          if (payload.tool_name) {
-            get().appendStreamLine(`[tool] ${payload.tool_name} started`, 'tool');
-          }
-          break;
-
-        case 'tool_result':
-          if (payload.error) {
-            get().appendStreamLine(`[tool error] ${payload.error}`, 'error');
-          } else if (payload.result) {
-            get().appendStreamLine(`[tool result] ${payload.result.substring(0, 200)}`, 'info');
-          }
-          break;
-
-        case 'error':
-          if (payload.message) {
-            get().appendStreamLine(`[error] ${payload.message}`, 'error');
-            get().addExecutionError({
-              severity: 'error',
-              title: 'Stream Error',
-              description: payload.message,
-              suggestedFix: 'Check the error details and retry if needed.',
-            });
-          }
-          break;
-
-        case 'story_start':
-          if (payload.story_id && payload.story_title) {
-            get().appendStreamLine(
-              `Starting story ${(payload.story_index || 0) + 1}/${payload.total_stories || '?'}: ${payload.story_title}`,
-              'info'
-            );
-            get().updateStory(payload.story_id, {
-              status: 'in_progress',
-              startedAt: new Date().toISOString(),
-            });
-            set({ currentStoryId: payload.story_id });
-
-            // Estimate time remaining based on average story completion time
-            const state = get();
-            const completedStories = state.stories.filter((s) => s.status === 'completed');
-            if (completedStories.length > 0 && state.startedAt) {
-              const elapsed = Date.now() - state.startedAt;
-              const avgTimePerStory = elapsed / completedStories.length;
-              const remainingStories = (payload.total_stories || state.stories.length) - completedStories.length;
-              set({ estimatedTimeRemaining: Math.round(avgTimePerStory * remainingStories) });
-            }
-          }
-          break;
-
-        case 'story_complete':
-          if (payload.story_id) {
-            const success = payload.success !== false;
-            get().updateStory(payload.story_id, {
-              status: success ? 'completed' : 'failed',
-              progress: success ? 100 : 0,
-              completedAt: new Date().toISOString(),
-              error: payload.error,
-            });
-            get().appendStreamLine(
-              `Story ${success ? 'completed' : 'failed'}: ${payload.story_id}${payload.error ? ' - ' + payload.error : ''}`,
-              success ? 'success' : 'error'
-            );
-
-            if (!success && payload.error) {
-              const story = get().stories.find((s) => s.id === payload.story_id);
-              get().addExecutionError({
-                storyId: payload.story_id,
-                severity: 'error',
-                title: `Story failed: ${story?.title || payload.story_id}`,
-                description: payload.error,
-                suggestedFix: 'Review the error output and retry this story.',
-              });
-            }
-          }
-          break;
-
-        case 'quality_gates_result':
-          if (payload.story_id && payload.summary) {
-            const summary = payload.summary as Record<string, { passed?: boolean; output?: string; duration?: number }>;
-            const passed = payload.passed !== false;
-
-            // Parse individual gate results from summary
-            for (const [gateName, gateResult] of Object.entries(summary)) {
-              get().updateQualityGate({
-                gateId: gateName.toLowerCase().replace(/\s+/g, '_'),
-                gateName,
-                storyId: payload.story_id,
-                status: gateResult.passed !== false ? 'passed' : 'failed',
-                output: gateResult.output,
-                duration: gateResult.duration,
-                completedAt: Date.now(),
-              });
-            }
-
-            get().appendStreamLine(
-              `Quality gates ${passed ? 'passed' : 'failed'} for story: ${payload.story_id}`,
-              passed ? 'success' : 'warning'
-            );
-          }
-          break;
-
-        case 'session_complete':
-          if (payload.success !== undefined) {
-            const completedStories = payload.success
-              ? (payload.total_stories || get().stories.length)
-              : get().stories.filter((s) => s.status === 'completed').length;
-            const totalStories = payload.total_stories || get().stories.length;
-
-            set({
-              status: payload.success ? 'completed' : 'failed',
-              progress: payload.success ? 100 : get().progress,
-              estimatedTimeRemaining: 0,
-              result: {
-                success: payload.success,
-                message: payload.success ? 'Execution completed' : 'Execution failed',
-                completedStories,
-                totalStories,
-                duration: Date.now() - (get().startedAt || Date.now()),
-              },
-            });
-            get().appendStreamLine(
-              payload.success ? 'All stories completed successfully.' : 'Execution finished with failures.',
-              payload.success ? 'success' : 'error'
-            );
-            get().saveToHistory();
-          }
-          break;
-      }
+    const unlistenUnified = await listen<UnifiedEventPayload>('execution:unified_stream', (event) => {
+      handleUnifiedExecutionEvent(event.payload, get, set);
     });
-    unlisteners.push(unlistenUnified);
+    if (!registerListener(unlistenUnified)) return;
+
+    // Standalone command streaming channel (used by execute_standalone).
+    const unlistenStandalone = await listen<UnifiedEventPayload>('standalone-event', (event) => {
+      handleUnifiedExecutionEvent(event.payload, get, set);
+    });
+    if (!registerListener(unlistenStandalone)) return;
   } catch (error) {
     console.error('Failed to set up Tauri event listeners:', error);
   }

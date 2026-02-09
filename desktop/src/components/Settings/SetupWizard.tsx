@@ -9,8 +9,10 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import * as VisuallyHidden from '@radix-ui/react-visually-hidden';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -54,7 +56,7 @@ const steps: StepDef[] = [
 ];
 
 /** Backends that require an API key */
-const BACKENDS_REQUIRING_KEY: Backend[] = ['claude-api', 'openai', 'deepseek'];
+const BACKENDS_REQUIRING_KEY: Backend[] = ['claude-api', 'openai', 'deepseek', 'glm', 'qwen'];
 
 /** API key format patterns for basic client-side validation */
 const API_KEY_PATTERNS: Partial<Record<Backend, RegExp>> = {
@@ -72,6 +74,9 @@ interface ProviderOption {
   i18nKey: string;
   icon: React.ReactNode;
   needsKey: boolean;
+  fallbackName: string;
+  fallbackDescription: string;
+  fallbackTag?: string;
 }
 
 const providerOptions: ProviderOption[] = [
@@ -80,30 +85,58 @@ const providerOptions: ProviderOption[] = [
     i18nKey: 'claudeCode',
     icon: <ProviderIcon color="var(--color-primary)" letter="C" />,
     needsKey: false,
+    fallbackName: 'Claude Code',
+    fallbackDescription: 'Use Claude Code subscription directly. No API key required.',
+    fallbackTag: 'Recommended',
   },
   {
     id: 'claude-api',
     i18nKey: 'claudeApi',
     icon: <ProviderIcon color="var(--color-accent)" letter="A" />,
     needsKey: true,
+    fallbackName: 'Anthropic API',
+    fallbackDescription: 'Direct Anthropic Claude API access.',
   },
   {
     id: 'openai',
     i18nKey: 'openai',
     icon: <ProviderIcon color="var(--color-success)" letter="O" />,
     needsKey: true,
+    fallbackName: 'OpenAI',
+    fallbackDescription: 'Use OpenAI GPT models.',
   },
   {
     id: 'deepseek',
     i18nKey: 'deepseek',
     icon: <ProviderIcon color="var(--color-secondary)" letter="D" />,
     needsKey: true,
+    fallbackName: 'DeepSeek',
+    fallbackDescription: 'DeepSeek coding models.',
+  },
+  {
+    id: 'glm',
+    i18nKey: 'glm',
+    icon: <ProviderIcon color="var(--color-info, #0ea5e9)" letter="G" />,
+    needsKey: true,
+    fallbackName: 'GLM (ZhipuAI)',
+    fallbackDescription: 'Use ZhipuAI GLM models.',
+  },
+  {
+    id: 'qwen',
+    i18nKey: 'qwen',
+    icon: <ProviderIcon color="var(--color-warning)" letter="Q" />,
+    needsKey: true,
+    fallbackName: 'Qwen (DashScope)',
+    fallbackDescription: 'Use Alibaba Qwen models.',
   },
   {
     id: 'ollama',
     i18nKey: 'ollama',
     icon: <ProviderIcon color="var(--color-warning)" letter="L" />,
     needsKey: false,
+    fallbackName: 'Ollama (Local)',
+    fallbackDescription: 'Run models locally with Ollama.',
+    fallbackTag: 'Local',
   },
 ];
 
@@ -205,8 +238,19 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
     setIsSaving(true);
 
     try {
-      // Persist API key if set
+      // Persist API key to OS keyring if set
       if (apiKey && needsApiKey) {
+        const provider = getProviderFromBackend(backend);
+        const result = await invoke<{ success: boolean; error?: string }>('configure_provider', {
+          provider,
+          apiKey: apiKey.trim(),
+        });
+
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to store API key');
+        }
+
+        // Keep local copy for backward compatibility with previous flows.
         storeSetApiKey(apiKey);
       }
 
@@ -226,7 +270,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
     } finally {
       setIsSaving(false);
     }
-  }, [apiKey, needsApiKey, workspacePath, wantsTour, storeSetApiKey, storeSetWorkspacePath, setOnboardingCompleted, onComplete]);
+  }, [apiKey, needsApiKey, backend, workspacePath, wantsTour, storeSetApiKey, storeSetWorkspacePath, setOnboardingCompleted, onComplete]);
 
   const handleProviderChange = useCallback((newBackend: Backend) => {
     setBackend(newBackend);
@@ -311,7 +355,12 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
             'focus:outline-none'
           )}
           onEscapeKeyDown={(e) => e.preventDefault()}
+          aria-describedby={undefined}
         >
+          <VisuallyHidden.Root asChild>
+            <Dialog.Title>Setup Wizard</Dialog.Title>
+          </VisuallyHidden.Root>
+
           {/* Progress Bar */}
           <div className="h-1 bg-[var(--bg-subtle)]">
             <div
@@ -546,9 +595,15 @@ function ProviderStep({ value, onChange }: ProviderStepProps) {
       <div className="space-y-2">
         {providerOptions.map((option) => {
           const isSelected = value === option.id;
-          const name = t(`provider.options.${option.i18nKey}.name`);
-          const desc = t(`provider.options.${option.i18nKey}.description`);
-          const tag = t(`provider.options.${option.i18nKey}.tag`, { defaultValue: '' });
+          const name = t(`provider.options.${option.i18nKey}.name`, {
+            defaultValue: option.fallbackName,
+          });
+          const desc = t(`provider.options.${option.i18nKey}.description`, {
+            defaultValue: option.fallbackDescription,
+          });
+          const tag = t(`provider.options.${option.i18nKey}.tag`, {
+            defaultValue: option.fallbackTag || '',
+          });
 
           return (
             <button
@@ -951,15 +1006,19 @@ function getProviderFromBackend(backend: Backend): string {
   switch (backend) {
     case 'claude-code':
     case 'claude-api':
-      return 'claude';
+      return 'anthropic';
     case 'openai':
       return 'openai';
     case 'deepseek':
       return 'deepseek';
+    case 'glm':
+      return 'glm';
+    case 'qwen':
+      return 'qwen';
     case 'ollama':
       return 'ollama';
     default:
-      return 'claude';
+      return 'anthropic';
   }
 }
 
@@ -973,6 +1032,10 @@ function getProviderDisplayName(backend: Backend): string {
       return 'OpenAI';
     case 'deepseek':
       return 'DeepSeek';
+    case 'glm':
+      return 'GLM (ZhipuAI)';
+    case 'qwen':
+      return 'Qwen (DashScope)';
     case 'ollama':
       return 'Ollama';
     default:

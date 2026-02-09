@@ -63,15 +63,21 @@ export interface StreamEventPayload {
   session_id: string;
 }
 
+// Matches Rust UnifiedStreamEvent with #[serde(tag = "type", rename_all = "snake_case")]
 export type UnifiedStreamEvent =
-  | { TextDelta: { content: string } }
-  | { ThinkingDelta: { content: string } }
-  | { ToolUse: { tool_use_id: string; name: string; input: Record<string, unknown> } }
-  | { ToolResult: { tool_use_id: string; success: boolean; output: string } }
-  | { InputTokens: { count: number } }
-  | { OutputTokens: { count: number } }
-  | { Error: { message: string } }
-  | { Done: Record<string, never> };
+  | { type: 'text_delta'; content: string }
+  | { type: 'thinking_start'; thinking_id?: string }
+  | { type: 'thinking_delta'; content: string; thinking_id?: string }
+  | { type: 'thinking_end'; thinking_id?: string }
+  | { type: 'tool_start'; tool_id: string; tool_name: string; arguments?: string }
+  | { type: 'tool_result'; tool_id: string; result?: string; error?: string }
+  | { type: 'usage'; input_tokens: number; output_tokens: number; thinking_tokens?: number }
+  | { type: 'error'; message: string; code?: string }
+  | { type: 'complete'; stop_reason?: string }
+  | { type: 'session_progress'; session_id: string; progress: unknown }
+  | { type: 'session_complete'; session_id: string; success: boolean }
+  | { type: 'story_start'; session_id: string; story_id: string; story_title: string }
+  | { type: 'story_complete'; session_id: string; story_id: string; success: boolean };
 
 export interface ThinkingBlock {
   id: string;

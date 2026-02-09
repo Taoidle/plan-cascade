@@ -66,6 +66,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             'flex flex-col',
             'focus:outline-none'
           )}
+          aria-describedby={undefined}
         >
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">

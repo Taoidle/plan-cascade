@@ -425,6 +425,16 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     [isDarkMode, onLinkClick]
   );
 
+  // Escape tags that rehype-raw would try to render as unrecognized DOM elements.
+  // SVG tags cause React warnings outside <svg> context; tool-related tags from
+  // LLM output (e.g. <tool_call>, <ls>, <arg_value>) are not valid HTML elements.
+  const safeContent = useMemo(() => {
+    return content.replace(
+      /<(\/?)(?:svg|path|circle|rect|line|polyline|polygon|ellipse|g|tool_call|tool_result|arg_key|arg_value|ls|cwd|search_results?)\b/gi,
+      (_, slash) => `&lt;${slash || ''}`
+    );
+  }, [content]);
+
   return (
     <div className={clsx('markdown-content', className)}>
       <ReactMarkdown
@@ -432,7 +442,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         rehypePlugins={[rehypeKatex, rehypeRaw]}
         components={components}
       >
-        {content}
+        {safeContent}
       </ReactMarkdown>
     </div>
   );

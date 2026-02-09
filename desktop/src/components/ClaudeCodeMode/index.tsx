@@ -20,9 +20,13 @@ import {
   CrossCircledIcon,
   DotsHorizontalIcon,
   KeyboardIcon,
+  ClockIcon,
+  ChatBubbleIcon,
+  BookmarkIcon,
 } from '@radix-ui/react-icons';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useClaudeCodeStore } from '../../store/claudeCode';
+import { useSettingsStore } from '../../store/settings';
 import { ChatView } from './ChatView';
 import { ChatInput } from './ChatInput';
 import { ToolHistorySidebar } from './ToolHistorySidebar';
@@ -30,6 +34,7 @@ import { ExportDialog } from './ExportDialog';
 import { CommandPaletteProvider, createDefaultCommands, useCommandPalette } from './CommandPalette';
 import { ShortcutsHelpDialog, useChatShortcuts } from './KeyboardShortcuts';
 import { SessionControlProvider } from './SessionControl';
+import { ProjectSelector } from '../shared';
 
 // ============================================================================
 // ClaudeCodeMode Component (Inner)
@@ -42,6 +47,10 @@ function ClaudeCodeModeInner() {
     initialize,
     cleanup,
     clearConversation,
+    saveConversation,
+    loadConversation,
+    deleteConversation,
+    conversations,
     messages,
     error,
     clearError,
@@ -49,17 +58,22 @@ function ClaudeCodeModeInner() {
 
   const { open: openCommandPalette } = useCommandPalette();
 
+  const workspacePath = useSettingsStore((s) => s.workspacePath);
+
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showConversations, setShowConversations] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
 
-  // Initialize WebSocket connection on mount
+  // Initialize connection and start a session on mount.
+  // Re-runs when workspacePath changes — cleans up old session, starts new one.
   useEffect(() => {
-    initialize();
+    const projectPath = workspacePath || '.';
+    initialize(projectPath);
     return () => {
       cleanup();
     };
-  }, [initialize, cleanup]);
+  }, [initialize, cleanup, workspacePath]);
 
   const handleClearChat = useCallback(() => {
     if (messages.length > 0 && confirm(t('chat.clearConfirm'))) {
@@ -72,8 +86,31 @@ function ClaudeCodeModeInner() {
   }, []);
 
   const handleToggleSidebar = useCallback(() => {
-    setShowSidebar((prev) => !prev);
+    setShowSidebar((prev) => {
+      if (!prev) setShowConversations(false); // mutually exclusive
+      return !prev;
+    });
   }, []);
+
+  const handleToggleConversations = useCallback(() => {
+    setShowConversations((prev) => {
+      if (!prev) setShowSidebar(false); // mutually exclusive
+      return !prev;
+    });
+  }, []);
+
+  const handleSaveConversation = useCallback(() => {
+    saveConversation();
+  }, [saveConversation]);
+
+  const handleLoadConversation = useCallback((id: string) => {
+    loadConversation(id);
+    setShowConversations(false);
+  }, [loadConversation]);
+
+  const handleDeleteConversation = useCallback((id: string) => {
+    deleteConversation(id);
+  }, [deleteConversation]);
 
   const handleShowShortcuts = useCallback(() => {
     setShowShortcutsDialog(true);
@@ -105,7 +142,7 @@ function ClaudeCodeModeInner() {
       {/* Header */}
       <div
         className={clsx(
-          'flex items-center justify-between px-4 py-2',
+          'flex items-center justify-between px-4 py-2 shrink-0',
           'border-b border-gray-200 dark:border-gray-700',
           'bg-white dark:bg-gray-900'
         )}
@@ -115,6 +152,7 @@ function ClaudeCodeModeInner() {
             {t('title')}
           </h2>
           <ConnectionBadge status={connectionStatus} />
+          <ProjectSelector compact />
         </div>
 
         <div className="flex items-center gap-2">
@@ -146,6 +184,20 @@ function ClaudeCodeModeInner() {
             title={t('shortcuts.title')}
           >
             <KeyboardIcon className="w-4 h-4" />
+          </button>
+
+          {/* Conversations history */}
+          <button
+            onClick={handleToggleConversations}
+            className={clsx(
+              'p-2 rounded-lg transition-colors',
+              showConversations
+                ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
+            )}
+            title="Conversations"
+          >
+            <ClockIcon className="w-4 h-4" />
           </button>
 
           {/* Toggle sidebar */}
@@ -188,6 +240,21 @@ function ClaudeCodeModeInner() {
                 sideOffset={5}
                 align="end"
               >
+                <DropdownMenu.Item
+                  onClick={handleSaveConversation}
+                  disabled={messages.length === 0}
+                  className={clsx(
+                    'flex items-center gap-2 px-3 py-2 rounded-md text-sm',
+                    'text-gray-700 dark:text-gray-300',
+                    'hover:bg-gray-100 dark:hover:bg-gray-700',
+                    'cursor-pointer outline-none',
+                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                  )}
+                >
+                  <BookmarkIcon className="w-4 h-4" />
+                  Save Conversation
+                </DropdownMenu.Item>
+
                 <DropdownMenu.Item
                   onClick={handleExport}
                   className={clsx(
@@ -246,20 +313,92 @@ function ClaudeCodeModeInner() {
       )}
 
       {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Chat area */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
           <ChatView />
           <ChatInput onOpenCommandPalette={openCommandPalette} />
         </div>
 
-        {/* Sidebar */}
+        {/* Sidebar (tool history) */}
         {showSidebar && (
           <div className="w-72 flex-shrink-0">
             <ToolHistorySidebar
               onToolClick={handleToolClick}
               onClose={() => setShowSidebar(false)}
             />
+          </div>
+        )}
+
+        {/* Conversations panel */}
+        {showConversations && (
+          <div className="w-72 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                Conversations
+              </h3>
+              <button
+                onClick={() => setShowConversations(false)}
+                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
+              >
+                <CrossCircledIcon className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {conversations.length === 0 ? (
+                <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                  <ChatBubbleIcon className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
+                  <p>No saved conversations</p>
+                  <p className="text-xs mt-1 text-gray-400">
+                    Conversations are auto-saved when cleared
+                  </p>
+                </div>
+              ) : (
+                <div className="p-2 space-y-1">
+                  {conversations.map((conv) => (
+                    <div
+                      key={conv.id}
+                      className={clsx(
+                        'group p-2 rounded-lg cursor-pointer',
+                        'hover:bg-gray-100 dark:hover:bg-gray-800',
+                        'transition-colors'
+                      )}
+                      onClick={() => handleLoadConversation(conv.id)}
+                    >
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                        {conv.title}
+                      </p>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          {conv.messages.length} messages
+                        </span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                          {new Date(conv.updatedAt).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteConversation(conv.id);
+                        }}
+                        className={clsx(
+                          'mt-1 flex items-center gap-1 px-1.5 py-0.5 rounded text-xs',
+                          'text-red-500 dark:text-red-400',
+                          'hover:bg-red-50 dark:hover:bg-red-900/20',
+                          'opacity-0 group-hover:opacity-100 transition-opacity'
+                        )}
+                      >
+                        <TrashIcon className="w-3 h-3" />
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
