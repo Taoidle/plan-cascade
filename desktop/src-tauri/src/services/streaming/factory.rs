@@ -4,7 +4,8 @@
 
 use super::adapter::StreamAdapter;
 use super::adapters::{
-    ClaudeApiAdapter, ClaudeCodeAdapter, DeepSeekAdapter, OllamaAdapter, OpenAIAdapter,
+    ClaudeApiAdapter, ClaudeCodeAdapter, DeepSeekAdapter, GlmAdapter, OllamaAdapter, OpenAIAdapter,
+    QwenAdapter,
 };
 
 /// Factory for creating stream adapters based on provider and model.
@@ -31,6 +32,12 @@ impl AdapterFactory {
 
             "deepseek" | "deepseek-api" => Box::new(DeepSeekAdapter::new(model)),
 
+            "glm" | "glm-api" | "zhipu" | "zhipuai" => Box::new(GlmAdapter::new(model)),
+
+            "qwen" | "qwen-api" | "dashscope" | "alibaba" | "aliyun" => {
+                Box::new(QwenAdapter::new(model))
+            }
+
             "ollama" | "ollama-api" => Box::new(OllamaAdapter::new(model)),
 
             // Default to OpenAI adapter as it's the most compatible format
@@ -51,6 +58,8 @@ impl AdapterFactory {
             "claude-api",
             "openai",
             "deepseek",
+            "glm",
+            "qwen",
             "ollama",
         ]
     }
@@ -71,6 +80,15 @@ impl AdapterFactory {
                 | "gpt"
                 | "deepseek"
                 | "deepseek-api"
+                | "glm"
+                | "glm-api"
+                | "zhipu"
+                | "zhipuai"
+                | "qwen"
+                | "qwen-api"
+                | "dashscope"
+                | "alibaba"
+                | "aliyun"
                 | "ollama"
                 | "ollama-api"
         )

@@ -9,8 +9,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::models::worktree::{
-    CompleteWorktreeResult, CreateWorktreeRequest, MergeConflict,
-    Worktree, WorktreeStatus,
+    CompleteWorktreeResult, CreateWorktreeRequest, MergeConflict, Worktree, WorktreeStatus,
 };
 use crate::utils::error::{AppError, AppResult};
 
@@ -215,7 +214,11 @@ impl WorktreeManager {
     }
 
     /// Get the status of a worktree
-    pub async fn get_worktree_status(&self, repo_path: &Path, worktree_id: &str) -> AppResult<WorktreeStatus> {
+    pub async fn get_worktree_status(
+        &self,
+        repo_path: &Path,
+        worktree_id: &str,
+    ) -> AppResult<WorktreeStatus> {
         let worktree = self.get_worktree(repo_path, worktree_id).await?;
         Ok(worktree.status)
     }
@@ -280,7 +283,9 @@ impl WorktreeManager {
             .cloned()
             .collect();
 
-        let committable_files = self.config_service.get_committable_files(&wt_path, &all_files);
+        let committable_files = self
+            .config_service
+            .get_committable_files(&wt_path, &all_files);
 
         let mut result = CompleteWorktreeResult::success(None, false, false);
 
@@ -320,12 +325,12 @@ impl WorktreeManager {
         self.git.checkout(repo_path, &worktree.target_branch)?;
 
         // Merge the worktree branch
-        let merge_message = format!(
-            "Merge {} into {}",
-            worktree.branch, worktree.target_branch
-        );
+        let merge_message = format!("Merge {} into {}", worktree.branch, worktree.target_branch);
 
-        match self.git.merge(repo_path, &worktree.branch, Some(&merge_message))? {
+        match self
+            .git
+            .merge(repo_path, &worktree.branch, Some(&merge_message))?
+        {
             MergeResult::Success => {
                 result.merged = true;
             }
@@ -349,7 +354,10 @@ impl WorktreeManager {
                 )));
             }
             MergeResult::Error(msg) => {
-                return Ok(CompleteWorktreeResult::error(format!("Merge failed: {}", msg)));
+                return Ok(CompleteWorktreeResult::error(format!(
+                    "Merge failed: {}",
+                    msg
+                )));
             }
         }
 

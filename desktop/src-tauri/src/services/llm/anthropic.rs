@@ -8,8 +8,8 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolDefinition, UsageStats,
+    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
+    StopReason, ToolCall, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::ClaudeApiAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -37,10 +37,7 @@ impl AnthropicProvider {
 
     /// Get the API base URL
     fn base_url(&self) -> &str {
-        self.config
-            .base_url
-            .as_deref()
-            .unwrap_or(ANTHROPIC_API_URL)
+        self.config.base_url.as_deref().unwrap_or(ANTHROPIC_API_URL)
     }
 
     /// Build the request body for the API
@@ -77,10 +74,8 @@ impl AnthropicProvider {
 
         // Add tools if provided
         if !tools.is_empty() {
-            let claude_tools: Vec<serde_json::Value> = tools
-                .iter()
-                .map(|t| self.tool_to_claude(t))
-                .collect();
+            let claude_tools: Vec<serde_json::Value> =
+                tools.iter().map(|t| self.tool_to_claude(t)).collect();
             body["tools"] = serde_json::json!(claude_tools);
         }
 
@@ -138,7 +133,10 @@ impl AnthropicProvider {
                     }
                     result
                 }
-                MessageContent::Thinking { thinking, thinking_id } => {
+                MessageContent::Thinking {
+                    thinking,
+                    thinking_id,
+                } => {
                     let mut obj = serde_json::json!({
                         "type": "thinking",
                         "thinking": thinking
@@ -147,6 +145,49 @@ impl AnthropicProvider {
                         obj["thinking_id"] = serde_json::json!(id);
                     }
                     obj
+                }
+                MessageContent::Image { media_type, data } => {
+                    serde_json::json!({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": data
+                        }
+                    })
+                }
+                MessageContent::ToolResultMultimodal {
+                    tool_use_id,
+                    content,
+                    is_error,
+                } => {
+                    let blocks: Vec<serde_json::Value> = content
+                        .iter()
+                        .map(|block| match block {
+                            super::types::ContentBlock::Text { text } => {
+                                serde_json::json!({ "type": "text", "text": text })
+                            }
+                            super::types::ContentBlock::Image { media_type, data } => {
+                                serde_json::json!({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": data
+                                    }
+                                })
+                            }
+                        })
+                        .collect();
+                    let mut result = serde_json::json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": blocks
+                    });
+                    if let Some(true) = is_error {
+                        result["is_error"] = serde_json::json!(true);
+                    }
+                    result
                 }
             })
             .collect();
@@ -239,6 +280,14 @@ impl LlmProvider for AnthropicProvider {
         true
     }
 
+    fn supports_multimodal(&self) -> bool {
+        true
+    }
+
+    fn context_window(&self) -> u32 {
+        200_000 // Claude 3.5/4 models have 200k context
+    }
+
     async fn send_message(
         &self,
         messages: Vec<Message>,
@@ -326,9 +375,6 @@ impl LlmProvider for AnthropicProvider {
         let mut tool_calls = Vec::new();
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
-        let mut current_tool_id = None;
-        let mut current_tool_name = None;
-        let mut tool_input_buffer = String::new();
 
         let mut stream = response.bytes_stream();
         use futures_util::StreamExt;
@@ -361,14 +407,18 @@ impl LlmProvider for AnthropicProvider {
                                 UnifiedStreamEvent::ThinkingDelta { content, .. } => {
                                     accumulated_thinking.push_str(content);
                                 }
-                                UnifiedStreamEvent::ToolStart {
+                                UnifiedStreamEvent::ToolComplete {
                                     tool_id,
                                     tool_name,
-                                    ..
+                                    arguments,
                                 } => {
-                                    current_tool_id = Some(tool_id.clone());
-                                    current_tool_name = Some(tool_name.clone());
-                                    tool_input_buffer.clear();
+                                    if let Ok(input) = serde_json::from_str(arguments) {
+                                        tool_calls.push(ToolCall {
+                                            id: tool_id.clone(),
+                                            name: tool_name.clone(),
+                                            arguments: input,
+                                        });
+                                    }
                                 }
                                 UnifiedStreamEvent::Usage {
                                     input_tokens,
@@ -399,8 +449,16 @@ impl LlmProvider for AnthropicProvider {
                                 _ => {}
                             }
 
-                            // Forward event to channel
-                            let _ = tx.send(event).await;
+                            // Forward streaming events but suppress Complete/Usage —
+                            // those are internal signals; the orchestrator emits its own
+                            // Complete after tool calls are done.
+                            if !matches!(
+                                &event,
+                                UnifiedStreamEvent::Complete { .. }
+                                    | UnifiedStreamEvent::Usage { .. }
+                            ) {
+                                let _ = tx.send(event).await;
+                            }
                         }
                     }
                     Err(e) => {
@@ -411,19 +469,6 @@ impl LlmProvider for AnthropicProvider {
                             })
                             .await;
                     }
-                }
-            }
-        }
-
-        // Finalize any accumulated tool call
-        if let (Some(id), Some(name)) = (current_tool_id, current_tool_name) {
-            if !tool_input_buffer.is_empty() {
-                if let Ok(input) = serde_json::from_str(&tool_input_buffer) {
-                    tool_calls.push(ToolCall {
-                        id,
-                        name,
-                        arguments: input,
-                    });
                 }
             }
         }

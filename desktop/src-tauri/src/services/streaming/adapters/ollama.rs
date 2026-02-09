@@ -2,17 +2,12 @@
 //!
 //! Handles Ollama JSON stream format with model-dependent thinking detection.
 
-use serde::Deserialize;
 use crate::services::streaming::adapter::StreamAdapter;
 use crate::services::streaming::unified::{AdapterError, UnifiedStreamEvent};
+use serde::Deserialize;
 
 /// Known models that support thinking via <think> tags
-const THINKING_MODELS: &[&str] = &[
-    "deepseek-r1",
-    "deepseek-reasoner",
-    "qwq",
-    "qwen-qwq",
-];
+const THINKING_MODELS: &[&str] = &["deepseek-r1", "deepseek-reasoner", "qwq", "qwen-qwq"];
 
 /// Ollama response format
 #[derive(Debug, Deserialize)]
@@ -100,12 +95,13 @@ impl OllamaAdapter {
                         self.buffer = self.buffer[start_pos + 7..].to_string();
                         self.state = ThinkState::InThinking;
                         events.push(UnifiedStreamEvent::ThinkingStart { thinking_id: None });
-                    } else if self.buffer.ends_with('<') ||
-                              self.buffer.ends_with("<t") ||
-                              self.buffer.ends_with("<th") ||
-                              self.buffer.ends_with("<thi") ||
-                              self.buffer.ends_with("<thin") ||
-                              self.buffer.ends_with("<think") {
+                    } else if self.buffer.ends_with('<')
+                        || self.buffer.ends_with("<t")
+                        || self.buffer.ends_with("<th")
+                        || self.buffer.ends_with("<thi")
+                        || self.buffer.ends_with("<thin")
+                        || self.buffer.ends_with("<think")
+                    {
                         break;
                     } else {
                         let text = std::mem::take(&mut self.buffer);
@@ -129,13 +125,14 @@ impl OllamaAdapter {
                         self.buffer = self.buffer[end_pos + 8..].to_string();
                         self.state = ThinkState::Normal;
                         events.push(UnifiedStreamEvent::ThinkingEnd { thinking_id: None });
-                    } else if self.buffer.ends_with('<') ||
-                              self.buffer.ends_with("</") ||
-                              self.buffer.ends_with("</t") ||
-                              self.buffer.ends_with("</th") ||
-                              self.buffer.ends_with("</thi") ||
-                              self.buffer.ends_with("</thin") ||
-                              self.buffer.ends_with("</think") {
+                    } else if self.buffer.ends_with('<')
+                        || self.buffer.ends_with("</")
+                        || self.buffer.ends_with("</t")
+                        || self.buffer.ends_with("</th")
+                        || self.buffer.ends_with("</thi")
+                        || self.buffer.ends_with("</thin")
+                        || self.buffer.ends_with("</think")
+                    {
                         break;
                     } else {
                         let thinking = std::mem::take(&mut self.buffer);
@@ -175,8 +172,8 @@ impl StreamAdapter for OllamaAdapter {
             return Ok(vec![]);
         }
 
-        let response: OllamaResponse = serde_json::from_str(trimmed)
-            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
+        let response: OllamaResponse =
+            serde_json::from_str(trimmed).map_err(|e| AdapterError::ParseError(e.to_string()))?;
 
         let mut events = vec![];
 
@@ -233,7 +230,9 @@ mod tests {
         let mut adapter = OllamaAdapter::new("llama3.2");
         assert!(!adapter.supports_thinking());
 
-        let events = adapter.adapt(r#"{"response": "Hello", "done": false}"#).unwrap();
+        let events = adapter
+            .adapt(r#"{"response": "Hello", "done": false}"#)
+            .unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
             UnifiedStreamEvent::TextDelta { content } => {
@@ -259,21 +258,37 @@ mod tests {
     fn test_done_response() {
         let mut adapter = OllamaAdapter::new("llama3.2");
 
-        let events = adapter.adapt(r#"{"done": true, "prompt_eval_count": 50, "eval_count": 100}"#).unwrap();
+        let events = adapter
+            .adapt(r#"{"done": true, "prompt_eval_count": 50, "eval_count": 100}"#)
+            .unwrap();
 
-        assert!(events.iter().any(|e| matches!(e, UnifiedStreamEvent::Usage { .. })));
-        assert!(events.iter().any(|e| matches!(e, UnifiedStreamEvent::Complete { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, UnifiedStreamEvent::Usage { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, UnifiedStreamEvent::Complete { .. })));
     }
 
     #[test]
     fn test_thinking_with_tags() {
         let mut adapter = OllamaAdapter::new("deepseek-r1");
 
-        let events = adapter.adapt(r#"{"response": "<think>analyzing", "done": false}"#).unwrap();
-        assert!(events.iter().any(|e| matches!(e, UnifiedStreamEvent::ThinkingStart { .. })));
+        let events = adapter
+            .adapt(r#"{"response": "<think>analyzing", "done": false}"#)
+            .unwrap();
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, UnifiedStreamEvent::ThinkingStart { .. })));
 
-        let events = adapter.adapt(r#"{"response": "</think>result", "done": false}"#).unwrap();
-        assert!(events.iter().any(|e| matches!(e, UnifiedStreamEvent::ThinkingEnd { .. })));
-        assert!(events.iter().any(|e| matches!(e, UnifiedStreamEvent::TextDelta { content } if content == "result")));
+        let events = adapter
+            .adapt(r#"{"response": "</think>result", "done": false}"#)
+            .unwrap();
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, UnifiedStreamEvent::ThinkingEnd { .. })));
+        assert!(events.iter().any(
+            |e| matches!(e, UnifiedStreamEvent::TextDelta { content } if content == "result")
+        ));
     }
 }

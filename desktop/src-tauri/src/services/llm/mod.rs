@@ -6,17 +6,21 @@
 //! - DeepSeek
 //! - Ollama (local inference)
 
-pub mod provider;
-pub mod types;
 pub mod anthropic;
-pub mod openai;
 pub mod deepseek;
+pub mod glm;
 pub mod ollama;
+pub mod openai;
+pub mod provider;
+pub mod qwen;
+pub mod types;
 
 // Re-export main types
-pub use provider::LlmProvider;
-pub use types::*;
 pub use anthropic::AnthropicProvider;
-pub use openai::OpenAIProvider;
 pub use deepseek::DeepSeekProvider;
+pub use glm::GlmProvider;
 pub use ollama::OllamaProvider;
+pub use openai::OpenAIProvider;
+pub use provider::LlmProvider;
+pub use qwen::QwenProvider;
+pub use types::*;

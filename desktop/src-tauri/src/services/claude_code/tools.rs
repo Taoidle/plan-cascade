@@ -3,8 +3,8 @@
 //! Tracks tool executions from Claude Code, maintaining history and status.
 //! Extracts file paths for file operations and provides queryable execution history.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Status of a tool execution
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,7 +152,10 @@ impl ToolExecution {
                     if let Some(cmd) = json.get("command").and_then(|v| v.as_str()) {
                         // Simple heuristic: look for paths starting with / or containing \
                         for word in cmd.split_whitespace() {
-                            if word.starts_with('/') || word.starts_with("./") || word.contains('\\') {
+                            if word.starts_with('/')
+                                || word.starts_with("./")
+                                || word.contains('\\')
+                            {
                                 // Remove quotes if present
                                 let cleaned = word.trim_matches(|c| c == '"' || c == '\'');
                                 if !cleaned.is_empty() {
@@ -270,7 +273,10 @@ impl ToolTracker {
 
     /// Get count of tools by status
     pub fn count_by_status(&self, status: ToolStatus) -> usize {
-        self.executions.values().filter(|e| e.status == status).count()
+        self.executions
+            .values()
+            .filter(|e| e.status == status)
+            .count()
     }
 
     /// Get total tool count
@@ -350,8 +356,8 @@ mod tests {
 
     #[test]
     fn test_extract_file_paths_read() {
-        let exec = ToolExecution::new("tool-1", "Read")
-            .with_arguments(r#"{"file_path": "/src/main.rs"}"#);
+        let exec =
+            ToolExecution::new("tool-1", "Read").with_arguments(r#"{"file_path": "/src/main.rs"}"#);
         assert_eq!(exec.file_paths, vec!["/src/main.rs"]);
     }
 
@@ -364,8 +370,9 @@ mod tests {
 
     #[test]
     fn test_extract_file_paths_edit() {
-        let exec = ToolExecution::new("tool-1", "Edit")
-            .with_arguments(r#"{"file_path": "/src/mod.rs", "old_string": "a", "new_string": "b"}"#);
+        let exec = ToolExecution::new("tool-1", "Edit").with_arguments(
+            r#"{"file_path": "/src/mod.rs", "old_string": "a", "new_string": "b"}"#,
+        );
         assert_eq!(exec.file_paths, vec!["/src/mod.rs"]);
     }
 
@@ -405,11 +412,7 @@ mod tests {
     fn test_tool_tracker_on_tool_start() {
         let mut tracker = ToolTracker::new();
 
-        let exec = tracker.on_tool_start(
-            "tool-1",
-            "Read",
-            Some(r#"{"file_path": "/test.rs"}"#),
-        );
+        let exec = tracker.on_tool_start("tool-1", "Read", Some(r#"{"file_path": "/test.rs"}"#));
 
         assert_eq!(exec.tool_id, "tool-1");
         assert_eq!(exec.status, ToolStatus::Running);

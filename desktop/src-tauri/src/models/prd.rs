@@ -275,7 +275,9 @@ impl Prd {
 
     /// Check if all stories are complete
     pub fn is_complete(&self) -> bool {
-        self.stories.iter().all(|s| s.status == StoryStatus::Completed)
+        self.stories
+            .iter()
+            .all(|s| s.status == StoryStatus::Completed)
     }
 
     /// Get completion percentage
@@ -283,7 +285,8 @@ impl Prd {
         if self.stories.is_empty() {
             return 100.0;
         }
-        let completed = self.stories
+        let completed = self
+            .stories
             .iter()
             .filter(|s| s.status == StoryStatus::Completed)
             .count();
@@ -292,18 +295,16 @@ impl Prd {
 
     /// Load PRD from a JSON file
     pub fn from_file(path: &std::path::Path) -> Result<Self, PrdError> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| PrdError::IoError(e.to_string()))?;
-        serde_json::from_str(&content)
-            .map_err(|e| PrdError::ParseError(e.to_string()))
+        let content =
+            std::fs::read_to_string(path).map_err(|e| PrdError::IoError(e.to_string()))?;
+        serde_json::from_str(&content).map_err(|e| PrdError::ParseError(e.to_string()))
     }
 
     /// Save PRD to a JSON file
     pub fn to_file(&self, path: &std::path::Path) -> Result<(), PrdError> {
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| PrdError::SerializeError(e.to_string()))?;
-        std::fs::write(path, content)
-            .map_err(|e| PrdError::IoError(e.to_string()))
+        std::fs::write(path, content).map_err(|e| PrdError::IoError(e.to_string()))
     }
 }
 
@@ -390,10 +391,7 @@ mod tests {
             serde_json::to_string(&StoryType::Refactor).unwrap(),
             "\"refactor\""
         );
-        assert_eq!(
-            serde_json::to_string(&StoryType::Test).unwrap(),
-            "\"test\""
-        );
+        assert_eq!(serde_json::to_string(&StoryType::Test).unwrap(), "\"test\"");
     }
 
     #[test]
@@ -493,13 +491,11 @@ mod tests {
         assert_eq!(story.get_story_type(), None);
 
         // Test with_agent builder
-        let story = Story::new("S002", "With Agent")
-            .with_agent("claude-code");
+        let story = Story::new("S002", "With Agent").with_agent("claude-code");
         assert_eq!(story.get_agent(), Some("claude-code"));
 
         // Test with_story_type builder
-        let story = Story::new("S003", "With Type")
-            .with_story_type(StoryType::Refactor);
+        let story = Story::new("S003", "With Type").with_story_type(StoryType::Refactor);
         assert_eq!(story.get_story_type(), Some(StoryType::Refactor));
 
         // Test chained builders
@@ -510,19 +506,16 @@ mod tests {
         assert_eq!(story.get_story_type(), Some(StoryType::Bugfix));
 
         // Test is_bugfix and is_refactor
-        let bugfix_story = Story::new("S005", "Bugfix")
-            .with_story_type(StoryType::Bugfix);
+        let bugfix_story = Story::new("S005", "Bugfix").with_story_type(StoryType::Bugfix);
         assert!(bugfix_story.is_bugfix());
         assert!(!bugfix_story.is_refactor());
 
-        let refactor_story = Story::new("S006", "Refactor")
-            .with_story_type(StoryType::Refactor);
+        let refactor_story = Story::new("S006", "Refactor").with_story_type(StoryType::Refactor);
         assert!(!refactor_story.is_bugfix());
         assert!(refactor_story.is_refactor());
 
         // Test feature story (neither bugfix nor refactor)
-        let feature_story = Story::new("S007", "Feature")
-            .with_story_type(StoryType::Feature);
+        let feature_story = Story::new("S007", "Feature").with_story_type(StoryType::Feature);
         assert!(!feature_story.is_bugfix());
         assert!(!feature_story.is_refactor());
 

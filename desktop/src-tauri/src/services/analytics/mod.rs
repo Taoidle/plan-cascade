@@ -2,14 +2,14 @@
 //!
 //! Provides usage tracking, cost calculation, data aggregation, and export functionality.
 
+mod aggregation;
 mod cost_calculator;
+mod export;
 mod service;
 mod tracker;
-mod aggregation;
-mod export;
 
+pub use aggregation::*;
 pub use cost_calculator::*;
+pub use export::*;
 pub use service::*;
 pub use tracker::*;
-pub use aggregation::*;
-pub use export::*;

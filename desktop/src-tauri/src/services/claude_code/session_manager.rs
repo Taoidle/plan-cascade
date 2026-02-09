@@ -33,8 +33,8 @@ impl ActiveSessionManager {
 
     /// Generate a unique session ID
     fn generate_session_id() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
         use std::sync::atomic::{AtomicU32, Ordering};
+        use std::time::{SystemTime, UNIX_EPOCH};
         static COUNTER: AtomicU32 = AtomicU32::new(0);
 
         let timestamp = SystemTime::now()
@@ -134,7 +134,10 @@ impl ActiveSessionManager {
         }
 
         // Log the process spawn (using eprintln for now, can be replaced with proper logging)
-        eprintln!("[INFO] Spawned Claude Code process {} for session {}", pid, session_id);
+        eprintln!(
+            "[INFO] Spawned Claude Code process {} for session {}",
+            pid, session_id
+        );
 
         Ok(())
     }
@@ -295,7 +298,10 @@ impl ActiveSessionManager {
     /// Check if a session has a running process
     pub async fn has_running_process(&self, session_id: &str) -> bool {
         let processes = self.processes.read().await;
-        processes.get(session_id).map(|p| p.is_running()).unwrap_or(false)
+        processes
+            .get(session_id)
+            .map(|p| p.is_running())
+            .unwrap_or(false)
     }
 
     /// Clean up dead processes

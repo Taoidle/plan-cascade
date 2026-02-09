@@ -10,12 +10,12 @@
 
 use serde_json::json;
 
-use plan_cascade_desktop::services::spec_interview::{
-    CompileOptions, InterviewManager, InterviewPhase, InterviewQuestion, SpecCompiler,
-};
 use plan_cascade_desktop::services::spec_interview::interview::InterviewConfig;
 use plan_cascade_desktop::services::spec_interview::state::{
     InterviewStateManager, InterviewTurn, PersistedInterviewState,
+};
+use plan_cascade_desktop::services::spec_interview::{
+    CompileOptions, InterviewManager, InterviewPhase, InterviewQuestion, SpecCompiler,
 };
 use plan_cascade_desktop::storage::database::Database;
 
@@ -74,7 +74,9 @@ fn test_submit_answer_advances_cursor() {
     let manager = create_interview_manager();
     let session = manager.start_interview(standard_config()).unwrap();
 
-    let updated = manager.submit_answer(&session.id, "My Auth System").unwrap();
+    let updated = manager
+        .submit_answer(&session.id, "My Auth System")
+        .unwrap();
 
     assert_eq!(updated.question_cursor, 1);
     assert!(updated.current_question.is_some());
@@ -94,11 +96,15 @@ fn test_multi_turn_conversation_through_overview() {
     assert_eq!(s.history.len(), 1);
 
     // Turn 2: Goal
-    let s = manager.submit_answer(&s.id, "Secure user authentication").unwrap();
+    let s = manager
+        .submit_answer(&s.id, "Secure user authentication")
+        .unwrap();
     assert_eq!(s.history.len(), 2);
 
     // Turn 3: Success metrics
-    let s = manager.submit_answer(&s.id, "Login works, tokens are valid, sessions persist").unwrap();
+    let s = manager
+        .submit_answer(&s.id, "Login works, tokens are valid, sessions persist")
+        .unwrap();
     assert_eq!(s.history.len(), 3);
 
     // Turn 4: Non-goals
@@ -130,10 +136,7 @@ fn test_first_principles_mode_adds_problem_question() {
     let s = manager.submit_answer(&session.id, "Auth System").unwrap();
 
     // Next question should be "problem" in first-principles mode
-    assert_eq!(
-        s.current_question.as_ref().unwrap().field_name,
-        "problem"
-    );
+    assert_eq!(s.current_question.as_ref().unwrap().field_name, "problem");
 }
 
 #[test]
@@ -207,7 +210,9 @@ fn test_state_persistence_across_managers() {
     // Start interview with first manager
     let manager1 = InterviewManager::new(mgr.clone());
     let session = manager1.start_interview(standard_config()).unwrap();
-    let s = manager1.submit_answer(&session.id, "Persistent Project").unwrap();
+    let s = manager1
+        .submit_answer(&session.id, "Persistent Project")
+        .unwrap();
 
     // Create new manager with same pool (simulates app restart)
     let manager2 = InterviewManager::new(mgr);
@@ -464,9 +469,17 @@ fn test_compile_full_spec_with_stories() {
     let result = SpecCompiler::compile(&spec_data, &CompileOptions::default()).unwrap();
 
     // Verify spec_json schema conformance
-    assert_eq!(result.spec_json["metadata"]["schema_version"].as_str(), Some("spec-0.1"));
-    assert_eq!(result.spec_json["metadata"]["source"].as_str(), Some("spec-interview"));
-    assert!(result.spec_json["metadata"]["created_at"].as_str().is_some());
+    assert_eq!(
+        result.spec_json["metadata"]["schema_version"].as_str(),
+        Some("spec-0.1")
+    );
+    assert_eq!(
+        result.spec_json["metadata"]["source"].as_str(),
+        Some("spec-interview")
+    );
+    assert!(result.spec_json["metadata"]["created_at"]
+        .as_str()
+        .is_some());
 
     // Verify stories in spec_json
     let stories = result.spec_json["stories"].as_array().unwrap();
@@ -495,7 +508,10 @@ fn test_compile_full_spec_with_stories() {
     assert_eq!(prd_stories[0]["id"].as_str(), Some("story-001"));
     assert_eq!(prd_stories[0]["status"].as_str(), Some("pending"));
     assert_eq!(prd_stories[0]["priority"].as_str(), Some("high")); // core -> high
-    assert!(!prd_stories[1]["dependencies"].as_array().unwrap().is_empty());
+    assert!(!prd_stories[1]["dependencies"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -518,11 +534,17 @@ fn test_compile_with_flow_options() {
 
     // Check flow config
     assert!(result.prd_json.get("flow_config").is_some());
-    assert_eq!(result.prd_json["flow_config"]["level"].as_str(), Some("full"));
+    assert_eq!(
+        result.prd_json["flow_config"]["level"].as_str(),
+        Some("full")
+    );
 
     // Check verification gate (full flow enables it)
     assert!(result.prd_json.get("verification_gate").is_some());
-    assert_eq!(result.prd_json["verification_gate"]["enabled"].as_bool(), Some(true));
+    assert_eq!(
+        result.prd_json["verification_gate"]["enabled"].as_bool(),
+        Some(true)
+    );
 
     // Check TDD config
     assert!(result.prd_json.get("tdd_config").is_some());
@@ -560,7 +582,11 @@ fn test_compile_objectives_truncation() {
 
     let result = SpecCompiler::compile(&spec_data, &CompileOptions::default()).unwrap();
     let objectives = result.prd_json["objectives"].as_array().unwrap();
-    assert!(objectives.len() <= 7, "Objectives should be truncated to 7, got {}", objectives.len());
+    assert!(
+        objectives.len() <= 7,
+        "Objectives should be truncated to 7, got {}",
+        objectives.len()
+    );
 }
 
 #[test]
@@ -579,11 +605,11 @@ fn test_compile_category_to_priority_mapping() {
     let result = SpecCompiler::compile(&spec_data, &CompileOptions::default()).unwrap();
     let stories = result.prd_json["stories"].as_array().unwrap();
 
-    assert_eq!(stories[0]["priority"].as_str(), Some("high"));    // setup -> high
-    assert_eq!(stories[1]["priority"].as_str(), Some("high"));    // core -> high
-    assert_eq!(stories[2]["priority"].as_str(), Some("medium"));  // integration -> medium
-    assert_eq!(stories[3]["priority"].as_str(), Some("low"));     // polish -> low
-    assert_eq!(stories[4]["priority"].as_str(), Some("medium"));  // test -> medium
+    assert_eq!(stories[0]["priority"].as_str(), Some("high")); // setup -> high
+    assert_eq!(stories[1]["priority"].as_str(), Some("high")); // core -> high
+    assert_eq!(stories[2]["priority"].as_str(), Some("medium")); // integration -> medium
+    assert_eq!(stories[3]["priority"].as_str(), Some("low")); // polish -> low
+    assert_eq!(stories[4]["priority"].as_str(), Some("medium")); // test -> medium
 }
 
 // ============================================================================
@@ -606,7 +632,13 @@ fn test_phase_index_monotonically_increases() {
     for phase in &phases {
         let idx = phase.index();
         if let Some(prev) = prev_index {
-            assert!(idx > prev, "Phase {:?} index {} should be > {}", phase, idx, prev);
+            assert!(
+                idx > prev,
+                "Phase {:?} index {} should be > {}",
+                phase,
+                idx,
+                prev
+            );
         }
         prev_index = Some(idx);
     }
@@ -665,7 +697,10 @@ fn test_progress_increases_through_phases() {
 
     // Submit answers to advance
     let s = manager.submit_answer(&session.id, "Test Project").unwrap();
-    assert!(s.progress >= session.progress, "Progress should not decrease");
+    assert!(
+        s.progress >= session.progress,
+        "Progress should not decrease"
+    );
 }
 
 // ============================================================================
@@ -685,7 +720,10 @@ fn test_get_spec_data_returns_accumulated_answers() {
     let overview = spec_data.get("overview");
     assert!(overview.is_some());
     if let Some(overview) = overview {
-        assert_eq!(overview.get("title").and_then(|v| v.as_str()), Some("My Project"));
+        assert_eq!(
+            overview.get("title").and_then(|v| v.as_str()),
+            Some("My Project")
+        );
     }
 }
 

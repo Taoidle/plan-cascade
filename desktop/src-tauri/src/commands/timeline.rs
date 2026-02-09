@@ -207,7 +207,12 @@ pub fn get_checkpoint_diff(
 ) -> Result<CommandResponse<CheckpointDiff>, String> {
     let service = TimelineService::new();
 
-    match service.calculate_diff(&project_path, &session_id, &from_checkpoint_id, &to_checkpoint_id) {
+    match service.calculate_diff(
+        &project_path,
+        &session_id,
+        &from_checkpoint_id,
+        &to_checkpoint_id,
+    ) {
         Ok(diff) => Ok(CommandResponse::ok(diff)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -223,7 +228,8 @@ pub fn get_diff_from_current(
 ) -> Result<CommandResponse<CheckpointDiff>, String> {
     let service = TimelineService::new();
 
-    match service.get_diff_from_current(&project_path, &session_id, &checkpoint_id, &tracked_files) {
+    match service.get_diff_from_current(&project_path, &session_id, &checkpoint_id, &tracked_files)
+    {
         Ok(diff) => Ok(CommandResponse::ok(diff)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -488,13 +494,8 @@ mod tests {
         .data
         .unwrap();
 
-        let result = get_checkpoint_diff(
-            project_path.clone(),
-            "sess1".to_string(),
-            cp1.id,
-            cp2.id,
-        )
-        .unwrap();
+        let result =
+            get_checkpoint_diff(project_path.clone(), "sess1".to_string(), cp1.id, cp2.id).unwrap();
 
         assert!(result.success);
         let diff = result.data.unwrap();

@@ -4,4 +4,4 @@
 
 mod manager;
 
-pub use manager::{Phase, PhaseConfig, PhaseManager, PhaseError};
+pub use manager::{Phase, PhaseConfig, PhaseError, PhaseManager};

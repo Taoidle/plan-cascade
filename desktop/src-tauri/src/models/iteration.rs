@@ -121,7 +121,11 @@ pub struct RetryEntry {
 
 impl RetryEntry {
     /// Create a new retry entry
-    pub fn new(story_id: impl Into<String>, failure_context: Option<String>, retry_number: u32) -> Self {
+    pub fn new(
+        story_id: impl Into<String>,
+        failure_context: Option<String>,
+        retry_number: u32,
+    ) -> Self {
         Self {
             story_id: story_id.into(),
             failure_context,
@@ -260,11 +264,8 @@ impl IterationState {
         let retry_count = self.retry_counts.entry(story_id.to_string()).or_insert(0);
         *retry_count += 1;
 
-        self.retry_queue.push(RetryEntry::new(
-            story_id,
-            failure_context,
-            *retry_count,
-        ));
+        self.retry_queue
+            .push(RetryEntry::new(story_id, failure_context, *retry_count));
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
@@ -282,16 +283,14 @@ impl IterationState {
     pub fn to_file(&self, path: &std::path::Path) -> Result<(), IterationError> {
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| IterationError::SerializeError(e.to_string()))?;
-        std::fs::write(path, content)
-            .map_err(|e| IterationError::IoError(e.to_string()))
+        std::fs::write(path, content).map_err(|e| IterationError::IoError(e.to_string()))
     }
 
     /// Load from file
     pub fn from_file(path: &std::path::Path) -> Result<Self, IterationError> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| IterationError::IoError(e.to_string()))?;
-        serde_json::from_str(&content)
-            .map_err(|e| IterationError::ParseError(e.to_string()))
+        let content =
+            std::fs::read_to_string(path).map_err(|e| IterationError::IoError(e.to_string()))?;
+        serde_json::from_str(&content).map_err(|e| IterationError::ParseError(e.to_string()))
     }
 }
 

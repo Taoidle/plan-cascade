@@ -5,10 +5,10 @@
 
 use std::path::Path;
 
+use crate::models::design_doc::DesignDoc;
 use crate::models::response::CommandResponse;
 use crate::services::design::{DesignDocGenerator, GenerateOptions, GenerateResult};
 use crate::services::design::{DesignDocImporter, ImportFormat, ImportResult};
-use crate::models::design_doc::DesignDoc;
 
 /// Generate a design document from a PRD file.
 ///
@@ -102,22 +102,15 @@ pub async fn import_design_doc(
 /// # Returns
 /// `CommandResponse<DesignDoc>` with the loaded design document.
 #[tauri::command]
-pub async fn get_design_doc(
-    project_path: Option<String>,
-) -> CommandResponse<DesignDoc> {
+pub async fn get_design_doc(project_path: Option<String>) -> CommandResponse<DesignDoc> {
     let base_path = match project_path {
         Some(p) if !p.trim().is_empty() => std::path::PathBuf::from(&p),
-        _ => {
-            match std::env::current_dir() {
-                Ok(p) => p,
-                Err(e) => {
-                    return CommandResponse::err(format!(
-                        "Cannot determine project path: {}",
-                        e
-                    ));
-                }
+        _ => match std::env::current_dir() {
+            Ok(p) => p,
+            Err(e) => {
+                return CommandResponse::err(format!("Cannot determine project path: {}", e));
             }
-        }
+        },
     };
 
     let design_doc_path = base_path.join("design_doc.json");
@@ -162,11 +155,7 @@ mod tests {
         }"#;
         fs::write(&prd_path, prd).unwrap();
 
-        let result = generate_design_doc(
-            prd_path.display().to_string(),
-            None,
-        )
-        .await;
+        let result = generate_design_doc(prd_path.display().to_string(), None).await;
 
         assert!(result.success);
         let data = result.data.unwrap();
@@ -184,8 +173,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_design_doc_not_found() {
-        let result =
-            generate_design_doc("/nonexistent/prd.json".to_string(), None).await;
+        let result = generate_design_doc("/nonexistent/prd.json".to_string(), None).await;
         assert!(!result.success);
         assert!(result.error.unwrap().contains("not found"));
     }
@@ -230,11 +218,7 @@ The core service component.
         }"#;
         fs::write(&file_path, content).unwrap();
 
-        let result = import_design_doc(
-            file_path.display().to_string(),
-            None,
-        )
-        .await;
+        let result = import_design_doc(file_path.display().to_string(), None).await;
 
         assert!(result.success);
         let data = result.data.unwrap();
@@ -255,11 +239,8 @@ The core service component.
         let file_path = temp_dir.path().join("design.md");
         fs::write(&file_path, "# Test").unwrap();
 
-        let result = import_design_doc(
-            file_path.display().to_string(),
-            Some("xml".to_string()),
-        )
-        .await;
+        let result =
+            import_design_doc(file_path.display().to_string(), Some("xml".to_string())).await;
 
         assert!(!result.success);
         assert!(result.error.unwrap().contains("Unsupported format"));
@@ -278,10 +259,7 @@ The core service component.
         }"#;
         fs::write(&doc_path, content).unwrap();
 
-        let result = get_design_doc(
-            Some(temp_dir.path().display().to_string()),
-        )
-        .await;
+        let result = get_design_doc(Some(temp_dir.path().display().to_string())).await;
 
         assert!(result.success);
         let data = result.data.unwrap();
@@ -292,10 +270,7 @@ The core service component.
     async fn test_get_design_doc_not_found() {
         let temp_dir = TempDir::new().unwrap();
 
-        let result = get_design_doc(
-            Some(temp_dir.path().display().to_string()),
-        )
-        .await;
+        let result = get_design_doc(Some(temp_dir.path().display().to_string())).await;
 
         assert!(!result.success);
         assert!(result.error.unwrap().contains("No design_doc.json found"));
@@ -322,11 +297,7 @@ The core service component.
             additional_context: None,
         };
 
-        let result = generate_design_doc(
-            prd_path.display().to_string(),
-            Some(options),
-        )
-        .await;
+        let result = generate_design_doc(prd_path.display().to_string(), Some(options)).await;
 
         assert!(result.success);
         let data = result.data.unwrap();

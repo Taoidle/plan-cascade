@@ -6,14 +6,12 @@
 //!
 //! No LLM calls are made - the strategy analyzer is entirely rule-based.
 
-use plan_cascade_desktop::services::strategy::{
-    StrategyAnalyzer, ExecutionStrategy, DimensionScores, StrategyDecision,
-};
-use plan_cascade_desktop::services::strategy::analyzer::{
-    AnalysisContext, get_strategy_options,
-};
+use plan_cascade_desktop::services::strategy::analyzer::{get_strategy_options, AnalysisContext};
 use plan_cascade_desktop::services::strategy::classifier::{
-    IntentClassifier, Intent, get_intent_choices,
+    get_intent_choices, Intent, IntentClassifier,
+};
+use plan_cascade_desktop::services::strategy::{
+    DimensionScores, ExecutionStrategy, StrategyAnalyzer, StrategyDecision,
 };
 
 // ============================================================================
@@ -25,8 +23,16 @@ use plan_cascade_desktop::services::strategy::classifier::{
 fn test_direct_strategy_simple_bug_fix() {
     let decision = StrategyAnalyzer::analyze("fix bug in login page", None);
     assert_eq!(decision.strategy, ExecutionStrategy::Direct);
-    assert!(decision.confidence >= 0.5, "Confidence {} < 0.5", decision.confidence);
-    assert!(decision.confidence <= 1.0, "Confidence {} > 1.0", decision.confidence);
+    assert!(
+        decision.confidence >= 0.5,
+        "Confidence {} < 0.5",
+        decision.confidence
+    );
+    assert!(
+        decision.confidence <= 1.0,
+        "Confidence {} > 1.0",
+        decision.confidence
+    );
     assert_eq!(decision.estimated_stories, 1);
     assert_eq!(decision.estimated_features, 1);
     assert!(decision.estimated_duration_hours <= 1.0);
@@ -71,7 +77,10 @@ fn test_hybrid_auto_strategy_feature_implementation() {
         None,
     );
     assert!(
-        matches!(decision.strategy, ExecutionStrategy::HybridAuto | ExecutionStrategy::HybridWorktree),
+        matches!(
+            decision.strategy,
+            ExecutionStrategy::HybridAuto | ExecutionStrategy::HybridWorktree
+        ),
         "Expected HybridAuto or HybridWorktree, got {:?}",
         decision.strategy
     );
@@ -86,7 +95,10 @@ fn test_hybrid_auto_multi_step_process() {
         None,
     );
     assert!(
-        matches!(decision.strategy, ExecutionStrategy::HybridAuto | ExecutionStrategy::HybridWorktree),
+        matches!(
+            decision.strategy,
+            ExecutionStrategy::HybridAuto | ExecutionStrategy::HybridWorktree
+        ),
         "Expected Hybrid strategy, got {:?}",
         decision.strategy
     );
@@ -99,7 +111,10 @@ fn test_hybrid_auto_refactoring_task() {
         None,
     );
     assert!(
-        matches!(decision.strategy, ExecutionStrategy::HybridAuto | ExecutionStrategy::HybridWorktree),
+        matches!(
+            decision.strategy,
+            ExecutionStrategy::HybridAuto | ExecutionStrategy::HybridWorktree
+        ),
         "Expected Hybrid strategy, got {:?}",
         decision.strategy
     );
@@ -114,7 +129,10 @@ fn test_hybrid_worktree_high_risk() {
     );
     // High risk keywords: payment, billing, database schema, production, deploy, breaking change, security, authentication
     assert!(
-        matches!(decision.strategy, ExecutionStrategy::HybridWorktree | ExecutionStrategy::HybridAuto),
+        matches!(
+            decision.strategy,
+            ExecutionStrategy::HybridWorktree | ExecutionStrategy::HybridAuto
+        ),
         "Expected worktree/auto strategy due to risk keywords, got {:?}",
         decision.strategy
     );
@@ -127,7 +145,12 @@ fn test_hybrid_worktree_parallel_modules() {
         None,
     );
     assert!(
-        matches!(decision.strategy, ExecutionStrategy::HybridWorktree | ExecutionStrategy::HybridAuto | ExecutionStrategy::MegaPlan),
+        matches!(
+            decision.strategy,
+            ExecutionStrategy::HybridWorktree
+                | ExecutionStrategy::HybridAuto
+                | ExecutionStrategy::MegaPlan
+        ),
         "Expected worktree/auto/mega strategy for parallel keywords, got {:?}",
         decision.strategy
     );
@@ -204,11 +227,19 @@ fn test_single_word_description() {
 
 #[test]
 fn test_very_long_description_without_keywords() {
-    let filler: String = (0..250).map(|i| format!("word{}", i)).collect::<Vec<_>>().join(" ");
+    let filler: String = (0..250)
+        .map(|i| format!("word{}", i))
+        .collect::<Vec<_>>()
+        .join(" ");
     let decision = StrategyAnalyzer::analyze(&filler, None);
     // Long but no specific keywords -- should at least be hybrid due to length
     assert!(
-        matches!(decision.strategy, ExecutionStrategy::HybridAuto | ExecutionStrategy::HybridWorktree | ExecutionStrategy::MegaPlan),
+        matches!(
+            decision.strategy,
+            ExecutionStrategy::HybridAuto
+                | ExecutionStrategy::HybridWorktree
+                | ExecutionStrategy::MegaPlan
+        ),
         "Very long description should not be Direct, got {:?}",
         decision.strategy
     );
@@ -240,13 +271,14 @@ fn test_mixed_signals_direct_and_mega() {
 
 #[test]
 fn test_confidence_always_in_valid_range() {
+    let long_desc = "word ".repeat(300);
     let descriptions = vec![
         "",
         "fix bug",
         "implement authentication system with OAuth integration and database migration",
         "Build comprehensive distributed microservices platform with multiple features end to end system architecture",
         "a",
-        &"word ".repeat(300),
+        long_desc.as_str(),
     ];
 
     for desc in descriptions {
@@ -271,7 +303,9 @@ fn test_override_sets_confidence_to_one() {
     assert!((overridden.confidence - 1.0).abs() < f64::EPSILON);
     assert_eq!(overridden.strategy, ExecutionStrategy::MegaPlan);
     assert!(overridden.reasoning.contains("User override"));
-    assert!(overridden.complexity_indicators.contains(&"User override applied".to_string()));
+    assert!(overridden
+        .complexity_indicators
+        .contains(&"User override applied".to_string()));
 }
 
 // ============================================================================
@@ -293,10 +327,26 @@ fn test_dimension_scores_bounded_for_all_strategies() {
         let decision = StrategyAnalyzer::analyze(desc, None);
         let ds = &decision.dimension_scores;
 
-        assert!(ds.scope >= 0.0 && ds.scope <= 1.0, "Scope {} out of range", ds.scope);
-        assert!(ds.complexity >= 0.0 && ds.complexity <= 1.0, "Complexity {} out of range", ds.complexity);
-        assert!(ds.risk >= 0.0 && ds.risk <= 1.0, "Risk {} out of range", ds.risk);
-        assert!(ds.parallelization >= 0.0 && ds.parallelization <= 1.0, "Parallelization {} out of range", ds.parallelization);
+        assert!(
+            ds.scope >= 0.0 && ds.scope <= 1.0,
+            "Scope {} out of range",
+            ds.scope
+        );
+        assert!(
+            ds.complexity >= 0.0 && ds.complexity <= 1.0,
+            "Complexity {} out of range",
+            ds.complexity
+        );
+        assert!(
+            ds.risk >= 0.0 && ds.risk <= 1.0,
+            "Risk {} out of range",
+            ds.risk
+        );
+        assert!(
+            ds.parallelization >= 0.0 && ds.parallelization <= 1.0,
+            "Parallelization {} out of range",
+            ds.parallelization
+        );
     }
 }
 
@@ -353,13 +403,14 @@ fn test_large_codebase_context() {
         has_worktrees: false,
     };
 
-    let decision = StrategyAnalyzer::analyze(
-        "implement a new API endpoint with validation",
-        Some(&ctx),
-    );
+    let decision =
+        StrategyAnalyzer::analyze("implement a new API endpoint with validation", Some(&ctx));
 
     // Large codebase should boost hybrid
-    assert!(decision.complexity_indicators.iter().any(|i| i.contains("Large codebase")));
+    assert!(decision
+        .complexity_indicators
+        .iter()
+        .any(|i| i.contains("Large codebase")));
 }
 
 #[test]
@@ -375,7 +426,10 @@ fn test_worktree_context_noted() {
         Some(&ctx),
     );
 
-    assert!(decision.complexity_indicators.iter().any(|i| i.contains("worktree")));
+    assert!(decision
+        .complexity_indicators
+        .iter()
+        .any(|i| i.contains("worktree")));
 }
 
 // ============================================================================
@@ -399,8 +453,16 @@ fn test_strategy_labels_and_descriptions() {
     for strat in ExecutionStrategy::all() {
         let label = strat.label();
         let desc = strat.description();
-        assert!(!label.is_empty(), "Label should not be empty for {:?}", strat);
-        assert!(!desc.is_empty(), "Description should not be empty for {:?}", strat);
+        assert!(
+            !label.is_empty(),
+            "Label should not be empty for {:?}",
+            strat
+        );
+        assert!(
+            !desc.is_empty(),
+            "Description should not be empty for {:?}",
+            strat
+        );
     }
 }
 
@@ -408,7 +470,10 @@ fn test_strategy_labels_and_descriptions() {
 fn test_strategy_display_format() {
     assert_eq!(format!("{}", ExecutionStrategy::Direct), "direct");
     assert_eq!(format!("{}", ExecutionStrategy::HybridAuto), "hybrid_auto");
-    assert_eq!(format!("{}", ExecutionStrategy::HybridWorktree), "hybrid_worktree");
+    assert_eq!(
+        format!("{}", ExecutionStrategy::HybridWorktree),
+        "hybrid_worktree"
+    );
     assert_eq!(format!("{}", ExecutionStrategy::MegaPlan), "mega_plan");
 }
 
@@ -484,11 +549,18 @@ fn test_intent_classifier_task_detection() {
     for msg in tasks {
         let result = classifier.classify(msg);
         assert_eq!(
-            result.intent, Intent::Task,
+            result.intent,
+            Intent::Task,
             "Expected Task intent for '{}', got {:?}",
-            msg, result.intent
+            msg,
+            result.intent
         );
-        assert!(result.confidence >= 0.7, "Low confidence {} for '{}'", result.confidence, msg);
+        assert!(
+            result.confidence >= 0.7,
+            "Low confidence {} for '{}'",
+            result.confidence,
+            msg
+        );
     }
 }
 
@@ -507,9 +579,11 @@ fn test_intent_classifier_query_detection() {
     for msg in queries {
         let result = classifier.classify(msg);
         assert_eq!(
-            result.intent, Intent::Query,
+            result.intent,
+            Intent::Query,
             "Expected Query intent for '{}', got {:?}",
-            msg, result.intent
+            msg,
+            result.intent
         );
     }
 }
@@ -518,19 +592,16 @@ fn test_intent_classifier_query_detection() {
 fn test_intent_classifier_chat_detection() {
     let classifier = IntentClassifier::new();
 
-    let chats = vec![
-        "hello",
-        "thanks for the help",
-        "sounds good",
-        "yes",
-    ];
+    let chats = vec!["hello", "thanks for the help", "sounds good", "yes"];
 
     for msg in chats {
         let result = classifier.classify(msg);
         assert_eq!(
-            result.intent, Intent::Chat,
+            result.intent,
+            Intent::Chat,
             "Expected Chat intent for '{}', got {:?}",
-            msg, result.intent
+            msg,
+            result.intent
         );
     }
 }
@@ -589,7 +660,10 @@ fn test_intent_result_is_confident() {
 fn test_direct_strategy_has_recommendations() {
     let decision = StrategyAnalyzer::analyze("fix bug", None);
     assert!(!decision.recommendations.is_empty());
-    assert!(decision.recommendations.iter().any(|r| r.contains("directly")));
+    assert!(decision
+        .recommendations
+        .iter()
+        .any(|r| r.contains("directly")));
 }
 
 #[test]
@@ -609,6 +683,9 @@ fn test_mega_strategy_has_recommendations() {
     );
     assert!(!decision.recommendations.is_empty());
     if decision.strategy == ExecutionStrategy::MegaPlan {
-        assert!(decision.recommendations.iter().any(|r| r.contains("feature") || r.contains("worktree")));
+        assert!(decision
+            .recommendations
+            .iter()
+            .any(|r| r.contains("feature") || r.contains("worktree")));
     }
 }

@@ -91,10 +91,22 @@ mod tests {
 
     #[test]
     fn test_sort_by_parsing() {
-        assert!(matches!(ProjectSortBy::from_str("name"), ProjectSortBy::Name));
-        assert!(matches!(ProjectSortBy::from_str("sessions"), ProjectSortBy::SessionCount));
-        assert!(matches!(ProjectSortBy::from_str("recent"), ProjectSortBy::RecentActivity));
-        assert!(matches!(ProjectSortBy::from_str("unknown"), ProjectSortBy::RecentActivity));
+        assert!(matches!(
+            ProjectSortBy::from_str("name"),
+            ProjectSortBy::Name
+        ));
+        assert!(matches!(
+            ProjectSortBy::from_str("sessions"),
+            ProjectSortBy::SessionCount
+        ));
+        assert!(matches!(
+            ProjectSortBy::from_str("recent"),
+            ProjectSortBy::RecentActivity
+        ));
+        assert!(matches!(
+            ProjectSortBy::from_str("unknown"),
+            ProjectSortBy::RecentActivity
+        ));
     }
 
     #[test]

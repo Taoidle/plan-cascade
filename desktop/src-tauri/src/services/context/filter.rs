@@ -192,7 +192,10 @@ impl StoryContext {
         let mut context = String::new();
 
         // Story info
-        context.push_str(&format!("## Story: {} - {}\n\n", self.story_id, self.story_title));
+        context.push_str(&format!(
+            "## Story: {} - {}\n\n",
+            self.story_id, self.story_title
+        ));
         if !self.story_description.is_empty() {
             context.push_str(&format!("{}\n\n", self.story_description));
         }
@@ -298,17 +301,27 @@ impl ContextFilter {
         // codex: planning focused
         agent_tags.insert(
             "codex".to_string(),
-            [ContextTag::Arch, ContextTag::Api, ContextTag::Logic, ContextTag::Infra]
-                .into_iter()
-                .collect(),
+            [
+                ContextTag::Arch,
+                ContextTag::Api,
+                ContextTag::Logic,
+                ContextTag::Infra,
+            ]
+            .into_iter()
+            .collect(),
         );
 
         // aider: refactoring focused
         agent_tags.insert(
             "aider".to_string(),
-            [ContextTag::Arch, ContextTag::Logic, ContextTag::Perf, ContextTag::Config]
-                .into_iter()
-                .collect(),
+            [
+                ContextTag::Arch,
+                ContextTag::Logic,
+                ContextTag::Perf,
+                ContextTag::Config,
+            ]
+            .into_iter()
+            .collect(),
         );
 
         Self {
@@ -362,23 +375,32 @@ impl ContextFilter {
     /// Returns tags that are relevant to this phase
     pub fn filter_for_phase(&self, phase: Phase) -> HashSet<ContextTag> {
         match phase {
-            Phase::Planning => {
-                [ContextTag::Arch, ContextTag::Api, ContextTag::Logic, ContextTag::Infra]
-                    .into_iter()
-                    .collect()
-            }
+            Phase::Planning => [
+                ContextTag::Arch,
+                ContextTag::Api,
+                ContextTag::Logic,
+                ContextTag::Infra,
+            ]
+            .into_iter()
+            .collect(),
             Phase::Implementation => ContextTag::all().into_iter().collect(),
             Phase::Retry => ContextTag::all().into_iter().collect(),
-            Phase::Refactor => {
-                [ContextTag::Arch, ContextTag::Logic, ContextTag::Perf, ContextTag::Config]
-                    .into_iter()
-                    .collect()
-            }
-            Phase::Review => {
-                [ContextTag::Security, ContextTag::Perf, ContextTag::Test, ContextTag::Api]
-                    .into_iter()
-                    .collect()
-            }
+            Phase::Refactor => [
+                ContextTag::Arch,
+                ContextTag::Logic,
+                ContextTag::Perf,
+                ContextTag::Config,
+            ]
+            .into_iter()
+            .collect(),
+            Phase::Review => [
+                ContextTag::Security,
+                ContextTag::Perf,
+                ContextTag::Test,
+                ContextTag::Api,
+            ]
+            .into_iter()
+            .collect(),
         }
     }
 
@@ -452,9 +474,9 @@ impl ContextFilter {
 
         for line in findings_content.lines() {
             // Check for tag at start of line
-            let tag = ContextTag::all().into_iter().find(|t| {
-                line.to_uppercase().starts_with(&t.to_string())
-            });
+            let tag = ContextTag::all()
+                .into_iter()
+                .find(|t| line.to_uppercase().starts_with(&t.to_string()));
 
             if let Some(new_tag) = tag {
                 // Save previous section if relevant
@@ -502,11 +524,9 @@ impl ContextFilter {
         feature_id: Option<&str>,
         findings_content: Option<&str>,
     ) -> Result<StoryContext, ContextError> {
-        let agent = self.phase_manager.get_agent_for_story(
-            phase,
-            story.story_type,
-            story.agent.as_deref(),
-        );
+        let agent =
+            self.phase_manager
+                .get_agent_for_story(phase, story.story_type, story.agent.as_deref());
 
         let mut context = StoryContext::new(&story.id, &story.title);
         context.story_description = story.description.clone();
@@ -521,7 +541,8 @@ impl ContextFilter {
             if let Some(findings) = findings_content {
                 let agent_tags = self.filter_for_agent(&agent);
                 let phase_tags = self.filter_for_phase(phase);
-                let combined_tags: HashSet<_> = agent_tags.intersection(&phase_tags).copied().collect();
+                let combined_tags: HashSet<_> =
+                    agent_tags.intersection(&phase_tags).copied().collect();
                 context.findings = self.filter_findings(findings, &combined_tags);
             }
         }
@@ -550,7 +571,8 @@ impl ContextFilter {
 
     /// Register custom agent tag filters
     pub fn register_agent_tags(&mut self, agent: impl Into<String>, tags: Vec<ContextTag>) {
-        self.agent_tags.insert(agent.into(), tags.into_iter().collect());
+        self.agent_tags
+            .insert(agent.into(), tags.into_iter().collect());
     }
 }
 

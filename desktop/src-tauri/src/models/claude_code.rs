@@ -199,8 +199,8 @@ mod tests {
 
     #[test]
     fn test_session_with_model() {
-        let session = ClaudeCodeSession::new("sess-123", "/project")
-            .with_model("claude-sonnet-4-20250514");
+        let session =
+            ClaudeCodeSession::new("sess-123", "/project").with_model("claude-sonnet-4-20250514");
         assert_eq!(session.model, Some("claude-sonnet-4-20250514".to_string()));
     }
 
@@ -217,7 +217,10 @@ mod tests {
 
         session.mark_error("Something went wrong");
         assert_eq!(session.state, SessionState::Error);
-        assert_eq!(session.error_message, Some("Something went wrong".to_string()));
+        assert_eq!(
+            session.error_message,
+            Some("Something went wrong".to_string())
+        );
     }
 
     #[test]

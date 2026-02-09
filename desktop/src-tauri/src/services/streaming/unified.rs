@@ -10,9 +10,12 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UnifiedStreamEvent {
     /// Text content delta from the model
-    TextDelta {
-        content: String,
-    },
+    TextDelta { content: String },
+
+    /// Replace previously streamed text with cleaned version.
+    /// Used after prompt-fallback tool call extraction to remove raw tool call
+    /// XML/blocks that were streamed before parsing.
+    TextReplace { content: String },
 
     /// Start of a thinking/reasoning block
     ThinkingStart {
@@ -40,6 +43,14 @@ pub enum UnifiedStreamEvent {
         tool_name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         arguments: Option<String>,
+    },
+
+    /// Tool call complete with accumulated arguments
+    ToolComplete {
+        tool_id: String,
+        tool_name: String,
+        /// Complete JSON string of tool arguments
+        arguments: String,
     },
 
     /// Tool execution result
@@ -77,9 +88,27 @@ pub enum UnifiedStreamEvent {
     },
 
     // ========================================================================
+    // Sub-agent events (for Task tool)
+    // ========================================================================
+    /// A sub-agent task has started
+    SubAgentStart {
+        sub_agent_id: String,
+        /// Truncated prompt summary
+        prompt: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        task_type: Option<String>,
+    },
+
+    /// A sub-agent task has completed
+    SubAgentEnd {
+        sub_agent_id: String,
+        success: bool,
+        usage: serde_json::Value,
+    },
+
+    // ========================================================================
     // Session-based execution events (for standalone mode)
     // ========================================================================
-
     /// Session progress update
     SessionProgress {
         session_id: String,
@@ -118,6 +147,16 @@ pub enum UnifiedStreamEvent {
         story_id: String,
         passed: bool,
         summary: serde_json::Value,
+    },
+
+    /// Context compaction occurred (messages were summarized to reduce context size)
+    ContextCompaction {
+        /// Number of messages that were compacted into a summary
+        messages_compacted: usize,
+        /// Number of recent messages preserved as-is
+        messages_preserved: usize,
+        /// Token count of the compaction summary
+        compaction_tokens: u32,
     },
 }
 

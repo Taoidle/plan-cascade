@@ -201,7 +201,12 @@ pub struct FileDiff {
 
 impl FileDiff {
     /// Create a new file diff for an added file
-    pub fn added(path: impl Into<String>, hash: impl Into<String>, size: u64, is_binary: bool) -> Self {
+    pub fn added(
+        path: impl Into<String>,
+        hash: impl Into<String>,
+        size: u64,
+        is_binary: bool,
+    ) -> Self {
         Self {
             path: path.into(),
             change_type: FileChangeType::Added,
@@ -217,7 +222,12 @@ impl FileDiff {
     }
 
     /// Create a new file diff for a deleted file
-    pub fn deleted(path: impl Into<String>, hash: impl Into<String>, size: u64, is_binary: bool) -> Self {
+    pub fn deleted(
+        path: impl Into<String>,
+        hash: impl Into<String>,
+        size: u64,
+        is_binary: bool,
+    ) -> Self {
         Self {
             path: path.into(),
             change_type: FileChangeType::Deleted,
@@ -256,7 +266,12 @@ impl FileDiff {
     }
 
     /// Set the unified diff content
-    pub fn with_diff_content(mut self, content: impl Into<String>, added: u32, removed: u32) -> Self {
+    pub fn with_diff_content(
+        mut self,
+        content: impl Into<String>,
+        added: u32,
+        removed: u32,
+    ) -> Self {
         self.diff_content = Some(content.into());
         self.lines_added = added;
         self.lines_removed = removed;
@@ -299,7 +314,8 @@ impl CheckpointDiff {
 
     /// Calculate summary after all diffs are added
     pub fn calculate_summary(&mut self) {
-        self.total_files_changed = (self.added_files.len() + self.modified_files.len() + self.deleted_files.len()) as u32;
+        self.total_files_changed =
+            (self.added_files.len() + self.modified_files.len() + self.deleted_files.len()) as u32;
 
         let mut lines_added = 0u32;
         let mut lines_removed = 0u32;
@@ -424,22 +440,22 @@ mod tests {
             .with_description("After first change");
 
         assert_eq!(checkpoint.parent_id, Some("cp1".to_string()));
-        assert_eq!(checkpoint.description, Some("After first change".to_string()));
+        assert_eq!(
+            checkpoint.description,
+            Some("After first change".to_string())
+        );
     }
 
     #[test]
     fn test_checkpoint_with_files() {
-        let files = vec![
-            FileSnapshot {
-                path: "src/main.rs".to_string(),
-                hash: "abc123".to_string(),
-                size: 1024,
-                is_binary: false,
-            },
-        ];
+        let files = vec![FileSnapshot {
+            path: "src/main.rs".to_string(),
+            hash: "abc123".to_string(),
+            size: 1024,
+            is_binary: false,
+        }];
 
-        let checkpoint = Checkpoint::new("cp1", "sess1", "Test")
-            .with_files(files.clone());
+        let checkpoint = Checkpoint::new("cp1", "sess1", "Test").with_files(files.clone());
 
         assert_eq!(checkpoint.files_snapshot.len(), 1);
         assert_eq!(checkpoint.files_snapshot[0].path, "src/main.rs");
@@ -482,7 +498,9 @@ mod tests {
         assert!(metadata.checkpoints.is_empty());
         assert!(metadata.branches.is_empty());
 
-        metadata.checkpoints.push(Checkpoint::new("cp1", "sess1", "First"));
+        metadata
+            .checkpoints
+            .push(Checkpoint::new("cp1", "sess1", "First"));
         assert_eq!(metadata.checkpoints.len(), 1);
     }
 
@@ -503,8 +521,7 @@ mod tests {
 
     #[test]
     fn test_branch_serialization() {
-        let branch = CheckpointBranch::new("br1", "feature", "cp1")
-            .with_description("Test branch");
+        let branch = CheckpointBranch::new("br1", "feature", "cp1").with_description("Test branch");
 
         let json = serde_json::to_string(&branch).unwrap();
         let parsed: CheckpointBranch = serde_json::from_str(&json).unwrap();
@@ -543,8 +560,11 @@ mod tests {
 
     #[test]
     fn test_file_diff_with_content() {
-        let diff = FileDiff::modified("file.txt", "h1", "h2", 10, 20, false)
-            .with_diff_content("@@ -1 +1 @@\n-old\n+new", 1, 1);
+        let diff = FileDiff::modified("file.txt", "h1", "h2", 10, 20, false).with_diff_content(
+            "@@ -1 +1 @@\n-old\n+new",
+            1,
+            1,
+        );
 
         assert!(diff.diff_content.is_some());
         assert_eq!(diff.lines_added, 1);
@@ -554,12 +574,18 @@ mod tests {
     #[test]
     fn test_checkpoint_diff_summary() {
         let mut diff = CheckpointDiff::new("cp1", "cp2");
-        diff.added_files.push(FileDiff::added("a.txt", "h1", 100, false)
-            .with_diff_content("+line1\n+line2", 2, 0));
-        diff.modified_files.push(FileDiff::modified("b.txt", "h1", "h2", 50, 60, false)
-            .with_diff_content("-old\n+new", 1, 1));
-        diff.deleted_files.push(FileDiff::deleted("c.txt", "h3", 30, false)
-            .with_diff_content("-removed", 0, 1));
+        diff.added_files.push(
+            FileDiff::added("a.txt", "h1", 100, false).with_diff_content("+line1\n+line2", 2, 0),
+        );
+        diff.modified_files.push(
+            FileDiff::modified("b.txt", "h1", "h2", 50, 60, false).with_diff_content(
+                "-old\n+new",
+                1,
+                1,
+            ),
+        );
+        diff.deleted_files
+            .push(FileDiff::deleted("c.txt", "h3", 30, false).with_diff_content("-removed", 0, 1));
 
         diff.calculate_summary();
 
@@ -584,7 +610,8 @@ mod tests {
     #[test]
     fn test_checkpoint_diff_serialization() {
         let mut diff = CheckpointDiff::new("cp1", "cp2");
-        diff.added_files.push(FileDiff::added("new.txt", "hash", 50, false));
+        diff.added_files
+            .push(FileDiff::added("new.txt", "hash", 50, false));
         diff.calculate_summary();
 
         let json = serde_json::to_string(&diff).unwrap();

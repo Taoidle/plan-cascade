@@ -4,4 +4,4 @@
 
 mod filter;
 
-pub use filter::{ContextFilter, ContextFilterConfig, ContextTag, StoryContext, ContextError};
+pub use filter::{ContextError, ContextFilter, ContextFilterConfig, ContextTag, StoryContext};

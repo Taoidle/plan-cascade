@@ -31,7 +31,10 @@ impl ConfigService {
             default_config
         };
 
-        Ok(Self { config_path, config })
+        Ok(Self {
+            config_path,
+            config,
+        })
     }
 
     /// Load configuration from a file

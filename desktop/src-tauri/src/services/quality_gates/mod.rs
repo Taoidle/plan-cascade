@@ -4,9 +4,9 @@
 //! Supports Node.js, Rust, Python, and Go projects with appropriate validators.
 
 mod detector;
-mod validators;
 mod runner;
+mod validators;
 
 pub use detector::*;
-pub use validators::*;
 pub use runner::*;
+pub use validators::*;

@@ -5,9 +5,7 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, ProviderConfig, ToolDefinition,
-};
+use super::types::{LlmError, LlmResponse, LlmResult, Message, ProviderConfig, ToolDefinition};
 use crate::services::streaming::UnifiedStreamEvent;
 
 /// Trait that all LLM providers must implement.
@@ -29,6 +27,19 @@ pub trait LlmProvider: Send + Sync {
 
     /// Returns whether this provider supports tool calling.
     fn supports_tools(&self) -> bool;
+
+    /// Returns whether this provider supports multimodal content (images).
+    fn supports_multimodal(&self) -> bool {
+        false // Default: text-only
+    }
+
+    /// Returns the model's context window size in tokens.
+    ///
+    /// Used to derive token budgets for sub-agents. Providers should override
+    /// this based on the model name. Default: 128,000.
+    fn context_window(&self) -> u32 {
+        128_000
+    }
 
     /// Send a message and get a complete response.
     ///

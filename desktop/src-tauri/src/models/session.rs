@@ -27,7 +27,11 @@ pub struct Session {
 
 impl Session {
     /// Create a new session with minimal info
-    pub fn new(id: impl Into<String>, project_id: impl Into<String>, file_path: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        project_id: impl Into<String>,
+        file_path: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             project_id: project_id.into(),

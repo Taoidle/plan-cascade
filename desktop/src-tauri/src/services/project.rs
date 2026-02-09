@@ -29,8 +29,7 @@ impl ProjectService {
 
         let mut projects = Vec::new();
 
-        let entries = fs::read_dir(&projects_dir)
-            .map_err(|e| AppError::Io(e))?;
+        let entries = fs::read_dir(&projects_dir).map_err(|e| AppError::Io(e))?;
 
         for entry in entries.flatten() {
             let path = entry.path();

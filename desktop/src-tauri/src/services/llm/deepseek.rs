@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolDefinition, UsageStats,
+    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
+    StopReason, ToolCall, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::DeepSeekAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -35,10 +35,7 @@ impl DeepSeekProvider {
 
     /// Get the API base URL
     fn base_url(&self) -> &str {
-        self.config
-            .base_url
-            .as_deref()
-            .unwrap_or(DEEPSEEK_API_URL)
+        self.config.base_url.as_deref().unwrap_or(DEEPSEEK_API_URL)
     }
 
     /// Check if model supports thinking (R1 models)
@@ -93,10 +90,8 @@ impl DeepSeekProvider {
 
         // Add tools if provided (DeepSeek uses OpenAI-compatible format)
         if !tools.is_empty() {
-            let api_tools: Vec<serde_json::Value> = tools
-                .iter()
-                .map(|t| self.tool_to_deepseek(t))
-                .collect();
+            let api_tools: Vec<serde_json::Value> =
+                tools.iter().map(|t| self.tool_to_deepseek(t)).collect();
             body["tools"] = serde_json::json!(api_tools);
         }
 
@@ -112,7 +107,10 @@ impl DeepSeekProvider {
         };
 
         // Check for tool results
-        let has_tool_results = message.content.iter().any(|c| matches!(c, MessageContent::ToolResult { .. }));
+        let has_tool_results = message
+            .content
+            .iter()
+            .any(|c| matches!(c, MessageContent::ToolResult { .. }));
 
         if has_tool_results {
             let mut result_msg = serde_json::json!({
@@ -120,7 +118,12 @@ impl DeepSeekProvider {
             });
 
             for content in &message.content {
-                if let MessageContent::ToolResult { tool_use_id, content, .. } = content {
+                if let MessageContent::ToolResult {
+                    tool_use_id,
+                    content,
+                    ..
+                } = content
+                {
                     result_msg["tool_call_id"] = serde_json::json!(tool_use_id);
                     result_msg["content"] = serde_json::json!(content);
                     break;
@@ -131,7 +134,10 @@ impl DeepSeekProvider {
         }
 
         // Check for tool calls
-        let has_tool_calls = message.content.iter().any(|c| matches!(c, MessageContent::ToolUse { .. }));
+        let has_tool_calls = message
+            .content
+            .iter()
+            .any(|c| matches!(c, MessageContent::ToolUse { .. }));
 
         if has_tool_calls {
             let tool_calls: Vec<serde_json::Value> = message
@@ -229,9 +235,9 @@ impl DeepSeekProvider {
 
                 if let Some(tcs) = &msg.tool_calls {
                     for tc in tcs {
-                        let arguments: serde_json::Value = serde_json::from_str(
-                            &tc.function.arguments
-                        ).unwrap_or(serde_json::Value::Null);
+                        let arguments: serde_json::Value =
+                            serde_json::from_str(&tc.function.arguments)
+                                .unwrap_or(serde_json::Value::Null);
 
                         tool_calls.push(ToolCall {
                             id: tc.id.clone(),
@@ -248,13 +254,17 @@ impl DeepSeekProvider {
             .map(|r| StopReason::from(r.as_str()))
             .unwrap_or(StopReason::EndTurn);
 
-        let usage = response.usage.as_ref().map(|u| UsageStats {
-            input_tokens: u.prompt_tokens,
-            output_tokens: u.completion_tokens,
-            thinking_tokens: None,
-            cache_read_tokens: None,
-            cache_creation_tokens: None,
-        }).unwrap_or_default();
+        let usage = response
+            .usage
+            .as_ref()
+            .map(|u| UsageStats {
+                input_tokens: u.prompt_tokens,
+                output_tokens: u.completion_tokens,
+                thinking_tokens: None,
+                cache_read_tokens: None,
+                cache_creation_tokens: None,
+            })
+            .unwrap_or_default();
 
         LlmResponse {
             content,
@@ -262,14 +272,24 @@ impl DeepSeekProvider {
             tool_calls,
             stop_reason,
             usage,
-            model: response.model.clone().unwrap_or_else(|| self.config.model.clone()),
+            model: response
+                .model
+                .clone()
+                .unwrap_or_else(|| self.config.model.clone()),
         }
     }
 
     /// Extract thinking content from <think> tags
     fn extract_thinking(&self, content: &str) -> (Option<String>, Option<String>) {
         if !self.model_supports_thinking() {
-            return (None, if content.is_empty() { None } else { Some(content.to_string()) });
+            return (
+                None,
+                if content.is_empty() {
+                    None
+                } else {
+                    Some(content.to_string())
+                },
+            );
         }
 
         let mut thinking = String::new();
@@ -312,8 +332,16 @@ impl DeepSeekProvider {
             text.push_str(&buffer);
         }
 
-        let thinking_result = if thinking.is_empty() { None } else { Some(thinking.trim().to_string()) };
-        let text_result = if text.is_empty() { None } else { Some(text.trim().to_string()) };
+        let thinking_result = if thinking.is_empty() {
+            None
+        } else {
+            Some(thinking.trim().to_string())
+        };
+        let text_result = if text.is_empty() {
+            None
+        } else {
+            Some(text.trim().to_string())
+        };
 
         (thinking_result, text_result)
     }
@@ -335,6 +363,15 @@ impl LlmProvider for DeepSeekProvider {
 
     fn supports_tools(&self) -> bool {
         true
+    }
+
+    fn context_window(&self) -> u32 {
+        let model = self.config.model.to_lowercase();
+        if model.contains("v2.5") {
+            128_000 // DeepSeek-V2.5: 128k context
+        } else {
+            64_000 // DeepSeek-V3, DeepSeek-R1, deepseek-chat, deepseek-reasoner: 64k
+        }
     }
 
     async fn send_message(
@@ -419,7 +456,7 @@ impl LlmProvider for DeepSeekProvider {
         let mut adapter = DeepSeekAdapter::new(&self.config.model);
         let mut accumulated_content = String::new();
         let mut accumulated_thinking = String::new();
-        let tool_calls = Vec::new();
+        let mut tool_calls = Vec::new();
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
 
@@ -454,6 +491,19 @@ impl LlmProvider for DeepSeekProvider {
                                 UnifiedStreamEvent::ThinkingDelta { content, .. } => {
                                     accumulated_thinking.push_str(content);
                                 }
+                                UnifiedStreamEvent::ToolComplete {
+                                    tool_id,
+                                    tool_name,
+                                    arguments,
+                                } => {
+                                    if let Ok(input) = serde_json::from_str(arguments) {
+                                        tool_calls.push(ToolCall {
+                                            id: tool_id.clone(),
+                                            name: tool_name.clone(),
+                                            arguments: input,
+                                        });
+                                    }
+                                }
                                 UnifiedStreamEvent::Usage {
                                     input_tokens,
                                     output_tokens,
@@ -470,8 +520,16 @@ impl LlmProvider for DeepSeekProvider {
                                 _ => {}
                             }
 
-                            // Forward event to channel
-                            let _ = tx.send(event).await;
+                            // Forward streaming events but suppress Complete/Usage —
+                            // those are internal signals; the orchestrator emits its own
+                            // Complete after tool calls are done.
+                            if !matches!(
+                                &event,
+                                UnifiedStreamEvent::Complete { .. }
+                                    | UnifiedStreamEvent::Usage { .. }
+                            ) {
+                                let _ = tx.send(event).await;
+                            }
                         }
                     }
                     Err(e) => {
@@ -626,7 +684,8 @@ mod tests {
         };
         let provider = DeepSeekProvider::new(config);
 
-        let (thinking, text) = provider.extract_thinking("<think>I need to think</think>Here is the answer");
+        let (thinking, text) =
+            provider.extract_thinking("<think>I need to think</think>Here is the answer");
         assert_eq!(thinking, Some("I need to think".to_string()));
         assert_eq!(text, Some("Here is the answer".to_string()));
 

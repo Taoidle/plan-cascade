@@ -85,7 +85,10 @@ impl IntentClassifier {
     pub fn new() -> Self {
         Self {
             task_patterns: Self::compile_patterns(&[
-                (r"(?i)(implement|create|add|modify|delete|fix|refactor|optimize)\s+", 0.85),
+                (
+                    r"(?i)(implement|create|add|modify|delete|fix|refactor|optimize)\s+",
+                    0.85,
+                ),
                 (r"(?i)(build|make|write)\s+(a|an|the)\s+", 0.80),
                 (r"(?i)(change|update|replace)\s+.{0,30}\s+(to|with)", 0.80),
                 (r"(?i)please\s+(implement|create|add|fix|build)", 0.85),
@@ -95,7 +98,10 @@ impl IntentClassifier {
                 (r"(?i)(integrate|connect|hook up)\s+", 0.80),
             ]),
             query_patterns: Self::compile_patterns(&[
-                (r"(?i)(what|where|which|how|why)\s+(is|are|does|do|did|can|should)", 0.85),
+                (
+                    r"(?i)(what|where|which|how|why)\s+(is|are|does|do|did|can|should)",
+                    0.85,
+                ),
                 (r"(?i)(explain|describe|tell me about)", 0.85),
                 (r"(?i)(show|list|find)\s+(me\s+)?(the|all|any)", 0.75),
                 (r"(?i)(analyze|inspect|review|check)\s+", 0.70),
@@ -135,10 +141,7 @@ impl IntentClassifier {
 
         // Check for expert mode indicators
         let suggested_mode = if best_intent == Intent::Task
-            && self
-                .expert_patterns
-                .iter()
-                .any(|p| p.is_match(message))
+            && self.expert_patterns.iter().any(|p| p.is_match(message))
         {
             "expert"
         } else {
@@ -184,10 +187,7 @@ impl IntentClassifier {
     }
 
     fn compile_regex_list(patterns: &[&str]) -> Vec<Regex> {
-        patterns
-            .iter()
-            .filter_map(|p| Regex::new(p).ok())
-            .collect()
+        patterns.iter().filter_map(|p| Regex::new(p).ok()).collect()
     }
 
     fn match_patterns(&self, message: &str, patterns: &[PatternEntry]) -> f64 {

@@ -14,4 +14,4 @@ pub mod state;
 
 pub use compiler::{CompileOptions, SpecCompiler};
 pub use interview::{InterviewManager, InterviewPhase, InterviewQuestion};
-pub use state::{InterviewStateManager, PersistedInterviewState, InterviewTurn};
+pub use state::{InterviewStateManager, InterviewTurn, PersistedInterviewState};

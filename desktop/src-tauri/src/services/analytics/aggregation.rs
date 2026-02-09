@@ -4,8 +4,8 @@
 //! Supports flexible filtering and grouping options.
 
 use crate::models::analytics::{
-    AggregationPeriod, DashboardSummary, ModelUsage, ProjectUsage, TimeSeriesPoint,
-    UsageFilter, UsageStats,
+    AggregationPeriod, DashboardSummary, ModelUsage, ProjectUsage, TimeSeriesPoint, UsageFilter,
+    UsageStats,
 };
 use crate::utils::error::{AppError, AppResult};
 
@@ -26,7 +26,7 @@ impl AnalyticsService {
                     SUM(output_tokens) as total_output,
                     SUM(cost_microdollars) as total_cost,
                     COUNT(*) as request_count
-             FROM usage_records WHERE 1=1"
+             FROM usage_records WHERE 1=1",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -34,43 +34,45 @@ impl AnalyticsService {
 
         sql.push_str(" GROUP BY model_name, provider ORDER BY total_cost DESC");
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         let mut stmt = conn.prepare(&sql)?;
-        let results = stmt.query_map(params_refs.as_slice(), |row| {
-            let model_name: String = row.get(0)?;
-            let provider: String = row.get(1)?;
-            let total_input: i64 = row.get(2)?;
-            let total_output: i64 = row.get(3)?;
-            let total_cost: i64 = row.get(4)?;
-            let request_count: i64 = row.get(5)?;
+        let results = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let model_name: String = row.get(0)?;
+                let provider: String = row.get(1)?;
+                let total_input: i64 = row.get(2)?;
+                let total_output: i64 = row.get(3)?;
+                let total_cost: i64 = row.get(4)?;
+                let request_count: i64 = row.get(5)?;
 
-            let avg_tokens = if request_count > 0 {
-                (total_input + total_output) as f64 / request_count as f64
-            } else {
-                0.0
-            };
-            let avg_cost = if request_count > 0 {
-                total_cost as f64 / request_count as f64
-            } else {
-                0.0
-            };
+                let avg_tokens = if request_count > 0 {
+                    (total_input + total_output) as f64 / request_count as f64
+                } else {
+                    0.0
+                };
+                let avg_cost = if request_count > 0 {
+                    total_cost as f64 / request_count as f64
+                } else {
+                    0.0
+                };
 
-            Ok(ModelUsage {
-                model_name,
-                provider,
-                stats: UsageStats {
-                    total_input_tokens: total_input,
-                    total_output_tokens: total_output,
-                    total_cost_microdollars: total_cost,
-                    request_count,
-                    avg_tokens_per_request: avg_tokens,
-                    avg_cost_per_request: avg_cost,
-                },
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+                Ok(ModelUsage {
+                    model_name,
+                    provider,
+                    stats: UsageStats {
+                        total_input_tokens: total_input,
+                        total_output_tokens: total_output,
+                        total_cost_microdollars: total_cost,
+                        request_count,
+                        avg_tokens_per_request: avg_tokens,
+                        avg_cost_per_request: avg_cost,
+                    },
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(results)
     }
@@ -89,7 +91,7 @@ impl AnalyticsService {
                     SUM(output_tokens) as total_output,
                     SUM(cost_microdollars) as total_cost,
                     COUNT(*) as request_count
-             FROM usage_records WHERE project_id IS NOT NULL"
+             FROM usage_records WHERE project_id IS NOT NULL",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -97,42 +99,44 @@ impl AnalyticsService {
 
         sql.push_str(" GROUP BY project_id ORDER BY total_cost DESC");
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         let mut stmt = conn.prepare(&sql)?;
-        let results = stmt.query_map(params_refs.as_slice(), |row| {
-            let project_id: String = row.get(0)?;
-            let total_input: i64 = row.get(1)?;
-            let total_output: i64 = row.get(2)?;
-            let total_cost: i64 = row.get(3)?;
-            let request_count: i64 = row.get(4)?;
+        let results = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let project_id: String = row.get(0)?;
+                let total_input: i64 = row.get(1)?;
+                let total_output: i64 = row.get(2)?;
+                let total_cost: i64 = row.get(3)?;
+                let request_count: i64 = row.get(4)?;
 
-            let avg_tokens = if request_count > 0 {
-                (total_input + total_output) as f64 / request_count as f64
-            } else {
-                0.0
-            };
-            let avg_cost = if request_count > 0 {
-                total_cost as f64 / request_count as f64
-            } else {
-                0.0
-            };
+                let avg_tokens = if request_count > 0 {
+                    (total_input + total_output) as f64 / request_count as f64
+                } else {
+                    0.0
+                };
+                let avg_cost = if request_count > 0 {
+                    total_cost as f64 / request_count as f64
+                } else {
+                    0.0
+                };
 
-            Ok(ProjectUsage {
-                project_id,
-                project_name: None, // Would need to join with projects table
-                stats: UsageStats {
-                    total_input_tokens: total_input,
-                    total_output_tokens: total_output,
-                    total_cost_microdollars: total_cost,
-                    request_count,
-                    avg_tokens_per_request: avg_tokens,
-                    avg_cost_per_request: avg_cost,
-                },
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+                Ok(ProjectUsage {
+                    project_id,
+                    project_name: None, // Would need to join with projects table
+                    stats: UsageStats {
+                        total_input_tokens: total_input,
+                        total_output_tokens: total_output,
+                        total_cost_microdollars: total_cost,
+                        request_count,
+                        avg_tokens_per_request: avg_tokens,
+                        avg_cost_per_request: avg_cost,
+                    },
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(results)
     }
@@ -167,43 +171,45 @@ impl AnalyticsService {
 
         sql.push_str(" GROUP BY period ORDER BY period_start ASC");
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         let mut stmt = conn.prepare(&sql)?;
-        let results = stmt.query_map(params_refs.as_slice(), |row| {
-            let period_formatted: String = row.get(0)?;
-            let timestamp: i64 = row.get(1)?;
-            let total_input: i64 = row.get(2)?;
-            let total_output: i64 = row.get(3)?;
-            let total_cost: i64 = row.get(4)?;
-            let request_count: i64 = row.get(5)?;
+        let results = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let period_formatted: String = row.get(0)?;
+                let timestamp: i64 = row.get(1)?;
+                let total_input: i64 = row.get(2)?;
+                let total_output: i64 = row.get(3)?;
+                let total_cost: i64 = row.get(4)?;
+                let request_count: i64 = row.get(5)?;
 
-            let avg_tokens = if request_count > 0 {
-                (total_input + total_output) as f64 / request_count as f64
-            } else {
-                0.0
-            };
-            let avg_cost = if request_count > 0 {
-                total_cost as f64 / request_count as f64
-            } else {
-                0.0
-            };
+                let avg_tokens = if request_count > 0 {
+                    (total_input + total_output) as f64 / request_count as f64
+                } else {
+                    0.0
+                };
+                let avg_cost = if request_count > 0 {
+                    total_cost as f64 / request_count as f64
+                } else {
+                    0.0
+                };
 
-            Ok(TimeSeriesPoint {
-                timestamp,
-                timestamp_formatted: period_formatted,
-                stats: UsageStats {
-                    total_input_tokens: total_input,
-                    total_output_tokens: total_output,
-                    total_cost_microdollars: total_cost,
-                    request_count,
-                    avg_tokens_per_request: avg_tokens,
-                    avg_cost_per_request: avg_cost,
-                },
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+                Ok(TimeSeriesPoint {
+                    timestamp,
+                    timestamp_formatted: period_formatted,
+                    stats: UsageStats {
+                        total_input_tokens: total_input,
+                        total_output_tokens: total_output,
+                        total_cost_microdollars: total_cost,
+                        request_count,
+                        avg_tokens_per_request: avg_tokens,
+                        avg_cost_per_request: avg_cost,
+                    },
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(results)
     }
@@ -284,18 +290,17 @@ impl AnalyticsService {
                 MIN(input_tokens + output_tokens) as min_tokens,
                 MAX(input_tokens + output_tokens) as max_tokens,
                 COUNT(*) as total_count
-             FROM usage_records WHERE 1=1"
+             FROM usage_records WHERE 1=1",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
         Self::append_filter_clauses(&mut sql, &mut params_vec, filter);
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
-        let (min_cost, max_cost, min_tokens, max_tokens, total_count) = conn.query_row(
-            &sql,
-            params_refs.as_slice(),
-            |row| {
+        let (min_cost, max_cost, min_tokens, max_tokens, total_count) =
+            conn.query_row(&sql, params_refs.as_slice(), |row| {
                 Ok((
                     row.get::<_, Option<i64>>(0)?.unwrap_or(0),
                     row.get::<_, Option<i64>>(1)?.unwrap_or(0),
@@ -303,8 +308,7 @@ impl AnalyticsService {
                     row.get::<_, Option<i64>>(3)?.unwrap_or(0),
                     row.get::<_, i64>(4)?,
                 ))
-            },
-        )?;
+            })?;
 
         // Get percentiles (p50, p90, p95, p99) for cost
         let percentiles = if total_count > 0 {
@@ -333,19 +337,18 @@ impl AnalyticsService {
             return Ok(Percentiles::default());
         }
 
-        let mut sql = format!(
-            "SELECT {} FROM usage_records WHERE 1=1",
-            field
-        );
+        let mut sql = format!("SELECT {} FROM usage_records WHERE 1=1", field);
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
         Self::append_filter_clauses(&mut sql, &mut params_vec, filter);
         sql.push_str(&format!(" ORDER BY {}", field));
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         let mut stmt = conn.prepare(&sql)?;
-        let values: Vec<i64> = stmt.query_map(params_refs.as_slice(), |row| row.get(0))?
+        let values: Vec<i64> = stmt
+            .query_map(params_refs.as_slice(), |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -359,10 +362,22 @@ impl AnalyticsService {
         let p99_idx = (values.len() as f64 * 0.99) as usize;
 
         Ok(Percentiles {
-            p50: values.get(p50_idx.min(values.len() - 1)).copied().unwrap_or(0),
-            p90: values.get(p90_idx.min(values.len() - 1)).copied().unwrap_or(0),
-            p95: values.get(p95_idx.min(values.len() - 1)).copied().unwrap_or(0),
-            p99: values.get(p99_idx.min(values.len() - 1)).copied().unwrap_or(0),
+            p50: values
+                .get(p50_idx.min(values.len() - 1))
+                .copied()
+                .unwrap_or(0),
+            p90: values
+                .get(p90_idx.min(values.len() - 1))
+                .copied()
+                .unwrap_or(0),
+            p95: values
+                .get(p95_idx.min(values.len() - 1))
+                .copied()
+                .unwrap_or(0),
+            p99: values
+                .get(p99_idx.min(values.len() - 1))
+                .copied()
+                .unwrap_or(0),
         })
     }
 
@@ -371,19 +386,31 @@ impl AnalyticsService {
     // ========================================================================
 
     /// Get top N most expensive requests
-    pub fn get_top_expensive_requests(&self, filter: &UsageFilter, limit: i64) -> AppResult<Vec<crate::models::analytics::UsageRecord>> {
+    pub fn get_top_expensive_requests(
+        &self,
+        filter: &UsageFilter,
+        limit: i64,
+    ) -> AppResult<Vec<crate::models::analytics::UsageRecord>> {
         let modified_filter = filter.clone();
         self.list_usage_records(&modified_filter, Some(limit), None)
     }
 
     /// Get top N models by cost
-    pub fn get_top_models_by_cost(&self, filter: &UsageFilter, limit: usize) -> AppResult<Vec<ModelUsage>> {
+    pub fn get_top_models_by_cost(
+        &self,
+        filter: &UsageFilter,
+        limit: usize,
+    ) -> AppResult<Vec<ModelUsage>> {
         let all = self.aggregate_by_model(filter)?;
         Ok(all.into_iter().take(limit).collect())
     }
 
     /// Get top N projects by cost
-    pub fn get_top_projects_by_cost(&self, filter: &UsageFilter, limit: usize) -> AppResult<Vec<ProjectUsage>> {
+    pub fn get_top_projects_by_cost(
+        &self,
+        filter: &UsageFilter,
+        limit: usize,
+    ) -> AppResult<Vec<ProjectUsage>> {
         let all = self.aggregate_by_project(filter)?;
         Ok(all.into_iter().take(limit).collect())
     }
@@ -393,7 +420,11 @@ impl AnalyticsService {
     // ========================================================================
 
     /// Append filter clauses to SQL query
-    fn append_filter_clauses(sql: &mut String, params: &mut Vec<Box<dyn rusqlite::ToSql>>, filter: &UsageFilter) {
+    fn append_filter_clauses(
+        sql: &mut String,
+        params: &mut Vec<Box<dyn rusqlite::ToSql>>,
+        filter: &UsageFilter,
+    ) {
         if let Some(ref start) = filter.start_timestamp {
             sql.push_str(" AND timestamp >= ?");
             params.push(Box::new(*start));
@@ -526,7 +557,10 @@ mod tests {
         assert_eq!(results.len(), 2);
 
         // Should be sorted by cost descending
-        let claude = results.iter().find(|m| m.model_name.contains("claude")).unwrap();
+        let claude = results
+            .iter()
+            .find(|m| m.model_name.contains("claude"))
+            .unwrap();
         assert_eq!(claude.stats.request_count, 2);
         assert_eq!(claude.stats.total_cost_microdollars, 300);
     }
@@ -536,7 +570,9 @@ mod tests {
         let service = create_test_service().unwrap();
         seed_test_data(&service);
 
-        let results = service.aggregate_by_project(&UsageFilter::default()).unwrap();
+        let results = service
+            .aggregate_by_project(&UsageFilter::default())
+            .unwrap();
         assert_eq!(results.len(), 2);
 
         let p1 = results.iter().find(|p| p.project_id == "p1").unwrap();
@@ -548,7 +584,9 @@ mod tests {
         let service = create_test_service().unwrap();
         seed_test_data(&service);
 
-        let results = service.get_time_series(&UsageFilter::default(), AggregationPeriod::Daily).unwrap();
+        let results = service
+            .get_time_series(&UsageFilter::default(), AggregationPeriod::Daily)
+            .unwrap();
         assert!(!results.is_empty());
 
         // Should have data points for different days
@@ -563,7 +601,9 @@ mod tests {
         let service = create_test_service().unwrap();
         seed_test_data(&service);
 
-        let summary = service.get_dashboard_summary(&UsageFilter::default(), AggregationPeriod::Daily).unwrap();
+        let summary = service
+            .get_dashboard_summary(&UsageFilter::default(), AggregationPeriod::Daily)
+            .unwrap();
 
         assert_eq!(summary.current_period.request_count, 4);
         assert!(!summary.by_model.is_empty());
@@ -587,7 +627,9 @@ mod tests {
         let service = create_test_service().unwrap();
         seed_test_data(&service);
 
-        let stats = service.get_summary_statistics(&UsageFilter::default()).unwrap();
+        let stats = service
+            .get_summary_statistics(&UsageFilter::default())
+            .unwrap();
 
         assert_eq!(stats.total_records, 4);
         assert!(stats.min_cost_microdollars <= stats.max_cost_microdollars);
@@ -598,7 +640,9 @@ mod tests {
         let service = create_test_service().unwrap();
         seed_test_data(&service);
 
-        let top = service.get_top_models_by_cost(&UsageFilter::default(), 1).unwrap();
+        let top = service
+            .get_top_models_by_cost(&UsageFilter::default(), 1)
+            .unwrap();
         assert_eq!(top.len(), 1);
 
         // Claude should be most expensive

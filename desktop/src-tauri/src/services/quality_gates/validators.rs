@@ -59,7 +59,11 @@ impl ValidatorRegistry {
         // Prettier check
         self.register(
             QualityGate::new("prettier", "Prettier Check", "npx")
-                .with_args(vec!["prettier".to_string(), "--check".to_string(), ".".to_string()])
+                .with_args(vec![
+                    "prettier".to_string(),
+                    "--check".to_string(),
+                    ".".to_string(),
+                ])
                 .for_project_types(vec![ProjectType::NodeJs])
                 .required(false)
                 .with_timeout(60),
@@ -109,7 +113,11 @@ impl ValidatorRegistry {
         // cargo fmt check
         self.register(
             QualityGate::new("cargo-fmt", "Cargo Format Check", "cargo")
-                .with_args(vec!["fmt".to_string(), "--".to_string(), "--check".to_string()])
+                .with_args(vec![
+                    "fmt".to_string(),
+                    "--".to_string(),
+                    "--check".to_string(),
+                ])
                 .for_project_types(vec![ProjectType::Rust])
                 .required(false)
                 .with_timeout(60),
@@ -287,11 +295,7 @@ pub fn get_default_gates(project_type: ProjectType) -> Vec<QualityGate> {
 /// Get quality gates by their IDs
 pub fn get_gates_by_ids(ids: &[String]) -> Vec<QualityGate> {
     let registry = ValidatorRegistry::new();
-    registry
-        .get_by_ids(ids)
-        .into_iter()
-        .cloned()
-        .collect()
+    registry.get_by_ids(ids).into_iter().cloned().collect()
 }
 
 #[cfg(test)]
@@ -366,7 +370,7 @@ mod tests {
         let mut registry = ValidatorRegistry::new();
         registry.register(
             QualityGate::new("custom-gate", "Custom Gate", "custom-command")
-                .with_args(vec!["--flag".to_string()])
+                .with_args(vec!["--flag".to_string()]),
         );
 
         assert!(registry.contains("custom-gate"));

@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::models::markdown::{ClaudeMdFile, ClaudeMdContent, FileMetadata};
+use crate::models::markdown::{ClaudeMdContent, ClaudeMdFile, FileMetadata};
 use crate::utils::error::{AppError, AppResult};
 
 /// Service for managing CLAUDE.md files
@@ -281,7 +281,9 @@ mod tests {
         writeln!(file, "# Nested Project").unwrap();
 
         let service = MarkdownService::new();
-        let files = service.scan_claude_md_files(root_path.to_str().unwrap()).unwrap();
+        let files = service
+            .scan_claude_md_files(root_path.to_str().unwrap())
+            .unwrap();
 
         assert_eq!(files.len(), 2);
     }
@@ -295,7 +297,9 @@ mod tests {
         fs::write(&claude_md_path, content).unwrap();
 
         let service = MarkdownService::new();
-        let result = service.read_claude_md(claude_md_path.to_str().unwrap()).unwrap();
+        let result = service
+            .read_claude_md(claude_md_path.to_str().unwrap())
+            .unwrap();
 
         assert_eq!(result.content, content);
         assert!(result.modified_at.is_some());
@@ -309,7 +313,9 @@ mod tests {
         let service = MarkdownService::new();
         let content = "# New Project\n\nNew content here.";
 
-        service.save_claude_md(claude_md_path.to_str().unwrap(), content).unwrap();
+        service
+            .save_claude_md(claude_md_path.to_str().unwrap(), content)
+            .unwrap();
 
         let saved_content = fs::read_to_string(&claude_md_path).unwrap();
         assert_eq!(saved_content, content);
@@ -323,7 +329,9 @@ mod tests {
         let service = MarkdownService::new();
         let template = "# New Project\n\nProject documentation.";
 
-        service.create_claude_md(claude_md_path.to_str().unwrap(), template).unwrap();
+        service
+            .create_claude_md(claude_md_path.to_str().unwrap(), template)
+            .unwrap();
 
         assert!(claude_md_path.exists());
         let content = fs::read_to_string(&claude_md_path).unwrap();
@@ -352,7 +360,9 @@ mod tests {
         fs::write(&claude_md_path, content).unwrap();
 
         let service = MarkdownService::new();
-        let metadata = service.get_file_metadata(claude_md_path.to_str().unwrap()).unwrap();
+        let metadata = service
+            .get_file_metadata(claude_md_path.to_str().unwrap())
+            .unwrap();
 
         assert_eq!(metadata.size, content.len() as u64);
         assert!(metadata.modified_at.is_some());

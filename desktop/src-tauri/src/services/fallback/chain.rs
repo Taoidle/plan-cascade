@@ -63,15 +63,27 @@ impl FailureReason {
     pub fn from_error_message(msg: &str) -> Self {
         let msg_lower = msg.to_lowercase();
 
-        if msg_lower.contains("unavailable") || msg_lower.contains("not found") || msg_lower.contains("not configured") {
+        if msg_lower.contains("unavailable")
+            || msg_lower.contains("not found")
+            || msg_lower.contains("not configured")
+        {
             FailureReason::Unavailable
         } else if msg_lower.contains("timeout") || msg_lower.contains("timed out") {
             FailureReason::Timeout
-        } else if msg_lower.contains("rate limit") || msg_lower.contains("too many requests") || msg_lower.contains("429") {
+        } else if msg_lower.contains("rate limit")
+            || msg_lower.contains("too many requests")
+            || msg_lower.contains("429")
+        {
             FailureReason::RateLimited
-        } else if msg_lower.contains("network") || msg_lower.contains("connection") || msg_lower.contains("socket") {
+        } else if msg_lower.contains("network")
+            || msg_lower.contains("connection")
+            || msg_lower.contains("socket")
+        {
             FailureReason::NetworkError
-        } else if msg_lower.contains("invalid") || msg_lower.contains("parse") || msg_lower.contains("deserialize") {
+        } else if msg_lower.contains("invalid")
+            || msg_lower.contains("parse")
+            || msg_lower.contains("deserialize")
+        {
             FailureReason::InvalidResponse
         } else if msg_lower.contains("cancel") || msg_lower.contains("abort") {
             FailureReason::Cancelled
@@ -332,7 +344,10 @@ impl AgentFallbackChain {
 
         for agent in self.all_agents() {
             if attempts >= self.config.max_attempts {
-                warn!("Max fallback attempts ({}) reached", self.config.max_attempts);
+                warn!(
+                    "Max fallback attempts ({}) reached",
+                    self.config.max_attempts
+                );
                 break;
             }
 
@@ -351,10 +366,7 @@ impl AgentFallbackChain {
                     let error_msg = e.to_string();
                     let reason = FailureReason::from_error_message(&error_msg);
 
-                    warn!(
-                        "Agent {} failed: {} (reason: {})",
-                        agent, error_msg, reason
-                    );
+                    warn!("Agent {} failed: {} (reason: {})", agent, error_msg, reason);
 
                     log.add_attempt(FallbackAttempt::failure(
                         agent,
@@ -372,15 +384,26 @@ impl AgentFallbackChain {
                     attempts += 1;
 
                     // Delay before next attempt
-                    if self.config.delay_between_attempts_ms > 0 && attempts < self.config.max_attempts {
-                        debug!("Waiting {}ms before next attempt", self.config.delay_between_attempts_ms);
-                        tokio::time::sleep(Duration::from_millis(self.config.delay_between_attempts_ms)).await;
+                    if self.config.delay_between_attempts_ms > 0
+                        && attempts < self.config.max_attempts
+                    {
+                        debug!(
+                            "Waiting {}ms before next attempt",
+                            self.config.delay_between_attempts_ms
+                        );
+                        tokio::time::sleep(Duration::from_millis(
+                            self.config.delay_between_attempts_ms,
+                        ))
+                        .await;
                     }
                 }
             }
         }
 
-        error!("All agents in fallback chain failed after {} attempts", log.attempts.len());
+        error!(
+            "All agents in fallback chain failed after {} attempts",
+            log.attempts.len()
+        );
         Err(FallbackError::AllAgentsFailed)
     }
 
@@ -534,12 +557,10 @@ mod tests {
 
     #[test]
     fn test_execute_with_fallback_success_first() {
-        let chain = AgentFallbackChain::new("agent1")
-            .with_fallbacks(vec!["agent2".to_string()]);
+        let chain = AgentFallbackChain::new("agent1").with_fallbacks(vec!["agent2".to_string()]);
 
-        let result: FallbackResult<(String, _)> = chain.execute_with_fallback_sync(|agent| {
-            Ok::<_, String>(format!("success from {}", agent))
-        });
+        let result: FallbackResult<(String, _)> = chain
+            .execute_with_fallback_sync(|agent| Ok::<_, String>(format!("success from {}", agent)));
 
         let (output, log) = result.unwrap();
         assert_eq!(output, "success from agent1");
@@ -549,8 +570,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_fallback_first_fails() {
-        let chain = AgentFallbackChain::new("agent1")
-            .with_fallbacks(vec!["agent2".to_string()]);
+        let chain = AgentFallbackChain::new("agent1").with_fallbacks(vec!["agent2".to_string()]);
 
         let mut call_count = 0;
         let result: FallbackResult<(String, _)> = chain.execute_with_fallback_sync(|agent| {
@@ -578,17 +598,15 @@ mod tests {
                 ..Default::default()
             });
 
-        let result: FallbackResult<(String, _)> = chain.execute_with_fallback_sync(|_| {
-            Err::<String, _>("Always fails".to_string())
-        });
+        let result: FallbackResult<(String, _)> =
+            chain.execute_with_fallback_sync(|_| Err::<String, _>("Always fails".to_string()));
 
         assert!(matches!(result, Err(FallbackError::AllAgentsFailed)));
     }
 
     #[test]
     fn test_execute_with_fallback_cancelled_no_fallback() {
-        let chain = AgentFallbackChain::new("agent1")
-            .with_fallbacks(vec!["agent2".to_string()]);
+        let chain = AgentFallbackChain::new("agent1").with_fallbacks(vec!["agent2".to_string()]);
 
         let result: FallbackResult<(String, _)> = chain.execute_with_fallback_sync(|_| {
             Err::<String, _>("User cancelled operation".to_string())

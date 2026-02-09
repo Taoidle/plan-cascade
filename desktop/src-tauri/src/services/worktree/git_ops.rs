@@ -73,7 +73,15 @@ impl GitOps {
 
     /// Check if a branch exists locally
     pub fn branch_exists(&self, cwd: &Path, branch: &str) -> AppResult<bool> {
-        let result = self.execute(cwd, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", branch)])?;
+        let result = self.execute(
+            cwd,
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{}", branch),
+            ],
+        )?;
         Ok(result.success)
     }
 
@@ -85,14 +93,16 @@ impl GitOps {
 
     /// Create a new branch from a base branch
     pub fn create_branch(&self, cwd: &Path, branch: &str, base: &str) -> AppResult<()> {
-        self.execute(cwd, &["branch", branch, base])?.into_result()?;
+        self.execute(cwd, &["branch", branch, base])?
+            .into_result()?;
         Ok(())
     }
 
     /// Delete a local branch
     pub fn delete_branch(&self, cwd: &Path, branch: &str, force: bool) -> AppResult<()> {
         let flag = if force { "-D" } else { "-d" };
-        self.execute(cwd, &["branch", flag, branch])?.into_result()?;
+        self.execute(cwd, &["branch", flag, branch])?
+            .into_result()?;
         Ok(())
     }
 
@@ -138,7 +148,8 @@ impl GitOps {
 
     /// List all worktrees
     pub fn list_worktrees(&self, cwd: &Path) -> AppResult<Vec<WorktreeInfo>> {
-        let output = self.execute(cwd, &["worktree", "list", "--porcelain"])?
+        let output = self
+            .execute(cwd, &["worktree", "list", "--porcelain"])?
             .into_result()?;
 
         let mut worktrees = Vec::new();
@@ -154,9 +165,10 @@ impl GitOps {
             } else if line.starts_with("HEAD ") {
                 current.head = line.strip_prefix("HEAD ").unwrap_or("").to_string();
             } else if line.starts_with("branch ") {
-                current.branch = line.strip_prefix("branch refs/heads/").unwrap_or(
-                    line.strip_prefix("branch ").unwrap_or("")
-                ).to_string();
+                current.branch = line
+                    .strip_prefix("branch refs/heads/")
+                    .unwrap_or(line.strip_prefix("branch ").unwrap_or(""))
+                    .to_string();
             } else if line == "bare" {
                 current.is_bare = true;
             } else if line == "detached" {
@@ -194,7 +206,8 @@ impl GitOps {
         let result = self.execute(cwd, &["commit", "-m", message])?;
         if result.success {
             // Get the commit SHA
-            let sha = self.execute(cwd, &["rev-parse", "HEAD"])?
+            let sha = self
+                .execute(cwd, &["rev-parse", "HEAD"])?
                 .into_result()?
                 .trim()
                 .to_string();
@@ -241,7 +254,8 @@ impl GitOps {
 
     /// Get list of conflicting files
     pub fn get_conflicting_files(&self, cwd: &Path) -> AppResult<Vec<String>> {
-        let output = self.execute(cwd, &["diff", "--name-only", "--diff-filter=U"])?
+        let output = self
+            .execute(cwd, &["diff", "--name-only", "--diff-filter=U"])?
             .into_result()?;
 
         Ok(output
@@ -253,7 +267,8 @@ impl GitOps {
 
     /// Get status of the working directory
     pub fn status(&self, cwd: &Path) -> AppResult<GitStatus> {
-        let output = self.execute(cwd, &["status", "--porcelain"])?
+        let output = self
+            .execute(cwd, &["status", "--porcelain"])?
             .into_result()?;
 
         let mut status = GitStatus::default();
@@ -296,11 +311,12 @@ impl GitOps {
 
     /// Get commit history
     pub fn log(&self, cwd: &Path, count: usize) -> AppResult<Vec<CommitInfo>> {
-        let output = self.execute(
-            cwd,
-            &["log", &format!("-{}", count), "--format=%H|%s|%an|%ai"],
-        )?
-        .into_result()?;
+        let output = self
+            .execute(
+                cwd,
+                &["log", &format!("-{}", count), "--format=%H|%s|%an|%ai"],
+            )?
+            .into_result()?;
 
         let commits = output
             .lines()

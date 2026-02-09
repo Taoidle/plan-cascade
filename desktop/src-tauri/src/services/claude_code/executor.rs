@@ -139,7 +139,11 @@ impl ClaudeCodeExecutor {
         cmd.current_dir(&config.working_dir);
 
         // Always use stream-json format for machine parsing
+        // --verbose is required when combining -p with --output-format stream-json
+        // --include-partial-messages enables true streaming via stream_event wrappers
         cmd.arg("--output-format").arg("stream-json");
+        cmd.arg("--verbose");
+        cmd.arg("--include-partial-messages");
 
         // Add resume flag if session ID provided
         if let Some(ref session_id) = config.resume_session_id {

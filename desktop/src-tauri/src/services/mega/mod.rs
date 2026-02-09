@@ -8,6 +8,6 @@ mod prd_generator;
 
 pub use orchestrator::{MegaOrchestrator, MegaOrchestratorConfig, MegaOrchestratorError};
 pub use prd_generator::{
-    PrdGenerator, PrdGeneratorConfig, PrdGeneratorError,
-    PrdGenerationRequest, PrdGenerationResult, DesignDocContext,
+    DesignDocContext, PrdGenerationRequest, PrdGenerationResult, PrdGenerator, PrdGeneratorConfig,
+    PrdGeneratorError,
 };

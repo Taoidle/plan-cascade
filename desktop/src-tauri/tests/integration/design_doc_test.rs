@@ -55,7 +55,10 @@ fn sample_prd() -> PrdDocument {
                 id: "story-003".to_string(),
                 title: "Data Export".to_string(),
                 description: "Export data to CSV and JSON formats".to_string(),
-                acceptance_criteria: vec!["CSV export works".to_string(), "JSON export works".to_string()],
+                acceptance_criteria: vec![
+                    "CSV export works".to_string(),
+                    "JSON export works".to_string(),
+                ],
                 dependencies: vec!["story-001".to_string(), "story-002".to_string()],
                 complexity: Some("low".to_string()),
                 story_points: Some(2),
@@ -67,7 +70,10 @@ fn sample_prd() -> PrdDocument {
             "Tauri".to_string(),
             "SQLite".to_string(),
         ],
-        goals: vec!["Fast performance".to_string(), "Reliable execution".to_string()],
+        goals: vec![
+            "Fast performance".to_string(),
+            "Reliable execution".to_string(),
+        ],
         non_goals: vec!["Mobile support".to_string()],
     }
 }
@@ -126,7 +132,10 @@ fn test_generate_extracts_components_from_stories() {
         .components
         .iter()
         .any(|c| c.name == "DataLayer");
-    assert!(has_data_layer, "SQLite tech should produce DataLayer component");
+    assert!(
+        has_data_layer,
+        "SQLite tech should produce DataLayer component"
+    );
 }
 
 #[test]
@@ -173,7 +182,10 @@ fn test_generate_creates_adrs_for_tech_stack() {
     );
 
     for decision in &result.design_doc.decisions {
-        assert!(decision.id.starts_with("ADR-"), "Decision ID should start with ADR-");
+        assert!(
+            decision.id.starts_with("ADR-"),
+            "Decision ID should start with ADR-"
+        );
         assert_eq!(decision.status, DecisionStatus::Accepted);
         assert!(!decision.title.is_empty());
     }
@@ -195,17 +207,24 @@ fn test_generate_creates_feature_mappings_for_all_stories() {
 
     for story in &prd.stories {
         let mapping = result.design_doc.feature_mappings.get(&story.id);
+        assert!(mapping.is_some(), "Missing mapping for story {}", story.id);
+        let mapping = mapping.unwrap();
         assert!(
-            mapping.is_some(),
-            "Missing mapping for story {}",
+            !mapping.components.is_empty(),
+            "Mapping for {} should have components",
             story.id
         );
-        let mapping = mapping.unwrap();
-        assert!(!mapping.components.is_empty(), "Mapping for {} should have components", story.id);
-        assert!(!mapping.description.is_empty(), "Mapping for {} should have description", story.id);
+        assert!(
+            !mapping.description.is_empty(),
+            "Mapping for {} should have description",
+            story.id
+        );
     }
 
-    assert_eq!(result.generation_info.feature_mappings_created, prd.stories.len());
+    assert_eq!(
+        result.generation_info.feature_mappings_created,
+        prd.stories.len()
+    );
 }
 
 #[test]
@@ -234,9 +253,17 @@ fn test_generate_builds_interfaces_from_tech() {
     let result = DesignDocGenerator::generate(&prd, None).unwrap();
 
     // Tauri should set IPC Commands style
-    assert_eq!(result.design_doc.interfaces.api_standards.style, "Tauri IPC Commands");
+    assert_eq!(
+        result.design_doc.interfaces.api_standards.style,
+        "Tauri IPC Commands"
+    );
     // Rust should set async/await with tokio
-    assert!(result.design_doc.interfaces.api_standards.async_pattern.contains("tokio"));
+    assert!(result
+        .design_doc
+        .interfaces
+        .api_standards
+        .async_pattern
+        .contains("tokio"));
 }
 
 #[test]
@@ -331,11 +358,8 @@ fn test_generate_from_file_and_save() {
 
 #[test]
 fn test_generate_from_nonexistent_file() {
-    let result = DesignDocGenerator::generate_from_file(
-        Path::new("/nonexistent/prd.json"),
-        None,
-        false,
-    );
+    let result =
+        DesignDocGenerator::generate_from_file(Path::new("/nonexistent/prd.json"), None, false);
     assert!(matches!(result, Err(DesignDocError::NotFound(_))));
 }
 
@@ -404,13 +428,30 @@ The system uses REST API for client communication.
         .iter()
         .map(|c| c.name.as_str())
         .collect();
-    assert!(comp_names.contains(&"AuthService"), "Missing AuthService. Got: {:?}", comp_names);
-    assert!(comp_names.contains(&"UserStore"), "Missing UserStore. Got: {:?}", comp_names);
-    assert!(comp_names.contains(&"TokenManager"), "Missing TokenManager. Got: {:?}", comp_names);
+    assert!(
+        comp_names.contains(&"AuthService"),
+        "Missing AuthService. Got: {:?}",
+        comp_names
+    );
+    assert!(
+        comp_names.contains(&"UserStore"),
+        "Missing UserStore. Got: {:?}",
+        comp_names
+    );
+    assert!(
+        comp_names.contains(&"TokenManager"),
+        "Missing TokenManager. Got: {:?}",
+        comp_names
+    );
 
     // Decisions
     assert!(result.design_doc.decisions.len() >= 2);
-    let decision_ids: Vec<&str> = result.design_doc.decisions.iter().map(|d| d.id.as_str()).collect();
+    let decision_ids: Vec<&str> = result
+        .design_doc
+        .decisions
+        .iter()
+        .map(|d| d.id.as_str())
+        .collect();
     assert!(decision_ids.contains(&"ADR-001"));
     assert!(decision_ids.contains(&"ADR-002"));
 
@@ -421,7 +462,10 @@ The system uses REST API for client communication.
     assert_eq!(result.design_doc.interfaces.api_standards.style, "REST");
 
     // Feature mappings
-    assert!(result.design_doc.feature_mappings.contains_key("feature-auth"));
+    assert!(result
+        .design_doc
+        .feature_mappings
+        .contains_key("feature-auth"));
     let auth_mapping = &result.design_doc.feature_mappings["feature-auth"];
     assert_eq!(auth_mapping.components.len(), 2);
     assert_eq!(auth_mapping.patterns.len(), 1);
@@ -481,7 +525,8 @@ fn test_import_markdown_empty_produces_warnings() {
 
 #[test]
 fn test_import_markdown_no_headers_produces_warnings() {
-    let result = DesignDocImporter::import_markdown("Just plain text without any headers.").unwrap();
+    let result =
+        DesignDocImporter::import_markdown("Just plain text without any headers.").unwrap();
     assert!(!result.clean_import);
     assert!(!result.warnings.is_empty());
 }
@@ -503,7 +548,10 @@ More content.
         .iter()
         .filter(|w| w.severity == WarningSeverity::Low)
         .collect();
-    assert!(low_warnings.len() >= 2, "Should have warnings for unrecognized sections");
+    assert!(
+        low_warnings.len() >= 2,
+        "Should have warnings for unrecognized sections"
+    );
 }
 
 // ============================================================================
@@ -548,7 +596,10 @@ fn test_import_json_standard_format() {
     assert_eq!(result.design_doc.architecture.patterns.len(), 1);
     assert_eq!(result.design_doc.decisions.len(), 1);
     assert_eq!(result.source_format, ImportFormat::Json);
-    assert_eq!(result.design_doc.metadata.source.as_deref(), Some("imported-json"));
+    assert_eq!(
+        result.design_doc.metadata.source.as_deref(),
+        Some("imported-json")
+    );
 }
 
 #[test]
@@ -736,9 +787,18 @@ fn test_generated_doc_can_be_saved_and_loaded() {
 
 #[test]
 fn test_import_format_detection() {
-    assert_eq!(ImportFormat::from_extension(Path::new("doc.md")), Some(ImportFormat::Markdown));
-    assert_eq!(ImportFormat::from_extension(Path::new("doc.markdown")), Some(ImportFormat::Markdown));
-    assert_eq!(ImportFormat::from_extension(Path::new("doc.json")), Some(ImportFormat::Json));
+    assert_eq!(
+        ImportFormat::from_extension(Path::new("doc.md")),
+        Some(ImportFormat::Markdown)
+    );
+    assert_eq!(
+        ImportFormat::from_extension(Path::new("doc.markdown")),
+        Some(ImportFormat::Markdown)
+    );
+    assert_eq!(
+        ImportFormat::from_extension(Path::new("doc.json")),
+        Some(ImportFormat::Json)
+    );
     assert_eq!(ImportFormat::from_extension(Path::new("doc.txt")), None);
     assert_eq!(ImportFormat::from_extension(Path::new("doc.yaml")), None);
 }
@@ -772,17 +832,15 @@ fn test_component_names_are_pascal_case() {
     let prd = PrdDocument {
         title: "Name Test".to_string(),
         description: String::new(),
-        stories: vec![
-            PrdStory {
-                id: "story-001".to_string(),
-                title: "User Authentication System".to_string(),
-                description: String::new(),
-                acceptance_criteria: vec![],
-                dependencies: vec![],
-                complexity: None,
-                story_points: None,
-            },
-        ],
+        stories: vec![PrdStory {
+            id: "story-001".to_string(),
+            title: "User Authentication System".to_string(),
+            description: String::new(),
+            acceptance_criteria: vec![],
+            dependencies: vec![],
+            complexity: None,
+            story_points: None,
+        }],
         tech_stack: vec![],
         goals: vec![],
         non_goals: vec![],
@@ -863,17 +921,15 @@ fn test_parallel_execution_pattern_detected() {
     let prd = PrdDocument {
         title: "Parallel Test".to_string(),
         description: String::new(),
-        stories: vec![
-            PrdStory {
-                id: "s1".to_string(),
-                title: "Parallel Task A".to_string(),
-                description: "Independent A".to_string(),
-                acceptance_criteria: vec![],
-                dependencies: vec!["dep-1".to_string(), "dep-2".to_string()], // multiple deps
-                complexity: None,
-                story_points: None,
-            },
-        ],
+        stories: vec![PrdStory {
+            id: "s1".to_string(),
+            title: "Parallel Task A".to_string(),
+            description: "Independent A".to_string(),
+            acceptance_criteria: vec![],
+            dependencies: vec!["dep-1".to_string(), "dep-2".to_string()], // multiple deps
+            complexity: None,
+            story_points: None,
+        }],
         tech_stack: vec![],
         goals: vec![],
         non_goals: vec![],

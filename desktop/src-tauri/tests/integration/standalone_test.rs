@@ -3,9 +3,8 @@
 //! Tests for standalone LLM execution models and session management.
 
 use plan_cascade_desktop::models::orchestrator::{
-    ExecutionStatus, ExecutionSession, StoryExecutionState,
-    ExecutionProgress, ExecutionSessionSummary,
-    ExecuteWithSessionRequest, ResumeExecutionRequest,
+    ExecuteWithSessionRequest, ExecutionProgress, ExecutionSession, ExecutionSessionSummary,
+    ExecutionStatus, ResumeExecutionRequest, StoryExecutionState,
 };
 
 // ============================================================================
@@ -24,12 +23,30 @@ fn test_execution_status_display() {
 
 #[test]
 fn test_execution_status_parse() {
-    assert_eq!("pending".parse::<ExecutionStatus>().unwrap(), ExecutionStatus::Pending);
-    assert_eq!("running".parse::<ExecutionStatus>().unwrap(), ExecutionStatus::Running);
-    assert_eq!("completed".parse::<ExecutionStatus>().unwrap(), ExecutionStatus::Completed);
-    assert_eq!("failed".parse::<ExecutionStatus>().unwrap(), ExecutionStatus::Failed);
-    assert_eq!("paused".parse::<ExecutionStatus>().unwrap(), ExecutionStatus::Paused);
-    assert_eq!("cancelled".parse::<ExecutionStatus>().unwrap(), ExecutionStatus::Cancelled);
+    assert_eq!(
+        "pending".parse::<ExecutionStatus>().unwrap(),
+        ExecutionStatus::Pending
+    );
+    assert_eq!(
+        "running".parse::<ExecutionStatus>().unwrap(),
+        ExecutionStatus::Running
+    );
+    assert_eq!(
+        "completed".parse::<ExecutionStatus>().unwrap(),
+        ExecutionStatus::Completed
+    );
+    assert_eq!(
+        "failed".parse::<ExecutionStatus>().unwrap(),
+        ExecutionStatus::Failed
+    );
+    assert_eq!(
+        "paused".parse::<ExecutionStatus>().unwrap(),
+        ExecutionStatus::Paused
+    );
+    assert_eq!(
+        "cancelled".parse::<ExecutionStatus>().unwrap(),
+        ExecutionStatus::Cancelled
+    );
 }
 
 #[test]
@@ -183,7 +200,10 @@ fn test_execution_session_with_system_prompt() {
     )
     .with_system_prompt("You are a helpful coding assistant.");
 
-    assert_eq!(session.system_prompt, Some("You are a helpful coding assistant.".to_string()));
+    assert_eq!(
+        session.system_prompt,
+        Some("You are a helpful coding assistant.".to_string())
+    );
 }
 
 #[test]

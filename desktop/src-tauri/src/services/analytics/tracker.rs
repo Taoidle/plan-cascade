@@ -91,9 +91,8 @@ impl UsageTracker {
         config: TrackerConfig,
     ) {
         let mut buffer: Vec<UsageRecord> = Vec::with_capacity(config.buffer_size);
-        let mut flush_interval = tokio::time::interval(
-            tokio::time::Duration::from_secs(config.flush_interval_secs)
-        );
+        let mut flush_interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(config.flush_interval_secs));
 
         loop {
             tokio::select! {
@@ -159,13 +158,15 @@ impl UsageTracker {
             return Ok(());
         }
 
-        let cost = self.cost_calculator.calculate_cost(provider, model_name, input_tokens, output_tokens);
+        let cost =
+            self.cost_calculator
+                .calculate_cost(provider, model_name, input_tokens, output_tokens);
 
         let session_id = self.current_session.read().await.clone();
         let project_id = self.current_project.read().await.clone();
 
-        let mut record = UsageRecord::new(model_name, provider, input_tokens, output_tokens)
-            .with_cost(cost);
+        let mut record =
+            UsageRecord::new(model_name, provider, input_tokens, output_tokens).with_cost(cost);
 
         if let Some(session) = session_id {
             record = record.with_session(session);
@@ -210,10 +211,12 @@ impl UsageTracker {
             return Ok(());
         }
 
-        let cost = self.cost_calculator.calculate_cost(provider, model_name, input_tokens, output_tokens);
+        let cost =
+            self.cost_calculator
+                .calculate_cost(provider, model_name, input_tokens, output_tokens);
 
-        let mut record = UsageRecord::new(model_name, provider, input_tokens, output_tokens)
-            .with_cost(cost);
+        let mut record =
+            UsageRecord::new(model_name, provider, input_tokens, output_tokens).with_cost(cost);
 
         if let Some(session) = session_id {
             record = record.with_session(session);
@@ -330,7 +333,9 @@ impl UsageTrackerBuilder {
 
     /// Build the tracker
     pub fn build(self, service: Arc<AnalyticsService>) -> UsageTracker {
-        let cost_calc = self.cost_calculator.unwrap_or_else(|| Arc::new(CostCalculator::new()));
+        let cost_calc = self
+            .cost_calculator
+            .unwrap_or_else(|| Arc::new(CostCalculator::new()));
         UsageTracker::new(service, cost_calc, self.config)
     }
 }
@@ -370,10 +375,12 @@ impl SyncUsageTracker {
             return;
         }
 
-        let cost = self.cost_calculator.calculate_cost(provider, model_name, input_tokens, output_tokens);
+        let cost =
+            self.cost_calculator
+                .calculate_cost(provider, model_name, input_tokens, output_tokens);
 
-        let mut record = UsageRecord::new(model_name, provider, input_tokens, output_tokens)
-            .with_cost(cost);
+        let mut record =
+            UsageRecord::new(model_name, provider, input_tokens, output_tokens).with_cost(cost);
 
         if let Some(session) = session_id {
             record = record.with_session(session);
@@ -390,16 +397,13 @@ impl SyncUsageTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::analytics::UsageFilter;
     use r2d2::Pool;
     use r2d2_sqlite::SqliteConnectionManager;
-    use crate::models::analytics::UsageFilter;
 
     fn create_test_service() -> Arc<AnalyticsService> {
         let manager = SqliteConnectionManager::memory();
-        let pool = Pool::builder()
-            .max_size(1)
-            .build(manager)
-            .unwrap();
+        let pool = Pool::builder().max_size(1).build(manager).unwrap();
         Arc::new(AnalyticsService::from_pool(pool).unwrap())
     }
 
@@ -424,7 +428,10 @@ mod tests {
         let tracker = UsageTracker::new(service.clone(), cost_calc, config);
 
         // Track some usage
-        tracker.track("anthropic", "claude-3-5-sonnet-20241022", 1000, 500).await.unwrap();
+        tracker
+            .track("anthropic", "claude-3-5-sonnet-20241022", 1000, 500)
+            .await
+            .unwrap();
 
         // Wait for flush
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -432,7 +439,9 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Verify in database
-        let records = service.list_usage_records(&UsageFilter::default(), None, None).unwrap();
+        let records = service
+            .list_usage_records(&UsageFilter::default(), None, None)
+            .unwrap();
         assert!(!records.is_empty());
     }
 
@@ -446,8 +455,13 @@ mod tests {
         assert!(tracker.get_session().await.is_none());
 
         // Set session
-        tracker.set_session(Some("test-session-123".to_string())).await;
-        assert_eq!(tracker.get_session().await, Some("test-session-123".to_string()));
+        tracker
+            .set_session(Some("test-session-123".to_string()))
+            .await;
+        assert_eq!(
+            tracker.get_session().await,
+            Some("test-session-123".to_string())
+        );
 
         // Clear session
         tracker.set_session(None).await;
@@ -461,7 +475,10 @@ mod tests {
         let tracker = UsageTracker::new(service, cost_calc, TrackerConfig::default());
 
         tracker.set_project(Some("test-project".to_string())).await;
-        assert_eq!(tracker.get_project().await, Some("test-project".to_string()));
+        assert_eq!(
+            tracker.get_project().await,
+            Some("test-project".to_string())
+        );
     }
 
     #[tokio::test]
@@ -475,12 +492,17 @@ mod tests {
         let tracker = UsageTracker::new(service.clone(), cost_calc, config);
 
         // Should not track when disabled
-        tracker.track("anthropic", "claude-3-5-sonnet", 1000, 500).await.unwrap();
+        tracker
+            .track("anthropic", "claude-3-5-sonnet", 1000, 500)
+            .await
+            .unwrap();
         tracker.flush().await.unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let records = service.list_usage_records(&UsageFilter::default(), None, None).unwrap();
+        let records = service
+            .list_usage_records(&UsageFilter::default(), None, None)
+            .unwrap();
         assert!(records.is_empty());
     }
 
@@ -495,20 +517,25 @@ mod tests {
         };
         let tracker = UsageTracker::new(service.clone(), cost_calc, config);
 
-        tracker.track_with_context(
-            "openai",
-            "gpt-4o",
-            500,
-            250,
-            Some("session-abc".to_string()),
-            Some("project-xyz".to_string()),
-        ).await.unwrap();
+        tracker
+            .track_with_context(
+                "openai",
+                "gpt-4o",
+                500,
+                250,
+                Some("session-abc".to_string()),
+                Some("project-xyz".to_string()),
+            )
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         tracker.flush().await.unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let records = service.list_usage_records(&UsageFilter::default(), None, None).unwrap();
+        let records = service
+            .list_usage_records(&UsageFilter::default(), None, None)
+            .unwrap();
         assert!(!records.is_empty());
 
         let record = &records[0];

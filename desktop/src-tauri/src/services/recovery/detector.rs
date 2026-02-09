@@ -178,7 +178,10 @@ impl RecoveryDetector {
         if context_snapshot.is_empty() || context_snapshot == "{}" {
             // Direct mode may not need a context snapshot
             if execution_mode == "direct" && completed_stories == 0 {
-                return (true, Some("Direct execution will restart from beginning".to_string()));
+                return (
+                    true,
+                    Some("Direct execution will restart from beginning".to_string()),
+                );
             }
             return (
                 false,
@@ -227,9 +230,18 @@ mod tests {
     #[test]
     fn test_execution_mode_from_str() {
         assert_eq!(ExecutionMode::from_str("direct"), ExecutionMode::Direct);
-        assert_eq!(ExecutionMode::from_str("hybrid_auto"), ExecutionMode::HybridAuto);
-        assert_eq!(ExecutionMode::from_str("hybrid_worktree"), ExecutionMode::HybridWorktree);
-        assert_eq!(ExecutionMode::from_str("mega_plan"), ExecutionMode::MegaPlan);
+        assert_eq!(
+            ExecutionMode::from_str("hybrid_auto"),
+            ExecutionMode::HybridAuto
+        );
+        assert_eq!(
+            ExecutionMode::from_str("hybrid_worktree"),
+            ExecutionMode::HybridWorktree
+        );
+        assert_eq!(
+            ExecutionMode::from_str("mega_plan"),
+            ExecutionMode::MegaPlan
+        );
         assert_eq!(ExecutionMode::from_str("unknown"), ExecutionMode::Direct);
     }
 
@@ -245,7 +257,10 @@ mod tests {
     fn test_execution_mode_display() {
         assert_eq!(format!("{}", ExecutionMode::Direct), "direct");
         assert_eq!(format!("{}", ExecutionMode::HybridAuto), "hybrid_auto");
-        assert_eq!(format!("{}", ExecutionMode::HybridWorktree), "hybrid_worktree");
+        assert_eq!(
+            format!("{}", ExecutionMode::HybridWorktree),
+            "hybrid_worktree"
+        );
         assert_eq!(format!("{}", ExecutionMode::MegaPlan), "mega_plan");
     }
 
@@ -261,9 +276,8 @@ mod tests {
 
     #[test]
     fn test_assess_recoverability_empty_context_direct() {
-        let (recoverable, note) = RecoveryDetector::assess_recoverability(
-            "direct", "running", "{}", 0, 0,
-        );
+        let (recoverable, note) =
+            RecoveryDetector::assess_recoverability("direct", "running", "{}", 0, 0);
         assert!(recoverable);
         assert!(note.is_some());
         assert!(note.unwrap().contains("restart"));
@@ -271,9 +285,8 @@ mod tests {
 
     #[test]
     fn test_assess_recoverability_empty_context_hybrid() {
-        let (recoverable, note) = RecoveryDetector::assess_recoverability(
-            "hybrid_auto", "running", "{}", 5, 2,
-        );
+        let (recoverable, note) =
+            RecoveryDetector::assess_recoverability("hybrid_auto", "running", "{}", 5, 2);
         assert!(!recoverable);
         assert!(note.is_some());
         assert!(note.unwrap().contains("No execution context"));
@@ -282,7 +295,11 @@ mod tests {
     #[test]
     fn test_assess_recoverability_corrupted_json() {
         let (recoverable, note) = RecoveryDetector::assess_recoverability(
-            "hybrid_auto", "running", "{invalid json", 5, 2,
+            "hybrid_auto",
+            "running",
+            "{invalid json",
+            5,
+            2,
         );
         assert!(!recoverable);
         assert!(note.unwrap().contains("corrupted"));
@@ -291,7 +308,11 @@ mod tests {
     #[test]
     fn test_assess_recoverability_all_stories_done() {
         let (recoverable, note) = RecoveryDetector::assess_recoverability(
-            "hybrid_auto", "running", r#"{"stories":[]}"#, 5, 5,
+            "hybrid_auto",
+            "running",
+            r#"{"stories":[]}"#,
+            5,
+            5,
         );
         assert!(recoverable);
         assert!(note.unwrap().contains("finalization"));
@@ -300,7 +321,11 @@ mod tests {
     #[test]
     fn test_assess_recoverability_failed() {
         let (recoverable, note) = RecoveryDetector::assess_recoverability(
-            "mega_plan", "failed", r#"{"stories":[]}"#, 10, 3,
+            "mega_plan",
+            "failed",
+            r#"{"stories":[]}"#,
+            10,
+            3,
         );
         assert!(recoverable);
         assert!(note.unwrap().contains("failed"));

@@ -24,8 +24,12 @@ impl KeyringService {
                 "anthropic".to_string(),
                 "openai".to_string(),
                 "deepseek".to_string(),
+                "glm".to_string(),
+                "qwen".to_string(),
                 "google".to_string(),
                 "ollama".to_string(),
+                "tavily".to_string(),
+                "brave_search".to_string(),
             ],
         }
     }
@@ -35,7 +39,8 @@ impl KeyringService {
         let entry = Entry::new(SERVICE_NAME, provider)
             .map_err(|e| AppError::keyring(format!("Failed to create keyring entry: {}", e)))?;
 
-        entry.set_password(key)
+        entry
+            .set_password(key)
             .map_err(|e| AppError::keyring(format!("Failed to store API key: {}", e)))?;
 
         Ok(())
@@ -49,7 +54,10 @@ impl KeyringService {
         match entry.get_password() {
             Ok(password) => Ok(Some(password)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(AppError::keyring(format!("Failed to retrieve API key: {}", e))),
+            Err(e) => Err(AppError::keyring(format!(
+                "Failed to retrieve API key: {}",
+                e
+            ))),
         }
     }
 
@@ -61,7 +69,10 @@ impl KeyringService {
         match entry.delete_credential() {
             Ok(_) => Ok(()),
             Err(keyring::Error::NoEntry) => Ok(()), // Already deleted, not an error
-            Err(e) => Err(AppError::keyring(format!("Failed to delete API key: {}", e))),
+            Err(e) => Err(AppError::keyring(format!(
+                "Failed to delete API key: {}",
+                e
+            ))),
         }
     }
 

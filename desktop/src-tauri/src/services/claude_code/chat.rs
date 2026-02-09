@@ -7,11 +7,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 use crate::models::claude_code::SessionState;
-use crate::services::streaming::adapters::claude_code::ClaudeCodeAdapter;
 use crate::services::streaming::adapter::StreamAdapter;
+use crate::services::streaming::adapters::claude_code::ClaudeCodeAdapter;
 use crate::services::streaming::unified::UnifiedStreamEvent;
 use crate::utils::error::{AppError, AppResult};
 
+use super::executor::{ClaudeCodeExecutor, SpawnConfig};
 use super::session_manager::ActiveSessionManager;
 
 /// Result of a message send operation
@@ -58,6 +59,11 @@ impl ChatHandler {
 
     /// Send a message to a session and start streaming responses
     ///
+    /// Spawns a new `claude --output-format stream-json --verbose` process
+    /// for each message. The prompt is piped to stdin (not -p), which enables
+    /// true streaming output with content_block_delta events.
+    /// Uses `--resume <session_id>` for conversation continuity.
+    ///
     /// Returns a channel receiver that yields UnifiedStreamEvents.
     pub async fn send_message(
         &mut self,
@@ -73,33 +79,54 @@ impl ChatHandler {
 
         // Check session state
         if session.state == SessionState::Running {
-            return Err(AppError::validation("Session is already processing a request"));
+            return Err(AppError::validation(
+                "Session is already processing a request",
+            ));
         }
-
-        // Make sure a process is spawned
-        if !self.session_manager.has_running_process(session_id).await {
-            self.session_manager.spawn_process(session_id).await?;
-        }
-
-        // Take the process to work with it
-        let mut process = self
-            .session_manager
-            .take_process(session_id)
-            .await
-            .ok_or_else(|| AppError::internal("Failed to get process handle"))?;
-
-        // Get stdin and stdout
-        let mut stdin = process
-            .take_stdin()
-            .ok_or_else(|| AppError::internal("Failed to get stdin handle"))?;
-        let stdout = process
-            .take_stdout()
-            .ok_or_else(|| AppError::internal("Failed to get stdout handle"))?;
 
         // Update session state to running
         self.session_manager
             .update_session_state(session_id, SessionState::Running)
             .await?;
+
+        // Build spawn config - prompt goes to stdin, NOT via -p flag
+        let mut config = SpawnConfig::new(&session.project_path);
+
+        if let Some(ref model) = session.model {
+            config = config.with_model(model);
+        }
+
+        // Use --resume with the CLI session_id for conversation continuity
+        if let Some(ref resume_token) = session.resume_token {
+            config = config.with_resume(resume_token);
+        }
+
+        // Spawn a new process for this message
+        let executor = ClaudeCodeExecutor::new();
+        let mut process = executor.spawn(&config).await?;
+        let pid = process.pid();
+        eprintln!(
+            "[INFO] Spawned Claude Code process {} for message in session {}",
+            pid, session_id
+        );
+
+        // Write prompt to stdin, then close it to signal EOF
+        // The CLI reads all of stdin and processes it as the user message
+        if let Some(mut stdin) = process.take_stdin() {
+            if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
+                eprintln!("[ERROR] Failed to write prompt to stdin: {}", e);
+            }
+            if let Err(e) = stdin.flush().await {
+                eprintln!("[ERROR] Failed to flush stdin: {}", e);
+            }
+            // Drop stdin to close it - signals EOF to the CLI
+            drop(stdin);
+        }
+
+        // Take stdout for reading events
+        let stdout = process
+            .take_stdout()
+            .ok_or_else(|| AppError::internal("Failed to get stdout handle"))?;
 
         // Create event channel
         let (tx, rx) = mpsc::channel::<UnifiedStreamEvent>(100);
@@ -108,78 +135,136 @@ impl ChatHandler {
         let session_id_clone = session_id.to_string();
         let session_manager = self.session_manager.clone();
 
-        // Write the prompt to stdin
-        let prompt_with_newline = format!("{}\n", prompt);
-        stdin
-            .write_all(prompt_with_newline.as_bytes())
-            .await
-            .map_err(|e| AppError::command(format!("Failed to write to stdin: {}", e)))?;
+        // Also capture stderr for debugging
+        let stderr = process.take_stderr();
 
-        // Flush stdin
-        stdin.flush().await.ok();
+        // Spawn a task to log stderr
+        if let Some(stderr) = stderr {
+            tokio::spawn(async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    eprintln!("[claude stderr] {}", line);
+                }
+            });
+        }
 
-        // Spawn a task to read and process stdout
+        // Spawn a task to read stdout and forward parsed events
         tokio::spawn(async move {
+            eprintln!(
+                "[DEBUG] stdout reader task started for session {}",
+                session_id_clone
+            );
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             let mut adapter = ClaudeCodeAdapter::new();
-            let mut line_buffer = String::new();
+            let mut line_count = 0u32;
 
             while let Ok(Some(line)) = lines.next_line().await {
+                line_count += 1;
                 // Skip empty lines
                 if line.trim().is_empty() {
                     continue;
                 }
 
-                // Try to parse the line
+                // Capture CLI session_id from raw JSON for conversation continuity
+                // The system and result events include a session_id field
+                if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if let Some(cli_sid) = raw.get("session_id").and_then(|v| v.as_str()) {
+                        if !cli_sid.is_empty() {
+                            eprintln!("[DEBUG] captured CLI session_id: {}", cli_sid);
+                            let _ = session_manager
+                                .set_resume_token(&session_id_clone, cli_sid)
+                                .await;
+                        }
+                    }
+                }
+
+                // Try to parse the line via adapter
                 match adapter.adapt(&line) {
                     Ok(events) => {
-                        for event in events {
-                            // Check for completion
-                            let is_complete = matches!(event, UnifiedStreamEvent::Complete { .. });
+                        let mut should_break = false;
 
-                            // Send the event
-                            if tx.send(event).await.is_err() {
-                                // Receiver dropped, stop processing
+                        for event in events {
+                            let is_complete = matches!(&event, UnifiedStreamEvent::Complete { .. });
+
+                            // Check if this is a large text delta that needs chunking
+                            // (e.g., from non-streaming assistant event with full response)
+                            let is_large_text = matches!(
+                                &event,
+                                UnifiedStreamEvent::TextDelta { content } if content.chars().count() > 20
+                            );
+                            let is_text = matches!(&event, UnifiedStreamEvent::TextDelta { .. });
+
+                            if is_large_text {
+                                // Split large text into small chunks for typewriter effect
+                                if let UnifiedStreamEvent::TextDelta { content } = event {
+                                    let chars: Vec<char> = content.chars().collect();
+                                    for chunk in chars.chunks(4) {
+                                        let chunk_text: String = chunk.iter().collect();
+                                        if tx
+                                            .send(UnifiedStreamEvent::TextDelta {
+                                                content: chunk_text,
+                                            })
+                                            .await
+                                            .is_err()
+                                        {
+                                            should_break = true;
+                                            break;
+                                        }
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(12))
+                                            .await;
+                                    }
+                                }
+                            } else {
+                                if tx.send(event).await.is_err() {
+                                    should_break = true;
+                                }
+                                // Small delay after text deltas to prevent React from
+                                // batching all rapid updates into a single render
+                                if is_text && !should_break {
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(8)).await;
+                                }
+                            }
+
+                            if should_break {
+                                eprintln!("[WARN] mpsc receiver dropped, stopping");
                                 break;
                             }
 
                             if is_complete {
-                                // Mark session as idle
+                                eprintln!(
+                                    "[DEBUG] stream complete for session {}",
+                                    session_id_clone
+                                );
                                 let _ = session_manager
                                     .update_session_state(&session_id_clone, SessionState::Idle)
                                     .await;
-                                break;
                             }
                         }
                     }
                     Err(e) => {
-                        // Buffer incomplete JSON and try combining
-                        line_buffer.push_str(&line);
-
-                        // Try to parse the combined buffer
-                        if let Ok(events) = adapter.adapt(&line_buffer) {
-                            for event in events {
-                                if tx.send(event).await.is_err() {
-                                    break;
-                                }
-                            }
-                            line_buffer.clear();
-                        }
-                        // If still fails, try next line (might be continuation)
+                        eprintln!("[DEBUG] adapter parse error on line {}: {}", line_count, e);
                     }
                 }
             }
 
-            // Stream ended - update session state
+            eprintln!(
+                "[DEBUG] stdout reader ended after {} lines for session {}",
+                line_count, session_id_clone
+            );
+
+            // Stream ended (process exited) - update session state
             let _ = session_manager
                 .update_session_state(&session_id_clone, SessionState::Idle)
                 .await;
-            let _ = session_manager.increment_message_count(&session_id_clone).await;
-        });
+            let _ = session_manager
+                .increment_message_count(&session_id_clone)
+                .await;
 
-        // Return the process to the manager (without stdin/stdout)
-        self.session_manager.return_process(session_id, process).await;
+            // Keep process alive until stdout is fully read, then let it drop
+            drop(process);
+        });
 
         Ok(rx)
     }
@@ -298,11 +383,18 @@ mod tests {
 
         let events = handler.process_line(r#"{"type": "thinking", "thinking_id": "t1"}"#);
         assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], UnifiedStreamEvent::ThinkingStart { .. }));
+        assert!(matches!(
+            events[0],
+            UnifiedStreamEvent::ThinkingStart { .. }
+        ));
 
-        let events = handler.process_line(r#"{"type": "thinking_delta", "delta": "test", "thinking_id": "t1"}"#);
+        let events = handler
+            .process_line(r#"{"type": "thinking_delta", "delta": "test", "thinking_id": "t1"}"#);
         assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], UnifiedStreamEvent::ThinkingDelta { .. }));
+        assert!(matches!(
+            events[0],
+            UnifiedStreamEvent::ThinkingDelta { .. }
+        ));
     }
 
     #[test]

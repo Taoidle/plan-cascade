@@ -66,10 +66,7 @@ impl DesignDocLoader {
     ///
     /// Loads from `{project_root}/design_doc.json` and caches the result.
     /// Subsequent calls return the cached version unless `reload_all` is called.
-    pub async fn load_project_doc(
-        &self,
-        project_root: &Path,
-    ) -> Result<(), DesignDocError> {
+    pub async fn load_project_doc(&self, project_root: &Path) -> Result<(), DesignDocError> {
         let path = Self::project_doc_path(project_root);
         let doc = DesignDoc::from_file(&path)?;
 
@@ -98,10 +95,7 @@ impl DesignDocLoader {
     ///
     /// Loads from `{worktree_path}/design_doc.json` and caches by feature ID.
     /// The feature ID is extracted from the worktree path.
-    pub async fn load_feature_doc(
-        &self,
-        worktree_path: &Path,
-    ) -> Result<(), DesignDocError> {
+    pub async fn load_feature_doc(&self, worktree_path: &Path) -> Result<(), DesignDocError> {
         let path = worktree_path.join(DESIGN_DOC_FILENAME);
         let doc = DesignDoc::from_file(&path)?;
 
@@ -125,14 +119,13 @@ impl DesignDocLoader {
     /// Load a feature-level design document by ID
     ///
     /// Requires project root to be set via `load_project_doc` first.
-    pub async fn load_feature_doc_by_id(
-        &self,
-        feature_id: &str,
-    ) -> Result<(), DesignDocError> {
+    pub async fn load_feature_doc_by_id(&self, feature_id: &str) -> Result<(), DesignDocError> {
         let root = {
             let root = self.project_root.read().await;
             root.clone().ok_or_else(|| {
-                DesignDocError::ValidationError("Project root not set. Call load_project_doc first.".to_string())
+                DesignDocError::ValidationError(
+                    "Project root not set. Call load_project_doc first.".to_string(),
+                )
             })?
         };
 
@@ -844,7 +837,9 @@ mod tests {
 
         assert_eq!(mapping.description, "Authentication feature");
         assert!(mapping.components.contains(&"AuthComponent".to_string()));
-        assert!(mapping.components.contains(&"DatabaseComponent".to_string()));
+        assert!(mapping
+            .components
+            .contains(&"DatabaseComponent".to_string()));
         assert!(mapping.patterns.contains(&"JWT".to_string()));
         assert!(mapping.decisions.contains(&"ADR-001".to_string()));
 
@@ -933,10 +928,7 @@ mod tests {
         let project_root = Path::new("/project");
 
         let project_path = DesignDocLoader::project_doc_path(project_root);
-        assert_eq!(
-            project_path,
-            PathBuf::from("/project/design_doc.json")
-        );
+        assert_eq!(project_path, PathBuf::from("/project/design_doc.json"));
 
         let feature_path = DesignDocLoader::feature_doc_path(project_root, "my-feature");
         assert_eq!(

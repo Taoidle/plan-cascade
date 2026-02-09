@@ -118,7 +118,8 @@ impl PhaseConfig {
 
     /// Add a story type override
     pub fn with_story_override(mut self, story_type: StoryType, agent: impl Into<String>) -> Self {
-        self.story_type_overrides.insert(story_type.to_string(), agent.into());
+        self.story_type_overrides
+            .insert(story_type.to_string(), agent.into());
         self
     }
 
@@ -190,8 +191,7 @@ impl PhaseManager {
         // Planning phase - codex for PRD generation
         configs.insert(
             Phase::Planning,
-            PhaseConfig::new("codex")
-                .with_fallback("claude-code"),
+            PhaseConfig::new("codex").with_fallback("claude-code"),
         );
 
         // Implementation phase - claude-code for coding
@@ -205,22 +205,17 @@ impl PhaseManager {
         // Retry phase - claude-code with more context
         configs.insert(
             Phase::Retry,
-            PhaseConfig::new("claude-code")
-                .with_timeout(900), // 15 minutes for retries
+            PhaseConfig::new("claude-code").with_timeout(900), // 15 minutes for retries
         );
 
         // Refactor phase - aider for code restructuring
         configs.insert(
             Phase::Refactor,
-            PhaseConfig::new("aider")
-                .with_fallback("claude-code"),
+            PhaseConfig::new("aider").with_fallback("claude-code"),
         );
 
         // Review phase - claude-code for code review
-        configs.insert(
-            Phase::Review,
-            PhaseConfig::new("claude-code"),
-        );
+        configs.insert(Phase::Review, PhaseConfig::new("claude-code"));
 
         Self { configs }
     }
@@ -239,7 +234,13 @@ impl PhaseManager {
 
         // Fill in missing phases with defaults
         let default_manager = Self::new();
-        for phase in [Phase::Planning, Phase::Implementation, Phase::Retry, Phase::Refactor, Phase::Review] {
+        for phase in [
+            Phase::Planning,
+            Phase::Implementation,
+            Phase::Retry,
+            Phase::Refactor,
+            Phase::Review,
+        ] {
             if !configs.contains_key(&phase) {
                 if let Some(default_config) = default_manager.configs.get(&phase) {
                     configs.insert(phase, default_config.clone());
@@ -368,7 +369,10 @@ mod tests {
     #[test]
     fn test_phase_from_str() {
         assert_eq!(Phase::from_str("planning"), Some(Phase::Planning));
-        assert_eq!(Phase::from_str("IMPLEMENTATION"), Some(Phase::Implementation));
+        assert_eq!(
+            Phase::from_str("IMPLEMENTATION"),
+            Some(Phase::Implementation)
+        );
         assert_eq!(Phase::from_str("unknown"), None);
     }
 
@@ -377,7 +381,10 @@ mod tests {
         let manager = PhaseManager::new();
 
         assert_eq!(manager.get_agent_for_phase(Phase::Planning), "codex");
-        assert_eq!(manager.get_agent_for_phase(Phase::Implementation), "claude-code");
+        assert_eq!(
+            manager.get_agent_for_phase(Phase::Implementation),
+            "claude-code"
+        );
         assert_eq!(manager.get_agent_for_phase(Phase::Retry), "claude-code");
         assert_eq!(manager.get_agent_for_phase(Phase::Refactor), "aider");
         assert_eq!(manager.get_agent_for_phase(Phase::Review), "claude-code");
@@ -388,19 +395,13 @@ mod tests {
         let manager = PhaseManager::new();
 
         // Refactor story type should use aider even in implementation phase
-        let agent = manager.get_agent_for_story(
-            Phase::Implementation,
-            Some(StoryType::Refactor),
-            None,
-        );
+        let agent =
+            manager.get_agent_for_story(Phase::Implementation, Some(StoryType::Refactor), None);
         assert_eq!(agent, "aider");
 
         // Feature story type uses default implementation agent
-        let agent = manager.get_agent_for_story(
-            Phase::Implementation,
-            Some(StoryType::Feature),
-            None,
-        );
+        let agent =
+            manager.get_agent_for_story(Phase::Implementation, Some(StoryType::Feature), None);
         assert_eq!(agent, "claude-code");
     }
 
@@ -435,7 +436,10 @@ mod tests {
 
         assert_eq!(config.default_agent, "test-agent");
         assert_eq!(config.fallback_chain.len(), 3); // default + 2 added
-        assert_eq!(config.story_type_overrides.get("bugfix"), Some(&"bugfix-agent".to_string()));
+        assert_eq!(
+            config.story_type_overrides.get("bugfix"),
+            Some(&"bugfix-agent".to_string())
+        );
         assert_eq!(config.timeout_seconds, 1200);
     }
 

@@ -11,11 +11,11 @@
 
 use serde_json::json;
 
+use plan_cascade_desktop::services::recovery::detector::ExecutionMode;
+use plan_cascade_desktop::services::recovery::resume::RestoredContext;
 use plan_cascade_desktop::services::recovery::{
     IncompleteTask, RecoveryDetector, ResumeEngine, ResumeEvent, ResumeResult,
 };
-use plan_cascade_desktop::services::recovery::detector::ExecutionMode;
-use plan_cascade_desktop::services::recovery::resume::RestoredContext;
 use plan_cascade_desktop::storage::database::Database;
 use plan_cascade_desktop::utils::error::AppResult;
 
@@ -36,16 +36,30 @@ fn insert_execution(
     completed: i32,
     context: &str,
 ) {
-    db.insert_execution(id, None, &format!("Test {}", id), mode, "/test/project", total, context)
-        .unwrap();
+    db.insert_execution(
+        id,
+        None,
+        &format!("Test {}", id),
+        mode,
+        "/test/project",
+        total,
+        context,
+    )
+    .unwrap();
 
     if status != "running" {
         db.update_execution_status(id, status, None).unwrap();
     }
 
     if completed > 0 {
-        db.update_execution_progress(id, completed, None, (completed as f64 / total as f64) * 100.0, context)
-            .unwrap();
+        db.update_execution_progress(
+            id,
+            completed,
+            None,
+            (completed as f64 / total as f64) * 100.0,
+            context,
+        )
+        .unwrap();
     }
 }
 
@@ -145,7 +159,8 @@ fn test_detect_hybrid_worktree_interruption() {
     ]})
     .to_string();
     insert_execution(&db, "exec-wt-001", "hybrid_worktree", "running", 3, 1, &ctx);
-    db.update_execution_status("exec-wt-001", "paused", None).unwrap();
+    db.update_execution_status("exec-wt-001", "paused", None)
+        .unwrap();
 
     let tasks = RecoveryDetector::detect(&db).unwrap();
     assert_eq!(tasks.len(), 1);
@@ -185,9 +200,19 @@ fn test_detect_multiple_interrupted_executions() {
     insert_execution(&db, "exec-1", "direct", "running", 1, 0, r#"{"a":1}"#);
     insert_execution(&db, "exec-2", "hybrid_auto", "running", 5, 2, r#"{"b":2}"#);
     insert_execution(&db, "exec-3", "mega_plan", "running", 10, 3, r#"{"c":3}"#);
-    db.update_execution_status("exec-3", "failed", None).unwrap();
-    insert_execution(&db, "exec-4", "hybrid_worktree", "running", 3, 1, r#"{"d":4}"#);
-    db.update_execution_status("exec-4", "paused", None).unwrap();
+    db.update_execution_status("exec-3", "failed", None)
+        .unwrap();
+    insert_execution(
+        &db,
+        "exec-4",
+        "hybrid_worktree",
+        "running",
+        3,
+        1,
+        r#"{"d":4}"#,
+    );
+    db.update_execution_status("exec-4", "paused", None)
+        .unwrap();
 
     let tasks = RecoveryDetector::detect(&db).unwrap();
     assert_eq!(tasks.len(), 4);
@@ -203,13 +228,39 @@ fn test_detect_multiple_interrupted_executions() {
 fn test_detect_ignores_completed_and_cancelled() {
     let db = create_test_db();
 
-    insert_execution(&db, "exec-done", "hybrid_auto", "running", 5, 5, r#"{"ok":true}"#);
-    db.update_execution_status("exec-done", "completed", None).unwrap();
+    insert_execution(
+        &db,
+        "exec-done",
+        "hybrid_auto",
+        "running",
+        5,
+        5,
+        r#"{"ok":true}"#,
+    );
+    db.update_execution_status("exec-done", "completed", None)
+        .unwrap();
 
-    insert_execution(&db, "exec-cancel", "direct", "running", 1, 0, r#"{"ok":true}"#);
-    db.update_execution_status("exec-cancel", "cancelled", None).unwrap();
+    insert_execution(
+        &db,
+        "exec-cancel",
+        "direct",
+        "running",
+        1,
+        0,
+        r#"{"ok":true}"#,
+    );
+    db.update_execution_status("exec-cancel", "cancelled", None)
+        .unwrap();
 
-    insert_execution(&db, "exec-active", "hybrid_auto", "running", 3, 1, r#"{"ok":true}"#);
+    insert_execution(
+        &db,
+        "exec-active",
+        "hybrid_auto",
+        "running",
+        3,
+        1,
+        r#"{"ok":true}"#,
+    );
 
     let tasks = RecoveryDetector::detect(&db).unwrap();
     assert_eq!(tasks.len(), 1);
@@ -252,7 +303,8 @@ fn test_state_summary_failed_execution() {
 
     let ctx = json!({"error": "OOM"}).to_string();
     insert_execution(&db, "exec-fail", "hybrid_auto", "running", 5, 2, &ctx);
-    db.update_execution_status("exec-fail", "failed", Some("Out of memory")).unwrap();
+    db.update_execution_status("exec-fail", "failed", Some("Out of memory"))
+        .unwrap();
 
     let tasks = RecoveryDetector::detect(&db).unwrap();
     let task = &tasks[0];
@@ -273,18 +325,34 @@ fn test_state_summary_no_context_hybrid_not_recoverable() {
     let tasks = RecoveryDetector::detect(&db).unwrap();
     assert_eq!(tasks.len(), 1);
     assert!(!tasks[0].recoverable);
-    assert!(tasks[0].recovery_note.as_deref().unwrap().contains("No execution context"));
+    assert!(tasks[0]
+        .recovery_note
+        .as_deref()
+        .unwrap()
+        .contains("No execution context"));
 }
 
 #[test]
 fn test_state_summary_corrupted_context_not_recoverable() {
     let db = create_test_db();
 
-    insert_execution(&db, "exec-corrupt", "hybrid_auto", "running", 5, 2, "not json");
+    insert_execution(
+        &db,
+        "exec-corrupt",
+        "hybrid_auto",
+        "running",
+        5,
+        2,
+        "not json",
+    );
 
     let tasks = RecoveryDetector::detect(&db).unwrap();
     assert!(!tasks[0].recoverable);
-    assert!(tasks[0].recovery_note.as_deref().unwrap().contains("corrupted"));
+    assert!(tasks[0]
+        .recovery_note
+        .as_deref()
+        .unwrap()
+        .contains("corrupted"));
 }
 
 #[test]
@@ -296,7 +364,11 @@ fn test_state_summary_all_stories_done_recoverable() {
 
     let tasks = RecoveryDetector::detect(&db).unwrap();
     assert!(tasks[0].recoverable);
-    assert!(tasks[0].recovery_note.as_deref().unwrap().contains("finalization"));
+    assert!(tasks[0]
+        .recovery_note
+        .as_deref()
+        .unwrap()
+        .contains("finalization"));
 }
 
 #[test]
@@ -307,7 +379,11 @@ fn test_state_summary_direct_empty_context_recoverable() {
 
     let tasks = RecoveryDetector::detect(&db).unwrap();
     assert!(tasks[0].recoverable);
-    assert!(tasks[0].recovery_note.as_deref().unwrap().contains("restart"));
+    assert!(tasks[0]
+        .recovery_note
+        .as_deref()
+        .unwrap()
+        .contains("restart"));
 }
 
 // ============================================================================
@@ -331,7 +407,14 @@ fn test_detect_with_checkpoints() {
 
     // Insert execution linked to session
     insert_execution_with_session(
-        &db, "exec-cp", "sess-cp", "hybrid_auto", "running", 5, 2, &ctx,
+        &db,
+        "exec-cp",
+        "sess-cp",
+        "hybrid_auto",
+        "running",
+        5,
+        2,
+        &ctx,
     );
 
     // Insert checkpoints for the session
@@ -451,7 +534,15 @@ fn test_resume_with_remaining_ids_fallback() {
         "remaining_story_ids": ["s2", "s3"],
     })
     .to_string();
-    insert_execution(&db, "exec-remaining", "hybrid_worktree", "running", 3, 1, &ctx);
+    insert_execution(
+        &db,
+        "exec-remaining",
+        "hybrid_worktree",
+        "running",
+        3,
+        1,
+        &ctx,
+    );
 
     let result = ResumeEngine::resume(&db, "exec-remaining").unwrap();
 
@@ -465,8 +556,17 @@ fn test_resume_with_remaining_ids_fallback() {
 fn test_resume_completed_execution_fails() {
     let db = create_test_db();
 
-    insert_execution(&db, "exec-done-2", "hybrid_auto", "running", 3, 3, r#"{"done":true}"#);
-    db.update_execution_status("exec-done-2", "completed", None).unwrap();
+    insert_execution(
+        &db,
+        "exec-done-2",
+        "hybrid_auto",
+        "running",
+        3,
+        3,
+        r#"{"done":true}"#,
+    );
+    db.update_execution_status("exec-done-2", "completed", None)
+        .unwrap();
 
     let result = ResumeEngine::resume(&db, "exec-done-2").unwrap();
     assert!(!result.success);
@@ -478,8 +578,17 @@ fn test_resume_completed_execution_fails() {
 fn test_resume_cancelled_execution_fails() {
     let db = create_test_db();
 
-    insert_execution(&db, "exec-cancel-2", "direct", "running", 1, 0, r#"{"cancel":true}"#);
-    db.update_execution_status("exec-cancel-2", "cancelled", None).unwrap();
+    insert_execution(
+        &db,
+        "exec-cancel-2",
+        "direct",
+        "running",
+        1,
+        0,
+        r#"{"cancel":true}"#,
+    );
+    db.update_execution_status("exec-cancel-2", "cancelled", None)
+        .unwrap();
 
     let result = ResumeEngine::resume(&db, "exec-cancel-2").unwrap();
     assert!(!result.success);
@@ -497,7 +606,15 @@ fn test_resume_nonexistent_execution_fails() {
 fn test_resume_corrupted_context_fails() {
     let db = create_test_db();
 
-    insert_execution(&db, "exec-bad-ctx", "hybrid_auto", "running", 5, 2, "not json");
+    insert_execution(
+        &db,
+        "exec-bad-ctx",
+        "hybrid_auto",
+        "running",
+        5,
+        2,
+        "not json",
+    );
 
     let result = ResumeEngine::resume(&db, "exec-bad-ctx");
     assert!(result.is_err());
@@ -513,7 +630,8 @@ fn test_resume_failed_execution() {
     })
     .to_string();
     insert_execution(&db, "exec-failed-res", "hybrid_auto", "running", 3, 1, &ctx);
-    db.update_execution_status("exec-failed-res", "failed", Some("Timeout")).unwrap();
+    db.update_execution_status("exec-failed-res", "failed", Some("Timeout"))
+        .unwrap();
 
     let result = ResumeEngine::resume(&db, "exec-failed-res").unwrap();
     assert!(result.success);
@@ -533,7 +651,15 @@ fn test_resume_failed_execution() {
 fn test_discard_running_execution() {
     let db = create_test_db();
 
-    insert_execution(&db, "exec-discard-1", "hybrid_auto", "running", 5, 2, r#"{"ok":true}"#);
+    insert_execution(
+        &db,
+        "exec-discard-1",
+        "hybrid_auto",
+        "running",
+        5,
+        2,
+        r#"{"ok":true}"#,
+    );
 
     ResumeEngine::discard(&db, "exec-discard-1").unwrap();
 
@@ -545,8 +671,17 @@ fn test_discard_running_execution() {
 fn test_discard_paused_execution() {
     let db = create_test_db();
 
-    insert_execution(&db, "exec-discard-2", "mega_plan", "running", 10, 3, r#"{"ok":true}"#);
-    db.update_execution_status("exec-discard-2", "paused", None).unwrap();
+    insert_execution(
+        &db,
+        "exec-discard-2",
+        "mega_plan",
+        "running",
+        10,
+        3,
+        r#"{"ok":true}"#,
+    );
+    db.update_execution_status("exec-discard-2", "paused", None)
+        .unwrap();
 
     ResumeEngine::discard(&db, "exec-discard-2").unwrap();
 
@@ -558,8 +693,17 @@ fn test_discard_paused_execution() {
 fn test_discard_completed_execution_fails() {
     let db = create_test_db();
 
-    insert_execution(&db, "exec-discard-3", "direct", "running", 1, 1, r#"{"ok":true}"#);
-    db.update_execution_status("exec-discard-3", "completed", None).unwrap();
+    insert_execution(
+        &db,
+        "exec-discard-3",
+        "direct",
+        "running",
+        1,
+        1,
+        r#"{"ok":true}"#,
+    );
+    db.update_execution_status("exec-discard-3", "completed", None)
+        .unwrap();
 
     let result = ResumeEngine::discard(&db, "exec-discard-3");
     assert!(result.is_err());
@@ -678,7 +822,15 @@ fn test_detect_then_discard_workflow() {
     let db = create_test_db();
 
     let ctx = json!({"ok": true}).to_string();
-    insert_execution(&db, "exec-discard-e2e", "hybrid_worktree", "running", 3, 1, &ctx);
+    insert_execution(
+        &db,
+        "exec-discard-e2e",
+        "hybrid_worktree",
+        "running",
+        3,
+        1,
+        &ctx,
+    );
 
     // Detect
     let tasks = RecoveryDetector::detect(&db).unwrap();

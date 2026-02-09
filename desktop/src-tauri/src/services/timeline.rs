@@ -7,13 +7,14 @@ use std::fs::{self, File};
 use std::io::{BufReader, Write};
 use std::path::PathBuf;
 
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use similar::{ChangeTag, TextDiff};
 
 use crate::models::checkpoint::{
-    Checkpoint, CheckpointBranch, CheckpointDiff, FileDiff, FileSnapshot, RestoreResult, TimelineMetadata,
+    Checkpoint, CheckpointBranch, CheckpointDiff, FileDiff, FileSnapshot, RestoreResult,
+    TimelineMetadata,
 };
 use crate::utils::error::{AppError, AppResult};
 
@@ -91,12 +92,9 @@ impl TimelineService {
     fn is_binary_file(&self, path: &PathBuf) -> bool {
         // Check by extension first
         let binary_extensions = [
-            "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp",
-            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-            "zip", "tar", "gz", "rar", "7z",
-            "exe", "dll", "so", "dylib",
-            "mp3", "mp4", "avi", "mov", "wav",
-            "woff", "woff2", "ttf", "otf", "eot",
+            "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "pdf", "doc", "docx", "xls", "xlsx",
+            "ppt", "pptx", "zip", "tar", "gz", "rar", "7z", "exe", "dll", "so", "dylib", "mp3",
+            "mp4", "avi", "mov", "wav", "woff", "woff2", "ttf", "otf", "eot",
         ];
 
         if let Some(ext) = path.extension() {
@@ -115,7 +113,11 @@ impl TimelineService {
     }
 
     /// Create a snapshot of tracked files in the project
-    fn create_files_snapshot(&self, project_path: &str, tracked_paths: &[String]) -> AppResult<Vec<FileSnapshot>> {
+    fn create_files_snapshot(
+        &self,
+        project_path: &str,
+        tracked_paths: &[String],
+    ) -> AppResult<Vec<FileSnapshot>> {
         let project_root = PathBuf::from(project_path);
         let mut snapshots = Vec::new();
 
@@ -164,8 +166,8 @@ impl TimelineService {
         let parent_id = metadata.current_checkpoint_id.clone();
 
         // Create checkpoint
-        let mut checkpoint = Checkpoint::new(&checkpoint_id, session_id, label)
-            .with_files(files_snapshot);
+        let mut checkpoint =
+            Checkpoint::new(&checkpoint_id, session_id, label).with_files(files_snapshot);
 
         if let Some(parent) = parent_id {
             checkpoint = checkpoint.with_parent(parent);
@@ -181,10 +183,7 @@ impl TimelineService {
 
         // Initialize main branch if this is the first checkpoint
         if metadata.branches.is_empty() {
-            let main_branch = CheckpointBranch::main(
-                Uuid::new_v4().to_string(),
-                &checkpoint.id,
-            );
+            let main_branch = CheckpointBranch::main(Uuid::new_v4().to_string(), &checkpoint.id);
             metadata.current_branch_id = Some(main_branch.id.clone());
             metadata.branches.push(main_branch);
         }
@@ -246,7 +245,9 @@ impl TimelineService {
             .checkpoints
             .iter()
             .position(|cp| cp.id == checkpoint_id)
-            .ok_or_else(|| AppError::not_found(format!("Checkpoint not found: {}", checkpoint_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found(format!("Checkpoint not found: {}", checkpoint_id))
+            })?;
 
         // Don't allow deleting if other checkpoints depend on this one
         let has_children = metadata
@@ -274,7 +275,11 @@ impl TimelineService {
     }
 
     /// Get the timeline metadata for a session
-    pub fn get_timeline(&self, project_path: &str, session_id: &str) -> AppResult<TimelineMetadata> {
+    pub fn get_timeline(
+        &self,
+        project_path: &str,
+        session_id: &str,
+    ) -> AppResult<TimelineMetadata> {
         self.load_metadata(project_path, session_id)
     }
 
@@ -289,7 +294,10 @@ impl TimelineService {
 
         // Verify checkpoint exists
         if !metadata.checkpoints.iter().any(|cp| cp.id == checkpoint_id) {
-            return Err(AppError::not_found(format!("Checkpoint not found: {}", checkpoint_id)));
+            return Err(AppError::not_found(format!(
+                "Checkpoint not found: {}",
+                checkpoint_id
+            )));
         }
 
         metadata.current_checkpoint_id = Some(checkpoint_id.to_string());
@@ -312,7 +320,10 @@ impl TimelineService {
 
         // Verify checkpoint exists
         if !metadata.checkpoints.iter().any(|cp| cp.id == checkpoint_id) {
-            return Err(AppError::not_found(format!("Checkpoint not found: {}", checkpoint_id)));
+            return Err(AppError::not_found(format!(
+                "Checkpoint not found: {}",
+                checkpoint_id
+            )));
         }
 
         // Check branch name is unique
@@ -324,11 +335,7 @@ impl TimelineService {
         }
 
         // Create new branch
-        let branch = CheckpointBranch::new(
-            Uuid::new_v4().to_string(),
-            branch_name,
-            checkpoint_id,
-        );
+        let branch = CheckpointBranch::new(Uuid::new_v4().to_string(), branch_name, checkpoint_id);
 
         metadata.branches.push(branch.clone());
         metadata.current_branch_id = Some(branch.id.clone());
@@ -390,10 +397,8 @@ impl TimelineService {
             .collect();
 
         // Get the ancestor chain from the branch point
-        let mut ancestor_chain = self.get_checkpoint_ancestors(
-            &metadata.checkpoints,
-            &branch.parent_checkpoint_id,
-        );
+        let mut ancestor_chain =
+            self.get_checkpoint_ancestors(&metadata.checkpoints, &branch.parent_checkpoint_id);
 
         // Combine: ancestors first, then branch checkpoints
         ancestor_chain.append(&mut branch_checkpoints);
@@ -483,7 +488,9 @@ impl TimelineService {
         metadata.branches.remove(branch_index);
 
         // Remove all checkpoints that are exclusively on this branch
-        metadata.checkpoints.retain(|cp| cp.branch_id.as_deref() != Some(branch_id));
+        metadata
+            .checkpoints
+            .retain(|cp| cp.branch_id.as_deref() != Some(branch_id));
 
         // If current branch was deleted, switch to main
         if metadata.current_branch_id.as_deref() == Some(branch_id) {
@@ -510,7 +517,11 @@ impl TimelineService {
         let mut metadata = self.load_metadata(project_path, session_id)?;
 
         // Check new name is unique
-        if metadata.branches.iter().any(|b| b.name == new_name && b.id != branch_id) {
+        if metadata
+            .branches
+            .iter()
+            .any(|b| b.name == new_name && b.id != branch_id)
+        {
             return Err(AppError::validation(format!(
                 "Branch with name '{}' already exists",
                 new_name
@@ -565,13 +576,17 @@ impl TimelineService {
             .checkpoints
             .iter()
             .find(|cp| cp.id == from_checkpoint_id)
-            .ok_or_else(|| AppError::not_found(format!("Checkpoint not found: {}", from_checkpoint_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found(format!("Checkpoint not found: {}", from_checkpoint_id))
+            })?;
 
         let to_checkpoint = metadata
             .checkpoints
             .iter()
             .find(|cp| cp.id == to_checkpoint_id)
-            .ok_or_else(|| AppError::not_found(format!("Checkpoint not found: {}", to_checkpoint_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found(format!("Checkpoint not found: {}", to_checkpoint_id))
+            })?;
 
         self.compute_checkpoint_diff(project_path, from_checkpoint, to_checkpoint)
     }
@@ -603,22 +618,13 @@ impl TimelineService {
             if let Some(from_file) = from_files.get(path) {
                 // File exists in both - check if modified
                 if from_file.hash != to_file.hash {
-                    let file_diff = self.create_file_diff(
-                        project_path,
-                        *path,
-                        Some(from_file),
-                        Some(to_file),
-                    )?;
+                    let file_diff =
+                        self.create_file_diff(project_path, *path, Some(from_file), Some(to_file))?;
                     diff.modified_files.push(file_diff);
                 }
             } else {
                 // File only in to - added
-                let file_diff = self.create_file_diff(
-                    project_path,
-                    *path,
-                    None,
-                    Some(to_file),
-                )?;
+                let file_diff = self.create_file_diff(project_path, *path, None, Some(to_file))?;
                 diff.added_files.push(file_diff);
             }
         }
@@ -626,12 +632,8 @@ impl TimelineService {
         // Find deleted files
         for (path, from_file) in &from_files {
             if !to_files.contains_key(path) {
-                let file_diff = self.create_file_diff(
-                    project_path,
-                    *path,
-                    Some(from_file),
-                    None,
-                )?;
+                let file_diff =
+                    self.create_file_diff(project_path, *path, Some(from_file), None)?;
                 diff.deleted_files.push(file_diff);
             }
         }
@@ -654,7 +656,9 @@ impl TimelineService {
                 let mut diff = FileDiff::added(&to.path, &to.hash, to.size, to.is_binary);
 
                 if !to.is_binary {
-                    let content = self.read_file_content(project_path, path).unwrap_or_default();
+                    let content = self
+                        .read_file_content(project_path, path)
+                        .unwrap_or_default();
                     let lines: Vec<&str> = content.lines().collect();
                     let line_count = lines.len() as u32;
 
@@ -692,7 +696,9 @@ impl TimelineService {
 
                 if !from.is_binary && !to.is_binary {
                     // Try to get current file content for diff
-                    let new_content = self.read_file_content(project_path, path).unwrap_or_default();
+                    let new_content = self
+                        .read_file_content(project_path, path)
+                        .unwrap_or_default();
 
                     // For old content, we'd need to have stored it or reconstruct
                     // For now, we'll show a simplified diff
@@ -791,12 +797,14 @@ impl TimelineService {
             .checkpoints
             .iter()
             .find(|cp| cp.id == checkpoint_id)
-            .ok_or_else(|| AppError::not_found(format!("Checkpoint not found: {}", checkpoint_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found(format!("Checkpoint not found: {}", checkpoint_id))
+            })?;
 
         // Create a virtual "current state" checkpoint
         let current_snapshot = self.create_files_snapshot(project_path, tracked_files)?;
-        let current = Checkpoint::new("current", session_id, "Current state")
-            .with_files(current_snapshot);
+        let current =
+            Checkpoint::new("current", session_id, "Current state").with_files(current_snapshot);
 
         self.compute_checkpoint_diff(project_path, checkpoint, &current)
     }
@@ -1055,8 +1063,18 @@ mod tests {
         assert_eq!(checkpoint.files_snapshot.len(), 2);
 
         // Verify hashes are different for different content
-        let hash1 = &checkpoint.files_snapshot.iter().find(|f| f.path == "file1.txt").unwrap().hash;
-        let hash2 = &checkpoint.files_snapshot.iter().find(|f| f.path == "file2.txt").unwrap().hash;
+        let hash1 = &checkpoint
+            .files_snapshot
+            .iter()
+            .find(|f| f.path == "file1.txt")
+            .unwrap()
+            .hash;
+        let hash2 = &checkpoint
+            .files_snapshot
+            .iter()
+            .find(|f| f.path == "file2.txt")
+            .unwrap()
+            .hash;
         assert_ne!(hash1, hash2);
 
         cleanup_temp_project(&temp_dir);
@@ -1394,7 +1412,12 @@ mod tests {
 
         // Create second checkpoint with file
         let cp2 = service
-            .create_checkpoint(&project_path, "sess1", "With file", &["new_file.txt".to_string()])
+            .create_checkpoint(
+                &project_path,
+                "sess1",
+                "With file",
+                &["new_file.txt".to_string()],
+            )
             .unwrap();
 
         // Calculate diff
@@ -1422,7 +1445,12 @@ mod tests {
         fs::write(&test_file, "Content").unwrap();
 
         let cp1 = service
-            .create_checkpoint(&project_path, "sess1", "With file", &["to_delete.txt".to_string()])
+            .create_checkpoint(
+                &project_path,
+                "sess1",
+                "With file",
+                &["to_delete.txt".to_string()],
+            )
             .unwrap();
 
         // Create checkpoint without file
@@ -1455,14 +1483,24 @@ mod tests {
         fs::write(&test_file, "Original content").unwrap();
 
         let cp1 = service
-            .create_checkpoint(&project_path, "sess1", "Original", &["modify.txt".to_string()])
+            .create_checkpoint(
+                &project_path,
+                "sess1",
+                "Original",
+                &["modify.txt".to_string()],
+            )
             .unwrap();
 
         // Modify file
         fs::write(&test_file, "Modified content with more text").unwrap();
 
         let cp2 = service
-            .create_checkpoint(&project_path, "sess1", "Modified", &["modify.txt".to_string()])
+            .create_checkpoint(
+                &project_path,
+                "sess1",
+                "Modified",
+                &["modify.txt".to_string()],
+            )
             .unwrap();
 
         // Calculate diff
@@ -1523,7 +1561,11 @@ mod tests {
                 &project_path,
                 "sess1",
                 "Initial",
-                &["keep.txt".to_string(), "modify.txt".to_string(), "delete.txt".to_string()],
+                &[
+                    "keep.txt".to_string(),
+                    "modify.txt".to_string(),
+                    "delete.txt".to_string(),
+                ],
             )
             .unwrap();
 
@@ -1537,7 +1579,11 @@ mod tests {
                 &project_path,
                 "sess1",
                 "Changed",
-                &["keep.txt".to_string(), "modify.txt".to_string(), "new.txt".to_string()],
+                &[
+                    "keep.txt".to_string(),
+                    "modify.txt".to_string(),
+                    "new.txt".to_string(),
+                ],
             )
             .unwrap();
 
@@ -1572,7 +1618,12 @@ mod tests {
 
         // Get diff from checkpoint to current state
         let diff = service
-            .get_diff_from_current(&project_path, "sess1", &cp1.id, &["evolving.txt".to_string()])
+            .get_diff_from_current(
+                &project_path,
+                "sess1",
+                &cp1.id,
+                &["evolving.txt".to_string()],
+            )
             .unwrap();
 
         assert_eq!(diff.modified_files.len(), 1);
@@ -1590,14 +1641,23 @@ mod tests {
 
         // Create binary file (PNG header)
         let binary_file = temp_dir.join("image.png");
-        fs::write(&binary_file, &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).unwrap();
+        fs::write(
+            &binary_file,
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+        )
+        .unwrap();
 
         let cp1 = service
             .create_checkpoint(&project_path, "sess1", "Empty", &[])
             .unwrap();
 
         let cp2 = service
-            .create_checkpoint(&project_path, "sess1", "With binary", &["image.png".to_string()])
+            .create_checkpoint(
+                &project_path,
+                "sess1",
+                "With binary",
+                &["image.png".to_string()],
+            )
             .unwrap();
 
         let diff = service

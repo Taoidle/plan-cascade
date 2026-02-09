@@ -129,7 +129,9 @@ impl McpServer {
 
         match self.server_type {
             McpServerType::Stdio => {
-                if self.command.is_none() || self.command.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                if self.command.is_none()
+                    || self.command.as_ref().map(|s| s.is_empty()).unwrap_or(true)
+                {
                     return Err("Command is required for stdio servers".to_string());
                 }
             }

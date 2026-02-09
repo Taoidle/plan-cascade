@@ -8,11 +8,11 @@ use tauri::State;
 use tokio::sync::RwLock;
 
 use crate::models::response::CommandResponse;
+use crate::services::spec_interview::compiler::CompiledSpec;
+use crate::services::spec_interview::interview::{InterviewConfig, InterviewSession};
 use crate::services::spec_interview::{
     CompileOptions, InterviewManager, InterviewStateManager, SpecCompiler,
 };
-use crate::services::spec_interview::interview::{InterviewConfig, InterviewSession};
-use crate::services::spec_interview::compiler::CompiledSpec;
 use crate::storage::database::DbPool;
 
 /// State for the Spec Interview service, managed by Tauri

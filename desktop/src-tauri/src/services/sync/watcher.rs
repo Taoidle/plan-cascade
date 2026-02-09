@@ -13,9 +13,8 @@ use tauri::{AppHandle, Runtime};
 use tokio::sync::{mpsc, RwLock};
 
 use super::events::{
-    ChangeType, FileChangeEvent, PrdChangeEvent, ProgressChangeEvent,
-    ProjectChangeEvent, SyncEventEmitter, WatchErrorEvent, WatchErrorKind,
-    WatchStatus, WatchStatusEvent,
+    ChangeType, FileChangeEvent, PrdChangeEvent, ProgressChangeEvent, ProjectChangeEvent,
+    SyncEventEmitter, WatchErrorEvent, WatchErrorKind, WatchStatus, WatchStatusEvent,
 };
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::paths::claude_projects_dir;
@@ -128,7 +127,8 @@ impl<R: Runtime> FileWatcherService<R> {
             return Ok(());
         }
 
-        self.add_watch(WatchTarget::ProjectsDirectory, &projects_dir, false).await
+        self.add_watch(WatchTarget::ProjectsDirectory, &projects_dir, false)
+            .await
     }
 
     /// Start watching a specific project directory
@@ -144,7 +144,8 @@ impl<R: Runtime> FileWatcherService<R> {
             WatchTarget::ProjectDirectory(project_path.clone()),
             &project_path,
             true,
-        ).await
+        )
+        .await
     }
 
     /// Start watching a specific file (prd.json or progress.txt)
@@ -152,11 +153,9 @@ impl<R: Runtime> FileWatcherService<R> {
         if !file_path.exists() {
             // Watch the parent directory instead, to catch creation
             if let Some(parent) = file_path.parent() {
-                return self.add_watch(
-                    WatchTarget::SpecificFile(file_path.clone()),
-                    parent,
-                    false,
-                ).await;
+                return self
+                    .add_watch(WatchTarget::SpecificFile(file_path.clone()), parent, false)
+                    .await;
             }
             return Err(AppError::not_found(format!(
                 "File not found: {:?}",
@@ -166,13 +165,12 @@ impl<R: Runtime> FileWatcherService<R> {
 
         // Watch the parent directory to catch modifications
         if let Some(parent) = file_path.parent() {
-            self.add_watch(
-                WatchTarget::SpecificFile(file_path.clone()),
-                parent,
-                false,
-            ).await
+            self.add_watch(WatchTarget::SpecificFile(file_path.clone()), parent, false)
+                .await
         } else {
-            Err(AppError::validation("Cannot watch file without parent directory"))
+            Err(AppError::validation(
+                "Cannot watch file without parent directory",
+            ))
         }
     }
 
@@ -229,12 +227,7 @@ impl<R: Runtime> FileWatcherService<R> {
     }
 
     /// Add a watch for a specific target
-    async fn add_watch(
-        &self,
-        target: WatchTarget,
-        path: &Path,
-        recursive: bool,
-    ) -> AppResult<()> {
+    async fn add_watch(&self, target: WatchTarget, path: &Path, recursive: bool) -> AppResult<()> {
         let mut state = self.state.write().await;
 
         // Check if already watching
@@ -263,7 +256,8 @@ impl<R: Runtime> FileWatcherService<R> {
                     }
                 }
             },
-        ).map_err(|e| AppError::internal(format!("Failed to create watcher: {}", e)))?;
+        )
+        .map_err(|e| AppError::internal(format!("Failed to create watcher: {}", e)))?;
 
         // Start watching
         let mode = if recursive && self.config.recursive {
@@ -272,14 +266,11 @@ impl<R: Runtime> FileWatcherService<R> {
             RecursiveMode::NonRecursive
         };
 
-        debouncer
-            .watcher()
-            .watch(path, mode)
-            .map_err(|e| {
-                let error_event = WatchErrorEvent::from_notify_error(&e);
-                self.emitter.emit_watch_error(error_event);
-                AppError::internal(format!("Failed to watch path {:?}: {}", path, e))
-            })?;
+        debouncer.watcher().watch(path, mode).map_err(|e| {
+            let error_event = WatchErrorEvent::from_notify_error(&e);
+            self.emitter.emit_watch_error(error_event);
+            AppError::internal(format!("Failed to watch path {:?}: {}", path, e))
+        })?;
 
         // Store the watcher
         state.watchers.insert(target.clone(), debouncer);
@@ -313,10 +304,7 @@ impl<R: Runtime> FileWatcherService<R> {
             WatchTarget::ProjectsDirectory => {
                 // Only emit for direct children (project directories)
                 if path.is_dir() {
-                    emitter.emit_project_change(ProjectChangeEvent::new(
-                        change_type,
-                        path,
-                    ));
+                    emitter.emit_project_change(ProjectChangeEvent::new(change_type, path));
                 }
             }
             WatchTarget::ProjectDirectory(project_path) => {
@@ -349,21 +337,12 @@ impl<R: Runtime> FileWatcherService<R> {
                     if let Some(file_name) = path.file_name() {
                         let name = file_name.to_string_lossy();
                         if name == "prd.json" {
-                            emitter.emit_prd_change(PrdChangeEvent::new(
-                                change_type,
-                                path,
-                            ));
+                            emitter.emit_prd_change(PrdChangeEvent::new(change_type, path));
                         } else if name == "progress.txt" {
-                            emitter.emit_progress_change(ProgressChangeEvent::new(
-                                change_type,
-                                path,
-                            ));
+                            emitter
+                                .emit_progress_change(ProgressChangeEvent::new(change_type, path));
                         } else {
-                            emitter.emit_file_change(FileChangeEvent::new(
-                                change_type,
-                                path,
-                                None,
-                            ));
+                            emitter.emit_file_change(FileChangeEvent::new(change_type, path, None));
                         }
                     }
                 }

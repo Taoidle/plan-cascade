@@ -13,8 +13,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
 use crate::models::quality_gates::{
-    CustomGateConfig, GateResult, GatesSummary, ProjectType, QualityGate,
-    StoredGateResult,
+    CustomGateConfig, GateResult, GatesSummary, ProjectType, QualityGate, StoredGateResult,
 };
 use crate::services::quality_gates::{detect_project_type, ValidatorRegistry};
 use crate::utils::error::{AppError, AppResult};
@@ -119,11 +118,12 @@ impl QualityGateRunner {
     }
 
     /// Run a list of quality gates
-    async fn run_gates(&self, gates: &[QualityGate], project_type: ProjectType) -> AppResult<GatesSummary> {
-        let mut summary = GatesSummary::new(
-            self.project_path.to_string_lossy(),
-            project_type,
-        );
+    async fn run_gates(
+        &self,
+        gates: &[QualityGate],
+        project_type: ProjectType,
+    ) -> AppResult<GatesSummary> {
+        let mut summary = GatesSummary::new(self.project_path.to_string_lossy(), project_type);
 
         for gate in gates {
             let result = self.run_single_gate(gate).await;
@@ -191,15 +191,11 @@ impl QualityGateRunner {
                     GateResult::failed(gate, exit_code, stdout, stderr, duration_ms)
                 }
             }
-            Ok(Err(e)) => {
-                GateResult::error(gate, format!("Failed to execute command: {}", e))
-            }
-            Err(_) => {
-                GateResult::error(
-                    gate,
-                    format!("Command timed out after {} seconds", gate.timeout_secs),
-                )
-            }
+            Ok(Err(e)) => GateResult::error(gate, format!("Failed to execute command: {}", e)),
+            Err(_) => GateResult::error(
+                gate,
+                format!("Command timed out after {} seconds", gate.timeout_secs),
+            ),
         }
     }
 
@@ -241,8 +237,13 @@ impl QualityGateRunner {
     }
 
     /// Store result in database
-    fn store_result(&self, pool: &Pool<SqliteConnectionManager>, result: &GateResult) -> AppResult<()> {
-        let conn = pool.get()
+    fn store_result(
+        &self,
+        pool: &Pool<SqliteConnectionManager>,
+        result: &GateResult,
+    ) -> AppResult<()> {
+        let conn = pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         // Truncate stdout/stderr for storage
@@ -295,7 +296,9 @@ impl QualityGatesStore {
 
     /// Initialize the database schema
     fn init_schema(&self) -> AppResult<()> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         conn.execute(
@@ -342,7 +345,9 @@ impl QualityGatesStore {
         project_path: &str,
         limit: Option<i64>,
     ) -> AppResult<Vec<StoredGateResult>> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let limit = limit.unwrap_or(100);
@@ -352,36 +357,36 @@ impl QualityGatesStore {
              FROM quality_gate_results
              WHERE project_path = ?1
              ORDER BY created_at DESC
-             LIMIT ?2"
+             LIMIT ?2",
         )?;
 
-        let results = stmt.query_map(params![project_path, limit], |row| {
-            Ok(StoredGateResult {
-                id: row.get(0)?,
-                project_path: row.get(1)?,
-                session_id: row.get(2)?,
-                gate_id: row.get(3)?,
-                gate_name: row.get(4)?,
-                status: row.get(5)?,
-                exit_code: row.get(6)?,
-                stdout: row.get(7)?,
-                stderr: row.get(8)?,
-                duration_ms: row.get::<_, i64>(9)? as u64,
-                created_at: row.get(10)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let results = stmt
+            .query_map(params![project_path, limit], |row| {
+                Ok(StoredGateResult {
+                    id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    session_id: row.get(2)?,
+                    gate_id: row.get(3)?,
+                    gate_name: row.get(4)?,
+                    status: row.get(5)?,
+                    exit_code: row.get(6)?,
+                    stdout: row.get(7)?,
+                    stderr: row.get(8)?,
+                    duration_ms: row.get::<_, i64>(9)? as u64,
+                    created_at: row.get(10)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(results)
     }
 
     /// Get results for a session
-    pub fn get_results_for_session(
-        &self,
-        session_id: &str,
-    ) -> AppResult<Vec<StoredGateResult>> {
-        let conn = self.pool.get()
+    pub fn get_results_for_session(&self, session_id: &str) -> AppResult<Vec<StoredGateResult>> {
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let mut stmt = conn.prepare(
@@ -389,33 +394,36 @@ impl QualityGatesStore {
                     exit_code, stdout, stderr, duration_ms, created_at
              FROM quality_gate_results
              WHERE session_id = ?1
-             ORDER BY created_at DESC"
+             ORDER BY created_at DESC",
         )?;
 
-        let results = stmt.query_map(params![session_id], |row| {
-            Ok(StoredGateResult {
-                id: row.get(0)?,
-                project_path: row.get(1)?,
-                session_id: row.get(2)?,
-                gate_id: row.get(3)?,
-                gate_name: row.get(4)?,
-                status: row.get(5)?,
-                exit_code: row.get(6)?,
-                stdout: row.get(7)?,
-                stderr: row.get(8)?,
-                duration_ms: row.get::<_, i64>(9)? as u64,
-                created_at: row.get(10)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let results = stmt
+            .query_map(params![session_id], |row| {
+                Ok(StoredGateResult {
+                    id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    session_id: row.get(2)?,
+                    gate_id: row.get(3)?,
+                    gate_name: row.get(4)?,
+                    status: row.get(5)?,
+                    exit_code: row.get(6)?,
+                    stdout: row.get(7)?,
+                    stderr: row.get(8)?,
+                    duration_ms: row.get::<_, i64>(9)? as u64,
+                    created_at: row.get(10)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(results)
     }
 
     /// Get a single result by ID
     pub fn get_result(&self, id: i64) -> AppResult<Option<StoredGateResult>> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let result = conn.query_row(
@@ -450,7 +458,9 @@ impl QualityGatesStore {
 
     /// Delete old results (older than days)
     pub fn cleanup_old_results(&self, days: i64) -> AppResult<i64> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let count = conn.execute(
@@ -490,9 +500,9 @@ pub async fn run_quality_gates(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::quality_gates::GateStatus;
     use std::fs;
     use tempfile::TempDir;
-    use crate::models::quality_gates::GateStatus;
 
     fn create_temp_project() -> TempDir {
         let temp = tempfile::tempdir().unwrap();

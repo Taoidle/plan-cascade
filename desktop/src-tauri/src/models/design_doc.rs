@@ -584,7 +584,9 @@ mod tests {
                 ]
             }
         }"#;
-        temp_file.write_all(content.as_bytes()).expect("Failed to write");
+        temp_file
+            .write_all(content.as_bytes())
+            .expect("Failed to write");
 
         // Load from file
         let doc = DesignDoc::from_file(temp_file.path()).expect("Failed to load");
@@ -656,14 +658,18 @@ mod tests {
         doc.add_feature_mapping("feature-data", data_mapping);
 
         // Test lookups
-        let auth = doc.get_feature_mapping("feature-auth").expect("Should find auth");
+        let auth = doc
+            .get_feature_mapping("feature-auth")
+            .expect("Should find auth");
         assert_eq!(auth.components.len(), 2);
         assert!(auth.components.contains(&"Auth".to_string()));
         assert!(auth.components.contains(&"Database".to_string()));
         assert_eq!(auth.decisions.len(), 1);
         assert!(auth.decisions.contains(&"ADR-001".to_string()));
 
-        let data = doc.get_feature_mapping("feature-data").expect("Should find data");
+        let data = doc
+            .get_feature_mapping("feature-data")
+            .expect("Should find data");
         assert_eq!(data.components.len(), 1);
         assert!(data.components.contains(&"Database".to_string()));
         assert_eq!(data.patterns.len(), 1);

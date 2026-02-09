@@ -156,23 +156,23 @@ impl MegaPlan {
 
     /// Check if all features are complete
     pub fn is_complete(&self) -> bool {
-        self.features.iter().all(|f| f.status == FeatureStatus::Completed)
+        self.features
+            .iter()
+            .all(|f| f.status == FeatureStatus::Completed)
     }
 
     /// Load from file
     pub fn from_file(path: &std::path::Path) -> Result<Self, MegaPlanError> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| MegaPlanError::IoError(e.to_string()))?;
-        serde_json::from_str(&content)
-            .map_err(|e| MegaPlanError::ParseError(e.to_string()))
+        let content =
+            std::fs::read_to_string(path).map_err(|e| MegaPlanError::IoError(e.to_string()))?;
+        serde_json::from_str(&content).map_err(|e| MegaPlanError::ParseError(e.to_string()))
     }
 
     /// Save to file
     pub fn to_file(&self, path: &std::path::Path) -> Result<(), MegaPlanError> {
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| MegaPlanError::SerializeError(e.to_string()))?;
-        std::fs::write(path, content)
-            .map_err(|e| MegaPlanError::IoError(e.to_string()))
+        std::fs::write(path, content).map_err(|e| MegaPlanError::IoError(e.to_string()))
     }
 }
 
@@ -315,7 +315,8 @@ impl MegaStatus {
         if self.features.is_empty() {
             return 0.0;
         }
-        let completed = self.features
+        let completed = self
+            .features
             .values()
             .filter(|s| s.status == FeatureStatus::Completed)
             .count();
@@ -326,16 +327,14 @@ impl MegaStatus {
     pub fn to_file(&self, path: &std::path::Path) -> Result<(), MegaPlanError> {
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| MegaPlanError::SerializeError(e.to_string()))?;
-        std::fs::write(path, content)
-            .map_err(|e| MegaPlanError::IoError(e.to_string()))
+        std::fs::write(path, content).map_err(|e| MegaPlanError::IoError(e.to_string()))
     }
 
     /// Load from file
     pub fn from_file(path: &std::path::Path) -> Result<Self, MegaPlanError> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| MegaPlanError::IoError(e.to_string()))?;
-        serde_json::from_str(&content)
-            .map_err(|e| MegaPlanError::ParseError(e.to_string()))
+        let content =
+            std::fs::read_to_string(path).map_err(|e| MegaPlanError::IoError(e.to_string()))?;
+        serde_json::from_str(&content).map_err(|e| MegaPlanError::ParseError(e.to_string()))
     }
 }
 

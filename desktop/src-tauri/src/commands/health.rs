@@ -9,7 +9,9 @@ use crate::state::AppState;
 
 /// Get the health status of all backend services
 #[tauri::command]
-pub async fn get_health(state: State<'_, AppState>) -> Result<CommandResponse<HealthResponse>, String> {
+pub async fn get_health(
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<HealthResponse>, String> {
     let mut health = HealthResponse::default();
 
     // Check database health

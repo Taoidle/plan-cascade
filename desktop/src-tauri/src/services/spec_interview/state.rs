@@ -73,7 +73,9 @@ impl InterviewStateManager {
 
     /// Initialize the interview tables (called during database setup)
     pub fn init_schema(&self) -> AppResult<()> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         conn.execute(
@@ -133,7 +135,9 @@ impl InterviewStateManager {
 
     /// Create a new interview record
     pub fn create_interview(&self, state: &PersistedInterviewState) -> AppResult<()> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         conn.execute(
@@ -161,7 +165,9 @@ impl InterviewStateManager {
 
     /// Get an interview by ID
     pub fn get_interview(&self, id: &str) -> AppResult<Option<PersistedInterviewState>> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let result = conn.query_row(
@@ -199,7 +205,9 @@ impl InterviewStateManager {
 
     /// Update an existing interview
     pub fn update_interview(&self, state: &PersistedInterviewState) -> AppResult<()> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         conn.execute(
@@ -226,59 +234,74 @@ impl InterviewStateManager {
     }
 
     /// List all interviews, optionally filtered by status
-    pub fn list_interviews(&self, status_filter: Option<&str>) -> AppResult<Vec<PersistedInterviewState>> {
-        let conn = self.pool.get()
+    pub fn list_interviews(
+        &self,
+        status_filter: Option<&str>,
+    ) -> AppResult<Vec<PersistedInterviewState>> {
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        let (sql, filter_params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(status) = status_filter {
-            (
-                "SELECT id, status, phase, flow_level, first_principles, max_questions,
+        let (sql, filter_params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(status) = status_filter {
+                (
+                    "SELECT id, status, phase, flow_level, first_principles, max_questions,
                  question_cursor, description, project_path, spec_data, created_at, updated_at
-                 FROM interviews WHERE status = ?1 ORDER BY updated_at DESC".to_string(),
-                vec![Box::new(status.to_string()) as Box<dyn rusqlite::types::ToSql>],
-            )
-        } else {
-            (
-                "SELECT id, status, phase, flow_level, first_principles, max_questions,
+                 FROM interviews WHERE status = ?1 ORDER BY updated_at DESC"
+                        .to_string(),
+                    vec![Box::new(status.to_string()) as Box<dyn rusqlite::types::ToSql>],
+                )
+            } else {
+                (
+                    "SELECT id, status, phase, flow_level, first_principles, max_questions,
                  question_cursor, description, project_path, spec_data, created_at, updated_at
-                 FROM interviews ORDER BY updated_at DESC".to_string(),
-                vec![],
-            )
-        };
+                 FROM interviews ORDER BY updated_at DESC"
+                        .to_string(),
+                    vec![],
+                )
+            };
 
         let mut stmt = conn.prepare(&sql)?;
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = filter_params.iter().map(|p| p.as_ref()).collect();
-        let interviews = stmt.query_map(params_refs.as_slice(), |row| {
-            Ok(PersistedInterviewState {
-                id: row.get(0)?,
-                status: row.get(1)?,
-                phase: row.get(2)?,
-                flow_level: row.get(3)?,
-                first_principles: {
-                    let v: i32 = row.get(4)?;
-                    v != 0
-                },
-                max_questions: row.get(5)?,
-                question_cursor: row.get(6)?,
-                description: row.get(7)?,
-                project_path: row.get(8)?,
-                spec_data: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            filter_params.iter().map(|p| p.as_ref()).collect();
+        let interviews = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                Ok(PersistedInterviewState {
+                    id: row.get(0)?,
+                    status: row.get(1)?,
+                    phase: row.get(2)?,
+                    flow_level: row.get(3)?,
+                    first_principles: {
+                        let v: i32 = row.get(4)?;
+                        v != 0
+                    },
+                    max_questions: row.get(5)?,
+                    question_cursor: row.get(6)?,
+                    description: row.get(7)?,
+                    project_path: row.get(8)?,
+                    spec_data: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(interviews)
     }
 
     /// Delete an interview and all its turns
     pub fn delete_interview(&self, id: &str) -> AppResult<()> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        conn.execute("DELETE FROM interview_turns WHERE interview_id = ?1", params![id])?;
+        conn.execute(
+            "DELETE FROM interview_turns WHERE interview_id = ?1",
+            params![id],
+        )?;
         conn.execute("DELETE FROM interviews WHERE id = ?1", params![id])?;
 
         Ok(())
@@ -290,7 +313,9 @@ impl InterviewStateManager {
 
     /// Add a new turn to an interview
     pub fn add_turn(&self, turn: &InterviewTurn) -> AppResult<()> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         conn.execute(
@@ -313,7 +338,9 @@ impl InterviewStateManager {
 
     /// Get all turns for an interview, ordered by turn number
     pub fn get_turns(&self, interview_id: &str) -> AppResult<Vec<InterviewTurn>> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let mut stmt = conn.prepare(
@@ -321,27 +348,30 @@ impl InterviewStateManager {
              FROM interview_turns WHERE interview_id = ?1 ORDER BY turn_number ASC",
         )?;
 
-        let turns = stmt.query_map(params![interview_id], |row| {
-            Ok(InterviewTurn {
-                id: row.get(0)?,
-                interview_id: row.get(1)?,
-                turn_number: row.get(2)?,
-                phase: row.get(3)?,
-                question: row.get(4)?,
-                answer: row.get(5)?,
-                field_name: row.get(6)?,
-                created_at: row.get(7)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let turns = stmt
+            .query_map(params![interview_id], |row| {
+                Ok(InterviewTurn {
+                    id: row.get(0)?,
+                    interview_id: row.get(1)?,
+                    turn_number: row.get(2)?,
+                    phase: row.get(3)?,
+                    question: row.get(4)?,
+                    answer: row.get(5)?,
+                    field_name: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(turns)
     }
 
     /// Count turns for an interview
     pub fn count_turns(&self, interview_id: &str) -> AppResult<i32> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let count: i32 = conn.query_row(

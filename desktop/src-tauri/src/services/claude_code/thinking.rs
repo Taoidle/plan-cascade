@@ -3,8 +3,8 @@
 //! Manages thinking block state for collapsible display in the UI.
 //! Tracks multiple concurrent thinking blocks and provides state for frontend rendering.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Maximum characters for auto-generated summary
 const SUMMARY_MAX_LEN: usize = 100;
@@ -127,17 +127,15 @@ impl ThinkingManager {
     ///
     /// Appends content to the active block.
     pub fn on_thinking_delta(&mut self, thinking_id: Option<&str>, content: &str) {
-        let id = thinking_id
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                // Find the most recent incomplete block
-                self.blocks
-                    .iter()
-                    .filter(|(_, b)| !b.is_complete)
-                    .max_by_key(|(id, _)| id.as_str())
-                    .map(|(id, _)| id.clone())
-                    .unwrap_or_else(|| self.on_thinking_start(None))
-            });
+        let id = thinking_id.map(|s| s.to_string()).unwrap_or_else(|| {
+            // Find the most recent incomplete block
+            self.blocks
+                .iter()
+                .filter(|(_, b)| !b.is_complete)
+                .max_by_key(|(id, _)| id.as_str())
+                .map(|(id, _)| id.clone())
+                .unwrap_or_else(|| self.on_thinking_start(None))
+        });
 
         if let Some(block) = self.blocks.get_mut(&id) {
             block.append_content(content);
@@ -153,17 +151,15 @@ impl ThinkingManager {
     ///
     /// Finalizes the block and generates a summary.
     pub fn on_thinking_end(&mut self, thinking_id: Option<&str>) {
-        let id = thinking_id
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                // Find the most recent incomplete block
-                self.blocks
-                    .iter()
-                    .filter(|(_, b)| !b.is_complete)
-                    .max_by_key(|(id, _)| id.as_str())
-                    .map(|(id, _)| id.clone())
-                    .unwrap_or_default()
-            });
+        let id = thinking_id.map(|s| s.to_string()).unwrap_or_else(|| {
+            // Find the most recent incomplete block
+            self.blocks
+                .iter()
+                .filter(|(_, b)| !b.is_complete)
+                .max_by_key(|(id, _)| id.as_str())
+                .map(|(id, _)| id.clone())
+                .unwrap_or_default()
+        });
 
         if let Some(block) = self.blocks.get_mut(&id) {
             block.finalize();

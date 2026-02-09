@@ -3,8 +3,8 @@
 //! Tests for Claude Code models including sessions, messages, and requests.
 
 use plan_cascade_desktop::models::claude_code::{
-    SessionState, ClaudeCodeSession, ChatMessage, ToolCallSummary,
-    StartChatRequest, StartChatResponse, SendMessageRequest, ActiveSessionInfo,
+    ActiveSessionInfo, ChatMessage, ClaudeCodeSession, SendMessageRequest, SessionState,
+    StartChatRequest, StartChatResponse, ToolCallSummary,
 };
 
 // ============================================================================
@@ -37,11 +37,26 @@ fn test_session_state_serialization() {
 
 #[test]
 fn test_session_state_json_format() {
-    assert_eq!(serde_json::to_string(&SessionState::Idle).unwrap(), "\"idle\"");
-    assert_eq!(serde_json::to_string(&SessionState::Running).unwrap(), "\"running\"");
-    assert_eq!(serde_json::to_string(&SessionState::Waiting).unwrap(), "\"waiting\"");
-    assert_eq!(serde_json::to_string(&SessionState::Cancelled).unwrap(), "\"cancelled\"");
-    assert_eq!(serde_json::to_string(&SessionState::Error).unwrap(), "\"error\"");
+    assert_eq!(
+        serde_json::to_string(&SessionState::Idle).unwrap(),
+        "\"idle\""
+    );
+    assert_eq!(
+        serde_json::to_string(&SessionState::Running).unwrap(),
+        "\"running\""
+    );
+    assert_eq!(
+        serde_json::to_string(&SessionState::Waiting).unwrap(),
+        "\"waiting\""
+    );
+    assert_eq!(
+        serde_json::to_string(&SessionState::Cancelled).unwrap(),
+        "\"cancelled\""
+    );
+    assert_eq!(
+        serde_json::to_string(&SessionState::Error).unwrap(),
+        "\"error\""
+    );
 }
 
 // ============================================================================
@@ -66,7 +81,10 @@ fn test_session_with_model() {
     let session = ClaudeCodeSession::new("sess-001", "/test/project")
         .with_model("claude-3-5-sonnet-20241022");
 
-    assert_eq!(session.model, Some("claude-3-5-sonnet-20241022".to_string()));
+    assert_eq!(
+        session.model,
+        Some("claude-3-5-sonnet-20241022".to_string())
+    );
 }
 
 #[test]

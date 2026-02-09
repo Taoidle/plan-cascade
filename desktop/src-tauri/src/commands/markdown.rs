@@ -30,7 +30,10 @@ pub fn read_claude_md(path: String) -> Result<CommandResponse<ClaudeMdContent>, 
 
 /// Save content to a CLAUDE.md file
 #[tauri::command]
-pub fn save_claude_md(path: String, content: String) -> Result<CommandResponse<SaveResult>, String> {
+pub fn save_claude_md(
+    path: String,
+    content: String,
+) -> Result<CommandResponse<SaveResult>, String> {
     let service = MarkdownService::new();
 
     match service.save_claude_md(&path, &content) {

@@ -10,9 +10,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::models::design_doc::{
-    ApiStandards, Component, Decision, DecisionStatus, DesignDoc, DesignDocError,
-    DesignDocLevel, DesignDocMetadata, FeatureMapping, Interfaces,
-    Pattern,
+    ApiStandards, Component, Decision, DecisionStatus, DesignDoc, DesignDocError, DesignDocLevel,
+    DesignDocMetadata, FeatureMapping, Interfaces, Pattern,
 };
 
 /// Supported import formats
@@ -103,9 +102,10 @@ impl DesignDocImporter {
         format: Option<ImportFormat>,
     ) -> Result<ImportResult, DesignDocError> {
         if !file_path.exists() {
-            return Err(DesignDocError::NotFound(
-                format!("Import file not found: {}", file_path.display()),
-            ));
+            return Err(DesignDocError::NotFound(format!(
+                "Import file not found: {}",
+                file_path.display()
+            )));
         }
 
         let detected_format = format.or_else(|| ImportFormat::from_extension(file_path));
@@ -302,7 +302,9 @@ impl DesignDocImporter {
         })?;
 
         warnings.push(ImportWarning {
-            message: "JSON does not match standard design_doc schema, performing best-effort import".to_string(),
+            message:
+                "JSON does not match standard design_doc schema, performing best-effort import"
+                    .to_string(),
             field: None,
             severity: WarningSeverity::Medium,
         });
@@ -747,10 +749,7 @@ mod tests {
             ImportFormat::from_extension(Path::new("doc.json")),
             Some(ImportFormat::Json)
         );
-        assert_eq!(
-            ImportFormat::from_extension(Path::new("doc.txt")),
-            None
-        );
+        assert_eq!(ImportFormat::from_extension(Path::new("doc.txt")), None);
         assert_eq!(
             ImportFormat::from_extension(Path::new("doc.markdown")),
             Some(ImportFormat::Markdown)
@@ -956,8 +955,7 @@ The main application component.
 
     #[test]
     fn test_import_from_file_not_found() {
-        let result =
-            DesignDocImporter::import(Path::new("/nonexistent/file.md"), None);
+        let result = DesignDocImporter::import(Path::new("/nonexistent/file.md"), None);
         assert!(matches!(result, Err(DesignDocError::NotFound(_))));
     }
 
@@ -996,8 +994,7 @@ Testing format override.
         assert!(DesignDocImporter::import(&file_path, None).is_err());
 
         // Should succeed with format override
-        let result =
-            DesignDocImporter::import(&file_path, Some(ImportFormat::Markdown)).unwrap();
+        let result = DesignDocImporter::import(&file_path, Some(ImportFormat::Markdown)).unwrap();
         assert_eq!(result.design_doc.overview.title, "Override Test");
     }
 
@@ -1048,13 +1045,19 @@ The system exposes a GraphQL API for client communication.
 
         let result = DesignDocImporter::import_markdown(markdown).unwrap();
 
-        assert!(result.design_doc.feature_mappings.contains_key("feature-auth"));
+        assert!(result
+            .design_doc
+            .feature_mappings
+            .contains_key("feature-auth"));
         let auth_mapping = &result.design_doc.feature_mappings["feature-auth"];
         assert_eq!(auth_mapping.components.len(), 2);
         assert_eq!(auth_mapping.patterns.len(), 1);
         assert_eq!(auth_mapping.decisions.len(), 1);
 
-        assert!(result.design_doc.feature_mappings.contains_key("feature-data"));
+        assert!(result
+            .design_doc
+            .feature_mappings
+            .contains_key("feature-data"));
     }
 
     #[test]

@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 
 use super::provider::LlmProvider;
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolDefinition, UsageStats,
+    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
+    StopReason, ToolCall, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::OllamaAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -156,14 +156,24 @@ impl OllamaProvider {
             tool_calls: Vec::new(), // Ollama tool support is limited
             stop_reason: StopReason::EndTurn,
             usage,
-            model: response.model.clone().unwrap_or_else(|| self.config.model.clone()),
+            model: response
+                .model
+                .clone()
+                .unwrap_or_else(|| self.config.model.clone()),
         }
     }
 
     /// Extract thinking content from <think> tags
     fn extract_thinking(&self, content: &str) -> (Option<String>, Option<String>) {
         if !self.model_supports_thinking() {
-            return (None, if content.is_empty() { None } else { Some(content.to_string()) });
+            return (
+                None,
+                if content.is_empty() {
+                    None
+                } else {
+                    Some(content.to_string())
+                },
+            );
         }
 
         let mut thinking = String::new();
@@ -202,8 +212,16 @@ impl OllamaProvider {
             text.push_str(&buffer);
         }
 
-        let thinking_result = if thinking.is_empty() { None } else { Some(thinking.trim().to_string()) };
-        let text_result = if text.is_empty() { None } else { Some(text.trim().to_string()) };
+        let thinking_result = if thinking.is_empty() {
+            None
+        } else {
+            Some(thinking.trim().to_string())
+        };
+        let text_result = if text.is_empty() {
+            None
+        } else {
+            Some(text.trim().to_string())
+        };
 
         (thinking_result, text_result)
     }
@@ -226,6 +244,13 @@ impl LlmProvider for OllamaProvider {
     fn supports_tools(&self) -> bool {
         // Ollama tool support is model-dependent and generally limited
         false
+    }
+
+    fn context_window(&self) -> u32 {
+        // Ollama models vary widely; use a conservative default.
+        // Users running larger models (e.g., Llama 3.1 70B) may need to
+        // adjust max_total_tokens in the orchestrator config.
+        8_192
     }
 
     async fn send_message(
@@ -330,6 +355,7 @@ impl LlmProvider for OllamaProvider {
         let mut adapter = OllamaAdapter::new(&self.config.model);
         let mut accumulated_content = String::new();
         let mut accumulated_thinking = String::new();
+        let mut tool_calls = Vec::new();
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
 
@@ -364,6 +390,19 @@ impl LlmProvider for OllamaProvider {
                                 UnifiedStreamEvent::ThinkingDelta { content, .. } => {
                                     accumulated_thinking.push_str(content);
                                 }
+                                UnifiedStreamEvent::ToolComplete {
+                                    tool_id,
+                                    tool_name,
+                                    arguments,
+                                } => {
+                                    if let Ok(input) = serde_json::from_str(arguments) {
+                                        tool_calls.push(ToolCall {
+                                            id: tool_id.clone(),
+                                            name: tool_name.clone(),
+                                            arguments: input,
+                                        });
+                                    }
+                                }
                                 UnifiedStreamEvent::Usage {
                                     input_tokens,
                                     output_tokens,
@@ -380,8 +419,16 @@ impl LlmProvider for OllamaProvider {
                                 _ => {}
                             }
 
-                            // Forward event to channel
-                            let _ = tx.send(event).await;
+                            // Forward streaming events but suppress Complete/Usage —
+                            // those are internal signals; the orchestrator emits its own
+                            // Complete after tool calls are done.
+                            if !matches!(
+                                &event,
+                                UnifiedStreamEvent::Complete { .. }
+                                    | UnifiedStreamEvent::Usage { .. }
+                            ) {
+                                let _ = tx.send(event).await;
+                            }
                         }
                     }
                     Err(e) => {
@@ -407,9 +454,28 @@ impl LlmProvider for OllamaProvider {
                         UnifiedStreamEvent::ThinkingDelta { content, .. } => {
                             accumulated_thinking.push_str(content);
                         }
+                        UnifiedStreamEvent::ToolComplete {
+                            tool_id,
+                            tool_name,
+                            arguments,
+                        } => {
+                            if let Ok(input) = serde_json::from_str(arguments) {
+                                tool_calls.push(ToolCall {
+                                    id: tool_id.clone(),
+                                    name: tool_name.clone(),
+                                    arguments: input,
+                                });
+                            }
+                        }
                         _ => {}
                     }
-                    let _ = tx.send(event).await;
+                    if !matches!(
+                        &event,
+                        UnifiedStreamEvent::Complete { .. }
+                            | UnifiedStreamEvent::Usage { .. }
+                    ) {
+                        let _ = tx.send(event).await;
+                    }
                 }
             }
         }
@@ -425,7 +491,7 @@ impl LlmProvider for OllamaProvider {
             } else {
                 Some(accumulated_thinking)
             },
-            tool_calls: Vec::new(),
+            tool_calls,
             stop_reason,
             usage,
             model: self.config.model.clone(),
@@ -435,22 +501,17 @@ impl LlmProvider for OllamaProvider {
     async fn health_check(&self) -> LlmResult<()> {
         let url = format!("{}/api/tags", self.base_url());
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_connect() {
-                    LlmError::ProviderUnavailable {
-                        message: format!("Cannot connect to Ollama at {}", self.base_url()),
-                    }
-                } else {
-                    LlmError::NetworkError {
-                        message: e.to_string(),
-                    }
+        let response = self.client.get(&url).send().await.map_err(|e| {
+            if e.is_connect() {
+                LlmError::ProviderUnavailable {
+                    message: format!("Cannot connect to Ollama at {}", self.base_url()),
                 }
-            })?;
+            } else {
+                LlmError::NetworkError {
+                    message: e.to_string(),
+                }
+            }
+        })?;
 
         if response.status().is_success() {
             Ok(())
@@ -468,22 +529,17 @@ impl LlmProvider for OllamaProvider {
     async fn list_models(&self) -> LlmResult<Option<Vec<String>>> {
         let url = format!("{}/api/tags", self.base_url());
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_connect() {
-                    LlmError::ProviderUnavailable {
-                        message: format!("Cannot connect to Ollama at {}", self.base_url()),
-                    }
-                } else {
-                    LlmError::NetworkError {
-                        message: e.to_string(),
-                    }
+        let response = self.client.get(&url).send().await.map_err(|e| {
+            if e.is_connect() {
+                LlmError::ProviderUnavailable {
+                    message: format!("Cannot connect to Ollama at {}", self.base_url()),
                 }
-            })?;
+            } else {
+                LlmError::NetworkError {
+                    message: e.to_string(),
+                }
+            }
+        })?;
 
         let status = response.status().as_u16();
         if status != 200 {

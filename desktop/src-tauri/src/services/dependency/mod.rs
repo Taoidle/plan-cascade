@@ -5,4 +5,4 @@
 
 mod analyzer;
 
-pub use analyzer::{DependencyAnalyzer, Batch, DependencyError};
+pub use analyzer::{Batch, DependencyAnalyzer, DependencyError};

@@ -2,19 +2,20 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use plan_cascade_desktop::state::AppState;
-use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
 use plan_cascade_desktop::commands::analytics::AnalyticsState;
+use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
-use plan_cascade_desktop::commands::worktree::WorktreeState;
-use plan_cascade_desktop::commands::standalone::StandaloneState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
+use plan_cascade_desktop::commands::standalone::StandaloneState;
+use plan_cascade_desktop::commands::worktree::WorktreeState;
+use plan_cascade_desktop::state::AppState;
 
 use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .manage(ClaudeCodeState::new())
         .manage(AnalyticsState::new())
@@ -139,6 +140,8 @@ fn main() {
             plan_cascade_desktop::commands::worktree::complete_worktree,
             // Standalone LLM commands
             plan_cascade_desktop::commands::standalone::list_providers,
+            plan_cascade_desktop::commands::standalone::list_configured_api_key_providers,
+            plan_cascade_desktop::commands::standalone::get_provider_api_key,
             plan_cascade_desktop::commands::standalone::configure_provider,
             plan_cascade_desktop::commands::standalone::check_provider_health,
             plan_cascade_desktop::commands::standalone::execute_standalone,
@@ -153,6 +156,8 @@ fn main() {
             plan_cascade_desktop::commands::standalone::list_standalone_sessions,
             plan_cascade_desktop::commands::standalone::delete_standalone_session,
             plan_cascade_desktop::commands::standalone::cleanup_standalone_sessions,
+            plan_cascade_desktop::commands::standalone::get_working_directory,
+            plan_cascade_desktop::commands::standalone::set_working_directory,
             // Strategy commands
             plan_cascade_desktop::commands::strategy::analyze_task_strategy,
             plan_cascade_desktop::commands::strategy::get_strategy_options,

@@ -3,14 +3,16 @@
 //! Tauri commands for Claude Code CLI integration.
 
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
 
 use crate::models::claude_code::{
     ActiveSessionInfo, ClaudeCodeSession, SendMessageRequest, StartChatRequest, StartChatResponse,
 };
 use crate::models::response::CommandResponse;
-use crate::services::claude_code::{ActiveSessionManager, ChatHandler};
+use crate::services::claude_code::{
+    channels, ActiveSessionManager, ChatHandler, StreamEventPayload,
+};
 
 /// State for Claude Code services
 pub struct ClaudeCodeState {
@@ -76,19 +78,48 @@ pub async fn start_chat(
 
 /// Send a message to a Claude Code session
 ///
-/// This triggers the streaming response. The actual stream events
-/// are emitted through Tauri events, not through this command's return value.
+/// This triggers the streaming response. Stream events are forwarded
+/// from the mpsc channel to Tauri events so the frontend can receive them.
 #[tauri::command]
 pub async fn send_message(
     request: SendMessageRequest,
     state: State<'_, ClaudeCodeState>,
+    app: AppHandle,
 ) -> Result<CommandResponse<bool>, String> {
     let mut chat_handler = state.chat_handler.write().await;
 
-    match chat_handler.send_message(&request.session_id, &request.prompt).await {
-        Ok(_rx) => {
-            // The receiver is returned for internal use
-            // Events will be emitted through the event system (story-007)
+    match chat_handler
+        .send_message(&request.session_id, &request.prompt)
+        .await
+    {
+        Ok(mut rx) => {
+            let session_id = request.session_id.clone();
+            eprintln!(
+                "[DEBUG] send_message: spawning event forwarder for session {}",
+                session_id
+            );
+            // Spawn a task to forward events from the mpsc channel to Tauri events
+            tokio::spawn(async move {
+                let mut event_count = 0u32;
+                while let Some(event) = rx.recv().await {
+                    event_count += 1;
+                    eprintln!(
+                        "[DEBUG] forwarding event #{} to frontend for session {}",
+                        event_count, session_id
+                    );
+                    let payload = StreamEventPayload {
+                        event,
+                        session_id: session_id.clone(),
+                    };
+                    if let Err(e) = app.emit(channels::STREAM, &payload) {
+                        eprintln!("[WARN] Failed to emit stream event: {}", e);
+                    }
+                }
+                eprintln!(
+                    "[DEBUG] event forwarder ended after {} events for session {}",
+                    event_count, session_id
+                );
+            });
             Ok(CommandResponse::ok(true))
         }
         Err(e) => Ok(CommandResponse::err(e.to_string())),

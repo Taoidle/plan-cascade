@@ -10,7 +10,9 @@ use crate::state::AppState;
 
 /// Get current application settings
 #[tauri::command]
-pub async fn get_settings(state: State<'_, AppState>) -> Result<CommandResponse<AppConfig>, String> {
+pub async fn get_settings(
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<AppConfig>, String> {
     match state.get_config().await {
         Ok(config) => Ok(CommandResponse::ok(config)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),

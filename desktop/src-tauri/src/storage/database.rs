@@ -88,7 +88,9 @@ impl Database {
 
     /// Initialize the database schema
     fn init_schema(&self) -> AppResult<()> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         // Create settings table
@@ -316,7 +318,8 @@ impl Database {
 
     /// Get a connection from the pool
     pub fn get_connection(&self) -> AppResult<r2d2::PooledConnection<SqliteConnectionManager>> {
-        self.pool.get()
+        self.pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))
     }
 
@@ -405,13 +408,24 @@ impl Database {
         conn.execute(
             "UPDATE executions SET completed_stories = ?2, current_story_id = ?3, progress = ?4,
              context_snapshot = ?5, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
-            params![id, completed_stories, current_story_id, progress, context_snapshot],
+            params![
+                id,
+                completed_stories,
+                current_story_id,
+                progress,
+                context_snapshot
+            ],
         )?;
         Ok(())
     }
 
     /// Update execution status
-    pub fn update_execution_status(&self, id: &str, status: &str, error_message: Option<&str>) -> AppResult<()> {
+    pub fn update_execution_status(
+        &self,
+        id: &str,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> AppResult<()> {
         let conn = self.get_connection()?;
         let completed_at = if status == "completed" || status == "cancelled" || status == "failed" {
             Some(chrono::Utc::now().to_rfc3339())
@@ -434,30 +448,31 @@ impl Database {
                     context_snapshot, error_message, created_at, updated_at, completed_at
              FROM executions
              WHERE status NOT IN ('completed', 'cancelled')
-             ORDER BY updated_at DESC"
+             ORDER BY updated_at DESC",
         )?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok(ExecutionRow {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                name: row.get(2)?,
-                execution_mode: row.get(3)?,
-                status: row.get(4)?,
-                project_path: row.get(5)?,
-                total_stories: row.get(6)?,
-                completed_stories: row.get(7)?,
-                current_story_id: row.get(8)?,
-                progress: row.get(9)?,
-                context_snapshot: row.get(10)?,
-                error_message: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
-                completed_at: row.get(14)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ExecutionRow {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    name: row.get(2)?,
+                    execution_mode: row.get(3)?,
+                    status: row.get(4)?,
+                    project_path: row.get(5)?,
+                    total_stories: row.get(6)?,
+                    completed_stories: row.get(7)?,
+                    current_story_id: row.get(8)?,
+                    progress: row.get(9)?,
+                    context_snapshot: row.get(10)?,
+                    error_message: row.get(11)?,
+                    created_at: row.get(12)?,
+                    updated_at: row.get(13)?,
+                    completed_at: row.get(14)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(rows)
     }
@@ -513,21 +528,22 @@ impl Database {
             "SELECT id, session_id, name, description, snapshot, created_at
              FROM checkpoints
              WHERE session_id = ?1
-             ORDER BY created_at DESC"
+             ORDER BY created_at DESC",
         )?;
 
-        let rows = stmt.query_map(params![session_id], |row| {
-            Ok(CheckpointRow {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                name: row.get(2)?,
-                description: row.get(3)?,
-                snapshot: row.get(4)?,
-                created_at: row.get(5)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok(CheckpointRow {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    name: row.get(2)?,
+                    description: row.get(3)?,
+                    snapshot: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(rows)
     }
@@ -594,7 +610,8 @@ impl Database {
              FROM mcp_servers ORDER BY name ASC"
         )?;
 
-        let servers = stmt.query_map([], |row| Self::row_to_mcp_server(row))?
+        let servers = stmt
+            .query_map([], |row| Self::row_to_mcp_server(row))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -659,7 +676,11 @@ impl Database {
     }
 
     /// Update MCP server status after health check
-    pub fn update_mcp_server_status(&self, id: &str, status: &crate::models::McpServerStatus) -> AppResult<()> {
+    pub fn update_mcp_server_status(
+        &self,
+        id: &str,
+        status: &crate::models::McpServerStatus,
+    ) -> AppResult<()> {
         let conn = self.get_connection()?;
         let status_str = match status {
             crate::models::McpServerStatus::Connected => "connected".to_string(),
@@ -677,7 +698,10 @@ impl Database {
     }
 
     /// Get MCP server by name (for duplicate detection)
-    pub fn get_mcp_server_by_name(&self, name: &str) -> AppResult<Option<crate::models::McpServer>> {
+    pub fn get_mcp_server_by_name(
+        &self,
+        name: &str,
+    ) -> AppResult<Option<crate::models::McpServer>> {
         let conn = self.get_connection()?;
 
         let result = conn.query_row(
@@ -705,7 +729,9 @@ impl Database {
         let url: Option<String> = row.get(6)?;
         let headers_json: String = row.get::<_, String>(7).unwrap_or_default();
         let enabled: i32 = row.get(8)?;
-        let status_str: String = row.get::<_, String>(9).unwrap_or_else(|_| "unknown".to_string());
+        let status_str: String = row
+            .get::<_, String>(9)
+            .unwrap_or_else(|_| "unknown".to_string());
         let last_checked: Option<String> = row.get(10)?;
         let created_at: Option<String> = row.get(11)?;
         let updated_at: Option<String> = row.get(12)?;
@@ -716,8 +742,10 @@ impl Database {
         };
 
         let args: Vec<String> = serde_json::from_str(&args_json).unwrap_or_default();
-        let env: std::collections::HashMap<String, String> = serde_json::from_str(&env_json).unwrap_or_default();
-        let headers: std::collections::HashMap<String, String> = serde_json::from_str(&headers_json).unwrap_or_default();
+        let env: std::collections::HashMap<String, String> =
+            serde_json::from_str(&env_json).unwrap_or_default();
+        let headers: std::collections::HashMap<String, String> =
+            serde_json::from_str(&headers_json).unwrap_or_default();
 
         let status = if status_str.starts_with("error:") {
             crate::models::McpServerStatus::Error(status_str[6..].to_string())

@@ -199,12 +199,10 @@ impl InterviewManager {
     }
 
     /// Submit an answer to the current question and get the next question
-    pub fn submit_answer(
-        &self,
-        interview_id: &str,
-        answer: &str,
-    ) -> AppResult<InterviewSession> {
-        let mut state = self.state_manager.get_interview(interview_id)?
+    pub fn submit_answer(&self, interview_id: &str, answer: &str) -> AppResult<InterviewSession> {
+        let mut state = self
+            .state_manager
+            .get_interview(interview_id)?
             .ok_or_else(|| AppError::not_found(format!("Interview not found: {}", interview_id)))?;
 
         if state.status == "finalized" || state.status == "complete" {
@@ -231,14 +229,14 @@ impl InterviewManager {
         let mut spec_data: serde_json::Value =
             serde_json::from_str(&state.spec_data).unwrap_or(serde_json::json!({}));
         self.apply_answer_to_spec(&mut spec_data, &current_phase, &state, answer);
-        state.spec_data = serde_json::to_string(&spec_data)
-            .unwrap_or_else(|_| "{}".to_string());
+        state.spec_data = serde_json::to_string(&spec_data).unwrap_or_else(|_| "{}".to_string());
 
         // Advance the question cursor
         state.question_cursor += 1;
 
         // Determine if we should advance the phase
-        let (new_phase, phase_complete) = self.check_phase_transition(&current_phase, &state, &spec_data);
+        let (new_phase, phase_complete) =
+            self.check_phase_transition(&current_phase, &state, &spec_data);
 
         if phase_complete {
             state.phase = new_phase.as_str().to_string();
@@ -292,7 +290,9 @@ impl InterviewManager {
 
     /// Get the current interview state
     pub fn get_interview_state(&self, interview_id: &str) -> AppResult<InterviewSession> {
-        let state = self.state_manager.get_interview(interview_id)?
+        let state = self
+            .state_manager
+            .get_interview(interview_id)?
             .ok_or_else(|| AppError::not_found(format!("Interview not found: {}", interview_id)))?;
 
         let phase = InterviewPhase::from_str(&state.phase);
@@ -333,7 +333,9 @@ impl InterviewManager {
 
     /// Get the raw spec data for compilation
     pub fn get_spec_data(&self, interview_id: &str) -> AppResult<serde_json::Value> {
-        let state = self.state_manager.get_interview(interview_id)?
+        let state = self
+            .state_manager
+            .get_interview(interview_id)?
             .ok_or_else(|| AppError::not_found(format!("Interview not found: {}", interview_id)))?;
 
         serde_json::from_str(&state.spec_data)
@@ -345,7 +347,10 @@ impl InterviewManager {
     // ========================================================================
 
     /// Generate the next question based on current phase and state
-    fn generate_next_question(&self, state: &PersistedInterviewState) -> AppResult<InterviewQuestion> {
+    fn generate_next_question(
+        &self,
+        state: &PersistedInterviewState,
+    ) -> AppResult<InterviewQuestion> {
         let phase = InterviewPhase::from_str(&state.phase);
         let spec_data: serde_json::Value =
             serde_json::from_str(&state.spec_data).unwrap_or(serde_json::json!({}));
@@ -370,9 +375,17 @@ impl InterviewManager {
         spec: &serde_json::Value,
         state: &PersistedInterviewState,
     ) -> InterviewQuestion {
-        let overview = spec.get("overview").cloned().unwrap_or(serde_json::json!({}));
+        let overview = spec
+            .get("overview")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
 
-        if overview.get("title").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+        if overview
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty()
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What is the title of this project/feature?".to_string(),
@@ -385,20 +398,32 @@ impl InterviewManager {
         }
 
         if state.first_principles
-            && overview.get("problem").and_then(|v| v.as_str()).unwrap_or("").is_empty()
+            && overview
+                .get("problem")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty()
         {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
-                question: "What is the core problem you are trying to solve? (first principles)".to_string(),
+                question: "What is the core problem you are trying to solve? (first principles)"
+                    .to_string(),
                 phase: InterviewPhase::Overview,
-                hint: Some("Describe the fundamental problem without assuming a solution".to_string()),
+                hint: Some(
+                    "Describe the fundamental problem without assuming a solution".to_string(),
+                ),
                 required: true,
                 input_type: "textarea".to_string(),
                 field_name: "problem".to_string(),
             };
         }
 
-        if overview.get("goal").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+        if overview
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty()
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What is the primary goal? (one sentence)".to_string(),
@@ -410,7 +435,11 @@ impl InterviewManager {
             };
         }
 
-        if overview.get("success_metrics").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if overview
+            .get("success_metrics")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What are the success metrics for this project?".to_string(),
@@ -422,7 +451,11 @@ impl InterviewManager {
             };
         }
 
-        if overview.get("non_goals").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if overview
+            .get("non_goals")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What are the non-goals / out of scope items?".to_string(),
@@ -437,7 +470,8 @@ impl InterviewManager {
         // Phase complete - generate a transition question
         InterviewQuestion {
             id: Uuid::new_v4().to_string(),
-            question: "Overview looks good. Anything else to add before moving to Scope?".to_string(),
+            question: "Overview looks good. Anything else to add before moving to Scope?"
+                .to_string(),
             phase: InterviewPhase::Overview,
             hint: Some("Type 'next' to continue or add additional context".to_string()),
             required: false,
@@ -453,7 +487,11 @@ impl InterviewManager {
     ) -> InterviewQuestion {
         let scope = spec.get("scope").cloned().unwrap_or(serde_json::json!({}));
 
-        if scope.get("in_scope").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if scope
+            .get("in_scope")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What is in scope for this project?".to_string(),
@@ -465,7 +503,11 @@ impl InterviewManager {
             };
         }
 
-        if scope.get("out_of_scope").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if scope
+            .get("out_of_scope")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What is explicitly out of scope?".to_string(),
@@ -477,10 +519,16 @@ impl InterviewManager {
             };
         }
 
-        if scope.get("do_not_touch").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if scope
+            .get("do_not_touch")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
-                question: "Are there any modules, files, or components that should NOT be modified?".to_string(),
+                question:
+                    "Are there any modules, files, or components that should NOT be modified?"
+                        .to_string(),
                 phase: InterviewPhase::Scope,
                 hint: Some("Files/modules to preserve as-is".to_string()),
                 required: false,
@@ -489,7 +537,11 @@ impl InterviewManager {
             };
         }
 
-        if scope.get("assumptions").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if scope
+            .get("assumptions")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What assumptions are being made?".to_string(),
@@ -517,9 +569,16 @@ impl InterviewManager {
         spec: &serde_json::Value,
         state: &PersistedInterviewState,
     ) -> InterviewQuestion {
-        let reqs = spec.get("requirements").cloned().unwrap_or(serde_json::json!({}));
+        let reqs = spec
+            .get("requirements")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
 
-        if reqs.get("functional").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if reqs
+            .get("functional")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What are the functional requirements?".to_string(),
@@ -531,21 +590,34 @@ impl InterviewManager {
             };
         }
 
-        let nfr = reqs.get("non_functional").cloned().unwrap_or(serde_json::json!({}));
+        let nfr = reqs
+            .get("non_functional")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
 
-        if nfr.get("performance_targets").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if nfr
+            .get("performance_targets")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "Any performance targets or constraints?".to_string(),
                 phase: InterviewPhase::Requirements,
-                hint: Some("e.g., API response time < 200ms, support 1000 concurrent users".to_string()),
+                hint: Some(
+                    "e.g., API response time < 200ms, support 1000 concurrent users".to_string(),
+                ),
                 required: false,
                 input_type: "list".to_string(),
                 field_name: "performance_targets".to_string(),
             };
         }
 
-        if nfr.get("security").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if nfr
+            .get("security")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "Any security requirements?".to_string(),
@@ -559,7 +631,11 @@ impl InterviewManager {
 
         // For quick flow, skip remaining NFR
         if state.flow_level != "quick" {
-            if nfr.get("reliability").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+            if nfr
+                .get("reliability")
+                .and_then(|v| v.as_array())
+                .map_or(true, |a| a.is_empty())
+            {
                 return InterviewQuestion {
                     id: Uuid::new_v4().to_string(),
                     question: "Any reliability expectations?".to_string(),
@@ -571,7 +647,11 @@ impl InterviewManager {
                 };
             }
 
-            if nfr.get("scalability").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+            if nfr
+                .get("scalability")
+                .and_then(|v| v.as_array())
+                .map_or(true, |a| a.is_empty())
+            {
                 return InterviewQuestion {
                     id: Uuid::new_v4().to_string(),
                     question: "Any scalability expectations?".to_string(),
@@ -583,7 +663,11 @@ impl InterviewManager {
                 };
             }
 
-            if nfr.get("accessibility").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+            if nfr
+                .get("accessibility")
+                .and_then(|v| v.as_array())
+                .map_or(true, |a| a.is_empty())
+            {
                 return InterviewQuestion {
                     id: Uuid::new_v4().to_string(),
                     question: "Any accessibility requirements?".to_string(),
@@ -598,7 +682,8 @@ impl InterviewManager {
 
         InterviewQuestion {
             id: Uuid::new_v4().to_string(),
-            question: "Requirements captured. Anything else before moving to Interfaces?".to_string(),
+            question: "Requirements captured. Anything else before moving to Interfaces?"
+                .to_string(),
             phase: InterviewPhase::Requirements,
             hint: Some("Type 'next' to continue".to_string()),
             required: false,
@@ -612,9 +697,16 @@ impl InterviewManager {
         spec: &serde_json::Value,
         _state: &PersistedInterviewState,
     ) -> InterviewQuestion {
-        let interfaces = spec.get("interfaces").cloned().unwrap_or(serde_json::json!({}));
+        let interfaces = spec
+            .get("interfaces")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
 
-        if interfaces.get("api").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if interfaces
+            .get("api")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What API endpoints or interfaces does this project expose?".to_string(),
@@ -626,7 +718,11 @@ impl InterviewManager {
             };
         }
 
-        if interfaces.get("data_models").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
+        if interfaces
+            .get("data_models")
+            .and_then(|v| v.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What are the key data models?".to_string(),
@@ -671,7 +767,10 @@ impl InterviewManager {
         // Check if all stories have titles
         let arr = stories.unwrap();
         let incomplete_idx = arr.iter().position(|s| {
-            s.get("title").and_then(|t| t.as_str()).unwrap_or("").is_empty()
+            s.get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .is_empty()
         });
 
         if let Some(idx) = incomplete_idx {
@@ -770,7 +869,10 @@ impl InterviewManager {
         let answer = answer.trim();
 
         // Skip transition answers
-        if answer.eq_ignore_ascii_case("next") || answer.eq_ignore_ascii_case("done") || answer.is_empty() {
+        if answer.eq_ignore_ascii_case("next")
+            || answer.eq_ignore_ascii_case("done")
+            || answer.is_empty()
+        {
             return;
         }
 
@@ -787,13 +889,11 @@ impl InterviewManager {
 
         match phase {
             InterviewPhase::Overview => {
-                let overview = spec.get_mut("overview")
-                    .and_then(|v| v.as_object_mut());
+                let overview = spec.get_mut("overview").and_then(|v| v.as_object_mut());
                 let overview = if overview.is_none() {
-                    spec.as_object_mut().unwrap().insert(
-                        "overview".to_string(),
-                        serde_json::json!({}),
-                    );
+                    spec.as_object_mut()
+                        .unwrap()
+                        .insert("overview".to_string(), serde_json::json!({}));
                     spec.get_mut("overview").unwrap().as_object_mut().unwrap()
                 } else {
                     overview.unwrap()
@@ -821,37 +921,45 @@ impl InterviewManager {
                     .collect();
                 scope.insert(field_name, serde_json::Value::Array(items));
             }
-            InterviewPhase::Requirements => {
-                match field_name.as_str() {
-                    "functional" => {
-                        let reqs = ensure_object(spec, "requirements");
-                        let items: Vec<serde_json::Value> = parse_list_answer(answer)
-                            .into_iter()
-                            .map(serde_json::Value::String)
-                            .collect();
-                        reqs.insert(field_name, serde_json::Value::Array(items));
-                    }
-                    "performance_targets" | "security" | "reliability" | "scalability"
-                    | "accessibility" => {
-                        let reqs = ensure_object(spec, "requirements");
-                        let nfr = if reqs.get("non_functional").and_then(|v| v.as_object()).is_none() {
-                            reqs.insert(
-                                "non_functional".to_string(),
-                                serde_json::json!({}),
-                            );
-                            reqs.get_mut("non_functional").unwrap().as_object_mut().unwrap()
-                        } else {
-                            reqs.get_mut("non_functional").unwrap().as_object_mut().unwrap()
-                        };
-                        let items: Vec<serde_json::Value> = parse_list_answer(answer)
-                            .into_iter()
-                            .map(serde_json::Value::String)
-                            .collect();
-                        nfr.insert(field_name, serde_json::Value::Array(items));
-                    }
-                    _ => {}
+            InterviewPhase::Requirements => match field_name.as_str() {
+                "functional" => {
+                    let reqs = ensure_object(spec, "requirements");
+                    let items: Vec<serde_json::Value> = parse_list_answer(answer)
+                        .into_iter()
+                        .map(serde_json::Value::String)
+                        .collect();
+                    reqs.insert(field_name, serde_json::Value::Array(items));
                 }
-            }
+                "performance_targets"
+                | "security"
+                | "reliability"
+                | "scalability"
+                | "accessibility" => {
+                    let reqs = ensure_object(spec, "requirements");
+                    let nfr = if reqs
+                        .get("non_functional")
+                        .and_then(|v| v.as_object())
+                        .is_none()
+                    {
+                        reqs.insert("non_functional".to_string(), serde_json::json!({}));
+                        reqs.get_mut("non_functional")
+                            .unwrap()
+                            .as_object_mut()
+                            .unwrap()
+                    } else {
+                        reqs.get_mut("non_functional")
+                            .unwrap()
+                            .as_object_mut()
+                            .unwrap()
+                    };
+                    let items: Vec<serde_json::Value> = parse_list_answer(answer)
+                        .into_iter()
+                        .map(serde_json::Value::String)
+                        .collect();
+                    nfr.insert(field_name, serde_json::Value::Array(items));
+                }
+                _ => {}
+            },
             InterviewPhase::Interfaces => {
                 let interfaces = ensure_object(spec, "interfaces");
                 match field_name.as_str() {
@@ -907,21 +1015,23 @@ impl InterviewManager {
                                 })
                             })
                             .collect();
-                        spec.as_object_mut().unwrap().insert(
-                            "stories".to_string(),
-                            serde_json::Value::Array(stories),
-                        );
+                        spec.as_object_mut()
+                            .unwrap()
+                            .insert("stories".to_string(), serde_json::Value::Array(stories));
                     }
                     f if f.starts_with("story_") => {
                         let idx: usize = f.trim_start_matches("story_").parse().unwrap_or(0);
-                        if let Some(stories) = spec.get_mut("stories").and_then(|v| v.as_array_mut()) {
+                        if let Some(stories) =
+                            spec.get_mut("stories").and_then(|v| v.as_array_mut())
+                        {
                             if let Some(story) = stories.get_mut(idx) {
                                 // Parse "Title | Description" format
-                                let (title, description) = if let Some((t, d)) = answer.split_once('|') {
-                                    (t.trim().to_string(), d.trim().to_string())
-                                } else {
-                                    (answer.to_string(), answer.to_string())
-                                };
+                                let (title, description) =
+                                    if let Some((t, d)) = answer.split_once('|') {
+                                        (t.trim().to_string(), d.trim().to_string())
+                                    } else {
+                                        (answer.to_string(), answer.to_string())
+                                    };
                                 story.as_object_mut().map(|s| {
                                     s.insert("title".to_string(), serde_json::Value::String(title));
                                     s.insert(
@@ -965,22 +1075,42 @@ impl InterviewManager {
             .map(|t| t.answer.trim().to_lowercase())
             .unwrap_or_default();
 
-        let is_transition = last_answer == "next" || last_answer == "done" || last_answer.is_empty();
+        let is_transition =
+            last_answer == "next" || last_answer == "done" || last_answer.is_empty();
 
         // Also check if the phase fields are sufficiently filled
         let phase_filled = match current_phase {
             InterviewPhase::Overview => {
-                let overview = spec.get("overview").cloned().unwrap_or(serde_json::json!({}));
-                !overview.get("title").and_then(|v| v.as_str()).unwrap_or("").is_empty()
-                    && !overview.get("goal").and_then(|v| v.as_str()).unwrap_or("").is_empty()
+                let overview = spec
+                    .get("overview")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+                !overview
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .is_empty()
+                    && !overview
+                        .get("goal")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .is_empty()
             }
             InterviewPhase::Scope => {
                 let scope = spec.get("scope").cloned().unwrap_or(serde_json::json!({}));
-                scope.get("in_scope").and_then(|v| v.as_array()).map_or(false, |a| !a.is_empty())
+                scope
+                    .get("in_scope")
+                    .and_then(|v| v.as_array())
+                    .map_or(false, |a| !a.is_empty())
             }
             InterviewPhase::Requirements => {
-                let reqs = spec.get("requirements").cloned().unwrap_or(serde_json::json!({}));
-                reqs.get("functional").and_then(|v| v.as_array()).map_or(false, |a| !a.is_empty())
+                let reqs = spec
+                    .get("requirements")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+                reqs.get("functional")
+                    .and_then(|v| v.as_array())
+                    .map_or(false, |a| !a.is_empty())
             }
             InterviewPhase::Interfaces => true, // Interfaces are optional
             InterviewPhase::Stories => {
@@ -995,9 +1125,7 @@ impl InterviewManager {
                         })
                 })
             }
-            InterviewPhase::Review => {
-                is_transition || last_answer == "done"
-            }
+            InterviewPhase::Review => is_transition || last_answer == "done",
             InterviewPhase::Complete => true,
         };
 
@@ -1023,7 +1151,8 @@ impl InterviewManager {
     fn calculate_progress(&self, phase: &InterviewPhase, state: &PersistedInterviewState) -> f64 {
         let phase_progress = phase.index() as f64 / InterviewPhase::total_phases() as f64;
         // Weight by questions within phase
-        let q_weight = (state.question_cursor as f64 / state.max_questions.max(1) as f64).min(1.0) * 0.1;
+        let q_weight =
+            (state.question_cursor as f64 / state.max_questions.max(1) as f64).min(1.0) * 0.1;
         ((phase_progress + q_weight) * 100.0).min(100.0)
     }
 }
@@ -1074,7 +1203,10 @@ pub struct InterviewHistoryEntry {
 /// Parse a comma/newline separated answer into a list of strings
 fn parse_list_answer(answer: &str) -> Vec<String> {
     let answer = answer.trim();
-    if answer.is_empty() || answer.eq_ignore_ascii_case("next") || answer.eq_ignore_ascii_case("done") {
+    if answer.is_empty()
+        || answer.eq_ignore_ascii_case("next")
+        || answer.eq_ignore_ascii_case("done")
+    {
         return vec![];
     }
 

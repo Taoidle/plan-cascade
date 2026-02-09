@@ -10,9 +10,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use crate::models::agent::{Agent, AgentRun};
 use crate::services::agent::AgentService;
-use crate::services::llm::{
-    LlmProvider, LlmError, LlmResult, Message, ToolDefinition,
-};
+use crate::services::llm::{LlmError, LlmProvider, LlmResult, Message, ToolDefinition};
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::utils::error::{AppError, AppResult};
 
@@ -50,17 +48,36 @@ pub enum AgentEvent {
     /// Thinking/reasoning content (if available)
     ThinkingDelta { delta: String },
     /// A tool is being called
-    ToolCall { id: String, name: String, input: serde_json::Value },
+    ToolCall {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
     /// Tool call completed
-    ToolResult { id: String, result: String, is_error: bool },
+    ToolResult {
+        id: String,
+        result: String,
+        is_error: bool,
+    },
     /// Execution completed successfully
-    Completed { run_id: String, output: String, duration_ms: u64 },
+    Completed {
+        run_id: String,
+        output: String,
+        duration_ms: u64,
+    },
     /// Execution failed
-    Failed { run_id: String, error: String, duration_ms: u64 },
+    Failed {
+        run_id: String,
+        error: String,
+        duration_ms: u64,
+    },
     /// Execution was cancelled
     Cancelled { run_id: String, duration_ms: u64 },
     /// Token usage update
-    Usage { input_tokens: u32, output_tokens: u32 },
+    Usage {
+        input_tokens: u32,
+        output_tokens: u32,
+    },
 }
 
 /// Handle to a running agent execution
@@ -199,11 +216,13 @@ impl AgentExecutor {
 
             // Update run record with final status
             if let Err(e) = result {
-                let _ = tx.send(AgentEvent::Failed {
-                    run_id: run_id.clone(),
-                    error: e.to_string(),
-                    duration_ms: 0,
-                }).await;
+                let _ = tx
+                    .send(AgentEvent::Failed {
+                        run_id: run_id.clone(),
+                        error: e.to_string(),
+                        duration_ms: 0,
+                    })
+                    .await;
             }
         });
 
@@ -313,9 +332,11 @@ impl AgentExecutor {
         let start_time = Instant::now();
 
         // Send started event
-        let _ = tx.send(AgentEvent::Started {
-            run_id: run.id.clone(),
-        }).await;
+        let _ = tx
+            .send(AgentEvent::Started {
+                run_id: run.id.clone(),
+            })
+            .await;
 
         run.start();
 
@@ -428,11 +449,13 @@ impl AgentExecutor {
             output_tokens,
         );
 
-        let _ = tx.send(AgentEvent::Completed {
-            run_id: run.id.clone(),
-            output: accumulated_content,
-            duration_ms,
-        }).await;
+        let _ = tx
+            .send(AgentEvent::Completed {
+                run_id: run.id.clone(),
+                output: accumulated_content,
+                duration_ms,
+            })
+            .await;
 
         Ok(())
     }
@@ -442,7 +465,10 @@ impl AgentExecutor {
         matches!(
             error,
             LlmError::RateLimited { .. }
-                | LlmError::ServerError { status: Some(502 | 503 | 504), .. }
+                | LlmError::ServerError {
+                    status: Some(502 | 503 | 504),
+                    ..
+                }
                 | LlmError::NetworkError { .. }
         )
     }
@@ -534,9 +560,11 @@ mod tests {
         }));
 
         // Non-retryable errors
-        assert!(!AgentExecutor::is_retryable(&LlmError::AuthenticationFailed {
-            message: "Invalid API key".to_string(),
-        }));
+        assert!(!AgentExecutor::is_retryable(
+            &LlmError::AuthenticationFailed {
+                message: "Invalid API key".to_string(),
+            }
+        ));
         assert!(!AgentExecutor::is_retryable(&LlmError::InvalidRequest {
             message: "Bad request".to_string(),
         }));

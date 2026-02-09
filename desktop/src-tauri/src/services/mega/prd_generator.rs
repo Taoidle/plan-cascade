@@ -143,22 +143,16 @@ impl DesignDocContext {
             // Get referenced components
             for comp_name in &mapping.components {
                 if let Some(comp) = doc.get_component(comp_name) {
-                    ctx.components.push(format!(
-                        "{}: {}",
-                        comp.name,
-                        comp.description
-                    ));
+                    ctx.components
+                        .push(format!("{}: {}", comp.name, comp.description));
                 }
             }
 
             // Get referenced patterns
             for pattern_name in &mapping.patterns {
                 if let Some(pattern) = doc.get_pattern(pattern_name) {
-                    ctx.patterns.push(format!(
-                        "{}: {}",
-                        pattern.name,
-                        pattern.description
-                    ));
+                    ctx.patterns
+                        .push(format!("{}: {}", pattern.name, pattern.description));
                 }
             }
 
@@ -167,9 +161,7 @@ impl DesignDocContext {
                 if let Some(decision) = doc.get_decision(decision_id) {
                     ctx.decisions.push(format!(
                         "{} - {}: {}",
-                        decision.id,
-                        decision.title,
-                        decision.decision
+                        decision.id, decision.title, decision.decision
                     ));
                 }
             }
@@ -225,9 +217,12 @@ pub struct PrdGenerator {
 
 /// Generator function type
 pub type GeneratorFn = Arc<
-    dyn Fn(PrdGenerationRequest) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Prd, String>> + Send>,
-    > + Send + Sync,
+    dyn Fn(
+            PrdGenerationRequest,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Prd, String>> + Send>>
+        + Send
+        + Sync,
 >;
 
 impl PrdGenerator {
@@ -301,7 +296,9 @@ impl PrdGenerator {
     ) -> Result<PrdGenerationResult, PrdGeneratorError> {
         // Load design document context
         let design_context = if self.config.use_design_context {
-            self.load_design_context(feature_id, project_root).await.ok()
+            self.load_design_context(feature_id, project_root)
+                .await
+                .ok()
         } else {
             None
         };
@@ -383,17 +380,16 @@ impl PrdGenerator {
             }
 
             // Check for numbered items (1. 2. etc)
-            if let Some(stripped) = line.strip_prefix(|c: char| c.is_ascii_digit())
+            if let Some(stripped) = line
+                .strip_prefix(|c: char| c.is_ascii_digit())
                 .and_then(|s| s.strip_prefix('.'))
                 .or_else(|| line.strip_prefix('-'))
                 .or_else(|| line.strip_prefix('*'))
             {
                 let stripped = stripped.trim();
                 if !stripped.is_empty() {
-                    let story = self.create_story_from_line(
-                        &format!("S{:03}", story_num),
-                        stripped,
-                    );
+                    let story =
+                        self.create_story_from_line(&format!("S{:03}", story_num), stripped);
                     stories.push(story);
                     story_num += 1;
                 }
@@ -431,18 +427,30 @@ impl PrdGenerator {
             story.story_type = Some(StoryType::Test);
         } else if text_lower.contains("refactor") || text_lower.contains("重构") {
             story.story_type = Some(StoryType::Refactor);
-        } else if text_lower.contains("fix") || text_lower.contains("bug") || text_lower.contains("修复") {
+        } else if text_lower.contains("fix")
+            || text_lower.contains("bug")
+            || text_lower.contains("修复")
+        {
             story.story_type = Some(StoryType::Bugfix);
         } else {
             story.story_type = Some(StoryType::Feature);
         }
 
         // Infer priority from keywords
-        if text_lower.contains("critical") || text_lower.contains("核心") || text_lower.contains("关键") {
+        if text_lower.contains("critical")
+            || text_lower.contains("核心")
+            || text_lower.contains("关键")
+        {
             story.priority = Priority::Critical;
-        } else if text_lower.contains("important") || text_lower.contains("high") || text_lower.contains("重要") {
+        } else if text_lower.contains("important")
+            || text_lower.contains("high")
+            || text_lower.contains("重要")
+        {
             story.priority = Priority::High;
-        } else if text_lower.contains("low") || text_lower.contains("optional") || text_lower.contains("可选") {
+        } else if text_lower.contains("low")
+            || text_lower.contains("optional")
+            || text_lower.contains("可选")
+        {
             story.priority = Priority::Low;
         } else {
             story.priority = Priority::Medium;
@@ -481,11 +489,11 @@ impl PrdGenerator {
                 if story_num > self.config.max_stories {
                     break;
                 }
-                let title = format!("Implement {}", comp.split(':').next().unwrap_or(comp).trim());
-                let story = self.create_story_from_line(
-                    &format!("S{:03}", story_num),
-                    &title,
+                let title = format!(
+                    "Implement {}",
+                    comp.split(':').next().unwrap_or(comp).trim()
                 );
+                let story = self.create_story_from_line(&format!("S{:03}", story_num), &title);
                 stories.push(story);
                 story_num += 1;
             }
@@ -545,7 +553,10 @@ impl PrdGenerator {
 
         prompt.push_str("Generate a Product Requirements Document (PRD) in JSON format.\n\n");
         prompt.push_str(&format!("## Feature: {}\n\n", request.feature_title));
-        prompt.push_str(&format!("### Description:\n{}\n\n", request.feature_description));
+        prompt.push_str(&format!(
+            "### Description:\n{}\n\n",
+            request.feature_description
+        ));
 
         if let Some(ctx) = &request.design_context {
             if !ctx.is_empty() {
@@ -729,7 +740,8 @@ mod tests {
 1. Create models
 2. Implement logic
 3. Add tests
-"#.to_string(),
+"#
+            .to_string(),
             design_context: None,
             additional_context: None,
         };
@@ -742,14 +754,13 @@ mod tests {
     #[tokio::test]
     async fn test_custom_generator() {
         let config = PrdGeneratorConfig::default();
-        let generator = PrdGenerator::new(config)
-            .with_generator(Arc::new(|req| {
-                Box::pin(async move {
-                    let mut prd = Prd::new(&req.feature_title);
-                    prd.add_story(Story::new("S001", "Custom generated story"));
-                    Ok(prd)
-                })
-            }));
+        let generator = PrdGenerator::new(config).with_generator(Arc::new(|req| {
+            Box::pin(async move {
+                let mut prd = Prd::new(&req.feature_title);
+                prd.add_story(Story::new("S001", "Custom generated story"));
+                Ok(prd)
+            })
+        }));
 
         let request = PrdGenerationRequest {
             feature_id: "feature-test".to_string(),

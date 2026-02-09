@@ -2,9 +2,9 @@
 //!
 //! Handles OpenAI SSE format with reasoning_content support for o1/o3 models.
 
-use serde::Deserialize;
 use crate::services::streaming::adapter::StreamAdapter;
 use crate::services::streaming::unified::{AdapterError, UnifiedStreamEvent};
+use serde::Deserialize;
 
 /// Internal event types from OpenAI API SSE format
 #[derive(Debug, Deserialize)]
@@ -89,6 +89,20 @@ impl OpenAIAdapter {
         let model_lower = self.model.to_lowercase();
         model_lower.starts_with("o1") || model_lower.starts_with("o3")
     }
+
+    /// Flush any pending tool call, emitting a ToolComplete event
+    fn flush_pending_tool(&mut self) -> Option<UnifiedStreamEvent> {
+        if let (Some(id), Some(name)) = (self.tool_id.take(), self.tool_name.take()) {
+            let args = std::mem::take(&mut self.tool_args_buffer);
+            Some(UnifiedStreamEvent::ToolComplete {
+                tool_id: id,
+                tool_name: name,
+                arguments: args,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 impl StreamAdapter for OpenAIAdapter {
@@ -117,16 +131,21 @@ impl StreamAdapter for OpenAIAdapter {
         };
 
         if json_str.is_empty() || json_str == "[DONE]" {
+            let mut events = vec![];
+            // Flush any pending tool call
+            if let Some(tool_event) = self.flush_pending_tool() {
+                events.push(tool_event);
+            }
             // End of stream - emit ThinkingEnd if we were in reasoning
             if self.in_reasoning {
                 self.in_reasoning = false;
-                return Ok(vec![UnifiedStreamEvent::ThinkingEnd { thinking_id: None }]);
+                events.push(UnifiedStreamEvent::ThinkingEnd { thinking_id: None });
             }
-            return Ok(vec![]);
+            return Ok(events);
         }
 
-        let event: OpenAIEvent = serde_json::from_str(json_str)
-            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
+        let event: OpenAIEvent =
+            serde_json::from_str(json_str).map_err(|e| AdapterError::ParseError(e.to_string()))?;
 
         let mut events = vec![];
 
@@ -143,6 +162,10 @@ impl StreamAdapter for OpenAIAdapter {
 
         for choice in event.choices {
             if let Some(finish_reason) = choice.finish_reason {
+                // Flush any pending tool call before completing
+                if let Some(tool_event) = self.flush_pending_tool() {
+                    events.push(tool_event);
+                }
                 // End any reasoning block
                 if self.in_reasoning {
                     self.in_reasoning = false;
@@ -185,7 +208,10 @@ impl StreamAdapter for OpenAIAdapter {
                 if let Some(tool_calls) = delta.tool_calls {
                     for tc in tool_calls {
                         if let Some(id) = tc.id {
-                            // New tool call starting
+                            // New tool call starting — flush any previous pending tool
+                            if let Some(tool_event) = self.flush_pending_tool() {
+                                events.push(tool_event);
+                            }
                             self.tool_id = Some(id.clone());
                             if let Some(func) = &tc.function {
                                 self.tool_name = func.name.clone();
@@ -231,7 +257,9 @@ mod tests {
     fn test_text_delta() {
         let mut adapter = OpenAIAdapter::new("gpt-4");
 
-        let events = adapter.adapt(r#"data: {"choices": [{"delta": {"content": "Hello"}}]}"#).unwrap();
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"content": "Hello"}}]}"#)
+            .unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
             UnifiedStreamEvent::TextDelta { content } => {
@@ -246,7 +274,9 @@ mod tests {
         let mut adapter = OpenAIAdapter::new("o1-preview");
         assert!(adapter.supports_thinking());
 
-        let events = adapter.adapt(r#"data: {"choices": [{"delta": {"reasoning_content": "Let me think..."}}]}"#).unwrap();
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"reasoning_content": "Let me think..."}}]}"#)
+            .unwrap();
         assert_eq!(events.len(), 2);
         match &events[0] {
             UnifiedStreamEvent::ThinkingStart { .. } => {}
@@ -264,7 +294,9 @@ mod tests {
     fn test_finish_reason() {
         let mut adapter = OpenAIAdapter::new("gpt-4");
 
-        let events = adapter.adapt(r#"data: {"choices": [{"finish_reason": "stop"}]}"#).unwrap();
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"finish_reason": "stop"}]}"#)
+            .unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
             UnifiedStreamEvent::Complete { stop_reason } => {

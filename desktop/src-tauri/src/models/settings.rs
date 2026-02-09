@@ -23,6 +23,13 @@ pub struct AppConfig {
     pub max_recent_projects: u32,
     /// Enable debug mode
     pub debug_mode: bool,
+    /// Web search provider: "tavily", "brave", or "duckduckgo"
+    #[serde(default = "default_search_provider")]
+    pub search_provider: String,
+}
+
+fn default_search_provider() -> String {
+    "duckduckgo".to_string()
 }
 
 impl Default for AppConfig {
@@ -36,6 +43,7 @@ impl Default for AppConfig {
             auto_save_interval: 30,
             max_recent_projects: 10,
             debug_mode: false,
+            search_provider: "duckduckgo".to_string(),
         }
     }
 }
@@ -51,6 +59,7 @@ pub struct SettingsUpdate {
     pub auto_save_interval: Option<u32>,
     pub max_recent_projects: Option<u32>,
     pub debug_mode: Option<bool>,
+    pub search_provider: Option<String>,
 }
 
 impl AppConfig {
@@ -80,13 +89,19 @@ impl AppConfig {
         if let Some(debug) = update.debug_mode {
             self.debug_mode = debug;
         }
+        if let Some(search_provider) = update.search_provider {
+            self.search_provider = search_provider;
+        }
     }
 
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), String> {
         // Validate theme
         if !["light", "dark", "system"].contains(&self.theme.as_str()) {
-            return Err(format!("Invalid theme: {}. Must be 'light', 'dark', or 'system'", self.theme));
+            return Err(format!(
+                "Invalid theme: {}. Must be 'light', 'dark', or 'system'",
+                self.theme
+            ));
         }
 
         // Validate language (basic check)

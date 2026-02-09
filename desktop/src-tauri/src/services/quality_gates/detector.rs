@@ -5,9 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::models::quality_gates::{
-    ProjectDetectionResult, ProjectMetadata, ProjectType,
-};
+use crate::models::quality_gates::{ProjectDetectionResult, ProjectMetadata, ProjectType};
 use crate::utils::error::{AppError, AppResult};
 
 /// Project type detector
@@ -61,7 +59,11 @@ impl ProjectDetector {
     }
 
     /// Extract metadata from the project configuration file
-    fn extract_metadata(&self, project_type: ProjectType, marker_path: &Path) -> AppResult<ProjectMetadata> {
+    fn extract_metadata(
+        &self,
+        project_type: ProjectType,
+        marker_path: &Path,
+    ) -> AppResult<ProjectMetadata> {
         match project_type {
             ProjectType::NodeJs => self.extract_nodejs_metadata(marker_path),
             ProjectType::Rust => self.extract_rust_metadata(marker_path),
@@ -80,17 +82,22 @@ impl ProjectDetector {
         let mut metadata = ProjectMetadata::default();
 
         metadata.name = json.get("name").and_then(|v| v.as_str()).map(String::from);
-        metadata.version = json.get("version").and_then(|v| v.as_str()).map(String::from);
+        metadata.version = json
+            .get("version")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         // Check for TypeScript
-        let has_ts_dep = json.get("devDependencies")
+        let has_ts_dep = json
+            .get("devDependencies")
             .and_then(|deps| deps.get("typescript"))
             .is_some();
         let tsconfig_exists = self.project_path.join("tsconfig.json").exists();
         metadata.has_typescript = has_ts_dep || tsconfig_exists;
 
         // Check for ESLint
-        let has_eslint_dep = json.get("devDependencies")
+        let has_eslint_dep = json
+            .get("devDependencies")
             .and_then(|deps| deps.get("eslint"))
             .is_some();
         let eslint_config_exists = self.project_path.join(".eslintrc.js").exists()
@@ -100,7 +107,8 @@ impl ProjectDetector {
         metadata.has_eslint = has_eslint_dep || eslint_config_exists;
 
         // Check for Prettier
-        let has_prettier_dep = json.get("devDependencies")
+        let has_prettier_dep = json
+            .get("devDependencies")
             .and_then(|deps| deps.get("prettier"))
             .is_some();
         let prettier_config_exists = self.project_path.join(".prettierrc").exists()
@@ -112,11 +120,23 @@ impl ProjectDetector {
         let scripts = json.get("scripts");
         metadata.has_tests = scripts.and_then(|s| s.get("test")).is_some();
 
-        if json.get("devDependencies").and_then(|d| d.get("jest")).is_some() {
+        if json
+            .get("devDependencies")
+            .and_then(|d| d.get("jest"))
+            .is_some()
+        {
             metadata.test_framework = Some("jest".to_string());
-        } else if json.get("devDependencies").and_then(|d| d.get("vitest")).is_some() {
+        } else if json
+            .get("devDependencies")
+            .and_then(|d| d.get("vitest"))
+            .is_some()
+        {
             metadata.test_framework = Some("vitest".to_string());
-        } else if json.get("devDependencies").and_then(|d| d.get("mocha")).is_some() {
+        } else if json
+            .get("devDependencies")
+            .and_then(|d| d.get("mocha"))
+            .is_some()
+        {
             metadata.test_framework = Some("mocha".to_string());
         }
 
@@ -131,14 +151,21 @@ impl ProjectDetector {
     /// Extract metadata from Cargo.toml
     fn extract_rust_metadata(&self, marker_path: &Path) -> AppResult<ProjectMetadata> {
         let content = std::fs::read_to_string(marker_path)?;
-        let toml: toml::Value = content.parse()
+        let toml: toml::Value = content
+            .parse()
             .map_err(|e| AppError::parse(format!("Failed to parse Cargo.toml: {}", e)))?;
 
         let mut metadata = ProjectMetadata::default();
 
         if let Some(package) = toml.get("package") {
-            metadata.name = package.get("name").and_then(|v| v.as_str()).map(String::from);
-            metadata.version = package.get("version").and_then(|v| v.as_str()).map(String::from);
+            metadata.name = package
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            metadata.version = package
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(String::from);
         }
 
         // Rust always has tests through cargo
@@ -159,34 +186,44 @@ impl ProjectDetector {
     fn extract_python_metadata(&self, marker_path: &Path) -> AppResult<ProjectMetadata> {
         let mut metadata = ProjectMetadata::default();
 
-        let marker_name = marker_path.file_name()
+        let marker_name = marker_path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("");
 
         if marker_name == "pyproject.toml" {
             let content = std::fs::read_to_string(marker_path)?;
-            let toml: toml::Value = content.parse()
+            let toml: toml::Value = content
+                .parse()
                 .map_err(|e| AppError::parse(format!("Failed to parse pyproject.toml: {}", e)))?;
 
             // Try to get project info from various sections
             if let Some(project) = toml.get("project") {
-                metadata.name = project.get("name").and_then(|v| v.as_str()).map(String::from);
-                metadata.version = project.get("version").and_then(|v| v.as_str()).map(String::from);
+                metadata.name = project
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                metadata.version = project
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
             } else if let Some(poetry) = toml.get("tool").and_then(|t| t.get("poetry")) {
-                metadata.name = poetry.get("name").and_then(|v| v.as_str()).map(String::from);
-                metadata.version = poetry.get("version").and_then(|v| v.as_str()).map(String::from);
+                metadata.name = poetry
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                metadata.version = poetry
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
             }
 
             // Check for mypy
-            let has_mypy = toml.get("tool")
-                .and_then(|t| t.get("mypy"))
-                .is_some();
+            let has_mypy = toml.get("tool").and_then(|t| t.get("mypy")).is_some();
             metadata.has_typescript = has_mypy; // mypy is the Python equivalent of type checking
 
             // Check for test configuration
-            let has_pytest = toml.get("tool")
-                .and_then(|t| t.get("pytest"))
-                .is_some();
+            let has_pytest = toml.get("tool").and_then(|t| t.get("pytest")).is_some();
             if has_pytest {
                 metadata.has_tests = true;
                 metadata.test_framework = Some("pytest".to_string());
@@ -246,7 +283,11 @@ impl ProjectDetector {
     }
 
     /// Get suggested quality gates based on project type and metadata
-    fn get_suggested_gates(&self, project_type: ProjectType, metadata: &ProjectMetadata) -> Vec<String> {
+    fn get_suggested_gates(
+        &self,
+        project_type: ProjectType,
+        metadata: &ProjectMetadata,
+    ) -> Vec<String> {
         let mut gates = Vec::new();
 
         match project_type {
@@ -383,7 +424,10 @@ strict = true
 
         let result = detect_project_type(temp.path()).unwrap();
         assert_eq!(result.project_type, ProjectType::Go);
-        assert_eq!(result.metadata.name, Some("github.com/test/project".to_string()));
+        assert_eq!(
+            result.metadata.name,
+            Some("github.com/test/project".to_string())
+        );
     }
 
     #[test]

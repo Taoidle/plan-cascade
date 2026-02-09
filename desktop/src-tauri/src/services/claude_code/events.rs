@@ -96,12 +96,7 @@ impl<R: Runtime> ClaudeCodeEventEmitter<R> {
     }
 
     /// Emit a thinking update event
-    pub fn emit_thinking_update(
-        &self,
-        session_id: &str,
-        block: ThinkingBlock,
-        update_type: &str,
-    ) {
+    pub fn emit_thinking_update(&self, session_id: &str, block: ThinkingBlock, update_type: &str) {
         let payload = ThinkingUpdateEvent {
             block,
             update_type: update_type.to_string(),
@@ -117,12 +112,7 @@ impl<R: Runtime> ClaudeCodeEventEmitter<R> {
     }
 
     /// Emit a tool update event
-    pub fn emit_tool_update(
-        &self,
-        session_id: &str,
-        execution: ToolExecution,
-        update_type: &str,
-    ) {
+    pub fn emit_tool_update(&self, session_id: &str, execution: ToolExecution, update_type: &str) {
         let payload = ToolUpdateEvent {
             execution,
             update_type: update_type.to_string(),

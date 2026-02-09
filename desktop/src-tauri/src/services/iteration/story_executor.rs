@@ -19,7 +19,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::models::prd::{Story, StoryStatus, StoryType};
 use crate::services::context::{ContextFilter, StoryContext};
-use crate::services::fallback::{AgentFallbackChain, FallbackExecutionLog, FailureReason};
+use crate::services::fallback::{AgentFallbackChain, FailureReason, FallbackExecutionLog};
 use crate::services::phase::{Phase, PhaseManager};
 
 /// Errors from story execution
@@ -70,7 +70,11 @@ pub struct StoryExecutionResult {
 
 impl StoryExecutionResult {
     /// Create a successful result
-    pub fn success(story_id: impl Into<String>, agent: impl Into<String>, duration_ms: u64) -> Self {
+    pub fn success(
+        story_id: impl Into<String>,
+        agent: impl Into<String>,
+        duration_ms: u64,
+    ) -> Self {
         Self {
             story_id: story_id.into(),
             success: true,
@@ -161,9 +165,14 @@ impl Default for StoryExecutorConfig {
 /// Executor function type for stories
 /// This allows plugging in different execution backends
 pub type ExecutorFn = Arc<
-    dyn Fn(String, StoryContext, String) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<String, String>> + Send>,
-    > + Send + Sync,
+    dyn Fn(
+            String,
+            StoryContext,
+            String,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>>
+        + Send
+        + Sync,
 >;
 
 /// Story Executor Service
@@ -188,8 +197,7 @@ impl StoryExecutor {
     /// Create a new StoryExecutor
     pub fn new(config: StoryExecutorConfig) -> Self {
         let phase_manager = PhaseManager::load_or_default(&config.project_root);
-        let context_filter = ContextFilter::default()
-            .with_phase_manager(phase_manager.clone());
+        let context_filter = ContextFilter::default().with_phase_manager(phase_manager.clone());
 
         Self {
             config,
@@ -224,9 +232,7 @@ impl StoryExecutor {
 
         // Load feature context if in worktree
         if let Some(feature_id) = &self.config.feature_id {
-            let feature_path = self.config.project_root
-                .join(".worktrees")
-                .join(feature_id);
+            let feature_path = self.config.project_root.join(".worktrees").join(feature_id);
             if feature_path.exists() {
                 context_filter
                     .load_feature(&feature_path)
@@ -249,7 +255,10 @@ impl StoryExecutor {
     }
 
     /// Execute a story
-    pub async fn execute_story(&self, story: &Story) -> Result<StoryExecutionResult, StoryExecutorError> {
+    pub async fn execute_story(
+        &self,
+        story: &Story,
+    ) -> Result<StoryExecutionResult, StoryExecutorError> {
         let start_time = Instant::now();
 
         info!("Executing story: {} - {}", story.id, story.title);
@@ -268,9 +277,12 @@ impl StoryExecutor {
 
         // Execute with or without fallback
         let (output, fallback_log) = if self.config.use_fallback {
-            self.execute_with_fallback(story, context.clone(), &agent).await?
+            self.execute_with_fallback(story, context.clone(), &agent)
+                .await?
         } else {
-            let output = self.execute_single(&story.id, context.clone(), &agent).await?;
+            let output = self
+                .execute_single(&story.id, context.clone(), &agent)
+                .await?;
             (output, None)
         };
 
@@ -288,12 +300,7 @@ impl StoryExecutor {
         let mut result = if success {
             StoryExecutionResult::success(&story.id, &agent, duration_ms)
         } else {
-            StoryExecutionResult::failure(
-                &story.id,
-                "Quality gates failed",
-                &agent,
-                duration_ms,
-            )
+            StoryExecutionResult::failure(&story.id, "Quality gates failed", &agent, duration_ms)
         };
 
         result.fallback_log = fallback_log;
@@ -320,8 +327,13 @@ impl StoryExecutor {
         match timeout(timeout_duration, self.execute_story(story)).await {
             Ok(result) => result,
             Err(_) => {
-                error!("Story {} timed out after {} seconds", story.id, self.config.story_timeout_seconds);
-                Err(StoryExecutorError::Timeout(self.config.story_timeout_seconds))
+                error!(
+                    "Story {} timed out after {} seconds",
+                    story.id, self.config.story_timeout_seconds
+                );
+                Err(StoryExecutorError::Timeout(
+                    self.config.story_timeout_seconds,
+                ))
             }
         }
     }
@@ -349,10 +361,8 @@ impl StoryExecutor {
         context: StoryContext,
         _primary_agent: &str,
     ) -> Result<(String, Option<FallbackExecutionLog>), StoryExecutorError> {
-        let fallback_chain = AgentFallbackChain::from_phase_manager(
-            &self.phase_manager,
-            self.current_phase,
-        );
+        let fallback_chain =
+            AgentFallbackChain::from_phase_manager(&self.phase_manager, self.current_phase);
 
         let story_id = story.id.clone();
         let executor = self.custom_executor.clone();
@@ -638,11 +648,9 @@ mod tests {
             ..Default::default()
         };
 
-        let executor = StoryExecutor::new(config)
-            .with_executor(Arc::new(|story_id, _context, agent| {
-                Box::pin(async move {
-                    Ok(format!("Custom executed {} with {}", story_id, agent))
-                })
+        let executor =
+            StoryExecutor::new(config).with_executor(Arc::new(|story_id, _context, agent| {
+                Box::pin(async move { Ok(format!("Custom executed {} with {}", story_id, agent)) })
             }));
 
         let story = create_test_story();
@@ -659,8 +667,7 @@ mod tests {
             ..Default::default()
         };
 
-        let executor = StoryExecutor::new(config)
-            .with_phase(Phase::Planning);
+        let executor = StoryExecutor::new(config).with_phase(Phase::Planning);
 
         assert_eq!(executor.current_phase(), Phase::Planning);
     }

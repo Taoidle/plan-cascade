@@ -91,10 +91,8 @@ impl DependencyAnalyzer {
             for story in &prd.stories {
                 if remaining.contains(&story.id) {
                     // Check if all dependencies are satisfied
-                    let deps_satisfied = story
-                        .dependencies
-                        .iter()
-                        .all(|dep| completed.contains(dep));
+                    let deps_satisfied =
+                        story.dependencies.iter().all(|dep| completed.contains(dep));
 
                     if deps_satisfied {
                         batch.push(story.id.clone());
@@ -140,10 +138,7 @@ impl DependencyAnalyzer {
 
     /// Detect circular dependencies using DFS
     fn find_cycle(stories: &[Story], remaining: &HashSet<String>) -> Vec<String> {
-        let story_map: HashMap<_, _> = stories
-            .iter()
-            .map(|s| (s.id.as_str(), s))
-            .collect();
+        let story_map: HashMap<_, _> = stories.iter().map(|s| (s.id.as_str(), s)).collect();
 
         for start_id in remaining {
             let mut visited = HashSet::new();
@@ -218,10 +213,7 @@ impl DependencyAnalyzer {
         let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
         for story in &prd.stories {
             for dep in &story.dependencies {
-                dependents
-                    .entry(dep.as_str())
-                    .or_default()
-                    .push(&story.id);
+                dependents.entry(dep.as_str()).or_default().push(&story.id);
             }
         }
 
@@ -272,14 +264,7 @@ impl DependencyAnalyzer {
 
         for (i, root) in roots.iter().enumerate() {
             let is_last = i == roots.len() - 1;
-            Self::print_tree_node(
-                &mut output,
-                root,
-                &prd.stories,
-                &dependents,
-                "",
-                is_last,
-            );
+            Self::print_tree_node(&mut output, root, &prd.stories, &dependents, "", is_last);
         }
 
         output
@@ -326,11 +311,7 @@ impl DependencyAnalyzer {
 
     /// Get the critical path (longest dependency chain)
     pub fn get_critical_path(prd: &Prd) -> Vec<String> {
-        let story_map: HashMap<_, _> = prd
-            .stories
-            .iter()
-            .map(|s| (s.id.as_str(), s))
-            .collect();
+        let story_map: HashMap<_, _> = prd.stories.iter().map(|s| (s.id.as_str(), s)).collect();
 
         let mut longest_path = Vec::new();
 
@@ -480,7 +461,10 @@ mod tests {
         prd.add_story(s2);
 
         let result = DependencyAnalyzer::generate_batches(&prd);
-        assert!(matches!(result, Err(DependencyError::CircularDependency(_))));
+        assert!(matches!(
+            result,
+            Err(DependencyError::CircularDependency(_))
+        ));
     }
 
     #[test]
@@ -492,7 +476,10 @@ mod tests {
         prd.add_story(s1);
 
         let result = DependencyAnalyzer::generate_batches(&prd);
-        assert!(matches!(result, Err(DependencyError::UnknownDependency { .. })));
+        assert!(matches!(
+            result,
+            Err(DependencyError::UnknownDependency { .. })
+        ));
     }
 
     #[test]

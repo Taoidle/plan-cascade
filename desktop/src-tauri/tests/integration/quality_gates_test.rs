@@ -6,8 +6,10 @@
 use std::fs;
 use tempfile::TempDir;
 
-use plan_cascade_desktop::models::quality_gates::{ProjectType, GateStatus, QualityGate, GatesSummary};
-use plan_cascade_desktop::services::quality_gates::{ProjectDetector, detect_project_type};
+use plan_cascade_desktop::models::quality_gates::{
+    GateStatus, GatesSummary, ProjectType, QualityGate,
+};
+use plan_cascade_desktop::services::quality_gates::{detect_project_type, ProjectDetector};
 
 // ============================================================================
 // Helper Functions
@@ -32,8 +34,16 @@ fn create_nodejs_project(temp: &TempDir) {
     }"#;
 
     fs::write(temp.path().join("package.json"), package_json).unwrap();
-    fs::write(temp.path().join("tsconfig.json"), r#"{"compilerOptions": {}}"#).unwrap();
-    fs::write(temp.path().join(".eslintrc.json"), r#"{"env": {"node": true}}"#).unwrap();
+    fs::write(
+        temp.path().join("tsconfig.json"),
+        r#"{"compilerOptions": {}}"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join(".eslintrc.json"),
+        r#"{"env": {"node": true}}"#,
+    )
+    .unwrap();
 }
 
 /// Create a temporary Rust project
@@ -49,7 +59,11 @@ edition = "2021"
 
     fs::write(temp.path().join("Cargo.toml"), cargo_toml).unwrap();
     fs::create_dir_all(temp.path().join("src")).unwrap();
-    fs::write(temp.path().join("src/lib.rs"), "pub fn hello() -> &'static str { \"hello\" }").unwrap();
+    fs::write(
+        temp.path().join("src/lib.rs"),
+        "pub fn hello() -> &'static str { \"hello\" }",
+    )
+    .unwrap();
 }
 
 /// Create a temporary Python project
@@ -71,7 +85,11 @@ line-length = 88
 
     fs::write(temp.path().join("pyproject.toml"), pyproject).unwrap();
     fs::create_dir_all(temp.path().join("tests")).unwrap();
-    fs::write(temp.path().join("tests/test_example.py"), "def test_pass(): assert True").unwrap();
+    fs::write(
+        temp.path().join("tests/test_example.py"),
+        "def test_pass(): assert True",
+    )
+    .unwrap();
 }
 
 /// Create a temporary Go project
@@ -79,7 +97,11 @@ fn create_go_project(temp: &TempDir) {
     let go_mod = "module github.com/test/go-project\n\ngo 1.21\n";
 
     fs::write(temp.path().join("go.mod"), go_mod).unwrap();
-    fs::write(temp.path().join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+    fs::write(
+        temp.path().join("main.go"),
+        "package main\n\nfunc main() {}\n",
+    )
+    .unwrap();
 }
 
 // ============================================================================
@@ -95,13 +117,20 @@ fn test_detect_nodejs_project() {
 
     assert_eq!(result.project_type, ProjectType::NodeJs);
     assert!(result.marker_file.is_some());
-    assert!(result.marker_file.as_ref().unwrap().contains("package.json"));
+    assert!(result
+        .marker_file
+        .as_ref()
+        .unwrap()
+        .contains("package.json"));
 
     // Check metadata extraction
     assert!(result.metadata.has_typescript);
     assert!(result.metadata.has_eslint);
     assert!(result.metadata.has_tests);
-    assert_eq!(result.metadata.name, Some("test-nodejs-project".to_string()));
+    assert_eq!(
+        result.metadata.name,
+        Some("test-nodejs-project".to_string())
+    );
 }
 
 #[test]
@@ -130,7 +159,11 @@ fn test_detect_python_project() {
 
     assert_eq!(result.project_type, ProjectType::Python);
     assert!(result.marker_file.is_some());
-    assert!(result.marker_file.as_ref().unwrap().contains("pyproject.toml"));
+    assert!(result
+        .marker_file
+        .as_ref()
+        .unwrap()
+        .contains("pyproject.toml"));
 
     // Check metadata
     assert!(result.metadata.has_tests);
@@ -151,7 +184,10 @@ fn test_detect_go_project() {
 
     // Go projects always have tests via go test
     assert!(result.metadata.has_tests);
-    assert_eq!(result.metadata.name, Some("github.com/test/go-project".to_string()));
+    assert_eq!(
+        result.metadata.name,
+        Some("github.com/test/go-project".to_string())
+    );
 }
 
 #[test]
@@ -172,10 +208,14 @@ fn test_detection_priority_rust_over_nodejs() {
 
     // Create both markers - Rust should take priority
     fs::write(temp.path().join("package.json"), r#"{"name": "test"}"#).unwrap();
-    fs::write(temp.path().join("Cargo.toml"), r#"[package]
+    fs::write(
+        temp.path().join("Cargo.toml"),
+        r#"[package]
 name = "test"
 version = "0.1.0"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     let result = detect_project_type(temp.path()).unwrap();
 

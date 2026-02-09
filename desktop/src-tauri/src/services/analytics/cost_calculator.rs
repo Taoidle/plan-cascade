@@ -13,16 +13,51 @@ use crate::utils::error::{AppError, AppResult};
 fn get_default_pricing() -> Vec<ModelPricing> {
     vec![
         // Anthropic Claude 3.5 family
-        ModelPricing::new("claude-3-5-sonnet-20241022", "anthropic", 3_000_000, 15_000_000),
-        ModelPricing::new("claude-3-5-sonnet-latest", "anthropic", 3_000_000, 15_000_000),
-        ModelPricing::new("claude-3-5-haiku-20241022", "anthropic", 1_000_000, 5_000_000),
+        ModelPricing::new(
+            "claude-3-5-sonnet-20241022",
+            "anthropic",
+            3_000_000,
+            15_000_000,
+        ),
+        ModelPricing::new(
+            "claude-3-5-sonnet-latest",
+            "anthropic",
+            3_000_000,
+            15_000_000,
+        ),
+        ModelPricing::new(
+            "claude-3-5-haiku-20241022",
+            "anthropic",
+            1_000_000,
+            5_000_000,
+        ),
         // Anthropic Claude 3 family
-        ModelPricing::new("claude-3-opus-20240229", "anthropic", 15_000_000, 75_000_000),
-        ModelPricing::new("claude-3-sonnet-20240229", "anthropic", 3_000_000, 15_000_000),
+        ModelPricing::new(
+            "claude-3-opus-20240229",
+            "anthropic",
+            15_000_000,
+            75_000_000,
+        ),
+        ModelPricing::new(
+            "claude-3-sonnet-20240229",
+            "anthropic",
+            3_000_000,
+            15_000_000,
+        ),
         ModelPricing::new("claude-3-haiku-20240307", "anthropic", 250_000, 1_250_000),
         // Anthropic Claude 4 family
-        ModelPricing::new("claude-opus-4-20250514", "anthropic", 15_000_000, 75_000_000),
-        ModelPricing::new("claude-sonnet-4-20250514", "anthropic", 3_000_000, 15_000_000),
+        ModelPricing::new(
+            "claude-opus-4-20250514",
+            "anthropic",
+            15_000_000,
+            75_000_000,
+        ),
+        ModelPricing::new(
+            "claude-sonnet-4-20250514",
+            "anthropic",
+            3_000_000,
+            15_000_000,
+        ),
         // OpenAI GPT-4 family
         ModelPricing::new("gpt-4-turbo", "openai", 10_000_000, 30_000_000),
         ModelPricing::new("gpt-4-turbo-preview", "openai", 10_000_000, 30_000_000),
@@ -82,10 +117,14 @@ impl CostCalculator {
 
     /// Load pricing from database
     pub fn load_from_pricing_list(&self, pricing_list: Vec<ModelPricing>) -> AppResult<()> {
-        let mut pricing = self.pricing.write()
+        let mut pricing = self
+            .pricing
+            .write()
             .map_err(|_| AppError::internal("Failed to acquire pricing lock"))?;
 
-        let mut custom = self.custom_overrides.write()
+        let mut custom = self
+            .custom_overrides
+            .write()
             .map_err(|_| AppError::internal("Failed to acquire custom overrides lock"))?;
 
         for p in pricing_list {
@@ -130,7 +169,13 @@ impl CostCalculator {
 
     /// Calculate cost for given token counts
     /// Returns cost in microdollars (1 USD = 1,000,000 microdollars)
-    pub fn calculate_cost(&self, provider: &str, model_name: &str, input_tokens: i64, output_tokens: i64) -> i64 {
+    pub fn calculate_cost(
+        &self,
+        provider: &str,
+        model_name: &str,
+        input_tokens: i64,
+        output_tokens: i64,
+    ) -> i64 {
         if let Some(pricing) = self.get_pricing(provider, model_name) {
             pricing.calculate_cost(input_tokens, output_tokens)
         } else {
@@ -144,21 +189,28 @@ impl CostCalculator {
 
     /// Set custom pricing override for a model
     pub fn set_custom_pricing(&self, pricing: ModelPricing) -> AppResult<()> {
-        let mut custom = self.custom_overrides.write()
+        let mut custom = self
+            .custom_overrides
+            .write()
             .map_err(|_| AppError::internal("Failed to acquire custom overrides lock"))?;
 
         let key = (pricing.provider.clone(), pricing.model_name.clone());
-        custom.insert(key, ModelPricing {
-            is_custom: true,
-            ..pricing
-        });
+        custom.insert(
+            key,
+            ModelPricing {
+                is_custom: true,
+                ..pricing
+            },
+        );
 
         Ok(())
     }
 
     /// Remove custom pricing override for a model
     pub fn remove_custom_pricing(&self, provider: &str, model_name: &str) -> AppResult<bool> {
-        let mut custom = self.custom_overrides.write()
+        let mut custom = self
+            .custom_overrides
+            .write()
             .map_err(|_| AppError::internal("Failed to acquire custom overrides lock"))?;
 
         let key = (provider.to_string(), model_name.to_string());
@@ -167,9 +219,13 @@ impl CostCalculator {
 
     /// Get all pricing (default + custom)
     pub fn get_all_pricing(&self) -> AppResult<Vec<ModelPricing>> {
-        let pricing = self.pricing.read()
+        let pricing = self
+            .pricing
+            .read()
             .map_err(|_| AppError::internal("Failed to acquire pricing lock"))?;
-        let custom = self.custom_overrides.read()
+        let custom = self
+            .custom_overrides
+            .read()
             .map_err(|_| AppError::internal("Failed to acquire custom overrides lock"))?;
 
         let mut result: Vec<ModelPricing> = pricing.values().cloned().collect();
@@ -182,7 +238,8 @@ impl CostCalculator {
         }
 
         result.sort_by(|a, b| {
-            a.provider.cmp(&b.provider)
+            a.provider
+                .cmp(&b.provider)
                 .then_with(|| a.model_name.cmp(&b.model_name))
         });
 
@@ -303,7 +360,9 @@ mod tests {
 
         assert!(calc.get_pricing("test-provider", "test-model").is_some());
 
-        let removed = calc.remove_custom_pricing("test-provider", "test-model").unwrap();
+        let removed = calc
+            .remove_custom_pricing("test-provider", "test-model")
+            .unwrap();
         assert!(removed);
 
         // Should no longer exist (not in defaults)
@@ -315,8 +374,18 @@ mod tests {
         let calc = CostCalculator::new();
 
         let requests = vec![
-            ("anthropic".to_string(), "claude-3-5-sonnet-20241022".to_string(), 1000_i64, 500_i64),
-            ("openai".to_string(), "gpt-4o".to_string(), 2000_i64, 1000_i64),
+            (
+                "anthropic".to_string(),
+                "claude-3-5-sonnet-20241022".to_string(),
+                1000_i64,
+                500_i64,
+            ),
+            (
+                "openai".to_string(),
+                "gpt-4o".to_string(),
+                2000_i64,
+                1000_i64,
+            ),
         ];
 
         let costs = calc.batch_calculate_cost(&requests);

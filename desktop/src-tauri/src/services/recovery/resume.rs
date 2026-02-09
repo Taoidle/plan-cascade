@@ -64,10 +64,7 @@ pub enum ResumeEvent {
         from_story_id: Option<String>,
     },
     /// Resume completed
-    Completed {
-        execution_id: String,
-        success: bool,
-    },
+    Completed { execution_id: String, success: bool },
     /// Resume encountered an error
     Error {
         execution_id: String,
@@ -134,10 +131,9 @@ impl ResumeEngine {
     /// 6. Returns the restored context for the caller to continue execution
     pub fn resume(db: &Database, execution_id: &str) -> AppResult<ResumeResult> {
         // Step 1: Load the execution record
-        let execution = db.get_execution(execution_id)?
-            .ok_or_else(|| AppError::not_found(
-                format!("Execution '{}' not found", execution_id)
-            ))?;
+        let execution = db.get_execution(execution_id)?.ok_or_else(|| {
+            AppError::not_found(format!("Execution '{}' not found", execution_id))
+        })?;
 
         let mode = ExecutionMode::from_str(&execution.execution_mode);
 
@@ -146,14 +142,12 @@ impl ResumeEngine {
             execution_id: execution_id.to_string(),
             context: None,
             error: None,
-            events: vec![
-                ResumeEvent::Started {
-                    execution_id: execution_id.to_string(),
-                    execution_mode: mode.clone(),
-                    total_stories: execution.total_stories,
-                    completed_stories: execution.completed_stories,
-                },
-            ],
+            events: vec![ResumeEvent::Started {
+                execution_id: execution_id.to_string(),
+                execution_mode: mode.clone(),
+                total_stories: execution.total_stories,
+                completed_stories: execution.completed_stories,
+            }],
         };
 
         // Step 2: Validate resumability
@@ -171,9 +165,12 @@ impl ResumeEngine {
 
         // Step 3: Parse the context snapshot
         let context_value: serde_json::Value = serde_json::from_str(&execution.context_snapshot)
-            .map_err(|e| AppError::parse(
-                format!("Failed to parse context snapshot for execution '{}': {}", execution_id, e)
-            ))?;
+            .map_err(|e| {
+                AppError::parse(format!(
+                    "Failed to parse context snapshot for execution '{}': {}",
+                    execution_id, e
+                ))
+            })?;
 
         // Step 4: Extract completed and remaining story IDs from the context
         let (completed_ids, remaining_ids) = Self::extract_story_progress(&context_value, &mode);
@@ -223,10 +220,9 @@ impl ResumeEngine {
 
     /// Discard an interrupted execution, marking it as cancelled.
     pub fn discard(db: &Database, execution_id: &str) -> AppResult<()> {
-        let execution = db.get_execution(execution_id)?
-            .ok_or_else(|| AppError::not_found(
-                format!("Execution '{}' not found", execution_id)
-            ))?;
+        let execution = db.get_execution(execution_id)?.ok_or_else(|| {
+            AppError::not_found(format!("Execution '{}' not found", execution_id))
+        })?;
 
         if execution.status == "completed" {
             return Err(AppError::validation(
@@ -250,7 +246,10 @@ impl ResumeEngine {
         let mut remaining = Vec::new();
 
         // Try to extract completed story IDs from known context fields
-        if let Some(completed_arr) = context.get("completed_story_ids").and_then(|v| v.as_array()) {
+        if let Some(completed_arr) = context
+            .get("completed_story_ids")
+            .and_then(|v| v.as_array())
+        {
             for id in completed_arr {
                 if let Some(s) = id.as_str() {
                     completed.push(s.to_string());
@@ -279,7 +278,10 @@ impl ResumeEngine {
                 for story in stories_arr {
                     if let Some(id) = story.get("id").and_then(|v| v.as_str()) {
                         // Check story status
-                        let status = story.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+                        let status = story
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("pending");
                         if status == "completed" {
                             if !completed.contains(&id.to_string()) {
                                 completed.push(id.to_string());
@@ -294,7 +296,10 @@ impl ResumeEngine {
 
         // Alternative: remaining_story_ids field
         if remaining.is_empty() {
-            if let Some(remaining_arr) = context.get("remaining_story_ids").and_then(|v| v.as_array()) {
+            if let Some(remaining_arr) = context
+                .get("remaining_story_ids")
+                .and_then(|v| v.as_array())
+            {
                 for id in remaining_arr {
                     if let Some(s) = id.as_str() {
                         remaining.push(s.to_string());
@@ -347,11 +352,10 @@ mod tests {
 
     #[test]
     fn test_resume_result_with_event() {
-        let result = ResumeResult::failure("exec-001", "test")
-            .with_event(ResumeEvent::Error {
-                execution_id: "exec-001".to_string(),
-                message: "test error".to_string(),
-            });
+        let result = ResumeResult::failure("exec-001", "test").with_event(ResumeEvent::Error {
+            execution_id: "exec-001".to_string(),
+            message: "test error".to_string(),
+        });
         assert_eq!(result.events.len(), 1);
     }
 
@@ -369,9 +373,8 @@ mod tests {
             }
         });
 
-        let (completed, remaining) = ResumeEngine::extract_story_progress(
-            &context, &ExecutionMode::HybridAuto,
-        );
+        let (completed, remaining) =
+            ResumeEngine::extract_story_progress(&context, &ExecutionMode::HybridAuto);
 
         assert_eq!(completed, vec!["s1", "s2"]);
         assert_eq!(remaining, vec!["s3", "s4"]);
@@ -388,9 +391,8 @@ mod tests {
             ]
         });
 
-        let (completed, remaining) = ResumeEngine::extract_story_progress(
-            &context, &ExecutionMode::MegaPlan,
-        );
+        let (completed, remaining) =
+            ResumeEngine::extract_story_progress(&context, &ExecutionMode::MegaPlan);
 
         assert_eq!(completed, vec!["s1", "s2"]);
         assert_eq!(remaining, vec!["s3", "s4"]);
@@ -403,9 +405,8 @@ mod tests {
             "remaining_story_ids": ["s2", "s3"],
         });
 
-        let (completed, remaining) = ResumeEngine::extract_story_progress(
-            &context, &ExecutionMode::Direct,
-        );
+        let (completed, remaining) =
+            ResumeEngine::extract_story_progress(&context, &ExecutionMode::Direct);
 
         assert_eq!(completed, vec!["s1"]);
         assert_eq!(remaining, vec!["s2", "s3"]);
@@ -415,9 +416,8 @@ mod tests {
     fn test_extract_story_progress_empty_context() {
         let context = serde_json::json!({});
 
-        let (completed, remaining) = ResumeEngine::extract_story_progress(
-            &context, &ExecutionMode::Direct,
-        );
+        let (completed, remaining) =
+            ResumeEngine::extract_story_progress(&context, &ExecutionMode::Direct);
 
         assert!(completed.is_empty());
         assert!(remaining.is_empty());

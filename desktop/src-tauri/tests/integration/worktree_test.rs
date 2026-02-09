@@ -4,14 +4,14 @@
 //! Note: Full worktree lifecycle tests require a git repository.
 
 use std::fs;
-use tempfile::TempDir;
 use std::process::Command;
+use tempfile::TempDir;
 
 use plan_cascade_desktop::models::worktree::{
-    Worktree, WorktreeStatus, PlanningConfig, PlanningPhase,
-    CreateWorktreeRequest, CompleteWorktreeResult, MergeConflict,
+    CompleteWorktreeResult, CreateWorktreeRequest, MergeConflict, PlanningConfig, PlanningPhase,
+    Worktree, WorktreeStatus,
 };
-use plan_cascade_desktop::services::worktree::{WorktreeManager, GitOps};
+use plan_cascade_desktop::services::worktree::{GitOps, WorktreeManager};
 
 // ============================================================================
 // Helper Functions
@@ -177,11 +177,7 @@ fn test_planning_phase_display() {
 
 #[test]
 fn test_complete_worktree_success() {
-    let result = CompleteWorktreeResult::success(
-        Some("abc123def456".to_string()),
-        true,
-        true,
-    );
+    let result = CompleteWorktreeResult::success(Some("abc123def456".to_string()), true, true);
 
     assert!(result.success);
     assert_eq!(result.commit_sha, Some("abc123def456".to_string()));
@@ -210,7 +206,9 @@ fn test_complete_worktree_with_warnings() {
 
     assert!(result.success);
     assert_eq!(result.warnings.len(), 2);
-    assert!(result.warnings.contains(&"No code changes to commit".to_string()));
+    assert!(result
+        .warnings
+        .contains(&"No code changes to commit".to_string()));
 }
 
 // ============================================================================
@@ -309,7 +307,7 @@ fn test_worktree_manager_sanitize_name() {
 
 #[test]
 fn test_git_status_is_clean() {
-    use plan_cascade_desktop::services::worktree::git_ops::GitStatus;
+    use plan_cascade_desktop::services::worktree::GitStatus;
 
     let status = GitStatus::default();
     assert!(status.is_clean());
@@ -321,7 +319,7 @@ fn test_git_status_is_clean() {
 
 #[test]
 fn test_git_status_change_count() {
-    use plan_cascade_desktop::services::worktree::git_ops::GitStatus;
+    use plan_cascade_desktop::services::worktree::GitStatus;
 
     let mut status = GitStatus::default();
     status.modified.push("a.txt".to_string());
@@ -332,7 +330,7 @@ fn test_git_status_change_count() {
 
 #[test]
 fn test_git_result_into_result() {
-    use plan_cascade_desktop::services::worktree::git_ops::GitResult;
+    use plan_cascade_desktop::services::worktree::GitResult;
 
     let success = GitResult {
         success: true,
@@ -420,14 +418,18 @@ fn test_git_branch_operations() {
 
     // Check branch exists
     assert!(git.branch_exists(temp.path(), &main_branch).unwrap());
-    assert!(!git.branch_exists(temp.path(), "nonexistent-branch-xyz").unwrap());
+    assert!(!git
+        .branch_exists(temp.path(), "nonexistent-branch-xyz")
+        .unwrap());
 
     // Create a new branch
-    git.create_branch(temp.path(), "test-branch", &main_branch).unwrap();
+    git.create_branch(temp.path(), "test-branch", &main_branch)
+        .unwrap();
     assert!(git.branch_exists(temp.path(), "test-branch").unwrap());
 
     // Delete the branch
-    git.delete_branch(temp.path(), "test-branch", false).unwrap();
+    git.delete_branch(temp.path(), "test-branch", false)
+        .unwrap();
     assert!(!git.branch_exists(temp.path(), "test-branch").unwrap());
 }
 

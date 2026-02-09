@@ -22,13 +22,14 @@ use crate::state::AppState;
 pub async fn detect_incomplete_tasks(
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<IncompleteTask>>, String> {
-    let result = state
-        .with_database(|db| RecoveryDetector::detect(db))
-        .await;
+    let result = state.with_database(|db| RecoveryDetector::detect(db)).await;
 
     match result {
         Ok(tasks) => Ok(CommandResponse::ok(tasks)),
-        Err(e) => Ok(CommandResponse::err(format!("Failed to detect incomplete tasks: {}", e))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Failed to detect incomplete tasks: {}",
+            e
+        ))),
     }
 }
 
@@ -68,7 +69,10 @@ pub async fn resume_task(
 
             Ok(CommandResponse::ok(resume_result))
         }
-        Err(e) => Ok(CommandResponse::err(format!("Failed to resume task '{}': {}", task_id, e))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Failed to resume task '{}': {}",
+            task_id, e
+        ))),
     }
 }
 
@@ -93,8 +97,14 @@ pub async fn discard_task(
         .await;
 
     match result {
-        Ok(()) => Ok(CommandResponse::ok(format!("Execution '{}' discarded", task_id))),
-        Err(e) => Ok(CommandResponse::err(format!("Failed to discard task '{}': {}", task_id, e))),
+        Ok(()) => Ok(CommandResponse::ok(format!(
+            "Execution '{}' discarded",
+            task_id
+        ))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Failed to discard task '{}': {}",
+            task_id, e
+        ))),
     }
 }
 

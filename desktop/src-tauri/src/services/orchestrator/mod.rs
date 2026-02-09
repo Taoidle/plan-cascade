@@ -6,6 +6,5 @@
 mod service;
 
 pub use service::{
-    OrchestratorService, OrchestratorConfig, ExecutionResult,
-    SessionExecutionResult, ProviderInfo,
+    ExecutionResult, OrchestratorConfig, OrchestratorService, ProviderInfo, SessionExecutionResult,
 };

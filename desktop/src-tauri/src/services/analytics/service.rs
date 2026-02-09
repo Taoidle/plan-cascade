@@ -7,7 +7,7 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 
-use crate::models::analytics::{ModelPricing, UsageRecord, UsageStats, UsageFilter};
+use crate::models::analytics::{ModelPricing, UsageFilter, UsageRecord, UsageStats};
 use crate::utils::error::{AppError, AppResult};
 
 /// Type alias for the analytics connection pool
@@ -37,7 +37,9 @@ impl AnalyticsService {
 
     /// Initialize the analytics database schema
     fn init_schema(&self) -> AppResult<()> {
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         // Create usage_records table
@@ -134,14 +136,49 @@ impl AnalyticsService {
     fn init_default_pricing(&self) -> AppResult<()> {
         let default_pricing = vec![
             // Anthropic models (prices in microdollars per million tokens)
-            ("claude-3-5-sonnet-20241022", "anthropic", 3_000_000, 15_000_000),
-            ("claude-3-5-sonnet-latest", "anthropic", 3_000_000, 15_000_000),
-            ("claude-3-5-haiku-20241022", "anthropic", 1_000_000, 5_000_000),
-            ("claude-3-opus-20240229", "anthropic", 15_000_000, 75_000_000),
-            ("claude-3-sonnet-20240229", "anthropic", 3_000_000, 15_000_000),
+            (
+                "claude-3-5-sonnet-20241022",
+                "anthropic",
+                3_000_000,
+                15_000_000,
+            ),
+            (
+                "claude-3-5-sonnet-latest",
+                "anthropic",
+                3_000_000,
+                15_000_000,
+            ),
+            (
+                "claude-3-5-haiku-20241022",
+                "anthropic",
+                1_000_000,
+                5_000_000,
+            ),
+            (
+                "claude-3-opus-20240229",
+                "anthropic",
+                15_000_000,
+                75_000_000,
+            ),
+            (
+                "claude-3-sonnet-20240229",
+                "anthropic",
+                3_000_000,
+                15_000_000,
+            ),
             ("claude-3-haiku-20240307", "anthropic", 250_000, 1_250_000),
-            ("claude-opus-4-20250514", "anthropic", 15_000_000, 75_000_000),
-            ("claude-sonnet-4-20250514", "anthropic", 3_000_000, 15_000_000),
+            (
+                "claude-opus-4-20250514",
+                "anthropic",
+                15_000_000,
+                75_000_000,
+            ),
+            (
+                "claude-sonnet-4-20250514",
+                "anthropic",
+                3_000_000,
+                15_000_000,
+            ),
             // OpenAI models
             ("gpt-4-turbo", "openai", 10_000_000, 30_000_000),
             ("gpt-4o", "openai", 5_000_000, 15_000_000),
@@ -157,7 +194,9 @@ impl AnalyticsService {
             ("mistral", "ollama", 0, 0),
         ];
 
-        let conn = self.pool.get()
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         for (model, provider, input_price, output_price) in default_pricing {
@@ -180,7 +219,8 @@ impl AnalyticsService {
 
     /// Get a connection from the pool
     pub fn get_connection(&self) -> AppResult<r2d2::PooledConnection<SqliteConnectionManager>> {
-        self.pool.get()
+        self.pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))
     }
 
@@ -266,13 +306,18 @@ impl AnalyticsService {
     }
 
     /// List usage records with optional filtering
-    pub fn list_usage_records(&self, filter: &UsageFilter, limit: Option<i64>, offset: Option<i64>) -> AppResult<Vec<UsageRecord>> {
+    pub fn list_usage_records(
+        &self,
+        filter: &UsageFilter,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> AppResult<Vec<UsageRecord>> {
         let conn = self.get_connection()?;
 
         let mut sql = String::from(
             "SELECT id, session_id, project_id, model_name, provider, input_tokens,
                     output_tokens, cost_microdollars, timestamp, metadata
-             FROM usage_records WHERE 1=1"
+             FROM usage_records WHERE 1=1",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -310,10 +355,12 @@ impl AnalyticsService {
             sql.push_str(&format!(" OFFSET {}", off));
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         let mut stmt = conn.prepare(&sql)?;
-        let records = stmt.query_map(params_refs.as_slice(), |row| Self::row_to_usage_record(row))?
+        let records = stmt
+            .query_map(params_refs.as_slice(), |row| Self::row_to_usage_record(row))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -359,7 +406,8 @@ impl AnalyticsService {
             params_vec.push(Box::new(project.clone()));
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
         let rows = conn.execute(&sql, params_refs.as_slice())?;
         Ok(rows as i64)
     }
@@ -369,7 +417,11 @@ impl AnalyticsService {
     // ========================================================================
 
     /// Get pricing for a specific model
-    pub fn get_model_pricing(&self, model_name: &str, provider: &str) -> AppResult<Option<ModelPricing>> {
+    pub fn get_model_pricing(
+        &self,
+        model_name: &str,
+        provider: &str,
+    ) -> AppResult<Option<ModelPricing>> {
         let conn = self.get_connection()?;
 
         let result = conn.query_row(
@@ -394,10 +446,11 @@ impl AnalyticsService {
         let mut stmt = conn.prepare(
             "SELECT id, model_name, provider, input_price_per_million,
                     output_price_per_million, is_custom, updated_at
-             FROM model_pricing ORDER BY provider, model_name"
+             FROM model_pricing ORDER BY provider, model_name",
         )?;
 
-        let pricing = stmt.query_map([], |row| Self::row_to_model_pricing(row))?
+        let pricing = stmt
+            .query_map([], |row| Self::row_to_model_pricing(row))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -448,7 +501,7 @@ impl AnalyticsService {
         let mut sql = String::from(
             "SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
                     COALESCE(SUM(cost_microdollars), 0), COUNT(*)
-             FROM usage_records WHERE 1=1"
+             FROM usage_records WHERE 1=1",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -477,7 +530,8 @@ impl AnalyticsService {
             params_vec.push(Box::new(project.clone()));
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         let stats = conn.query_row(&sql, params_refs.as_slice(), |row| {
             let total_input: i64 = row.get(0)?;
@@ -541,7 +595,8 @@ impl AnalyticsService {
             params_vec.push(Box::new(project.clone()));
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
         let count: i64 = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
         Ok(count)
     }
@@ -675,8 +730,12 @@ mod tests {
     fn test_usage_stats() {
         let service = create_test_service().unwrap();
 
-        service.insert_usage_record(&UsageRecord::new("m1", "p1", 1000, 500).with_cost(100)).unwrap();
-        service.insert_usage_record(&UsageRecord::new("m1", "p1", 2000, 1000).with_cost(200)).unwrap();
+        service
+            .insert_usage_record(&UsageRecord::new("m1", "p1", 1000, 500).with_cost(100))
+            .unwrap();
+        service
+            .insert_usage_record(&UsageRecord::new("m1", "p1", 2000, 1000).with_cost(200))
+            .unwrap();
 
         let stats = service.get_usage_stats(&UsageFilter::default()).unwrap();
         assert_eq!(stats.total_input_tokens, 3000);
@@ -690,7 +749,9 @@ mod tests {
         let service = create_test_service().unwrap();
 
         // Default pricing should be loaded
-        let pricing = service.get_model_pricing("claude-3-5-sonnet-20241022", "anthropic").unwrap();
+        let pricing = service
+            .get_model_pricing("claude-3-5-sonnet-20241022", "anthropic")
+            .unwrap();
         assert!(pricing.is_some());
         let p = pricing.unwrap();
         assert_eq!(p.input_price_per_million, 3_000_000);
@@ -708,7 +769,10 @@ mod tests {
         };
         service.upsert_model_pricing(&custom).unwrap();
 
-        let fetched = service.get_model_pricing("custom-model", "custom").unwrap().unwrap();
+        let fetched = service
+            .get_model_pricing("custom-model", "custom")
+            .unwrap()
+            .unwrap();
         assert_eq!(fetched.input_price_per_million, 1_000_000);
         assert!(fetched.is_custom);
     }

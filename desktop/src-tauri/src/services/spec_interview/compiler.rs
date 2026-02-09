@@ -84,7 +84,10 @@ impl SpecCompiler {
         let requirements = spec_data.get("requirements").cloned().unwrap_or(json!({}));
         let interfaces = spec_data.get("interfaces").cloned().unwrap_or(json!({}));
         let stories = spec_data.get("stories").cloned().unwrap_or(json!([]));
-        let open_questions = spec_data.get("open_questions").cloned().unwrap_or(json!([]));
+        let open_questions = spec_data
+            .get("open_questions")
+            .cloned()
+            .unwrap_or(json!([]));
 
         let spec = json!({
             "metadata": {
@@ -117,24 +120,39 @@ impl SpecCompiler {
         let interfaces = spec.get("interfaces").cloned().unwrap_or(json!({}));
         let metadata = spec.get("metadata").cloned().unwrap_or(json!({}));
 
-        let title = overview.get("title").and_then(|v| v.as_str()).unwrap_or("Specification");
+        let title = overview
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Specification");
         let goal = overview.get("goal").and_then(|v| v.as_str()).unwrap_or("");
-        let problem = overview.get("problem").and_then(|v| v.as_str()).unwrap_or("");
+        let problem = overview
+            .get("problem")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         // Header
         md.push(format!("# Spec: {}", title));
         md.push(String::new());
         md.push(format!(
             "**Schema:** `{}`",
-            metadata.get("schema_version").and_then(|v| v.as_str()).unwrap_or("")
+            metadata
+                .get("schema_version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
         ));
         md.push(format!(
             "**Created:** `{}`",
-            metadata.get("created_at").and_then(|v| v.as_str()).unwrap_or("")
+            metadata
+                .get("created_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
         ));
         md.push(format!(
             "**Updated:** `{}`",
-            metadata.get("updated_at").and_then(|v| v.as_str()).unwrap_or("")
+            metadata
+                .get("updated_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
         ));
         md.push(String::new());
 
@@ -189,9 +207,16 @@ impl SpecCompiler {
 
         md.push("### Non-functional".to_string());
         md.push(String::new());
-        for section in &["performance_targets", "security", "reliability", "scalability", "accessibility"] {
+        for section in &[
+            "performance_targets",
+            "security",
+            "reliability",
+            "scalability",
+            "accessibility",
+        ] {
             let label = section.replace('_', " ");
-            let label = format!("{}{}",
+            let label = format!(
+                "{}{}",
                 label.chars().next().unwrap().to_uppercase(),
                 &label[1..]
             );
@@ -270,10 +295,22 @@ impl SpecCompiler {
                     }
                     let obj = obj.unwrap();
                     let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("???");
-                    let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
-                    let category = obj.get("category").and_then(|v| v.as_str()).unwrap_or("core");
-                    let context_est = obj.get("context_estimate").and_then(|v| v.as_str()).unwrap_or("medium");
-                    let description = obj.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                    let title = obj
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Untitled");
+                    let category = obj
+                        .get("category")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("core");
+                    let context_est = obj
+                        .get("context_estimate")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("medium");
+                    let description = obj
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
                     md.push(format!("### {}: {}", id, title));
                     md.push(String::new());
@@ -282,7 +319,8 @@ impl SpecCompiler {
 
                     if let Some(deps) = obj.get("dependencies").and_then(|v| v.as_array()) {
                         if !deps.is_empty() {
-                            let dep_strs: Vec<&str> = deps.iter().filter_map(|d| d.as_str()).collect();
+                            let dep_strs: Vec<&str> =
+                                deps.iter().filter_map(|d| d.as_str()).collect();
                             md.push(format!("- **Dependencies:** {}", dep_strs.join(", ")));
                         }
                     }
@@ -353,7 +391,12 @@ impl SpecCompiler {
             .get("goal")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
-            .or_else(|| overview.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty()))
+            .or_else(|| {
+                overview
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+            })
             .unwrap_or("Complete the task")
             .to_string();
 
@@ -412,10 +455,10 @@ impl SpecCompiler {
         });
 
         if !notes.is_empty() {
-            prd_metadata.as_object_mut().unwrap().insert(
-                "notes".to_string(),
-                json!(notes),
-            );
+            prd_metadata
+                .as_object_mut()
+                .unwrap()
+                .insert("notes".to_string(), json!(notes));
         }
 
         // Category-to-priority defaults
@@ -464,7 +507,10 @@ impl SpecCompiler {
                     .get("priority")
                     .and_then(|v| v.as_str())
                     .unwrap_or_else(|| {
-                        category_priority.get(category.as_str()).copied().unwrap_or("medium")
+                        category_priority
+                            .get(category.as_str())
+                            .copied()
+                            .unwrap_or("medium")
                     })
                     .to_string();
 
@@ -498,20 +544,23 @@ impl SpecCompiler {
 
                 // Verification commands
                 if let Some(verification) = obj.get("verification").and_then(|v| v.as_object()) {
-                    if let Some(commands) = verification.get("commands").and_then(|v| v.as_array()) {
+                    if let Some(commands) = verification.get("commands").and_then(|v| v.as_array())
+                    {
                         if !commands.is_empty() {
-                            prd_story.as_object_mut().unwrap().insert(
-                                "verification_commands".to_string(),
-                                json!(commands),
-                            );
+                            prd_story
+                                .as_object_mut()
+                                .unwrap()
+                                .insert("verification_commands".to_string(), json!(commands));
                         }
                     }
-                    if let Some(manual) = verification.get("manual_steps").and_then(|v| v.as_array()) {
+                    if let Some(manual) =
+                        verification.get("manual_steps").and_then(|v| v.as_array())
+                    {
                         if !manual.is_empty() {
-                            prd_story.as_object_mut().unwrap().insert(
-                                "verification_manual_steps".to_string(),
-                                json!(manual),
-                            );
+                            prd_story
+                                .as_object_mut()
+                                .unwrap()
+                                .insert("verification_manual_steps".to_string(), json!(manual));
                         }
                     }
                 }
@@ -519,10 +568,10 @@ impl SpecCompiler {
                 // Test expectations
                 if let Some(test_exp) = obj.get("test_expectations") {
                     if test_exp.is_object() {
-                        prd_story.as_object_mut().unwrap().insert(
-                            "test_expectations".to_string(),
-                            test_exp.clone(),
-                        );
+                        prd_story
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("test_expectations".to_string(), test_exp.clone());
                     }
                 }
 
@@ -553,10 +602,9 @@ impl SpecCompiler {
                     json!({ "enabled": true, "required": true }),
                 );
             }
-            prd.as_object_mut().unwrap().insert(
-                "flow_config".to_string(),
-                flow_config,
-            );
+            prd.as_object_mut()
+                .unwrap()
+                .insert("flow_config".to_string(), flow_config);
         }
 
         // TDD config
@@ -718,17 +766,24 @@ mod tests {
             Some("Complete the feature")
         );
         assert_eq!(
-            prd.get("objectives").and_then(|v| v.as_array()).map(|a| a.len()),
+            prd.get("objectives")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len()),
             Some(2)
         );
         assert_eq!(
-            prd.get("stories").and_then(|v| v.as_array()).map(|a| a.len()),
+            prd.get("stories")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len()),
             Some(1)
         );
 
         let story = &prd["stories"][0];
         assert_eq!(story.get("id").and_then(|v| v.as_str()), Some("story-001"));
-        assert_eq!(story.get("status").and_then(|v| v.as_str()), Some("pending"));
+        assert_eq!(
+            story.get("status").and_then(|v| v.as_str()),
+            Some("pending")
+        );
         assert_eq!(story.get("priority").and_then(|v| v.as_str()), Some("high"));
     }
 

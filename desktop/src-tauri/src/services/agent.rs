@@ -89,18 +89,17 @@ impl AgentService {
     /// Create a new agent
     pub async fn create_agent(&self, request: AgentCreateRequest) -> AppResult<Agent> {
         let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            Self::create_agent_sync(&pool, request)
-        })
-        .await
-        .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
+        tokio::task::spawn_blocking(move || Self::create_agent_sync(&pool, request))
+            .await
+            .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
     }
 
     fn create_agent_sync(pool: &DbPool, request: AgentCreateRequest) -> AppResult<Agent> {
         // Validate the request
         request.validate().map_err(|e| AppError::validation(e))?;
 
-        let conn = pool.get()
+        let conn = pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         // Check for duplicate name
@@ -150,15 +149,14 @@ impl AgentService {
     pub async fn get_agent(&self, id: &str) -> AppResult<Option<Agent>> {
         let pool = self.pool.clone();
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || {
-            Self::get_agent_sync(&pool, &id)
-        })
-        .await
-        .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
+        tokio::task::spawn_blocking(move || Self::get_agent_sync(&pool, &id))
+            .await
+            .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
     }
 
     fn get_agent_sync(pool: &DbPool, id: &str) -> AppResult<Option<Agent>> {
-        let conn = pool.get()
+        let conn = pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let result = conn.query_row(
@@ -203,15 +201,14 @@ impl AgentService {
     /// List all agents
     pub async fn list_agents(&self) -> AppResult<Vec<Agent>> {
         let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            Self::list_agents_sync(&pool)
-        })
-        .await
-        .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
+        tokio::task::spawn_blocking(move || Self::list_agents_sync(&pool))
+            .await
+            .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
     }
 
     fn list_agents_sync(pool: &DbPool) -> AppResult<Vec<Agent>> {
-        let conn = pool.get()
+        let conn = pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let mut stmt = conn.prepare(
@@ -249,11 +246,9 @@ impl AgentService {
     pub async fn update_agent(&self, id: &str, request: AgentUpdateRequest) -> AppResult<Agent> {
         let pool = self.pool.clone();
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || {
-            Self::update_agent_sync(&pool, &id, request)
-        })
-        .await
-        .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
+        tokio::task::spawn_blocking(move || Self::update_agent_sync(&pool, &id, request))
+            .await
+            .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
     }
 
     fn update_agent_sync(pool: &DbPool, id: &str, request: AgentUpdateRequest) -> AppResult<Agent> {
@@ -271,7 +266,8 @@ impl AgentService {
         // Check for name conflict if updating name
         if let Some(ref new_name) = request.name {
             if new_name != &existing.name {
-                let conn = pool.get()
+                let conn = pool
+                    .get()
                     .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
                 let existing_with_name: Result<String, _> = conn.query_row(
@@ -301,7 +297,8 @@ impl AgentService {
             updated_at: Some(now),
         };
 
-        let conn = pool.get()
+        let conn = pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
         let allowed_tools_json = serde_json::to_string(&updated.allowed_tools)?;
 
@@ -332,7 +329,8 @@ impl AgentService {
                 return Err(AppError::not_found(format!("Agent not found: {}", id)));
             }
 
-            let conn = pool.get()
+            let conn = pool
+                .get()
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             // Delete associated runs first
@@ -359,12 +357,16 @@ impl AgentService {
         tokio::task::spawn_blocking(move || {
             // Verify agent exists
             if Self::get_agent_sync(&pool, &agent_id)?.is_none() {
-                return Err(AppError::not_found(format!("Agent not found: {}", agent_id)));
+                return Err(AppError::not_found(format!(
+                    "Agent not found: {}",
+                    agent_id
+                )));
             }
 
             let run = AgentRun::new(&agent_id, &input);
 
-            let conn = pool.get()
+            let conn = pool
+                .get()
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             conn.execute(
@@ -487,15 +489,14 @@ impl AgentService {
     pub async fn get_agent_stats(&self, agent_id: &str) -> AppResult<AgentStats> {
         let pool = self.pool.clone();
         let agent_id = agent_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            Self::get_agent_stats_sync(&pool, &agent_id)
-        })
-        .await
-        .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
+        tokio::task::spawn_blocking(move || Self::get_agent_stats_sync(&pool, &agent_id))
+            .await
+            .map_err(|e| AppError::internal(format!("Task join error: {}", e)))?
     }
 
     fn get_agent_stats_sync(pool: &DbPool, agent_id: &str) -> AppResult<AgentStats> {
-        let conn = pool.get()
+        let conn = pool
+            .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let mut stats = AgentStats::default();
@@ -556,7 +557,8 @@ impl AgentService {
         let pool = self.pool.clone();
         let agent_id = agent_id.to_string();
         tokio::task::spawn_blocking(move || {
-            let conn = pool.get()
+            let conn = pool
+                .get()
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             // Get the created_at of the nth most recent run
@@ -594,7 +596,8 @@ impl AgentService {
         let description: Option<String> = row.get(2)?;
         let system_prompt: String = row.get(3)?;
         let model: String = row.get(4)?;
-        let allowed_tools_json: String = row.get::<_, String>(5).unwrap_or_else(|_| "[]".to_string());
+        let allowed_tools_json: String =
+            row.get::<_, String>(5).unwrap_or_else(|_| "[]".to_string());
         let created_at: Option<String> = row.get(6)?;
         let updated_at: Option<String> = row.get(7)?;
 

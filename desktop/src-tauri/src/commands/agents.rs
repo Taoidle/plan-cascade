@@ -5,8 +5,8 @@
 use tauri::State;
 
 use crate::models::agent::{
-    Agent, AgentCreateRequest, AgentRun, AgentRunList, AgentStats,
-    AgentUpdateRequest, AgentWithStats,
+    Agent, AgentCreateRequest, AgentRun, AgentRunList, AgentStats, AgentUpdateRequest,
+    AgentWithStats,
 };
 use crate::models::response::CommandResponse;
 use crate::services::agent::AgentService;

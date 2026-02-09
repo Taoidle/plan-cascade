@@ -86,7 +86,11 @@ impl PlanningConfigService {
     }
 
     /// Update the phase in a planning config
-    pub fn update_phase(&self, worktree_path: &Path, phase: PlanningPhase) -> AppResult<PlanningConfig> {
+    pub fn update_phase(
+        &self,
+        worktree_path: &Path,
+        phase: PlanningPhase,
+    ) -> AppResult<PlanningConfig> {
         let mut config = self.read(worktree_path)?;
         config.set_phase(phase);
         self.write(worktree_path, &config)?;
@@ -94,7 +98,11 @@ impl PlanningConfigService {
     }
 
     /// Mark a story as complete in the planning config
-    pub fn complete_story(&self, worktree_path: &Path, story_id: &str) -> AppResult<PlanningConfig> {
+    pub fn complete_story(
+        &self,
+        worktree_path: &Path,
+        story_id: &str,
+    ) -> AppResult<PlanningConfig> {
         let mut config = self.read(worktree_path)?;
         config.complete_story(story_id);
         self.write(worktree_path, &config)?;
@@ -154,7 +162,9 @@ mod tests {
         let service = PlanningConfigService::new();
         let path = Path::new("/path/to/worktree");
         let config_path = service.config_path(path);
-        assert!(config_path.to_string_lossy().contains(".planning-config.json"));
+        assert!(config_path
+            .to_string_lossy()
+            .contains(".planning-config.json"));
     }
 
     #[test]

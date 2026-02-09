@@ -65,9 +65,7 @@ pub struct ProjectChangeEvent {
 impl ProjectChangeEvent {
     /// Create a new project change event
     pub fn new(change_type: ChangeType, path: PathBuf) -> Self {
-        let project_id = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string());
+        let project_id = path.file_name().map(|n| n.to_string_lossy().to_string());
 
         Self {
             change_type,
@@ -104,13 +102,10 @@ impl FileChangeEvent {
                 .map(|p| p.to_string_lossy().to_string())
         });
 
-        let project_id = project_path.and_then(|p| {
-            p.file_name().map(|n| n.to_string_lossy().to_string())
-        });
+        let project_id =
+            project_path.and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
 
-        let extension = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_string());
+        let extension = path.extension().map(|e| e.to_string_lossy().to_string());
 
         Self {
             change_type,
@@ -228,7 +223,9 @@ impl WatchErrorEvent {
         let kind = match &error.kind {
             notify::ErrorKind::PathNotFound => WatchErrorKind::PathNotFound,
             notify::ErrorKind::MaxFilesWatch => WatchErrorKind::MaxFilesReached,
-            notify::ErrorKind::Io(io_err) if io_err.kind() == std::io::ErrorKind::PermissionDenied => {
+            notify::ErrorKind::Io(io_err)
+                if io_err.kind() == std::io::ErrorKind::PermissionDenied =>
+            {
                 WatchErrorKind::PermissionDenied
             }
             _ => WatchErrorKind::Generic,
@@ -296,60 +293,42 @@ impl<R: Runtime> SyncEventEmitter<R> {
     /// Emit a project change event
     pub fn emit_project_change(&self, event: ProjectChangeEvent) {
         if let Err(e) = self.app_handle.emit(channels::PROJECT_CHANGE, &event) {
-            eprintln!(
-                "[WARN] Failed to emit project change event: {}",
-                e
-            );
+            eprintln!("[WARN] Failed to emit project change event: {}", e);
         }
     }
 
     /// Emit a file change event
     pub fn emit_file_change(&self, event: FileChangeEvent) {
         if let Err(e) = self.app_handle.emit(channels::FILE_CHANGE, &event) {
-            eprintln!(
-                "[WARN] Failed to emit file change event: {}",
-                e
-            );
+            eprintln!("[WARN] Failed to emit file change event: {}", e);
         }
     }
 
     /// Emit a PRD change event
     pub fn emit_prd_change(&self, event: PrdChangeEvent) {
         if let Err(e) = self.app_handle.emit(channels::PRD_CHANGE, &event) {
-            eprintln!(
-                "[WARN] Failed to emit PRD change event: {}",
-                e
-            );
+            eprintln!("[WARN] Failed to emit PRD change event: {}", e);
         }
     }
 
     /// Emit a progress change event
     pub fn emit_progress_change(&self, event: ProgressChangeEvent) {
         if let Err(e) = self.app_handle.emit(channels::PROGRESS_CHANGE, &event) {
-            eprintln!(
-                "[WARN] Failed to emit progress change event: {}",
-                e
-            );
+            eprintln!("[WARN] Failed to emit progress change event: {}", e);
         }
     }
 
     /// Emit a watch error event
     pub fn emit_watch_error(&self, event: WatchErrorEvent) {
         if let Err(e) = self.app_handle.emit(channels::WATCH_ERROR, &event) {
-            eprintln!(
-                "[WARN] Failed to emit watch error event: {}",
-                e
-            );
+            eprintln!("[WARN] Failed to emit watch error event: {}", e);
         }
     }
 
     /// Emit a watch status event
     pub fn emit_watch_status(&self, event: WatchStatusEvent) {
         if let Err(e) = self.app_handle.emit(channels::WATCH_STATUS, &event) {
-            eprintln!(
-                "[WARN] Failed to emit watch status event: {}",
-                e
-            );
+            eprintln!("[WARN] Failed to emit watch status event: {}", e);
         }
     }
 }

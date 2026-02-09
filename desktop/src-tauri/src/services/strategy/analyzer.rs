@@ -214,10 +214,7 @@ impl StrategyAnalyzer {
     ];
 
     /// Analyze a task description and return a strategy recommendation.
-    pub fn analyze(
-        description: &str,
-        context: Option<&AnalysisContext>,
-    ) -> StrategyDecision {
+    pub fn analyze(description: &str, context: Option<&AnalysisContext>) -> StrategyDecision {
         let description_lower = description.to_lowercase();
         let word_count = description.split_whitespace().count();
 
@@ -280,8 +277,7 @@ impl StrategyAnalyzer {
             }
             if ctx.existing_codebase_size > 10_000 {
                 hybrid_adj += 1;
-                indicators
-                    .push("Large codebase suggests careful multi-story approach".to_string());
+                indicators.push("Large codebase suggests careful multi-story approach".to_string());
             }
             if ctx.has_worktrees {
                 // Slight boost toward worktree strategy
@@ -527,8 +523,11 @@ mod tests {
         let decision = StrategyAnalyzer::analyze("fix typo", None);
         assert_eq!(decision.strategy, ExecutionStrategy::Direct);
 
-        let overridden =
-            StrategyAnalyzer::override_strategy(&decision, ExecutionStrategy::HybridAuto, "I want stories");
+        let overridden = StrategyAnalyzer::override_strategy(
+            &decision,
+            ExecutionStrategy::HybridAuto,
+            "I want stories",
+        );
         assert_eq!(overridden.strategy, ExecutionStrategy::HybridAuto);
         assert!((overridden.confidence - 1.0).abs() < f64::EPSILON);
         assert!(overridden.reasoning.contains("User override"));

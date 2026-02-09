@@ -7,12 +7,13 @@ use tauri::State;
 use tokio::sync::RwLock;
 
 use crate::models::analytics::{
-    AggregationPeriod, DashboardSummary, ExportFormat, ExportRequest, ExportResult,
-    ModelPricing, ModelUsage, ProjectUsage, TimeSeriesPoint, UsageFilter, UsageRecord,
-    UsageStats,
+    AggregationPeriod, DashboardSummary, ExportFormat, ExportRequest, ExportResult, ModelPricing,
+    ModelUsage, ProjectUsage, TimeSeriesPoint, UsageFilter, UsageRecord, UsageStats,
 };
 use crate::models::response::CommandResponse;
-use crate::services::analytics::{AnalyticsService, CostCalculator, SummaryStatistics, UsageTracker, UsageTrackerBuilder};
+use crate::services::analytics::{
+    AnalyticsService, CostCalculator, SummaryStatistics, UsageTracker, UsageTrackerBuilder,
+};
 use crate::state::AppState;
 use crate::utils::error::{AppError, AppResult};
 
@@ -55,7 +56,7 @@ impl AnalyticsState {
 
         // Store service (we need to unwrap the Arc for storage)
         *service_lock = Some(AnalyticsService::from_pool(
-            app_state.with_database(|db| Ok(db.pool().clone())).await?
+            app_state.with_database(|db| Ok(db.pool().clone())).await?,
         )?);
 
         let mut tracker_lock = self.tracker.write().await;
@@ -131,16 +132,23 @@ pub async fn track_usage(
     session_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<CommandResponse<bool>, String> {
-    let result = analytics_state.with_tracker(|_tracker| {
-        // We need to run this in a blocking context since the tracker is async
-        Ok(())
-    }).await;
+    let result = analytics_state
+        .with_tracker(|_tracker| {
+            // We need to run this in a blocking context since the tracker is async
+            Ok(())
+        })
+        .await;
 
     match result {
         Ok(()) => {
             // Track using the service directly for now
             let record = UsageRecord::new(&model_name, &provider, input_tokens, output_tokens)
-                .with_cost(analytics_state.cost_calculator().calculate_cost(&provider, &model_name, input_tokens, output_tokens));
+                .with_cost(analytics_state.cost_calculator().calculate_cost(
+                    &provider,
+                    &model_name,
+                    input_tokens,
+                    output_tokens,
+                ));
 
             let record = if let Some(sid) = session_id {
                 record.with_session(sid)
@@ -154,7 +162,10 @@ pub async fn track_usage(
                 record
             };
 
-            match analytics_state.with_service(|s| s.insert_usage_record(&record).map(|_| ())).await {
+            match analytics_state
+                .with_service(|s| s.insert_usage_record(&record).map(|_| ()))
+                .await
+            {
                 Ok(()) => Ok(CommandResponse::ok(true)),
                 Err(e) => Ok(CommandResponse::err(e.to_string())),
             }
@@ -192,7 +203,10 @@ pub async fn get_usage_statistics(
     analytics_state: State<'_, AnalyticsState>,
     filter: UsageFilter,
 ) -> Result<CommandResponse<UsageStats>, String> {
-    match analytics_state.with_service(|s| s.get_usage_stats(&filter)).await {
+    match analytics_state
+        .with_service(|s| s.get_usage_stats(&filter))
+        .await
+    {
         Ok(stats) => Ok(CommandResponse::ok(stats)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -206,7 +220,10 @@ pub async fn list_usage_records(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<CommandResponse<Vec<UsageRecord>>, String> {
-    match analytics_state.with_service(|s| s.list_usage_records(&filter, limit, offset)).await {
+    match analytics_state
+        .with_service(|s| s.list_usage_records(&filter, limit, offset))
+        .await
+    {
         Ok(records) => Ok(CommandResponse::ok(records)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -218,7 +235,10 @@ pub async fn count_usage_records(
     analytics_state: State<'_, AnalyticsState>,
     filter: UsageFilter,
 ) -> Result<CommandResponse<i64>, String> {
-    match analytics_state.with_service(|s| s.count_usage_records(&filter)).await {
+    match analytics_state
+        .with_service(|s| s.count_usage_records(&filter))
+        .await
+    {
         Ok(count) => Ok(CommandResponse::ok(count)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -234,7 +254,10 @@ pub async fn aggregate_by_model(
     analytics_state: State<'_, AnalyticsState>,
     filter: UsageFilter,
 ) -> Result<CommandResponse<Vec<ModelUsage>>, String> {
-    match analytics_state.with_service(|s| s.aggregate_by_model(&filter)).await {
+    match analytics_state
+        .with_service(|s| s.aggregate_by_model(&filter))
+        .await
+    {
         Ok(data) => Ok(CommandResponse::ok(data)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -246,7 +269,10 @@ pub async fn aggregate_by_project(
     analytics_state: State<'_, AnalyticsState>,
     filter: UsageFilter,
 ) -> Result<CommandResponse<Vec<ProjectUsage>>, String> {
-    match analytics_state.with_service(|s| s.aggregate_by_project(&filter)).await {
+    match analytics_state
+        .with_service(|s| s.aggregate_by_project(&filter))
+        .await
+    {
         Ok(data) => Ok(CommandResponse::ok(data)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -259,7 +285,10 @@ pub async fn get_time_series(
     filter: UsageFilter,
     period: AggregationPeriod,
 ) -> Result<CommandResponse<Vec<TimeSeriesPoint>>, String> {
-    match analytics_state.with_service(|s| s.get_time_series(&filter, period)).await {
+    match analytics_state
+        .with_service(|s| s.get_time_series(&filter, period))
+        .await
+    {
         Ok(data) => Ok(CommandResponse::ok(data)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -272,7 +301,10 @@ pub async fn get_dashboard_summary(
     filter: UsageFilter,
     period: AggregationPeriod,
 ) -> Result<CommandResponse<DashboardSummary>, String> {
-    match analytics_state.with_service(|s| s.get_dashboard_summary(&filter, period)).await {
+    match analytics_state
+        .with_service(|s| s.get_dashboard_summary(&filter, period))
+        .await
+    {
         Ok(summary) => Ok(CommandResponse::ok(summary)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -284,7 +316,10 @@ pub async fn get_summary_statistics(
     analytics_state: State<'_, AnalyticsState>,
     filter: UsageFilter,
 ) -> Result<CommandResponse<SummaryStatistics>, String> {
-    match analytics_state.with_service(|s| s.get_summary_statistics(&filter)).await {
+    match analytics_state
+        .with_service(|s| s.get_summary_statistics(&filter))
+        .await
+    {
         Ok(stats) => Ok(CommandResponse::ok(stats)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -303,7 +338,12 @@ pub async fn calculate_usage_cost(
     input_tokens: i64,
     output_tokens: i64,
 ) -> Result<CommandResponse<i64>, String> {
-    let cost = analytics_state.cost_calculator().calculate_cost(&provider, &model_name, input_tokens, output_tokens);
+    let cost = analytics_state.cost_calculator().calculate_cost(
+        &provider,
+        &model_name,
+        input_tokens,
+        output_tokens,
+    );
     Ok(CommandResponse::ok(cost))
 }
 
@@ -314,7 +354,9 @@ pub async fn get_model_pricing(
     provider: String,
     model_name: String,
 ) -> Result<CommandResponse<Option<ModelPricing>>, String> {
-    let pricing = analytics_state.cost_calculator().get_pricing(&provider, &model_name);
+    let pricing = analytics_state
+        .cost_calculator()
+        .get_pricing(&provider, &model_name);
     Ok(CommandResponse::ok(pricing))
 }
 
@@ -336,14 +378,19 @@ pub async fn set_custom_pricing(
     pricing: ModelPricing,
 ) -> Result<CommandResponse<bool>, String> {
     let pricing_clone = pricing.clone();
-    match analytics_state.cost_calculator().set_custom_pricing(pricing) {
+    match analytics_state
+        .cost_calculator()
+        .set_custom_pricing(pricing)
+    {
         Ok(()) => {
             // Also persist to database
-            let result = analytics_state.with_service(|s| {
-                let mut p = pricing_clone.clone();
-                p.is_custom = true;
-                s.upsert_model_pricing(&p)
-            }).await;
+            let result = analytics_state
+                .with_service(|s| {
+                    let mut p = pricing_clone.clone();
+                    p.is_custom = true;
+                    s.upsert_model_pricing(&p)
+                })
+                .await;
             match result {
                 Ok(()) => Ok(CommandResponse::ok(true)),
                 Err(e) => Ok(CommandResponse::err(e.to_string())),
@@ -360,12 +407,15 @@ pub async fn remove_custom_pricing(
     provider: String,
     model_name: String,
 ) -> Result<CommandResponse<bool>, String> {
-    match analytics_state.cost_calculator().remove_custom_pricing(&provider, &model_name) {
+    match analytics_state
+        .cost_calculator()
+        .remove_custom_pricing(&provider, &model_name)
+    {
         Ok(removed) => {
             // Also remove from database
-            let _ = analytics_state.with_service(|s| {
-                s.delete_model_pricing(&model_name, &provider)
-            }).await;
+            let _ = analytics_state
+                .with_service(|s| s.delete_model_pricing(&model_name, &provider))
+                .await;
             Ok(CommandResponse::ok(removed))
         }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
@@ -382,7 +432,10 @@ pub async fn export_usage(
     analytics_state: State<'_, AnalyticsState>,
     request: ExportRequest,
 ) -> Result<CommandResponse<ExportResult>, String> {
-    match analytics_state.with_service(|s| s.export_usage(&request)).await {
+    match analytics_state
+        .with_service(|s| s.export_usage(&request))
+        .await
+    {
         Ok(result) => Ok(CommandResponse::ok(result)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -395,7 +448,10 @@ pub async fn export_by_model(
     filter: UsageFilter,
     format: ExportFormat,
 ) -> Result<CommandResponse<String>, String> {
-    match analytics_state.with_service(|s| s.export_by_model(&filter, format)).await {
+    match analytics_state
+        .with_service(|s| s.export_by_model(&filter, format))
+        .await
+    {
         Ok(data) => Ok(CommandResponse::ok(data)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -408,7 +464,10 @@ pub async fn export_by_project(
     filter: UsageFilter,
     format: ExportFormat,
 ) -> Result<CommandResponse<String>, String> {
-    match analytics_state.with_service(|s| s.export_by_project(&filter, format)).await {
+    match analytics_state
+        .with_service(|s| s.export_by_project(&filter, format))
+        .await
+    {
         Ok(data) => Ok(CommandResponse::ok(data)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -422,7 +481,10 @@ pub async fn export_time_series(
     period: AggregationPeriod,
     format: ExportFormat,
 ) -> Result<CommandResponse<String>, String> {
-    match analytics_state.with_service(|s| s.export_time_series(&filter, period, format)).await {
+    match analytics_state
+        .with_service(|s| s.export_time_series(&filter, period, format))
+        .await
+    {
         Ok(data) => Ok(CommandResponse::ok(data)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -449,7 +511,10 @@ pub async fn delete_usage_records(
     analytics_state: State<'_, AnalyticsState>,
     filter: UsageFilter,
 ) -> Result<CommandResponse<i64>, String> {
-    match analytics_state.with_service(|s| s.delete_usage_records(&filter)).await {
+    match analytics_state
+        .with_service(|s| s.delete_usage_records(&filter))
+        .await
+    {
         Ok(count) => Ok(CommandResponse::ok(count)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }

@@ -50,8 +50,7 @@ impl SessionService {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let entries = fs::read_dir(&sessions_dir)
-            .map_err(|e| AppError::Io(e))?;
+        let entries = fs::read_dir(&sessions_dir).map_err(|e| AppError::Io(e))?;
 
         for entry in entries.flatten() {
             let path = entry.path();
@@ -73,10 +72,7 @@ impl SessionService {
         let file = File::open(path).ok()?;
         let reader = BufReader::new(file);
 
-        let session_id = path
-            .file_stem()?
-            .to_string_lossy()
-            .to_string();
+        let session_id = path.file_stem()?.to_string_lossy().to_string();
 
         let mut session = Session::new(
             session_id,
@@ -88,7 +84,8 @@ impl SessionService {
         let mut last_timestamp: Option<String> = None;
         let mut first_timestamp: Option<String> = None;
 
-        for line in reader.lines().take(1000) { // Limit for performance
+        for line in reader.lines().take(1000) {
+            // Limit for performance
             if let Ok(line_str) = line {
                 if let Ok(entry) = serde_json::from_str::<SessionEntry>(&line_str) {
                     session.message_count += 1;
@@ -103,7 +100,9 @@ impl SessionService {
 
                     // Get first user message
                     if first_user_message.is_none() {
-                        if entry.role.as_deref() == Some("user") || entry.entry_type.as_deref() == Some("user") {
+                        if entry.role.as_deref() == Some("user")
+                            || entry.entry_type.as_deref() == Some("user")
+                        {
                             first_user_message = self.extract_content_preview(&entry.content);
                         }
                     }
@@ -173,7 +172,10 @@ impl SessionService {
         let path = PathBuf::from(session_path);
 
         if !path.exists() {
-            return Err(AppError::not_found(format!("Session file not found: {}", session_path)));
+            return Err(AppError::not_found(format!(
+                "Session file not found: {}",
+                session_path
+            )));
         }
 
         let project_id = path
@@ -183,7 +185,8 @@ impl SessionService {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let session = self.parse_session_file(&path, &project_id)
+        let session = self
+            .parse_session_file(&path, &project_id)
             .ok_or_else(|| AppError::internal("Failed to parse session file"))?;
 
         // Parse messages for details
@@ -199,10 +202,12 @@ impl SessionService {
 
         let mut messages = Vec::new();
 
-        for line in reader.lines().take(500) { // Limit for performance
+        for line in reader.lines().take(500) {
+            // Limit for performance
             if let Ok(line_str) = line {
                 if let Ok(entry) = serde_json::from_str::<SessionEntry>(&line_str) {
-                    let message_type = entry.role
+                    let message_type = entry
+                        .role
                         .or(entry.entry_type)
                         .unwrap_or_else(|| "unknown".to_string());
 

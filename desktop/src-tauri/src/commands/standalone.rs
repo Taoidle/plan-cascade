@@ -9,11 +9,11 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, RwLock};
 
-use crate::models::CommandResponse;
 use crate::models::orchestrator::{
     ExecuteWithSessionRequest, ExecutionProgress, ExecutionSession, ExecutionSessionSummary,
     ExecutionStatus, ResumeExecutionRequest, StandaloneStatus,
 };
+use crate::models::CommandResponse;
 use crate::services::llm::{ProviderConfig, ProviderType};
 use crate::services::orchestrator::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, SessionExecutionResult,
@@ -26,6 +26,8 @@ use crate::storage::KeyringService;
 pub struct StandaloneState {
     /// Active orchestrators by session ID
     pub orchestrators: Arc<RwLock<HashMap<String, Arc<OrchestratorService>>>>,
+    /// Current working directory for standalone mode
+    pub working_directory: Arc<RwLock<PathBuf>>,
 }
 
 impl Default for StandaloneState {
@@ -39,6 +41,9 @@ impl StandaloneState {
     pub fn new() -> Self {
         Self {
             orchestrators: Arc::new(RwLock::new(HashMap::new())),
+            working_directory: Arc::new(RwLock::new(
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            )),
         }
     }
 
@@ -49,7 +54,11 @@ impl StandaloneState {
     }
 
     /// Store an orchestrator for a session
-    pub async fn set_orchestrator(&self, session_id: String, orchestrator: Arc<OrchestratorService>) {
+    pub async fn set_orchestrator(
+        &self,
+        session_id: String,
+        orchestrator: Arc<OrchestratorService>,
+    ) {
         let mut orchestrators = self.orchestrators.write().await;
         orchestrators.insert(session_id, orchestrator);
     }
@@ -101,6 +110,61 @@ pub struct UsageStatistics {
     pub total_thinking_tokens: u32,
     pub total_cost_usd: f64,
     pub requests: u32,
+}
+
+/// Normalize provider aliases to canonical names used by orchestrator/keyring.
+fn normalize_provider_name(provider: &str) -> Option<&'static str> {
+    match provider.trim().to_lowercase().as_str() {
+        "anthropic" | "claude" | "claude-api" => Some("anthropic"),
+        "openai" => Some("openai"),
+        "deepseek" => Some("deepseek"),
+        "glm" | "glm-api" | "zhipu" | "zhipuai" => Some("glm"),
+        "qwen" | "qwen-api" | "dashscope" | "alibaba" | "aliyun" => Some("qwen"),
+        "ollama" => Some("ollama"),
+        _ => None,
+    }
+}
+
+fn provider_type_from_name(provider: &str) -> Option<ProviderType> {
+    match provider {
+        "anthropic" => Some(ProviderType::Anthropic),
+        "openai" => Some(ProviderType::OpenAI),
+        "deepseek" => Some(ProviderType::DeepSeek),
+        "glm" => Some(ProviderType::Glm),
+        "qwen" => Some(ProviderType::Qwen),
+        "ollama" => Some(ProviderType::Ollama),
+        _ => None,
+    }
+}
+
+fn provider_key_candidates(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "anthropic" => &["anthropic", "claude", "claude-api"],
+        "openai" => &["openai"],
+        "deepseek" => &["deepseek"],
+        "glm" => &["glm", "glm-api", "zhipu", "zhipuai"],
+        "qwen" => &["qwen", "qwen-api", "dashscope", "alibaba", "aliyun"],
+        "ollama" => &["ollama"],
+        _ => &[],
+    }
+}
+
+fn canonical_providers() -> &'static [&'static str] {
+    &["anthropic", "openai", "deepseek", "glm", "qwen", "ollama"]
+}
+
+fn get_api_key_with_aliases(
+    keyring: &KeyringService,
+    canonical_provider: &str,
+) -> Result<Option<String>, String> {
+    for candidate in provider_key_candidates(canonical_provider) {
+        match keyring.get_api_key(candidate) {
+            Ok(Some(key)) => return Ok(Some(key)),
+            Ok(None) => continue,
+            Err(e) => return Err(format!("Failed to get API key: {}", e)),
+        }
+    }
+    Ok(None)
 }
 
 /// List all supported providers and their models
@@ -216,6 +280,58 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
             default_base_url: Some("https://api.deepseek.com/v1/chat/completions".to_string()),
         },
         ProviderInfo {
+            provider_type: "glm".to_string(),
+            name: "GLM (ZhipuAI)".to_string(),
+            models: vec![
+                ModelInfo {
+                    id: "glm-4-flash-250414".to_string(),
+                    name: "GLM-4 Flash".to_string(),
+                    supports_thinking: false,
+                    supports_tools: true,
+                    context_window: 128_000,
+                    pricing: None,
+                },
+                ModelInfo {
+                    id: "glm-4.5-air".to_string(),
+                    name: "GLM-4.5 Air".to_string(),
+                    supports_thinking: true,
+                    supports_tools: true,
+                    context_window: 128_000,
+                    pricing: None,
+                },
+            ],
+            requires_api_key: true,
+            default_base_url: Some(
+                "https://open.bigmodel.cn/api/paas/v4/chat/completions".to_string(),
+            ),
+        },
+        ProviderInfo {
+            provider_type: "qwen".to_string(),
+            name: "Qwen (DashScope)".to_string(),
+            models: vec![
+                ModelInfo {
+                    id: "qwen-plus".to_string(),
+                    name: "Qwen Plus".to_string(),
+                    supports_thinking: true,
+                    supports_tools: true,
+                    context_window: 128_000,
+                    pricing: None,
+                },
+                ModelInfo {
+                    id: "qwen-turbo".to_string(),
+                    name: "Qwen Turbo".to_string(),
+                    supports_thinking: false,
+                    supports_tools: true,
+                    context_window: 64_000,
+                    pricing: None,
+                },
+            ],
+            requires_api_key: true,
+            default_base_url: Some(
+                "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions".to_string(),
+            ),
+        },
+        ProviderInfo {
             provider_type: "ollama".to_string(),
             name: "Ollama (Local)".to_string(),
             models: vec![
@@ -252,30 +368,107 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
     CommandResponse::ok(providers)
 }
 
+/// List providers that currently have API keys configured in OS keyring.
+#[tauri::command]
+pub async fn list_configured_api_key_providers() -> CommandResponse<Vec<String>> {
+    let keyring = KeyringService::new();
+    let mut configured = Vec::new();
+
+    for provider in canonical_providers() {
+        match get_api_key_with_aliases(&keyring, provider) {
+            Ok(Some(_)) => configured.push((*provider).to_string()),
+            Ok(None) => {}
+            Err(_) => {}
+        }
+    }
+
+    CommandResponse::ok(configured)
+}
+
+/// Get the currently stored API key for a provider (alias-aware).
+/// Returns None if no key is configured.
+#[tauri::command]
+pub async fn get_provider_api_key(provider: String) -> CommandResponse<Option<String>> {
+    let keyring = KeyringService::new();
+    let canonical_provider = match normalize_provider_name(&provider) {
+        Some(p) => p,
+        None => return CommandResponse::err(format!("Unknown provider: {}", provider)),
+    };
+
+    match get_api_key_with_aliases(&keyring, canonical_provider) {
+        Ok(key) => CommandResponse::ok(key),
+        Err(e) => CommandResponse::err(format!("Failed to get API key: {}", e)),
+    }
+}
+
 /// Configure a provider (store API key securely)
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn configure_provider(
     provider: String,
     api_key: Option<String>,
+    apiKey: Option<String>,
     base_url: Option<String>,
+    baseUrl: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<bool>, String> {
-    // Store API key if provided
+    let api_key = api_key.or(apiKey);
+    let base_url = base_url.or(baseUrl);
+
+    if api_key.is_none() && base_url.is_none() {
+        return Ok(CommandResponse::err(
+            "No configuration provided (expected api_key/apiKey and/or base_url/baseUrl)",
+        ));
+    }
+
+    let canonical_provider = match normalize_provider_name(&provider) {
+        Some(p) => p.to_string(),
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                provider
+            )))
+        }
+    };
+
+    // Use KeyringService directly (same as execute_standalone) to avoid
+    // AppState initialization timing issues
+    let keyring = KeyringService::new();
+
+    // Store or delete API key
     if let Some(key) = api_key {
-        if let Err(e) = state.set_api_key(&provider, &key).await {
-            return Ok(CommandResponse::err(format!("Failed to store API key: {}", e)));
+        if key.is_empty() {
+            // Empty key means delete
+            if let Err(e) = keyring.delete_api_key(&canonical_provider) {
+                return Ok(CommandResponse::err(format!(
+                    "Failed to delete API key: {}",
+                    e
+                )));
+            }
+        } else {
+            if let Err(e) = keyring.set_api_key(&canonical_provider, &key) {
+                return Ok(CommandResponse::err(format!(
+                    "Failed to store API key: {}",
+                    e
+                )));
+            }
         }
     }
 
     // Store base URL in settings if provided
     if let Some(url) = base_url {
-        let db_result = state.with_database(|db| {
-            let key = format!("provider_{}_base_url", provider);
-            db.set_setting(&key, &url)
-        }).await;
+        let db_result = state
+            .with_database(|db| {
+                let key = format!("provider_{}_base_url", canonical_provider);
+                db.set_setting(&key, &url)
+            })
+            .await;
 
         if let Err(e) = db_result {
-            return Ok(CommandResponse::err(format!("Failed to store base URL: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Failed to store base URL: {}",
+                e
+            )));
         }
     }
 
@@ -290,9 +483,13 @@ pub async fn check_provider_health(
     base_url: Option<String>,
 ) -> CommandResponse<HealthCheckResult> {
     let keyring = KeyringService::new();
+    let canonical_provider = match normalize_provider_name(&provider) {
+        Some(p) => p,
+        None => return CommandResponse::err(format!("Unknown provider: {}", provider)),
+    };
 
     // Get API key
-    let api_key = match keyring.get_api_key(&provider) {
+    let api_key = match get_api_key_with_aliases(&keyring, canonical_provider) {
         Ok(key) => key,
         Err(e) => {
             return CommandResponse::ok(HealthCheckResult {
@@ -303,15 +500,9 @@ pub async fn check_provider_health(
         }
     };
 
-    // Ollama doesn't need API key
-    let provider_type = match provider.as_str() {
-        "anthropic" => ProviderType::Anthropic,
-        "openai" => ProviderType::OpenAI,
-        "deepseek" => ProviderType::DeepSeek,
-        "ollama" => ProviderType::Ollama,
-        _ => {
-            return CommandResponse::err(format!("Unknown provider: {}", provider));
-        }
+    let provider_type = match provider_type_from_name(canonical_provider) {
+        Some(p) => p,
+        None => return CommandResponse::err(format!("Unknown provider: {}", provider)),
     };
 
     if provider_type != ProviderType::Ollama && api_key.is_none() {
@@ -337,6 +528,7 @@ pub async fn check_provider_health(
         max_total_tokens: 1000,
         project_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         streaming: false,
+        enable_compaction: false,
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config);
@@ -364,8 +556,59 @@ pub struct HealthCheckResult {
     pub latency_ms: Option<u32>,
 }
 
+/// Get the current working directory for standalone LLM sessions
+#[tauri::command]
+pub async fn get_working_directory(
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<String>, String> {
+    let wd = standalone_state.working_directory.read().await;
+    Ok(CommandResponse::ok(wd.to_string_lossy().to_string()))
+}
+
+/// Set the working directory for standalone LLM sessions.
+/// Validates that the path exists and is a directory.
+#[tauri::command]
+pub async fn set_working_directory(
+    path: String,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<String>, String> {
+    let new_path = PathBuf::from(&path);
+
+    // Validate the path exists and is a directory
+    if !new_path.exists() {
+        return Ok(CommandResponse::err(format!(
+            "Path does not exist: {}",
+            path
+        )));
+    }
+    if !new_path.is_dir() {
+        return Ok(CommandResponse::err(format!(
+            "Path is not a directory: {}",
+            path
+        )));
+    }
+
+    // Canonicalize the path
+    let canonical = match new_path.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!(
+                "Failed to resolve path: {}",
+                e
+            )));
+        }
+    };
+
+    let result = canonical.to_string_lossy().to_string();
+    let mut wd = standalone_state.working_directory.write().await;
+    *wd = canonical;
+
+    Ok(CommandResponse::ok(result))
+}
+
 /// Execute a message in standalone mode
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn execute_standalone(
     message: String,
     provider: String,
@@ -373,32 +616,49 @@ pub async fn execute_standalone(
     project_path: String,
     system_prompt: Option<String>,
     enable_tools: bool,
+    api_key: Option<String>,
+    apiKey: Option<String>,
+    enable_compaction: Option<bool>,
     app: AppHandle,
 ) -> CommandResponse<ExecutionResult> {
     let keyring = KeyringService::new();
+    let canonical_provider = match normalize_provider_name(&provider) {
+        Some(p) => p,
+        None => return CommandResponse::err(format!("Unknown provider: {}", provider)),
+    };
+    let provided_api_key = api_key
+        .or(apiKey)
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty());
 
     // Get API key
-    let api_key = match keyring.get_api_key(&provider) {
+    let mut api_key = match get_api_key_with_aliases(&keyring, canonical_provider) {
         Ok(key) => key,
         Err(e) => {
             return CommandResponse::err(format!("Failed to get API key: {}", e));
         }
     };
 
-    // Parse provider type
-    let provider_type = match provider.as_str() {
-        "anthropic" => ProviderType::Anthropic,
-        "openai" => ProviderType::OpenAI,
-        "deepseek" => ProviderType::DeepSeek,
-        "ollama" => ProviderType::Ollama,
-        _ => {
-            return CommandResponse::err(format!("Unknown provider: {}", provider));
+    // Fallback: use API key provided by frontend request when keyring has no entry.
+    if api_key.is_none() {
+        if let Some(key) = provided_api_key {
+            // Best-effort backfill into keyring for future requests.
+            let _ = keyring.set_api_key(canonical_provider, &key);
+            api_key = Some(key);
         }
+    }
+
+    let provider_type = match provider_type_from_name(canonical_provider) {
+        Some(p) => p,
+        None => return CommandResponse::err(format!("Unknown provider: {}", provider)),
     };
 
     // Validate API key for non-Ollama providers
     if provider_type != ProviderType::Ollama && api_key.is_none() {
-        return CommandResponse::err("API key not configured for this provider");
+        return CommandResponse::err(format!(
+            "API key not configured for provider '{}'",
+            canonical_provider
+        ));
     }
 
     let config = ProviderConfig {
@@ -416,6 +676,7 @@ pub async fn execute_standalone(
         max_total_tokens: 100_000,
         project_root: PathBuf::from(&project_path),
         streaming: true,
+        enable_compaction: enable_compaction.unwrap_or(true),
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config);
@@ -481,7 +742,10 @@ pub async fn get_usage_stats(
 
     match result {
         Ok(stats) => Ok(CommandResponse::ok(stats)),
-        Err(e) => Ok(CommandResponse::err(format!("Failed to get usage stats: {}", e))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Failed to get usage stats: {}",
+            e
+        ))),
     }
 }
 
@@ -538,29 +802,43 @@ pub async fn execute_standalone_with_session(
     standalone_state: State<'_, StandaloneState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     let keyring = KeyringService::new();
-
-    // Get API key
-    let api_key = match keyring.get_api_key(&request.provider) {
-        Ok(key) => key,
-        Err(e) => {
-            return Ok(CommandResponse::err(format!("Failed to get API key: {}", e)));
+    let canonical_provider = match normalize_provider_name(&request.provider) {
+        Some(p) => p.to_string(),
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                request.provider
+            )))
         }
     };
 
-    // Parse provider type
-    let provider_type = match request.provider.as_str() {
-        "anthropic" => ProviderType::Anthropic,
-        "openai" => ProviderType::OpenAI,
-        "deepseek" => ProviderType::DeepSeek,
-        "ollama" => ProviderType::Ollama,
-        _ => {
-            return Ok(CommandResponse::err(format!("Unknown provider: {}", request.provider)));
+    // Get API key
+    let api_key = match get_api_key_with_aliases(&keyring, &canonical_provider) {
+        Ok(key) => key,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!(
+                "Failed to get API key: {}",
+                e
+            )));
+        }
+    };
+
+    let provider_type = match provider_type_from_name(&canonical_provider) {
+        Some(p) => p,
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                request.provider
+            )))
         }
     };
 
     // Validate API key for non-Ollama providers
     if provider_type != ProviderType::Ollama && api_key.is_none() {
-        return Ok(CommandResponse::err("API key not configured for this provider"));
+        return Ok(CommandResponse::err(format!(
+            "API key not configured for provider '{}'",
+            canonical_provider
+        )));
     }
 
     let config = ProviderConfig {
@@ -578,16 +856,17 @@ pub async fn execute_standalone_with_session(
         max_total_tokens: 100_000,
         project_root: PathBuf::from(&request.project_path),
         streaming: true,
+        enable_compaction: true,
     };
 
     // Get database pool for session persistence
-    let pool = app_state.with_database(|db| {
-        Ok(db.pool().clone())
-    }).await.map_err(|e| e.to_string())?;
+    let pool = app_state
+        .with_database(|db| Ok(db.pool().clone()))
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Create orchestrator with database
-    let orchestrator = OrchestratorService::new(orchestrator_config)
-        .with_database(pool);
+    let orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
     let orchestrator = Arc::new(orchestrator);
 
     // Generate session ID
@@ -597,7 +876,7 @@ pub async fn execute_standalone_with_session(
     let mut session = ExecutionSession::new(
         session_id.clone(),
         &request.project_path,
-        &request.provider,
+        &canonical_provider,
         &request.model,
     );
 
@@ -618,10 +897,12 @@ pub async fn execute_standalone_with_session(
         if let Ok(prd) = serde_json::from_str::<serde_json::Value>(&prd_content) {
             if let Some(stories) = prd.get("stories").and_then(|s| s.as_array()) {
                 for story in stories {
-                    let story_id = story.get("id")
+                    let story_id = story
+                        .get("id")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
-                    let title = story.get("title")
+                    let title = story
+                        .get("title")
                         .and_then(|v| v.as_str())
                         .unwrap_or("Untitled Story");
 
@@ -644,7 +925,9 @@ pub async fn execute_standalone_with_session(
     }
 
     // Store orchestrator for potential cancellation
-    standalone_state.set_orchestrator(session_id.clone(), orchestrator.clone()).await;
+    standalone_state
+        .set_orchestrator(session_id.clone(), orchestrator.clone())
+        .await;
 
     // Create channel for streaming events
     let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
@@ -661,11 +944,9 @@ pub async fn execute_standalone_with_session(
     });
 
     // Execute the session
-    let result = orchestrator.execute_session(
-        &mut session,
-        tx,
-        request.run_quality_gates,
-    ).await;
+    let result = orchestrator
+        .execute_session(&mut session, tx, request.run_quality_gates)
+        .await;
 
     // Clean up orchestrator
     standalone_state.remove_orchestrator(&session_id).await;
@@ -683,7 +964,10 @@ pub async fn cancel_standalone_execution(
         orchestrator.cancel();
         Ok(CommandResponse::ok(true))
     } else {
-        Ok(CommandResponse::err(format!("Session not found: {}", session_id)))
+        Ok(CommandResponse::err(format!(
+            "Session not found: {}",
+            session_id
+        )))
     }
 }
 
@@ -693,12 +977,13 @@ pub async fn get_standalone_status(
     app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<StandaloneStatus>, String> {
     // Get database pool
-    let pool = match app_state.with_database(|db| {
-        Ok(db.pool().clone())
-    }).await {
+    let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
         Ok(p) => p,
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Database not available: {}",
+                e
+            )));
         }
     };
 
@@ -716,27 +1001,35 @@ pub async fn get_standalone_status(
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
+        enable_compaction: false,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
 
     // Get active sessions (running or paused)
-    let active = orchestrator.list_sessions(Some(ExecutionStatus::Running), Some(50)).await
+    let active = orchestrator
+        .list_sessions(Some(ExecutionStatus::Running), Some(50))
+        .await
         .unwrap_or_default();
 
-    let paused = orchestrator.list_sessions(Some(ExecutionStatus::Paused), Some(50)).await
+    let paused = orchestrator
+        .list_sessions(Some(ExecutionStatus::Paused), Some(50))
+        .await
         .unwrap_or_default();
 
-    let active_sessions: Vec<ExecutionSessionSummary> = active.into_iter()
-        .chain(paused.into_iter())
-        .collect();
+    let active_sessions: Vec<ExecutionSessionSummary> =
+        active.into_iter().chain(paused.into_iter()).collect();
 
     // Get recent completed sessions
-    let recent_sessions = orchestrator.list_sessions(Some(ExecutionStatus::Completed), Some(10)).await
+    let recent_sessions = orchestrator
+        .list_sessions(Some(ExecutionStatus::Completed), Some(10))
+        .await
         .unwrap_or_default();
 
     // Get total count
-    let total = orchestrator.list_sessions(None, Some(1000)).await
+    let total = orchestrator
+        .list_sessions(None, Some(1000))
+        .await
         .unwrap_or_default()
         .len();
 
@@ -754,12 +1047,13 @@ pub async fn get_standalone_progress(
     app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<ExecutionProgress>, String> {
     // Get database pool
-    let pool = match app_state.with_database(|db| {
-        Ok(db.pool().clone())
-    }).await {
+    let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
         Ok(p) => p,
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Database not available: {}",
+                e
+            )));
         }
     };
 
@@ -777,14 +1071,21 @@ pub async fn get_standalone_progress(
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
+        enable_compaction: false,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
 
     match orchestrator.get_progress(&session_id).await {
         Ok(Some(progress)) => Ok(CommandResponse::ok(progress)),
-        Ok(None) => Ok(CommandResponse::err(format!("Session not found: {}", session_id))),
-        Err(e) => Ok(CommandResponse::err(format!("Failed to get progress: {}", e))),
+        Ok(None) => Ok(CommandResponse::err(format!(
+            "Session not found: {}",
+            session_id
+        ))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Failed to get progress: {}",
+            e
+        ))),
     }
 }
 
@@ -797,12 +1098,13 @@ pub async fn resume_standalone_execution(
     standalone_state: State<'_, StandaloneState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     // Get database pool
-    let pool = match app_state.with_database(|db| {
-        Ok(db.pool().clone())
-    }).await {
+    let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
         Ok(p) => p,
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Database not available: {}",
+                e
+            )));
         }
     };
 
@@ -820,6 +1122,7 @@ pub async fn resume_standalone_execution(
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
+        enable_compaction: false,
     };
 
     let temp_orchestrator = OrchestratorService::new(temp_config).with_database(pool.clone());
@@ -827,10 +1130,16 @@ pub async fn resume_standalone_execution(
     let mut session = match temp_orchestrator.load_session(&request.session_id).await {
         Ok(Some(s)) => s,
         Ok(None) => {
-            return Ok(CommandResponse::err(format!("Session not found: {}", request.session_id)));
+            return Ok(CommandResponse::err(format!(
+                "Session not found: {}",
+                request.session_id
+            )));
         }
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Failed to load session: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Failed to load session: {}",
+                e
+            )));
         }
     };
 
@@ -861,21 +1170,32 @@ pub async fn resume_standalone_execution(
 
     // Get keyring to retrieve API key
     let keyring = KeyringService::new();
-    let api_key = match keyring.get_api_key(&session.provider) {
+    let canonical_provider = match normalize_provider_name(&session.provider) {
+        Some(p) => p,
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                session.provider
+            )));
+        }
+    };
+    let api_key = match get_api_key_with_aliases(&keyring, canonical_provider) {
         Ok(key) => key,
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Failed to get API key: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Failed to get API key: {}",
+                e
+            )));
         }
     };
 
-    // Parse provider type
-    let provider_type = match session.provider.as_str() {
-        "anthropic" => ProviderType::Anthropic,
-        "openai" => ProviderType::OpenAI,
-        "deepseek" => ProviderType::DeepSeek,
-        "ollama" => ProviderType::Ollama,
-        _ => {
-            return Ok(CommandResponse::err(format!("Unknown provider: {}", session.provider)));
+    let provider_type = match provider_type_from_name(canonical_provider) {
+        Some(p) => p,
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                session.provider
+            )));
         }
     };
 
@@ -895,14 +1215,16 @@ pub async fn resume_standalone_execution(
         max_total_tokens: 100_000,
         project_root: PathBuf::from(&session.project_path),
         streaming: true,
+        enable_compaction: true,
     };
 
-    let orchestrator = OrchestratorService::new(orchestrator_config)
-        .with_database(pool);
+    let orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
     let orchestrator = Arc::new(orchestrator);
 
     // Store orchestrator for potential cancellation
-    standalone_state.set_orchestrator(request.session_id.clone(), orchestrator.clone()).await;
+    standalone_state
+        .set_orchestrator(request.session_id.clone(), orchestrator.clone())
+        .await;
 
     // Create channel for streaming events
     let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
@@ -921,7 +1243,9 @@ pub async fn resume_standalone_execution(
     let result = orchestrator.execute_session(&mut session, tx, true).await;
 
     // Clean up orchestrator
-    standalone_state.remove_orchestrator(&request.session_id).await;
+    standalone_state
+        .remove_orchestrator(&request.session_id)
+        .await;
 
     Ok(CommandResponse::ok(result))
 }
@@ -933,12 +1257,13 @@ pub async fn get_standalone_session(
     app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<ExecutionSession>, String> {
     // Get database pool
-    let pool = match app_state.with_database(|db| {
-        Ok(db.pool().clone())
-    }).await {
+    let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
         Ok(p) => p,
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Database not available: {}",
+                e
+            )));
         }
     };
 
@@ -956,14 +1281,21 @@ pub async fn get_standalone_session(
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
+        enable_compaction: false,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
 
     match orchestrator.load_session(&session_id).await {
         Ok(Some(session)) => Ok(CommandResponse::ok(session)),
-        Ok(None) => Ok(CommandResponse::err(format!("Session not found: {}", session_id))),
-        Err(e) => Ok(CommandResponse::err(format!("Failed to load session: {}", e))),
+        Ok(None) => Ok(CommandResponse::err(format!(
+            "Session not found: {}",
+            session_id
+        ))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Failed to load session: {}",
+            e
+        ))),
     }
 }
 
@@ -975,12 +1307,13 @@ pub async fn list_standalone_sessions(
     app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<ExecutionSessionSummary>>, String> {
     // Get database pool
-    let pool = match app_state.with_database(|db| {
-        Ok(db.pool().clone())
-    }).await {
+    let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
         Ok(p) => p,
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Database not available: {}",
+                e
+            )));
         }
     };
 
@@ -1001,13 +1334,17 @@ pub async fn list_standalone_sessions(
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
+        enable_compaction: false,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
 
     match orchestrator.list_sessions(status_filter, limit).await {
         Ok(sessions) => Ok(CommandResponse::ok(sessions)),
-        Err(e) => Ok(CommandResponse::err(format!("Failed to list sessions: {}", e))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Failed to list sessions: {}",
+            e
+        ))),
     }
 }
 
@@ -1018,12 +1355,13 @@ pub async fn delete_standalone_session(
     app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<bool>, String> {
     // Get database pool
-    let pool = match app_state.with_database(|db| {
-        Ok(db.pool().clone())
-    }).await {
+    let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
         Ok(p) => p,
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Database not available: {}",
+                e
+            )));
         }
     };
 
@@ -1041,13 +1379,17 @@ pub async fn delete_standalone_session(
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
+        enable_compaction: false,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
 
     match orchestrator.delete_session(&session_id).await {
         Ok(()) => Ok(CommandResponse::ok(true)),
-        Err(e) => Ok(CommandResponse::err(format!("Failed to delete session: {}", e))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Failed to delete session: {}",
+            e
+        ))),
     }
 }
 
@@ -1058,12 +1400,13 @@ pub async fn cleanup_standalone_sessions(
     app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<usize>, String> {
     // Get database pool
-    let pool = match app_state.with_database(|db| {
-        Ok(db.pool().clone())
-    }).await {
+    let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
         Ok(p) => p,
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Database not available: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Database not available: {}",
+                e
+            )));
         }
     };
 
@@ -1081,13 +1424,17 @@ pub async fn cleanup_standalone_sessions(
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
+        enable_compaction: false,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
 
     match orchestrator.cleanup_old_sessions(days).await {
         Ok(count) => Ok(CommandResponse::ok(count)),
-        Err(e) => Ok(CommandResponse::err(format!("Failed to cleanup sessions: {}", e))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Failed to cleanup sessions: {}",
+            e
+        ))),
     }
 }
 
@@ -1133,5 +1480,42 @@ mod tests {
         assert!(names.contains(&"openai"));
         assert!(names.contains(&"deepseek"));
         assert!(names.contains(&"ollama"));
+    }
+
+    #[test]
+    fn test_standalone_state_default_working_directory() {
+        let state = StandaloneState::new();
+        // The default working directory should be the process working dir
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let wd = rt.block_on(async { state.working_directory.read().await.clone() });
+        assert!(wd.exists());
+        assert!(wd.is_dir());
+    }
+
+    #[test]
+    fn test_normalize_provider_name() {
+        assert_eq!(normalize_provider_name("anthropic"), Some("anthropic"));
+        assert_eq!(normalize_provider_name("claude"), Some("anthropic"));
+        assert_eq!(normalize_provider_name("claude-api"), Some("anthropic"));
+        assert_eq!(normalize_provider_name("openai"), Some("openai"));
+        assert_eq!(normalize_provider_name("glm"), Some("glm"));
+        assert_eq!(normalize_provider_name("zhipu"), Some("glm"));
+        assert_eq!(normalize_provider_name("qwen"), Some("qwen"));
+        assert_eq!(normalize_provider_name("dashscope"), Some("qwen"));
+        assert_eq!(normalize_provider_name("ollama"), Some("ollama"));
+        assert_eq!(normalize_provider_name("unknown"), None);
+    }
+
+    #[test]
+    fn test_standalone_state_working_directory_update() {
+        let state = StandaloneState::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let temp = std::env::temp_dir();
+        rt.block_on(async {
+            let mut wd = state.working_directory.write().await;
+            *wd = temp.clone();
+        });
+        let wd = rt.block_on(async { state.working_directory.read().await.clone() });
+        assert_eq!(wd, temp);
     }
 }

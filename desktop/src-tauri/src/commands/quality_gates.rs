@@ -7,13 +7,12 @@ use tauri::State;
 use tokio::sync::RwLock;
 
 use crate::models::quality_gates::{
-    CustomGateConfig, GatesSummary, ProjectDetectionResult, ProjectType,
-    QualityGate, StoredGateResult,
+    CustomGateConfig, GatesSummary, ProjectDetectionResult, ProjectType, QualityGate,
+    StoredGateResult,
 };
 use crate::models::response::CommandResponse;
 use crate::services::quality_gates::{
-    detect_project_type, get_default_gates, QualityGateRunner, QualityGatesStore,
-    ValidatorRegistry,
+    detect_project_type, get_default_gates, QualityGateRunner, QualityGatesStore, ValidatorRegistry,
 };
 use crate::state::AppState;
 use crate::utils::error::{AppError, AppResult};
@@ -122,7 +121,12 @@ pub async fn get_available_gates(
 pub async fn list_all_gates(
     quality_state: State<'_, QualityGatesState>,
 ) -> Result<CommandResponse<Vec<QualityGate>>, String> {
-    let gates = quality_state.registry().all().into_iter().cloned().collect();
+    let gates = quality_state
+        .registry()
+        .all()
+        .into_iter()
+        .cloned()
+        .collect();
     Ok(CommandResponse::ok(gates))
 }
 
@@ -293,9 +297,7 @@ pub async fn get_default_gates_for_type(
 pub async fn check_quality_gates_health(
     quality_state: State<'_, QualityGatesState>,
 ) -> Result<CommandResponse<bool>, String> {
-    let result = quality_state
-        .with_store(|_| Ok(true))
-        .await;
+    let result = quality_state.with_store(|_| Ok(true)).await;
 
     match result {
         Ok(healthy) => Ok(CommandResponse::ok(healthy)),

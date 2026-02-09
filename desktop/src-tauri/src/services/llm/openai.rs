@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolDefinition, UsageStats,
+    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
+    StopReason, ToolCall, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::OpenAIAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -35,10 +35,7 @@ impl OpenAIProvider {
 
     /// Get the API base URL
     fn base_url(&self) -> &str {
-        self.config
-            .base_url
-            .as_deref()
-            .unwrap_or(OPENAI_API_URL)
+        self.config.base_url.as_deref().unwrap_or(OPENAI_API_URL)
     }
 
     /// Check if model supports reasoning (o1/o3 models)
@@ -105,10 +102,8 @@ impl OpenAIProvider {
 
         // Add tools if provided
         if !tools.is_empty() {
-            let openai_tools: Vec<serde_json::Value> = tools
-                .iter()
-                .map(|t| self.tool_to_openai(t))
-                .collect();
+            let openai_tools: Vec<serde_json::Value> =
+                tools.iter().map(|t| self.tool_to_openai(t)).collect();
             body["tools"] = serde_json::json!(openai_tools);
         }
 
@@ -131,8 +126,14 @@ impl OpenAIProvider {
         };
 
         // Check if message contains tool calls or tool results
-        let has_tool_calls = message.content.iter().any(|c| matches!(c, MessageContent::ToolUse { .. }));
-        let has_tool_results = message.content.iter().any(|c| matches!(c, MessageContent::ToolResult { .. }));
+        let has_tool_calls = message
+            .content
+            .iter()
+            .any(|c| matches!(c, MessageContent::ToolUse { .. }));
+        let has_tool_results = message
+            .content
+            .iter()
+            .any(|c| matches!(c, MessageContent::ToolResult { .. } | MessageContent::ToolResultMultimodal { .. }));
 
         if has_tool_results {
             // Tool results are sent as separate messages in OpenAI format
@@ -141,10 +142,38 @@ impl OpenAIProvider {
             });
 
             for content in &message.content {
-                if let MessageContent::ToolResult { tool_use_id, content, .. } = content {
-                    result_msg["tool_call_id"] = serde_json::json!(tool_use_id);
-                    result_msg["content"] = serde_json::json!(content);
-                    break;
+                match content {
+                    MessageContent::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => {
+                        result_msg["tool_call_id"] = serde_json::json!(tool_use_id);
+                        result_msg["content"] = serde_json::json!(content);
+                        break;
+                    }
+                    MessageContent::ToolResultMultimodal {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => {
+                        // OpenAI tool results are text-only; extract text and include image as data URI
+                        let mut parts = Vec::new();
+                        for block in content {
+                            match block {
+                                super::types::ContentBlock::Text { text } => {
+                                    parts.push(text.clone());
+                                }
+                                super::types::ContentBlock::Image { media_type, data } => {
+                                    parts.push(format!("[Image: data:{};base64,<{} bytes>]", media_type, data.len()));
+                                }
+                            }
+                        }
+                        result_msg["tool_call_id"] = serde_json::json!(tool_use_id);
+                        result_msg["content"] = serde_json::json!(parts.join("\n"));
+                        break;
+                    }
+                    _ => {}
                 }
             }
 
@@ -196,6 +225,38 @@ impl OpenAIProvider {
             return msg;
         }
 
+        // Check if message contains images (multimodal)
+        let has_images = message
+            .content
+            .iter()
+            .any(|c| matches!(c, MessageContent::Image { .. }));
+
+        if has_images {
+            // Build multimodal content array for OpenAI vision
+            let content_parts: Vec<serde_json::Value> = message
+                .content
+                .iter()
+                .filter_map(|c| match c {
+                    MessageContent::Text { text } => Some(serde_json::json!({
+                        "type": "text",
+                        "text": text
+                    })),
+                    MessageContent::Image { media_type, data } => Some(serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:{};base64,{}", media_type, data)
+                        }
+                    })),
+                    _ => None,
+                })
+                .collect();
+
+            return serde_json::json!({
+                "role": role,
+                "content": content_parts
+            });
+        }
+
         // Simple text message
         let text_content: String = message
             .content
@@ -243,9 +304,9 @@ impl OpenAIProvider {
 
                 if let Some(tcs) = &msg.tool_calls {
                     for tc in tcs {
-                        let arguments: serde_json::Value = serde_json::from_str(
-                            &tc.function.arguments
-                        ).unwrap_or(serde_json::Value::Null);
+                        let arguments: serde_json::Value =
+                            serde_json::from_str(&tc.function.arguments)
+                                .unwrap_or(serde_json::Value::Null);
 
                         tool_calls.push(ToolCall {
                             id: tc.id.clone(),
@@ -262,13 +323,17 @@ impl OpenAIProvider {
             .map(|r| StopReason::from(r.as_str()))
             .unwrap_or(StopReason::EndTurn);
 
-        let usage = response.usage.as_ref().map(|u| UsageStats {
-            input_tokens: u.prompt_tokens,
-            output_tokens: u.completion_tokens,
-            thinking_tokens: u.reasoning_tokens,
-            cache_read_tokens: None,
-            cache_creation_tokens: None,
-        }).unwrap_or_default();
+        let usage = response
+            .usage
+            .as_ref()
+            .map(|u| UsageStats {
+                input_tokens: u.prompt_tokens,
+                output_tokens: u.completion_tokens,
+                thinking_tokens: u.reasoning_tokens,
+                cache_read_tokens: None,
+                cache_creation_tokens: None,
+            })
+            .unwrap_or_default();
 
         LlmResponse {
             content,
@@ -297,6 +362,27 @@ impl LlmProvider for OpenAIProvider {
 
     fn supports_tools(&self) -> bool {
         true
+    }
+
+    fn supports_multimodal(&self) -> bool {
+        true
+    }
+
+    fn context_window(&self) -> u32 {
+        let model = self.config.model.to_lowercase();
+        if model.contains("o1") || model.contains("o3") || model.contains("o4") {
+            200_000 // o1, o3-mini, o3, o4-mini: 200k
+        } else if model.contains("gpt-4o") || model.contains("gpt-4-turbo") || model.contains("gpt-4.1") {
+            128_000 // GPT-4o, GPT-4-turbo, GPT-4.1: 128k
+        } else if model.contains("gpt-4-32k") {
+            32_768
+        } else if model.contains("gpt-4") {
+            8_192 // GPT-4 (original): 8k
+        } else if model.contains("gpt-3.5") {
+            16_384 // GPT-3.5-turbo: 16k
+        } else {
+            128_000 // Default for newer/unknown models
+        }
     }
 
     async fn send_message(
@@ -385,9 +471,6 @@ impl LlmProvider for OpenAIProvider {
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
 
-        // Track tool calls being accumulated
-        let mut pending_tool_calls: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
-
         let mut stream = response.bytes_stream();
         use futures_util::StreamExt;
 
@@ -419,15 +502,18 @@ impl LlmProvider for OpenAIProvider {
                                 UnifiedStreamEvent::ThinkingDelta { content, .. } => {
                                     accumulated_thinking.push_str(content);
                                 }
-                                UnifiedStreamEvent::ToolStart {
+                                UnifiedStreamEvent::ToolComplete {
                                     tool_id,
                                     tool_name,
-                                    ..
+                                    arguments,
                                 } => {
-                                    pending_tool_calls.insert(
-                                        tool_id.clone(),
-                                        (tool_name.clone(), String::new()),
-                                    );
+                                    if let Ok(input) = serde_json::from_str(arguments) {
+                                        tool_calls.push(ToolCall {
+                                            id: tool_id.clone(),
+                                            name: tool_name.clone(),
+                                            arguments: input,
+                                        });
+                                    }
                                 }
                                 UnifiedStreamEvent::Usage {
                                     input_tokens,
@@ -447,8 +533,16 @@ impl LlmProvider for OpenAIProvider {
                                 _ => {}
                             }
 
-                            // Forward event to channel
-                            let _ = tx.send(event).await;
+                            // Forward streaming events but suppress Complete/Usage —
+                            // those are internal signals; the orchestrator emits its own
+                            // Complete after tool calls are done.
+                            if !matches!(
+                                &event,
+                                UnifiedStreamEvent::Complete { .. }
+                                    | UnifiedStreamEvent::Usage { .. }
+                            ) {
+                                let _ = tx.send(event).await;
+                            }
                         }
                     }
                     Err(e) => {
@@ -460,17 +554,6 @@ impl LlmProvider for OpenAIProvider {
                             .await;
                     }
                 }
-            }
-        }
-
-        // Finalize pending tool calls
-        for (id, (name, args)) in pending_tool_calls {
-            if let Ok(arguments) = serde_json::from_str(&args) {
-                tool_calls.push(ToolCall {
-                    id,
-                    name,
-                    arguments,
-                });
             }
         }
 
@@ -559,7 +642,9 @@ impl LlmProvider for OpenAIProvider {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
-                    .filter(|id| id.starts_with("gpt") || id.starts_with("o1") || id.starts_with("o3"))
+                    .filter(|id| {
+                        id.starts_with("gpt") || id.starts_with("o1") || id.starts_with("o3")
+                    })
                     .collect()
             })
             .unwrap_or_default();

@@ -73,7 +73,10 @@ impl UnifiedStreamingService {
     /// Process a raw stream line and return unified events.
     ///
     /// If an event channel is configured, events are also sent through it.
-    pub async fn process_line(&mut self, line: &str) -> Result<Vec<UnifiedStreamEvent>, StreamError> {
+    pub async fn process_line(
+        &mut self,
+        line: &str,
+    ) -> Result<Vec<UnifiedStreamEvent>, StreamError> {
         let events = self.adapter.adapt(line)?;
 
         // Send events through channel if configured
@@ -89,7 +92,10 @@ impl UnifiedStreamingService {
     }
 
     /// Process a line synchronously (without sending through channel).
-    pub fn process_line_sync(&mut self, line: &str) -> Result<Vec<UnifiedStreamEvent>, StreamError> {
+    pub fn process_line_sync(
+        &mut self,
+        line: &str,
+    ) -> Result<Vec<UnifiedStreamEvent>, StreamError> {
         Ok(self.adapter.adapt(line)?)
     }
 
@@ -176,13 +182,19 @@ mod tests {
     #[test]
     fn test_thinking_format_descriptions() {
         let service = UnifiedStreamingService::new("claude-code", "claude-3-opus", None);
-        assert_eq!(service.thinking_format(), "Claude Extended Thinking (native)");
+        assert_eq!(
+            service.thinking_format(),
+            "Claude Extended Thinking (native)"
+        );
 
         let service = UnifiedStreamingService::new("openai", "o1-preview", None);
         assert_eq!(service.thinking_format(), "OpenAI o1 Reasoning");
 
         let service = UnifiedStreamingService::new("deepseek", "deepseek-r1", None);
-        assert_eq!(service.thinking_format(), "DeepSeek R1 Thinking (<think> tags)");
+        assert_eq!(
+            service.thinking_format(),
+            "DeepSeek R1 Thinking (<think> tags)"
+        );
 
         let service = UnifiedStreamingService::new("ollama", "qwq:32b", None);
         assert_eq!(service.thinking_format(), "QwQ Thinking (<think> tags)");
@@ -195,9 +207,14 @@ mod tests {
     fn test_process_line_sync() {
         let mut service = UnifiedStreamingService::new("claude-code", "claude-3-opus", None);
 
-        let events = service.process_line_sync(r#"{"type": "thinking", "thinking_id": "t1"}"#).unwrap();
+        let events = service
+            .process_line_sync(r#"{"type": "thinking", "thinking_id": "t1"}"#)
+            .unwrap();
         assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], UnifiedStreamEvent::ThinkingStart { .. }));
+        assert!(matches!(
+            events[0],
+            UnifiedStreamEvent::ThinkingStart { .. }
+        ));
     }
 
     #[tokio::test]
@@ -224,13 +241,18 @@ mod tests {
         let mut service = UnifiedStreamingService::new("deepseek", "deepseek-r1", None);
 
         // Process some content that puts adapter in thinking state
-        let _ = service.process_line_sync(r#"data: {"choices": [{"delta": {"content": "<think>thinking"}}]}"#);
+        let _ = service
+            .process_line_sync(r#"data: {"choices": [{"delta": {"content": "<think>thinking"}}]}"#);
 
         // Reset should clear state
         service.reset();
 
         // Process fresh content - should not be in thinking state
-        let events = service.process_line_sync(r#"data: {"choices": [{"delta": {"content": "hello"}}]}"#).unwrap();
-        assert!(events.iter().any(|e| matches!(e, UnifiedStreamEvent::TextDelta { .. })));
+        let events = service
+            .process_line_sync(r#"data: {"choices": [{"delta": {"content": "hello"}}]}"#)
+            .unwrap();
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, UnifiedStreamEvent::TextDelta { .. })));
     }
 }

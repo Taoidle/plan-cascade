@@ -5,6 +5,6 @@
 mod chain;
 
 pub use chain::{
-    AgentFallbackChain, FallbackConfig, FallbackError, FallbackResult,
-    FailureReason, FallbackAttempt, FallbackExecutionLog,
+    AgentFallbackChain, FailureReason, FallbackAttempt, FallbackConfig, FallbackError,
+    FallbackExecutionLog, FallbackResult,
 };

@@ -11,9 +11,7 @@ use futures_util::future::join_all;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
-use crate::models::iteration::{
-    IterationConfig, IterationMode, IterationResult, IterationState,
-};
+use crate::models::iteration::{IterationConfig, IterationMode, IterationResult, IterationState};
 use crate::models::prd::{Prd, StoryStatus};
 use crate::services::dependency::{Batch, DependencyAnalyzer, DependencyError};
 
@@ -74,7 +72,10 @@ pub enum IterationEvent {
     /// New iteration started
     IterationStarted { iteration: u32 },
     /// Batch started
-    BatchStarted { batch_index: usize, story_count: usize },
+    BatchStarted {
+        batch_index: usize,
+        story_count: usize,
+    },
     /// Story execution started
     StoryStarted { story_id: String, title: String },
     /// Story execution completed
@@ -90,11 +91,18 @@ pub enum IterationEvent {
     /// Batch completed
     BatchCompleted { batch_index: usize },
     /// Iteration completed
-    IterationCompleted { iteration: u32, completed_stories: usize },
+    IterationCompleted {
+        iteration: u32,
+        completed_stories: usize,
+    },
     /// Loop completed
     Completed { result: IterationResult },
     /// Progress update
-    Progress { completed: usize, total: usize, percentage: f32 },
+    Progress {
+        completed: usize,
+        total: usize,
+        percentage: f32,
+    },
     /// Error occurred
     Error { message: String },
 }
@@ -192,7 +200,9 @@ impl IterationLoop {
             prd.stories.len()
         };
 
-        let _ = event_tx.send(IterationEvent::Started { total_stories }).await;
+        let _ = event_tx
+            .send(IterationEvent::Started { total_stories })
+            .await;
 
         loop {
             // Check for cancellation
@@ -230,7 +240,9 @@ impl IterationLoop {
                 .await;
 
             // Execute stories in parallel (up to max_concurrent)
-            let results = self.execute_stories_parallel(&pending, event_tx.clone()).await?;
+            let results = self
+                .execute_stories_parallel(&pending, event_tx.clone())
+                .await?;
 
             // Process results and run quality gates
             for (story_id, result) in results {
@@ -352,7 +364,9 @@ impl IterationLoop {
             state.complete();
         }
 
-        let result = self.generate_result(start_time.elapsed().as_millis() as u64).await;
+        let result = self
+            .generate_result(start_time.elapsed().as_millis() as u64)
+            .await;
 
         let _ = event_tx
             .send(IterationEvent::Completed {
@@ -446,7 +460,6 @@ impl IterationLoop {
         story_ids: &[String],
         event_tx: mpsc::Sender<IterationEvent>,
     ) -> Result<Vec<(String, StoryExecutionResult)>, IterationLoopError> {
-
         let tasks: Vec<_> = story_ids
             .iter()
             .map(|id| {
@@ -617,8 +630,8 @@ impl IterationLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::prd::Story;
     use crate::models::iteration::IterationStatus;
+    use crate::models::prd::Story;
 
     fn create_test_prd() -> Prd {
         let mut prd = Prd::new("Test PRD");

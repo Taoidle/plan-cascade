@@ -12,6 +12,8 @@ pub enum ProviderType {
     Anthropic,
     OpenAI,
     DeepSeek,
+    Glm,
+    Qwen,
     Ollama,
 }
 
@@ -21,6 +23,8 @@ impl std::fmt::Display for ProviderType {
             ProviderType::Anthropic => write!(f, "anthropic"),
             ProviderType::OpenAI => write!(f, "openai"),
             ProviderType::DeepSeek => write!(f, "deepseek"),
+            ProviderType::Glm => write!(f, "glm"),
+            ProviderType::Qwen => write!(f, "qwen"),
             ProviderType::Ollama => write!(f, "ollama"),
         }
     }
@@ -118,6 +122,28 @@ pub enum MessageContent {
         #[serde(skip_serializing_if = "Option::is_none")]
         thinking_id: Option<String>,
     },
+    /// Image content (base64 encoded, for multimodal providers)
+    Image {
+        media_type: String,
+        data: String,
+    },
+    /// Tool result with multimodal content (text + images)
+    ToolResultMultimodal {
+        tool_use_id: String,
+        content: Vec<ContentBlock>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_error: Option<bool>,
+    },
+}
+
+/// A content block that can be text or image (for multimodal tool results)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentBlock {
+    /// Text content
+    Text { text: String },
+    /// Base64-encoded image
+    Image { media_type: String, data: String },
 }
 
 /// A message in the conversation
@@ -154,12 +180,32 @@ impl Message {
     }
 
     /// Create a tool result message
-    pub fn tool_result(tool_use_id: impl Into<String>, content: impl Into<String>, is_error: bool) -> Self {
+    pub fn tool_result(
+        tool_use_id: impl Into<String>,
+        content: impl Into<String>,
+        is_error: bool,
+    ) -> Self {
         Self {
             role: MessageRole::User,
             content: vec![MessageContent::ToolResult {
                 tool_use_id: tool_use_id.into(),
                 content: content.into(),
+                is_error: if is_error { Some(true) } else { None },
+            }],
+        }
+    }
+
+    /// Create a multimodal tool result message (text + images)
+    pub fn tool_result_multimodal(
+        tool_use_id: impl Into<String>,
+        blocks: Vec<ContentBlock>,
+        is_error: bool,
+    ) -> Self {
+        Self {
+            role: MessageRole::User,
+            content: vec![MessageContent::ToolResultMultimodal {
+                tool_use_id: tool_use_id.into(),
+                content: blocks,
                 is_error: if is_error { Some(true) } else { None },
             }],
         }
@@ -370,13 +416,19 @@ pub enum LlmError {
     /// Authentication failed (invalid API key)
     AuthenticationFailed { message: String },
     /// Rate limit exceeded
-    RateLimited { message: String, retry_after: Option<u32> },
+    RateLimited {
+        message: String,
+        retry_after: Option<u32>,
+    },
     /// Model not found or not available
     ModelNotFound { model: String },
     /// Invalid request (bad parameters)
     InvalidRequest { message: String },
     /// Server error from the provider
-    ServerError { message: String, status: Option<u16> },
+    ServerError {
+        message: String,
+        status: Option<u16>,
+    },
     /// Network/connection error
     NetworkError { message: String },
     /// Response parsing error
@@ -384,7 +436,10 @@ pub enum LlmError {
     /// Provider not available (e.g., Ollama not running)
     ProviderUnavailable { message: String },
     /// Context length exceeded
-    ContextLengthExceeded { message: String, max_tokens: Option<u32> },
+    ContextLengthExceeded {
+        message: String,
+        max_tokens: Option<u32>,
+    },
     /// Other error
     Other { message: String },
 }
@@ -497,7 +552,10 @@ mod tests {
     #[test]
     fn test_tool_definition() {
         let mut properties = HashMap::new();
-        properties.insert("file_path".to_string(), ParameterSchema::string(Some("Path to file")));
+        properties.insert(
+            "file_path".to_string(),
+            ParameterSchema::string(Some("Path to file")),
+        );
 
         let tool = ToolDefinition {
             name: "read_file".to_string(),

@@ -5,7 +5,9 @@
 
 use std::io::Write;
 
-use crate::models::analytics::{ExportFormat, ExportRequest, ExportResult, UsageFilter, UsageRecord, UsageStats};
+use crate::models::analytics::{
+    ExportFormat, ExportRequest, ExportResult, UsageFilter, UsageRecord, UsageStats,
+};
 use crate::utils::error::{AppError, AppResult};
 
 use super::service::AnalyticsService;
@@ -42,7 +44,11 @@ impl AnalyticsService {
     }
 
     /// Export to CSV format
-    fn records_to_csv(&self, records: &[UsageRecord], summary: Option<&UsageStats>) -> AppResult<String> {
+    fn records_to_csv(
+        &self,
+        records: &[UsageRecord],
+        summary: Option<&UsageStats>,
+    ) -> AppResult<String> {
         let mut output = Vec::new();
 
         // Write header
@@ -77,62 +83,60 @@ impl AnalyticsService {
                 record.timestamp,
                 timestamp_formatted,
                 metadata,
-            ).map_err(|e| AppError::internal(e.to_string()))?;
+            )
+            .map_err(|e| AppError::internal(e.to_string()))?;
         }
 
         // Write summary row if requested
         if let Some(stats) = summary {
-            writeln!(
-                output,
-                "\n# Summary"
-            ).map_err(|e| AppError::internal(e.to_string()))?;
-            writeln!(
-                output,
-                "# Total Input Tokens: {}",
-                stats.total_input_tokens
-            ).map_err(|e| AppError::internal(e.to_string()))?;
+            writeln!(output, "\n# Summary").map_err(|e| AppError::internal(e.to_string()))?;
+            writeln!(output, "# Total Input Tokens: {}", stats.total_input_tokens)
+                .map_err(|e| AppError::internal(e.to_string()))?;
             writeln!(
                 output,
                 "# Total Output Tokens: {}",
                 stats.total_output_tokens
-            ).map_err(|e| AppError::internal(e.to_string()))?;
-            writeln!(
-                output,
-                "# Total Tokens: {}",
-                stats.total_tokens()
-            ).map_err(|e| AppError::internal(e.to_string()))?;
+            )
+            .map_err(|e| AppError::internal(e.to_string()))?;
+            writeln!(output, "# Total Tokens: {}", stats.total_tokens())
+                .map_err(|e| AppError::internal(e.to_string()))?;
             writeln!(
                 output,
                 "# Total Cost (microdollars): {}",
                 stats.total_cost_microdollars
-            ).map_err(|e| AppError::internal(e.to_string()))?;
+            )
+            .map_err(|e| AppError::internal(e.to_string()))?;
             writeln!(
                 output,
                 "# Total Cost (dollars): ${:.6}",
                 stats.total_cost_dollars()
-            ).map_err(|e| AppError::internal(e.to_string()))?;
-            writeln!(
-                output,
-                "# Request Count: {}",
-                stats.request_count
-            ).map_err(|e| AppError::internal(e.to_string()))?;
+            )
+            .map_err(|e| AppError::internal(e.to_string()))?;
+            writeln!(output, "# Request Count: {}", stats.request_count)
+                .map_err(|e| AppError::internal(e.to_string()))?;
             writeln!(
                 output,
                 "# Average Tokens per Request: {:.2}",
                 stats.avg_tokens_per_request
-            ).map_err(|e| AppError::internal(e.to_string()))?;
+            )
+            .map_err(|e| AppError::internal(e.to_string()))?;
             writeln!(
                 output,
                 "# Average Cost per Request (microdollars): {:.2}",
                 stats.avg_cost_per_request
-            ).map_err(|e| AppError::internal(e.to_string()))?;
+            )
+            .map_err(|e| AppError::internal(e.to_string()))?;
         }
 
         String::from_utf8(output).map_err(|e| AppError::internal(e.to_string()))
     }
 
     /// Export to JSON format
-    fn records_to_json(&self, records: &[UsageRecord], summary: Option<&UsageStats>) -> AppResult<String> {
+    fn records_to_json(
+        &self,
+        records: &[UsageRecord],
+        summary: Option<&UsageStats>,
+    ) -> AppResult<String> {
         #[derive(serde::Serialize)]
         struct ExportData<'a> {
             exported_at: String,
@@ -148,8 +152,7 @@ impl AnalyticsService {
             records,
         };
 
-        serde_json::to_string_pretty(&export_data)
-            .map_err(|e| AppError::internal(e.to_string()))
+        serde_json::to_string_pretty(&export_data).map_err(|e| AppError::internal(e.to_string()))
     }
 
     /// Export with streaming for large datasets
@@ -184,9 +187,10 @@ impl AnalyticsService {
                     }
 
                     for record in &records {
-                        let timestamp_formatted = chrono::DateTime::from_timestamp(record.timestamp, 0)
-                            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                            .unwrap_or_default();
+                        let timestamp_formatted =
+                            chrono::DateTime::from_timestamp(record.timestamp, 0)
+                                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                                .unwrap_or_default();
 
                         writeln!(
                             writer,
@@ -204,7 +208,8 @@ impl AnalyticsService {
                             record.timestamp,
                             timestamp_formatted,
                             Self::csv_escape(record.metadata.as_deref().unwrap_or("")),
-                        ).map_err(|e| AppError::internal(e.to_string()))?;
+                        )
+                        .map_err(|e| AppError::internal(e.to_string()))?;
                     }
 
                     exported += records.len() as i64;
@@ -222,7 +227,8 @@ impl AnalyticsService {
                     writer,
                     "  \"exported_at\": \"{}\",",
                     chrono::Utc::now().to_rfc3339()
-                ).map_err(|e| AppError::internal(e.to_string()))?;
+                )
+                .map_err(|e| AppError::internal(e.to_string()))?;
                 writeln!(writer, "  \"record_count\": {},", total_count)
                     .map_err(|e| AppError::internal(e.to_string()))?;
 
@@ -234,7 +240,8 @@ impl AnalyticsService {
                         .map_err(|e| AppError::internal(e.to_string()))?;
                 }
 
-                writeln!(writer, "  \"records\": [").map_err(|e| AppError::internal(e.to_string()))?;
+                writeln!(writer, "  \"records\": [")
+                    .map_err(|e| AppError::internal(e.to_string()))?;
 
                 let mut first = true;
                 loop {
@@ -320,7 +327,8 @@ impl AnalyticsService {
                         item.stats.request_count,
                         item.stats.avg_tokens_per_request,
                         item.stats.avg_cost_per_request,
-                    ).map_err(|e| AppError::internal(e.to_string()))?;
+                    )
+                    .map_err(|e| AppError::internal(e.to_string()))?;
                 }
 
                 String::from_utf8(output).map_err(|e| AppError::internal(e.to_string()))
@@ -332,7 +340,11 @@ impl AnalyticsService {
     }
 
     /// Export aggregated data by project
-    pub fn export_by_project(&self, filter: &UsageFilter, format: ExportFormat) -> AppResult<String> {
+    pub fn export_by_project(
+        &self,
+        filter: &UsageFilter,
+        format: ExportFormat,
+    ) -> AppResult<String> {
         let data = self.aggregate_by_project(filter)?;
 
         match format {
@@ -354,7 +366,8 @@ impl AnalyticsService {
                         item.stats.request_count,
                         item.stats.avg_tokens_per_request,
                         item.stats.avg_cost_per_request,
-                    ).map_err(|e| AppError::internal(e.to_string()))?;
+                    )
+                    .map_err(|e| AppError::internal(e.to_string()))?;
                 }
 
                 String::from_utf8(output).map_err(|e| AppError::internal(e.to_string()))
@@ -391,7 +404,8 @@ impl AnalyticsService {
                         point.stats.total_cost_microdollars,
                         point.stats.total_cost_dollars(),
                         point.stats.request_count,
-                    ).map_err(|e| AppError::internal(e.to_string()))?;
+                    )
+                    .map_err(|e| AppError::internal(e.to_string()))?;
                 }
 
                 String::from_utf8(output).map_err(|e| AppError::internal(e.to_string()))
@@ -533,8 +547,14 @@ mod tests {
     fn test_csv_escape() {
         assert_eq!(AnalyticsService::csv_escape("simple"), "simple");
         assert_eq!(AnalyticsService::csv_escape("with,comma"), "\"with,comma\"");
-        assert_eq!(AnalyticsService::csv_escape("with\"quote"), "\"with\"\"quote\"");
-        assert_eq!(AnalyticsService::csv_escape("with\nnewline"), "\"with\nnewline\"");
+        assert_eq!(
+            AnalyticsService::csv_escape("with\"quote"),
+            "\"with\"\"quote\""
+        );
+        assert_eq!(
+            AnalyticsService::csv_escape("with\nnewline"),
+            "\"with\nnewline\""
+        );
     }
 
     #[test]
@@ -549,7 +569,9 @@ mod tests {
         };
 
         let mut output = Vec::new();
-        let count = service.export_usage_streaming(&request, &mut output, 1).unwrap();
+        let count = service
+            .export_usage_streaming(&request, &mut output, 1)
+            .unwrap();
 
         assert_eq!(count, 2);
 
@@ -564,12 +586,16 @@ mod tests {
         seed_test_data(&service);
 
         // CSV
-        let csv = service.export_by_model(&UsageFilter::default(), ExportFormat::Csv).unwrap();
+        let csv = service
+            .export_by_model(&UsageFilter::default(), ExportFormat::Csv)
+            .unwrap();
         assert!(csv.contains("model_name,provider"));
         assert!(csv.contains("claude-3-5-sonnet"));
 
         // JSON
-        let json = service.export_by_model(&UsageFilter::default(), ExportFormat::Json).unwrap();
+        let json = service
+            .export_by_model(&UsageFilter::default(), ExportFormat::Json)
+            .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.is_array());
     }

@@ -13,5 +13,5 @@
 pub mod analyzer;
 pub mod classifier;
 
-pub use analyzer::{StrategyAnalyzer, StrategyDecision, ExecutionStrategy, DimensionScores};
-pub use classifier::{IntentClassifier, IntentResult, Intent};
+pub use analyzer::{DimensionScores, ExecutionStrategy, StrategyAnalyzer, StrategyDecision};
+pub use classifier::{Intent, IntentClassifier, IntentResult};

@@ -27,3 +27,9 @@ mod design_doc_test;
 
 // Recovery system integration tests (story-010)
 mod recovery_test;
+
+// Tool calling integration tests (story-006)
+mod tool_calling_test;
+
+// Prompt fallback integration tests (story-006)
+mod prompt_fallback_test;

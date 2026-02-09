@@ -61,9 +61,7 @@ pub async fn get_strategy_options() -> CommandResponse<Vec<StrategyOption>> {
 /// `CommandResponse<IntentResult>` with intent, confidence, reasoning,
 /// and suggested mode.
 #[tauri::command]
-pub async fn classify_intent(
-    message: String,
-) -> CommandResponse<IntentResult> {
+pub async fn classify_intent(message: String) -> CommandResponse<IntentResult> {
     if message.trim().is_empty() {
         return CommandResponse::err("Message cannot be empty");
     }
@@ -127,11 +125,8 @@ mod tests {
             existing_codebase_size: 0,
             has_worktrees: false,
         };
-        let result = analyze_task_strategy(
-            "build a system with architecture".to_string(),
-            Some(ctx),
-        )
-        .await;
+        let result =
+            analyze_task_strategy("build a system with architecture".to_string(), Some(ctx)).await;
         assert!(result.success);
     }
 
@@ -148,7 +143,10 @@ mod tests {
         let result = classify_intent("implement a new feature".to_string()).await;
         assert!(result.success);
         let intent = result.data.unwrap();
-        assert_eq!(intent.intent, crate::services::strategy::classifier::Intent::Task);
+        assert_eq!(
+            intent.intent,
+            crate::services::strategy::classifier::Intent::Task
+        );
     }
 
     #[tokio::test]

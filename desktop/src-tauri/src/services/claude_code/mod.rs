@@ -13,8 +13,8 @@ pub mod tools;
 
 pub use chat::{ChatHandler, JsonLineBuffer, SendMessageResult};
 pub use events::{
-    channels, ClaudeCodeEventEmitter, SessionUpdateEvent, StreamEventPayload,
-    ThinkingUpdateEvent, ToolUpdateEvent,
+    channels, ClaudeCodeEventEmitter, SessionUpdateEvent, StreamEventPayload, ThinkingUpdateEvent,
+    ToolUpdateEvent,
 };
 pub use executor::{ClaudeCodeExecutor, ClaudeCodeProcess, SpawnConfig};
 pub use session_manager::ActiveSessionManager;

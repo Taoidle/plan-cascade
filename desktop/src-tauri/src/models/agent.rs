@@ -251,7 +251,13 @@ impl AgentRun {
     }
 
     /// Mark the run as completed with output
-    pub fn complete(&mut self, output: String, duration_ms: u64, input_tokens: u32, output_tokens: u32) {
+    pub fn complete(
+        &mut self,
+        output: String,
+        duration_ms: u64,
+        input_tokens: u32,
+        output_tokens: u32,
+    ) {
         self.status = RunStatus::Completed;
         self.output = Some(output);
         self.duration_ms = Some(duration_ms);
@@ -337,7 +343,11 @@ mod tests {
 
     #[test]
     fn test_agent_creation() {
-        let agent = Agent::create("Test Agent", "You are a helpful assistant.", "claude-sonnet-4-20250514");
+        let agent = Agent::create(
+            "Test Agent",
+            "You are a helpful assistant.",
+            "claude-sonnet-4-20250514",
+        );
         assert!(!agent.id.is_empty());
         assert_eq!(agent.name, "Test Agent");
         assert_eq!(agent.system_prompt, "You are a helpful assistant.");
@@ -378,7 +388,10 @@ mod tests {
     #[test]
     fn test_run_status_parsing() {
         assert_eq!("pending".parse::<RunStatus>().unwrap(), RunStatus::Pending);
-        assert_eq!("COMPLETED".parse::<RunStatus>().unwrap(), RunStatus::Completed);
+        assert_eq!(
+            "COMPLETED".parse::<RunStatus>().unwrap(),
+            RunStatus::Completed
+        );
         assert!("invalid".parse::<RunStatus>().is_err());
     }
 

@@ -217,9 +217,10 @@ impl DesignDocGenerator {
         save: bool,
     ) -> Result<GenerateResult, DesignDocError> {
         if !prd_path.exists() {
-            return Err(DesignDocError::NotFound(
-                format!("PRD file not found: {}", prd_path.display()),
-            ));
+            return Err(DesignDocError::NotFound(format!(
+                "PRD file not found: {}",
+                prd_path.display()
+            )));
         }
 
         let content = std::fs::read_to_string(prd_path)
@@ -259,10 +260,7 @@ impl DesignDocGenerator {
         }
 
         if !prd.tech_stack.is_empty() {
-            overview.push_str(&format!(
-                "\n\nTech Stack: {}",
-                prd.tech_stack.join(", ")
-            ));
+            overview.push_str(&format!("\n\nTech Stack: {}", prd.tech_stack.join(", ")));
         }
 
         if overview.is_empty() {
@@ -312,22 +310,28 @@ impl DesignDocGenerator {
         // Add core infrastructure components based on tech stack
         for tech in tech_stack {
             let tech_lower = tech.to_lowercase();
-            if (tech_lower.contains("database") || tech_lower.contains("sqlite") || tech_lower.contains("postgres"))
+            if (tech_lower.contains("database")
+                || tech_lower.contains("sqlite")
+                || tech_lower.contains("postgres"))
                 && !component_names.contains("DataLayer")
             {
                 let mut comp = Component::new("DataLayer");
                 comp.description = format!("Data persistence layer using {}", tech);
-                comp.responsibilities.push("Data storage and retrieval".to_string());
+                comp.responsibilities
+                    .push("Data storage and retrieval".to_string());
                 components.push(comp);
                 component_names.insert("DataLayer".to_string());
             }
 
-            if (tech_lower.contains("api") || tech_lower.contains("rest") || tech_lower.contains("graphql"))
+            if (tech_lower.contains("api")
+                || tech_lower.contains("rest")
+                || tech_lower.contains("graphql"))
                 && !component_names.contains("ApiGateway")
             {
                 let mut comp = Component::new("ApiGateway");
                 comp.description = format!("API layer using {}", tech);
-                comp.responsibilities.push("Request routing and validation".to_string());
+                comp.responsibilities
+                    .push("Request routing and validation".to_string());
                 components.push(comp);
                 component_names.insert("ApiGateway".to_string());
             }
@@ -344,8 +348,10 @@ impl DesignDocGenerator {
             .split_whitespace()
             .filter(|w| {
                 let lower = w.to_lowercase();
-                !["the", "a", "an", "and", "or", "for", "to", "in", "of", "with", "as"]
-                    .contains(&lower.as_str())
+                ![
+                    "the", "a", "an", "and", "or", "for", "to", "in", "of", "with", "as",
+                ]
+                .contains(&lower.as_str())
             })
             .take(3)
             .collect();
@@ -392,8 +398,7 @@ impl DesignDocGenerator {
     /// Extract design patterns from tech stack and story analysis
     fn extract_patterns(tech_stack: &[String], stories: &[PrdStory]) -> Vec<Pattern> {
         let mut patterns: Vec<Pattern> = Vec::new();
-        let mut pattern_names: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut pattern_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         // Tech stack derived patterns
         for tech in tech_stack {
@@ -401,7 +406,8 @@ impl DesignDocGenerator {
 
             if tech_lower.contains("react") && !pattern_names.contains("Component-Based UI") {
                 let mut p = Pattern::new("Component-Based UI");
-                p.description = "React component architecture with composable UI elements".to_string();
+                p.description =
+                    "React component architecture with composable UI elements".to_string();
                 p.rationale = "Enables reusable, testable UI components".to_string();
                 patterns.push(p);
                 pattern_names.insert("Component-Based UI".to_string());
@@ -558,8 +564,10 @@ impl DesignDocGenerator {
         if decisions.is_empty() {
             let mut decision = Decision::new("ADR-001", "Modular Architecture");
             decision.context = "Need a maintainable and extensible architecture".to_string();
-            decision.decision = "Use modular architecture with clear separation of concerns".to_string();
-            decision.rationale = "Enables independent development and testing of components".to_string();
+            decision.decision =
+                "Use modular architecture with clear separation of concerns".to_string();
+            decision.rationale =
+                "Enables independent development and testing of components".to_string();
             decision.status = DecisionStatus::Accepted;
             decisions.push(decision);
         }
@@ -597,10 +605,7 @@ impl DesignDocGenerator {
             // Find applicable patterns (first pattern if any)
             let mapping_patterns: Vec<String> = patterns
                 .iter()
-                .filter(|p| {
-                    p.applies_to.contains(&story.id)
-                        || p.applies_to.is_empty()
-                })
+                .filter(|p| p.applies_to.contains(&story.id) || p.applies_to.is_empty())
                 .map(|p| p.name.clone())
                 .take(1)
                 .collect();
@@ -692,7 +697,10 @@ mod tests {
         assert_eq!(result.design_doc.overview.goals.len(), 1);
         assert_eq!(result.design_doc.overview.non_goals.len(), 1);
         assert_eq!(result.design_doc.level(), DesignDocLevel::Project);
-        assert_eq!(result.design_doc.metadata.source.as_deref(), Some("generated"));
+        assert_eq!(
+            result.design_doc.metadata.source.as_deref(),
+            Some("generated")
+        );
     }
 
     #[test]
@@ -760,7 +768,10 @@ mod tests {
 
         // Should have one mapping per story
         assert_eq!(result.design_doc.feature_mappings.len(), prd.stories.len());
-        assert_eq!(result.generation_info.feature_mappings_created, prd.stories.len());
+        assert_eq!(
+            result.generation_info.feature_mappings_created,
+            prd.stories.len()
+        );
 
         // Each mapping should reference at least one component
         for (story_id, mapping) in &result.design_doc.feature_mappings {
@@ -831,8 +842,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&prd).unwrap();
         std::fs::write(&prd_path, json).unwrap();
 
-        let result =
-            DesignDocGenerator::generate_from_file(&prd_path, None, false).unwrap();
+        let result = DesignDocGenerator::generate_from_file(&prd_path, None, false).unwrap();
         assert_eq!(result.design_doc.overview.title, "Test Project");
         assert!(result.saved_path.is_none());
     }
@@ -846,8 +856,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&prd).unwrap();
         std::fs::write(&prd_path, json).unwrap();
 
-        let result =
-            DesignDocGenerator::generate_from_file(&prd_path, None, true).unwrap();
+        let result = DesignDocGenerator::generate_from_file(&prd_path, None, true).unwrap();
         assert!(result.saved_path.is_some());
 
         // Verify the file was created
@@ -861,11 +870,8 @@ mod tests {
 
     #[test]
     fn test_generate_from_nonexistent_file() {
-        let result = DesignDocGenerator::generate_from_file(
-            Path::new("/nonexistent/prd.json"),
-            None,
-            false,
-        );
+        let result =
+            DesignDocGenerator::generate_from_file(Path::new("/nonexistent/prd.json"), None, false);
         assert!(matches!(result, Err(DesignDocError::NotFound(_))));
     }
 

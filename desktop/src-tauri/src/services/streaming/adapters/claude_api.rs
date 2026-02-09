@@ -2,9 +2,9 @@
 //!
 //! Handles the SSE format from Claude API with content_block_delta parsing.
 
-use serde::Deserialize;
 use crate::services::streaming::adapter::StreamAdapter;
 use crate::services::streaming::unified::{AdapterError, UnifiedStreamEvent};
+use serde::Deserialize;
 
 /// Internal event types from Claude API SSE format
 #[derive(Debug, Deserialize)]
@@ -163,8 +163,8 @@ impl StreamAdapter for ClaudeApiAdapter {
             return Ok(vec![]);
         }
 
-        let event: ClaudeApiEvent = serde_json::from_str(json_str)
-            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
+        let event: ClaudeApiEvent =
+            serde_json::from_str(json_str).map_err(|e| AdapterError::ParseError(e.to_string()))?;
 
         let events = match event {
             ClaudeApiEvent::MessageStart { message } => {
@@ -220,6 +220,18 @@ impl StreamAdapter for ClaudeApiAdapter {
                 if self.current_thinking_id.is_some() {
                     events.push(UnifiedStreamEvent::ThinkingEnd {
                         thinking_id: self.current_thinking_id.take(),
+                    });
+                }
+
+                // If we were accumulating a tool call, emit ToolComplete
+                if let (Some(id), Some(name)) =
+                    (self.current_tool_id.take(), self.current_tool_name.take())
+                {
+                    let args = std::mem::take(&mut self.tool_input_buffer);
+                    events.push(UnifiedStreamEvent::ToolComplete {
+                        tool_id: id,
+                        tool_name: name,
+                        arguments: args,
                     });
                 }
 
@@ -300,7 +312,10 @@ mod tests {
         let events = adapter.adapt(r#"data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "reasoning..."}}"#).unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            UnifiedStreamEvent::ThinkingDelta { content, thinking_id } => {
+            UnifiedStreamEvent::ThinkingDelta {
+                content,
+                thinking_id,
+            } => {
                 assert_eq!(content, "reasoning...");
                 assert_eq!(thinking_id, &Some("t1".to_string()));
             }

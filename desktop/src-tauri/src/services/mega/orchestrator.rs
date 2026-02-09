@@ -14,9 +14,9 @@ use tokio_util::sync::CancellationToken;
 use crate::models::mega::{
     Feature, FeatureState, FeatureStatus, MegaExecutionStatus, MegaPlan, MegaStatus,
 };
+use crate::models::prd::Prd;
 use crate::models::worktree::CreateWorktreeRequest;
 use crate::services::worktree::WorktreeManager;
-use crate::models::prd::Prd;
 
 /// Configuration for the mega orchestrator
 #[derive(Debug, Clone)]
@@ -73,15 +73,24 @@ pub enum MegaEvent {
     /// Orchestration started
     Started { plan_id: String },
     /// Batch started
-    BatchStarted { batch_index: usize, feature_count: usize },
+    BatchStarted {
+        batch_index: usize,
+        feature_count: usize,
+    },
     /// Feature worktree created
     FeatureWorktreeCreated { feature_id: String, path: PathBuf },
     /// PRD generated for feature
-    PrdGenerated { feature_id: String, prd_path: PathBuf },
+    PrdGenerated {
+        feature_id: String,
+        prd_path: PathBuf,
+    },
     /// Feature execution started
     FeatureStarted { feature_id: String },
     /// Feature story completed
-    FeatureStoryCompleted { feature_id: String, story_id: String },
+    FeatureStoryCompleted {
+        feature_id: String,
+        story_id: String,
+    },
     /// Feature completed
     FeatureCompleted { feature_id: String },
     /// Feature failed
@@ -91,7 +100,11 @@ pub enum MegaEvent {
     /// Orchestration completed
     Completed { success: bool },
     /// Progress update
-    Progress { completed: usize, total: usize, percentage: f32 },
+    Progress {
+        completed: usize,
+        total: usize,
+        percentage: f32,
+    },
     /// Error occurred
     Error { message: String },
 }
@@ -171,9 +184,7 @@ impl MegaOrchestrator {
                 break; // All batches complete
             }
 
-            let batch_index = {
-                self.status.read().await.current_batch
-            };
+            let batch_index = { self.status.read().await.current_batch };
 
             let _ = event_tx
                 .send(MegaEvent::BatchStarted {
@@ -225,11 +236,13 @@ impl MegaOrchestrator {
 
             // Generate PRDs for each feature if configured
             if self.config.auto_generate_prds {
-                self.generate_prds_parallel(&batch, event_tx.clone()).await?;
+                self.generate_prds_parallel(&batch, event_tx.clone())
+                    .await?;
             }
 
             // Execute features in parallel
-            self.execute_features_parallel(&batch, event_tx.clone()).await?;
+            self.execute_features_parallel(&batch, event_tx.clone())
+                .await?;
 
             // Wait for batch completion
             self.wait_for_batch_completion(&batch).await?;
@@ -399,7 +412,6 @@ impl MegaOrchestrator {
         features: &[Feature],
         event_tx: mpsc::Sender<MegaEvent>,
     ) -> Result<(), MegaOrchestratorError> {
-
         let tasks: Vec<_> = features
             .iter()
             .map(|f| {
@@ -429,8 +441,9 @@ impl MegaOrchestrator {
                         let prd = Prd::new(&feature_id);
                         let prd_path = wt_path.join("prd.json");
 
-                        prd.to_file(&prd_path)
-                            .map_err(|e| MegaOrchestratorError::PrdGenerationError(e.to_string()))?;
+                        prd.to_file(&prd_path).map_err(|e| {
+                            MegaOrchestratorError::PrdGenerationError(e.to_string())
+                        })?;
 
                         // Update status
                         {
@@ -469,7 +482,6 @@ impl MegaOrchestrator {
         features: &[Feature],
         event_tx: mpsc::Sender<MegaEvent>,
     ) -> Result<(), MegaOrchestratorError> {
-
         let tasks: Vec<_> = features
             .iter()
             .map(|f| {

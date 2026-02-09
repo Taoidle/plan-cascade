@@ -306,7 +306,10 @@ impl McpService {
         #[cfg(target_os = "linux")]
         {
             if let Some(home) = dirs::home_dir() {
-                return home.join(".config").join("claude-desktop").join("config.json");
+                return home
+                    .join(".config")
+                    .join("claude-desktop")
+                    .join("config.json");
             }
         }
 
