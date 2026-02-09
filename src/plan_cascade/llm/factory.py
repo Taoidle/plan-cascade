@@ -56,6 +56,14 @@ class LLMFactory:
             "model": "deepseek-chat",
             "max_tokens": 8192,
         },
+        "glm": {
+            "model": "glm-4-flash-250414",
+            "max_tokens": 8192,
+        },
+        "qwen": {
+            "model": "qwen-plus",
+            "max_tokens": 8192,
+        },
         "ollama": {
             "model": "llama3.2",
             "base_url": "http://localhost:11434",
@@ -165,6 +173,14 @@ class LLMFactory:
             from .providers.deepseek import DeepSeekProvider
             cls._providers["deepseek"] = DeepSeekProvider
             return DeepSeekProvider
+        elif provider_name == "glm":
+            from .providers.glm import GLMProvider
+            cls._providers["glm"] = GLMProvider
+            return GLMProvider
+        elif provider_name == "qwen":
+            from .providers.qwen import QwenProvider
+            cls._providers["qwen"] = QwenProvider
+            return QwenProvider
         elif provider_name == "ollama":
             from .providers.ollama import OllamaProvider
             cls._providers["ollama"] = OllamaProvider
@@ -184,7 +200,7 @@ class LLMFactory:
             List of provider names
         """
         # Built-in providers plus any registered
-        built_in = ["claude", "claude-max", "openai", "deepseek", "ollama"]
+        built_in = ["claude", "claude-max", "openai", "deepseek", "glm", "qwen", "ollama"]
         registered = list(cls._providers.keys())
         return list(set(built_in + registered))
 
