@@ -39,8 +39,8 @@ import {
   CheckCircledIcon,
   KeyboardIcon,
 } from '../components/shared/CommandPalette';
-import { useModeStore, Mode, MODES } from '../store/mode';
-import { useSettingsStore, Theme, Language } from '../store/settings';
+import { useModeStore, MODES } from '../store/mode';
+import { useSettingsStore } from '../store/settings';
 import { useClaudeCodeStore } from '../store/claudeCode';
 import { useAgentsStore } from '../store/agents';
 import { useAnalyticsStore } from '../store/analytics';

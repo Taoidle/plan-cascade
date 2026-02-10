@@ -6,9 +6,8 @@
  * command execution, and keyboard navigation.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ReactNode } from 'react';
 
 // Mock react-i18next
@@ -505,7 +504,8 @@ describe('Command Palette Accessibility', () => {
 
     // Command buttons should be accessible
     const button = screen.getByTestId('cmd-aria-test');
-    expect(button).toHaveAttribute('type', 'submit'); // or 'button'
+    expect(button.tagName).toBe('BUTTON');
+    expect(button).toHaveTextContent('Test Command');
   });
 
   it('should support keyboard navigation keys conceptually', () => {

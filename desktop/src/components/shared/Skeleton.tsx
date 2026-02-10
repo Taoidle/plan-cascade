@@ -20,8 +20,6 @@ import { clsx } from 'clsx';
 // Types
 // ============================================================================
 
-type SkeletonVariant = 'rect' | 'circle' | 'text' | 'card' | 'button' | 'avatar' | 'badge';
-
 interface SkeletonBaseProps {
   className?: string;
   /** Animation style */

@@ -10,7 +10,7 @@
 
 import { clsx } from 'clsx';
 import { ChevronRightIcon, HomeIcon } from '@radix-ui/react-icons';
-import { useModeStore, BreadcrumbItem } from '../../store/mode';
+import { useModeStore } from '../../store/mode';
 
 // ============================================================================
 // Types

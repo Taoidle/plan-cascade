@@ -6,7 +6,7 @@
  * Renders interview questions with a progress indicator and conversation history.
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
 import {
   useSpecInterviewStore,
@@ -283,13 +283,13 @@ interface InterviewProgressBarProps {
 
 function InterviewProgressBar({ phase, progress, questionCursor, maxQuestions }: InterviewProgressBarProps) {
   const phases = getPhaseOrder().filter((p) => p !== 'complete');
+  const currentIdx = phase === 'complete' ? phases.length : phases.indexOf(phase);
 
   return (
     <div className="px-6 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700">
       {/* Phase indicators */}
       <div className="flex items-center gap-1 mb-3">
         {phases.map((p, idx) => {
-          const currentIdx = phases.indexOf(phase);
           const isActive = p === phase;
           const isComplete = idx < currentIdx || phase === 'complete';
 
@@ -325,7 +325,7 @@ function InterviewProgressBar({ phase, progress, questionCursor, maxQuestions }:
       {/* Overall progress */}
       <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
         <span>Phase: {getPhaseLabel(phase)}</span>
-        <span>{Math.round(progress)}% complete</span>
+        <span>{questionCursor}/{maxQuestions} questions | {Math.round(progress)}% complete</span>
       </div>
     </div>
   );

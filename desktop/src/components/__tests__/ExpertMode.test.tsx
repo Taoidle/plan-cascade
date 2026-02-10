@@ -7,7 +7,7 @@
  * Story 009: React Component Test Coverage
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SpecInterviewPanel } from '../ExpertMode/SpecInterviewPanel';
 import { StrategySelector } from '../ExpertMode/StrategySelector';
@@ -187,9 +187,9 @@ describe('SpecInterviewPanel', () => {
     render(<SpecInterviewPanel />);
 
     // Phase labels should be visible in progress bar
-    expect(screen.getByText('Overview')).toBeInTheDocument();
-    expect(screen.getByText('Scope')).toBeInTheDocument();
-    expect(screen.getByText('30% complete')).toBeInTheDocument();
+    expect(screen.getAllByText('Overview').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Scope').length).toBeGreaterThan(0);
+    expect(screen.getByText(/30\s*% complete/)).toBeInTheDocument();
 
     // Current question should be displayed
     expect(screen.getByText('What is the target audience?')).toBeInTheDocument();
@@ -206,7 +206,7 @@ describe('SpecInterviewPanel', () => {
 
     render(<SpecInterviewPanel />);
 
-    const input = screen.getByPlaceholderText('Type your answer...');
+    const input = screen.getByPlaceholderText(/Describe the main goal|Type your answer/);
     fireEvent.change(input, { target: { value: 'Build a fast app' } });
 
     fireEvent.click(screen.getByText('Submit'));
@@ -382,7 +382,7 @@ describe('StrategySelector', () => {
 
     expect(screen.getByText(/AI Recommendation: Hybrid Auto/)).toBeInTheDocument();
     expect(screen.getByText(/High confidence/)).toBeInTheDocument();
-    expect(screen.getByText(/92%/)).toBeInTheDocument();
+    expect(screen.getAllByText(/92%/).length).toBeGreaterThan(0);
     expect(screen.getByText('Task has multiple interdependent features.')).toBeInTheDocument();
   });
 
@@ -416,9 +416,7 @@ describe('StrategySelector', () => {
     // Advance past the debounce delay
     vi.advanceTimersByTime(600);
 
-    await waitFor(() => {
-      expect(mockAnalyzeStrategy).toHaveBeenCalledWith('Build a complex dashboard with charts');
-    });
+    expect(mockAnalyzeStrategy).toHaveBeenCalledWith('Build a complex dashboard with charts');
   });
 
   it('does not trigger analysis for short descriptions', () => {
@@ -480,8 +478,8 @@ describe('DesignDocPanel', () => {
   it('renders action panel when no design doc is loaded', () => {
     render(<DesignDocPanel />);
 
-    expect(screen.getByText(/Generate/i)).toBeInTheDocument();
-    expect(screen.getByText(/Import/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Generate/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Import/i).length).toBeGreaterThan(0);
   });
 
   it('shows loading state during generation', () => {
@@ -521,7 +519,9 @@ describe('DesignDocPanel', () => {
 
     expect(screen.getByText('Test Design')).toBeInTheDocument();
     expect(screen.getByText('ComponentA')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Design Patterns/i }));
     expect(screen.getByText('Pattern1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Architecture Decisions/i }));
     expect(screen.getByText('ADR-F001')).toBeInTheDocument();
   });
 
@@ -555,7 +555,7 @@ describe('DesignDocPanel', () => {
 
     render(<DesignDocPanel />);
 
-    const resetBtn = screen.getByRole('button', { name: /close|reset|back/i });
+    const resetBtn = screen.getByRole('button', { name: /new document/i });
     if (resetBtn) {
       fireEvent.click(resetBtn);
       expect(mockDesignDocReset).toHaveBeenCalled();

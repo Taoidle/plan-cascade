@@ -7,7 +7,7 @@
  * Supports generation from PRD and import of external documents.
  */
 
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { clsx } from 'clsx';
 import { useDesignDocStore } from '../../store/designDoc';
 import type {

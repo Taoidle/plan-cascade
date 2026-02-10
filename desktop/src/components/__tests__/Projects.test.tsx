@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { Projects } from '../Projects/index';
 import { createMockProject, createMockSession } from './test-utils';
 import type { Project, Session } from '../../types/project';
@@ -101,7 +101,7 @@ vi.mock('../../store/projects', () => ({
 
 // Mock Radix Select to avoid portal issues
 vi.mock('@radix-ui/react-select', () => ({
-  Root: ({ children, value, onValueChange }: { children: React.ReactNode; value: string; onValueChange: (v: string) => void }) => (
+  Root: ({ children, value }: { children: React.ReactNode; value: string; onValueChange: (v: string) => void }) => (
     <div data-testid="select-root" data-value={value}>{children}</div>
   ),
   Trigger: ({ children }: { children: React.ReactNode }) => <button data-testid="select-trigger">{children}</button>,

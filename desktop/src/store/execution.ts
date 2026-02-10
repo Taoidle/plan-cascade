@@ -72,6 +72,7 @@ export type StreamLineType =
   | 'tool'
   | 'tool_result'
   | 'sub_agent'
+  | 'analysis'
   | 'thinking'
   | 'code';
 
@@ -985,6 +986,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       tool: '[Tool] ',
       tool_result: '[ToolResult] ',
       sub_agent: '[SubAgent] ',
+      analysis: '[Analysis] ',
       thinking: '[Thinking] ',
       code: '[Code] ',
     };
@@ -1047,6 +1049,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       '[Tool] ': 'tool',
       '[ToolResult] ': 'tool_result',
       '[SubAgent] ': 'sub_agent',
+      '[Analysis] ': 'analysis',
       '[Thinking] ': 'thinking',
       '[Code] ': 'code',
     };
@@ -1261,12 +1264,19 @@ interface UnifiedEventPayload {
   type: string;
   session_id?: string;
   content?: string;
+  phase_id?: string;
+  title?: string;
+  objective?: string;
   prompt?: string;
   sub_agent_id?: string;
   task_type?: string;
   tool_id?: string;
   tool_name?: string;
   arguments?: string;
+  file_path?: string;
+  metrics?: Record<string, unknown>;
+  issues?: string[];
+  status?: string;
   result?: string;
   usage?: Record<string, unknown>;
   error?: string;
@@ -1278,7 +1288,7 @@ interface UnifiedEventPayload {
   total_stories?: number;
   success?: boolean;
   passed?: boolean;
-  summary?: Record<string, unknown>;
+  summary?: unknown;
   thinking_id?: string;
   stop_reason?: string;
   input_tokens?: number;
@@ -1311,6 +1321,26 @@ function formatSubAgentUsage(usage?: Record<string, unknown>): string {
   }
 
   return fragments.length > 0 ? ` (${fragments.join(', ')})` : '';
+}
+
+function formatAnalysisMetrics(metrics?: Record<string, unknown>): string {
+  if (!metrics || typeof metrics !== 'object') return '';
+  const toolCalls = parseOptionalNumber(metrics.tool_calls);
+  const readCalls = parseOptionalNumber(metrics.read_calls);
+  const grepCalls = parseOptionalNumber(metrics.grep_calls);
+  const observedPaths = parseOptionalNumber(metrics.observed_paths);
+  const fragments: string[] = [];
+
+  if (typeof toolCalls === 'number') fragments.push(`tools=${toolCalls}`);
+  if (typeof readCalls === 'number') fragments.push(`read=${readCalls}`);
+  if (typeof grepCalls === 'number') fragments.push(`grep=${grepCalls}`);
+  if (typeof observedPaths === 'number') fragments.push(`paths=${observedPaths}`);
+  return fragments.length > 0 ? ` (${fragments.join(', ')})` : '';
+}
+
+function toShortText(value: unknown, fallback = ''): string {
+  if (typeof value !== 'string') return fallback;
+  return value.trim();
 }
 
 function handleUnifiedExecutionEvent(
@@ -1399,6 +1429,81 @@ function handleUnifiedExecutionEvent(
         );
       }
       break;
+
+    case 'analysis_phase_start': {
+      const show = useSettingsStore.getState().showSubAgentEvents;
+      if (show) {
+        const phaseId = toShortText(payload.phase_id, 'phase');
+        const title = toShortText(payload.title, phaseId);
+        const objective = toShortText(payload.objective);
+        const details = objective ? `${title} - ${objective}` : title;
+        get().appendStreamLine(`[analysis:phase_start:${phaseId}] ${details}`, 'analysis');
+      }
+      break;
+    }
+
+    case 'analysis_phase_progress': {
+      const show = useSettingsStore.getState().showSubAgentEvents;
+      if (show) {
+        const phaseId = toShortText(payload.phase_id, 'phase');
+        const details = toShortText(payload.message, 'progress update');
+        get().appendStreamLine(`[analysis:phase_progress:${phaseId}] ${details}`, 'analysis');
+      }
+      break;
+    }
+
+    case 'analysis_evidence': {
+      const show = useSettingsStore.getState().showSubAgentEvents;
+      if (show || payload.success === false) {
+        const phaseId = toShortText(payload.phase_id, 'phase');
+        const toolName = toShortText(payload.tool_name, 'tool');
+        const summaryValue = typeof payload.summary === 'string' ? payload.summary : payload.message;
+        const summary = toShortText(summaryValue, 'evidence captured');
+        const filePath = toShortText(payload.file_path);
+        const suffix = filePath ? ` (${filePath})` : '';
+        const state = payload.success === false ? 'error' : 'ok';
+        get().appendStreamLine(
+          `[analysis:evidence:${phaseId}:${state}] ${toolName}: ${summary}${suffix}`,
+          'analysis'
+        );
+      }
+      break;
+    }
+
+    case 'analysis_phase_end': {
+      const show = useSettingsStore.getState().showSubAgentEvents;
+      if (show || payload.success === false) {
+        const phaseId = toShortText(payload.phase_id, 'phase');
+        const usage = formatSubAgentUsage(payload.usage);
+        const metrics = formatAnalysisMetrics(payload.metrics);
+        get().appendStreamLine(
+          `[analysis:phase_end:${phaseId}] ${payload.success ? 'completed' : 'failed'}${usage}${metrics}`,
+          'analysis'
+        );
+      }
+      break;
+    }
+
+    case 'analysis_validation': {
+      const validationStatus = toShortText(payload.status, 'unknown');
+      const issues = Array.isArray(payload.issues) ? payload.issues : [];
+      const issuePreview =
+        issues.length > 0 ? ` | ${issues.slice(0, 3).join(' ; ')}` : '';
+      get().appendStreamLine(
+        `[analysis:validation:${validationStatus}] ${issues.length} issue(s)${issuePreview}`,
+        'analysis'
+      );
+
+      if (validationStatus === 'warning' && issues.length > 0) {
+        get().addExecutionError({
+          severity: 'warning',
+          title: 'Analysis validation warning',
+          description: issues.slice(0, 5).join('\n'),
+          suggestedFix: 'Review evidence lines and rerun analysis if needed.',
+        });
+      }
+      break;
+    }
 
     case 'usage':
       if (typeof payload.input_tokens === 'number' && typeof payload.output_tokens === 'number') {
@@ -1500,7 +1605,7 @@ function handleUnifiedExecutionEvent(
       break;
 
     case 'quality_gates_result':
-      if (payload.story_id && payload.summary) {
+      if (payload.story_id && payload.summary && typeof payload.summary === 'object') {
         const summary = payload.summary as Record<string, { passed?: boolean; output?: string; duration?: number }>;
         const passed = payload.passed !== false;
 

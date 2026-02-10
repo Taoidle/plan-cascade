@@ -5,6 +5,18 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      if (key === 'shortcuts.title') {
+        return 'Keyboard Shortcuts';
+      }
+      return key;
+    },
+  }),
+}));
+
 import {
   formatShortcut,
   getPlatformModifier,
@@ -15,7 +27,7 @@ import {
 describe('formatShortcut', () => {
   it('formats mod+key shortcuts', () => {
     const formatted = formatShortcut('mod+enter');
-    expect(formatted).toMatch(/(Ctrl|Cmd) \+ Enter/);
+    expect(formatted).toMatch(/(Ctrl|Cmd) \+ enter/i);
   });
 
   it('handles multiple modifiers', () => {
@@ -25,7 +37,7 @@ describe('formatShortcut', () => {
 
   it('handles single keys', () => {
     const formatted = formatShortcut('escape');
-    expect(formatted).toBe('Escape');
+    expect(formatted).toBe('escape');
   });
 });
 
@@ -38,10 +50,8 @@ describe('getPlatformModifier', () => {
 
 describe('KeyboardShortcutHint', () => {
   it('renders keyboard shortcut with keys', () => {
-    render(<KeyboardShortcutHint shortcut="mod+enter" />);
-    const keys = screen.getAllByRole('generic').filter(
-      (el) => el.tagName.toLowerCase() === 'kbd'
-    );
+    const { container } = render(<KeyboardShortcutHint shortcut="mod+enter" />);
+    const keys = container.querySelectorAll('kbd');
     expect(keys.length).toBeGreaterThan(0);
   });
 

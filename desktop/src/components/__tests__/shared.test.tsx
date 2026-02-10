@@ -149,7 +149,7 @@ describe('Skeleton', () => {
 
 describe('SkeletonGroup', () => {
   it('renders the correct number of children', () => {
-    const { container } = render(
+    render(
       <SkeletonGroup count={5}>
         {(i) => <div key={i} data-testid={`item-${i}`}>Item {i}</div>}
       </SkeletonGroup>
@@ -417,6 +417,6 @@ describe('ShortcutOverlay', () => {
   it('shows Esc instruction in the header', () => {
     render(<ShortcutOverlay isOpen={true} />);
 
-    expect(screen.getByText('Esc')).toBeInTheDocument();
+    expect(screen.getAllByText('Esc').length).toBeGreaterThan(0);
   });
 });

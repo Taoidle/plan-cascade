@@ -8,13 +8,17 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
 // --------------------------------------------------------------------------
 // Mocks
 // --------------------------------------------------------------------------
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: {
+    type: '3rdParty',
+    init: () => {},
+  },
   useTranslation: () => ({
     t: (key: string, opts?: { defaultValue?: string }) => opts?.defaultValue || key,
   }),
@@ -107,16 +111,20 @@ vi.mock('@radix-ui/react-dropdown-menu', () => ({
   Separator: () => <hr />,
 }));
 
-vi.mock('@radix-ui/react-icons', () => ({
-  ViewVerticalIcon: () => <span>SidebarIcon</span>,
-  TrashIcon: () => <span>TrashIcon</span>,
-  DownloadIcon: () => <span>DownloadIcon</span>,
-  ReloadIcon: () => <span>ReloadIcon</span>,
-  CheckCircledIcon: () => <span>CheckIcon</span>,
-  CrossCircledIcon: () => <span>CrossIcon</span>,
-  DotsHorizontalIcon: () => <span>DotsIcon</span>,
-  KeyboardIcon: () => <span>KeyboardIcon</span>,
-}));
+vi.mock('@radix-ui/react-icons', async () => {
+  const actual = await vi.importActual<typeof import('@radix-ui/react-icons')>('@radix-ui/react-icons');
+  return {
+    ...actual,
+    ViewVerticalIcon: () => <span>SidebarIcon</span>,
+    TrashIcon: () => <span>TrashIcon</span>,
+    DownloadIcon: () => <span>DownloadIcon</span>,
+    ReloadIcon: () => <span>ReloadIcon</span>,
+    CheckCircledIcon: () => <span>CheckIcon</span>,
+    CrossCircledIcon: () => <span>CrossIcon</span>,
+    DotsHorizontalIcon: () => <span>DotsIcon</span>,
+    KeyboardIcon: () => <span>KeyboardIcon</span>,
+  };
+});
 
 // --------------------------------------------------------------------------
 // Tests

@@ -48,6 +48,7 @@ const LINE_TYPE_COLORS: Record<StreamLineType, string> = {
   tool: 'text-purple-400',
   tool_result: 'text-cyan-400',
   sub_agent: 'text-amber-400',
+  analysis: 'text-sky-300',
   thinking: 'text-gray-500 italic',
   code: 'text-cyan-300',
 };
@@ -61,6 +62,7 @@ const LINE_TYPE_PREFIX: Record<StreamLineType, string> = {
   tool: '',
   tool_result: '',
   sub_agent: '',
+  analysis: '',
   thinking: '     ',
   code: '',
 };
@@ -242,6 +244,10 @@ export function StreamingOutput({
 
           if (line.type === 'sub_agent') {
             return <SubAgentLine key={line.id} content={line.content} compact={compact} />;
+          }
+
+          if (line.type === 'analysis') {
+            return <AnalysisLine key={line.id} content={line.content} compact={compact} />;
           }
 
           // Tool result: render as collapsible result
@@ -440,6 +446,95 @@ function SubAgentLine({ content, compact }: { content: string; compact: boolean 
             isEndSuccess ? 'text-green-400/80' : isEndFail ? 'text-red-400/80' : 'text-amber-400/80'
           )}
         >
+          {parsed.details}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function parseAnalysisContent(content: string): {
+  kind: 'phase_start' | 'phase_progress' | 'evidence' | 'phase_end' | 'validation' | 'generic';
+  phase: string;
+  status: string;
+  details: string;
+} {
+  const match = content.match(/^\[analysis:([^:\]]+)(?::([^:\]]+))?(?::([^:\]]+))?\]\s*(.*)$/s);
+  if (!match) {
+    return { kind: 'generic', phase: '', status: '', details: content };
+  }
+
+  const rawKind = match[1] || '';
+  const part2 = match[2] || '';
+  const part3 = match[3] || '';
+  const details = match[4] || '';
+
+  if (rawKind === 'phase_start') {
+    return { kind: 'phase_start', phase: part2, status: '', details };
+  }
+  if (rawKind === 'phase_progress') {
+    return { kind: 'phase_progress', phase: part2, status: '', details };
+  }
+  if (rawKind === 'evidence') {
+    return { kind: 'evidence', phase: part2, status: part3, details };
+  }
+  if (rawKind === 'phase_end') {
+    return { kind: 'phase_end', phase: part2, status: '', details };
+  }
+  if (rawKind === 'validation') {
+    return { kind: 'validation', phase: '', status: part2, details };
+  }
+  return { kind: 'generic', phase: part2, status: part3, details };
+}
+
+function AnalysisLine({ content, compact }: { content: string; compact: boolean }) {
+  const parsed = parseAnalysisContent(content);
+  const isError = parsed.status === 'error' || /failed|warning|issue/i.test(parsed.details);
+  const isDone = parsed.kind === 'phase_end' && !isError;
+
+  const borderClass = isError
+    ? 'border-red-800/40 bg-red-950/20'
+    : isDone
+      ? 'border-green-800/40 bg-green-950/20'
+      : 'border-sky-800/40 bg-sky-950/20';
+  const textClass = isError
+    ? 'text-red-300'
+    : isDone
+      ? 'text-green-300'
+      : 'text-sky-300';
+  const detailClass = isError
+    ? 'text-red-400/80'
+    : isDone
+      ? 'text-green-400/80'
+      : 'text-sky-400/80';
+
+  const label = parsed.kind === 'evidence'
+    ? 'Evidence'
+    : parsed.kind === 'validation'
+      ? 'Validation'
+      : 'Analysis';
+  const phaseLabel = parsed.phase ? ` ${parsed.phase}` : '';
+
+  return (
+    <div
+      className={clsx(
+        'my-1 rounded border',
+        borderClass,
+        compact ? 'px-2 py-1' : 'px-3 py-1.5',
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {isDone ? (
+          <CheckCircledIcon className="w-3 h-3 text-green-400 flex-shrink-0" />
+        ) : isError ? (
+          <CrossCircledIcon className="w-3 h-3 text-red-400 flex-shrink-0" />
+        ) : (
+          <GearIcon className="w-3 h-3 text-sky-400" />
+        )}
+        <span className={clsx('font-mono text-xs font-semibold uppercase tracking-wide', textClass)}>
+          {label}{phaseLabel}
+        </span>
+        <span className={clsx('font-mono text-xs truncate', detailClass)}>
           {parsed.details}
         </span>
       </div>

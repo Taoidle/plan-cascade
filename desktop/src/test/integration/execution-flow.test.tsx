@@ -7,9 +7,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { ReactNode } from 'react';
 
 // Mock Tauri API
 const mockInvoke = vi.fn();
@@ -34,30 +31,6 @@ vi.mock('react-i18next', () => ({
 }));
 
 // ============================================================================
-// Test Utilities
-// ============================================================================
-
-function createMockMessage(role: 'user' | 'assistant', content: string, id?: string) {
-  return {
-    id: id || `msg-${Date.now()}`,
-    role,
-    content,
-    timestamp: new Date().toISOString(),
-    toolCalls: [],
-  };
-}
-
-function createMockToolCall(name: string, status: 'pending' | 'executing' | 'completed' | 'failed') {
-  return {
-    id: `tool-${Date.now()}`,
-    name,
-    parameters: {},
-    status,
-    startedAt: new Date().toISOString(),
-  };
-}
-
-// ============================================================================
 // Message Flow Tests
 // ============================================================================
 
@@ -73,7 +46,7 @@ describe('Message Flow Integration', () => {
 
   it('should send a message and receive a response', async () => {
     // Mock the invoke call for sending messages
-    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'send_message') {
         return { success: true, messageId: 'msg-123' };
       }
@@ -111,19 +84,16 @@ describe('Message Flow Integration', () => {
     });
 
     // Simulate streaming events
-    if (eventHandler) {
-      eventHandler({ payload: { type: 'TextDelta', text: 'Hello' } });
-      eventHandler({ payload: { type: 'TextDelta', text: ' World' } });
-      eventHandler({ payload: { type: 'Complete', stop_reason: 'end_turn' } });
-    }
+    const streamHandler = eventHandler as unknown as (event: { payload: unknown }) => void;
+    streamHandler({ payload: { type: 'TextDelta', text: 'Hello' } });
+    streamHandler({ payload: { type: 'TextDelta', text: ' World' } });
+    streamHandler({ payload: { type: 'Complete', stop_reason: 'end_turn' } });
 
     expect(streamEvents).toHaveLength(3);
     expect(streamEvents[0]).toEqual({ type: 'TextDelta', text: 'Hello' });
   });
 
   it('should handle tool call execution', async () => {
-    const toolCalls: unknown[] = [];
-
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'execute_tool') {
         return { success: true, output: 'Tool executed successfully' };
@@ -246,10 +216,9 @@ describe('Connection Status Integration', () => {
     });
 
     // Simulate connection state changes
-    if (statusHandler) {
-      statusHandler({ payload: 'connecting' });
-      statusHandler({ payload: 'connected' });
-    }
+    const connectionHandler = statusHandler as unknown as (event: { payload: string }) => void;
+    connectionHandler({ payload: 'connecting' });
+    connectionHandler({ payload: 'connected' });
 
     expect(connectionStates).toContain('connecting');
     expect(connectionStates).toContain('connected');
@@ -259,7 +228,7 @@ describe('Connection Status Integration', () => {
     let statusHandler: ((event: { payload: string }) => void) | null = null;
     const states: string[] = [];
 
-    mockListen.mockImplementation(async (event: string, handler: (event: { payload: string }) => void) => {
+    mockListen.mockImplementation(async (_event: string, handler: (event: { payload: string }) => void) => {
       statusHandler = handler;
       return mockUnlisten;
     });
@@ -268,10 +237,9 @@ describe('Connection Status Integration', () => {
       states.push(event.payload);
     });
 
-    if (statusHandler) {
-      statusHandler({ payload: 'connected' });
-      statusHandler({ payload: 'disconnected' });
-    }
+    const connectionHandler = statusHandler as unknown as (event: { payload: string }) => void;
+    connectionHandler({ payload: 'connected' });
+    connectionHandler({ payload: 'disconnected' });
 
     expect(states).toContain('disconnected');
   });

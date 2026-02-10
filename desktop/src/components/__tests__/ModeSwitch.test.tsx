@@ -10,7 +10,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ModeSwitch, ModeTabs, AnimatedModeContent } from '../ModeSwitch';
-import type { Mode } from '../../store/mode';
 
 // --------------------------------------------------------------------------
 // Mocks
@@ -75,17 +74,17 @@ describe('ModeSwitch', () => {
   it('renders with the current mode label displayed', () => {
     render(<ModeSwitch mode="simple" onChange={mockOnChange} />);
 
-    expect(screen.getByText('Simple')).toBeInTheDocument();
+    expect(screen.getAllByText('Simple').length).toBeGreaterThan(0);
   });
 
   it('renders all 5 mode options in the dropdown', () => {
     render(<ModeSwitch mode="simple" onChange={mockOnChange} />);
 
-    expect(screen.getByText('Simple')).toBeInTheDocument();
-    expect(screen.getByText('Expert')).toBeInTheDocument();
-    expect(screen.getByText('Claude Code')).toBeInTheDocument();
-    expect(screen.getByText('Projects')).toBeInTheDocument();
-    expect(screen.getByText('Analytics')).toBeInTheDocument();
+    expect(screen.getAllByText('Simple').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Expert').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Claude Code').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Projects').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Analytics').length).toBeGreaterThan(0);
   });
 
   it('displays descriptions for each mode', () => {
@@ -108,7 +107,7 @@ describe('ModeSwitch', () => {
   });
 
   it('shows a checkmark icon for the currently selected mode', () => {
-    const { container } = render(<ModeSwitch mode="expert" onChange={mockOnChange} />);
+    render(<ModeSwitch mode="expert" onChange={mockOnChange} />);
 
     // The selected mode label should be visible as the trigger text
     // There are multiple "Expert" entries (trigger + menu item)

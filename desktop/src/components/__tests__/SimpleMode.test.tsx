@@ -18,6 +18,10 @@ import { createMockStrategyAnalysis } from './test-utils';
 
 // Mock react-i18next
 vi.mock('react-i18next', () => ({
+  initReactI18next: {
+    type: '3rdParty',
+    init: () => {},
+  },
   useTranslation: () => ({
     t: (key: string, opts?: { defaultValue?: string }) => opts?.defaultValue || key,
   }),
@@ -26,6 +30,7 @@ vi.mock('react-i18next', () => ({
 // Track store state for controlled testing
 const mockAnalyzeStrategy = vi.fn();
 const mockStart = vi.fn();
+const mockSendFollowUp = vi.fn();
 const mockReset = vi.fn();
 const mockClearStrategyAnalysis = vi.fn();
 const mockInitialize = vi.fn();
@@ -37,6 +42,7 @@ let mockStoreState = {
   isSubmitting: false,
   apiError: null as string | null,
   start: mockStart,
+  sendFollowUp: mockSendFollowUp,
   reset: mockReset,
   result: null as { success: boolean; message: string } | null,
   initialize: mockInitialize,
@@ -45,6 +51,9 @@ let mockStoreState = {
   strategyAnalysis: null as ReturnType<typeof createMockStrategyAnalysis> | null,
   isAnalyzingStrategy: false,
   clearStrategyAnalysis: mockClearStrategyAnalysis,
+  isChatSession: false,
+  streamingOutput: [] as Array<Record<string, unknown>>,
+  standaloneTurns: [] as Array<Record<string, unknown>>,
 };
 
 vi.mock('../../store/execution', () => ({
@@ -101,6 +110,7 @@ vi.mock('../shared', () => ({
   StreamingOutput: () => <div data-testid="streaming-output">Streaming</div>,
   GlobalProgressBar: () => <div data-testid="global-progress">Progress</div>,
   ErrorState: () => <div data-testid="error-state">Errors</div>,
+  ProjectSelector: () => <div data-testid="project-selector">Project Selector</div>,
 }));
 
 // --------------------------------------------------------------------------
@@ -116,6 +126,7 @@ describe('SimpleMode', () => {
       isSubmitting: false,
       apiError: null,
       start: mockStart,
+      sendFollowUp: mockSendFollowUp,
       reset: mockReset,
       result: null,
       initialize: mockInitialize,
@@ -124,6 +135,9 @@ describe('SimpleMode', () => {
       strategyAnalysis: null,
       isAnalyzingStrategy: false,
       clearStrategyAnalysis: mockClearStrategyAnalysis,
+      isChatSession: false,
+      streamingOutput: [],
+      standaloneTurns: [],
     };
   });
 

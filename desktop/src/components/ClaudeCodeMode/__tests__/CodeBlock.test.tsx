@@ -71,15 +71,27 @@ describe('CodeBlock', () => {
   });
 
   it('shows line numbers when enabled', () => {
-    render(<CodeBlock code="line1\nline2\nline3" showLineNumbers={true} />);
-    expect(screen.getByText('1')).toBeInTheDocument();
-    expect(screen.getByText('2')).toBeInTheDocument();
-    expect(screen.getByText('3')).toBeInTheDocument();
+    const { container } = render(
+      <CodeBlock
+        code={'const a = 1;\nconst b = 2;\nconst c = 3;'}
+        language="javascript"
+        showLineNumbers={true}
+      />
+    );
+    const lineNumbers = container.querySelectorAll('.table-cell.pr-4.text-right');
+    expect(lineNumbers).toHaveLength(3);
   });
 
   it('hides line numbers when disabled', () => {
-    render(<CodeBlock code="line1\nline2" showLineNumbers={false} />);
-    expect(screen.queryByText('1')).not.toBeInTheDocument();
+    const { container } = render(
+      <CodeBlock
+        code={'const a = 1;\nconst b = 2;'}
+        language="javascript"
+        showLineNumbers={false}
+      />
+    );
+    const lineNumbers = container.querySelectorAll('.table-cell.pr-4.text-right');
+    expect(lineNumbers).toHaveLength(0);
   });
 
   it('respects maxHeight prop', () => {

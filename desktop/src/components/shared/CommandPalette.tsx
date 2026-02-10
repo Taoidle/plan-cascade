@@ -47,7 +47,7 @@ import {
   StopIcon,
   CheckCircledIcon,
 } from '@radix-ui/react-icons';
-import Fuse from 'fuse.js';
+import Fuse, { type FuseResultMatch } from 'fuse.js';
 import { useTranslation } from 'react-i18next';
 import { useHotkeys } from 'react-hotkeys-hook';
 
@@ -359,7 +359,7 @@ const GlobalCommandPaletteDialog = memo(function GlobalCommandPaletteDialog() {
           }
           return acc;
         },
-        {} as Record<string, Fuse.FuseResultMatch[]>
+        {} as Record<string, readonly FuseResultMatch[]>
       ),
     };
   }, [query, contextFilteredCommands, recentCommands, fuse]);
@@ -620,7 +620,7 @@ interface CommandItemProps {
   isSelected: boolean;
   onClick: () => void;
   dataIndex: number;
-  matches?: Fuse.FuseResultMatch[];
+  matches?: readonly FuseResultMatch[];
 }
 
 const CommandItem = memo(function CommandItem({
@@ -643,7 +643,8 @@ const CommandItem = memo(function CommandItem({
     let result: React.ReactNode[] = [];
     let lastIndex = 0;
 
-    indices.forEach(([start, end], i) => {
+    indices.forEach((range: readonly [number, number], i: number) => {
+      const [start, end] = range;
       if (start > lastIndex) {
         result.push(text.slice(lastIndex, start));
       }

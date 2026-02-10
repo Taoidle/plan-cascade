@@ -287,7 +287,7 @@ function TabTrigger({ value, children, disabled = false }: TabTriggerProps) {
 
 function ExecutionView() {
   const { t } = useTranslation('expertMode');
-  const { stories, progress, currentStoryId, status, qualityGateResults } = useExecutionStore();
+  const { stories, currentStoryId, qualityGateResults } = useExecutionStore();
 
   if (stories.length === 0) {
     return (

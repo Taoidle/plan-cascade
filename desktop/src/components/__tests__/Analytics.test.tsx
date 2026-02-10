@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { OverviewCards } from '../Analytics/OverviewCards';
 import { Dashboard } from '../Analytics/Dashboard';
 import {
@@ -72,7 +72,7 @@ vi.mock('../../store/analytics', () => ({
 
 // Mock Radix Select for PeriodSelector
 vi.mock('@radix-ui/react-select', () => ({
-  Root: ({ children, value, onValueChange }: { children: React.ReactNode; value: string; onValueChange: (v: string) => void }) => (
+  Root: ({ children, value }: { children: React.ReactNode; value: string; onValueChange: (v: string) => void }) => (
     <div data-testid="select-root" data-value={value}>{children}</div>
   ),
   Trigger: ({ children }: { children: React.ReactNode }) => <button data-testid="period-trigger">{children}</button>,
@@ -264,12 +264,14 @@ describe('Dashboard', () => {
     expect(screen.getByTestId('export-dialog')).toBeInTheDocument();
   });
 
-  it('calls initialize, fetchDashboardSummary, and fetchPricing on mount', () => {
+  it('calls initialize, fetchDashboardSummary, and fetchPricing on mount', async () => {
     render(<Dashboard />);
 
-    expect(mockInitialize).toHaveBeenCalled();
-    expect(mockFetchDashboardSummary).toHaveBeenCalled();
-    expect(mockFetchPricing).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockInitialize).toHaveBeenCalled();
+      expect(mockFetchDashboardSummary).toHaveBeenCalled();
+      expect(mockFetchPricing).toHaveBeenCalled();
+    });
   });
 
   it('renders model table when summary has model data', () => {
