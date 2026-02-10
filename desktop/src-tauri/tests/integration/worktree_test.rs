@@ -38,6 +38,11 @@ fn init_git_repo(path: &std::path::Path) -> bool {
         .current_dir(path)
         .output();
 
+    let _ = Command::new("git")
+        .args(["config", "commit.gpgsign", "false"])
+        .current_dir(path)
+        .output();
+
     true
 }
 
@@ -55,7 +60,7 @@ fn create_initial_commit(path: &std::path::Path) -> bool {
     }
 
     let commit = Command::new("git")
-        .args(["commit", "-m", "Initial commit"])
+        .args(["commit", "--no-gpg-sign", "-m", "Initial commit"])
         .current_dir(path)
         .output();
 

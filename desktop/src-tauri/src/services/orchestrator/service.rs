@@ -19,9 +19,9 @@ use crate::models::orchestrator::{
     StoryExecutionState,
 };
 use crate::services::llm::{
-    AnthropicProvider, DeepSeekProvider, GlmProvider, LlmProvider, LlmResponse, Message,
-    MessageContent, OllamaProvider, OpenAIProvider, ProviderConfig, ProviderType, QwenProvider,
-    ToolDefinition, UsageStats,
+    AnthropicProvider, DeepSeekProvider, FallbackToolFormatMode, GlmProvider, LlmProvider,
+    LlmRequestOptions, LlmResponse, Message, MessageContent, OllamaProvider, OpenAIProvider,
+    ProviderConfig, ProviderType, QwenProvider, ToolCallMode, ToolDefinition, UsageStats,
 };
 use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 use crate::services::streaming::UnifiedStreamEvent;
@@ -196,15 +196,90 @@ impl AnalysisPhase {
     }
 }
 
+#[derive(Debug, Clone)]
+struct AnalysisToolQuota {
+    min_total_calls: usize,
+    min_read_calls: usize,
+    min_search_calls: usize,
+    required_tools: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone)]
+struct AnalysisPhasePolicy {
+    max_attempts: u32,
+    force_tool_mode_attempts: u32,
+    temperature_override: f32,
+    quota: AnalysisToolQuota,
+}
+
+impl AnalysisPhasePolicy {
+    fn for_phase(phase: AnalysisPhase) -> Self {
+        match phase {
+            AnalysisPhase::StructureDiscovery => Self {
+                max_attempts: 3,
+                force_tool_mode_attempts: 2,
+                temperature_override: 0.1,
+                quota: AnalysisToolQuota {
+                    min_total_calls: 4,
+                    min_read_calls: 1,
+                    min_search_calls: 1,
+                    required_tools: vec!["Cwd", "LS"],
+                },
+            },
+            AnalysisPhase::ArchitectureTrace => Self {
+                max_attempts: 3,
+                force_tool_mode_attempts: 2,
+                temperature_override: 0.1,
+                quota: AnalysisToolQuota {
+                    min_total_calls: 5,
+                    min_read_calls: 2,
+                    min_search_calls: 2,
+                    required_tools: vec!["Grep"],
+                },
+            },
+            AnalysisPhase::ConsistencyCheck => Self {
+                max_attempts: 3,
+                force_tool_mode_attempts: 2,
+                temperature_override: 0.1,
+                quota: AnalysisToolQuota {
+                    min_total_calls: 3,
+                    min_read_calls: 1,
+                    min_search_calls: 1,
+                    required_tools: vec!["Read", "Grep"],
+                },
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct PhaseCapture {
     tool_calls: usize,
     read_calls: usize,
     grep_calls: usize,
+    glob_calls: usize,
     ls_calls: usize,
+    cwd_calls: usize,
     observed_paths: HashSet<String>,
     evidence_lines: Vec<String>,
     warnings: Vec<String>,
+}
+
+impl PhaseCapture {
+    fn search_calls(&self) -> usize {
+        self.grep_calls + self.glob_calls
+    }
+
+    fn tool_call_count(&self, name: &str) -> usize {
+        match name {
+            "Read" => self.read_calls,
+            "Grep" => self.grep_calls,
+            "Glob" => self.glob_calls,
+            "LS" => self.ls_calls,
+            "Cwd" => self.cwd_calls,
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -982,7 +1057,25 @@ impl OrchestratorService {
         tools: &[ToolDefinition],
         tx: mpsc::Sender<UnifiedStreamEvent>,
     ) -> ExecutionResult {
-        let use_prompt_fallback = !self.provider.supports_tools();
+        self.execute_story_with_request_options(
+            prompt,
+            tools,
+            tx,
+            LlmRequestOptions::default(),
+            false,
+        )
+        .await
+    }
+
+    async fn execute_story_with_request_options(
+        &self,
+        prompt: &str,
+        tools: &[ToolDefinition],
+        tx: mpsc::Sender<UnifiedStreamEvent>,
+        request_options: LlmRequestOptions,
+        force_prompt_fallback: bool,
+    ) -> ExecutionResult {
+        let use_prompt_fallback = force_prompt_fallback || !self.provider.supports_tools();
         let mut messages = vec![Message::user(prompt.to_string())];
         let mut total_usage = UsageStats::default();
         let mut iterations = 0;
@@ -1010,8 +1103,23 @@ impl OrchestratorService {
             ));
 
             // For prompt-fallback providers, add tool call format instructions
-            if use_prompt_fallback {
+            if use_prompt_fallback
+                || !matches!(
+                    request_options.fallback_tool_format_mode,
+                    FallbackToolFormatMode::Off
+                )
+            {
                 parts.push(build_tool_call_instructions(tools));
+                if matches!(
+                    request_options.fallback_tool_format_mode,
+                    FallbackToolFormatMode::Strict
+                ) {
+                    parts.push(
+                        "Strict mode: every tool call MUST be emitted in the exact tool_call format. \
+                         If your prior output was not parseable, output only valid tool_call blocks now."
+                            .to_string(),
+                    );
+                }
             }
 
             if parts.is_empty() {
@@ -1105,11 +1213,17 @@ impl OrchestratorService {
                         system_prompt.clone(),
                         api_tools.to_vec(),
                         tx.clone(),
+                        request_options.clone(),
                     )
                     .await
             } else {
                 self.provider
-                    .send_message(messages.to_vec(), system_prompt.clone(), api_tools.to_vec())
+                    .send_message(
+                        messages.to_vec(),
+                        system_prompt.clone(),
+                        api_tools.to_vec(),
+                        request_options.clone(),
+                    )
                     .await
             };
 
@@ -1415,10 +1529,17 @@ impl OrchestratorService {
 
             // Call LLM - main agent has all tools (including Task)
             let response = if self.config.streaming {
-                self.call_llm_streaming(&messages, api_tools, &tools, tx.clone())
-                    .await
+                self.call_llm_streaming(
+                    &messages,
+                    api_tools,
+                    &tools,
+                    tx.clone(),
+                    LlmRequestOptions::default(),
+                )
+                .await
             } else {
-                self.call_llm(&messages, api_tools, &tools).await
+                self.call_llm(&messages, api_tools, &tools, LlmRequestOptions::default())
+                    .await
             };
 
             let response = match response {
@@ -1746,6 +1867,71 @@ impl OrchestratorService {
             };
         }
 
+        let all_phases_passed = ledger.successful_phases == 3;
+        let has_evidence = !ledger.evidence_lines.is_empty();
+        if !all_phases_passed || !has_evidence {
+            let mut failures = Vec::new();
+            if !all_phases_passed {
+                failures.push(format!(
+                    "Phase gate failed: {}/3 phases passed",
+                    ledger.successful_phases
+                ));
+            }
+            if !has_evidence {
+                failures.push("Evidence gate failed: no tool evidence captured".to_string());
+            }
+
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisRunSummary {
+                    success: false,
+                    phase_results: vec![
+                        format!("successful_phases={}", ledger.successful_phases),
+                        format!("observed_paths={}", ledger.observed_paths.len()),
+                    ],
+                    total_metrics: serde_json::json!({
+                        "input_tokens": total_usage.input_tokens,
+                        "output_tokens": total_usage.output_tokens,
+                        "iterations": total_iterations,
+                        "evidence_lines": ledger.evidence_lines.len(),
+                    }),
+                })
+                .await;
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisValidation {
+                    status: "error".to_string(),
+                    issues: failures.clone(),
+                })
+                .await;
+            let _ = tx
+                .send(UnifiedStreamEvent::Error {
+                    message: failures.join("; "),
+                    code: Some("analysis_insufficient_evidence".to_string()),
+                })
+                .await;
+            let _ = tx
+                .send(UnifiedStreamEvent::Usage {
+                    input_tokens: total_usage.input_tokens,
+                    output_tokens: total_usage.output_tokens,
+                    thinking_tokens: total_usage.thinking_tokens,
+                    cache_read_tokens: total_usage.cache_read_tokens,
+                    cache_creation_tokens: total_usage.cache_creation_tokens,
+                })
+                .await;
+            let _ = tx
+                .send(UnifiedStreamEvent::Complete {
+                    stop_reason: Some("analysis_gate_failed".to_string()),
+                })
+                .await;
+
+            return ExecutionResult {
+                response: None,
+                usage: total_usage,
+                iterations: total_iterations,
+                success: false,
+                error: Some("Analysis failed: insufficient verified evidence".to_string()),
+            };
+        }
+
         let evidence_block = if ledger.evidence_lines.is_empty() {
             "- No tool evidence captured.".to_string()
         } else {
@@ -1786,7 +1972,9 @@ impl OrchestratorService {
         );
 
         let synthesis_messages = vec![Message::user(synthesis_prompt)];
-        let synthesis_response = self.call_llm(&synthesis_messages, &[], &[]).await;
+        let synthesis_response = self
+            .call_llm(&synthesis_messages, &[], &[], LlmRequestOptions::default())
+            .await;
         total_iterations += 1;
 
         let (mut final_response, synthesis_success) = match synthesis_response {
@@ -1849,7 +2037,10 @@ impl OrchestratorService {
                     original
                 );
                 let correction_messages = vec![Message::user(correction_prompt)];
-                if let Ok(corrected) = self.call_llm(&correction_messages, &[], &[]).await {
+                if let Ok(corrected) = self
+                    .call_llm(&correction_messages, &[], &[], LlmRequestOptions::default())
+                    .await
+                {
                     merge_usage(&mut total_usage, &corrected.usage);
                     let cleaned = corrected
                         .content
@@ -1874,6 +2065,31 @@ impl OrchestratorService {
                 .await;
         }
 
+        let final_success = all_phases_passed
+            && has_evidence
+            && final_response
+                .as_ref()
+                .map(|text| !text.trim().is_empty())
+                .unwrap_or(false)
+            && synthesis_success;
+
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisRunSummary {
+                success: final_success,
+                phase_results: vec![
+                    format!("successful_phases={}", ledger.successful_phases),
+                    format!("observed_paths={}", ledger.observed_paths.len()),
+                    format!("validation_issues={}", validation_issues.len()),
+                ],
+                total_metrics: serde_json::json!({
+                    "input_tokens": total_usage.input_tokens,
+                    "output_tokens": total_usage.output_tokens,
+                    "iterations": total_iterations,
+                    "evidence_lines": ledger.evidence_lines.len(),
+                }),
+            })
+            .await;
+
         let _ = tx
             .send(UnifiedStreamEvent::Complete {
                 stop_reason: Some("end_turn".to_string()),
@@ -1889,12 +2105,6 @@ impl OrchestratorService {
                 cache_creation_tokens: total_usage.cache_creation_tokens,
             })
             .await;
-
-        let final_success = final_response
-            .as_ref()
-            .map(|text| !text.trim().is_empty())
-            .unwrap_or(false)
-            && (ledger.successful_phases > 0 || synthesis_success);
 
         ExecutionResult {
             response: final_response,
@@ -1916,6 +2126,7 @@ impl OrchestratorService {
         tx: &mpsc::Sender<UnifiedStreamEvent>,
     ) -> AnalysisPhaseOutcome {
         let phase_id = phase.id().to_string();
+        let policy = AnalysisPhasePolicy::for_phase(phase);
         let _ = tx
             .send(UnifiedStreamEvent::AnalysisPhaseStart {
                 phase_id: phase_id.clone(),
@@ -1931,60 +2142,198 @@ impl OrchestratorService {
             })
             .await;
 
-        let phase_config = OrchestratorConfig {
-            provider: self.config.provider.clone(),
-            system_prompt: Some(analysis_phase_system_prompt(phase).to_string()),
-            max_iterations: phase.max_iterations(),
-            max_total_tokens: sub_agent_token_budget(self.provider.context_window()),
-            project_root: self.config.project_root.clone(),
-            streaming: true,
-            enable_compaction: false,
-        };
-        let phase_agent =
-            OrchestratorService::new_sub_agent(phase_config, self.cancellation_token.clone());
-
-        let (sub_tx, mut sub_rx) = mpsc::channel::<UnifiedStreamEvent>(256);
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel::<ExecutionResult>();
         let tools = get_basic_tool_definitions();
-        tokio::spawn(async move {
-            let result = phase_agent.execute_story(&prompt, &tools, sub_tx).await;
-            let _ = result_tx.send(result);
-        });
+        let mut total_usage = UsageStats::default();
+        let mut total_iterations = 0u32;
+        let mut aggregate_capture = PhaseCapture::default();
+        let mut final_response: Option<String> = None;
+        let mut final_error: Option<String> = None;
+        let mut phase_success = false;
+        let mut gate_failure_history: Vec<String> = Vec::new();
 
-        let mut capture = PhaseCapture::default();
-        while let Some(event) = sub_rx.recv().await {
-            self.observe_analysis_event(phase, &event, &mut capture, tx)
+        for attempt in 1..=policy.max_attempts {
+            if self.cancellation_token.is_cancelled() {
+                final_error = Some("Execution cancelled".to_string());
+                break;
+            }
+
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisPhaseAttemptStart {
+                    phase_id: phase_id.clone(),
+                    attempt,
+                    max_attempts: policy.max_attempts,
+                    required_tools: policy
+                        .quota
+                        .required_tools
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                })
                 .await;
+
+            let phase_config = OrchestratorConfig {
+                provider: self.config.provider.clone(),
+                system_prompt: Some(analysis_phase_system_prompt_with_quota(
+                    phase,
+                    &policy.quota,
+                    &gate_failure_history,
+                )),
+                max_iterations: phase.max_iterations(),
+                max_total_tokens: sub_agent_token_budget(self.provider.context_window()),
+                project_root: self.config.project_root.clone(),
+                streaming: true,
+                enable_compaction: false,
+            };
+            let phase_agent =
+                OrchestratorService::new_sub_agent(phase_config, self.cancellation_token.clone());
+
+            let request_options = LlmRequestOptions {
+                tool_call_mode: if attempt <= policy.force_tool_mode_attempts {
+                    ToolCallMode::Required
+                } else {
+                    ToolCallMode::Auto
+                },
+                fallback_tool_format_mode: FallbackToolFormatMode::Strict,
+                temperature_override: Some(policy.temperature_override),
+                reasoning_effort_override: None,
+                analysis_phase: Some(phase.id().to_string()),
+            };
+            let force_prompt_fallback = !self.provider.supports_tools();
+
+            let (sub_tx, mut sub_rx) = mpsc::channel::<UnifiedStreamEvent>(256);
+            let (result_tx, result_rx) = tokio::sync::oneshot::channel::<ExecutionResult>();
+            let attempt_prompt = prompt.clone();
+            let attempt_tools = tools.clone();
+            tokio::spawn(async move {
+                let result = phase_agent
+                    .execute_story_with_request_options(
+                        &attempt_prompt,
+                        &attempt_tools,
+                        sub_tx,
+                        request_options,
+                        force_prompt_fallback,
+                    )
+                    .await;
+                let _ = result_tx.send(result);
+            });
+
+            let mut attempt_capture = PhaseCapture::default();
+            while let Some(event) = sub_rx.recv().await {
+                self.observe_analysis_event(phase, &event, &mut attempt_capture, tx)
+                    .await;
+            }
+
+            let attempt_result = match result_rx.await {
+                Ok(result) => result,
+                Err(_) => ExecutionResult {
+                    response: None,
+                    usage: UsageStats::default(),
+                    iterations: 0,
+                    success: false,
+                    error: Some("Sub-agent task join error".to_string()),
+                },
+            };
+
+            merge_usage(&mut total_usage, &attempt_result.usage);
+            total_iterations += attempt_result.iterations;
+            aggregate_capture.tool_calls += attempt_capture.tool_calls;
+            aggregate_capture.read_calls += attempt_capture.read_calls;
+            aggregate_capture.grep_calls += attempt_capture.grep_calls;
+            aggregate_capture.glob_calls += attempt_capture.glob_calls;
+            aggregate_capture.ls_calls += attempt_capture.ls_calls;
+            aggregate_capture.cwd_calls += attempt_capture.cwd_calls;
+            aggregate_capture
+                .observed_paths
+                .extend(attempt_capture.observed_paths.iter().cloned());
+            aggregate_capture
+                .evidence_lines
+                .extend(attempt_capture.evidence_lines.iter().cloned());
+            aggregate_capture
+                .warnings
+                .extend(attempt_capture.warnings.iter().cloned());
+
+            let gate_failures = evaluate_analysis_quota(&attempt_capture, &policy.quota);
+            let attempt_success = attempt_result.success && gate_failures.is_empty();
+            final_response = attempt_result.response.clone().or(final_response);
+            if !attempt_success {
+                if let Some(err) = attempt_result.error.as_ref() {
+                    gate_failure_history.push(format!("attempt {} error: {}", attempt, err));
+                }
+                gate_failure_history.extend(gate_failures.iter().cloned());
+            }
+
+            let attempt_metrics = serde_json::json!({
+                "tool_calls": attempt_capture.tool_calls,
+                "read_calls": attempt_capture.read_calls,
+                "grep_calls": attempt_capture.grep_calls,
+                "glob_calls": attempt_capture.glob_calls,
+                "ls_calls": attempt_capture.ls_calls,
+                "cwd_calls": attempt_capture.cwd_calls,
+                "observed_paths": attempt_capture.observed_paths.len(),
+            });
+
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisPhaseAttemptEnd {
+                    phase_id: phase_id.clone(),
+                    attempt,
+                    success: attempt_success,
+                    metrics: attempt_metrics,
+                    gate_failures: gate_failures.clone(),
+                })
+                .await;
+
+            if attempt_success {
+                phase_success = true;
+                break;
+            }
+
+            if !gate_failures.is_empty() {
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisGateFailure {
+                        phase_id: phase_id.clone(),
+                        attempt,
+                        reasons: gate_failures,
+                    })
+                    .await;
+            }
         }
 
-        let phase_result = match result_rx.await {
-            Ok(result) => result,
-            Err(_) => ExecutionResult {
-                response: None,
-                usage: UsageStats::default(),
-                iterations: 0,
-                success: false,
-                error: Some("Sub-agent task join error".to_string()),
-            },
-        };
+        if !phase_success && final_error.is_none() {
+            final_error = Some(if gate_failure_history.is_empty() {
+                "Analysis phase failed with insufficient evidence".to_string()
+            } else {
+                format!(
+                    "Analysis phase failed with insufficient evidence: {}",
+                    gate_failure_history
+                        .iter()
+                        .take(5)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                )
+            });
+        }
 
         let metrics = serde_json::json!({
-            "tool_calls": capture.tool_calls,
-            "read_calls": capture.read_calls,
-            "grep_calls": capture.grep_calls,
-            "ls_calls": capture.ls_calls,
-            "observed_paths": capture.observed_paths.len(),
+            "tool_calls": aggregate_capture.tool_calls,
+            "read_calls": aggregate_capture.read_calls,
+            "grep_calls": aggregate_capture.grep_calls,
+            "glob_calls": aggregate_capture.glob_calls,
+            "ls_calls": aggregate_capture.ls_calls,
+            "cwd_calls": aggregate_capture.cwd_calls,
+            "observed_paths": aggregate_capture.observed_paths.len(),
+            "attempts": policy.max_attempts,
         });
         let usage = serde_json::json!({
-            "input_tokens": phase_result.usage.input_tokens,
-            "output_tokens": phase_result.usage.output_tokens,
-            "iterations": phase_result.iterations,
+            "input_tokens": total_usage.input_tokens,
+            "output_tokens": total_usage.output_tokens,
+            "iterations": total_iterations,
         });
 
         let _ = tx
             .send(UnifiedStreamEvent::AnalysisPhaseEnd {
                 phase_id: phase_id.clone(),
-                success: phase_result.success,
+                success: phase_success,
                 usage: usage.clone(),
                 metrics,
             })
@@ -1992,19 +2341,19 @@ impl OrchestratorService {
         let _ = tx
             .send(UnifiedStreamEvent::SubAgentEnd {
                 sub_agent_id: phase_id,
-                success: phase_result.success,
+                success: phase_success,
                 usage,
             })
             .await;
 
         AnalysisPhaseOutcome {
             phase,
-            response: phase_result.response,
-            usage: phase_result.usage,
-            iterations: phase_result.iterations,
-            success: phase_result.success,
-            error: phase_result.error,
-            capture,
+            response: final_response,
+            usage: total_usage,
+            iterations: total_iterations,
+            success: phase_success,
+            error: final_error,
+            capture: aggregate_capture,
         }
     }
 
@@ -2025,7 +2374,9 @@ impl OrchestratorService {
                 match tool_name.as_str() {
                     "Read" => capture.read_calls += 1,
                     "Grep" => capture.grep_calls += 1,
+                    "Glob" => capture.glob_calls += 1,
                     "LS" => capture.ls_calls += 1,
+                    "Cwd" => capture.cwd_calls += 1,
                     _ => {}
                 }
 
@@ -2217,7 +2568,12 @@ impl OrchestratorService {
         let summary_messages = vec![Message::user(compaction_prompt)];
         let result = self
             .provider
-            .send_message(summary_messages, None, Vec::new())
+            .send_message(
+                summary_messages,
+                None,
+                Vec::new(),
+                LlmRequestOptions::default(),
+            )
             .await;
 
         match result {
@@ -2271,7 +2627,11 @@ impl OrchestratorService {
     ///
     /// `prompt_tools` are the tools listed in the system prompt (for guidance).
     /// If empty, only the config system prompt is returned.
-    fn effective_system_prompt(&self, prompt_tools: &[ToolDefinition]) -> Option<String> {
+    fn effective_system_prompt(
+        &self,
+        prompt_tools: &[ToolDefinition],
+        request_options: &LlmRequestOptions,
+    ) -> Option<String> {
         if prompt_tools.is_empty() {
             return self.config.system_prompt.clone();
         }
@@ -2280,9 +2640,28 @@ impl OrchestratorService {
 
         // For providers that don't support native tool calling,
         // add prompt-based tool call format instructions
-        if !self.provider.supports_tools() {
+        if !self.provider.supports_tools()
+            || !matches!(
+                request_options.fallback_tool_format_mode,
+                FallbackToolFormatMode::Off
+            )
+        {
             let fallback_instructions = build_tool_call_instructions(prompt_tools);
-            prompt = format!("{}\n\n{}", prompt, fallback_instructions);
+            prompt = if matches!(
+                request_options.fallback_tool_format_mode,
+                FallbackToolFormatMode::Strict
+            ) {
+                format!(
+                    "{}\n\n{}\n\n{}",
+                    prompt,
+                    fallback_instructions,
+                    "STRICT TOOL FORMAT MODE: emit only parseable tool_call blocks when using tools. \
+                     If your previous output used prose or malformed tags for tools, fix it and output \
+                     valid tool_call blocks only before any explanation."
+                )
+            } else {
+                format!("{}\n\n{}", prompt, fallback_instructions)
+            };
         }
 
         Some(merge_system_prompts(
@@ -2300,10 +2679,16 @@ impl OrchestratorService {
         messages: &[Message],
         api_tools: &[ToolDefinition],
         prompt_tools: &[ToolDefinition],
+        request_options: LlmRequestOptions,
     ) -> Result<LlmResponse, crate::services::llm::LlmError> {
-        let system = self.effective_system_prompt(prompt_tools);
+        let system = self.effective_system_prompt(prompt_tools, &request_options);
         self.provider
-            .send_message(messages.to_vec(), system, api_tools.to_vec())
+            .send_message(
+                messages.to_vec(),
+                system,
+                api_tools.to_vec(),
+                request_options,
+            )
             .await
     }
 
@@ -2317,10 +2702,17 @@ impl OrchestratorService {
         api_tools: &[ToolDefinition],
         prompt_tools: &[ToolDefinition],
         tx: mpsc::Sender<UnifiedStreamEvent>,
+        request_options: LlmRequestOptions,
     ) -> Result<LlmResponse, crate::services::llm::LlmError> {
-        let system = self.effective_system_prompt(prompt_tools);
+        let system = self.effective_system_prompt(prompt_tools, &request_options);
         self.provider
-            .stream_message(messages.to_vec(), system, api_tools.to_vec(), tx)
+            .stream_message(
+                messages.to_vec(),
+                system,
+                api_tools.to_vec(),
+                tx,
+                request_options,
+            )
             .await
     }
 
@@ -2333,10 +2725,17 @@ impl OrchestratorService {
         let messages = vec![Message::user(message)];
 
         let response = if self.config.streaming {
-            self.call_llm_streaming(&messages, &[], &[], tx.clone())
-                .await
+            self.call_llm_streaming(
+                &messages,
+                &[],
+                &[],
+                tx.clone(),
+                LlmRequestOptions::default(),
+            )
+            .await
         } else {
-            self.call_llm(&messages, &[], &[]).await
+            self.call_llm(&messages, &[], &[], LlmRequestOptions::default())
+                .await
         };
 
         match response {
@@ -2541,6 +2940,75 @@ fn analysis_phase_system_prompt(phase: AnalysisPhase) -> &'static str {
     }
 }
 
+fn analysis_phase_system_prompt_with_quota(
+    phase: AnalysisPhase,
+    quota: &AnalysisToolQuota,
+    previous_failures: &[String],
+) -> String {
+    let base = analysis_phase_system_prompt(phase);
+    let required = if quota.required_tools.is_empty() {
+        "(none)".to_string()
+    } else {
+        quota.required_tools.join(", ")
+    };
+    let previous = if previous_failures.is_empty() {
+        "none".to_string()
+    } else {
+        previous_failures
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    format!(
+        "{base}\n\n\
+         Hard requirements for this phase:\n\
+         - Minimum total tool calls: {min_total}\n\
+         - Minimum Read calls: {min_read}\n\
+         - Minimum search calls (Grep/Glob): {min_search}\n\
+         - Required tools that must appear: {required}\n\
+         - Previous gate failures: {previous}\n\n\
+         If requirements were not met previously, DO NOT finish yet. \
+         Continue with concrete tool calls until all requirements are satisfied.",
+        min_total = quota.min_total_calls,
+        min_read = quota.min_read_calls,
+        min_search = quota.min_search_calls,
+    )
+}
+
+fn evaluate_analysis_quota(capture: &PhaseCapture, quota: &AnalysisToolQuota) -> Vec<String> {
+    let mut failures = Vec::new();
+
+    if capture.tool_calls < quota.min_total_calls {
+        failures.push(format!(
+            "tool_calls {} < required {}",
+            capture.tool_calls, quota.min_total_calls
+        ));
+    }
+    if capture.read_calls < quota.min_read_calls {
+        failures.push(format!(
+            "read_calls {} < required {}",
+            capture.read_calls, quota.min_read_calls
+        ));
+    }
+    let search_calls = capture.search_calls();
+    if search_calls < quota.min_search_calls {
+        failures.push(format!(
+            "search_calls {} < required {}",
+            search_calls, quota.min_search_calls
+        ));
+    }
+
+    for required in &quota.required_tools {
+        if capture.tool_call_count(required) == 0 {
+            failures.push(format!("required tool '{}' not used", required));
+        }
+    }
+
+    failures
+}
+
 fn join_sorted_paths(paths: &HashSet<String>, limit: usize) -> String {
     if paths.is_empty() {
         return "(none)".to_string();
@@ -2685,6 +3153,9 @@ fn extract_path_candidates_from_text(text: &str) -> Vec<String> {
         if !(candidate.contains('/') || candidate.contains('\\')) {
             continue;
         }
+        if !is_plausible_path_text(candidate) {
+            continue;
+        }
         if let Some(path) = normalize_candidate_path(candidate) {
             paths.push(path);
         }
@@ -2692,6 +3163,48 @@ fn extract_path_candidates_from_text(text: &str) -> Vec<String> {
     paths.sort();
     paths.dedup();
     paths
+}
+
+fn is_plausible_path_text(candidate: &str) -> bool {
+    let candidate = candidate.trim();
+    if candidate.len() < 2 || candidate.len() > 260 {
+        return false;
+    }
+    if candidate.starts_with("http://") || candidate.starts_with("https://") {
+        return false;
+    }
+
+    // Filter common code/regex/template fragments that contain '/' but are not paths.
+    if candidate.starts_with("!/") || candidate.starts_with("/^") {
+        return false;
+    }
+    if candidate.contains("${")
+        || candidate.contains("`)")
+        || candidate.contains(".test(")
+        || candidate.contains(".match(")
+    {
+        return false;
+    }
+    if candidate.contains('*')
+        || candidate.contains('?')
+        || candidate.contains('|')
+        || candidate.contains('^')
+        || candidate.contains('!')
+    {
+        return false;
+    }
+
+    // Keep path-like strings conservative: letters/digits plus common path symbols.
+    if candidate
+        .chars()
+        .any(|c| !(c.is_alphanumeric() || "/\\._-:+@~#".contains(c)))
+    {
+        return false;
+    }
+
+    candidate
+        .split(['/', '\\'])
+        .any(|segment| segment.chars().any(|c| c.is_alphanumeric()))
 }
 
 fn is_observed_path(candidate: &str, observed: &HashSet<String>) -> bool {
@@ -3095,5 +3608,65 @@ mod tests {
                     and src/main.rs plus https://docs.example.com/page.";
         let issues = find_unverified_paths(text, &observed);
         assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn test_find_unverified_paths_ignores_regex_and_template_fragments() {
+        let observed = HashSet::from(["src/main.rs".to_string()]);
+        let text = "Validation issues from generated prose: \
+                    !/^[a-zA-Z0-9_-]+$/.test(task.command); \
+                    ${plan.name}`);/n \
+                    ${task.command}`);/n \
+                    and src/main.rs.";
+
+        let issues = find_unverified_paths(text, &observed);
+        assert!(issues.is_empty(), "unexpected issues: {:?}", issues);
+    }
+
+    #[test]
+    fn test_evaluate_analysis_quota_reports_missing_requirements() {
+        let capture = PhaseCapture {
+            tool_calls: 1,
+            read_calls: 0,
+            grep_calls: 0,
+            glob_calls: 0,
+            ls_calls: 0,
+            cwd_calls: 1,
+            ..Default::default()
+        };
+        let quota = AnalysisToolQuota {
+            min_total_calls: 3,
+            min_read_calls: 1,
+            min_search_calls: 1,
+            required_tools: vec!["Cwd", "LS"],
+        };
+
+        let failures = evaluate_analysis_quota(&capture, &quota);
+        assert!(failures.iter().any(|f| f.contains("tool_calls")));
+        assert!(failures.iter().any(|f| f.contains("read_calls")));
+        assert!(failures.iter().any(|f| f.contains("search_calls")));
+        assert!(failures.iter().any(|f| f.contains("required tool 'LS'")));
+    }
+
+    #[test]
+    fn test_evaluate_analysis_quota_passes_when_requirements_met() {
+        let capture = PhaseCapture {
+            tool_calls: 6,
+            read_calls: 2,
+            grep_calls: 2,
+            glob_calls: 1,
+            ls_calls: 1,
+            cwd_calls: 1,
+            ..Default::default()
+        };
+        let quota = AnalysisToolQuota {
+            min_total_calls: 4,
+            min_read_calls: 1,
+            min_search_calls: 2,
+            required_tools: vec!["Cwd", "LS"],
+        };
+
+        let failures = evaluate_analysis_quota(&capture, &quota);
+        assert!(failures.is_empty(), "unexpected failures: {:?}", failures);
     }
 }

@@ -1,4 +1,4 @@
-//! Prompt-Based Tool Calling Fallback
+﻿//! Prompt-Based Tool Calling Fallback
 //!
 //! For LLM providers that don't support native function/tool calling (e.g., Ollama),
 //! this module injects tool descriptions into the system prompt and parses tool call
@@ -403,6 +403,10 @@ fn parse_bare_function_calls(text: &str) -> Vec<ParsedToolCall> {
 ///
 /// Uses `parse_single_tool_call` for the JSON parsing itself.
 fn parse_bare_json_tool_calls(text: &str) -> Vec<ParsedToolCall> {
+    if has_unclosed_tool_call_fence(text) {
+        return Vec::new();
+    }
+
     let mut calls = Vec::new();
     let lines: Vec<&str> = text.lines().collect();
     let mut i = 0;
@@ -459,6 +463,19 @@ fn parse_bare_json_tool_calls(text: &str) -> Vec<ParsedToolCall> {
     }
 
     calls
+}
+
+fn has_unclosed_tool_call_fence(text: &str) -> bool {
+    let mut remaining = text;
+    while let Some(start) = remaining.find("```tool_call") {
+        let after_marker = &remaining[start + 12..];
+        if let Some(end) = after_marker.find("```") {
+            remaining = &after_marker[end + 3..];
+        } else {
+            return true;
+        }
+    }
+    false
 }
 
 /// Parse nested `<param_name>value</param_name>` XML pairs from content.
@@ -712,6 +729,27 @@ fn parse_lenient_tool_calls(content: &str) -> Vec<ParsedToolCall> {
                 return calls;
             }
 
+            // 1.5 Chained tools: "Cwd LS {...}" or "LS Cwd"
+            if let Some((next_tool, next_rest)) = parse_leading_known_tool(rest) {
+                calls.push(ParsedToolCall {
+                    tool_name: tool.to_string(),
+                    arguments: serde_json::Value::Object(serde_json::Map::new()),
+                    raw_text: format!("<tool_call>{}</tool_call>", tool),
+                });
+                let arguments = if next_rest.is_empty() {
+                    serde_json::Value::Object(serde_json::Map::new())
+                } else {
+                    parse_lenient_arguments(next_tool, next_rest)
+                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+                };
+                calls.push(ParsedToolCall {
+                    tool_name: next_tool.to_string(),
+                    arguments,
+                    raw_text: format!("<tool_call>{}</tool_call>", content),
+                });
+                return calls;
+            }
+
             // 2. Tool name followed by JSON arguments: ToolName {"key": "val"}
             if rest.starts_with('{') {
                 let arguments = serde_json::from_str(rest)
@@ -814,6 +852,61 @@ fn parse_lenient_tool_calls(content: &str) -> Vec<ParsedToolCall> {
     }
 
     calls
+}
+
+fn parse_leading_known_tool(rest: &str) -> Option<(&'static str, &str)> {
+    for tool in KNOWN_TOOLS {
+        if let Some(after) = rest.strip_prefix(tool) {
+            let boundary_ok = after
+                .chars()
+                .next()
+                .map(|c| c.is_whitespace() || c == '{' || c == '(' || c == '<')
+                .unwrap_or(true);
+            if boundary_ok {
+                return Some((tool, after.trim_start()));
+            }
+        }
+    }
+    None
+}
+
+fn parse_lenient_arguments(tool: &str, rest: &str) -> Option<serde_json::Value> {
+    if rest.starts_with('{') {
+        return Some(
+            serde_json::from_str(rest).unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+        );
+    }
+
+    if rest.contains("</arg_key>") {
+        let arguments = parse_xml_arg_pairs(rest);
+        if arguments.as_object().map_or(false, |m| !m.is_empty()) {
+            return Some(arguments);
+        }
+    }
+
+    if let Some(open) = rest.find('(') {
+        if let Some(close) = rest[open..].find(')') {
+            let inner = rest[open + 1..open + close].trim().trim_matches('"');
+            if !inner.is_empty() {
+                let arguments = infer_tool_arguments(tool, inner);
+                if arguments.as_object().map_or(false, |m| !m.is_empty()) {
+                    return Some(arguments);
+                }
+            }
+        }
+    }
+
+    if let Some(arguments) = parse_equals_args(rest) {
+        return Some(arguments);
+    }
+    if let Some(arguments) = parse_colon_args(rest) {
+        return Some(arguments);
+    }
+    if let Some(arguments) = parse_degenerate_xml_args(rest) {
+        return Some(arguments);
+    }
+
+    None
 }
 
 /// Parse XML argument pairs into a JSON object.
@@ -1134,6 +1227,34 @@ pub fn extract_text_without_tool_calls(text: &str) -> String {
         } else {
             break;
         }
+    }
+
+    // Pass 4: Remove direct XML tool blocks (`<ls>...</ls>`, `<read>...</read>`, etc.)
+    for call in parse_direct_xml_tool_calls(&cleaned) {
+        cleaned = cleaned.replacen(&call.raw_text, "", 1);
+    }
+
+    // Pass 5: Remove bare function-call tool lines (`LS(.)`, `Read(src/main.rs)`).
+    for call in parse_bare_function_calls(&cleaned) {
+        cleaned = cleaned.replacen(&call.raw_text, "", 1);
+    }
+
+    // Pass 6: Remove bare JSON tool calls and leftover labels.
+    for call in parse_bare_json_tool_calls(&cleaned) {
+        cleaned = cleaned.replacen(&call.raw_text, "", 1);
+    }
+    cleaned = cleaned
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.eq_ignore_ascii_case("tool_call:")
+                && !trimmed.eq_ignore_ascii_case("tool_call")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    while cleaned.contains("\n\n\n") {
+        cleaned = cleaned.replace("\n\n\n", "\n\n");
     }
 
     cleaned.trim().to_string()
@@ -2158,5 +2279,42 @@ End."#;
         let text = r#"{"name": "test", "value": 42}"#;
         let calls = parse_bare_json_tool_calls(text);
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn test_bare_json_skips_unclosed_tool_call_fence() {
+        let text = r#"```tool_call
+{"tool": "Read", "arguments": {"file_path": "test.txt"}}"#;
+        let calls = parse_bare_json_tool_calls(text);
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn test_parse_lenient_chained_tools_with_json_args() {
+        let text = r#"<tool_call>Cwd LS {"path": "."}</tool_call>"#;
+        let calls = parse_tool_calls(text);
+
+        assert_eq!(calls.len(), 2, "calls = {:?}", calls);
+        assert_eq!(calls[0].tool_name, "Cwd");
+        assert_eq!(calls[1].tool_name, "LS");
+        assert_eq!(calls[1].arguments["path"].as_str(), Some("."));
+    }
+
+    #[test]
+    fn test_extract_text_without_tool_calls_removes_bare_and_xml_variants() {
+        let text = r#"I'll inspect first.
+LS(.)
+tool_call:
+{"tool": "Read", "arguments": {"file_path": "src/main.rs"}}
+<ls><path>.</path></ls>
+Done."#;
+
+        let clean = extract_text_without_tool_calls(text);
+        assert!(clean.contains("I'll inspect first."));
+        assert!(clean.contains("Done."));
+        assert!(!clean.contains("LS(.)"));
+        assert!(!clean.contains("\"tool\": \"Read\""));
+        assert!(!clean.contains("<ls>"));
+        assert!(!clean.contains("tool_call"));
     }
 }

@@ -341,17 +341,6 @@ impl ToolExecutor {
             Err(e) => return ToolResult::err(e),
         };
 
-        // Enforce read-before-write for existing files
-        if path.exists() {
-            if let Ok(read_files) = self.read_files.lock() {
-                if !read_files.contains(&path) {
-                    return ToolResult::err(
-                        "You must read a file before writing to it. Use the Read tool first.",
-                    );
-                }
-            }
-        }
-
         // Create parent directories if needed
         if let Some(parent) = path.parent() {
             if !parent.exists() {
@@ -403,15 +392,6 @@ impl ToolExecutor {
 
         if !path.exists() {
             return ToolResult::err(format!("File not found: {}", file_path));
-        }
-
-        // Enforce read-before-edit
-        if let Ok(read_files) = self.read_files.lock() {
-            if !read_files.contains(&path) {
-                return ToolResult::err(
-                    "You must read a file before editing it. Use the Read tool first.",
-                );
-            }
         }
 
         let content = match std::fs::read_to_string(&path) {
@@ -632,7 +612,7 @@ impl ToolExecutor {
         let output_mode = args
             .get("output_mode")
             .and_then(|v| v.as_str())
-            .unwrap_or("files_with_matches");
+            .unwrap_or("content");
         let head_limit = args.get("head_limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         // Build regex
@@ -817,7 +797,10 @@ impl ToolExecutor {
 
     /// Execute LS tool - list directory contents
     async fn execute_ls(&self, args: &serde_json::Value) -> ToolResult {
-        let dir_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let dir_path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return ToolResult::err(missing_param_error("LS", "path")),
+        };
 
         let show_hidden = args
             .get("show_hidden")

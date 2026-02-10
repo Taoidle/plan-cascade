@@ -46,6 +46,9 @@ impl GitOps {
         let output = Command::new("git")
             .args(args)
             .current_dir(cwd)
+            // Disable interactive prompts to avoid hanging automation flows/tests.
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GCM_INTERACTIVE", "never")
             .output()
             .map_err(|e| AppError::command(format!("Failed to execute git: {}", e)))?;
 
@@ -203,7 +206,7 @@ impl GitOps {
 
     /// Commit changes
     pub fn commit(&self, cwd: &Path, message: &str) -> AppResult<String> {
-        let result = self.execute(cwd, &["commit", "-m", message])?;
+        let result = self.execute(cwd, &["commit", "--no-gpg-sign", "-m", message])?;
         if result.success {
             // Get the commit SHA
             let sha = self

@@ -8,8 +8,8 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
-    StopReason, ToolCall, ToolDefinition, UsageStats,
+    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
+    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::ClaudeApiAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -47,6 +47,7 @@ impl AnthropicProvider {
         system: Option<&str>,
         tools: &[ToolDefinition],
         stream: bool,
+        request_options: &LlmRequestOptions,
     ) -> serde_json::Value {
         let mut body = serde_json::json!({
             "model": self.config.model,
@@ -61,7 +62,9 @@ impl AnthropicProvider {
 
         // Add temperature (only if not using extended thinking)
         if !self.config.enable_thinking {
-            body["temperature"] = serde_json::json!(self.config.temperature);
+            body["temperature"] = serde_json::json!(request_options
+                .temperature_override
+                .unwrap_or(self.config.temperature));
         }
 
         // Convert messages to Claude format
@@ -77,6 +80,11 @@ impl AnthropicProvider {
             let claude_tools: Vec<serde_json::Value> =
                 tools.iter().map(|t| self.tool_to_claude(t)).collect();
             body["tools"] = serde_json::json!(claude_tools);
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) {
+                body["tool_choice"] = serde_json::json!({
+                    "type": "any"
+                });
+            }
         }
 
         // Add extended thinking if enabled
@@ -293,6 +301,7 @@ impl LlmProvider for AnthropicProvider {
         messages: Vec<Message>,
         system: Option<String>,
         tools: Vec<ToolDefinition>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
@@ -300,7 +309,13 @@ impl LlmProvider for AnthropicProvider {
             .as_ref()
             .ok_or_else(|| missing_api_key_error("anthropic"))?;
 
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, false);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            false,
+            &request_options,
+        );
 
         let response = self
             .client
@@ -338,6 +353,7 @@ impl LlmProvider for AnthropicProvider {
         system: Option<String>,
         tools: Vec<ToolDefinition>,
         tx: mpsc::Sender<UnifiedStreamEvent>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
@@ -345,7 +361,8 @@ impl LlmProvider for AnthropicProvider {
             .as_ref()
             .ok_or_else(|| missing_api_key_error("anthropic"))?;
 
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, true);
+        let body =
+            self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
 
         let response = self
             .client
@@ -627,7 +644,13 @@ mod tests {
         let provider = AnthropicProvider::new(test_config());
         let messages = vec![Message::user("Hello")];
 
-        let body = provider.build_request_body(&messages, Some("Be helpful"), &[], false);
+        let body = provider.build_request_body(
+            &messages,
+            Some("Be helpful"),
+            &[],
+            false,
+            &LlmRequestOptions::default(),
+        );
         assert_eq!(body["model"], "claude-3-5-sonnet-20241022");
         assert_eq!(body["system"], "Be helpful");
         assert_eq!(body["stream"], false);

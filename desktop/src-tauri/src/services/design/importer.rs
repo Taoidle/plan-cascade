@@ -235,10 +235,19 @@ impl DesignDocImporter {
     /// Supports both the standard design_doc.json format and simplified formats.
     pub fn import_json(content: &str) -> Result<ImportResult, DesignDocError> {
         let mut warnings: Vec<ImportWarning> = Vec::new();
+        let raw_value: serde_json::Value = serde_json::from_str(content)
+            .map_err(|e| DesignDocError::ParseError(format!("Failed to parse JSON: {}", e)))?;
+        let raw_obj = raw_value.as_object();
 
         // Try to parse as standard DesignDoc first
-        match serde_json::from_str::<DesignDoc>(content) {
+        match serde_json::from_value::<DesignDoc>(raw_value.clone()) {
             Ok(mut doc) => {
+                // If the payload looks like a generic schema (title/components at top-level)
+                // and lacks standard sections, use generic importer instead.
+                if Self::looks_like_generic_json(raw_obj) {
+                    return Self::import_json_generic(&raw_value, &mut warnings);
+                }
+
                 // Set import metadata
                 doc.metadata.source = Some("imported-json".to_string());
                 if doc.metadata.created_at.is_none() {
@@ -279,15 +288,9 @@ impl DesignDocImporter {
                     clean_import,
                 })
             }
-            Err(parse_err) => {
+            Err(_parse_err) => {
                 // Try to parse as a generic JSON object and map fields
-                match serde_json::from_str::<serde_json::Value>(content) {
-                    Ok(value) => Self::import_json_generic(&value, &mut warnings),
-                    Err(_) => Err(DesignDocError::ParseError(format!(
-                        "Failed to parse JSON: {}",
-                        parse_err
-                    ))),
-                }
+                Self::import_json_generic(&raw_value, &mut warnings)
             }
         }
     }
@@ -400,6 +403,28 @@ impl DesignDocImporter {
         })
     }
 
+    fn looks_like_generic_json(obj: Option<&serde_json::Map<String, serde_json::Value>>) -> bool {
+        let Some(obj) = obj else {
+            return false;
+        };
+
+        let has_standard_sections = obj.contains_key("overview")
+            || obj.contains_key("architecture")
+            || obj.contains_key("interfaces")
+            || obj.contains_key("feature_mappings")
+            || obj.contains_key("metadata");
+
+        let has_generic_sections = obj.contains_key("title")
+            || obj.contains_key("name")
+            || obj.contains_key("project")
+            || obj.contains_key("description")
+            || obj.contains_key("summary")
+            || obj.contains_key("components")
+            || obj.contains_key("modules");
+
+        has_generic_sections && !has_standard_sections
+    }
+
     // ========================================================================
     // Markdown Parsing Helpers
     // ========================================================================
@@ -411,7 +436,7 @@ impl DesignDocImporter {
         let mut current_body = String::new();
 
         for line in content.lines() {
-            if line.starts_with('#') {
+            if Self::is_top_level_markdown_header(line) {
                 // Save previous section
                 if let Some(header) = current_header.take() {
                     sections.push((header, current_body.trim().to_string()));
@@ -430,6 +455,16 @@ impl DesignDocImporter {
         }
 
         sections
+    }
+
+    fn is_top_level_markdown_header(line: &str) -> bool {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("# ")
+            || trimmed.starts_with("## ")
+            || trimmed
+                .strip_prefix("##")
+                .map(|rest| rest.starts_with(' '))
+                .unwrap_or(false)
     }
 
     /// Extract plain text content from a markdown body (skip lists and code blocks)

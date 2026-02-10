@@ -116,6 +116,14 @@ pub enum UnifiedStreamEvent {
         objective: String,
     },
 
+    /// Analysis phase attempt has started
+    AnalysisPhaseAttemptStart {
+        phase_id: String,
+        attempt: u32,
+        max_attempts: u32,
+        required_tools: Vec<String>,
+    },
+
     /// Analysis phase progress update
     AnalysisPhaseProgress { phase_id: String, message: String },
 
@@ -138,8 +146,31 @@ pub enum UnifiedStreamEvent {
         metrics: serde_json::Value,
     },
 
+    /// Analysis phase attempt has completed
+    AnalysisPhaseAttemptEnd {
+        phase_id: String,
+        attempt: u32,
+        success: bool,
+        metrics: serde_json::Value,
+        gate_failures: Vec<String>,
+    },
+
+    /// Analysis gate failure detail
+    AnalysisGateFailure {
+        phase_id: String,
+        attempt: u32,
+        reasons: Vec<String>,
+    },
+
     /// Validation result emitted near the end of analysis
     AnalysisValidation { status: String, issues: Vec<String> },
+
+    /// Overall analysis run summary
+    AnalysisRunSummary {
+        success: bool,
+        phase_results: Vec<String>,
+        total_metrics: serde_json::Value,
+    },
 
     // ========================================================================
     // Session-based execution events (for standalone mode)
@@ -305,6 +336,49 @@ mod tests {
 
         let parsed: UnifiedStreamEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn test_analysis_attempt_and_gate_events_serialization() {
+        let start = UnifiedStreamEvent::AnalysisPhaseAttemptStart {
+            phase_id: "structure_discovery".to_string(),
+            attempt: 1,
+            max_attempts: 3,
+            required_tools: vec!["Cwd".to_string(), "LS".to_string()],
+        };
+        let start_json = serde_json::to_string(&start).unwrap();
+        assert!(start_json.contains("\"type\":\"analysis_phase_attempt_start\""));
+        assert!(start_json.contains("\"attempt\":1"));
+
+        let end = UnifiedStreamEvent::AnalysisPhaseAttemptEnd {
+            phase_id: "structure_discovery".to_string(),
+            attempt: 1,
+            success: false,
+            metrics: serde_json::json!({ "tool_calls": 2, "read_calls": 0 }),
+            gate_failures: vec!["read_calls 0 < required 1".to_string()],
+        };
+        let end_json = serde_json::to_string(&end).unwrap();
+        assert!(end_json.contains("\"type\":\"analysis_phase_attempt_end\""));
+        assert!(end_json.contains("\"success\":false"));
+
+        let gate = UnifiedStreamEvent::AnalysisGateFailure {
+            phase_id: "structure_discovery".to_string(),
+            attempt: 1,
+            reasons: vec!["required tool 'LS' not used".to_string()],
+        };
+        let gate_json = serde_json::to_string(&gate).unwrap();
+        assert!(gate_json.contains("\"type\":\"analysis_gate_failure\""));
+
+        let summary = UnifiedStreamEvent::AnalysisRunSummary {
+            success: false,
+            phase_results: vec!["successful_phases=2".to_string()],
+            total_metrics: serde_json::json!({ "iterations": 9 }),
+        };
+        let summary_json = serde_json::to_string(&summary).unwrap();
+        assert!(summary_json.contains("\"type\":\"analysis_run_summary\""));
+
+        let parsed: UnifiedStreamEvent = serde_json::from_str(&summary_json).unwrap();
+        assert_eq!(summary, parsed);
     }
 
     #[test]
