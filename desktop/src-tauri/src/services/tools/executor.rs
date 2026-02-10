@@ -130,6 +130,23 @@ const BLOCKED_COMMANDS: &[&str] = &[
     "chown -R",
 ];
 
+/// Directories excluded from default full-workspace scans.
+/// These are skipped only when callers do not provide an explicit search path.
+const DEFAULT_SCAN_EXCLUDES: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "coverage",
+    ".venv",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "claude-code",
+    "codex",
+];
+
 /// Tool executor for running tools locally
 pub struct ToolExecutor {
     /// Project root for path validation
@@ -542,11 +559,16 @@ impl ToolExecutor {
             None => return ToolResult::err(missing_param_error("Glob", "pattern")),
         };
 
-        let base_path = args
-            .get("path")
-            .and_then(|v| v.as_str())
+        let explicit_base_path = args.get("path").and_then(|v| v.as_str());
+        let base_path = explicit_base_path
             .map(PathBuf::from)
             .unwrap_or_else(|| self.project_root.clone());
+        let apply_default_excludes = explicit_base_path
+            .map(|p| {
+                let normalized = p.trim().replace('\\', "/");
+                normalized == "." || normalized == "./"
+            })
+            .unwrap_or(true);
 
         // Combine base path with pattern
         let full_pattern = base_path.join(pattern);
@@ -569,6 +591,9 @@ impl ToolExecutor {
 
                 let result: Vec<String> = matches
                     .iter()
+                    .filter(|(p, _)| {
+                        !apply_default_excludes || !is_default_scan_excluded(&base_path, p)
+                    })
                     .map(|(p, _)| p.to_string_lossy().to_string())
                     .collect();
 
@@ -589,16 +614,19 @@ impl ToolExecutor {
             None => return ToolResult::err(missing_param_error("Grep", "pattern")),
         };
 
-        let search_path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                self.current_working_dir
-                    .lock()
-                    .map(|cwd| cwd.clone())
-                    .unwrap_or_else(|_| self.project_root.clone())
-            });
+        let explicit_search_path = args.get("path").and_then(|v| v.as_str());
+        let search_path = explicit_search_path.map(PathBuf::from).unwrap_or_else(|| {
+            self.current_working_dir
+                .lock()
+                .map(|cwd| cwd.clone())
+                .unwrap_or_else(|_| self.project_root.clone())
+        });
+        let apply_default_excludes = explicit_search_path
+            .map(|p| {
+                let normalized = p.trim().replace('\\', "/");
+                normalized == "." || normalized == "./"
+            })
+            .unwrap_or(true);
 
         let file_glob = args.get("glob").and_then(|v| v.as_str());
         let case_insensitive = args
@@ -612,7 +640,7 @@ impl ToolExecutor {
         let output_mode = args
             .get("output_mode")
             .and_then(|v| v.as_str())
-            .unwrap_or("content");
+            .unwrap_or("files_with_matches");
         let head_limit = args.get("head_limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         // Build regex
@@ -665,6 +693,10 @@ impl ToolExecutor {
                 }
 
                 let path = entry.path();
+
+                if apply_default_excludes && is_default_scan_excluded(&search_path, path) {
+                    continue;
+                }
 
                 // Apply glob filter if provided
                 if let Some(ref overrides) = glob_matcher {
@@ -1119,6 +1151,16 @@ impl ToolExecutor {
     pub fn set_project_root(&mut self, new_root: PathBuf) {
         self.project_root = new_root;
     }
+}
+
+fn is_default_scan_excluded(base: &Path, candidate: &Path) -> bool {
+    if let Ok(relative) = candidate.strip_prefix(base) {
+        if let Some(first) = relative.components().next() {
+            let root = first.as_os_str().to_string_lossy();
+            return DEFAULT_SCAN_EXCLUDES.contains(&root.as_ref());
+        }
+    }
+    false
 }
 
 /// Format a file size into a human-readable string

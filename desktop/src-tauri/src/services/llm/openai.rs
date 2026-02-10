@@ -61,11 +61,9 @@ impl OpenAIProvider {
 
         // Add temperature (not for o1/o3 models)
         if !self.model_supports_reasoning() {
-            body["temperature"] = serde_json::json!(
-                request_options
-                    .temperature_override
-                    .unwrap_or(self.config.temperature)
-            );
+            body["temperature"] = serde_json::json!(request_options
+                .temperature_override
+                .unwrap_or(self.config.temperature));
         }
 
         // Add reasoning effort for o1/o3 models
@@ -470,13 +468,8 @@ impl LlmProvider for OpenAIProvider {
             .as_ref()
             .ok_or_else(|| missing_api_key_error("openai"))?;
 
-        let body = self.build_request_body(
-            &messages,
-            system.as_deref(),
-            &tools,
-            true,
-            &request_options,
-        );
+        let body =
+            self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
 
         let response = self
             .client

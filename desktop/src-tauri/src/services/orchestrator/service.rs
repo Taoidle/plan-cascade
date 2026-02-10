@@ -14,6 +14,11 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
+use super::analysis_scheduler::build_phase_plan;
+use super::analysis_store::{
+    AnalysisPhaseResultRecord, AnalysisRunHandle, AnalysisRunStore, CoverageMetrics,
+    EvidenceRecord, SubAgentResultRecord,
+};
 use crate::models::orchestrator::{
     ExecutionProgress, ExecutionSession, ExecutionSessionSummary, ExecutionStatus,
     StoryExecutionState,
@@ -84,6 +89,15 @@ fn sub_agent_token_budget(context_window: u32) -> u32 {
     (context_window * 2).clamp(20_000, 500_000)
 }
 
+/// Limit evidence verbosity to keep synthesis prompt focused and token-efficient.
+const MAX_ANALYSIS_EVIDENCE_LINES: usize = 90;
+/// Keep each phase summary short before feeding into synthesis.
+const MAX_ANALYSIS_PHASE_SUMMARY_CHARS: usize = 1600;
+/// Keep tool outputs bounded when they are fed back into the model during analysis.
+const ANALYSIS_TOOL_RESULT_MAX_CHARS: usize = 3000;
+const ANALYSIS_TOOL_RESULT_MAX_LINES: usize = 100;
+const ANALYSIS_BASELINE_MAX_READ_FILES: usize = 5;
+
 /// Result of an orchestration execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
@@ -132,6 +146,8 @@ pub struct OrchestratorService {
     db_pool: Option<Pool<SqliteConnectionManager>>,
     /// Active sessions (in-memory cache)
     active_sessions: Arc<RwLock<HashMap<String, ExecutionSession>>>,
+    /// Persistent analysis artifacts store (run manifests, evidence, reports)
+    analysis_store: AnalysisRunStore,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances
@@ -189,9 +205,25 @@ impl AnalysisPhase {
 
     fn max_iterations(self) -> u32 {
         match self {
-            AnalysisPhase::StructureDiscovery => 35,
-            AnalysisPhase::ArchitectureTrace => 50,
-            AnalysisPhase::ConsistencyCheck => 28,
+            AnalysisPhase::StructureDiscovery => 6,
+            AnalysisPhase::ArchitectureTrace => 7,
+            AnalysisPhase::ConsistencyCheck => 5,
+        }
+    }
+
+    fn layers(self) -> &'static [&'static str] {
+        match self {
+            AnalysisPhase::StructureDiscovery => &[
+                "Layer 1 (Inventory): identify actual root directories and manifests.",
+                "Layer 2 (Entrypoints): verify language/runtime entrypoints from discovered files only.",
+            ],
+            AnalysisPhase::ArchitectureTrace => &[
+                "Layer 1 (Module map): map major components and boundaries with concrete files.",
+                "Layer 2 (Flow trace): verify integration/data-flow edges across components.",
+            ],
+            AnalysisPhase::ConsistencyCheck => &[
+                "Layer 1 (Claim audit): re-open cited files and mark VERIFIED/UNVERIFIED/CONTRADICTED.",
+            ],
         }
     }
 }
@@ -216,40 +248,47 @@ impl AnalysisPhasePolicy {
     fn for_phase(phase: AnalysisPhase) -> Self {
         match phase {
             AnalysisPhase::StructureDiscovery => Self {
-                max_attempts: 3,
-                force_tool_mode_attempts: 2,
-                temperature_override: 0.1,
+                max_attempts: 2,
+                force_tool_mode_attempts: 1,
+                temperature_override: 0.0,
                 quota: AnalysisToolQuota {
                     min_total_calls: 4,
                     min_read_calls: 1,
                     min_search_calls: 1,
-                    required_tools: vec!["Cwd", "LS"],
+                    required_tools: vec!["Cwd", "LS", "Read"],
                 },
             },
             AnalysisPhase::ArchitectureTrace => Self {
-                max_attempts: 3,
-                force_tool_mode_attempts: 2,
-                temperature_override: 0.1,
+                max_attempts: 1,
+                force_tool_mode_attempts: 1,
+                temperature_override: 0.0,
                 quota: AnalysisToolQuota {
-                    min_total_calls: 5,
+                    min_total_calls: 4,
                     min_read_calls: 2,
-                    min_search_calls: 2,
-                    required_tools: vec!["Grep"],
+                    min_search_calls: 1,
+                    required_tools: vec!["Read", "Grep"],
                 },
             },
             AnalysisPhase::ConsistencyCheck => Self {
-                max_attempts: 3,
-                force_tool_mode_attempts: 2,
-                temperature_override: 0.1,
+                max_attempts: 1,
+                force_tool_mode_attempts: 1,
+                temperature_override: 0.0,
                 quota: AnalysisToolQuota {
-                    min_total_calls: 3,
-                    min_read_calls: 1,
+                    min_total_calls: 4,
+                    min_read_calls: 2,
                     min_search_calls: 1,
                     required_tools: vec!["Read", "Grep"],
                 },
             },
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnalysisPhaseStatus {
+    Passed,
+    Partial,
+    Failed,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -263,6 +302,13 @@ struct PhaseCapture {
     observed_paths: HashSet<String>,
     evidence_lines: Vec<String>,
     warnings: Vec<String>,
+    pending_tools: HashMap<String, PendingAnalysisToolCall>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PendingAnalysisToolCall {
+    tool_name: String,
+    arguments: Option<serde_json::Value>,
 }
 
 impl PhaseCapture {
@@ -288,7 +334,7 @@ struct AnalysisPhaseOutcome {
     response: Option<String>,
     usage: UsageStats,
     iterations: u32,
-    success: bool,
+    status: AnalysisPhaseStatus,
     error: Option<String>,
     capture: PhaseCapture,
 }
@@ -300,15 +346,31 @@ struct AnalysisLedger {
     warnings: Vec<String>,
     phase_summaries: Vec<String>,
     successful_phases: usize,
+    partial_phases: usize,
+    total_phases: usize,
 }
 
 impl AnalysisLedger {
     fn record(&mut self, outcome: &AnalysisPhaseOutcome) {
-        if outcome.success {
-            self.successful_phases += 1;
-        } else if let Some(err) = outcome.error.as_ref() {
-            self.warnings
-                .push(format!("{} failed: {}", outcome.phase.title(), err));
+        self.total_phases += 1;
+        match outcome.status {
+            AnalysisPhaseStatus::Passed => self.successful_phases += 1,
+            AnalysisPhaseStatus::Partial => {
+                self.partial_phases += 1;
+                if let Some(err) = outcome.error.as_ref() {
+                    self.warnings.push(format!(
+                        "{} completed with partial evidence: {}",
+                        outcome.phase.title(),
+                        err
+                    ));
+                }
+            }
+            AnalysisPhaseStatus::Failed => {
+                if let Some(err) = outcome.error.as_ref() {
+                    self.warnings
+                        .push(format!("{} failed: {}", outcome.phase.title(), err));
+                }
+            }
         }
 
         self.observed_paths
@@ -322,11 +384,12 @@ impl AnalysisLedger {
         if let Some(summary) = outcome.response.as_ref() {
             let trimmed = summary.trim();
             if !trimmed.is_empty() {
+                let compact = truncate_for_log(trimmed, MAX_ANALYSIS_PHASE_SUMMARY_CHARS);
                 self.phase_summaries.push(format!(
                     "## {} ({})\n{}",
                     outcome.phase.title(),
                     outcome.phase.id(),
-                    trimmed
+                    compact
                 ));
             }
         }
@@ -383,6 +446,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
 impl OrchestratorService {
     /// Create a new orchestrator service
     pub fn new(config: OrchestratorConfig) -> Self {
+        let analysis_project_root = config.project_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
             ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config.provider.clone())),
             ProviderType::OpenAI => Arc::new(OpenAIProvider::new(config.provider.clone())),
@@ -401,11 +465,13 @@ impl OrchestratorService {
             cancellation_token: CancellationToken::new(),
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
+            analysis_store: AnalysisRunStore::new(analysis_project_root),
         }
     }
 
     /// Create a sub-agent orchestrator (no Task tool, no database, inherits cancellation)
     fn new_sub_agent(config: OrchestratorConfig, cancellation_token: CancellationToken) -> Self {
+        let analysis_project_root = config.project_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
             ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config.provider.clone())),
             ProviderType::OpenAI => Arc::new(OpenAIProvider::new(config.provider.clone())),
@@ -424,6 +490,7 @@ impl OrchestratorService {
             cancellation_token,
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
+            analysis_store: AnalysisRunStore::new(analysis_project_root),
         }
     }
 
@@ -1252,17 +1319,35 @@ impl OrchestratorService {
             let last_input_tokens = response.usage.input_tokens;
             merge_usage(&mut total_usage, &response.usage);
 
-            // Check for context compaction before processing tool calls
-            if self.should_compact(last_input_tokens) {
-                self.compact_messages(&mut messages, &tx).await;
+            // Check for context compaction before processing tool calls.
+            // In analysis mode, use cheap deterministic trimming (Codex-like)
+            // instead of summary LLM calls to avoid extra token spikes.
+            if self.should_compact(
+                last_input_tokens,
+                request_options.analysis_phase.as_ref().is_some(),
+            ) {
+                if request_options.analysis_phase.is_some() {
+                    let removed = Self::trim_messages_for_analysis(&mut messages);
+                    if removed > 0 {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ContextCompaction {
+                                messages_compacted: removed,
+                                messages_preserved: messages.len(),
+                                compaction_tokens: 0,
+                            })
+                            .await;
+                    }
+                } else {
+                    self.compact_messages(&mut messages, &tx).await;
+                }
             }
 
             // Handle tool calls - either native or prompt-based fallback
             let has_native_tool_calls = response.has_tool_calls();
-            let parsed_fallback_calls = if !has_native_tool_calls {
-                parse_fallback_tool_calls(&response)
+            let parsed_fallback = if !has_native_tool_calls {
+                parse_fallback_tool_calls(&response, request_options.analysis_phase.as_deref())
             } else {
-                Vec::new()
+                ParsedFallbackCalls::default()
             };
 
             if has_native_tool_calls {
@@ -1285,17 +1370,45 @@ impl OrchestratorService {
 
                 // Execute each tool call
                 for tc in &response.tool_calls {
+                    let (effective_tool_name, effective_args) =
+                        match prepare_tool_call_for_execution(
+                            &tc.name,
+                            &tc.arguments,
+                            request_options.analysis_phase.as_deref(),
+                        ) {
+                            Ok(prepared) => prepared,
+                            Err(error_message) => {
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::ToolResult {
+                                        tool_id: tc.id.clone(),
+                                        result: None,
+                                        error: Some(error_message.clone()),
+                                    })
+                                    .await;
+                                messages.push(Message::tool_result(&tc.id, error_message, true));
+                                continue;
+                            }
+                        };
+
                     // Emit tool start event
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolStart {
                             tool_id: tc.id.clone(),
-                            tool_name: tc.name.clone(),
-                            arguments: Some(tc.arguments.to_string()),
+                            tool_name: effective_tool_name.clone(),
+                            arguments: Some(effective_args.to_string()),
                         })
                         .await;
 
                     // Execute the tool
-                    let result = self.tool_executor.execute(&tc.name, &tc.arguments).await;
+                    let result = self
+                        .tool_executor
+                        .execute(&effective_tool_name, &effective_args)
+                        .await;
+                    let context_tool_output = tool_output_for_model_context(
+                        &effective_tool_name,
+                        &result,
+                        request_options.analysis_phase.as_deref(),
+                    );
 
                     // Emit tool result event
                     let _ = tx
@@ -1320,7 +1433,7 @@ impl OrchestratorService {
                             use crate::services::llm::types::ContentBlock;
                             let blocks = vec![
                                 ContentBlock::Text {
-                                    text: result.to_content(),
+                                    text: context_tool_output.clone(),
                                 },
                                 ContentBlock::Image {
                                     media_type: mime.clone(),
@@ -1335,19 +1448,19 @@ impl OrchestratorService {
                         } else {
                             messages.push(Message::tool_result(
                                 &tc.id,
-                                result.to_content(),
+                                context_tool_output.clone(),
                                 !result.success,
                             ));
                         }
                     } else {
                         messages.push(Message::tool_result(
                             &tc.id,
-                            result.to_content(),
+                            context_tool_output.clone(),
                             !result.success,
                         ));
                     }
                 }
-            } else if !parsed_fallback_calls.is_empty() {
+            } else if !parsed_fallback.calls.is_empty() {
                 // Prompt-based fallback path
                 if let Some(text) = &response.content {
                     let cleaned = extract_text_without_tool_calls(text);
@@ -1358,22 +1471,52 @@ impl OrchestratorService {
 
                 // Execute each parsed tool call and collect results
                 let mut tool_results = Vec::new();
-                for ptc in &parsed_fallback_calls {
+                for ptc in &parsed_fallback.calls {
                     fallback_call_counter += 1;
                     let tool_id = format!("story_fallback_{}", fallback_call_counter);
+
+                    let (effective_tool_name, effective_args) =
+                        match prepare_tool_call_for_execution(
+                            &ptc.tool_name,
+                            &ptc.arguments,
+                            request_options.analysis_phase.as_deref(),
+                        ) {
+                            Ok(prepared) => prepared,
+                            Err(error_message) => {
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::ToolResult {
+                                        tool_id: tool_id.clone(),
+                                        result: None,
+                                        error: Some(error_message.clone()),
+                                    })
+                                    .await;
+                                tool_results.push(format_tool_result(
+                                    &ptc.tool_name,
+                                    &tool_id,
+                                    &error_message,
+                                    true,
+                                ));
+                                continue;
+                            }
+                        };
 
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolStart {
                             tool_id: tool_id.clone(),
-                            tool_name: ptc.tool_name.clone(),
-                            arguments: Some(ptc.arguments.to_string()),
+                            tool_name: effective_tool_name.clone(),
+                            arguments: Some(effective_args.to_string()),
                         })
                         .await;
 
                     let result = self
                         .tool_executor
-                        .execute(&ptc.tool_name, &ptc.arguments)
+                        .execute(&effective_tool_name, &effective_args)
                         .await;
+                    let context_tool_output = tool_output_for_model_context(
+                        &effective_tool_name,
+                        &result,
+                        request_options.analysis_phase.as_deref(),
+                    );
 
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
@@ -1392,9 +1535,9 @@ impl OrchestratorService {
                         .await;
 
                     tool_results.push(format_tool_result(
-                        &ptc.tool_name,
+                        &effective_tool_name,
                         &tool_id,
-                        &result.to_content(),
+                        &context_tool_output,
                         !result.success,
                     ));
                 }
@@ -1402,6 +1545,26 @@ impl OrchestratorService {
                 // Feed all tool results back as a user message
                 let combined_results = tool_results.join("\n\n");
                 messages.push(Message::user(combined_results));
+            } else if !parsed_fallback.dropped_reasons.is_empty() {
+                let repair_hint = format!(
+                    "Tool call validation failed. Emit valid tool_call blocks with required arguments.\nIssues:\n- {}",
+                    parsed_fallback
+                        .dropped_reasons
+                        .iter()
+                        .take(5)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("\n- ")
+                );
+                if let Some(phase_id) = request_options.analysis_phase.as_ref() {
+                    let _ = tx
+                        .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                            phase_id: phase_id.clone(),
+                            message: "Invalid fallback tool calls were dropped and a correction hint was injected.".to_string(),
+                        })
+                        .await;
+                }
+                messages.push(Message::user(repair_hint));
             } else {
                 // No tool calls (native or fallback) - this is the final response
                 let final_content = response
@@ -1568,17 +1731,17 @@ impl OrchestratorService {
             merge_usage(&mut total_usage, &response.usage);
 
             // Check for context compaction before processing tool calls
-            if self.should_compact(last_input_tokens) {
+            if self.should_compact(last_input_tokens, false) {
                 self.compact_messages(&mut messages, &tx).await;
             }
 
             // Handle tool calls - either native or prompt-based fallback
             let has_native_tool_calls = response.has_tool_calls();
-            let parsed_fallback_calls = if !has_native_tool_calls {
+            let parsed_fallback = if !has_native_tool_calls {
                 // Check both assistant text and thinking content for prompt-based tool calls.
-                parse_fallback_tool_calls(&response)
+                parse_fallback_tool_calls(&response, None)
             } else {
-                Vec::new()
+                ParsedFallbackCalls::default()
             };
 
             if has_native_tool_calls {
@@ -1663,7 +1826,7 @@ impl OrchestratorService {
                         ));
                     }
                 }
-            } else if !parsed_fallback_calls.is_empty() {
+            } else if !parsed_fallback.calls.is_empty() {
                 // Prompt-based fallback path
                 // Add assistant message with tool call blocks stripped from text
                 // (keeps conversation history clean for subsequent LLM calls)
@@ -1683,7 +1846,7 @@ impl OrchestratorService {
 
                 // Execute each parsed tool call and collect results
                 let mut tool_results = Vec::new();
-                for ptc in &parsed_fallback_calls {
+                for ptc in &parsed_fallback.calls {
                     fallback_call_counter += 1;
                     let tool_id = format!("fallback_{}", fallback_call_counter);
 
@@ -1727,6 +1890,18 @@ impl OrchestratorService {
                 // Feed all tool results back as a user message
                 let combined_results = tool_results.join("\n\n");
                 messages.push(Message::user(combined_results));
+            } else if !parsed_fallback.dropped_reasons.is_empty() {
+                let repair_hint = format!(
+                    "Tool call parsing detected invalid calls. Please emit valid tool_call JSON blocks.\nIssues:\n- {}",
+                    parsed_fallback
+                        .dropped_reasons
+                        .iter()
+                        .take(5)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("\n- ")
+                );
+                messages.push(Message::user(repair_hint));
             } else {
                 // No tool calls (native or fallback) - this is the final response
                 // Always strip any tool call blocks from the response text,
@@ -1774,21 +1949,59 @@ impl OrchestratorService {
         let mut total_usage = UsageStats::default();
         let mut total_iterations = 0;
         let mut ledger = AnalysisLedger::default();
+        let scope_guidance = analysis_scope_guidance(&message);
+        let run_handle = match self
+            .analysis_store
+            .start_run(&message, &self.config.project_root)
+        {
+            Ok(handle) => {
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisRunStarted {
+                        run_id: handle.run_id().to_string(),
+                        run_dir: handle.run_dir().to_string_lossy().to_string(),
+                        request: message.clone(),
+                    })
+                    .await;
+                Some(handle)
+            }
+            Err(err) => {
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                        phase_id: "analysis".to_string(),
+                        message: format!(
+                            "Analysis artifact persistence unavailable for this run: {}",
+                            err
+                        ),
+                    })
+                    .await;
+                None
+            }
+        };
 
-        let phase1_prompt = format!(
+        let phase1_base_prompt = format!(
             "User request: {}\n\n\
+             Scope constraints:\n{}\n\n\
              Run a strict structure discovery pass. Identify the real repository shape,\n\
-             read primary manifests, and list true entrypoints with file paths.",
-            message
+             read primary manifests, and list true entrypoints with file paths.\n\
+             Keep tool usage targeted and avoid broad scans after objective is satisfied.",
+            message, scope_guidance
         );
-        let phase1 = self
-            .run_analysis_phase(AnalysisPhase::StructureDiscovery, phase1_prompt, &tx)
+        let structure_summary = self
+            .run_analysis_phase_layered(
+                AnalysisPhase::StructureDiscovery,
+                phase1_base_prompt,
+                &tx,
+                &mut total_usage,
+                &mut total_iterations,
+                &mut ledger,
+                run_handle.as_ref(),
+            )
             .await;
-        merge_usage(&mut total_usage, &phase1.usage);
-        total_iterations += phase1.iterations;
-        ledger.record(&phase1);
 
         if self.cancellation_token.is_cancelled() {
+            if let Some(run) = run_handle.as_ref() {
+                let _ = run.complete(false, Some("Execution cancelled".to_string()));
+            }
             return ExecutionResult {
                 response: None,
                 usage: total_usage,
@@ -1798,29 +2011,34 @@ impl OrchestratorService {
             };
         }
 
-        let structure_summary = phase1
-            .response
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| "Structure discovery produced no summary.".to_string());
-        let observed_from_phase1 = join_sorted_paths(&ledger.observed_paths, 120);
+        let observed_from_phase1 = join_sorted_paths(&ledger.observed_paths, 90);
 
-        let phase2_prompt = format!(
+        let phase2_base_prompt = format!(
             "User request: {}\n\n\
+             Scope constraints:\n{}\n\n\
              Structure summary from previous phase:\n{}\n\n\
              Observed paths so far:\n{}\n\n\
              Build a concrete architecture trace from real files. If a component cannot be verified\n\
-             from tools, label it as unknown.",
-            message, structure_summary, observed_from_phase1
+             from tools, label it as unknown.\n\
+             Prioritize high-signal files and avoid repeated reads of very large files.",
+            message, scope_guidance, structure_summary, observed_from_phase1
         );
-        let phase2 = self
-            .run_analysis_phase(AnalysisPhase::ArchitectureTrace, phase2_prompt, &tx)
+        let architecture_summary = self
+            .run_analysis_phase_layered(
+                AnalysisPhase::ArchitectureTrace,
+                phase2_base_prompt,
+                &tx,
+                &mut total_usage,
+                &mut total_iterations,
+                &mut ledger,
+                run_handle.as_ref(),
+            )
             .await;
-        merge_usage(&mut total_usage, &phase2.usage);
-        total_iterations += phase2.iterations;
-        ledger.record(&phase2);
 
         if self.cancellation_token.is_cancelled() {
+            if let Some(run) = run_handle.as_ref() {
+                let _ = run.complete(false, Some("Execution cancelled".to_string()));
+            }
             return ExecutionResult {
                 response: None,
                 usage: total_usage,
@@ -1830,13 +2048,9 @@ impl OrchestratorService {
             };
         }
 
-        let architecture_summary = phase2
-            .response
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| "Architecture trace produced no summary.".to_string());
-        let phase3_prompt = format!(
+        let phase3_base_prompt = format!(
             "User request: {}\n\n\
+             Scope constraints:\n{}\n\n\
              Verify these findings and explicitly mark uncertain claims.\n\n\
              Structure summary:\n{}\n\n\
              Architecture summary:\n{}\n\n\
@@ -1844,20 +2058,30 @@ impl OrchestratorService {
              Output must include:\n\
              - Verified claims (with path evidence)\n\
              - Unverified claims (and why)\n\
-             - Contradictions or missing data",
+             - Contradictions or missing data\n\
+             Keep output concise and strictly evidence-backed.",
             message,
+            scope_guidance,
             structure_summary,
             architecture_summary,
-            join_sorted_paths(&ledger.observed_paths, 160)
+            join_sorted_paths(&ledger.observed_paths, 120)
         );
-        let phase3 = self
-            .run_analysis_phase(AnalysisPhase::ConsistencyCheck, phase3_prompt, &tx)
+        let consistency_summary = self
+            .run_analysis_phase_layered(
+                AnalysisPhase::ConsistencyCheck,
+                phase3_base_prompt,
+                &tx,
+                &mut total_usage,
+                &mut total_iterations,
+                &mut ledger,
+                run_handle.as_ref(),
+            )
             .await;
-        merge_usage(&mut total_usage, &phase3.usage);
-        total_iterations += phase3.iterations;
-        ledger.record(&phase3);
 
         if self.cancellation_token.is_cancelled() {
+            if let Some(run) = run_handle.as_ref() {
+                let _ = run.complete(false, Some("Execution cancelled".to_string()));
+            }
             return ExecutionResult {
                 response: None,
                 usage: total_usage,
@@ -1867,14 +2091,19 @@ impl OrchestratorService {
             };
         }
 
-        let all_phases_passed = ledger.successful_phases == 3;
         let has_evidence = !ledger.evidence_lines.is_empty();
-        if !all_phases_passed || !has_evidence {
+        let usable_phases = ledger.successful_phases + ledger.partial_phases;
+        let required_usable_phases = 3;
+        let analysis_gate_passed = usable_phases >= required_usable_phases && has_evidence;
+        if !analysis_gate_passed {
             let mut failures = Vec::new();
-            if !all_phases_passed {
+            if usable_phases < required_usable_phases {
                 failures.push(format!(
-                    "Phase gate failed: {}/3 phases passed",
-                    ledger.successful_phases
+                    "Phase gate failed: {} usable phases (required={}, passed={}, partial={})",
+                    usable_phases,
+                    required_usable_phases,
+                    ledger.successful_phases,
+                    ledger.partial_phases
                 ));
             }
             if !has_evidence {
@@ -1886,6 +2115,7 @@ impl OrchestratorService {
                     success: false,
                     phase_results: vec![
                         format!("successful_phases={}", ledger.successful_phases),
+                        format!("partial_phases={}", ledger.partial_phases),
                         format!("observed_paths={}", ledger.observed_paths.len()),
                     ],
                     total_metrics: serde_json::json!({
@@ -1922,6 +2152,20 @@ impl OrchestratorService {
                     stop_reason: Some("analysis_gate_failed".to_string()),
                 })
                 .await;
+            if let Some(run) = run_handle.as_ref() {
+                let _ = run.complete(
+                    false,
+                    Some("Analysis failed: insufficient verified evidence".to_string()),
+                );
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisRunCompleted {
+                        run_id: run.run_id().to_string(),
+                        success: false,
+                        manifest_path: run.manifest_path().to_string_lossy().to_string(),
+                        report_path: None,
+                    })
+                    .await;
+            }
 
             return ExecutionResult {
                 response: None,
@@ -1938,7 +2182,7 @@ impl OrchestratorService {
             ledger
                 .evidence_lines
                 .iter()
-                .take(220)
+                .take(MAX_ANALYSIS_EVIDENCE_LINES)
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -1953,7 +2197,7 @@ impl OrchestratorService {
         } else {
             ledger.warnings.join("\n")
         };
-        let observed_paths = join_sorted_paths(&ledger.observed_paths, 250);
+        let observed_paths = join_sorted_paths(&ledger.observed_paths, 120);
 
         let synthesis_prompt = format!(
             "You are synthesizing a repository analysis from verified tool evidence.\n\n\
@@ -1991,9 +2235,7 @@ impl OrchestratorService {
             Err(e) => {
                 let fallback = format!(
                     "{}\n\n{}\n\n{}",
-                    structure_summary,
-                    architecture_summary,
-                    phase3.response.unwrap_or_default()
+                    structure_summary, architecture_summary, consistency_summary
                 );
                 ledger
                     .warnings
@@ -2033,7 +2275,7 @@ impl OrchestratorService {
                      Observed paths:\n{}\n\n\
                      Original analysis:\n{}",
                     validation_issues.join("\n"),
-                    join_sorted_paths(&ledger.observed_paths, 250),
+                    join_sorted_paths(&ledger.observed_paths, 120),
                     original
                 );
                 let correction_messages = vec![Message::user(correction_prompt)];
@@ -2054,6 +2296,22 @@ impl OrchestratorService {
             }
         }
 
+        if !validation_issues.is_empty() {
+            if let Some(text) = final_response.as_ref() {
+                final_response = Some(sanitize_unverified_path_mentions(text, &validation_issues));
+            }
+        }
+
+        let final_validation_issues = if let Some(text) = final_response.as_ref() {
+            find_unverified_paths(text, &ledger.observed_paths)
+                .into_iter()
+                .take(20)
+                .map(|p| format!("Unverified path mention: {}", p))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
         if let Some(content) = final_response
             .as_ref()
             .filter(|text| !text.trim().is_empty())
@@ -2065,21 +2323,34 @@ impl OrchestratorService {
                 .await;
         }
 
-        let final_success = all_phases_passed
-            && has_evidence
-            && final_response
-                .as_ref()
-                .map(|text| !text.trim().is_empty())
-                .unwrap_or(false)
-            && synthesis_success;
+        let has_final_response = final_response
+            .as_ref()
+            .map(|text| !text.trim().is_empty())
+            .unwrap_or(false);
+        let is_partial_run = ledger.successful_phases < ledger.total_phases
+            && usable_phases >= required_usable_phases;
+        let final_success = analysis_gate_passed && has_final_response;
+
+        if is_partial_run {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisPartial {
+                    successful_phases: ledger.successful_phases,
+                    partial_phases: ledger.partial_phases,
+                    failed_phases: ledger.total_phases.saturating_sub(usable_phases),
+                    reason: "Analysis completed with partial phase evidence; returning best-effort verified summary.".to_string(),
+                })
+                .await;
+        }
 
         let _ = tx
             .send(UnifiedStreamEvent::AnalysisRunSummary {
                 success: final_success,
                 phase_results: vec![
                     format!("successful_phases={}", ledger.successful_phases),
+                    format!("partial_phases={}", ledger.partial_phases),
                     format!("observed_paths={}", ledger.observed_paths.len()),
-                    format!("validation_issues={}", validation_issues.len()),
+                    format!("validation_issues={}", final_validation_issues.len()),
+                    format!("synthesis_success={}", synthesis_success),
                 ],
                 total_metrics: serde_json::json!({
                     "input_tokens": total_usage.input_tokens,
@@ -2106,6 +2377,40 @@ impl OrchestratorService {
             })
             .await;
 
+        let coverage = build_coverage_metrics(&ledger);
+        if let Some(run) = run_handle.as_ref() {
+            let _ = run.update_coverage(coverage.clone());
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisCoverageUpdated {
+                    run_id: run.run_id().to_string(),
+                    metrics: serde_json::to_value(&coverage).unwrap_or_default(),
+                })
+                .await;
+        }
+
+        if let Some(run) = run_handle.as_ref() {
+            let report_path = final_response
+                .as_ref()
+                .filter(|text| !text.trim().is_empty())
+                .and_then(|text| run.write_final_report(text).ok());
+            let _ = run.complete(
+                final_success,
+                if final_success {
+                    None
+                } else {
+                    Some("Analysis completed with insufficient verified output".to_string())
+                },
+            );
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisRunCompleted {
+                    run_id: run.run_id().to_string(),
+                    success: final_success,
+                    manifest_path: run.manifest_path().to_string_lossy().to_string(),
+                    report_path,
+                })
+                .await;
+        }
+
         ExecutionResult {
             response: final_response,
             usage: total_usage,
@@ -2119,28 +2424,688 @@ impl OrchestratorService {
         }
     }
 
+    fn existing_analysis_files(&self, candidates: &[&str], limit: usize) -> Vec<String> {
+        let mut files = Vec::<String>::new();
+        for candidate in candidates {
+            let abs = self.config.project_root.join(candidate);
+            if abs.is_file() {
+                files.push(candidate.replace('\\', "/"));
+                if files.len() >= limit {
+                    break;
+                }
+            }
+        }
+        files
+    }
+
+    fn existing_observed_files(&self, ledger: &AnalysisLedger, limit: usize) -> Vec<String> {
+        let mut files = ledger
+            .observed_paths
+            .iter()
+            .filter_map(|candidate| {
+                let path = PathBuf::from(candidate);
+                let exists = if path.is_absolute() {
+                    path.is_file()
+                } else {
+                    self.config.project_root.join(&path).is_file()
+                };
+                if exists {
+                    Some(candidate.replace('\\', "/"))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        files.sort();
+        files.dedup();
+        files.truncate(limit);
+        files
+    }
+
+    fn baseline_steps_for_phase(
+        &self,
+        phase: AnalysisPhase,
+        ledger: &AnalysisLedger,
+    ) -> Vec<(String, serde_json::Value)> {
+        let mut steps = vec![
+            ("Cwd".to_string(), serde_json::json!({})),
+            ("LS".to_string(), serde_json::json!({ "path": "." })),
+        ];
+
+        match phase {
+            AnalysisPhase::StructureDiscovery => {
+                steps.push((
+                    "Glob".to_string(),
+                    serde_json::json!({ "pattern": "pyproject.toml", "path": "." }),
+                ));
+                steps.push((
+                    "Glob".to_string(),
+                    serde_json::json!({ "pattern": "README*.md", "path": "." }),
+                ));
+                steps.push((
+                    "Glob".to_string(),
+                    serde_json::json!({ "pattern": "package.json", "path": "." }),
+                ));
+                steps.push((
+                    "Glob".to_string(),
+                    serde_json::json!({ "pattern": "Cargo.toml", "path": "." }),
+                ));
+
+                let files = self.existing_analysis_files(
+                    &[
+                        "pyproject.toml",
+                        "README.md",
+                        "README_zh.md",
+                        "README_zh-CN.md",
+                        "package.json",
+                        "desktop/package.json",
+                        "desktop/src-tauri/Cargo.toml",
+                        "mcp_server/server.py",
+                        "src/plan_cascade/cli/main.py",
+                    ],
+                    ANALYSIS_BASELINE_MAX_READ_FILES,
+                );
+                for file in files {
+                    steps.push((
+                        "Read".to_string(),
+                        serde_json::json!({
+                            "file_path": file,
+                            "offset": 1,
+                            "limit": 180
+                        }),
+                    ));
+                }
+            }
+            AnalysisPhase::ArchitectureTrace => {
+                steps.push((
+                    "Grep".to_string(),
+                    serde_json::json!({
+                        "pattern": "(class\\s+|def\\s+|fn\\s+|impl\\s+|tauri::command|FastMCP)",
+                        "path": ".",
+                        "output_mode": "files_with_matches",
+                        "head_limit": 80
+                    }),
+                ));
+                let mut files = self.existing_analysis_files(
+                    &[
+                        "src/plan_cascade/cli/main.py",
+                        "src/plan_cascade/core/orchestrator.py",
+                        "src/plan_cascade/backends/factory.py",
+                        "mcp_server/server.py",
+                        "desktop/src-tauri/src/main.rs",
+                        "desktop/src/main.tsx",
+                        "desktop/src/store/execution.ts",
+                    ],
+                    ANALYSIS_BASELINE_MAX_READ_FILES,
+                );
+                files.extend(self.existing_observed_files(ledger, 2));
+                files.sort();
+                files.dedup();
+                files.truncate(ANALYSIS_BASELINE_MAX_READ_FILES);
+                for file in files {
+                    steps.push((
+                        "Read".to_string(),
+                        serde_json::json!({
+                            "file_path": file,
+                            "offset": 1,
+                            "limit": 180
+                        }),
+                    ));
+                }
+            }
+            AnalysisPhase::ConsistencyCheck => {
+                steps.push((
+                    "Grep".to_string(),
+                    serde_json::json!({
+                        "pattern": "(?i)version|__version__|\\\"version\\\"|tauri|orchestrator",
+                        "path": ".",
+                        "output_mode": "files_with_matches",
+                        "head_limit": 80
+                    }),
+                ));
+                let mut files = self.existing_observed_files(ledger, ANALYSIS_BASELINE_MAX_READ_FILES);
+                if files.len() < 2 {
+                    files.extend(self.existing_analysis_files(
+                        &[
+                            "pyproject.toml",
+                            "README.md",
+                            "src/plan_cascade/__init__.py",
+                            "mcp_server/server.py",
+                            "desktop/src-tauri/Cargo.toml",
+                        ],
+                        ANALYSIS_BASELINE_MAX_READ_FILES,
+                    ));
+                }
+                files.sort();
+                files.dedup();
+                files.truncate(ANALYSIS_BASELINE_MAX_READ_FILES);
+                for file in files {
+                    steps.push((
+                        "Read".to_string(),
+                        serde_json::json!({
+                            "file_path": file,
+                            "offset": 1,
+                            "limit": 180
+                        }),
+                    ));
+                }
+            }
+        }
+
+        steps
+    }
+
+    async fn execute_baseline_tool_step(
+        &self,
+        phase: AnalysisPhase,
+        step_index: usize,
+        tool_name: &str,
+        args: &serde_json::Value,
+        capture: &mut PhaseCapture,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+        run_handle: Option<&AnalysisRunHandle>,
+    ) {
+        let tool_id = format!(
+            "analysis_baseline_{}_{}_{}",
+            phase.id(),
+            step_index + 1,
+            tool_name.to_ascii_lowercase()
+        );
+        let (effective_tool_name, effective_args) =
+            match prepare_tool_call_for_execution(tool_name, args, Some(phase.id())) {
+                Ok(prepared) => prepared,
+                Err(err) => {
+                    capture
+                        .warnings
+                        .push(format!("{} baseline step dropped: {}", phase.title(), err));
+                    return;
+                }
+            };
+
+        let start_event = UnifiedStreamEvent::ToolStart {
+            tool_id: tool_id.clone(),
+            tool_name: effective_tool_name.clone(),
+            arguments: Some(effective_args.to_string()),
+        };
+        let _ = tx.send(start_event.clone()).await;
+        self.observe_analysis_event(phase, &start_event, capture, tx)
+            .await;
+
+        let result = self
+            .tool_executor
+            .execute(&effective_tool_name, &effective_args)
+            .await;
+        let result_event = UnifiedStreamEvent::ToolResult {
+            tool_id: tool_id.clone(),
+            result: if result.success {
+                result.output.clone()
+            } else {
+                None
+            },
+            error: if result.success {
+                None
+            } else {
+                result.error.clone()
+            },
+        };
+        let _ = tx.send(result_event.clone()).await;
+        self.observe_analysis_event(phase, &result_event, capture, tx)
+            .await;
+
+        if let Some(run) = run_handle {
+            let primary_path = extract_primary_path_from_arguments(&effective_args);
+            let summary = summarize_tool_activity(
+                &effective_tool_name,
+                Some(&effective_args),
+                primary_path.as_deref(),
+            );
+            let record = EvidenceRecord {
+                evidence_id: format!(
+                    "{}-baseline-{}-{}",
+                    phase.id(),
+                    step_index + 1,
+                    chrono::Utc::now().timestamp_millis()
+                ),
+                phase_id: phase.id().to_string(),
+                sub_agent_id: "baseline".to_string(),
+                tool_name: Some(effective_tool_name.clone()),
+                file_path: primary_path,
+                summary: truncate_for_log(&summary, 400),
+                success: result.success,
+                timestamp: chrono::Utc::now().timestamp(),
+            };
+            let _ = run.append_evidence(&record);
+        }
+    }
+
+    async fn collect_phase_baseline_capture(
+        &self,
+        phase: AnalysisPhase,
+        ledger: &AnalysisLedger,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+        run_handle: Option<&AnalysisRunHandle>,
+    ) -> PhaseCapture {
+        let mut capture = PhaseCapture::default();
+        let steps = self.baseline_steps_for_phase(phase, ledger);
+        if steps.is_empty() {
+            return capture;
+        }
+
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                phase_id: phase.id().to_string(),
+                message: format!("Running baseline evidence pass ({} steps)", steps.len()),
+            })
+            .await;
+
+        for (idx, (tool_name, args)) in steps.iter().enumerate() {
+            self.execute_baseline_tool_step(
+                phase,
+                idx,
+                tool_name,
+                args,
+                &mut capture,
+                tx,
+                run_handle,
+            )
+            .await;
+        }
+
+        capture
+    }
+
+    async fn run_analysis_phase_layered(
+        &self,
+        phase: AnalysisPhase,
+        base_prompt: String,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+        total_usage: &mut UsageStats,
+        total_iterations: &mut u32,
+        ledger: &mut AnalysisLedger,
+        run_handle: Option<&AnalysisRunHandle>,
+    ) -> String {
+        let policy = AnalysisPhasePolicy::for_phase(phase);
+        let mut layer_summaries = Vec::new();
+        let mut sub_agent_results = Vec::<SubAgentResultRecord>::new();
+        let mut aggregate_capture = PhaseCapture::default();
+        let mut aggregate_usage = UsageStats::default();
+        let mut aggregate_iterations = 0u32;
+
+        let layers = phase.layers();
+        let upstream_summary = ledger
+            .phase_summaries
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "(none)".to_string());
+        let baseline_capture = self
+            .collect_phase_baseline_capture(phase, ledger, tx, run_handle)
+            .await;
+        aggregate_capture.tool_calls += baseline_capture.tool_calls;
+        aggregate_capture.read_calls += baseline_capture.read_calls;
+        aggregate_capture.grep_calls += baseline_capture.grep_calls;
+        aggregate_capture.glob_calls += baseline_capture.glob_calls;
+        aggregate_capture.ls_calls += baseline_capture.ls_calls;
+        aggregate_capture.cwd_calls += baseline_capture.cwd_calls;
+        aggregate_capture
+            .observed_paths
+            .extend(baseline_capture.observed_paths.iter().cloned());
+        aggregate_capture
+            .evidence_lines
+            .extend(baseline_capture.evidence_lines.iter().cloned());
+        aggregate_capture
+            .warnings
+            .extend(baseline_capture.warnings.iter().cloned());
+
+        let baseline_digest = baseline_capture
+            .evidence_lines
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let worker_base_prompt = if baseline_digest.is_empty() {
+            base_prompt.clone()
+        } else {
+            format!(
+                "{}\n\nVerified baseline evidence (do not re-scan blindly):\n{}",
+                base_prompt, baseline_digest
+            )
+        };
+
+        let plan = build_phase_plan(
+            phase.id(),
+            phase.title(),
+            phase.objective(),
+            layers,
+            &worker_base_prompt,
+            &analysis_scope_guidance(&worker_base_prompt),
+            &upstream_summary,
+        );
+
+        if let Some(run) = run_handle {
+            let _ = run.record_phase_plan(plan.clone());
+        }
+        if let Some(run) = run_handle {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisPhasePlanned {
+                    run_id: run.run_id().to_string(),
+                    phase_id: plan.phase_id.clone(),
+                    title: plan.title.clone(),
+                    objective: plan.objective.clone(),
+                    worker_count: plan.workers.len(),
+                    layers: plan.layers.clone(),
+                })
+                .await;
+        }
+
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisPhaseStart {
+                phase_id: phase.id().to_string(),
+                title: phase.title().to_string(),
+                objective: phase.objective().to_string(),
+            })
+            .await;
+
+        for worker in &plan.workers {
+            if let Some(run) = run_handle {
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisSubAgentPlanned {
+                        run_id: run.run_id().to_string(),
+                        phase_id: phase.id().to_string(),
+                        sub_agent_id: worker.sub_agent_id.clone(),
+                        role: worker.role.clone(),
+                        objective: worker.objective.clone(),
+                    })
+                    .await;
+            }
+        }
+
+        for worker in &plan.workers {
+            if let Some(run) = run_handle {
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisSubAgentProgress {
+                        run_id: run.run_id().to_string(),
+                        phase_id: phase.id().to_string(),
+                        sub_agent_id: worker.sub_agent_id.clone(),
+                        status: "started".to_string(),
+                        message: worker.objective.clone(),
+                    })
+                    .await;
+            }
+            let _ = tx
+                .send(UnifiedStreamEvent::SubAgentStart {
+                    sub_agent_id: worker.sub_agent_id.clone(),
+                    prompt: worker.objective.clone(),
+                    task_type: Some(phase.task_type().to_string()),
+                })
+                .await;
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                    phase_id: phase.id().to_string(),
+                    message: format!("Running {} ({})", worker.sub_agent_id, worker.role),
+                })
+                .await;
+
+            let prompt = format!(
+                "{}\n\n\
+                 {}\n\n\
+                 Execution constraints for this worker:\n\
+                 - Stop once the objective is satisfied.\n\
+                 - Avoid broad rescans of previously explored areas.\n\
+                 - Produce concise, evidence-backed findings only.",
+                worker_base_prompt, worker.prompt_suffix
+            );
+            let worker_phase_id = format!("{}:{}", phase.id(), worker.sub_agent_id);
+            let outcome = self
+                .run_analysis_phase(phase, prompt, tx, Some(worker_phase_id), false, false)
+                .await;
+            merge_usage(&mut aggregate_usage, &outcome.usage);
+            aggregate_iterations += outcome.iterations;
+
+            aggregate_capture.tool_calls += outcome.capture.tool_calls;
+            aggregate_capture.read_calls += outcome.capture.read_calls;
+            aggregate_capture.grep_calls += outcome.capture.grep_calls;
+            aggregate_capture.glob_calls += outcome.capture.glob_calls;
+            aggregate_capture.ls_calls += outcome.capture.ls_calls;
+            aggregate_capture.cwd_calls += outcome.capture.cwd_calls;
+            aggregate_capture
+                .observed_paths
+                .extend(outcome.capture.observed_paths.iter().cloned());
+            aggregate_capture
+                .evidence_lines
+                .extend(outcome.capture.evidence_lines.iter().cloned());
+            aggregate_capture
+                .warnings
+                .extend(outcome.capture.warnings.iter().cloned());
+
+            if let Some(summary) = outcome.response.as_ref().filter(|s| !s.trim().is_empty()) {
+                layer_summaries.push(format!(
+                    "### {} - {}\n{}",
+                    phase.title(),
+                    worker.objective,
+                    truncate_for_log(summary.trim(), MAX_ANALYSIS_PHASE_SUMMARY_CHARS)
+                ));
+            }
+
+            if let Some(run) = run_handle {
+                for (idx, evidence_line) in outcome.capture.evidence_lines.iter().enumerate() {
+                    let file_path = extract_path_candidates_from_text(evidence_line)
+                        .into_iter()
+                        .next();
+                    let record = EvidenceRecord {
+                        evidence_id: format!(
+                            "{}-{}-{}-{}",
+                            phase.id(),
+                            worker.layer_index,
+                            idx + 1,
+                            chrono::Utc::now().timestamp_millis()
+                        ),
+                        phase_id: phase.id().to_string(),
+                        sub_agent_id: worker.sub_agent_id.clone(),
+                        tool_name: None,
+                        file_path,
+                        summary: truncate_for_log(evidence_line, 400),
+                        success: true,
+                        timestamp: chrono::Utc::now().timestamp(),
+                    };
+                    let _ = run.append_evidence(&record);
+                }
+            }
+
+            let status_text = match outcome.status {
+                AnalysisPhaseStatus::Passed => "passed",
+                AnalysisPhaseStatus::Partial => "partial",
+                AnalysisPhaseStatus::Failed => "failed",
+            }
+            .to_string();
+            let usage_json = serde_json::json!({
+                "input_tokens": outcome.usage.input_tokens,
+                "output_tokens": outcome.usage.output_tokens,
+                "iterations": outcome.iterations,
+            });
+            let metrics_json = serde_json::json!({
+                "tool_calls": outcome.capture.tool_calls,
+                "read_calls": outcome.capture.read_calls,
+                "grep_calls": outcome.capture.grep_calls,
+                "glob_calls": outcome.capture.glob_calls,
+                "ls_calls": outcome.capture.ls_calls,
+                "cwd_calls": outcome.capture.cwd_calls,
+                "observed_paths": outcome.capture.observed_paths.len(),
+            });
+            sub_agent_results.push(SubAgentResultRecord {
+                sub_agent_id: worker.sub_agent_id.clone(),
+                role: worker.role.clone(),
+                status: status_text.clone(),
+                summary: outcome
+                    .response
+                    .as_ref()
+                    .map(|text| truncate_for_log(text, 1200)),
+                usage: usage_json.clone(),
+                metrics: metrics_json.clone(),
+                error: outcome.error.clone(),
+            });
+
+            let _ = tx
+                .send(UnifiedStreamEvent::SubAgentEnd {
+                    sub_agent_id: worker.sub_agent_id.clone(),
+                    success: !matches!(outcome.status, AnalysisPhaseStatus::Failed),
+                    usage: usage_json,
+                })
+                .await;
+            if let Some(run) = run_handle {
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisSubAgentProgress {
+                        run_id: run.run_id().to_string(),
+                        phase_id: phase.id().to_string(),
+                        sub_agent_id: worker.sub_agent_id.clone(),
+                        status: status_text,
+                        message: outcome
+                            .error
+                            .clone()
+                            .unwrap_or_else(|| "completed".to_string()),
+                    })
+                    .await;
+            }
+
+            if analysis_layer_goal_satisfied(phase, &aggregate_capture)
+                && !matches!(outcome.status, AnalysisPhaseStatus::Failed)
+            {
+                break;
+            }
+        }
+
+        let phase_gate_failures = evaluate_analysis_quota(&aggregate_capture, &policy.quota);
+        let has_worker_output = !layer_summaries.is_empty();
+        let has_worker_success = sub_agent_results
+            .iter()
+            .any(|item| item.status == "passed" || item.status == "partial");
+        let phase_status = if phase_gate_failures.is_empty() && has_worker_output {
+            AnalysisPhaseStatus::Passed
+        } else if has_worker_success || analysis_layer_goal_satisfied(phase, &aggregate_capture) {
+            AnalysisPhaseStatus::Partial
+        } else {
+            AnalysisPhaseStatus::Failed
+        };
+
+        let phase_summary = if layer_summaries.is_empty() {
+            format!("{} produced no summary.", phase.title())
+        } else {
+            layer_summaries.join("\n\n")
+        };
+        let phase_error = if matches!(phase_status, AnalysisPhaseStatus::Failed) {
+            Some(format!(
+                "{} workers failed to produce usable evidence",
+                phase.title()
+            ))
+        } else {
+            None
+        };
+        let aggregated_outcome = AnalysisPhaseOutcome {
+            phase,
+            response: Some(phase_summary.clone()),
+            usage: aggregate_usage.clone(),
+            iterations: aggregate_iterations,
+            status: phase_status,
+            error: phase_error.clone(),
+            capture: aggregate_capture.clone(),
+        };
+
+        merge_usage(total_usage, &aggregate_usage);
+        *total_iterations += aggregate_iterations;
+        ledger.record(&aggregated_outcome);
+
+        let phase_usage = serde_json::json!({
+            "input_tokens": aggregate_usage.input_tokens,
+            "output_tokens": aggregate_usage.output_tokens,
+            "iterations": aggregate_iterations,
+        });
+        let phase_metrics = serde_json::json!({
+            "tool_calls": aggregate_capture.tool_calls,
+            "read_calls": aggregate_capture.read_calls,
+            "grep_calls": aggregate_capture.grep_calls,
+            "glob_calls": aggregate_capture.glob_calls,
+            "ls_calls": aggregate_capture.ls_calls,
+            "cwd_calls": aggregate_capture.cwd_calls,
+            "observed_paths": aggregate_capture.observed_paths.len(),
+            "workers": sub_agent_results.len(),
+        });
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisPhaseEnd {
+                phase_id: phase.id().to_string(),
+                success: !matches!(phase_status, AnalysisPhaseStatus::Failed),
+                usage: phase_usage.clone(),
+                metrics: phase_metrics.clone(),
+            })
+            .await;
+
+        if !phase_gate_failures.is_empty() {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisGateFailure {
+                    phase_id: phase.id().to_string(),
+                    attempt: 1,
+                    reasons: phase_gate_failures,
+                })
+                .await;
+        }
+
+        if let Some(run) = run_handle {
+            let summary_path = run.write_phase_summary(phase.id(), &phase_summary).ok();
+            let _ = run.record_phase_result(AnalysisPhaseResultRecord {
+                phase_id: phase.id().to_string(),
+                title: phase.title().to_string(),
+                status: match phase_status {
+                    AnalysisPhaseStatus::Passed => "passed",
+                    AnalysisPhaseStatus::Partial => "partial",
+                    AnalysisPhaseStatus::Failed => "failed",
+                }
+                .to_string(),
+                summary_path,
+                usage: phase_usage,
+                metrics: phase_metrics,
+                warnings: aggregate_capture.warnings.clone(),
+                sub_agents: sub_agent_results,
+            });
+            let coverage = build_coverage_metrics(ledger);
+            let _ = run.update_coverage(coverage.clone());
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisCoverageUpdated {
+                    run_id: run.run_id().to_string(),
+                    metrics: serde_json::to_value(&coverage).unwrap_or_default(),
+                })
+                .await;
+        }
+
+        phase_summary
+    }
+
     async fn run_analysis_phase(
         &self,
         phase: AnalysisPhase,
         prompt: String,
         tx: &mpsc::Sender<UnifiedStreamEvent>,
+        phase_event_id: Option<String>,
+        emit_lifecycle_events: bool,
+        enforce_quota_gate: bool,
     ) -> AnalysisPhaseOutcome {
-        let phase_id = phase.id().to_string();
+        let phase_id = phase_event_id.unwrap_or_else(|| phase.id().to_string());
         let policy = AnalysisPhasePolicy::for_phase(phase);
-        let _ = tx
-            .send(UnifiedStreamEvent::AnalysisPhaseStart {
-                phase_id: phase_id.clone(),
-                title: phase.title().to_string(),
-                objective: phase.objective().to_string(),
-            })
-            .await;
-        let _ = tx
-            .send(UnifiedStreamEvent::SubAgentStart {
-                sub_agent_id: phase_id.clone(),
-                prompt: format!("{}: {}", phase.title(), phase.objective()),
-                task_type: Some(phase.task_type().to_string()),
-            })
-            .await;
+        let phase_token_budget = analysis_phase_token_budget(self.provider.context_window(), phase);
+        if emit_lifecycle_events {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisPhaseStart {
+                    phase_id: phase_id.clone(),
+                    title: phase.title().to_string(),
+                    objective: phase.objective().to_string(),
+                })
+                .await;
+            let _ = tx
+                .send(UnifiedStreamEvent::SubAgentStart {
+                    sub_agent_id: phase_id.clone(),
+                    prompt: format!("{}: {}", phase.title(), phase.objective()),
+                    task_type: Some(phase.task_type().to_string()),
+                })
+                .await;
+        }
 
         let tools = get_basic_tool_definitions();
         let mut total_usage = UsageStats::default();
@@ -2148,7 +3113,7 @@ impl OrchestratorService {
         let mut aggregate_capture = PhaseCapture::default();
         let mut final_response: Option<String> = None;
         let mut final_error: Option<String> = None;
-        let mut phase_success = false;
+        let mut phase_status = AnalysisPhaseStatus::Failed;
         let mut gate_failure_history: Vec<String> = Vec::new();
 
         for attempt in 1..=policy.max_attempts {
@@ -2179,10 +3144,10 @@ impl OrchestratorService {
                     &gate_failure_history,
                 )),
                 max_iterations: phase.max_iterations(),
-                max_total_tokens: sub_agent_token_budget(self.provider.context_window()),
+                max_total_tokens: phase_token_budget,
                 project_root: self.config.project_root.clone(),
                 streaming: true,
-                enable_compaction: false,
+                enable_compaction: true,
             };
             let phase_agent =
                 OrchestratorService::new_sub_agent(phase_config, self.cancellation_token.clone());
@@ -2196,7 +3161,7 @@ impl OrchestratorService {
                 fallback_tool_format_mode: FallbackToolFormatMode::Strict,
                 temperature_override: Some(policy.temperature_override),
                 reasoning_effort_override: None,
-                analysis_phase: Some(phase.id().to_string()),
+                analysis_phase: Some(phase_id.clone()),
             };
             let force_prompt_fallback = !self.provider.supports_tools();
 
@@ -2252,14 +3217,63 @@ impl OrchestratorService {
                 .warnings
                 .extend(attempt_capture.warnings.iter().cloned());
 
-            let gate_failures = evaluate_analysis_quota(&attempt_capture, &policy.quota);
-            let attempt_success = attempt_result.success && gate_failures.is_empty();
+            let gate_failures = if enforce_quota_gate {
+                evaluate_analysis_quota(&attempt_capture, &policy.quota)
+            } else {
+                Vec::new()
+            };
+            let attempt_token_usage = attempt_result.usage.total_tokens();
+            let token_pressure_threshold = (phase_token_budget as f64 * 0.85) as u32;
+            let token_pressure = attempt_token_usage >= token_pressure_threshold
+                || attempt_result
+                    .error
+                    .as_deref()
+                    .map(|e| e.to_lowercase().contains("token budget"))
+                    .unwrap_or(false);
+            let has_min_evidence = if enforce_quota_gate {
+                attempt_capture.read_calls >= 1
+                    && attempt_capture.tool_calls >= 2
+                    && !attempt_capture.observed_paths.is_empty()
+            } else {
+                attempt_capture.tool_calls >= 1 || !attempt_capture.observed_paths.is_empty()
+            };
+            let hard_gate_failure = if enforce_quota_gate {
+                attempt_capture.read_calls == 0
+                    || attempt_capture.tool_calls == 0
+                    || attempt_capture.observed_paths.is_empty()
+            } else {
+                false
+            };
+
+            let has_text_response = attempt_result
+                .response
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            let soft_success = if enforce_quota_gate {
+                !attempt_result.success
+                    && gate_failures.is_empty()
+                    && has_min_evidence
+                    && has_text_response
+            } else {
+                has_text_response && !attempt_result.success
+            };
+            let attempt_success =
+                (attempt_result.success && gate_failures.is_empty()) || soft_success;
+            let attempt_partial = !attempt_success
+                && has_min_evidence
+                && (!hard_gate_failure && (token_pressure || attempt == policy.max_attempts));
             final_response = attempt_result.response.clone().or(final_response);
             if !attempt_success {
                 if let Some(err) = attempt_result.error.as_ref() {
                     gate_failure_history.push(format!("attempt {} error: {}", attempt, err));
                 }
                 gate_failure_history.extend(gate_failures.iter().cloned());
+            } else if soft_success {
+                gate_failure_history.push(format!(
+                    "attempt {} accepted with soft success after budget pressure",
+                    attempt
+                ));
             }
 
             let attempt_metrics = serde_json::json!({
@@ -2270,6 +3284,8 @@ impl OrchestratorService {
                 "ls_calls": attempt_capture.ls_calls,
                 "cwd_calls": attempt_capture.cwd_calls,
                 "observed_paths": attempt_capture.observed_paths.len(),
+                "attempt_tokens": attempt_token_usage,
+                "token_budget": phase_token_budget,
             });
 
             let _ = tx
@@ -2283,7 +3299,32 @@ impl OrchestratorService {
                 .await;
 
             if attempt_success {
-                phase_success = true;
+                phase_status = AnalysisPhaseStatus::Passed;
+                break;
+            }
+
+            if attempt_partial {
+                phase_status = AnalysisPhaseStatus::Partial;
+                let partial_reasons = if gate_failures.is_empty() {
+                    vec!["Phase reached token/attempt budget with sufficient evidence".to_string()]
+                } else {
+                    gate_failures.iter().take(3).cloned().collect()
+                };
+                final_error = Some(if token_pressure {
+                    format!(
+                        "Phase reached token budget pressure ({}/{}) and returned partial evidence",
+                        attempt_token_usage, phase_token_budget
+                    )
+                } else {
+                    "Phase returned partial evidence after exhausting retry budget".to_string()
+                });
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisPhaseDegraded {
+                        phase_id: phase_id.clone(),
+                        attempt,
+                        reasons: partial_reasons,
+                    })
+                    .await;
                 break;
             }
 
@@ -2298,7 +3339,7 @@ impl OrchestratorService {
             }
         }
 
-        if !phase_success && final_error.is_none() {
+        if matches!(phase_status, AnalysisPhaseStatus::Failed) && final_error.is_none() {
             final_error = Some(if gate_failure_history.is_empty() {
                 "Analysis phase failed with insufficient evidence".to_string()
             } else {
@@ -2323,35 +3364,41 @@ impl OrchestratorService {
             "cwd_calls": aggregate_capture.cwd_calls,
             "observed_paths": aggregate_capture.observed_paths.len(),
             "attempts": policy.max_attempts,
+            "token_budget": phase_token_budget,
         });
         let usage = serde_json::json!({
             "input_tokens": total_usage.input_tokens,
             "output_tokens": total_usage.output_tokens,
             "iterations": total_iterations,
         });
+        let phase_success = matches!(phase_status, AnalysisPhaseStatus::Passed);
+        let phase_partial = matches!(phase_status, AnalysisPhaseStatus::Partial);
+        let sub_agent_success = phase_success || phase_partial;
 
-        let _ = tx
-            .send(UnifiedStreamEvent::AnalysisPhaseEnd {
-                phase_id: phase_id.clone(),
-                success: phase_success,
-                usage: usage.clone(),
-                metrics,
-            })
-            .await;
-        let _ = tx
-            .send(UnifiedStreamEvent::SubAgentEnd {
-                sub_agent_id: phase_id,
-                success: phase_success,
-                usage,
-            })
-            .await;
+        if emit_lifecycle_events {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisPhaseEnd {
+                    phase_id: phase_id.clone(),
+                    success: sub_agent_success,
+                    usage: usage.clone(),
+                    metrics,
+                })
+                .await;
+            let _ = tx
+                .send(UnifiedStreamEvent::SubAgentEnd {
+                    sub_agent_id: phase_id,
+                    success: sub_agent_success,
+                    usage,
+                })
+                .await;
+        }
 
         AnalysisPhaseOutcome {
             phase,
             response: final_response,
             usage: total_usage,
             iterations: total_iterations,
-            success: phase_success,
+            status: phase_status,
             error: final_error,
             capture: aggregate_capture,
         }
@@ -2366,10 +3413,83 @@ impl OrchestratorService {
     ) {
         match event {
             UnifiedStreamEvent::ToolStart {
+                tool_id,
                 tool_name,
                 arguments,
                 ..
             } => {
+                let args_json = parse_tool_arguments(arguments);
+                let pending = capture
+                    .pending_tools
+                    .entry(tool_id.clone())
+                    .or_insert_with(PendingAnalysisToolCall::default);
+                pending.tool_name = tool_name.clone();
+                if args_json.is_some() {
+                    pending.arguments = args_json;
+                }
+            }
+            UnifiedStreamEvent::ToolComplete {
+                tool_id,
+                tool_name,
+                arguments,
+            } => {
+                let args_json = serde_json::from_str::<serde_json::Value>(arguments).ok();
+                let pending = capture
+                    .pending_tools
+                    .entry(tool_id.clone())
+                    .or_insert_with(PendingAnalysisToolCall::default);
+                pending.tool_name = tool_name.clone();
+                if args_json.is_some() {
+                    pending.arguments = args_json;
+                }
+            }
+            UnifiedStreamEvent::ToolResult { tool_id, error, .. } => {
+                let pending = capture.pending_tools.remove(tool_id);
+                let (tool_name, args_json) = match pending {
+                    Some(p) => (p.tool_name, p.arguments),
+                    None => {
+                        if let Some(err) = error.as_ref() {
+                            let compact_err = truncate_for_log(err, 180);
+                            capture.warnings.push(format!(
+                                "{} tool error: {}",
+                                phase.title(),
+                                compact_err
+                            ));
+                        }
+                        return;
+                    }
+                };
+
+                let is_valid = is_valid_analysis_tool_start(&tool_name, args_json.as_ref());
+                let primary_path = args_json
+                    .as_ref()
+                    .and_then(extract_primary_path_from_arguments);
+                let summary = summarize_tool_activity(
+                    &tool_name,
+                    args_json.as_ref(),
+                    primary_path.as_deref(),
+                );
+
+                if let Some(err) = error.as_ref() {
+                    let compact_err = truncate_for_log(err, 180);
+                    capture.warnings.push(format!(
+                        "{} tool error ({}): {}",
+                        phase.title(),
+                        summary,
+                        compact_err
+                    ));
+                    return;
+                }
+
+                if !is_valid {
+                    capture.warnings.push(format!(
+                        "{} invalid tool call ignored for evidence: {}",
+                        phase.title(),
+                        summary
+                    ));
+                    return;
+                }
+
                 capture.tool_calls += 1;
                 match tool_name.as_str() {
                     "Read" => capture.read_calls += 1,
@@ -2380,10 +3500,6 @@ impl OrchestratorService {
                     _ => {}
                 }
 
-                let args_json = parse_tool_arguments(arguments);
-                let primary_path = args_json
-                    .as_ref()
-                    .and_then(extract_primary_path_from_arguments);
                 if let Some(path) = primary_path.as_ref() {
                     capture.observed_paths.insert(path.clone());
                 }
@@ -2393,9 +3509,7 @@ impl OrchestratorService {
                     }
                 }
 
-                let summary =
-                    summarize_tool_activity(tool_name, args_json.as_ref(), primary_path.as_deref());
-                if capture.evidence_lines.len() < 220 {
+                if capture.evidence_lines.len() < MAX_ANALYSIS_EVIDENCE_LINES {
                     capture
                         .evidence_lines
                         .push(format!("- [{}] {}", phase.id(), summary));
@@ -2404,29 +3518,12 @@ impl OrchestratorService {
                 let _ = tx
                     .send(UnifiedStreamEvent::AnalysisEvidence {
                         phase_id: phase.id().to_string(),
-                        tool_name: tool_name.clone(),
+                        tool_name,
                         file_path: primary_path,
                         summary,
-                        success: None,
+                        success: Some(true),
                     })
                     .await;
-            }
-            UnifiedStreamEvent::ToolResult { error, .. } => {
-                if let Some(err) = error.as_ref() {
-                    let compact_err = truncate_for_log(err, 180);
-                    capture
-                        .warnings
-                        .push(format!("{} tool error: {}", phase.title(), compact_err));
-                    let _ = tx
-                        .send(UnifiedStreamEvent::AnalysisEvidence {
-                            phase_id: phase.id().to_string(),
-                            tool_name: "tool_result".to_string(),
-                            file_path: None,
-                            summary: format!("Tool error: {}", compact_err),
-                            success: Some(false),
-                        })
-                        .await;
-                }
             }
             UnifiedStreamEvent::Error { message, .. } => {
                 let compact = truncate_for_log(message, 200);
@@ -2448,12 +3545,29 @@ impl OrchestratorService {
     ///
     /// Compaction triggers when the last LLM response's input_tokens exceeds 60% of max_total_tokens.
     /// This uses per-call input_tokens (not cumulative) since it reflects the actual current context size.
-    fn should_compact(&self, last_input_tokens: u32) -> bool {
+    fn should_compact(&self, last_input_tokens: u32, aggressive: bool) -> bool {
         if !self.config.enable_compaction {
             return false;
         }
-        let threshold = (self.config.max_total_tokens as f64 * 0.6) as u32;
+        let ratio = if aggressive { 0.35 } else { 0.6 };
+        let threshold = (self.config.max_total_tokens as f64 * ratio) as u32;
         last_input_tokens > threshold
+    }
+
+    /// Deterministically trim analysis conversation history without making an extra LLM call.
+    /// Returns the number of removed messages.
+    fn trim_messages_for_analysis(messages: &mut Vec<Message>) -> usize {
+        let keep_head = 1usize;
+        let keep_tail = 8usize;
+        if messages.len() <= keep_head + keep_tail {
+            return 0;
+        }
+        let removable = messages.len().saturating_sub(keep_head + keep_tail);
+        let to_remove = removable.min(4).max(1);
+        let start = keep_head;
+        let end = keep_head + to_remove;
+        messages.drain(start..end);
+        to_remove
     }
 
     /// Compact conversation messages by summarizing older messages while preserving recent ones.
@@ -2856,8 +3970,17 @@ impl OrchestratorService {
     }
 }
 
-fn parse_fallback_tool_calls(response: &LlmResponse) -> Vec<ParsedToolCall> {
-    let mut calls = Vec::new();
+#[derive(Debug, Clone, Default)]
+struct ParsedFallbackCalls {
+    calls: Vec<ParsedToolCall>,
+    dropped_reasons: Vec<String>,
+}
+
+fn parse_fallback_tool_calls(
+    response: &LlmResponse,
+    analysis_phase: Option<&str>,
+) -> ParsedFallbackCalls {
+    let mut parsed = ParsedFallbackCalls::default();
     let mut seen = HashSet::new();
 
     for text in [response.content.as_deref(), response.thinking.as_deref()]
@@ -2865,14 +3988,192 @@ fn parse_fallback_tool_calls(response: &LlmResponse) -> Vec<ParsedToolCall> {
         .flatten()
     {
         for call in parse_tool_calls(text) {
-            let signature = format!("{}:{}", call.tool_name, call.arguments);
-            if seen.insert(signature) {
-                calls.push(call);
+            match prepare_tool_call_for_execution(&call.tool_name, &call.arguments, analysis_phase)
+            {
+                Ok((tool_name, arguments)) => {
+                    let signature = format!("{}:{}", tool_name, arguments);
+                    if seen.insert(signature) {
+                        parsed.calls.push(ParsedToolCall {
+                            tool_name,
+                            arguments,
+                            raw_text: call.raw_text,
+                        });
+                    }
+                }
+                Err(reason) => parsed.dropped_reasons.push(reason),
             }
         }
     }
 
-    calls
+    parsed
+}
+
+fn canonical_tool_name(name: &str) -> Option<&'static str> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "read" => Some("Read"),
+        "write" => Some("Write"),
+        "edit" => Some("Edit"),
+        "bash" => Some("Bash"),
+        "glob" => Some("Glob"),
+        "grep" => Some("Grep"),
+        "ls" => Some("LS"),
+        "cwd" => Some("Cwd"),
+        "task" => Some("Task"),
+        "webfetch" => Some("WebFetch"),
+        "websearch" => Some("WebSearch"),
+        "notebookedit" => Some("NotebookEdit"),
+        _ => None,
+    }
+}
+
+fn analysis_excluded_roots() -> &'static [&'static str] {
+    &[
+        ".git",
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        "coverage",
+        ".venv",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "claude-code",
+        "codex",
+    ]
+}
+
+fn is_analysis_excluded_path(path: &str) -> bool {
+    let normalized = normalize_candidate_path(path).unwrap_or_else(|| path.replace('\\', "/"));
+    normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .any(|segment| analysis_excluded_roots().contains(&segment))
+}
+
+fn ensure_object_arguments(
+    arguments: &serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    arguments
+        .as_object()
+        .cloned()
+        .unwrap_or_else(serde_json::Map::new)
+}
+
+fn has_nonempty_string_arg(
+    map: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<String> {
+    map.get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn prepare_tool_call_for_execution(
+    tool_name: &str,
+    arguments: &serde_json::Value,
+    analysis_phase: Option<&str>,
+) -> Result<(String, serde_json::Value), String> {
+    let canonical = canonical_tool_name(tool_name)
+        .ok_or_else(|| format!("Unsupported tool name '{}'", tool_name.trim()))?;
+    let strict_analysis = analysis_phase.is_some();
+    let mut map = ensure_object_arguments(arguments);
+
+    match canonical {
+        "Cwd" => {}
+        "LS" => {
+            if has_nonempty_string_arg(&map, "path").is_none() {
+                map.insert(
+                    "path".to_string(),
+                    serde_json::Value::String(".".to_string()),
+                );
+            }
+        }
+        "Glob" => {
+            if has_nonempty_string_arg(&map, "pattern").is_none() {
+                map.insert(
+                    "pattern".to_string(),
+                    serde_json::Value::String(if strict_analysis {
+                        "*".to_string()
+                    } else {
+                        "**/*".to_string()
+                    }),
+                );
+            }
+            if has_nonempty_string_arg(&map, "path").is_none() {
+                map.insert(
+                    "path".to_string(),
+                    serde_json::Value::String(".".to_string()),
+                );
+            }
+        }
+        "Grep" => {
+            let pattern = has_nonempty_string_arg(&map, "pattern")
+                .ok_or_else(|| "Grep requires non-empty 'pattern'".to_string())?;
+            if pattern == "(missing pattern)" {
+                return Err("Grep requires non-empty 'pattern'".to_string());
+            }
+            if has_nonempty_string_arg(&map, "path").is_none() {
+                map.insert(
+                    "path".to_string(),
+                    serde_json::Value::String(".".to_string()),
+                );
+            }
+            if strict_analysis {
+                map.entry("output_mode".to_string())
+                    .or_insert_with(|| serde_json::Value::String("files_with_matches".to_string()));
+                map.entry("head_limit".to_string())
+                    .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(80)));
+            }
+        }
+        "Read" => {
+            let file_path = has_nonempty_string_arg(&map, "file_path")
+                .or_else(|| has_nonempty_string_arg(&map, "path"));
+            match file_path {
+                Some(path) => {
+                    map.insert("file_path".to_string(), serde_json::Value::String(path));
+                }
+                None => return Err("Read requires non-empty 'file_path'".to_string()),
+            }
+            if strict_analysis {
+                map.entry("offset".to_string())
+                    .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(1)));
+                map.entry("limit".to_string())
+                    .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(180)));
+            }
+        }
+        "Bash" => {
+            if strict_analysis {
+                return Err("Bash is disabled during analysis phases".to_string());
+            }
+            if has_nonempty_string_arg(&map, "command").is_none() {
+                return Err("Bash requires non-empty 'command'".to_string());
+            }
+        }
+        "Write" | "Edit" | "Task" | "WebFetch" | "WebSearch" | "NotebookEdit" => {
+            if strict_analysis {
+                return Err(format!(
+                    "{} is disabled during analysis phases; use read-only tools",
+                    canonical
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    if strict_analysis {
+        for key in ["path", "file_path", "working_dir", "notebook_path"] {
+            if let Some(path) = has_nonempty_string_arg(&map, key) {
+                if is_analysis_excluded_path(&path) {
+                    return Err(format!("Path '{}' is outside analysis scope", path));
+                }
+            }
+        }
+    }
+
+    Ok((canonical.to_string(), serde_json::Value::Object(map)))
 }
 
 fn merge_usage(total: &mut UsageStats, delta: &UsageStats) {
@@ -2890,6 +4191,92 @@ fn merge_usage(total: &mut UsageStats, delta: &UsageStats) {
     }
 }
 
+fn build_coverage_metrics(ledger: &AnalysisLedger) -> CoverageMetrics {
+    let failed = ledger
+        .total_phases
+        .saturating_sub(ledger.successful_phases + ledger.partial_phases);
+    CoverageMetrics {
+        observed_paths: ledger.observed_paths.len(),
+        evidence_records: ledger.evidence_lines.len(),
+        successful_phases: ledger.successful_phases,
+        partial_phases: ledger.partial_phases,
+        failed_phases: failed,
+    }
+}
+
+fn analysis_phase_token_budget(context_window: u32, phase: AnalysisPhase) -> u32 {
+    let phase_cap = match phase {
+        AnalysisPhase::StructureDiscovery => 25_000,
+        AnalysisPhase::ArchitectureTrace => 30_000,
+        AnalysisPhase::ConsistencyCheck => 20_000,
+    };
+    let scaled = (context_window as f64 * 0.22) as u32;
+    scaled.clamp(8_000, phase_cap)
+}
+
+fn analysis_layer_goal_satisfied(phase: AnalysisPhase, capture: &PhaseCapture) -> bool {
+    match phase {
+        AnalysisPhase::StructureDiscovery => {
+            capture.read_calls >= 1 && capture.observed_paths.len() >= 2
+        }
+        AnalysisPhase::ArchitectureTrace => {
+            capture.read_calls >= 1 && capture.observed_paths.len() >= 3
+        }
+        AnalysisPhase::ConsistencyCheck => capture.read_calls >= 1,
+    }
+}
+
+fn analysis_scope_guidance(message: &str) -> String {
+    let lower = message.to_lowercase();
+    let user_mentions_cloned_repos = lower.contains("claude-code") || lower.contains("codex");
+
+    let mut excludes = analysis_excluded_roots()
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+    if user_mentions_cloned_repos {
+        excludes.retain(|item| item != "claude-code" && item != "codex");
+    }
+
+    format!(
+        "Focus on first-party project files under the working directory. \
+Avoid expensive full-repo scans. Exclude top-level directories by default: {}. \
+Only enter excluded directories when explicitly requested by the user.",
+        excludes.join(", ")
+    )
+}
+
+fn is_valid_analysis_tool_start(tool_name: &str, args: Option<&serde_json::Value>) -> bool {
+    match tool_name {
+        "Cwd" => true,
+        "LS" => args
+            .and_then(|v| v.get("path"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+        "Read" => args
+            .and_then(|v| v.get("file_path"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+        "Glob" => args
+            .and_then(|v| v.get("pattern"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+        "Grep" => args
+            .and_then(|v| v.get("pattern"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .map(|s| !s.is_empty() && s != "(missing pattern)")
+            .unwrap_or(false),
+        _ => true,
+    }
+}
+
 fn analysis_phase_system_prompt(phase: AnalysisPhase) -> &'static str {
     match phase {
         AnalysisPhase::StructureDiscovery => {
@@ -2899,7 +4286,7 @@ fn analysis_phase_system_prompt(phase: AnalysisPhase) -> &'static str {
              Required workflow:\n\
              1) Call Cwd and LS on repository root.\n\
              2) Discover manifests/configs with Glob (json/toml/yaml/md).\n\
-             3) Read key manifests (package.json, Cargo.toml, pyproject.toml, README* when present).\n\
+             3) Read only files that were discovered in step 2 (never assume a manifest exists).\n\
              4) Read likely entrypoints for each language stack found.\n\
              5) Provide only verified findings with concrete file paths.\n\n\
              Output sections:\n\
@@ -2969,6 +4356,10 @@ fn analysis_phase_system_prompt_with_quota(
          - Minimum search calls (Grep/Glob): {min_search}\n\
          - Required tools that must appear: {required}\n\
          - Previous gate failures: {previous}\n\n\
+         Tool hygiene requirements:\n\
+         - Always provide required arguments for each tool.\n\
+         - Prefer targeted paths; avoid broad workspace scans unless necessary.\n\
+         - If a previous call failed due missing args, fix the call format before continuing.\n\n\
          If requirements were not met previously, DO NOT finish yet. \
          Continue with concrete tool calls until all requirements are satisfied.",
         min_total = quota.min_total_calls,
@@ -2992,8 +4383,12 @@ fn evaluate_analysis_quota(capture: &PhaseCapture, quota: &AnalysisToolQuota) ->
             capture.read_calls, quota.min_read_calls
         ));
     }
+
+    let has_core_evidence = capture.read_calls >= quota.min_read_calls
+        && capture.tool_calls >= quota.min_total_calls.saturating_sub(1)
+        && !capture.observed_paths.is_empty();
     let search_calls = capture.search_calls();
-    if search_calls < quota.min_search_calls {
+    if search_calls < quota.min_search_calls && !has_core_evidence {
         failures.push(format!(
             "search_calls {} < required {}",
             search_calls, quota.min_search_calls
@@ -3031,6 +4426,47 @@ fn truncate_for_log(text: &str, limit: usize) -> String {
     format!("{}...", &text[..limit])
 }
 
+fn tool_output_for_model_context(
+    tool_name: &str,
+    result: &crate::services::tools::executor::ToolResult,
+    analysis_phase: Option<&str>,
+) -> String {
+    let raw = result.to_content();
+    if analysis_phase.is_none() {
+        return raw;
+    }
+
+    let line_limit = if tool_name == "Read" {
+        ANALYSIS_TOOL_RESULT_MAX_LINES
+    } else {
+        ANALYSIS_TOOL_RESULT_MAX_LINES / 2
+    };
+    let mut lines = raw.lines().take(line_limit).collect::<Vec<_>>().join("\n");
+    if lines.len() > ANALYSIS_TOOL_RESULT_MAX_CHARS {
+        lines = truncate_for_log(&lines, ANALYSIS_TOOL_RESULT_MAX_CHARS);
+    }
+    if raw.len() > lines.len() {
+        format!(
+            "{}\n\n[tool output truncated for analysis context: {} -> {} chars]",
+            lines,
+            raw.len(),
+            lines.len()
+        )
+    } else {
+        lines
+    }
+}
+
+fn sanitize_unverified_path_mentions(text: &str, issues: &[String]) -> String {
+    let mut revised = text.to_string();
+    for issue in issues {
+        if let Some(path) = issue.strip_prefix("Unverified path mention: ") {
+            revised = revised.replace(path, "an unverified reference");
+        }
+    }
+    revised
+}
+
 fn normalize_candidate_path(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -3044,9 +4480,10 @@ fn normalize_candidate_path(raw: &str) -> Option<String> {
         .trim_matches(|c: char| "\"'`[](){}<>,".contains(c))
         .replace('\\', "/")
         .trim_start_matches("./")
+        .trim_end_matches('/')
         .to_string();
 
-    if normalized.is_empty() {
+    if normalized.is_empty() || normalized == "." || normalized == ".." {
         None
     } else {
         Some(normalized)
@@ -3215,6 +4652,7 @@ fn is_observed_path(candidate: &str, observed: &HashSet<String>) -> bool {
     observed.iter().any(|known| {
         known == &normalized
             || known.ends_with(&normalized)
+            || known.starts_with(&normalized)
             || normalized.ends_with(known)
             || normalized.starts_with(known)
     })
@@ -3524,10 +4962,41 @@ mod tests {
             model: "test-model".to_string(),
         };
 
-        let calls = parse_fallback_tool_calls(&response);
-        assert_eq!(calls.len(), 2);
-        assert!(calls.iter().any(|c| c.tool_name == "LS"));
-        assert!(calls.iter().any(|c| c.tool_name == "Read"));
+        let parsed = parse_fallback_tool_calls(&response, None);
+        assert!(parsed.dropped_reasons.is_empty());
+        assert_eq!(parsed.calls.len(), 2);
+        assert!(parsed.calls.iter().any(|c| c.tool_name == "LS"));
+        assert!(parsed.calls.iter().any(|c| c.tool_name == "Read"));
+    }
+
+    #[test]
+    fn test_prepare_tool_call_for_execution_repairs_ls_and_rejects_invalid_read() {
+        let ls_args = serde_json::json!({});
+        let prepared =
+            prepare_tool_call_for_execution("LS", &ls_args, Some("structure_discovery")).unwrap();
+        assert_eq!(prepared.0, "LS");
+        assert_eq!(prepared.1.get("path").and_then(|v| v.as_str()), Some("."));
+
+        let read_args = serde_json::json!({});
+        let read_result =
+            prepare_tool_call_for_execution("Read", &read_args, Some("consistency_check"));
+        assert!(read_result.is_err());
+    }
+
+    #[test]
+    fn test_parse_fallback_tool_calls_collects_dropped_reasons_in_analysis_mode() {
+        let response = LlmResponse {
+            content: Some("```tool_call\n{\"tool\":\"Grep\",\"arguments\":{}}\n```".to_string()),
+            thinking: None,
+            tool_calls: vec![],
+            stop_reason: crate::services::llm::StopReason::EndTurn,
+            usage: UsageStats::default(),
+            model: "test-model".to_string(),
+        };
+
+        let parsed = parse_fallback_tool_calls(&response, Some("architecture_trace"));
+        assert!(parsed.calls.is_empty());
+        assert!(!parsed.dropped_reasons.is_empty());
     }
 
     #[test]
@@ -3611,6 +5080,14 @@ mod tests {
     }
 
     #[test]
+    fn test_find_unverified_paths_accepts_directory_prefix_with_trailing_slash() {
+        let observed = HashSet::from(["src/plan_cascade/cli/main.py".to_string()]);
+        let text = "Repository uses src/ layout and includes src/plan_cascade/cli/main.py.";
+        let issues = find_unverified_paths(text, &observed);
+        assert!(issues.is_empty(), "unexpected issues: {:?}", issues);
+    }
+
+    #[test]
     fn test_find_unverified_paths_ignores_regex_and_template_fragments() {
         let observed = HashSet::from(["src/main.rs".to_string()]);
         let text = "Validation issues from generated prose: \
@@ -3621,6 +5098,45 @@ mod tests {
 
         let issues = find_unverified_paths(text, &observed);
         assert!(issues.is_empty(), "unexpected issues: {:?}", issues);
+    }
+
+    #[test]
+    fn test_baseline_steps_cover_required_tool_families() {
+        let project_root = std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join("..").join(".."))
+            .and_then(|p| p.canonicalize().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let config = OrchestratorConfig {
+            provider: ProviderConfig {
+                provider: ProviderType::Ollama,
+                model: "test-model".to_string(),
+                ..Default::default()
+            },
+            system_prompt: None,
+            max_iterations: 4,
+            max_total_tokens: 8_000,
+            project_root,
+            streaming: false,
+            enable_compaction: false,
+        };
+        let orchestrator = OrchestratorService::new(config);
+        let ledger = AnalysisLedger::default();
+
+        let structure_steps =
+            orchestrator.baseline_steps_for_phase(AnalysisPhase::StructureDiscovery, &ledger);
+        assert!(structure_steps.iter().any(|(tool, _)| tool == "Glob"));
+        assert!(structure_steps.iter().any(|(tool, _)| tool == "Read"));
+
+        let architecture_steps =
+            orchestrator.baseline_steps_for_phase(AnalysisPhase::ArchitectureTrace, &ledger);
+        assert!(architecture_steps.iter().any(|(tool, _)| tool == "Grep"));
+        assert!(architecture_steps.iter().any(|(tool, _)| tool == "Read"));
+
+        let consistency_steps =
+            orchestrator.baseline_steps_for_phase(AnalysisPhase::ConsistencyCheck, &ledger);
+        assert!(consistency_steps.iter().any(|(tool, _)| tool == "Grep"));
+        assert!(consistency_steps.iter().any(|(tool, _)| tool == "Read"));
     }
 
     #[test]
@@ -3668,5 +5184,30 @@ mod tests {
 
         let failures = evaluate_analysis_quota(&capture, &quota);
         assert!(failures.is_empty(), "unexpected failures: {:?}", failures);
+    }
+
+    #[test]
+    fn test_evaluate_analysis_quota_allows_missing_search_with_core_evidence() {
+        let capture = PhaseCapture {
+            tool_calls: 4,
+            read_calls: 2,
+            grep_calls: 0,
+            glob_calls: 0,
+            observed_paths: HashSet::from(["src/plan_cascade/cli/main.py".to_string()]),
+            ..Default::default()
+        };
+        let quota = AnalysisToolQuota {
+            min_total_calls: 3,
+            min_read_calls: 2,
+            min_search_calls: 1,
+            required_tools: vec!["Read"],
+        };
+
+        let failures = evaluate_analysis_quota(&capture, &quota);
+        assert!(
+            !failures.iter().any(|f| f.contains("search_calls")),
+            "unexpected failures: {:?}",
+            failures
+        );
     }
 }

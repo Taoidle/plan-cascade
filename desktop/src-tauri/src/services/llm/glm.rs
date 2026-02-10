@@ -401,13 +401,12 @@ impl LlmProvider for GlmProvider {
         })?;
         if status != 200 {
             if Self::is_invalid_param_error(status, &body_text) {
-                let compat_body =
-                    self.build_compat_request_body(
-                        &messages,
-                        system.as_deref(),
-                        false,
-                        &request_options,
-                    );
+                let compat_body = self.build_compat_request_body(
+                    &messages,
+                    system.as_deref(),
+                    false,
+                    &request_options,
+                );
                 response = self
                     .post_chat_completion(self.base_url(), api_key, &compat_body)
                     .await?;
@@ -464,13 +463,8 @@ impl LlmProvider for GlmProvider {
             .api_key
             .as_ref()
             .ok_or_else(|| missing_api_key_error("glm"))?;
-        let body = self.build_request_body(
-            &messages,
-            system.as_deref(),
-            &tools,
-            true,
-            &request_options,
-        );
+        let body =
+            self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
 
         let mut response = self
             .post_chat_completion(self.base_url(), api_key, &body)
@@ -483,13 +477,12 @@ impl LlmProvider for GlmProvider {
             })?;
 
             if Self::is_invalid_param_error(status, &body_text) {
-                let compat_body =
-                    self.build_compat_request_body(
-                        &messages,
-                        system.as_deref(),
-                        true,
-                        &request_options,
-                    );
+                let compat_body = self.build_compat_request_body(
+                    &messages,
+                    system.as_deref(),
+                    true,
+                    &request_options,
+                );
                 response = self
                     .post_chat_completion(self.base_url(), api_key, &compat_body)
                     .await?;

@@ -839,14 +839,23 @@ fn parse_lenient_tool_calls(content: &str) -> Vec<ParsedToolCall> {
                 return calls;
             }
 
-            // 8. Fallback: tool name recognized, return with empty args
-            // (better to call the tool with missing args — the error message
-            //  tells the model which param is needed — than to skip it entirely)
-            calls.push(ParsedToolCall {
-                tool_name: tool.to_string(),
-                arguments: serde_json::Value::Object(serde_json::Map::new()),
-                raw_text: format!("<tool_call>{}</tool_call>", content),
-            });
+            // 8. Final fallback:
+            // - For path-discovery tools, synthesize safe defaults.
+            // - For tools with required arguments (Read/Grep/Bash/etc), skip instead
+            //   of emitting an empty call that only creates noisy "missing parameter" retries.
+            let synthesized = match *tool {
+                "Cwd" => Some(serde_json::Value::Object(serde_json::Map::new())),
+                "LS" => Some(serde_json::json!({ "path": "." })),
+                "Glob" => Some(serde_json::json!({ "pattern": "**/*", "path": "." })),
+                _ => None,
+            };
+            if let Some(arguments) = synthesized {
+                calls.push(ParsedToolCall {
+                    tool_name: tool.to_string(),
+                    arguments,
+                    raw_text: format!("<tool_call>{}</tool_call>", content),
+                });
+            }
             return calls;
         }
     }

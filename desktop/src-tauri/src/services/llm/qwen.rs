@@ -373,13 +373,8 @@ impl LlmProvider for QwenProvider {
             .api_key
             .as_ref()
             .ok_or_else(|| missing_api_key_error("qwen"))?;
-        let body = self.build_request_body(
-            &messages,
-            system.as_deref(),
-            &tools,
-            true,
-            &request_options,
-        );
+        let body =
+            self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
 
         let response = self
             .client

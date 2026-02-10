@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { useSettingsStore } from './settings';
+import { useModeStore } from './mode';
 import type { StreamEventPayload } from '../lib/claudeCodeClient';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
@@ -1262,6 +1263,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
 interface UnifiedEventPayload {
   type: string;
+  run_id?: string;
+  run_dir?: string;
+  request?: string;
   session_id?: string;
   content?: string;
   phase_id?: string;
@@ -1270,6 +1274,7 @@ interface UnifiedEventPayload {
   prompt?: string;
   sub_agent_id?: string;
   task_type?: string;
+  role?: string;
   tool_id?: string;
   tool_name?: string;
   arguments?: string;
@@ -1281,8 +1286,14 @@ interface UnifiedEventPayload {
   required_tools?: string[];
   gate_failures?: string[];
   reasons?: string[];
+  worker_count?: number;
+  layers?: string[];
   phase_results?: string[];
   total_metrics?: Record<string, unknown>;
+  successful_phases?: number;
+  partial_phases?: number;
+  failed_phases?: number;
+  reason?: string;
   status?: string;
   result?: string;
   usage?: Record<string, unknown>;
@@ -1304,6 +1315,8 @@ interface UnifiedEventPayload {
   messages_compacted?: number;
   messages_preserved?: number;
   compaction_tokens?: number;
+  manifest_path?: string;
+  report_path?: string;
 }
 
 function parseOptionalNumber(value: unknown): number | undefined {
@@ -1359,7 +1372,70 @@ function handleUnifiedExecutionEvent(
   get: () => ExecutionState,
   set: (partial: Partial<ExecutionState>) => void
 ) {
+  const currentMode = useModeStore.getState().mode;
+  const isSimpleMode = currentMode === 'simple';
+  const showSubAgent = useSettingsStore.getState().showSubAgentEvents && !isSimpleMode;
+  const showAnalysisDetails = useSettingsStore.getState().showSubAgentEvents && !isSimpleMode;
+
   switch (payload.type) {
+    case 'analysis_run_started': {
+      const runId = toShortText(payload.run_id, 'run');
+      const runDir = toShortText(payload.run_dir);
+      const request = toShortText(payload.request);
+      if (showAnalysisDetails) {
+        const suffix = runDir ? ` | ${runDir}` : '';
+        get().appendStreamLine(`[analysis:run_start:${runId}] ${request || 'analysis started'}${suffix}`, 'analysis');
+      } else {
+        get().appendStreamLine(`[analysis] run started (${runId})`, 'analysis');
+      }
+      break;
+    }
+
+    case 'analysis_phase_planned': {
+      const phaseId = toShortText(payload.phase_id, 'phase');
+      const title = toShortText(payload.title, phaseId);
+      const workerCount = typeof payload.worker_count === 'number' ? payload.worker_count : 0;
+      const layers = Array.isArray(payload.layers) ? payload.layers.length : 0;
+      if (showAnalysisDetails) {
+        get().appendStreamLine(
+          `[analysis:phase_plan:${phaseId}] ${title} | workers=${workerCount}, layers=${layers}`,
+          'analysis'
+        );
+      } else {
+        get().appendStreamLine(`[analysis] planning ${title}`, 'analysis');
+      }
+      break;
+    }
+
+    case 'analysis_sub_agent_planned': {
+      if (showAnalysisDetails) {
+        const phaseId = toShortText(payload.phase_id, 'phase');
+        const subAgentId = toShortText(payload.sub_agent_id, 'worker');
+        const role = toShortText(payload.role, 'worker');
+        const objective = toShortText(payload.objective);
+        const suffix = objective ? ` | ${objective}` : '';
+        get().appendStreamLine(
+          `[analysis:subagent_plan:${phaseId}] ${subAgentId} (${role})${suffix}`,
+          'analysis'
+        );
+      }
+      break;
+    }
+
+    case 'analysis_sub_agent_progress': {
+      const phaseId = toShortText(payload.phase_id, 'phase');
+      const subAgentId = toShortText(payload.sub_agent_id, 'worker');
+      const status = toShortText(payload.status, 'running');
+      const details = toShortText(payload.message);
+      if (showAnalysisDetails) {
+        get().appendStreamLine(
+          `[analysis:subagent:${phaseId}:${subAgentId}] ${status}${details ? ` | ${details}` : ''}`,
+          'analysis'
+        );
+      }
+      break;
+    }
+
     case 'text_delta':
       if (payload.content) {
         get().appendStreamLine(payload.content, 'text');
@@ -1424,7 +1500,7 @@ function handleUnifiedExecutionEvent(
       break;
 
     case 'sub_agent_start':
-      if (useSettingsStore.getState().showSubAgentEvents) {
+      if (showSubAgent) {
         const promptPreview = (payload.prompt || '').trim().substring(0, 180);
         const label = promptPreview || payload.sub_agent_id || payload.task_type || 'sub-agent';
         get().appendStreamLine(`[sub_agent:start] ${label}`, 'sub_agent');
@@ -1432,7 +1508,7 @@ function handleUnifiedExecutionEvent(
       break;
 
     case 'sub_agent_end':
-      if (payload.success === false || useSettingsStore.getState().showSubAgentEvents) {
+      if (payload.success === false || showSubAgent) {
         const usage = formatSubAgentUsage(payload.usage);
         get().appendStreamLine(
           `[sub_agent:end] ${payload.success ? 'completed' : 'failed'}${usage}`,
@@ -1442,20 +1518,21 @@ function handleUnifiedExecutionEvent(
       break;
 
     case 'analysis_phase_start': {
-      const show = useSettingsStore.getState().showSubAgentEvents;
-      if (show) {
+      if (showAnalysisDetails) {
         const phaseId = toShortText(payload.phase_id, 'phase');
         const title = toShortText(payload.title, phaseId);
         const objective = toShortText(payload.objective);
         const details = objective ? `${title} - ${objective}` : title;
         get().appendStreamLine(`[analysis:phase_start:${phaseId}] ${details}`, 'analysis');
+      } else if (isSimpleMode) {
+        const title = toShortText(payload.title, toShortText(payload.phase_id, 'phase'));
+        get().appendStreamLine(`[analysis] ${title}`, 'analysis');
       }
       break;
     }
 
     case 'analysis_phase_attempt_start': {
-      const show = useSettingsStore.getState().showSubAgentEvents;
-      if (show) {
+      if (showAnalysisDetails) {
         const phaseId = toShortText(payload.phase_id, 'phase');
         const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
         const maxAttempts = typeof payload.max_attempts === 'number' ? payload.max_attempts : 0;
@@ -1472,8 +1549,7 @@ function handleUnifiedExecutionEvent(
     }
 
     case 'analysis_phase_progress': {
-      const show = useSettingsStore.getState().showSubAgentEvents;
-      if (show) {
+      if (showAnalysisDetails) {
         const phaseId = toShortText(payload.phase_id, 'phase');
         const details = toShortText(payload.message, 'progress update');
         get().appendStreamLine(`[analysis:phase_progress:${phaseId}] ${details}`, 'analysis');
@@ -1482,8 +1558,7 @@ function handleUnifiedExecutionEvent(
     }
 
     case 'analysis_evidence': {
-      const show = useSettingsStore.getState().showSubAgentEvents;
-      if (show || payload.success === false) {
+      if (showAnalysisDetails || payload.success === false) {
         const phaseId = toShortText(payload.phase_id, 'phase');
         const toolName = toShortText(payload.tool_name, 'tool');
         const summaryValue = typeof payload.summary === 'string' ? payload.summary : payload.message;
@@ -1500,8 +1575,7 @@ function handleUnifiedExecutionEvent(
     }
 
     case 'analysis_phase_end': {
-      const show = useSettingsStore.getState().showSubAgentEvents;
-      if (show || payload.success === false) {
+      if (showAnalysisDetails || payload.success === false) {
         const phaseId = toShortText(payload.phase_id, 'phase');
         const usage = formatSubAgentUsage(payload.usage);
         const metrics = formatAnalysisMetrics(payload.metrics);
@@ -1509,13 +1583,18 @@ function handleUnifiedExecutionEvent(
           `[analysis:phase_end:${phaseId}] ${payload.success ? 'completed' : 'failed'}${usage}${metrics}`,
           'analysis'
         );
+      } else if (isSimpleMode) {
+        const phaseId = toShortText(payload.phase_id, 'phase');
+        get().appendStreamLine(
+          `[analysis] ${phaseId} ${payload.success ? 'completed' : 'completed (partial)'}`,
+          'analysis'
+        );
       }
       break;
     }
 
     case 'analysis_phase_attempt_end': {
-      const show = useSettingsStore.getState().showSubAgentEvents;
-      if (show || payload.success === false) {
+      if (showAnalysisDetails || payload.success === false) {
         const phaseId = toShortText(payload.phase_id, 'phase');
         const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
         const metrics = formatAnalysisMetrics(payload.metrics);
@@ -1535,8 +1614,24 @@ function handleUnifiedExecutionEvent(
       const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
       const reasons = Array.isArray(payload.reasons) ? payload.reasons : [];
       const reasonText = reasons.length > 0 ? reasons.slice(0, 3).join(' ; ') : 'unknown';
+      if (showAnalysisDetails) {
+        get().appendStreamLine(
+          `[analysis:gate_failure:${phaseId}] attempt ${attempt} | ${reasonText}`,
+          'analysis'
+        );
+      } else {
+        get().appendStreamLine(`[analysis] ${phaseId} adjusted: ${reasonText}`, 'analysis');
+      }
+      break;
+    }
+
+    case 'analysis_phase_degraded': {
+      const phaseId = toShortText(payload.phase_id, 'phase');
+      const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
+      const reasons = Array.isArray(payload.reasons) ? payload.reasons : [];
+      const reasonText = reasons.length > 0 ? reasons.slice(0, 2).join(' ; ') : 'budget gate';
       get().appendStreamLine(
-        `[analysis:gate_failure:${phaseId}] attempt ${attempt} | ${reasonText}`,
+        `[analysis] ${phaseId} degraded at attempt ${attempt}: ${reasonText}`,
         'analysis'
       );
       break;
@@ -1573,6 +1668,46 @@ function handleUnifiedExecutionEvent(
       const suffix = metrics ? ` | ${metrics}` : '';
       get().appendStreamLine(
         `[analysis:run_summary:${payload.success ? 'success' : 'failed'}] ${summary}${suffix}`,
+        'analysis'
+      );
+      break;
+    }
+
+    case 'analysis_coverage_updated': {
+      const metrics = payload.metrics && typeof payload.metrics === 'object'
+        ? payload.metrics
+        : undefined;
+      const summary = metrics ? formatAnalysisMetrics(metrics) : '';
+      if (showAnalysisDetails) {
+        get().appendStreamLine(
+          `[analysis:coverage] updated${summary}`,
+          'analysis'
+        );
+      }
+      break;
+    }
+
+    case 'analysis_run_completed': {
+      const runId = toShortText(payload.run_id, 'run');
+      const manifestPath = toShortText(payload.manifest_path);
+      const reportPath = toShortText(payload.report_path);
+      const status = payload.success === false ? 'failed' : 'completed';
+      const parts = [manifestPath, reportPath].filter(Boolean);
+      const suffix = parts.length > 0 ? ` | ${parts.join(' | ')}` : '';
+      get().appendStreamLine(
+        `[analysis] run ${status} (${runId})${suffix}`,
+        payload.success === false ? 'warning' : 'success'
+      );
+      break;
+    }
+
+    case 'analysis_partial': {
+      const passed = typeof payload.successful_phases === 'number' ? payload.successful_phases : 0;
+      const partial = typeof payload.partial_phases === 'number' ? payload.partial_phases : 0;
+      const failed = typeof payload.failed_phases === 'number' ? payload.failed_phases : 0;
+      const reason = toShortText(payload.reason, 'partial evidence mode');
+      get().appendStreamLine(
+        `[analysis:partial] passed=${passed}, partial=${partial}, failed=${failed} | ${reason}`,
         'analysis'
       );
       break;

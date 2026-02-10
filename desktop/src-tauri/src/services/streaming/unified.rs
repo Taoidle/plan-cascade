@@ -109,6 +109,41 @@ pub enum UnifiedStreamEvent {
     // ========================================================================
     // Analysis pipeline events (evidence-first project analysis mode)
     // ========================================================================
+    /// Analysis run has started and artifacts will be persisted to disk.
+    AnalysisRunStarted {
+        run_id: String,
+        run_dir: String,
+        request: String,
+    },
+
+    /// Phase planning metadata was produced before execution.
+    AnalysisPhasePlanned {
+        run_id: String,
+        phase_id: String,
+        title: String,
+        objective: String,
+        worker_count: usize,
+        layers: Vec<String>,
+    },
+
+    /// A phase worker (sub-agent task) was planned.
+    AnalysisSubAgentPlanned {
+        run_id: String,
+        phase_id: String,
+        sub_agent_id: String,
+        role: String,
+        objective: String,
+    },
+
+    /// Sub-agent progress signal for the analysis planner.
+    AnalysisSubAgentProgress {
+        run_id: String,
+        phase_id: String,
+        sub_agent_id: String,
+        status: String,
+        message: String,
+    },
+
     /// Analysis phase has started
     AnalysisPhaseStart {
         phase_id: String,
@@ -155,6 +190,13 @@ pub enum UnifiedStreamEvent {
         gate_failures: Vec<String>,
     },
 
+    /// Analysis phase completed with partial evidence due to budget or gate constraints
+    AnalysisPhaseDegraded {
+        phase_id: String,
+        attempt: u32,
+        reasons: Vec<String>,
+    },
+
     /// Analysis gate failure detail
     AnalysisGateFailure {
         phase_id: String,
@@ -170,6 +212,29 @@ pub enum UnifiedStreamEvent {
         success: bool,
         phase_results: Vec<String>,
         total_metrics: serde_json::Value,
+    },
+
+    /// Coverage metrics updated while processing analysis artifacts.
+    AnalysisCoverageUpdated {
+        run_id: String,
+        metrics: serde_json::Value,
+    },
+
+    /// Analysis run completed and persisted final artifacts.
+    AnalysisRunCompleted {
+        run_id: String,
+        success: bool,
+        manifest_path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        report_path: Option<String>,
+    },
+
+    /// Overall analysis returned a usable but partial result
+    AnalysisPartial {
+        successful_phases: usize,
+        partial_phases: usize,
+        failed_phases: usize,
+        reason: String,
     },
 
     // ========================================================================
@@ -339,6 +404,39 @@ mod tests {
     }
 
     #[test]
+    fn test_analysis_run_events_serialization() {
+        let started = UnifiedStreamEvent::AnalysisRunStarted {
+            run_id: "run-123".to_string(),
+            run_dir: "/tmp/run-123".to_string(),
+            request: "Analyze this project".to_string(),
+        };
+        let started_json = serde_json::to_string(&started).unwrap();
+        assert!(started_json.contains("\"type\":\"analysis_run_started\""));
+
+        let planned = UnifiedStreamEvent::AnalysisPhasePlanned {
+            run_id: "run-123".to_string(),
+            phase_id: "structure_discovery".to_string(),
+            title: "Structure Discovery".to_string(),
+            objective: "map".to_string(),
+            worker_count: 2,
+            layers: vec!["Layer 1".to_string()],
+        };
+        let planned_json = serde_json::to_string(&planned).unwrap();
+        assert!(planned_json.contains("\"type\":\"analysis_phase_planned\""));
+
+        let completed = UnifiedStreamEvent::AnalysisRunCompleted {
+            run_id: "run-123".to_string(),
+            success: true,
+            manifest_path: "/tmp/run-123/manifest.json".to_string(),
+            report_path: Some("/tmp/run-123/final/report.md".to_string()),
+        };
+        let completed_json = serde_json::to_string(&completed).unwrap();
+        assert!(completed_json.contains("\"type\":\"analysis_run_completed\""));
+        let parsed: UnifiedStreamEvent = serde_json::from_str(&completed_json).unwrap();
+        assert_eq!(completed, parsed);
+    }
+
+    #[test]
     fn test_analysis_attempt_and_gate_events_serialization() {
         let start = UnifiedStreamEvent::AnalysisPhaseAttemptStart {
             phase_id: "structure_discovery".to_string(),
@@ -369,6 +467,14 @@ mod tests {
         let gate_json = serde_json::to_string(&gate).unwrap();
         assert!(gate_json.contains("\"type\":\"analysis_gate_failure\""));
 
+        let degraded = UnifiedStreamEvent::AnalysisPhaseDegraded {
+            phase_id: "architecture_trace".to_string(),
+            attempt: 2,
+            reasons: vec!["token budget pressure".to_string()],
+        };
+        let degraded_json = serde_json::to_string(&degraded).unwrap();
+        assert!(degraded_json.contains("\"type\":\"analysis_phase_degraded\""));
+
         let summary = UnifiedStreamEvent::AnalysisRunSummary {
             success: false,
             phase_results: vec!["successful_phases=2".to_string()],
@@ -376,6 +482,15 @@ mod tests {
         };
         let summary_json = serde_json::to_string(&summary).unwrap();
         assert!(summary_json.contains("\"type\":\"analysis_run_summary\""));
+
+        let partial = UnifiedStreamEvent::AnalysisPartial {
+            successful_phases: 2,
+            partial_phases: 1,
+            failed_phases: 0,
+            reason: "best effort".to_string(),
+        };
+        let partial_json = serde_json::to_string(&partial).unwrap();
+        assert!(partial_json.contains("\"type\":\"analysis_partial\""));
 
         let parsed: UnifiedStreamEvent = serde_json::from_str(&summary_json).unwrap();
         assert_eq!(summary, parsed);

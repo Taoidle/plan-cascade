@@ -74,11 +74,9 @@ impl OllamaProvider {
 
         // Add options
         let mut options = serde_json::json!({});
-        options["temperature"] = serde_json::json!(
-            request_options
-                .temperature_override
-                .unwrap_or(self.config.temperature)
-        );
+        options["temperature"] = serde_json::json!(request_options
+            .temperature_override
+            .unwrap_or(self.config.temperature));
         if self.config.max_tokens > 0 {
             options["num_predict"] = serde_json::json!(self.config.max_tokens);
         }
@@ -327,13 +325,8 @@ impl LlmProvider for OllamaProvider {
         request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let url = format!("{}/api/chat", self.base_url());
-        let body = self.build_request_body(
-            &messages,
-            system.as_deref(),
-            &tools,
-            true,
-            &request_options,
-        );
+        let body =
+            self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
 
         let response = self
             .client
