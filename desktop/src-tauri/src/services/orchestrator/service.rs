@@ -3606,11 +3606,7 @@ impl OrchestratorService {
             for content in &msg.content {
                 match content {
                     MessageContent::Text { text } => {
-                        let snippet = if text.len() > 500 {
-                            format!("{}...", &text[..500])
-                        } else {
-                            text.clone()
-                        };
+                        let snippet = truncate_for_log(text, 500);
                         conversation_snippets.push(snippet);
                     }
                     MessageContent::ToolUse { name, .. } => {
@@ -3631,11 +3627,7 @@ impl OrchestratorService {
                                 }
                             }
                         }
-                        let snippet = if content.len() > 500 {
-                            format!("{}...", &content[..500])
-                        } else {
-                            content.clone()
-                        };
+                        let snippet = truncate_for_log(content, 500);
                         conversation_snippets.push(snippet);
                     }
                     MessageContent::ToolResultMultimodal {
@@ -3644,11 +3636,7 @@ impl OrchestratorService {
                         for block in blocks {
                             if let crate::services::llm::types::ContentBlock::Text { text } = block
                             {
-                                let snippet = if text.len() > 500 {
-                                    format!("{}...", &text[..500])
-                                } else {
-                                    text.clone()
-                                };
+                                let snippet = truncate_for_log(text, 500);
                                 conversation_snippets.push(snippet);
                             }
                         }
@@ -4420,10 +4408,24 @@ fn parse_tool_arguments(arguments: &Option<String>) -> Option<serde_json::Value>
 }
 
 fn truncate_for_log(text: &str, limit: usize) -> String {
+    if limit == 0 {
+        return String::new();
+    }
     if text.len() <= limit {
         return text.to_string();
     }
-    format!("{}...", &text[..limit])
+    let mut cut = 0usize;
+    for (idx, _) in text.char_indices() {
+        if idx > limit {
+            break;
+        }
+        cut = idx;
+    }
+    if cut == 0 {
+        "...".to_string()
+    } else {
+        format!("{}...", &text[..cut])
+    }
 }
 
 fn tool_output_for_model_context(
@@ -5032,6 +5034,14 @@ mod tests {
         });
         let path = extract_primary_path_from_arguments(&args);
         assert_eq!(path.as_deref(), Some("src/main.rs"));
+    }
+
+    #[test]
+    fn test_truncate_for_log_handles_unicode_boundary() {
+        let text = "──────────中文";
+        let truncated = truncate_for_log(text, 5);
+        assert!(truncated.ends_with("..."));
+        assert_ne!(truncated, text.to_string());
     }
 
     #[test]

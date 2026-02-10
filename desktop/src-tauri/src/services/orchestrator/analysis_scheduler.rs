@@ -97,11 +97,25 @@ fn truncate_for_plan(text: &str, limit: usize) -> String {
     if text.is_empty() {
         return "(none)".to_string();
     }
+    if limit == 0 {
+        return "...".to_string();
+    }
     let trimmed = text.trim();
     if trimmed.len() <= limit {
         return trimmed.to_string();
     }
-    format!("{}...", &trimmed[..limit])
+    let mut cut = 0usize;
+    for (idx, _) in trimmed.char_indices() {
+        if idx > limit {
+            break;
+        }
+        cut = idx;
+    }
+    if cut == 0 {
+        "...".to_string()
+    } else {
+        format!("{}...", &trimmed[..cut])
+    }
 }
 
 #[cfg(test)]
@@ -123,5 +137,13 @@ mod tests {
         assert_eq!(plan.workers.len(), 2);
         assert_eq!(plan.workers[0].sub_agent_id, "structure_discovery_worker_1");
         assert!(plan.workers[1].prompt_suffix.contains("Layer 2"));
+    }
+
+    #[test]
+    fn truncate_for_plan_handles_unicode_boundary() {
+        let text = "──────────中文";
+        let truncated = truncate_for_plan(text, 5);
+        assert!(truncated.ends_with("..."));
+        assert_ne!(truncated, text.to_string());
     }
 }
