@@ -296,7 +296,9 @@ fn web_fetch_tool() -> ToolDefinition {
     let mut properties = HashMap::new();
     properties.insert(
         "url".to_string(),
-        ParameterSchema::string(Some("The URL to fetch content from. HTTP URLs are auto-upgraded to HTTPS.")),
+        ParameterSchema::string(Some(
+            "The URL to fetch content from. HTTP URLs are auto-upgraded to HTTPS.",
+        )),
     );
     properties.insert(
         "prompt".to_string(),
@@ -358,7 +360,9 @@ fn notebook_edit_tool() -> ToolDefinition {
     );
     properties.insert(
         "cell_type".to_string(),
-        ParameterSchema::string(Some("Cell type: 'code' or 'markdown' (required for insert)")),
+        ParameterSchema::string(Some(
+            "Cell type: 'code' or 'markdown' (required for insert)",
+        )),
     );
     properties.insert(
         "new_source".to_string(),

@@ -28,7 +28,20 @@ fn test_all_tool_names_present() {
     let tools = get_tool_definitions();
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
 
-    let expected = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "LS", "Cwd", "Task", "WebFetch", "WebSearch", "NotebookEdit"];
+    let expected = [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash",
+        "Glob",
+        "Grep",
+        "LS",
+        "Cwd",
+        "Task",
+        "WebFetch",
+        "WebSearch",
+        "NotebookEdit",
+    ];
     for name in &expected {
         assert!(
             names.contains(name),
@@ -195,13 +208,13 @@ fn test_cwd_tool_has_empty_properties() {
     let schema = json.get("input_schema").unwrap();
 
     let properties = schema.get("properties").unwrap().as_object().unwrap();
-    assert!(
-        properties.is_empty(),
-        "Cwd tool should have no properties"
-    );
+    assert!(properties.is_empty(), "Cwd tool should have no properties");
 
     let required = schema.get("required").unwrap().as_array().unwrap();
-    assert!(required.is_empty(), "Cwd tool should have no required params");
+    assert!(
+        required.is_empty(),
+        "Cwd tool should have no required params"
+    );
 }
 
 // ============================================================================
@@ -250,9 +263,12 @@ fn test_tool_definitions_round_trip_preserves_property_types() {
             );
 
             for (key, orig_schema) in orig_props {
-                let deser_schema = deser_props
-                    .get(key)
-                    .unwrap_or_else(|| panic!("Tool '{}': missing property '{}' after round-trip", tool.name, key));
+                let deser_schema = deser_props.get(key).unwrap_or_else(|| {
+                    panic!(
+                        "Tool '{}': missing property '{}' after round-trip",
+                        tool.name, key
+                    )
+                });
                 assert_eq!(
                     orig_schema.schema_type, deser_schema.schema_type,
                     "Tool '{}': property '{}' type mismatch after round-trip",
@@ -394,7 +410,11 @@ fn setup_test_env() -> TempDir {
     .unwrap();
     // Create a subdirectory with a file
     std::fs::create_dir(dir.path().join("subdir")).unwrap();
-    std::fs::write(dir.path().join("subdir").join("nested.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(
+        dir.path().join("subdir").join("nested.rs"),
+        "fn main() {}\n",
+    )
+    .unwrap();
     // Create another file for grep testing
     std::fs::write(
         dir.path().join("search_target.txt"),
@@ -416,8 +436,14 @@ async fn test_executor_read_tool() {
     let result = executor.execute("Read", &args).await;
     assert!(result.success, "Read should succeed: {:?}", result.error);
     let output = result.output.unwrap();
-    assert!(output.contains("hello world"), "Read output should contain file content");
-    assert!(output.contains("line 2"), "Read output should contain line 2");
+    assert!(
+        output.contains("hello world"),
+        "Read output should contain file content"
+    );
+    assert!(
+        output.contains("line 2"),
+        "Read output should contain line 2"
+    );
 }
 
 #[tokio::test]
@@ -434,7 +460,10 @@ async fn test_executor_read_tool_with_offset_and_limit() {
     let result = executor.execute("Read", &args).await;
     assert!(result.success);
     let output = result.output.unwrap();
-    assert!(output.contains("foo bar"), "Should contain line 2 (offset=2)");
+    assert!(
+        output.contains("foo bar"),
+        "Should contain line 2 (offset=2)"
+    );
     // Should only have 1 line (limit=1)
     let line_count = output.lines().count();
     assert_eq!(line_count, 1, "Should return exactly 1 line");
@@ -471,7 +500,11 @@ async fn test_executor_write_tool_creates_parent_dirs() {
     });
 
     let result = executor.execute("Write", &args).await;
-    assert!(result.success, "Write should create parent dirs: {:?}", result.error);
+    assert!(
+        result.success,
+        "Write should create parent dirs: {:?}",
+        result.error
+    );
     assert!(deep_file.exists());
 }
 
@@ -509,7 +542,11 @@ async fn test_executor_edit_tool_replace_all() {
     });
 
     let result = executor.execute("Edit", &args).await;
-    assert!(result.success, "Edit replace_all should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "Edit replace_all should succeed: {:?}",
+        result.error
+    );
 
     let content = std::fs::read_to_string(dir.path().join("dup.txt")).unwrap();
     assert_eq!(content, "ZZZ bbb ZZZ ccc ZZZ");
@@ -693,7 +730,10 @@ async fn test_executor_ls_tool() {
     let result = executor.execute("LS", &args).await;
     assert!(result.success, "LS should succeed: {:?}", result.error);
     let output = result.output.unwrap();
-    assert!(output.contains("DIR"), "LS should show directory indicators");
+    assert!(
+        output.contains("DIR"),
+        "LS should show directory indicators"
+    );
     assert!(output.contains("subdir"), "LS should show subdirectory");
     assert!(output.contains("FILE"), "LS should show file indicators");
     assert!(output.contains("hello.txt"), "LS should show hello.txt");
@@ -809,7 +849,11 @@ async fn test_write_then_read_flow() {
     let executor = ToolExecutor::new(dir.path());
 
     // Step 1: Write a file
-    let file_path = dir.path().join("flow_test.txt").to_string_lossy().to_string();
+    let file_path = dir
+        .path()
+        .join("flow_test.txt")
+        .to_string_lossy()
+        .to_string();
     let write_args = serde_json::json!({
         "file_path": &file_path,
         "content": "Hello from flow test!\nLine 2.\n"
@@ -833,7 +877,11 @@ async fn test_write_then_edit_then_read_flow() {
     let dir = setup_test_env();
     let executor = ToolExecutor::new(dir.path());
 
-    let file_path = dir.path().join("edit_flow.txt").to_string_lossy().to_string();
+    let file_path = dir
+        .path()
+        .join("edit_flow.txt")
+        .to_string_lossy()
+        .to_string();
 
     // Step 1: Write initial content
     let write_args = serde_json::json!({
@@ -905,13 +953,21 @@ async fn test_bash_then_read_flow() {
     let executor = ToolExecutor::new(dir.path());
 
     // Step 1: Use Write tool to create a file (more reliable cross-platform than bash redirect)
-    let file_path = dir.path().join("bash_out.txt").to_string_lossy().to_string();
+    let file_path = dir
+        .path()
+        .join("bash_out.txt")
+        .to_string_lossy()
+        .to_string();
     let write_args = serde_json::json!({
         "file_path": &file_path,
         "content": "bash_created_content\n"
     });
     let write_result = executor.execute("Write", &write_args).await;
-    assert!(write_result.success, "Write should succeed: {:?}", write_result.error);
+    assert!(
+        write_result.success,
+        "Write should succeed: {:?}",
+        write_result.error
+    );
 
     // Step 2: Use bash to verify the file exists (cross-platform echo)
     let bash_args = serde_json::json!({
@@ -919,7 +975,11 @@ async fn test_bash_then_read_flow() {
         "working_dir": dir.path().to_string_lossy().to_string()
     });
     let bash_result = executor.execute("Bash", &bash_args).await;
-    assert!(bash_result.success, "Bash should succeed: {:?}", bash_result.error);
+    assert!(
+        bash_result.success,
+        "Bash should succeed: {:?}",
+        bash_result.error
+    );
     assert!(bash_result.output.unwrap().contains("file_verified"));
 
     // Step 3: Read the file back
@@ -1195,7 +1255,11 @@ async fn test_notebook_edit_replace_after_read() {
     // Read first
     let read_args = serde_json::json!({ "file_path": &nb_path_str });
     let read_result = executor.execute("Read", &read_args).await;
-    assert!(read_result.success, "Read should succeed: {:?}", read_result.error);
+    assert!(
+        read_result.success,
+        "Read should succeed: {:?}",
+        read_result.error
+    );
 
     // Now edit
     let edit_args = serde_json::json!({
@@ -1205,7 +1269,11 @@ async fn test_notebook_edit_replace_after_read() {
         "new_source": "print('world')"
     });
     let edit_result = executor.execute("NotebookEdit", &edit_args).await;
-    assert!(edit_result.success, "NotebookEdit should succeed: {:?}", edit_result.error);
+    assert!(
+        edit_result.success,
+        "NotebookEdit should succeed: {:?}",
+        edit_result.error
+    );
 
     // Verify the change
     let content = std::fs::read_to_string(&nb_path).unwrap();
@@ -1246,10 +1314,20 @@ async fn test_read_jupyter_notebook() {
         "file_path": nb_path.to_string_lossy().to_string()
     });
     let result = executor.execute("Read", &args).await;
-    assert!(result.success, "Read .ipynb should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "Read .ipynb should succeed: {:?}",
+        result.error
+    );
     let output = result.output.unwrap();
-    assert!(output.contains("Title"), "Should contain markdown cell content");
-    assert!(output.contains("x = 1 + 2"), "Should contain code cell content");
+    assert!(
+        output.contains("Title"),
+        "Should contain markdown cell content"
+    );
+    assert!(
+        output.contains("x = 1 + 2"),
+        "Should contain code cell content"
+    );
 }
 
 // ============================================================================
@@ -1260,7 +1338,11 @@ async fn test_read_jupyter_notebook() {
 fn test_tool_result_ok_with_image() {
     use plan_cascade_desktop::services::tools::ToolResult;
 
-    let result = ToolResult::ok_with_image("Image metadata", "image/png".to_string(), "base64data".to_string());
+    let result = ToolResult::ok_with_image(
+        "Image metadata",
+        "image/png".to_string(),
+        "base64data".to_string(),
+    );
     assert!(result.success);
     assert_eq!(result.output.as_deref(), Some("Image metadata"));
     assert!(result.image_data.is_some());
@@ -1287,7 +1369,16 @@ fn test_system_prompt_includes_web_fetch_guidance() {
     let project_root = PathBuf::from("/test/project");
     let prompt = build_system_prompt(&project_root, &tools);
 
-    assert!(prompt.contains("WebFetch"), "System prompt should mention WebFetch tool");
-    assert!(prompt.contains("WebSearch"), "System prompt should mention WebSearch tool");
-    assert!(prompt.contains("NotebookEdit"), "System prompt should mention NotebookEdit tool");
+    assert!(
+        prompt.contains("WebFetch"),
+        "System prompt should mention WebFetch tool"
+    );
+    assert!(
+        prompt.contains("WebSearch"),
+        "System prompt should mention WebSearch tool"
+    );
+    assert!(
+        prompt.contains("NotebookEdit"),
+        "System prompt should mention NotebookEdit tool"
+    );
 }

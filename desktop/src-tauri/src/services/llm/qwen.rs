@@ -271,13 +271,20 @@ impl LlmProvider for QwenProvider {
         if model.contains("qwen3-max") {
             // qwen3-max, qwen3-max-2025-09-23, qwen3-max-2026-01-23: 262k
             262_144
-        } else if model.contains("qwen-max-latest") || model.contains("qwen-max-2025") || model.contains("qwen-max-2026") {
+        } else if model.contains("qwen-max-latest")
+            || model.contains("qwen-max-2025")
+            || model.contains("qwen-max-2026")
+        {
             // qwen-max-latest, qwen-max-2025-01-25: 131k
             131_072
         } else if model.contains("qwen-max") {
             // qwen-max (stable, older): 32k
             32_768
-        } else if model.contains("qwen-plus") || model.contains("qwen-turbo") || model.contains("qwen-flash") || model.contains("qwen-long") {
+        } else if model.contains("qwen-plus")
+            || model.contains("qwen-turbo")
+            || model.contains("qwen-flash")
+            || model.contains("qwen-long")
+        {
             // qwen-plus, qwen-turbo, qwen-flash, qwen-long: 1M context
             1_000_000
         } else if model.contains("qwen3-coder") {

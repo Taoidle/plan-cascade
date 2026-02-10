@@ -18,8 +18,8 @@ pub fn edit_notebook(
     new_source: Option<&str>,
 ) -> Result<String, String> {
     // Read and parse notebook
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read notebook: {}", e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read notebook: {}", e))?;
 
     let mut notebook: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse notebook JSON: {}", e))?;
@@ -31,8 +31,8 @@ pub fn edit_notebook(
 
     let result_msg = match operation {
         "replace" => {
-            let source = new_source
-                .ok_or_else(|| "replace operation requires 'new_source'".to_string())?;
+            let source =
+                new_source.ok_or_else(|| "replace operation requires 'new_source'".to_string())?;
 
             let cells = notebook["cells"].as_array().unwrap();
             if cell_index >= cells.len() {
@@ -75,8 +75,8 @@ pub fn edit_notebook(
         }
 
         "insert" => {
-            let source = new_source
-                .ok_or_else(|| "insert operation requires 'new_source'".to_string())?;
+            let source =
+                new_source.ok_or_else(|| "insert operation requires 'new_source'".to_string())?;
             let ct = cell_type.ok_or_else(|| {
                 "insert operation requires 'cell_type' (\"code\" or \"markdown\")".to_string()
             })?;
@@ -130,10 +130,7 @@ pub fn edit_notebook(
                 .unwrap_or("unknown")
                 .to_string();
 
-            notebook["cells"]
-                .as_array_mut()
-                .unwrap()
-                .remove(cell_index);
+            notebook["cells"].as_array_mut().unwrap().remove(cell_index);
 
             let total = notebook["cells"].as_array().unwrap().len();
             format!(
@@ -251,7 +248,10 @@ mod tests {
         let content: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(content["cells"].as_array().unwrap().len(), 4);
-        assert_eq!(content["cells"][1]["source"][0].as_str().unwrap(), "y = 100");
+        assert_eq!(
+            content["cells"][1]["source"][0].as_str().unwrap(),
+            "y = 100"
+        );
     }
 
     #[test]

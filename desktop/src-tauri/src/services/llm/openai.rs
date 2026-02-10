@@ -130,10 +130,12 @@ impl OpenAIProvider {
             .content
             .iter()
             .any(|c| matches!(c, MessageContent::ToolUse { .. }));
-        let has_tool_results = message
-            .content
-            .iter()
-            .any(|c| matches!(c, MessageContent::ToolResult { .. } | MessageContent::ToolResultMultimodal { .. }));
+        let has_tool_results = message.content.iter().any(|c| {
+            matches!(
+                c,
+                MessageContent::ToolResult { .. } | MessageContent::ToolResultMultimodal { .. }
+            )
+        });
 
         if has_tool_results {
             // Tool results are sent as separate messages in OpenAI format
@@ -165,7 +167,11 @@ impl OpenAIProvider {
                                     parts.push(text.clone());
                                 }
                                 super::types::ContentBlock::Image { media_type, data } => {
-                                    parts.push(format!("[Image: data:{};base64,<{} bytes>]", media_type, data.len()));
+                                    parts.push(format!(
+                                        "[Image: data:{};base64,<{} bytes>]",
+                                        media_type,
+                                        data.len()
+                                    ));
                                 }
                             }
                         }
@@ -372,7 +378,10 @@ impl LlmProvider for OpenAIProvider {
         let model = self.config.model.to_lowercase();
         if model.contains("o1") || model.contains("o3") || model.contains("o4") {
             200_000 // o1, o3-mini, o3, o4-mini: 200k
-        } else if model.contains("gpt-4o") || model.contains("gpt-4-turbo") || model.contains("gpt-4.1") {
+        } else if model.contains("gpt-4o")
+            || model.contains("gpt-4-turbo")
+            || model.contains("gpt-4.1")
+        {
             128_000 // GPT-4o, GPT-4-turbo, GPT-4.1: 128k
         } else if model.contains("gpt-4-32k") {
             32_768

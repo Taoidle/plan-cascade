@@ -141,6 +141,123 @@ struct OrchestratorTaskSpawner {
     context_window: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnalysisPhase {
+    StructureDiscovery,
+    ArchitectureTrace,
+    ConsistencyCheck,
+}
+
+impl AnalysisPhase {
+    fn id(self) -> &'static str {
+        match self {
+            AnalysisPhase::StructureDiscovery => "structure_discovery",
+            AnalysisPhase::ArchitectureTrace => "architecture_trace",
+            AnalysisPhase::ConsistencyCheck => "consistency_check",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            AnalysisPhase::StructureDiscovery => "Structure Discovery",
+            AnalysisPhase::ArchitectureTrace => "Architecture Trace",
+            AnalysisPhase::ConsistencyCheck => "Consistency Check",
+        }
+    }
+
+    fn objective(self) -> &'static str {
+        match self {
+            AnalysisPhase::StructureDiscovery => {
+                "Enumerate real project structure and verify manifests/entrypoints."
+            }
+            AnalysisPhase::ArchitectureTrace => {
+                "Trace major modules, data flow, and integration boundaries using concrete files."
+            }
+            AnalysisPhase::ConsistencyCheck => {
+                "Verify claims against file reads and grep results; explicitly mark unknowns."
+            }
+        }
+    }
+
+    fn task_type(self) -> &'static str {
+        match self {
+            AnalysisPhase::StructureDiscovery => "explore",
+            AnalysisPhase::ArchitectureTrace => "analyze",
+            AnalysisPhase::ConsistencyCheck => "analyze",
+        }
+    }
+
+    fn max_iterations(self) -> u32 {
+        match self {
+            AnalysisPhase::StructureDiscovery => 35,
+            AnalysisPhase::ArchitectureTrace => 50,
+            AnalysisPhase::ConsistencyCheck => 28,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct PhaseCapture {
+    tool_calls: usize,
+    read_calls: usize,
+    grep_calls: usize,
+    ls_calls: usize,
+    observed_paths: HashSet<String>,
+    evidence_lines: Vec<String>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct AnalysisPhaseOutcome {
+    phase: AnalysisPhase,
+    response: Option<String>,
+    usage: UsageStats,
+    iterations: u32,
+    success: bool,
+    error: Option<String>,
+    capture: PhaseCapture,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AnalysisLedger {
+    observed_paths: HashSet<String>,
+    evidence_lines: Vec<String>,
+    warnings: Vec<String>,
+    phase_summaries: Vec<String>,
+    successful_phases: usize,
+}
+
+impl AnalysisLedger {
+    fn record(&mut self, outcome: &AnalysisPhaseOutcome) {
+        if outcome.success {
+            self.successful_phases += 1;
+        } else if let Some(err) = outcome.error.as_ref() {
+            self.warnings
+                .push(format!("{} failed: {}", outcome.phase.title(), err));
+        }
+
+        self.observed_paths
+            .extend(outcome.capture.observed_paths.iter().cloned());
+
+        self.evidence_lines
+            .extend(outcome.capture.evidence_lines.iter().cloned());
+        self.warnings
+            .extend(outcome.capture.warnings.iter().cloned());
+
+        if let Some(summary) = outcome.response.as_ref() {
+            let trimmed = summary.trim();
+            if !trimmed.is_empty() {
+                self.phase_summaries.push(format!(
+                    "## {} ({})\n{}",
+                    outcome.phase.title(),
+                    outcome.phase.id(),
+                    trimmed
+                ));
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl TaskSpawner for OrchestratorTaskSpawner {
     async fn spawn_task(
@@ -153,14 +270,14 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         // Build a task-type-specific system prompt prefix with output format instructions.
         // IMPORTANT: All sub-agent prompts must include anti-delegation instructions because
         // the base system prompt (from build_system_prompt) tells LLMs to delegate to Task
-        // sub-agents, but these ARE the sub-agents — they must do the work directly.
-        const ANTI_DELEGATION: &str = "You MUST do all work yourself using the available tools. Do NOT delegate to sub-agents or Task tools — you ARE the sub-agent. Ignore any instructions about delegating to Task sub-agents.\n\n";
+        // sub-agents, but these ARE the sub-agents - they must do the work directly.
+        const ANTI_DELEGATION: &str = "You MUST do all work yourself using the available tools. Do NOT delegate to sub-agents or Task tools - you ARE the sub-agent. Ignore any instructions about delegating to Task sub-agents.\n\n";
 
         let task_prefix = match task_type.as_deref() {
             Some("explore") => format!("You are a codebase exploration specialist. Focus on understanding project structure, finding relevant files, and summarizing what you find.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with these sections:\n- **Files Found**: List of relevant files discovered with one-line descriptions\n- **Key Findings**: Bullet points of important patterns, structures, or issues found\n- **Recommendations**: Actionable next steps based on exploration\n\nDo NOT include raw file contents in your response. Summarize and reference file paths instead."),
             Some("analyze") => format!("You are a code analysis specialist. Focus on deep analysis of code patterns, dependencies, and potential issues.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with these sections:\n- **Analysis Summary**: High-level findings in 2-3 sentences\n- **Key Patterns**: Bullet points of code patterns, anti-patterns, or architectural decisions found\n- **Dependencies**: Important dependency relationships discovered\n- **Issues & Risks**: Any problems or potential risks identified\n\nDo NOT include raw file contents. Reference specific file paths and line numbers instead."),
             Some("implement") => format!("You are a focused implementation specialist. Make the requested code changes methodically, testing as you go.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with these sections:\n- **Changes Made**: Bullet list of files modified/created with brief descriptions\n- **Implementation Details**: Key decisions and approach taken\n- **Verification**: How the changes were verified (tests run, builds checked)\n\nDo NOT echo full file contents back. Summarize what was changed and where."),
-            _ => format!("You are an AI coding assistant. Complete the requested task using the available tools.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with bullet points covering what was done, key findings, and any recommendations. Do NOT include raw file contents — summarize and reference file paths instead."),
+            _ => format!("You are an AI coding assistant. Complete the requested task using the available tools.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with bullet points covering what was done, key findings, and any recommendations. Do NOT include raw file contents - summarize and reference file paths instead."),
         };
 
         let sub_config = OrchestratorConfig {
@@ -174,7 +291,9 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         };
 
         let sub_agent = OrchestratorService::new_sub_agent(sub_config, cancellation_token);
-        let result = sub_agent.execute_story(&prompt, &get_basic_tool_definitions(), tx).await;
+        let result = sub_agent
+            .execute_story(&prompt, &get_basic_tool_definitions(), tx)
+            .await;
 
         TaskExecutionResult {
             response: result.response,
@@ -990,11 +1109,7 @@ impl OrchestratorService {
                     .await
             } else {
                 self.provider
-                    .send_message(
-                        messages.to_vec(),
-                        system_prompt.clone(),
-                        api_tools.to_vec(),
-                    )
+                    .send_message(messages.to_vec(), system_prompt.clone(), api_tools.to_vec())
                     .await
             };
 
@@ -1090,8 +1205,13 @@ impl OrchestratorService {
                         if self.provider.supports_multimodal() {
                             use crate::services::llm::types::ContentBlock;
                             let blocks = vec![
-                                ContentBlock::Text { text: result.to_content() },
-                                ContentBlock::Image { media_type: mime.clone(), data: b64.clone() },
+                                ContentBlock::Text {
+                                    text: result.to_content(),
+                                },
+                                ContentBlock::Image {
+                                    media_type: mime.clone(),
+                                    data: b64.clone(),
+                                },
                             ];
                             messages.push(Message::tool_result_multimodal(
                                 &tc.id,
@@ -1195,8 +1315,8 @@ impl OrchestratorService {
         // Auto-delegate exploration tasks to sub-agents to prevent context overflow.
         // Non-Claude LLMs often read files directly instead of using the Task tool,
         // filling up the token budget after ~20 files.
-        if self.config.enable_compaction && is_exploration_task(&message) {
-            return self.execute_as_exploration(message, tx).await;
+        if is_exploration_task(&message) {
+            return self.execute_with_analysis_pipeline(message, tx).await;
         }
 
         let tools = get_tool_definitions();
@@ -1293,7 +1413,7 @@ impl OrchestratorService {
                 &tools
             };
 
-            // Call LLM — main agent has all tools (including Task)
+            // Call LLM - main agent has all tools (including Task)
             let response = if self.config.streaming {
                 self.call_llm_streaming(&messages, api_tools, &tools, tx.clone())
                     .await
@@ -1394,8 +1514,13 @@ impl OrchestratorService {
                         if self.provider.supports_multimodal() {
                             use crate::services::llm::types::ContentBlock;
                             let blocks = vec![
-                                ContentBlock::Text { text: result.to_content() },
-                                ContentBlock::Image { media_type: mime.clone(), data: b64.clone() },
+                                ContentBlock::Text {
+                                    text: result.to_content(),
+                                },
+                                ContentBlock::Image {
+                                    media_type: mime.clone(),
+                                    data: b64.clone(),
+                                },
                             ];
                             messages.push(Message::tool_result_multimodal(
                                 &tc.id,
@@ -1519,378 +1644,235 @@ impl OrchestratorService {
         }
     }
 
-    /// Execute an exploration/analysis task by automatically delegating to sub-agents.
-    ///
-    /// Instead of entering the main agentic loop (where non-Claude LLMs tend to read files
-    /// directly and overflow the context), this method orchestrates a structured exploration:
-    ///   1. Sub-agent 1: Discover project structure
-    ///   2. Sub-agent 2: Deep analysis using the structure summary
-    ///   3. Synthesis: Single LLM call to combine findings into a coherent response
-    async fn execute_as_exploration(
+    /// Execute an analysis task with an evidence-first multi-phase pipeline.
+    async fn execute_with_analysis_pipeline(
         &self,
         message: String,
         tx: mpsc::Sender<UnifiedStreamEvent>,
     ) -> ExecutionResult {
         let mut total_usage = UsageStats::default();
+        let mut total_iterations = 0;
+        let mut ledger = AnalysisLedger::default();
 
-        // ---- Phase 1: Structure Discovery ----
-        let phase1_id = "exploration_phase1".to_string();
         let phase1_prompt = format!(
-            "The user asked: \"{}\"\n\n\
-             Perform a THOROUGH project structure discovery. Follow the mandatory steps \
-             in your system prompt. Start with Step 1: use LS on the project root directory NOW.",
+            "User request: {}\n\n\
+             Run a strict structure discovery pass. Identify the real repository shape,\n\
+             read primary manifests, and list true entrypoints with file paths.",
             message
         );
-
-        let _ = tx
-            .send(UnifiedStreamEvent::SubAgentStart {
-                sub_agent_id: phase1_id.clone(),
-                prompt: "Phase 1: Exploring project structure...".to_string(),
-                task_type: Some("explore".to_string()),
-            })
+        let phase1 = self
+            .run_analysis_phase(AnalysisPhase::StructureDiscovery, phase1_prompt, &tx)
             .await;
+        merge_usage(&mut total_usage, &phase1.usage);
+        total_iterations += phase1.iterations;
+        ledger.record(&phase1);
 
-        let phase1_config = OrchestratorConfig {
-            provider: self.config.provider.clone(),
-            system_prompt: Some(
-                "You are a codebase exploration specialist performing THOROUGH project discovery.\n\
-                 You MUST do all work yourself using tools (LS, Read, Glob, Grep). You ARE the sub-agent.\n\
-                 Do NOT delegate to sub-agents or Task tools.\n\n\
-                 ## MANDATORY STEPS (follow in order)\n\n\
-                 ### Step 1: List root directory\n\
-                 Use LS on the project root to see all top-level files and directories.\n\n\
-                 ### Step 2: Find ALL config files\n\
-                 Use Glob with these patterns (run each one):\n\
-                 - `*.json` (package.json, tsconfig.json, etc.)\n\
-                 - `*.toml` (Cargo.toml, pyproject.toml, etc.)\n\
-                 - `*.yaml` or `*.yml` (docker-compose, CI configs)\n\
-                 - `*.md` in root only (README.md, CLAUDE.md, etc.)\n\n\
-                 ### Step 3: READ every config file found\n\
-                 Use Read on EACH config file from Step 2. This is critical — you must read the actual \
-                 contents to understand the project. At minimum read:\n\
-                 - package.json (dependencies, scripts)\n\
-                 - Cargo.toml (Rust crates, workspace)\n\
-                 - pyproject.toml / setup.py (Python packages)\n\
-                 - tsconfig.json (TypeScript config)\n\
-                 - README.md or CLAUDE.md (project description)\n\n\
-                 ### Step 4: Explore ALL source directories\n\
-                 Use LS on every major directory found in Step 1 (e.g., src/, lib/, app/, desktop/, \
-                 server/, client/, components/, services/, etc.). Go ONE level deeper into important \
-                 subdirectories.\n\n\
-                 ### Step 5: Read entry point files\n\
-                 Use Read on entry points found:\n\
-                 - main.rs, lib.rs, mod.rs (Rust)\n\
-                 - index.ts, index.tsx, main.ts, App.tsx (TypeScript/React)\n\
-                 - main.py, __init__.py, app.py (Python)\n\
-                 - index.js, server.js (JavaScript)\n\n\
-                 ## MINIMUM REQUIREMENTS\n\
-                 - You MUST make at least 15 tool calls before writing your summary\n\
-                 - You MUST read at least 8 files (not just list them)\n\
-                 - Do NOT write any summary text until you have completed all 5 steps\n\n\
-                 ## Output Format\n\
-                 After completing all steps, provide a detailed summary with:\n\
-                 - **Project Type**: What kind of project (monorepo? desktop app? CLI? web app?)\n\
-                 - **Languages & Frameworks**: All languages and frameworks detected with versions\n\
-                 - **Directory Structure**: Every major directory and its purpose\n\
-                 - **Key Config Files**: What each config file reveals about the project\n\
-                 - **Source Entry Points**: Main entry points for each component\n\
-                 - **Dependencies**: Major dependencies from package managers\n\
-                 - **Build System**: How the project is built (scripts, toolchain)\n\n\
-                 Be thorough and specific. Reference actual file paths and dependency names."
-                    .to_string(),
-            ),
-            max_iterations: 40,
-            max_total_tokens: sub_agent_token_budget(self.provider.context_window()),
-            project_root: self.config.project_root.clone(),
-            streaming: true,
-            enable_compaction: false,
-        };
-
-        let phase1_agent =
-            OrchestratorService::new_sub_agent(phase1_config, self.cancellation_token.clone());
-
-        // Create a separate channel for sub-agent events. Sub-agent internals
-        // (TextDelta, ToolStart, ToolResult) should NOT leak to the frontend.
-        // Only SubAgentStart/End (emitted by us above) reach the user.
-        let (sub_tx1, mut sub_rx1) = mpsc::channel::<UnifiedStreamEvent>(256);
-        let drain1 = tokio::spawn(async move {
-            while sub_rx1.recv().await.is_some() {}
-        });
-
-        let phase1_result = phase1_agent
-            .execute_story(&phase1_prompt, &get_basic_tool_definitions(), sub_tx1)
-            .await;
-        drain1.await.ok();
-
-        // Log Phase 1 results for diagnostics
-        if !phase1_result.success {
-            eprintln!(
-                "[exploration] Phase 1 failed: error={:?}, iterations={}, tokens={}",
-                phase1_result.error,
-                phase1_result.iterations,
-                phase1_result.usage.total_tokens()
-            );
-        }
-        eprintln!(
-            "[exploration] Phase 1 result: iterations={}, tokens={}, response_len={}",
-            phase1_result.iterations,
-            phase1_result.usage.total_tokens(),
-            phase1_result.response.as_ref().map_or(0, |s| s.len())
-        );
-        if let Some(ref resp) = phase1_result.response {
-            let preview = if resp.len() > 200 {
-                format!("{}...", &resp[..200])
-            } else {
-                resp.clone()
-            };
-            eprintln!("[exploration] Phase 1 response preview: {}", preview);
-        }
-
-        merge_usage(&mut total_usage, &phase1_result.usage);
-
-        let structure_summary = phase1_result
-            .response
-            .clone()
-            .unwrap_or_else(|| "Could not determine project structure.".to_string());
-
-        let _ = tx
-            .send(UnifiedStreamEvent::SubAgentEnd {
-                sub_agent_id: phase1_id,
-                success: phase1_result.success,
-                usage: serde_json::json!({
-                    "input_tokens": phase1_result.usage.input_tokens,
-                    "output_tokens": phase1_result.usage.output_tokens,
-                }),
-            })
-            .await;
-
-        // Check cancellation between phases
         if self.cancellation_token.is_cancelled() {
             return ExecutionResult {
                 response: None,
                 usage: total_usage,
-                iterations: phase1_result.iterations,
+                iterations: total_iterations,
                 success: false,
                 error: Some("Execution cancelled".to_string()),
             };
         }
 
-        // ---- Phase 2: Deep Analysis ----
-        let phase2_id = "exploration_phase2".to_string();
-
-        // Truncate structure_summary to prevent oversized prompts for Phase 2.
-        // Allow a generous limit since Phase 2 needs good context from Phase 1.
-        let truncated_structure = if structure_summary.len() > 8000 {
-            let truncated = &structure_summary[..8000];
-            let cut_at = truncated.rfind('\n').unwrap_or(8000);
-            format!("{}\n\n... (truncated)", &structure_summary[..cut_at])
-        } else {
-            structure_summary.clone()
-        };
+        let structure_summary = phase1
+            .response
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| "Structure discovery produced no summary.".to_string());
+        let observed_from_phase1 = join_sorted_paths(&ledger.observed_paths, 120);
 
         let phase2_prompt = format!(
-            "The user asked: \"{}\"\n\n\
-             Here is the project structure discovered in Phase 1:\n\
-             ---\n{}\n---\n\n\
-             You MUST now perform a DEEP code analysis. Follow the steps below IN ORDER.\n\
-             Your FIRST response MUST be a tool call. Do NOT write any text before using tools.",
-            message, truncated_structure
+            "User request: {}\n\n\
+             Structure summary from previous phase:\n{}\n\n\
+             Observed paths so far:\n{}\n\n\
+             Build a concrete architecture trace from real files. If a component cannot be verified\n\
+             from tools, label it as unknown.",
+            message, structure_summary, observed_from_phase1
         );
-
-        let _ = tx
-            .send(UnifiedStreamEvent::SubAgentStart {
-                sub_agent_id: phase2_id.clone(),
-                prompt: "Phase 2: Analyzing architecture...".to_string(),
-                task_type: Some("analyze".to_string()),
-            })
+        let phase2 = self
+            .run_analysis_phase(AnalysisPhase::ArchitectureTrace, phase2_prompt, &tx)
             .await;
+        merge_usage(&mut total_usage, &phase2.usage);
+        total_iterations += phase2.iterations;
+        ledger.record(&phase2);
 
-        let phase2_config = OrchestratorConfig {
-            provider: self.config.provider.clone(),
-            system_prompt: Some(
-                "You are a code analysis specialist performing DEEP architecture analysis.\n\
-                 You MUST do all work yourself using tools (Read, Grep, Glob, LS). You ARE the sub-agent.\n\
-                 Do NOT delegate to sub-agents or Task tools.\n\n\
-                 ## CRITICAL: TOOLS FIRST, TEXT LAST\n\
-                 Your FIRST response MUST be a tool call. You MUST NOT write ANY analysis text \
-                 until you have read at least 10 source files. If you write text before reading \
-                 enough files, your analysis will be WRONG.\n\n\
-                 ## MANDATORY STEPS (follow in order)\n\n\
-                 ### Step 1: Grep for architectural patterns\n\
-                 Search for key code patterns to find important files:\n\
-                 - `pub struct` or `class ` or `interface ` (type definitions)\n\
-                 - `pub fn` or `export function` or `def ` (function definitions)\n\
-                 - `mod ` or `import ` or `from ` (module structure)\n\
-                 - `impl ` or `extends ` or `implements ` (inheritance/traits)\n\
-                 Run at least 3-4 Grep searches to find key files.\n\n\
-                 ### Step 2: Read core module files\n\
-                 Based on the project structure from Phase 1 AND your Grep results, use Read on:\n\
-                 - The main entry point of each component/package\n\
-                 - mod.rs or index.ts files in key directories (these define module structure)\n\
-                 - Service/controller/handler files (the business logic)\n\
-                 - Model/type definition files (data structures)\n\
-                 Read at least 8-10 source files in this step.\n\n\
-                 ### Step 3: Read deeper implementation files\n\
-                 For each major component discovered, read at least one implementation file:\n\
-                 - If there's a services/ directory, read 2-3 service files\n\
-                 - If there's a components/ directory, read 2-3 component files\n\
-                 - If there's a commands/ or handlers/ directory, read 1-2 files\n\
-                 - Read test files to understand expected behavior\n\
-                 Read 5-8 more files in this step.\n\n\
-                 ### Step 4: Identify cross-cutting patterns\n\
-                 Use Grep to find:\n\
-                 - Error handling patterns (Result, Error, try/catch)\n\
-                 - State management (store, context, state)\n\
-                 - API/routing patterns (route, endpoint, handler)\n\
-                 - Configuration patterns (config, settings, env)\n\n\
-                 ### Step 5: Write your analysis\n\
-                 ONLY after completing Steps 1-4, write your analysis.\n\n\
-                 ## MINIMUM REQUIREMENTS\n\
-                 - You MUST make at least 20 tool calls total\n\
-                 - You MUST read at least 15 different source files using Read\n\
-                 - You MUST run at least 4 Grep searches\n\
-                 - Do NOT provide analysis until all steps are complete\n\n\
-                 ## Output Format\n\
-                 Provide a comprehensive analysis with:\n\
-                 - **Architecture Overview**: High-level architecture (multi-tier? client-server? etc.)\n\
-                 - **Components**: Each major component with its purpose, key files, and responsibilities\n\
-                 - **Data Flow**: How data flows through the system\n\
-                 - **Key Patterns**: Design patterns used (MVC, event-driven, etc.)\n\
-                 - **Technology Stack**: Specific frameworks, libraries, and tools with versions\n\
-                 - **Code Organization**: How code is structured (modules, layers, packages)\n\
-                 - **Integration Points**: How components communicate\n\n\
-                 Reference SPECIFIC file paths and code patterns you found. Be precise and thorough."
-                    .to_string(),
-            ),
-            max_iterations: 50,
-            max_total_tokens: sub_agent_token_budget(self.provider.context_window()),
-            project_root: self.config.project_root.clone(),
-            streaming: true,
-            enable_compaction: false,
-        };
-
-        let phase2_agent =
-            OrchestratorService::new_sub_agent(phase2_config, self.cancellation_token.clone());
-
-        let (sub_tx2, mut sub_rx2) = mpsc::channel::<UnifiedStreamEvent>(256);
-        let drain2 = tokio::spawn(async move {
-            while sub_rx2.recv().await.is_some() {}
-        });
-
-        let phase2_result = phase2_agent
-            .execute_story(&phase2_prompt, &get_basic_tool_definitions(), sub_tx2)
-            .await;
-        drain2.await.ok();
-
-        // Log Phase 2 results for diagnostics
-        if !phase2_result.success {
-            eprintln!(
-                "[exploration] Phase 2 failed: error={:?}, iterations={}, tokens={}",
-                phase2_result.error,
-                phase2_result.iterations,
-                phase2_result.usage.total_tokens()
-            );
-        }
-        eprintln!(
-            "[exploration] Phase 2 result: iterations={}, tokens={}, response_len={}",
-            phase2_result.iterations,
-            phase2_result.usage.total_tokens(),
-            phase2_result.response.as_ref().map_or(0, |s| s.len())
-        );
-        if let Some(ref resp) = phase2_result.response {
-            let preview = if resp.len() > 200 {
-                format!("{}...", &resp[..200])
-            } else {
-                resp.clone()
-            };
-            eprintln!("[exploration] Phase 2 response preview: {}", preview);
-        }
-
-        merge_usage(&mut total_usage, &phase2_result.usage);
-
-        let analysis_summary = phase2_result
-            .response
-            .clone()
-            .unwrap_or_else(|| "Could not complete analysis.".to_string());
-
-        let _ = tx
-            .send(UnifiedStreamEvent::SubAgentEnd {
-                sub_agent_id: phase2_id,
-                success: phase2_result.success,
-                usage: serde_json::json!({
-                    "input_tokens": phase2_result.usage.input_tokens,
-                    "output_tokens": phase2_result.usage.output_tokens,
-                }),
-            })
-            .await;
-
-        // Check cancellation before synthesis
         if self.cancellation_token.is_cancelled() {
             return ExecutionResult {
                 response: None,
                 usage: total_usage,
-                iterations: phase1_result.iterations + phase2_result.iterations,
+                iterations: total_iterations,
                 success: false,
                 error: Some("Execution cancelled".to_string()),
             };
         }
 
-        // ---- Phase 3: Synthesis (single LLM call, no tools) ----
+        let architecture_summary = phase2
+            .response
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| "Architecture trace produced no summary.".to_string());
+        let phase3_prompt = format!(
+            "User request: {}\n\n\
+             Verify these findings and explicitly mark uncertain claims.\n\n\
+             Structure summary:\n{}\n\n\
+             Architecture summary:\n{}\n\n\
+             Observed paths:\n{}\n\n\
+             Output must include:\n\
+             - Verified claims (with path evidence)\n\
+             - Unverified claims (and why)\n\
+             - Contradictions or missing data",
+            message,
+            structure_summary,
+            architecture_summary,
+            join_sorted_paths(&ledger.observed_paths, 160)
+        );
+        let phase3 = self
+            .run_analysis_phase(AnalysisPhase::ConsistencyCheck, phase3_prompt, &tx)
+            .await;
+        merge_usage(&mut total_usage, &phase3.usage);
+        total_iterations += phase3.iterations;
+        ledger.record(&phase3);
+
+        if self.cancellation_token.is_cancelled() {
+            return ExecutionResult {
+                response: None,
+                usage: total_usage,
+                iterations: total_iterations,
+                success: false,
+                error: Some("Execution cancelled".to_string()),
+            };
+        }
+
+        let evidence_block = if ledger.evidence_lines.is_empty() {
+            "- No tool evidence captured.".to_string()
+        } else {
+            ledger
+                .evidence_lines
+                .iter()
+                .take(220)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let summary_block = if ledger.phase_summaries.is_empty() {
+            "No phase summaries were produced.".to_string()
+        } else {
+            ledger.phase_summaries.join("\n\n")
+        };
+        let warnings_block = if ledger.warnings.is_empty() {
+            "None".to_string()
+        } else {
+            ledger.warnings.join("\n")
+        };
+        let observed_paths = join_sorted_paths(&ledger.observed_paths, 250);
+
         let synthesis_prompt = format!(
-            "You are synthesizing findings from a thorough codebase exploration.\n\n\
-             **User's original question**: {}\n\n\
-             **Project Structure Discovery** (Phase 1 — config files, directories, entry points):\n\
-             ---\n{}\n---\n\n\
-             **Deep Code Analysis** (Phase 2 — source code reading, architecture patterns):\n\
-             ---\n{}\n---\n\n\
-             Combine ALL findings into a comprehensive, well-organized response. Your response MUST:\n\
-             1. Accurately describe what the project IS (not what you guess it might be)\n\
-             2. Cover ALL major components/packages found in the codebase\n\
-             3. Reference specific file paths, frameworks, and dependency names from the findings\n\
-             4. Describe the architecture with concrete details (not generic descriptions)\n\
-             5. Use markdown formatting with headers, bullet points, and code references\n\n\
-             IMPORTANT: Base your response ONLY on the actual findings above. Do NOT guess or \
-             fabricate details that aren't in the Phase 1 and Phase 2 data.",
-            message, structure_summary, analysis_summary
+            "You are synthesizing a repository analysis from verified tool evidence.\n\n\
+             User request:\n{}\n\n\
+             Observed paths (ground truth):\n{}\n\n\
+             Warnings collected:\n{}\n\n\
+             Phase summaries:\n{}\n\n\
+             Evidence log:\n{}\n\n\
+             Requirements:\n\
+             1) Use only the evidence above.\n\
+             2) Do not invent files, modules, frameworks, versions, or runtime details.\n\
+             3) If a claim is uncertain, place it under 'Unknowns'.\n\
+             4) Include explicit file paths for major claims.\n\
+             5) Output markdown with sections: Project Snapshot, Architecture, Verified Facts, Risks, Unknowns.",
+            message, observed_paths, warnings_block, summary_block, evidence_block
         );
 
         let synthesis_messages = vec![Message::user(synthesis_prompt)];
-        // Use non-streaming synthesis to avoid leaking low-level thinking/tool
-        // internals into the user-visible stream for exploration mode.
         let synthesis_response = self.call_llm(&synthesis_messages, &[], &[]).await;
+        total_iterations += 1;
 
-        let (final_response, synthesis_success) = match synthesis_response {
+        let (mut final_response, synthesis_success) = match synthesis_response {
             Ok(r) => {
                 merge_usage(&mut total_usage, &r.usage);
-                let cleaned = r.content.map(|text| extract_text_without_tool_calls(&text));
-                if let Some(content) = cleaned.as_ref().filter(|text| !text.trim().is_empty()) {
-                    let _ = tx
-                        .send(UnifiedStreamEvent::TextDelta {
-                            content: content.clone(),
-                        })
-                        .await;
-                }
-                (cleaned, true)
+                (
+                    r.content
+                        .as_deref()
+                        .map(extract_text_without_tool_calls)
+                        .filter(|s| !s.trim().is_empty()),
+                    true,
+                )
             }
             Err(e) => {
-                // If synthesis fails, fall back to concatenating the two summaries
                 let fallback = format!(
-                    "## Project Structure\n\n{}\n\n## Architecture Analysis\n\n{}",
-                    structure_summary, analysis_summary
+                    "{}\n\n{}\n\n{}",
+                    structure_summary,
+                    architecture_summary,
+                    phase3.response.unwrap_or_default()
                 );
-                // Emit the fallback as text deltas so the frontend shows it
-                let _ = tx
-                    .send(UnifiedStreamEvent::TextDelta {
-                        content: fallback.clone(),
-                    })
-                    .await;
-                eprintln!("Synthesis LLM call failed, using fallback: {}", e);
-                (Some(fallback), true)
+                ledger
+                    .warnings
+                    .push(format!("Synthesis call failed, fallback used: {}", e));
+                (Some(fallback), false)
             }
         };
 
-        let total_iterations =
-            phase1_result.iterations + phase2_result.iterations + 1; // +1 for synthesis
+        let validation_issues = if let Some(text) = final_response.as_ref() {
+            find_unverified_paths(text, &ledger.observed_paths)
+                .into_iter()
+                .take(20)
+                .map(|p| format!("Unverified path mention: {}", p))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        if validation_issues.is_empty() {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisValidation {
+                    status: "ok".to_string(),
+                    issues: Vec::new(),
+                })
+                .await;
+        } else {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisValidation {
+                    status: "warning".to_string(),
+                    issues: validation_issues.clone(),
+                })
+                .await;
+
+            if let Some(original) = final_response.clone() {
+                let correction_prompt = format!(
+                    "Revise this analysis to remove or mark these path claims as unverified:\n{}\n\n\
+                     Observed paths:\n{}\n\n\
+                     Original analysis:\n{}",
+                    validation_issues.join("\n"),
+                    join_sorted_paths(&ledger.observed_paths, 250),
+                    original
+                );
+                let correction_messages = vec![Message::user(correction_prompt)];
+                if let Ok(corrected) = self.call_llm(&correction_messages, &[], &[]).await {
+                    merge_usage(&mut total_usage, &corrected.usage);
+                    let cleaned = corrected
+                        .content
+                        .as_deref()
+                        .map(extract_text_without_tool_calls)
+                        .filter(|s| !s.trim().is_empty());
+                    if cleaned.is_some() {
+                        final_response = cleaned;
+                    }
+                }
+            }
+        }
+
+        if let Some(content) = final_response
+            .as_ref()
+            .filter(|text| !text.trim().is_empty())
+        {
+            let _ = tx
+                .send(UnifiedStreamEvent::TextDelta {
+                    content: content.clone(),
+                })
+                .await;
+        }
 
         let _ = tx
             .send(UnifiedStreamEvent::Complete {
@@ -1908,12 +1890,206 @@ impl OrchestratorService {
             })
             .await;
 
+        let final_success = final_response
+            .as_ref()
+            .map(|text| !text.trim().is_empty())
+            .unwrap_or(false)
+            && (ledger.successful_phases > 0 || synthesis_success);
+
         ExecutionResult {
             response: final_response,
             usage: total_usage,
             iterations: total_iterations,
-            success: synthesis_success,
-            error: None,
+            success: final_success,
+            error: if final_success {
+                None
+            } else {
+                Some("Analysis completed with insufficient verified output".to_string())
+            },
+        }
+    }
+
+    async fn run_analysis_phase(
+        &self,
+        phase: AnalysisPhase,
+        prompt: String,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+    ) -> AnalysisPhaseOutcome {
+        let phase_id = phase.id().to_string();
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisPhaseStart {
+                phase_id: phase_id.clone(),
+                title: phase.title().to_string(),
+                objective: phase.objective().to_string(),
+            })
+            .await;
+        let _ = tx
+            .send(UnifiedStreamEvent::SubAgentStart {
+                sub_agent_id: phase_id.clone(),
+                prompt: format!("{}: {}", phase.title(), phase.objective()),
+                task_type: Some(phase.task_type().to_string()),
+            })
+            .await;
+
+        let phase_config = OrchestratorConfig {
+            provider: self.config.provider.clone(),
+            system_prompt: Some(analysis_phase_system_prompt(phase).to_string()),
+            max_iterations: phase.max_iterations(),
+            max_total_tokens: sub_agent_token_budget(self.provider.context_window()),
+            project_root: self.config.project_root.clone(),
+            streaming: true,
+            enable_compaction: false,
+        };
+        let phase_agent =
+            OrchestratorService::new_sub_agent(phase_config, self.cancellation_token.clone());
+
+        let (sub_tx, mut sub_rx) = mpsc::channel::<UnifiedStreamEvent>(256);
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel::<ExecutionResult>();
+        let tools = get_basic_tool_definitions();
+        tokio::spawn(async move {
+            let result = phase_agent.execute_story(&prompt, &tools, sub_tx).await;
+            let _ = result_tx.send(result);
+        });
+
+        let mut capture = PhaseCapture::default();
+        while let Some(event) = sub_rx.recv().await {
+            self.observe_analysis_event(phase, &event, &mut capture, tx)
+                .await;
+        }
+
+        let phase_result = match result_rx.await {
+            Ok(result) => result,
+            Err(_) => ExecutionResult {
+                response: None,
+                usage: UsageStats::default(),
+                iterations: 0,
+                success: false,
+                error: Some("Sub-agent task join error".to_string()),
+            },
+        };
+
+        let metrics = serde_json::json!({
+            "tool_calls": capture.tool_calls,
+            "read_calls": capture.read_calls,
+            "grep_calls": capture.grep_calls,
+            "ls_calls": capture.ls_calls,
+            "observed_paths": capture.observed_paths.len(),
+        });
+        let usage = serde_json::json!({
+            "input_tokens": phase_result.usage.input_tokens,
+            "output_tokens": phase_result.usage.output_tokens,
+            "iterations": phase_result.iterations,
+        });
+
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisPhaseEnd {
+                phase_id: phase_id.clone(),
+                success: phase_result.success,
+                usage: usage.clone(),
+                metrics,
+            })
+            .await;
+        let _ = tx
+            .send(UnifiedStreamEvent::SubAgentEnd {
+                sub_agent_id: phase_id,
+                success: phase_result.success,
+                usage,
+            })
+            .await;
+
+        AnalysisPhaseOutcome {
+            phase,
+            response: phase_result.response,
+            usage: phase_result.usage,
+            iterations: phase_result.iterations,
+            success: phase_result.success,
+            error: phase_result.error,
+            capture,
+        }
+    }
+
+    async fn observe_analysis_event(
+        &self,
+        phase: AnalysisPhase,
+        event: &UnifiedStreamEvent,
+        capture: &mut PhaseCapture,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+    ) {
+        match event {
+            UnifiedStreamEvent::ToolStart {
+                tool_name,
+                arguments,
+                ..
+            } => {
+                capture.tool_calls += 1;
+                match tool_name.as_str() {
+                    "Read" => capture.read_calls += 1,
+                    "Grep" => capture.grep_calls += 1,
+                    "LS" => capture.ls_calls += 1,
+                    _ => {}
+                }
+
+                let args_json = parse_tool_arguments(arguments);
+                let primary_path = args_json
+                    .as_ref()
+                    .and_then(extract_primary_path_from_arguments);
+                if let Some(path) = primary_path.as_ref() {
+                    capture.observed_paths.insert(path.clone());
+                }
+                if let Some(args) = args_json.as_ref() {
+                    for p in extract_all_paths_from_arguments(args) {
+                        capture.observed_paths.insert(p);
+                    }
+                }
+
+                let summary =
+                    summarize_tool_activity(tool_name, args_json.as_ref(), primary_path.as_deref());
+                if capture.evidence_lines.len() < 220 {
+                    capture
+                        .evidence_lines
+                        .push(format!("- [{}] {}", phase.id(), summary));
+                }
+
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisEvidence {
+                        phase_id: phase.id().to_string(),
+                        tool_name: tool_name.clone(),
+                        file_path: primary_path,
+                        summary,
+                        success: None,
+                    })
+                    .await;
+            }
+            UnifiedStreamEvent::ToolResult { error, .. } => {
+                if let Some(err) = error.as_ref() {
+                    let compact_err = truncate_for_log(err, 180);
+                    capture
+                        .warnings
+                        .push(format!("{} tool error: {}", phase.title(), compact_err));
+                    let _ = tx
+                        .send(UnifiedStreamEvent::AnalysisEvidence {
+                            phase_id: phase.id().to_string(),
+                            tool_name: "tool_result".to_string(),
+                            file_path: None,
+                            summary: format!("Tool error: {}", compact_err),
+                            success: Some(false),
+                        })
+                        .await;
+                }
+            }
+            UnifiedStreamEvent::Error { message, .. } => {
+                let compact = truncate_for_log(message, 200);
+                capture
+                    .warnings
+                    .push(format!("{} stream error: {}", phase.title(), compact));
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                        phase_id: phase.id().to_string(),
+                        message: format!("Warning: {}", compact),
+                    })
+                    .await;
+            }
+            _ => {}
         }
     }
 
@@ -1997,9 +2173,12 @@ impl OrchestratorService {
                         };
                         conversation_snippets.push(snippet);
                     }
-                    MessageContent::ToolResultMultimodal { content: blocks, .. } => {
+                    MessageContent::ToolResultMultimodal {
+                        content: blocks, ..
+                    } => {
                         for block in blocks {
-                            if let crate::services::llm::types::ContentBlock::Text { text } = block {
+                            if let crate::services::llm::types::ContentBlock::Text { text } = block
+                            {
                                 let snippet = if text.len() > 500 {
                                     format!("{}...", &text[..500])
                                 } else {
@@ -2043,7 +2222,9 @@ impl OrchestratorService {
 
         match result {
             Ok(response) => {
-                let summary_text = response.content.unwrap_or_else(|| "Previous conversation context was compacted.".to_string());
+                let summary_text = response
+                    .content
+                    .unwrap_or_else(|| "Previous conversation context was compacted.".to_string());
                 let compaction_tokens = response.usage.output_tokens;
 
                 // Build new message list: original prompt + summary + preserved tail
@@ -2152,7 +2333,8 @@ impl OrchestratorService {
         let messages = vec![Message::user(message)];
 
         let response = if self.config.streaming {
-            self.call_llm_streaming(&messages, &[], &[], tx.clone()).await
+            self.call_llm_streaming(&messages, &[], &[], tx.clone())
+                .await
         } else {
             self.call_llm(&messages, &[], &[]).await
         };
@@ -2309,12 +2491,232 @@ fn merge_usage(total: &mut UsageStats, delta: &UsageStats) {
     }
 }
 
-/// Parse an RFC3339 timestamp to Unix timestamp
-/// Detect whether a user message is an exploration/analysis task that should be
-/// automatically delegated to sub-agents instead of entering the direct agentic loop.
-/// This prevents context overflow when non-Claude LLMs read files directly instead of
-/// using the Task tool for delegation.
-fn is_exploration_task(message: &str) -> bool {
+fn analysis_phase_system_prompt(phase: AnalysisPhase) -> &'static str {
+    match phase {
+        AnalysisPhase::StructureDiscovery => {
+            "You are a repository structure investigator.\n\
+             You must do all work directly with tools (Cwd, LS, Glob, Read, Grep).\n\
+             Do not delegate to Task or any sub-agent.\n\n\
+             Required workflow:\n\
+             1) Call Cwd and LS on repository root.\n\
+             2) Discover manifests/configs with Glob (json/toml/yaml/md).\n\
+             3) Read key manifests (package.json, Cargo.toml, pyproject.toml, README* when present).\n\
+             4) Read likely entrypoints for each language stack found.\n\
+             5) Provide only verified findings with concrete file paths.\n\n\
+             Output sections:\n\
+             - Repository Shape\n\
+             - Runtime and Build Stack\n\
+             - Entry Points (verified)\n\
+             - Unknowns"
+        }
+        AnalysisPhase::ArchitectureTrace => {
+            "You are an architecture tracing specialist.\n\
+             You must do all work directly with tools (Read, Grep, Glob, LS).\n\
+             Do not delegate to Task or any sub-agent.\n\n\
+             Required workflow:\n\
+             1) Use Grep to locate module boundaries, service layers, handlers, state stores.\n\
+             2) Read concrete implementation files across major components.\n\
+             3) Trace data flow and integration points with explicit file evidence.\n\
+             4) Any uncertain statement must be marked unknown.\n\n\
+             Output sections:\n\
+             - Architecture Overview\n\
+             - Component Map (with files)\n\
+             - Data and Control Flow\n\
+             - Risks and Unknowns"
+        }
+        AnalysisPhase::ConsistencyCheck => {
+            "You are a consistency verifier.\n\
+             You must verify claims against concrete file reads and grep evidence.\n\
+             Do not delegate to Task or any sub-agent.\n\n\
+             Required workflow:\n\
+             1) Re-open high-impact files cited previously.\n\
+             2) Re-run targeted grep for disputed/important claims.\n\
+             3) Label each major claim as VERIFIED, UNVERIFIED, or CONTRADICTED.\n\n\
+             Output sections:\n\
+             - Verified Claims (with evidence)\n\
+             - Unverified Claims\n\
+             - Contradictions\n\
+             - Additional Evidence Needed"
+        }
+    }
+}
+
+fn join_sorted_paths(paths: &HashSet<String>, limit: usize) -> String {
+    if paths.is_empty() {
+        return "(none)".to_string();
+    }
+    let mut items: Vec<String> = paths.iter().cloned().collect();
+    items.sort();
+    items.into_iter().take(limit).collect::<Vec<_>>().join("\n")
+}
+
+fn parse_tool_arguments(arguments: &Option<String>) -> Option<serde_json::Value> {
+    arguments
+        .as_ref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+}
+
+fn truncate_for_log(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    format!("{}...", &text[..limit])
+}
+
+fn normalize_candidate_path(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return None;
+    }
+
+    let normalized = trimmed
+        .trim_matches(|c: char| "\"'`[](){}<>,".contains(c))
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .to_string();
+
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn extract_primary_path_from_arguments(arguments: &serde_json::Value) -> Option<String> {
+    const PRIMARY_KEYS: &[&str] = &["file_path", "path", "notebook_path", "working_dir", "cwd"];
+
+    for key in PRIMARY_KEYS {
+        if let Some(value) = arguments.get(*key).and_then(|v| v.as_str()) {
+            if let Some(path) = normalize_candidate_path(value) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn extract_all_paths_from_arguments(arguments: &serde_json::Value) -> Vec<String> {
+    const PATH_KEYS: &[&str] = &["file_path", "path", "notebook_path", "working_dir", "cwd"];
+    let mut found = Vec::<String>::new();
+
+    fn walk(value: &serde_json::Value, found: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, inner) in map {
+                    if PATH_KEYS.contains(&key.as_str()) {
+                        if let Some(s) = inner.as_str() {
+                            if let Some(path) = normalize_candidate_path(s) {
+                                found.push(path);
+                            }
+                        }
+                    }
+                    walk(inner, found);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for inner in items {
+                    walk(inner, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    walk(arguments, &mut found);
+    found.sort();
+    found.dedup();
+    found
+}
+
+fn summarize_tool_activity(
+    tool_name: &str,
+    arguments: Option<&serde_json::Value>,
+    primary_path: Option<&str>,
+) -> String {
+    match tool_name {
+        "Read" => format!(
+            "Read {}",
+            primary_path.unwrap_or("an unspecified file path")
+        ),
+        "LS" => format!(
+            "Listed directory {}",
+            primary_path.unwrap_or("at current working directory")
+        ),
+        "Glob" => {
+            let pattern = arguments
+                .and_then(|v| v.get("pattern"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("*");
+            format!(
+                "Glob pattern '{}' under {}",
+                pattern,
+                primary_path.unwrap_or("working directory")
+            )
+        }
+        "Grep" => {
+            let pattern = arguments
+                .and_then(|v| v.get("pattern"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("(missing pattern)");
+            format!(
+                "Grep pattern '{}' under {}",
+                pattern,
+                primary_path.unwrap_or("working directory")
+            )
+        }
+        "Cwd" => "Resolved working directory".to_string(),
+        _ => format!(
+            "{} called{}",
+            tool_name,
+            primary_path
+                .map(|p| format!(" on {}", p))
+                .unwrap_or_else(String::new)
+        ),
+    }
+}
+
+fn extract_path_candidates_from_text(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for token in text.split_whitespace() {
+        let candidate = token.trim_matches(|c: char| "\"'`[](){}<>,;:".contains(c));
+        if !(candidate.contains('/') || candidate.contains('\\')) {
+            continue;
+        }
+        if let Some(path) = normalize_candidate_path(candidate) {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn is_observed_path(candidate: &str, observed: &HashSet<String>) -> bool {
+    let normalized = match normalize_candidate_path(candidate) {
+        Some(path) => path,
+        None => return true,
+    };
+    observed.iter().any(|known| {
+        known == &normalized
+            || known.ends_with(&normalized)
+            || normalized.ends_with(known)
+            || normalized.starts_with(known)
+    })
+}
+
+fn find_unverified_paths(text: &str, observed: &HashSet<String>) -> Vec<String> {
+    extract_path_candidates_from_text(text)
+        .into_iter()
+        .filter(|path| !is_observed_path(path, observed))
+        .collect()
+}
+
+#[allow(dead_code)]
+// Legacy heuristic kept for regression comparison in tests/debugging.
+fn is_exploration_task_legacy(message: &str) -> bool {
     let lower = message.to_lowercase();
 
     // Chinese exploration keywords
@@ -2370,6 +2772,91 @@ fn is_exploration_task(message: &str) -> bool {
     CONTEXT_WORDS.iter().any(|cw| lower.contains(cw))
 }
 
+fn is_exploration_task(message: &str) -> bool {
+    let lower = message.to_lowercase();
+
+    const EN_ANALYSIS: &[&str] = &[
+        "analyze",
+        "analyse",
+        "explore",
+        "review",
+        "investigate",
+        "understand",
+        "overview",
+        "summarize",
+        "summarise",
+        "architecture",
+        "codebase",
+        "repository",
+        "repo",
+    ];
+    const EN_CONTEXT: &[&str] = &[
+        "project",
+        "code",
+        "codebase",
+        "repository",
+        "repo",
+        "folder",
+        "directory",
+        "this",
+    ];
+    const EN_EXECUTION: &[&str] = &[
+        "implement",
+        "fix",
+        "build",
+        "write",
+        "create",
+        "add",
+        "remove",
+        "refactor",
+    ];
+
+    const ZH_ANALYSIS: &[&str] = &[
+        "\u{5206}\u{6790}",
+        "\u{63a2}\u{7d22}",
+        "\u{4e86}\u{89e3}",
+        "\u{603b}\u{7ed3}",
+        "\u{67e5}\u{770b}",
+        "\u{67b6}\u{6784}",
+    ];
+    const ZH_CONTEXT: &[&str] = &[
+        "\u{9879}\u{76ee}",
+        "\u{4ee3}\u{7801}",
+        "\u{4ed3}\u{5e93}",
+        "\u{76ee}\u{5f55}",
+        "\u{8fd9}\u{4e2a}",
+    ];
+    const ZH_EXECUTION: &[&str] = &[
+        "\u{5b9e}\u{73b0}",
+        "\u{4fee}\u{590d}",
+        "\u{65b0}\u{589e}",
+        "\u{7f16}\u{5199}",
+        "\u{91cd}\u{6784}",
+    ];
+
+    let has_zh_analysis = ZH_ANALYSIS.iter().any(|kw| message.contains(kw));
+    let has_zh_context = ZH_CONTEXT.iter().any(|kw| message.contains(kw));
+    let has_zh_execution = ZH_EXECUTION.iter().any(|kw| message.contains(kw));
+
+    if has_zh_analysis && has_zh_context {
+        return true;
+    }
+    if has_zh_execution && !has_zh_analysis {
+        return false;
+    }
+
+    let has_en_analysis = EN_ANALYSIS.iter().any(|kw| lower.contains(kw));
+    let has_en_context = EN_CONTEXT.iter().any(|kw| lower.contains(kw));
+    let has_en_execution = EN_EXECUTION.iter().any(|kw| lower.contains(kw));
+
+    if has_en_execution && !has_en_analysis {
+        return false;
+    }
+
+    has_en_analysis && has_en_context
+}
+
+/// Parse an RFC3339 timestamp to Unix timestamp.
 fn parse_timestamp(s: Option<String>) -> i64 {
     s.and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
         .map(|dt| dt.timestamp())
@@ -2468,19 +2955,28 @@ mod tests {
 
     #[test]
     fn test_is_exploration_task_chinese() {
-        assert!(is_exploration_task("分析这个项目"));
-        assert!(is_exploration_task("帮我了解这个代码"));
-        assert!(is_exploration_task("总结一下项目结构"));
-        assert!(is_exploration_task("探索代码库"));
+        assert!(is_exploration_task(
+            "\u{5206}\u{6790}\u{8fd9}\u{4e2a}\u{9879}\u{76ee}"
+        ));
+        assert!(is_exploration_task(
+            "\u{5e2e}\u{6211}\u{4e86}\u{89e3}\u{8fd9}\u{4e2a}\u{4ee3}\u{7801}\u{4ed3}\u{5e93}"
+        ));
+        assert!(is_exploration_task(
+            "\u{603b}\u{7ed3}\u{4e00}\u{4e0b}\u{9879}\u{76ee}\u{67b6}\u{6784}"
+        ));
+        assert!(is_exploration_task(
+            "\u{63a2}\u{7d22}\u{4ee3}\u{7801}\u{76ee}\u{5f55}"
+        ));
     }
 
     #[test]
     fn test_is_exploration_task_english() {
         assert!(is_exploration_task("analyze this project"));
         assert!(is_exploration_task("Explore the codebase"));
-        assert!(is_exploration_task("examine this code"));
-        assert!(is_exploration_task("give me an overview of this repository"));
-        assert!(is_exploration_task("summarize the project structure"));
+        assert!(is_exploration_task(
+            "give me an overview of this repository"
+        ));
+        assert!(is_exploration_task("summarize the repository architecture"));
         assert!(is_exploration_task("help me understand this codebase"));
     }
 
@@ -2493,6 +2989,10 @@ mod tests {
         assert!(!is_exploration_task("add a login button"));
         assert!(!is_exploration_task("fix the bug in checkout"));
         assert!(!is_exploration_task("write a test for the API"));
+        assert!(!is_exploration_task("implement this endpoint"));
+        assert!(!is_exploration_task(
+            "\u{4fee}\u{590d}\u{767b}\u{5f55}\u{6309}\u{94ae}"
+        ));
     }
 
     #[test]
@@ -2540,5 +3040,60 @@ mod tests {
         assert_eq!(total.thinking_tokens, Some(9));
         assert_eq!(total.cache_read_tokens, Some(9));
         assert_eq!(total.cache_creation_tokens, Some(3));
+    }
+
+    #[test]
+    fn test_extract_primary_path_from_arguments_prefers_file_path() {
+        let args = serde_json::json!({
+            "path": "src",
+            "file_path": "src/main.rs"
+        });
+        let path = extract_primary_path_from_arguments(&args);
+        assert_eq!(path.as_deref(), Some("src/main.rs"));
+    }
+
+    #[test]
+    fn test_find_unverified_paths_flags_unknown_paths() {
+        let observed = HashSet::from([
+            "src/main.rs".to_string(),
+            "desktop/src-tauri/src/main.rs".to_string(),
+        ]);
+        let text =
+            "Verified: src/main.rs and desktop/src-tauri/src/main.rs. Maybe server/main.py too.";
+        let issues = find_unverified_paths(text, &observed);
+        assert!(issues.iter().any(|p| p == "server/main.py"));
+        assert!(!issues.iter().any(|p| p == "src/main.rs"));
+    }
+
+    #[test]
+    fn test_extract_all_paths_from_arguments_collects_nested_paths() {
+        let args = serde_json::json!({
+            "path": "./src",
+            "nested": {
+                "file_path": "desktop/src-tauri/src/main.rs",
+                "items": [
+                    {"path": ".\\README.md"},
+                    {"path": "https://example.com/not-a-file"}
+                ]
+            }
+        });
+        let paths = extract_all_paths_from_arguments(&args);
+
+        assert!(paths.iter().any(|p| p == "src"));
+        assert!(paths.iter().any(|p| p == "README.md"));
+        assert!(paths.iter().any(|p| p == "desktop/src-tauri/src/main.rs"));
+        assert!(!paths.iter().any(|p| p.contains("https://")));
+    }
+
+    #[test]
+    fn test_find_unverified_paths_ignores_observed_prefix_and_urls() {
+        let observed = HashSet::from([
+            "desktop/src-tauri/src".to_string(),
+            "src/main.rs".to_string(),
+        ]);
+        let text = "Evidence: desktop/src-tauri/src/services/orchestrator/service.rs \
+                    and src/main.rs plus https://docs.example.com/page.";
+        let issues = find_unverified_paths(text, &observed);
+        assert!(issues.is_empty());
     }
 }

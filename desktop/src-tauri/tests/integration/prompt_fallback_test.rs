@@ -110,8 +110,14 @@ fn test_parse_write_tool_call() {
     let calls = parse_tool_calls(text);
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].tool_name, "Write");
-    assert_eq!(calls[0].arguments["file_path"].as_str(), Some("src/main.rs"));
-    assert!(calls[0].arguments["content"].as_str().unwrap().contains("fn main()"));
+    assert_eq!(
+        calls[0].arguments["file_path"].as_str(),
+        Some("src/main.rs")
+    );
+    assert!(calls[0].arguments["content"]
+        .as_str()
+        .unwrap()
+        .contains("fn main()"));
 }
 
 #[test]
@@ -289,7 +295,10 @@ fn test_parse_invalid_json_skipped() {
 ```"#;
 
     let calls = parse_tool_calls(text);
-    assert!(calls.is_empty(), "Invalid JSON should be skipped gracefully");
+    assert!(
+        calls.is_empty(),
+        "Invalid JSON should be skipped gracefully"
+    );
 }
 
 #[test]
@@ -505,7 +514,10 @@ async fn test_fallback_parse_and_execute_flow() {
 ```
 
 I'll analyze the results."#,
-        dir.path().join("test.txt").to_string_lossy().replace('\\', "\\\\")
+        dir.path()
+            .join("test.txt")
+            .to_string_lossy()
+            .replace('\\', "\\\\")
     );
 
     // Step 1: Parse tool calls
@@ -514,7 +526,9 @@ I'll analyze the results."#,
     assert_eq!(calls[0].tool_name, "Read");
 
     // Step 2: Execute the tool
-    let result = executor.execute(&calls[0].tool_name, &calls[0].arguments).await;
+    let result = executor
+        .execute(&calls[0].tool_name, &calls[0].arguments)
+        .await;
     assert!(result.success);
     assert!(result.output.as_ref().unwrap().contains("Hello World"));
 
@@ -540,7 +554,11 @@ async fn test_fallback_multiple_tools_flow() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join("readme.md"), "# My Project\n").unwrap();
     std::fs::create_dir(dir.path().join("src")).unwrap();
-    std::fs::write(dir.path().join("src").join("lib.rs"), "pub fn add(a: i32, b: i32) -> i32 { a + b }\n").unwrap();
+    std::fs::write(
+        dir.path().join("src").join("lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .unwrap();
     let executor = ToolExecutor::new(dir.path());
 
     // Simulate LLM outputting multiple tool calls
@@ -594,7 +612,11 @@ async fn test_fallback_write_then_verify_flow() {
     let dir = tempfile::TempDir::new().unwrap();
     let executor = ToolExecutor::new(dir.path());
 
-    let file_path = dir.path().join("created.txt").to_string_lossy().replace('\\', "\\\\");
+    let file_path = dir
+        .path()
+        .join("created.txt")
+        .to_string_lossy()
+        .replace('\\', "\\\\");
 
     // Simulate LLM writing a file
     let write_response = format!(
@@ -609,7 +631,9 @@ async fn test_fallback_write_then_verify_flow() {
     let calls = parse_tool_calls(&write_response);
     assert_eq!(calls.len(), 1);
 
-    let result = executor.execute(&calls[0].tool_name, &calls[0].arguments).await;
+    let result = executor
+        .execute(&calls[0].tool_name, &calls[0].arguments)
+        .await;
     assert!(result.success, "Write failed: {:?}", result.error);
 
     // Simulate LLM then reading it back
@@ -621,9 +645,14 @@ async fn test_fallback_write_then_verify_flow() {
     );
 
     let read_calls = parse_tool_calls(&read_response);
-    let read_result = executor.execute(&read_calls[0].tool_name, &read_calls[0].arguments).await;
+    let read_result = executor
+        .execute(&read_calls[0].tool_name, &read_calls[0].arguments)
+        .await;
     assert!(read_result.success);
-    assert!(read_result.output.unwrap().contains("Created by fallback test."));
+    assert!(read_result
+        .output
+        .unwrap()
+        .contains("Created by fallback test."));
 }
 
 // ============================================================================

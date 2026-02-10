@@ -388,7 +388,8 @@ impl LlmProvider for GlmProvider {
         })?;
         if status != 200 {
             if Self::is_invalid_param_error(status, &body_text) {
-                let compat_body = self.build_compat_request_body(&messages, system.as_deref(), false);
+                let compat_body =
+                    self.build_compat_request_body(&messages, system.as_deref(), false);
                 response = self
                     .post_chat_completion(self.base_url(), api_key, &compat_body)
                     .await?;
@@ -457,16 +458,14 @@ impl LlmProvider for GlmProvider {
             })?;
 
             if Self::is_invalid_param_error(status, &body_text) {
-                let compat_body = self.build_compat_request_body(&messages, system.as_deref(), true);
+                let compat_body =
+                    self.build_compat_request_body(&messages, system.as_deref(), true);
                 response = self
                     .post_chat_completion(self.base_url(), api_key, &compat_body)
                     .await?;
 
                 status = response.status().as_u16();
-                if status != 200
-                    && self.model_is_glm47_family()
-                    && self.using_default_endpoint()
-                {
+                if status != 200 && self.model_is_glm47_family() && self.using_default_endpoint() {
                     let retry_text = response.text().await.map_err(|e| LlmError::NetworkError {
                         message: e.to_string(),
                     })?;

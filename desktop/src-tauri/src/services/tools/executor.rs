@@ -49,7 +49,11 @@ impl ToolResult {
     }
 
     /// Create a successful result with image data for multimodal support
-    pub fn ok_with_image(output: impl Into<String>, mime_type: String, base64_data: String) -> Self {
+    pub fn ok_with_image(
+        output: impl Into<String>,
+        mime_type: String,
+        base64_data: String,
+    ) -> Self {
         Self {
             success: true,
             output: Some(output.into()),
@@ -77,24 +81,36 @@ impl ToolResult {
 /// this error message teaches it the correct format for the next retry.
 fn missing_param_error(tool: &str, param: &str) -> String {
     let example = match (tool, param) {
-        ("Read", "file_path") => r#"```tool_call
+        ("Read", "file_path") => {
+            r#"```tool_call
 {"tool": "Read", "arguments": {"file_path": "path/to/file"}}
-```"#,
-        ("LS", "path") => r#"```tool_call
+```"#
+        }
+        ("LS", "path") => {
+            r#"```tool_call
 {"tool": "LS", "arguments": {"path": "."}}
-```"#,
-        ("Bash", "command") => r#"```tool_call
+```"#
+        }
+        ("Bash", "command") => {
+            r#"```tool_call
 {"tool": "Bash", "arguments": {"command": "your command here"}}
-```"#,
-        ("Glob", "pattern") => r#"```tool_call
+```"#
+        }
+        ("Glob", "pattern") => {
+            r#"```tool_call
 {"tool": "Glob", "arguments": {"pattern": "**/*.rs"}}
-```"#,
-        ("Grep", "pattern") => r#"```tool_call
+```"#
+        }
+        ("Grep", "pattern") => {
+            r#"```tool_call
 {"tool": "Grep", "arguments": {"pattern": "search_term"}}
-```"#,
-        ("Write", "file_path") => r#"```tool_call
+```"#
+        }
+        ("Write", "file_path") => {
+            r#"```tool_call
 {"tool": "Write", "arguments": {"file_path": "path/to/file", "content": "file content"}}
-```"#,
+```"#
+        }
         _ => return format!("Missing required parameter: {param}"),
     };
     format!("Missing required parameter: {param}. Correct format:\n{example}")
@@ -149,7 +165,11 @@ impl ToolExecutor {
         match super::web_search::WebSearchService::new(provider_name, api_key.as_deref()) {
             Ok(service) => self.web_search = Some(service),
             Err(e) => {
-                tracing::warn!("Failed to configure search provider '{}': {}", provider_name, e);
+                tracing::warn!(
+                    "Failed to configure search provider '{}': {}",
+                    provider_name,
+                    e
+                );
                 self.web_search = None;
             }
         }
@@ -237,7 +257,11 @@ impl ToolExecutor {
         }
 
         // Extension-based dispatch for rich file formats
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
         match ext.as_str() {
             "pdf" => {
                 let pages = args.get("pages").and_then(|v| v.as_str());
@@ -246,24 +270,18 @@ impl ToolExecutor {
                     Err(e) => return ToolResult::err(e),
                 }
             }
-            "ipynb" => {
-                match super::file_parsers::parse_jupyter(&path) {
-                    Ok(content) => return ToolResult::ok(content),
-                    Err(e) => return ToolResult::err(e),
-                }
-            }
-            "docx" => {
-                match super::file_parsers::parse_docx(&path) {
-                    Ok(content) => return ToolResult::ok(content),
-                    Err(e) => return ToolResult::err(e),
-                }
-            }
-            "xlsx" | "xls" | "ods" => {
-                match super::file_parsers::parse_xlsx(&path) {
-                    Ok(content) => return ToolResult::ok(content),
-                    Err(e) => return ToolResult::err(e),
-                }
-            }
+            "ipynb" => match super::file_parsers::parse_jupyter(&path) {
+                Ok(content) => return ToolResult::ok(content),
+                Err(e) => return ToolResult::err(e),
+            },
+            "docx" => match super::file_parsers::parse_docx(&path) {
+                Ok(content) => return ToolResult::ok(content),
+                Err(e) => return ToolResult::err(e),
+            },
+            "xlsx" | "xls" | "ods" => match super::file_parsers::parse_xlsx(&path) {
+                Ok(content) => return ToolResult::ok(content),
+                Err(e) => return ToolResult::err(e),
+            },
             "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" => {
                 let metadata = match super::file_parsers::read_image_metadata(&path) {
                     Ok(m) => m,
@@ -615,10 +633,7 @@ impl ToolExecutor {
             .get("output_mode")
             .and_then(|v| v.as_str())
             .unwrap_or("files_with_matches");
-        let head_limit = args
-            .get("head_limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
+        let head_limit = args.get("head_limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         // Build regex
         let regex = match regex::RegexBuilder::new(pattern)
@@ -665,11 +680,7 @@ impl ToolExecutor {
                 .build();
 
             for entry in walker.flatten() {
-                if !entry
-                    .file_type()
-                    .map(|ft| ft.is_file())
-                    .unwrap_or(false)
-                {
+                if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
                     continue;
                 }
 
@@ -806,10 +817,7 @@ impl ToolExecutor {
 
     /// Execute LS tool - list directory contents
     async fn execute_ls(&self, args: &serde_json::Value) -> ToolResult {
-        let dir_path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let dir_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
         let show_hidden = args
             .get("show_hidden")
@@ -846,10 +854,7 @@ impl ToolExecutor {
                         continue;
                     }
 
-                    let is_dir = entry
-                        .file_type()
-                        .map(|ft| ft.is_dir())
-                        .unwrap_or(false);
+                    let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
 
                     let size = if is_dir {
                         0
@@ -862,7 +867,8 @@ impl ToolExecutor {
 
                 // Sort: directories first, then alphabetically
                 items.sort_by(|a, b| {
-                    b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+                    b.1.cmp(&a.1)
+                        .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
                 });
 
                 if items.is_empty() {
@@ -1022,7 +1028,9 @@ impl ToolExecutor {
             }
         }
 
-        match super::notebook_edit::edit_notebook(&path, cell_index, operation, cell_type, new_source) {
+        match super::notebook_edit::edit_notebook(
+            &path, cell_index, operation, cell_type, new_source,
+        ) {
             Ok(msg) => ToolResult::ok(msg),
             Err(e) => ToolResult::err(e),
         }
@@ -1068,11 +1076,13 @@ impl ToolExecutor {
         // Emit SubAgentStart event
         let _ = ctx
             .tx
-            .send(crate::services::streaming::unified::UnifiedStreamEvent::SubAgentStart {
-                sub_agent_id: sub_agent_id.clone(),
-                prompt: prompt.chars().take(200).collect(),
-                task_type: task_type.clone(),
-            })
+            .send(
+                crate::services::streaming::unified::UnifiedStreamEvent::SubAgentStart {
+                    sub_agent_id: sub_agent_id.clone(),
+                    prompt: prompt.chars().take(200).collect(),
+                    task_type: task_type.clone(),
+                },
+            )
             .await;
 
         // Spawn the sub-agent task
@@ -1089,15 +1099,17 @@ impl ToolExecutor {
         // Emit SubAgentEnd event
         let _ = ctx
             .tx
-            .send(crate::services::streaming::unified::UnifiedStreamEvent::SubAgentEnd {
-                sub_agent_id,
-                success: result.success,
-                usage: serde_json::json!({
-                    "input_tokens": result.usage.input_tokens,
-                    "output_tokens": result.usage.output_tokens,
-                    "iterations": result.iterations,
-                }),
-            })
+            .send(
+                crate::services::streaming::unified::UnifiedStreamEvent::SubAgentEnd {
+                    sub_agent_id,
+                    success: result.success,
+                    usage: serde_json::json!({
+                        "input_tokens": result.usage.input_tokens,
+                        "output_tokens": result.usage.output_tokens,
+                        "iterations": result.iterations,
+                    }),
+                },
+            )
             .await;
 
         if result.success {

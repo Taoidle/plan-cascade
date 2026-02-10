@@ -123,10 +123,7 @@ pub enum MessageContent {
         thinking_id: Option<String>,
     },
     /// Image content (base64 encoded, for multimodal providers)
-    Image {
-        media_type: String,
-        data: String,
-    },
+    Image { media_type: String, data: String },
     /// Tool result with multimodal content (text + images)
     ToolResultMultimodal {
         tool_use_id: String,

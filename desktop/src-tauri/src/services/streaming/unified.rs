@@ -107,6 +107,41 @@ pub enum UnifiedStreamEvent {
     },
 
     // ========================================================================
+    // Analysis pipeline events (evidence-first project analysis mode)
+    // ========================================================================
+    /// Analysis phase has started
+    AnalysisPhaseStart {
+        phase_id: String,
+        title: String,
+        objective: String,
+    },
+
+    /// Analysis phase progress update
+    AnalysisPhaseProgress { phase_id: String, message: String },
+
+    /// Evidence captured during analysis (from tool activity)
+    AnalysisEvidence {
+        phase_id: String,
+        tool_name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        file_path: Option<String>,
+        summary: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        success: Option<bool>,
+    },
+
+    /// Analysis phase has completed
+    AnalysisPhaseEnd {
+        phase_id: String,
+        success: bool,
+        usage: serde_json::Value,
+        metrics: serde_json::Value,
+    },
+
+    /// Validation result emitted near the end of analysis
+    AnalysisValidation { status: String, issues: Vec<String> },
+
+    // ========================================================================
     // Session-based execution events (for standalone mode)
     // ========================================================================
     /// Session progress update
@@ -255,6 +290,21 @@ mod tests {
         assert!(json.contains("\"input_tokens\":100"));
         assert!(json.contains("\"thinking_tokens\":20"));
         assert!(!json.contains("cache_read_tokens")); // None skipped
+    }
+
+    #[test]
+    fn test_analysis_phase_event_serialization() {
+        let event = UnifiedStreamEvent::AnalysisPhaseStart {
+            phase_id: "structure_discovery".to_string(),
+            title: "Structure Discovery".to_string(),
+            objective: "Map project entrypoints and manifests".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"analysis_phase_start\""));
+        assert!(json.contains("\"phase_id\":\"structure_discovery\""));
+
+        let parsed: UnifiedStreamEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(event, parsed);
     }
 
     #[test]

@@ -53,7 +53,11 @@ impl SearchProvider for TavilyProvider {
         let status = response.status();
         if !status.is_success() {
             let err_body = response.text().await.unwrap_or_default();
-            return Err(format!("Tavily API error ({}): {}", status.as_u16(), err_body));
+            return Err(format!(
+                "Tavily API error ({}): {}",
+                status.as_u16(),
+                err_body
+            ));
         }
 
         let data: serde_json::Value = response
@@ -67,9 +71,21 @@ impl SearchProvider for TavilyProvider {
             .map(|arr| {
                 arr.iter()
                     .map(|item| SearchResult {
-                        title: item.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                        url: item.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string(),
-                        snippet: item.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string(),
+                        title: item
+                            .get("title")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        url: item
+                            .get("url")
+                            .and_then(|u| u.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        snippet: item
+                            .get("content")
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                     })
                     .collect()
             })
@@ -105,7 +121,11 @@ impl SearchProvider for BraveSearchProvider {
         let status = response.status();
         if !status.is_success() {
             let err_body = response.text().await.unwrap_or_default();
-            return Err(format!("Brave Search API error ({}): {}", status.as_u16(), err_body));
+            return Err(format!(
+                "Brave Search API error ({}): {}",
+                status.as_u16(),
+                err_body
+            ));
         }
 
         let data: serde_json::Value = response
@@ -120,9 +140,21 @@ impl SearchProvider for BraveSearchProvider {
             .map(|arr| {
                 arr.iter()
                     .map(|item| SearchResult {
-                        title: item.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                        url: item.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string(),
-                        snippet: item.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string(),
+                        title: item
+                            .get("title")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        url: item
+                            .get("url")
+                            .and_then(|u| u.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        snippet: item
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                     })
                     .collect()
             })
@@ -222,28 +254,32 @@ impl WebSearchService {
 
         let provider: Box<dyn SearchProvider> = match provider_name.to_lowercase().as_str() {
             "tavily" => {
-                let key = api_key
-                    .filter(|k| !k.is_empty())
-                    .ok_or_else(|| "Tavily requires an API key. Configure it in Settings > LLM Backend.".to_string())?;
+                let key = api_key.filter(|k| !k.is_empty()).ok_or_else(|| {
+                    "Tavily requires an API key. Configure it in Settings > LLM Backend."
+                        .to_string()
+                })?;
                 Box::new(TavilyProvider {
                     client,
                     api_key: key.to_string(),
                 })
             }
             "brave" | "brave_search" => {
-                let key = api_key
-                    .filter(|k| !k.is_empty())
-                    .ok_or_else(|| "Brave Search requires an API key. Configure it in Settings > LLM Backend.".to_string())?;
+                let key = api_key.filter(|k| !k.is_empty()).ok_or_else(|| {
+                    "Brave Search requires an API key. Configure it in Settings > LLM Backend."
+                        .to_string()
+                })?;
                 Box::new(BraveSearchProvider {
                     client,
                     api_key: key.to_string(),
                 })
             }
             "duckduckgo" | "" => Box::new(DuckDuckGoProvider { client }),
-            other => return Err(format!(
-                "Unknown search provider: '{}'. Supported: tavily, brave, duckduckgo",
-                other
-            )),
+            other => {
+                return Err(format!(
+                    "Unknown search provider: '{}'. Supported: tavily, brave, duckduckgo",
+                    other
+                ))
+            }
         };
 
         Ok(Self { provider })

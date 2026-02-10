@@ -471,8 +471,7 @@ impl LlmProvider for OllamaProvider {
                     }
                     if !matches!(
                         &event,
-                        UnifiedStreamEvent::Complete { .. }
-                            | UnifiedStreamEvent::Usage { .. }
+                        UnifiedStreamEvent::Complete { .. } | UnifiedStreamEvent::Usage { .. }
                     ) {
                         let _ = tx.send(event).await;
                     }

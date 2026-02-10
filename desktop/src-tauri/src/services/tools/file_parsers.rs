@@ -25,8 +25,8 @@ const MAX_XLSX_SHEETS: usize = 5;
 
 /// Check file size against a limit
 fn check_file_size(path: &Path, max_size: u64) -> Result<u64, String> {
-    let metadata = std::fs::metadata(path)
-        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    let metadata =
+        std::fs::metadata(path).map_err(|e| format!("Failed to read file metadata: {}", e))?;
     let size = metadata.len();
     if size > max_size {
         return Err(format!(
@@ -99,9 +99,19 @@ pub fn parse_pdf(path: &Path, pages: Option<&str>) -> Result<String, String> {
         }
         let end = end.min(total_pages);
 
-        let mut output = format!("PDF: {} ({} total pages, showing {}-{})\n\n", path.display(), total_pages, start, end);
+        let mut output = format!(
+            "PDF: {} ({} total pages, showing {}-{})\n\n",
+            path.display(),
+            total_pages,
+            start,
+            end
+        );
         for i in (start - 1)..end {
-            output.push_str(&format!("--- Page {} ---\n{}\n\n", i + 1, all_pages[i].trim()));
+            output.push_str(&format!(
+                "--- Page {} ---\n{}\n\n",
+                i + 1,
+                all_pages[i].trim()
+            ));
         }
         Ok(output)
     } else {
@@ -127,8 +137,8 @@ pub fn parse_pdf(path: &Path, pages: Option<&str>) -> Result<String, String> {
 ///
 /// Renders cells with their type, source, and text outputs.
 pub fn parse_jupyter(path: &Path) -> Result<String, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read notebook: {}", e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read notebook: {}", e))?;
 
     let notebook: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse notebook JSON: {}", e))?;
@@ -138,7 +148,11 @@ pub fn parse_jupyter(path: &Path) -> Result<String, String> {
         .and_then(|c| c.as_array())
         .ok_or_else(|| "Invalid notebook: missing 'cells' array".to_string())?;
 
-    let mut output = format!("Jupyter Notebook: {} ({} cells)\n\n", path.display(), cells.len());
+    let mut output = format!(
+        "Jupyter Notebook: {} ({} cells)\n\n",
+        path.display(),
+        cells.len()
+    );
 
     for (i, cell) in cells.iter().enumerate() {
         let cell_type = cell
@@ -153,16 +167,24 @@ pub fn parse_jupyter(path: &Path) -> Result<String, String> {
 
         match cell_type {
             "code" => {
-                output.push_str(&format!("[Cell {} - code]:\n```python\n{}\n```\n", i + 1, source));
+                output.push_str(&format!(
+                    "[Cell {} - code]:\n```python\n{}\n```\n",
+                    i + 1,
+                    source
+                ));
 
                 // Extract text outputs
                 if let Some(outputs) = cell.get("outputs").and_then(|o| o.as_array()) {
                     for out in outputs {
                         if let Some(text) = out.get("text") {
-                            output.push_str(&format!("[Output]: {}\n", extract_notebook_text(text)));
+                            output
+                                .push_str(&format!("[Output]: {}\n", extract_notebook_text(text)));
                         } else if let Some(data) = out.get("data") {
                             if let Some(text) = data.get("text/plain") {
-                                output.push_str(&format!("[Output]: {}\n", extract_notebook_text(text)));
+                                output.push_str(&format!(
+                                    "[Output]: {}\n",
+                                    extract_notebook_text(text)
+                                ));
                             } else {
                                 // Skip binary outputs (image/png, etc.)
                                 let keys: Vec<&str> = data
@@ -183,7 +205,12 @@ pub fn parse_jupyter(path: &Path) -> Result<String, String> {
                 output.push_str(&format!("[Cell {} - raw]:\n{}\n\n", i + 1, source));
             }
             _ => {
-                output.push_str(&format!("[Cell {} - {}]:\n{}\n\n", i + 1, cell_type, source));
+                output.push_str(&format!(
+                    "[Cell {} - {}]:\n{}\n\n",
+                    i + 1,
+                    cell_type,
+                    source
+                ));
             }
         }
     }
@@ -208,11 +235,10 @@ fn extract_notebook_text(value: &serde_json::Value) -> String {
 pub fn parse_docx(path: &Path) -> Result<String, String> {
     check_file_size(path, MAX_DOC_SIZE)?;
 
-    let file = std::fs::File::open(path)
-        .map_err(|e| format!("Failed to open DOCX: {}", e))?;
+    let file = std::fs::File::open(path).map_err(|e| format!("Failed to open DOCX: {}", e))?;
 
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("Failed to read DOCX as ZIP: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("Failed to read DOCX as ZIP: {}", e))?;
 
     // Read word/document.xml
     let mut doc_xml = String::new();
@@ -234,7 +260,8 @@ pub fn parse_docx(path: &Path) -> Result<String, String> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(quick_xml::events::Event::Start(ref e)) | Ok(quick_xml::events::Event::Empty(ref e)) => {
+            Ok(quick_xml::events::Event::Start(ref e))
+            | Ok(quick_xml::events::Event::Empty(ref e)) => {
                 let local_name = e.local_name();
                 let name = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
                 if name == "p" {
@@ -281,7 +308,11 @@ pub fn parse_xlsx(path: &Path) -> Result<String, String> {
     let mut workbook = calamine::open_workbook_auto(path)
         .map_err(|e| format!("Failed to open spreadsheet: {}", e))?;
 
-    let sheet_names: Vec<String> = workbook.sheet_names().iter().map(|s| s.to_string()).collect();
+    let sheet_names: Vec<String> = workbook
+        .sheet_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let num_sheets = sheet_names.len().min(MAX_XLSX_SHEETS);
 
     let mut output = format!(
@@ -419,8 +450,7 @@ pub fn encode_image_base64(path: &Path) -> Result<(String, String), String> {
         _ => return Err(format!("Unsupported image format: {}", ext)),
     };
 
-    let bytes = std::fs::read(path)
-        .map_err(|e| format!("Failed to read image file: {}", e))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("Failed to read image file: {}", e))?;
 
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -443,8 +473,19 @@ fn format_file_size(size: u64) -> String {
 pub fn is_rich_format(ext: &str) -> bool {
     matches!(
         ext,
-        "pdf" | "ipynb" | "docx" | "xlsx" | "xls" | "ods"
-            | "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg"
+        "pdf"
+            | "ipynb"
+            | "docx"
+            | "xlsx"
+            | "xls"
+            | "ods"
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "bmp"
+            | "svg"
     )
 }
 

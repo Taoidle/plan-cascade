@@ -76,7 +76,11 @@ impl WebFetchService {
 
         let status = response.status();
         if !status.is_success() {
-            return Err(format!("HTTP error: {} {}", status.as_u16(), status.canonical_reason().unwrap_or("Unknown")));
+            return Err(format!(
+                "HTTP error: {} {}",
+                status.as_u16(),
+                status.canonical_reason().unwrap_or("Unknown")
+            ));
         }
 
         // Check content length header
@@ -114,11 +118,12 @@ impl WebFetchService {
         let body = String::from_utf8_lossy(&bytes).to_string();
 
         // Convert to markdown if HTML
-        let result = if content_type.contains("text/html") || content_type.contains("application/xhtml") {
-            html2md::parse_html(&body)
-        } else {
-            body
-        };
+        let result =
+            if content_type.contains("text/html") || content_type.contains("application/xhtml") {
+                html2md::parse_html(&body)
+            } else {
+                body
+            };
 
         // Truncate to max output size
         let result = if result.len() > MAX_OUTPUT_SIZE {
@@ -146,8 +151,7 @@ impl WebFetchService {
             url_str.to_string()
         };
 
-        let url = url::Url::parse(&url_str)
-            .map_err(|e| format!("Invalid URL: {}", e))?;
+        let url = url::Url::parse(&url_str).map_err(|e| format!("Invalid URL: {}", e))?;
 
         // Must be HTTPS
         if url.scheme() != "https" {
@@ -192,11 +196,9 @@ fn is_private_host(host: &str) -> bool {
                     || ipv4.is_private()      // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
                     || ipv4.is_link_local()   // 169.254.0.0/16
                     || ipv4.is_unspecified()  // 0.0.0.0
-                    || ipv4.is_broadcast()    // 255.255.255.255
+                    || ipv4.is_broadcast() // 255.255.255.255
             }
-            IpAddr::V6(ipv6) => {
-                ipv6.is_loopback() || ipv6.is_unspecified()
-            }
+            IpAddr::V6(ipv6) => ipv6.is_loopback() || ipv6.is_unspecified(),
         };
     }
 

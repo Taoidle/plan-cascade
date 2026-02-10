@@ -46,10 +46,7 @@ pub fn build_tool_call_instructions(tools: &[ToolDefinition]) -> String {
                     } else {
                         " (optional)"
                     };
-                    let desc = schema
-                        .description
-                        .as_deref()
-                        .unwrap_or("");
+                    let desc = schema.description.as_deref().unwrap_or("");
                     tool_descriptions.push_str(&format!(
                         "  - `{}` ({}{}): {}\n",
                         name, type_str, req_marker, desc
@@ -382,8 +379,7 @@ fn parse_bare_function_calls(text: &str) -> Vec<ParsedToolCall> {
                     let inner = trimmed[paren_start + 1..paren_start + 1 + close_rel].trim();
                     if !inner.is_empty() {
                         let arguments = infer_tool_arguments(tool, inner);
-                        let raw_text =
-                            trimmed[..paren_start + 1 + close_rel + 1].to_string();
+                        let raw_text = trimmed[..paren_start + 1 + close_rel + 1].to_string();
                         calls.push(ParsedToolCall {
                             tool_name: tool.to_string(),
                             arguments,
@@ -415,21 +411,20 @@ fn parse_bare_json_tool_calls(text: &str) -> Vec<ParsedToolCall> {
         let line = lines[i].trim();
 
         // Check for "tool_call:" prefix — JSON starts on the next line
-        let json_start_line = if line.eq_ignore_ascii_case("tool_call:")
-            || line.eq_ignore_ascii_case("tool_call")
-        {
-            i += 1;
-            if i < lines.len() {
+        let json_start_line =
+            if line.eq_ignore_ascii_case("tool_call:") || line.eq_ignore_ascii_case("tool_call") {
+                i += 1;
+                if i < lines.len() {
+                    Some(i)
+                } else {
+                    None
+                }
+            } else if line.starts_with('{') && line.contains("\"tool\"") {
+                // Bare JSON on this line
                 Some(i)
             } else {
                 None
-            }
-        } else if line.starts_with('{') && line.contains("\"tool\"") {
-            // Bare JSON on this line
-            Some(i)
-        } else {
-            None
-        };
+            };
 
         if let Some(start_line) = json_start_line {
             let first = lines[start_line].trim();
@@ -651,8 +646,18 @@ fn parse_single_tool_call(content: &str) -> Option<(String, serde_json::Value)> 
 
 /// Known tool names for lenient parsing.
 const KNOWN_TOOLS: &[&str] = &[
-    "Read", "Write", "Edit", "Bash", "Glob", "Grep", "LS", "Cwd", "Task",
-    "WebFetch", "WebSearch", "NotebookEdit",
+    "Read",
+    "Write",
+    "Edit",
+    "Bash",
+    "Glob",
+    "Grep",
+    "LS",
+    "Cwd",
+    "Task",
+    "WebFetch",
+    "WebSearch",
+    "NotebookEdit",
 ];
 
 /// Attempt to parse lenient tool calls from freeform text.
@@ -686,17 +691,16 @@ fn parse_lenient_tool_calls(content: &str) -> Vec<ParsedToolCall> {
             //    e.g. "(id: story_fallback_6){"path": "..."}" → `{"path": "..."}`
             //    Only strip the `(id:...)` segment, preserve any trailing content after `)`.
             //    Must NOT consume `(id: x, path: ".")` — that's a colon-args pattern.
-            let rest = if (rest.starts_with("(id:") || rest.starts_with("(id "))
-                && !rest.contains(',')
-            {
-                if let Some(close_paren) = rest.find(')') {
-                    rest[close_paren + 1..].trim()
+            let rest =
+                if (rest.starts_with("(id:") || rest.starts_with("(id ")) && !rest.contains(',') {
+                    if let Some(close_paren) = rest.find(')') {
+                        rest[close_paren + 1..].trim()
+                    } else {
+                        rest
+                    }
                 } else {
                     rest
-                }
-            } else {
-                rest
-            };
+                };
 
             // 1. Tool name only, no arguments
             if rest.is_empty() {
@@ -903,7 +907,9 @@ fn parse_equals_args(text: &str) -> Option<serde_json::Value> {
             None => break,
         };
 
-        let key = remaining[..eq_pos].trim().trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
+        let key = remaining[..eq_pos]
+            .trim()
+            .trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
         let after_eq = &remaining[eq_pos + 1..];
 
         if key.is_empty() {
@@ -914,7 +920,10 @@ fn parse_equals_args(text: &str) -> Option<serde_json::Value> {
         let (value, rest) = if after_eq.starts_with('"') {
             // Quoted value: find closing quote
             if let Some(end_quote) = after_eq[1..].find('"') {
-                (&after_eq[1..end_quote + 1], after_eq[end_quote + 2..].trim())
+                (
+                    &after_eq[1..end_quote + 1],
+                    after_eq[end_quote + 2..].trim(),
+                )
             } else {
                 (after_eq[1..].trim(), "")
             }
@@ -937,7 +946,9 @@ fn parse_equals_args(text: &str) -> Option<serde_json::Value> {
                         let potential_key = rest_after_space[..next_eq].trim();
                         if !potential_key.is_empty()
                             && !potential_key.contains(' ')
-                            && potential_key.chars().all(|c| c.is_alphanumeric() || c == '_')
+                            && potential_key
+                                .chars()
+                                .all(|c| c.is_alphanumeric() || c == '_')
                         {
                             end = i;
                             break;
@@ -955,9 +966,7 @@ fn parse_equals_args(text: &str) -> Option<serde_json::Value> {
         };
 
         // Clean value: strip quotes and trailing XML junk
-        let clean_value = value
-            .trim_matches('"')
-            .trim_end_matches("/>");
+        let clean_value = value.trim_matches('"').trim_end_matches("/>");
 
         if !key.is_empty() && !clean_value.is_empty() {
             map.insert(
@@ -1138,10 +1147,7 @@ pub fn format_tool_result(tool_name: &str, tool_id: &str, result: &str, is_error
             tool_name, tool_id, result
         )
     } else {
-        format!(
-            "[Tool Result: {} (id: {})]\n{}",
-            tool_name, tool_id, result
-        )
+        format!("[Tool Result: {} (id: {})]\n{}", tool_name, tool_id, result)
     }
 }
 
@@ -1429,7 +1435,8 @@ End."#;
 
     #[test]
     fn test_parse_xml_arg_pairs_glob() {
-        let text = "<tool_call>Glob<arg_key>pattern</arg_key><arg_value>**/*</arg_value></tool_call>";
+        let text =
+            "<tool_call>Glob<arg_key>pattern</arg_key><arg_value>**/*</arg_value></tool_call>";
 
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
@@ -1439,7 +1446,8 @@ End."#;
 
     #[test]
     fn test_parse_xml_arg_pairs_bash() {
-        let text = "<tool_call>Bash<arg_key>command</arg_key><arg_value>ls -la</arg_value></tool_call>";
+        let text =
+            "<tool_call>Bash<arg_key>command</arg_key><arg_value>ls -la</arg_value></tool_call>";
 
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
@@ -1495,8 +1503,7 @@ End."#;
     #[test]
     fn test_parse_malformed_tool_call_as_arg_key() {
         // Real-world pattern: model outputs <tool_call> instead of <arg_key>
-        let text =
-            "<tool_call>LS<tool_call>path</arg_key><arg_value>.</arg_value></tool_call>";
+        let text = "<tool_call>LS<tool_call>path</arg_key><arg_value>.</arg_value></tool_call>";
 
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
@@ -1521,9 +1528,7 @@ End."#;
     #[test]
     fn test_parse_xml_arg_pairs_malformed_opening_tag() {
         // The parse_xml_arg_pairs function should handle <tool_call> instead of <arg_key>
-        let args = parse_xml_arg_pairs(
-            "<tool_call>path</arg_key><arg_value>.</arg_value>",
-        );
+        let args = parse_xml_arg_pairs("<tool_call>path</arg_key><arg_value>.</arg_value>");
         assert_eq!(args["path"].as_str(), Some("."));
     }
 
@@ -1699,10 +1704,7 @@ End."#;
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "Read");
-        assert_eq!(
-            calls[0].arguments["file_path"].as_str(),
-            Some("README.md")
-        );
+        assert_eq!(calls[0].arguments["file_path"].as_str(), Some("README.md"));
     }
 
     #[test]
@@ -1716,10 +1718,7 @@ End."#;
             Some("README.zh-CN.md")
         );
         assert_eq!(calls[1].tool_name, "Read");
-        assert_eq!(
-            calls[1].arguments["file_path"].as_str(),
-            Some("README.md")
-        );
+        assert_eq!(calls[1].arguments["file_path"].as_str(), Some("README.md"));
         assert_eq!(calls[2].tool_name, "Read");
         assert_eq!(
             calls[2].arguments["file_path"].as_str(),
@@ -1751,10 +1750,7 @@ End."#;
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "Bash");
-        assert_eq!(
-            calls[0].arguments["command"].as_str(),
-            Some("cargo test")
-        );
+        assert_eq!(calls[0].arguments["command"].as_str(), Some("cargo test"));
     }
 
     #[test]
@@ -1986,7 +1982,12 @@ End."#;
 
 <glob><pattern>**/{package.json,Cargo.toml,pyproject.toml}</pattern></glob>"#;
         let calls = parse_tool_calls(text);
-        assert_eq!(calls.len(), 2, "Should parse 2 tool calls, got: {:?}", calls);
+        assert_eq!(
+            calls.len(),
+            2,
+            "Should parse 2 tool calls, got: {:?}",
+            calls
+        );
         assert_eq!(calls[0].tool_name, "LS");
         assert_eq!(calls[0].arguments["path"].as_str(), Some("."));
         assert_eq!(calls[1].tool_name, "Glob");
@@ -2002,7 +2003,10 @@ End."#;
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "Read");
-        assert_eq!(calls[0].arguments["file_path"].as_str(), Some("src/main.rs"));
+        assert_eq!(
+            calls[0].arguments["file_path"].as_str(),
+            Some("src/main.rs")
+        );
     }
 
     #[test]
@@ -2031,7 +2035,8 @@ End."#;
     #[test]
     fn test_direct_xml_does_not_conflict_with_other_passes() {
         // If ```tool_call is present, pass 1 should handle it and pass 4 should not run
-        let text = "```tool_call\n{\"tool\": \"Read\", \"arguments\": {\"file_path\": \"a.rs\"}}\n```";
+        let text =
+            "```tool_call\n{\"tool\": \"Read\", \"arguments\": {\"file_path\": \"a.rs\"}}\n```";
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "Read");
@@ -2065,7 +2070,10 @@ End."#;
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "Read");
-        assert_eq!(calls[0].arguments["file_path"].as_str(), Some("src/main.rs"));
+        assert_eq!(
+            calls[0].arguments["file_path"].as_str(),
+            Some("src/main.rs")
+        );
     }
 
     #[test]
