@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
-    StopReason, ToolCall, ToolDefinition, UsageStats,
+    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
+    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::OpenAIAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -51,6 +51,7 @@ impl OpenAIProvider {
         system: Option<&str>,
         tools: &[ToolDefinition],
         stream: bool,
+        request_options: &LlmRequestOptions,
     ) -> serde_json::Value {
         let mut body = serde_json::json!({
             "model": self.config.model,
@@ -60,12 +61,20 @@ impl OpenAIProvider {
 
         // Add temperature (not for o1/o3 models)
         if !self.model_supports_reasoning() {
-            body["temperature"] = serde_json::json!(self.config.temperature);
+            body["temperature"] = serde_json::json!(
+                request_options
+                    .temperature_override
+                    .unwrap_or(self.config.temperature)
+            );
         }
 
         // Add reasoning effort for o1/o3 models
         if self.model_supports_reasoning() {
-            if let Some(effort) = &self.config.reasoning_effort {
+            if let Some(effort) = request_options
+                .reasoning_effort_override
+                .as_ref()
+                .or(self.config.reasoning_effort.as_ref())
+            {
                 body["reasoning_effort"] = serde_json::json!(effort);
             }
         }
@@ -105,6 +114,9 @@ impl OpenAIProvider {
             let openai_tools: Vec<serde_json::Value> =
                 tools.iter().map(|t| self.tool_to_openai(t)).collect();
             body["tools"] = serde_json::json!(openai_tools);
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) {
+                body["tool_choice"] = serde_json::json!("required");
+            }
         }
 
         // Add stream options for usage in streaming
@@ -399,6 +411,7 @@ impl LlmProvider for OpenAIProvider {
         messages: Vec<Message>,
         system: Option<String>,
         tools: Vec<ToolDefinition>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
@@ -406,7 +419,13 @@ impl LlmProvider for OpenAIProvider {
             .as_ref()
             .ok_or_else(|| missing_api_key_error("openai"))?;
 
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, false);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            false,
+            &request_options,
+        );
 
         let response = self
             .client
@@ -443,6 +462,7 @@ impl LlmProvider for OpenAIProvider {
         system: Option<String>,
         tools: Vec<ToolDefinition>,
         tx: mpsc::Sender<UnifiedStreamEvent>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
@@ -450,7 +470,13 @@ impl LlmProvider for OpenAIProvider {
             .as_ref()
             .ok_or_else(|| missing_api_key_error("openai"))?;
 
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, true);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            true,
+            &request_options,
+        );
 
         let response = self
             .client

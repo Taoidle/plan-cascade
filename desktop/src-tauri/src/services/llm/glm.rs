@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
-    StopReason, ToolCall, ToolDefinition, UsageStats,
+    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
+    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::GlmAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -70,12 +70,13 @@ impl GlmProvider {
         system: Option<&str>,
         tools: &[ToolDefinition],
         stream: bool,
+        request_options: &LlmRequestOptions,
     ) -> serde_json::Value {
         let mut body = serde_json::json!({
             "model": self.config.model,
             "max_tokens": self.config.max_tokens,
             "stream": stream,
-            "temperature": self.config.temperature,
+            "temperature": request_options.temperature_override.unwrap_or(self.config.temperature),
         });
 
         // Convert messages to OpenAI-compatible format
@@ -120,6 +121,9 @@ impl GlmProvider {
                 })
                 .collect();
             body["tools"] = serde_json::json!(api_tools);
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) {
+                body["tool_choice"] = serde_json::json!("required");
+            }
         }
 
         if stream {
@@ -142,12 +146,14 @@ impl GlmProvider {
         messages: &[Message],
         system: Option<&str>,
         stream: bool,
+        request_options: &LlmRequestOptions,
     ) -> serde_json::Value {
-        let mut body = self.build_request_body(messages, system, &[], stream);
+        let mut body = self.build_request_body(messages, system, &[], stream, request_options);
         if let Some(obj) = body.as_object_mut() {
             obj.remove("stream_options");
             obj.remove("tools");
             obj.remove("tool_stream");
+            obj.remove("tool_choice");
         }
         body
     }
@@ -370,13 +376,20 @@ impl LlmProvider for GlmProvider {
         messages: Vec<Message>,
         system: Option<String>,
         tools: Vec<ToolDefinition>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
             .api_key
             .as_ref()
             .ok_or_else(|| missing_api_key_error("glm"))?;
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, false);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            false,
+            &request_options,
+        );
 
         let mut response = self
             .post_chat_completion(self.base_url(), api_key, &body)
@@ -389,7 +402,12 @@ impl LlmProvider for GlmProvider {
         if status != 200 {
             if Self::is_invalid_param_error(status, &body_text) {
                 let compat_body =
-                    self.build_compat_request_body(&messages, system.as_deref(), false);
+                    self.build_compat_request_body(
+                        &messages,
+                        system.as_deref(),
+                        false,
+                        &request_options,
+                    );
                 response = self
                     .post_chat_completion(self.base_url(), api_key, &compat_body)
                     .await?;
@@ -439,13 +457,20 @@ impl LlmProvider for GlmProvider {
         system: Option<String>,
         tools: Vec<ToolDefinition>,
         tx: mpsc::Sender<UnifiedStreamEvent>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
             .api_key
             .as_ref()
             .ok_or_else(|| missing_api_key_error("glm"))?;
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, true);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            true,
+            &request_options,
+        );
 
         let mut response = self
             .post_chat_completion(self.base_url(), api_key, &body)
@@ -459,7 +484,12 @@ impl LlmProvider for GlmProvider {
 
             if Self::is_invalid_param_error(status, &body_text) {
                 let compat_body =
-                    self.build_compat_request_body(&messages, system.as_deref(), true);
+                    self.build_compat_request_body(
+                        &messages,
+                        system.as_deref(),
+                        true,
+                        &request_options,
+                    );
                 response = self
                     .post_chat_completion(self.base_url(), api_key, &compat_body)
                     .await?;

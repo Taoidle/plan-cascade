@@ -30,6 +30,62 @@ impl std::fmt::Display for ProviderType {
     }
 }
 
+/// Tool calling mode preference for a request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallMode {
+    /// Provider chooses when to call tools.
+    Auto,
+    /// Provider should require tool calls when tools are available.
+    Required,
+    /// Disable tool calling for this request.
+    None,
+}
+
+impl Default for ToolCallMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+/// Prompt-fallback tool format mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FallbackToolFormatMode {
+    /// Do not include prompt fallback format instructions.
+    Off,
+    /// Include regular fallback format instructions.
+    Soft,
+    /// Include strict fallback instructions (analysis mode).
+    Strict,
+}
+
+impl Default for FallbackToolFormatMode {
+    fn default() -> Self {
+        Self::Off
+    }
+}
+
+/// Per-request options for provider behavior.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LlmRequestOptions {
+    /// Tool calling behavior for this request.
+    #[serde(default)]
+    pub tool_call_mode: ToolCallMode,
+    /// Prompt-fallback mode for tool-call text formats.
+    #[serde(default)]
+    pub fallback_tool_format_mode: FallbackToolFormatMode,
+    /// Optional temperature override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature_override: Option<f32>,
+    /// Optional reasoning effort override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort_override: Option<String>,
+    /// Optional analysis phase identifier for provider-side tuning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_phase: Option<String>,
+}
+
 /// Configuration for an LLM provider
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {

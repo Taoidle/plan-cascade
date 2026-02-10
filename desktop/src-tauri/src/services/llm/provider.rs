@@ -5,7 +5,9 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use super::types::{LlmError, LlmResponse, LlmResult, Message, ProviderConfig, ToolDefinition};
+use super::types::{
+    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, ProviderConfig, ToolDefinition,
+};
 use crate::services::streaming::UnifiedStreamEvent;
 
 /// Trait that all LLM providers must implement.
@@ -55,6 +57,7 @@ pub trait LlmProvider: Send + Sync {
         messages: Vec<Message>,
         system: Option<String>,
         tools: Vec<ToolDefinition>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse>;
 
     /// Stream a message response via a channel.
@@ -73,6 +76,7 @@ pub trait LlmProvider: Send + Sync {
         system: Option<String>,
         tools: Vec<ToolDefinition>,
         tx: mpsc::Sender<UnifiedStreamEvent>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse>;
 
     /// Check if the provider is healthy and reachable.

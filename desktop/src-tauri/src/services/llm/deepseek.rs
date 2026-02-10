@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
-    StopReason, ToolCall, ToolDefinition, UsageStats,
+    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
+    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::DeepSeekAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -51,12 +51,13 @@ impl DeepSeekProvider {
         system: Option<&str>,
         tools: &[ToolDefinition],
         stream: bool,
+        request_options: &LlmRequestOptions,
     ) -> serde_json::Value {
         let mut body = serde_json::json!({
             "model": self.config.model,
             "max_tokens": self.config.max_tokens,
             "stream": stream,
-            "temperature": self.config.temperature,
+            "temperature": request_options.temperature_override.unwrap_or(self.config.temperature),
         });
 
         // Convert messages to OpenAI-compatible format
@@ -93,6 +94,9 @@ impl DeepSeekProvider {
             let api_tools: Vec<serde_json::Value> =
                 tools.iter().map(|t| self.tool_to_deepseek(t)).collect();
             body["tools"] = serde_json::json!(api_tools);
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) {
+                body["tool_choice"] = serde_json::json!("required");
+            }
         }
 
         body
@@ -379,6 +383,7 @@ impl LlmProvider for DeepSeekProvider {
         messages: Vec<Message>,
         system: Option<String>,
         tools: Vec<ToolDefinition>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
@@ -386,7 +391,13 @@ impl LlmProvider for DeepSeekProvider {
             .as_ref()
             .ok_or_else(|| missing_api_key_error("deepseek"))?;
 
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, false);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            false,
+            &request_options,
+        );
 
         let response = self
             .client
@@ -423,6 +434,7 @@ impl LlmProvider for DeepSeekProvider {
         system: Option<String>,
         tools: Vec<ToolDefinition>,
         tx: mpsc::Sender<UnifiedStreamEvent>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
@@ -430,7 +442,13 @@ impl LlmProvider for DeepSeekProvider {
             .as_ref()
             .ok_or_else(|| missing_api_key_error("deepseek"))?;
 
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, true);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            true,
+            &request_options,
+        );
 
         let response = self
             .client

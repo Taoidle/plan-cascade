@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 
 use super::provider::LlmProvider;
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
-    StopReason, ToolCall, ToolDefinition, UsageStats,
+    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
+    ProviderConfig, StopReason, ToolCall, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::OllamaAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -65,6 +65,7 @@ impl OllamaProvider {
         system: Option<&str>,
         _tools: &[ToolDefinition],
         stream: bool,
+        request_options: &LlmRequestOptions,
     ) -> serde_json::Value {
         let mut body = serde_json::json!({
             "model": self.config.model,
@@ -73,7 +74,11 @@ impl OllamaProvider {
 
         // Add options
         let mut options = serde_json::json!({});
-        options["temperature"] = serde_json::json!(self.config.temperature);
+        options["temperature"] = serde_json::json!(
+            request_options
+                .temperature_override
+                .unwrap_or(self.config.temperature)
+        );
         if self.config.max_tokens > 0 {
             options["num_predict"] = serde_json::json!(self.config.max_tokens);
         }
@@ -258,9 +263,16 @@ impl LlmProvider for OllamaProvider {
         messages: Vec<Message>,
         system: Option<String>,
         tools: Vec<ToolDefinition>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let url = format!("{}/api/chat", self.base_url());
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, false);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            false,
+            &request_options,
+        );
 
         let response = self
             .client
@@ -312,9 +324,16 @@ impl LlmProvider for OllamaProvider {
         system: Option<String>,
         tools: Vec<ToolDefinition>,
         tx: mpsc::Sender<UnifiedStreamEvent>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let url = format!("{}/api/chat", self.base_url());
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, true);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            true,
+            &request_options,
+        );
 
         let response = self
             .client

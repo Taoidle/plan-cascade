@@ -1276,6 +1276,13 @@ interface UnifiedEventPayload {
   file_path?: string;
   metrics?: Record<string, unknown>;
   issues?: string[];
+  attempt?: number;
+  max_attempts?: number;
+  required_tools?: string[];
+  gate_failures?: string[];
+  reasons?: string[];
+  phase_results?: string[];
+  total_metrics?: Record<string, unknown>;
   status?: string;
   result?: string;
   usage?: Record<string, unknown>;
@@ -1328,12 +1335,16 @@ function formatAnalysisMetrics(metrics?: Record<string, unknown>): string {
   const toolCalls = parseOptionalNumber(metrics.tool_calls);
   const readCalls = parseOptionalNumber(metrics.read_calls);
   const grepCalls = parseOptionalNumber(metrics.grep_calls);
+  const globCalls = parseOptionalNumber(metrics.glob_calls);
+  const cwdCalls = parseOptionalNumber(metrics.cwd_calls);
   const observedPaths = parseOptionalNumber(metrics.observed_paths);
   const fragments: string[] = [];
 
   if (typeof toolCalls === 'number') fragments.push(`tools=${toolCalls}`);
   if (typeof readCalls === 'number') fragments.push(`read=${readCalls}`);
   if (typeof grepCalls === 'number') fragments.push(`grep=${grepCalls}`);
+  if (typeof globCalls === 'number') fragments.push(`glob=${globCalls}`);
+  if (typeof cwdCalls === 'number') fragments.push(`cwd=${cwdCalls}`);
   if (typeof observedPaths === 'number') fragments.push(`paths=${observedPaths}`);
   return fragments.length > 0 ? ` (${fragments.join(', ')})` : '';
 }
@@ -1442,6 +1453,24 @@ function handleUnifiedExecutionEvent(
       break;
     }
 
+    case 'analysis_phase_attempt_start': {
+      const show = useSettingsStore.getState().showSubAgentEvents;
+      if (show) {
+        const phaseId = toShortText(payload.phase_id, 'phase');
+        const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
+        const maxAttempts = typeof payload.max_attempts === 'number' ? payload.max_attempts : 0;
+        const requiredTools = Array.isArray(payload.required_tools)
+          ? payload.required_tools.join(', ')
+          : '';
+        const suffix = requiredTools ? ` | required: ${requiredTools}` : '';
+        get().appendStreamLine(
+          `[analysis:attempt_start:${phaseId}] attempt ${attempt}/${maxAttempts}${suffix}`,
+          'analysis'
+        );
+      }
+      break;
+    }
+
     case 'analysis_phase_progress': {
       const show = useSettingsStore.getState().showSubAgentEvents;
       if (show) {
@@ -1484,6 +1513,35 @@ function handleUnifiedExecutionEvent(
       break;
     }
 
+    case 'analysis_phase_attempt_end': {
+      const show = useSettingsStore.getState().showSubAgentEvents;
+      if (show || payload.success === false) {
+        const phaseId = toShortText(payload.phase_id, 'phase');
+        const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
+        const metrics = formatAnalysisMetrics(payload.metrics);
+        const gateFailures = Array.isArray(payload.gate_failures) ? payload.gate_failures : [];
+        const failurePreview =
+          gateFailures.length > 0 ? ` | ${gateFailures.slice(0, 2).join(' ; ')}` : '';
+        get().appendStreamLine(
+          `[analysis:attempt_end:${phaseId}] attempt ${attempt} ${payload.success ? 'passed' : 'failed'}${metrics}${failurePreview}`,
+          'analysis'
+        );
+      }
+      break;
+    }
+
+    case 'analysis_gate_failure': {
+      const phaseId = toShortText(payload.phase_id, 'phase');
+      const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
+      const reasons = Array.isArray(payload.reasons) ? payload.reasons : [];
+      const reasonText = reasons.length > 0 ? reasons.slice(0, 3).join(' ; ') : 'unknown';
+      get().appendStreamLine(
+        `[analysis:gate_failure:${phaseId}] attempt ${attempt} | ${reasonText}`,
+        'analysis'
+      );
+      break;
+    }
+
     case 'analysis_validation': {
       const validationStatus = toShortText(payload.status, 'unknown');
       const issues = Array.isArray(payload.issues) ? payload.issues : [];
@@ -1502,6 +1560,21 @@ function handleUnifiedExecutionEvent(
           suggestedFix: 'Review evidence lines and rerun analysis if needed.',
         });
       }
+      break;
+    }
+
+    case 'analysis_run_summary': {
+      const phaseResults = Array.isArray(payload.phase_results) ? payload.phase_results : [];
+      const metrics = payload.total_metrics && typeof payload.total_metrics === 'object'
+        ? JSON.stringify(payload.total_metrics)
+        : '';
+      const summary =
+        phaseResults.length > 0 ? phaseResults.join(' | ') : 'no phase results';
+      const suffix = metrics ? ` | ${metrics}` : '';
+      get().appendStreamLine(
+        `[analysis:run_summary:${payload.success ? 'success' : 'failed'}] ${summary}${suffix}`,
+        'analysis'
+      );
       break;
     }
 

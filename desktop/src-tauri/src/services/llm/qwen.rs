@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmResponse, LlmResult, Message, MessageContent, MessageRole, ProviderConfig,
-    StopReason, ToolCall, ToolDefinition, UsageStats,
+    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
+    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::QwenAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -51,12 +51,13 @@ impl QwenProvider {
         system: Option<&str>,
         tools: &[ToolDefinition],
         stream: bool,
+        request_options: &LlmRequestOptions,
     ) -> serde_json::Value {
         let mut body = serde_json::json!({
             "model": self.config.model,
             "max_tokens": self.config.max_tokens,
             "stream": stream,
-            "temperature": self.config.temperature,
+            "temperature": request_options.temperature_override.unwrap_or(self.config.temperature),
         });
 
         // Enable thinking for Qwen3 models if configured
@@ -109,6 +110,9 @@ impl QwenProvider {
                 })
                 .collect();
             body["tools"] = serde_json::json!(api_tools);
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) {
+                body["tool_choice"] = serde_json::json!("required");
+            }
         }
 
         if stream {
@@ -314,13 +318,20 @@ impl LlmProvider for QwenProvider {
         messages: Vec<Message>,
         system: Option<String>,
         tools: Vec<ToolDefinition>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
             .api_key
             .as_ref()
             .ok_or_else(|| missing_api_key_error("qwen"))?;
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, false);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            false,
+            &request_options,
+        );
 
         let response = self
             .client
@@ -355,13 +366,20 @@ impl LlmProvider for QwenProvider {
         system: Option<String>,
         tools: Vec<ToolDefinition>,
         tx: mpsc::Sender<UnifiedStreamEvent>,
+        request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
         let api_key = self
             .config
             .api_key
             .as_ref()
             .ok_or_else(|| missing_api_key_error("qwen"))?;
-        let body = self.build_request_body(&messages, system.as_deref(), &tools, true);
+        let body = self.build_request_body(
+            &messages,
+            system.as_deref(),
+            &tools,
+            true,
+            &request_options,
+        );
 
         let response = self
             .client

@@ -10,7 +10,9 @@ use tokio::sync::{mpsc, RwLock};
 
 use crate::models::agent::{Agent, AgentRun};
 use crate::services::agent::AgentService;
-use crate::services::llm::{LlmError, LlmProvider, LlmResult, Message, ToolDefinition};
+use crate::services::llm::{
+    LlmError, LlmProvider, LlmRequestOptions, LlmResult, Message, ToolDefinition,
+};
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::utils::error::{AppError, AppResult};
 
@@ -278,6 +280,7 @@ impl AgentExecutor {
                     } else {
                         vec![]
                     },
+                    LlmRequestOptions::default(),
                 )
                 .await
             {
@@ -361,7 +364,13 @@ impl AgentExecutor {
 
         let stream_handle = tokio::spawn(async move {
             provider_clone
-                .stream_message(messages, Some(system_prompt), tools, stream_tx)
+                .stream_message(
+                    messages,
+                    Some(system_prompt),
+                    tools,
+                    stream_tx,
+                    LlmRequestOptions::default(),
+                )
                 .await
         });
 
