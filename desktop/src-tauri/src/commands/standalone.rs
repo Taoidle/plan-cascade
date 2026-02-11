@@ -21,6 +21,7 @@ use crate::services::orchestrator::{
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::state::AppState;
 use crate::storage::KeyringService;
+use crate::utils::paths::ensure_plan_cascade_dir;
 
 /// State for standalone execution management
 pub struct StandaloneState {
@@ -165,6 +166,18 @@ fn get_api_key_with_aliases(
         }
     }
     Ok(None)
+}
+
+fn analysis_artifacts_root() -> PathBuf {
+    if let Some(local_data_dir) = dirs::data_local_dir() {
+        return local_data_dir.join("plan-cascade").join("analysis-runs");
+    }
+    if let Ok(base) = ensure_plan_cascade_dir() {
+        return base.join("analysis-runs");
+    }
+    std::env::temp_dir()
+        .join("plan-cascade")
+        .join("analysis-runs")
 }
 
 /// List all supported providers and their models
@@ -529,6 +542,9 @@ pub async fn check_provider_health(
         project_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         streaming: false,
         enable_compaction: false,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config);
@@ -677,6 +693,9 @@ pub async fn execute_standalone(
         project_root: PathBuf::from(&project_path),
         streaming: true,
         enable_compaction: enable_compaction.unwrap_or(true),
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config);
@@ -857,6 +876,9 @@ pub async fn execute_standalone_with_session(
         project_root: PathBuf::from(&request.project_path),
         streaming: true,
         enable_compaction: true,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     // Get database pool for session persistence
@@ -1002,6 +1024,9 @@ pub async fn get_standalone_status(
         project_root: PathBuf::from("."),
         streaming: false,
         enable_compaction: false,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1072,6 +1097,9 @@ pub async fn get_standalone_progress(
         project_root: PathBuf::from("."),
         streaming: false,
         enable_compaction: false,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1123,6 +1151,9 @@ pub async fn resume_standalone_execution(
         project_root: PathBuf::from("."),
         streaming: false,
         enable_compaction: false,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let temp_orchestrator = OrchestratorService::new(temp_config).with_database(pool.clone());
@@ -1216,6 +1247,9 @@ pub async fn resume_standalone_execution(
         project_root: PathBuf::from(&session.project_path),
         streaming: true,
         enable_compaction: true,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
@@ -1282,6 +1316,9 @@ pub async fn get_standalone_session(
         project_root: PathBuf::from("."),
         streaming: false,
         enable_compaction: false,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1335,6 +1372,9 @@ pub async fn list_standalone_sessions(
         project_root: PathBuf::from("."),
         streaming: false,
         enable_compaction: false,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1380,6 +1420,9 @@ pub async fn delete_standalone_session(
         project_root: PathBuf::from("."),
         streaming: false,
         enable_compaction: false,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1425,6 +1468,9 @@ pub async fn cleanup_standalone_sessions(
         project_root: PathBuf::from("."),
         streaming: false,
         enable_compaction: false,
+        analysis_artifacts_root: analysis_artifacts_root(),
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);

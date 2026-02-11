@@ -144,6 +144,14 @@ pub enum UnifiedStreamEvent {
         message: String,
     },
 
+    /// Inventory index has been built for analysis.
+    AnalysisIndexBuilt {
+        run_id: String,
+        inventory_total_files: usize,
+        test_files_total: usize,
+        chunk_count: usize,
+    },
+
     /// Analysis phase has started
     AnalysisPhaseStart {
         phase_id: String,
@@ -161,6 +169,24 @@ pub enum UnifiedStreamEvent {
 
     /// Analysis phase progress update
     AnalysisPhaseProgress { phase_id: String, message: String },
+
+    /// Chunk-level processing started.
+    AnalysisChunkStarted {
+        run_id: String,
+        phase_id: String,
+        chunk_id: String,
+        component: String,
+        file_count: usize,
+    },
+
+    /// Chunk-level processing completed.
+    AnalysisChunkCompleted {
+        run_id: String,
+        phase_id: String,
+        chunk_id: String,
+        observed_paths: usize,
+        read_files: usize,
+    },
 
     /// Evidence captured during analysis (from tool activity)
     AnalysisEvidence {
@@ -227,6 +253,13 @@ pub enum UnifiedStreamEvent {
         manifest_path: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         report_path: Option<String>,
+    },
+
+    /// Batch summary merge completed before final synthesis.
+    AnalysisMergeCompleted {
+        run_id: String,
+        phase_count: usize,
+        chunk_summary_count: usize,
     },
 
     /// Overall analysis returned a usable but partial result
@@ -424,6 +457,35 @@ mod tests {
         let planned_json = serde_json::to_string(&planned).unwrap();
         assert!(planned_json.contains("\"type\":\"analysis_phase_planned\""));
 
+        let indexed = UnifiedStreamEvent::AnalysisIndexBuilt {
+            run_id: "run-123".to_string(),
+            inventory_total_files: 320,
+            test_files_total: 42,
+            chunk_count: 18,
+        };
+        let indexed_json = serde_json::to_string(&indexed).unwrap();
+        assert!(indexed_json.contains("\"type\":\"analysis_index_built\""));
+
+        let chunk_started = UnifiedStreamEvent::AnalysisChunkStarted {
+            run_id: "run-123".to_string(),
+            phase_id: "architecture_trace".to_string(),
+            chunk_id: "python-core-001".to_string(),
+            component: "python-core".to_string(),
+            file_count: 24,
+        };
+        let chunk_started_json = serde_json::to_string(&chunk_started).unwrap();
+        assert!(chunk_started_json.contains("\"type\":\"analysis_chunk_started\""));
+
+        let chunk_completed = UnifiedStreamEvent::AnalysisChunkCompleted {
+            run_id: "run-123".to_string(),
+            phase_id: "architecture_trace".to_string(),
+            chunk_id: "python-core-001".to_string(),
+            observed_paths: 19,
+            read_files: 3,
+        };
+        let chunk_completed_json = serde_json::to_string(&chunk_completed).unwrap();
+        assert!(chunk_completed_json.contains("\"type\":\"analysis_chunk_completed\""));
+
         let completed = UnifiedStreamEvent::AnalysisRunCompleted {
             run_id: "run-123".to_string(),
             success: true,
@@ -432,6 +494,15 @@ mod tests {
         };
         let completed_json = serde_json::to_string(&completed).unwrap();
         assert!(completed_json.contains("\"type\":\"analysis_run_completed\""));
+
+        let merged = UnifiedStreamEvent::AnalysisMergeCompleted {
+            run_id: "run-123".to_string(),
+            phase_count: 3,
+            chunk_summary_count: 26,
+        };
+        let merged_json = serde_json::to_string(&merged).unwrap();
+        assert!(merged_json.contains("\"type\":\"analysis_merge_completed\""));
+
         let parsed: UnifiedStreamEvent = serde_json::from_str(&completed_json).unwrap();
         assert_eq!(completed, parsed);
     }

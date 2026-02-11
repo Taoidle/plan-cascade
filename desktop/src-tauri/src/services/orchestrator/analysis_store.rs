@@ -15,8 +15,6 @@ use uuid::Uuid;
 
 use super::analysis_scheduler::PlannedPhase;
 
-const ANALYSIS_RUNS_DIR: &str = ".plan-cascade/analysis-runs";
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CoverageMetrics {
     pub observed_paths: usize,
@@ -24,6 +22,15 @@ pub struct CoverageMetrics {
     pub successful_phases: usize,
     pub partial_phases: usize,
     pub failed_phases: usize,
+    pub inventory_total_files: usize,
+    pub inventory_indexed_files: usize,
+    pub sampled_read_files: usize,
+    pub test_files_total: usize,
+    pub test_files_read: usize,
+    pub coverage_ratio: f64,
+    pub test_coverage_ratio: f64,
+    pub chunk_count: usize,
+    pub synthesis_rounds: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,10 +99,8 @@ pub struct AnalysisRunHandle {
 }
 
 impl AnalysisRunStore {
-    pub fn new(project_root: PathBuf) -> Self {
-        Self {
-            base_dir: project_root.join(ANALYSIS_RUNS_DIR),
-        }
+    pub fn new(base_dir: PathBuf) -> Self {
+        Self { base_dir }
     }
 
     pub fn start_run(&self, request: &str, project_root: &Path) -> AppResult<AnalysisRunHandle> {
@@ -206,6 +211,19 @@ impl AnalysisRunHandle {
         Ok(path.to_string_lossy().to_string())
     }
 
+    pub fn write_json_artifact<T: Serialize>(
+        &self,
+        relative_path: &str,
+        payload: &T,
+    ) -> AppResult<String> {
+        let target = self.run_dir.join(relative_path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&target, serde_json::to_string_pretty(payload)?)?;
+        Ok(target.to_string_lossy().to_string())
+    }
+
     pub fn record_phase_result(&self, result: AnalysisPhaseResultRecord) -> AppResult<()> {
         let mut manifest = self.lock_manifest()?;
         if let Some(existing) = manifest
@@ -265,7 +283,7 @@ mod tests {
     #[test]
     fn start_run_creates_manifest_and_directories() {
         let dir = tempdir().expect("temp dir");
-        let store = AnalysisRunStore::new(dir.path().to_path_buf());
+        let store = AnalysisRunStore::new(dir.path().join("analysis-runs"));
         let handle = store
             .start_run("analyze project", dir.path())
             .expect("start run");
@@ -279,7 +297,7 @@ mod tests {
     #[test]
     fn records_phase_plan_and_completion() {
         let dir = tempdir().expect("temp dir");
-        let store = AnalysisRunStore::new(dir.path().to_path_buf());
+        let store = AnalysisRunStore::new(dir.path().join("analysis-runs"));
         let handle = store
             .start_run("analyze project", dir.path())
             .expect("start run");

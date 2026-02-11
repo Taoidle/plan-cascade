@@ -14,6 +14,12 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
+use super::analysis_index::{
+    build_chunk_plan, build_file_inventory, compute_coverage_report, select_chunks_for_phase,
+    AnalysisCoverageReport, AnalysisLimits, AnalysisProfile, ChunkPlan, FileInventory,
+    InventoryChunk,
+};
+use super::analysis_merge::{merge_chunk_summaries, ChunkSummaryRecord};
 use super::analysis_scheduler::build_phase_plan;
 use super::analysis_store::{
     AnalysisPhaseResultRecord, AnalysisRunHandle, AnalysisRunStore, CoverageMetrics,
@@ -36,6 +42,7 @@ use crate::services::tools::{
     parse_tool_calls, ParsedToolCall, TaskContext, TaskExecutionResult, TaskSpawner, ToolExecutor,
 };
 use crate::utils::error::{AppError, AppResult};
+use crate::utils::paths::ensure_plan_cascade_dir;
 
 /// Configuration for the orchestrator
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,12 +60,21 @@ pub struct OrchestratorConfig {
     pub max_total_tokens: u32,
     /// Project root directory
     pub project_root: PathBuf,
+    /// Program-data-root directory for analysis artifacts.
+    #[serde(default = "default_analysis_artifacts_root")]
+    pub analysis_artifacts_root: PathBuf,
     /// Whether to enable streaming
     #[serde(default = "default_streaming")]
     pub streaming: bool,
     /// Whether to enable automatic context compaction when input tokens exceed threshold
     #[serde(default = "default_enable_compaction")]
     pub enable_compaction: bool,
+    /// Analysis profile for repository exploration depth.
+    #[serde(default)]
+    pub analysis_profile: AnalysisProfile,
+    /// Detailed limits for chunking and coverage.
+    #[serde(default)]
+    pub analysis_limits: AnalysisLimits,
 }
 
 fn default_max_iterations() -> u32 {
@@ -75,6 +91,18 @@ fn default_streaming() -> bool {
 
 fn default_enable_compaction() -> bool {
     true
+}
+
+fn default_analysis_artifacts_root() -> PathBuf {
+    if let Some(local_data_dir) = dirs::data_local_dir() {
+        return local_data_dir.join("plan-cascade").join("analysis-runs");
+    }
+    if let Ok(base) = ensure_plan_cascade_dir() {
+        return base.join("analysis-runs");
+    }
+    std::env::temp_dir()
+        .join("plan-cascade")
+        .join("analysis-runs")
 }
 
 /// Compute a reasonable token budget for sub-agents based on the model's context window.
@@ -94,9 +122,9 @@ const MAX_ANALYSIS_EVIDENCE_LINES: usize = 90;
 /// Keep each phase summary short before feeding into synthesis.
 const MAX_ANALYSIS_PHASE_SUMMARY_CHARS: usize = 1600;
 /// Keep tool outputs bounded when they are fed back into the model during analysis.
-const ANALYSIS_TOOL_RESULT_MAX_CHARS: usize = 3000;
-const ANALYSIS_TOOL_RESULT_MAX_LINES: usize = 100;
-const ANALYSIS_BASELINE_MAX_READ_FILES: usize = 5;
+const ANALYSIS_TOOL_RESULT_MAX_CHARS: usize = 1200;
+const ANALYSIS_TOOL_RESULT_MAX_LINES: usize = 40;
+const ANALYSIS_BASELINE_MAX_READ_FILES: usize = 16;
 
 /// Result of an orchestration execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,8 +234,8 @@ impl AnalysisPhase {
     fn max_iterations(self) -> u32 {
         match self {
             AnalysisPhase::StructureDiscovery => 6,
-            AnalysisPhase::ArchitectureTrace => 7,
-            AnalysisPhase::ConsistencyCheck => 5,
+            AnalysisPhase::ArchitectureTrace => 5,
+            AnalysisPhase::ConsistencyCheck => 4,
         }
     }
 
@@ -216,14 +244,25 @@ impl AnalysisPhase {
             AnalysisPhase::StructureDiscovery => &[
                 "Layer 1 (Inventory): identify actual root directories and manifests.",
                 "Layer 2 (Entrypoints): verify language/runtime entrypoints from discovered files only.",
+                "Layer 3 (Test surface): verify test directories/framework entrypoints and representative test files.",
             ],
             AnalysisPhase::ArchitectureTrace => &[
                 "Layer 1 (Module map): map major components and boundaries with concrete files.",
                 "Layer 2 (Flow trace): verify integration/data-flow edges across components.",
+                "Layer 3 (Quality trace): map testing/quality boundaries (unit/integration/frontend tests) with concrete files.",
             ],
             AnalysisPhase::ConsistencyCheck => &[
                 "Layer 1 (Claim audit): re-open cited files and mark VERIFIED/UNVERIFIED/CONTRADICTED.",
+                "Layer 2 (Test audit): verify testing and quality claims against concrete test files.",
             ],
+        }
+    }
+
+    fn min_workers_before_early_exit(self) -> usize {
+        match self {
+            AnalysisPhase::StructureDiscovery => 2,
+            AnalysisPhase::ArchitectureTrace => 2,
+            AnalysisPhase::ConsistencyCheck => 2,
         }
     }
 }
@@ -263,8 +302,8 @@ impl AnalysisPhasePolicy {
                 force_tool_mode_attempts: 1,
                 temperature_override: 0.0,
                 quota: AnalysisToolQuota {
-                    min_total_calls: 4,
-                    min_read_calls: 2,
+                    min_total_calls: 6,
+                    min_read_calls: 3,
                     min_search_calls: 1,
                     required_tools: vec!["Read", "Grep"],
                 },
@@ -274,8 +313,8 @@ impl AnalysisPhasePolicy {
                 force_tool_mode_attempts: 1,
                 temperature_override: 0.0,
                 quota: AnalysisToolQuota {
-                    min_total_calls: 4,
-                    min_read_calls: 2,
+                    min_total_calls: 6,
+                    min_read_calls: 3,
                     min_search_calls: 1,
                     required_tools: vec!["Read", "Grep"],
                 },
@@ -300,6 +339,7 @@ struct PhaseCapture {
     ls_calls: usize,
     cwd_calls: usize,
     observed_paths: HashSet<String>,
+    read_paths: HashSet<String>,
     evidence_lines: Vec<String>,
     warnings: Vec<String>,
     pending_tools: HashMap<String, PendingAnalysisToolCall>,
@@ -342,12 +382,17 @@ struct AnalysisPhaseOutcome {
 #[derive(Debug, Clone, Default)]
 struct AnalysisLedger {
     observed_paths: HashSet<String>,
+    read_paths: HashSet<String>,
     evidence_lines: Vec<String>,
     warnings: Vec<String>,
     phase_summaries: Vec<String>,
+    chunk_summaries: Vec<ChunkSummaryRecord>,
     successful_phases: usize,
     partial_phases: usize,
     total_phases: usize,
+    inventory: Option<FileInventory>,
+    chunk_plan: Option<ChunkPlan>,
+    coverage_report: Option<AnalysisCoverageReport>,
 }
 
 impl AnalysisLedger {
@@ -375,6 +420,8 @@ impl AnalysisLedger {
 
         self.observed_paths
             .extend(outcome.capture.observed_paths.iter().cloned());
+        self.read_paths
+            .extend(outcome.capture.read_paths.iter().cloned());
 
         self.evidence_lines
             .extend(outcome.capture.evidence_lines.iter().cloned());
@@ -424,8 +471,11 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             max_iterations: 25,
             max_total_tokens: sub_agent_token_budget(self.context_window),
             project_root: self.project_root.clone(),
+            analysis_artifacts_root: default_analysis_artifacts_root(),
             streaming: true,
             enable_compaction: false, // Sub-agents are short-lived, no compaction needed
+            analysis_profile: AnalysisProfile::default(),
+            analysis_limits: AnalysisLimits::default(),
         };
 
         let sub_agent = OrchestratorService::new_sub_agent(sub_config, cancellation_token);
@@ -446,7 +496,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
 impl OrchestratorService {
     /// Create a new orchestrator service
     pub fn new(config: OrchestratorConfig) -> Self {
-        let analysis_project_root = config.project_root.clone();
+        let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
             ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config.provider.clone())),
             ProviderType::OpenAI => Arc::new(OpenAIProvider::new(config.provider.clone())),
@@ -465,13 +515,13 @@ impl OrchestratorService {
             cancellation_token: CancellationToken::new(),
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
-            analysis_store: AnalysisRunStore::new(analysis_project_root),
+            analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
         }
     }
 
     /// Create a sub-agent orchestrator (no Task tool, no database, inherits cancellation)
     fn new_sub_agent(config: OrchestratorConfig, cancellation_token: CancellationToken) -> Self {
-        let analysis_project_root = config.project_root.clone();
+        let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
             ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config.provider.clone())),
             ProviderType::OpenAI => Arc::new(OpenAIProvider::new(config.provider.clone())),
@@ -490,7 +540,7 @@ impl OrchestratorService {
             cancellation_token,
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
-            analysis_store: AnalysisRunStore::new(analysis_project_root),
+            analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
         }
     }
 
@@ -1589,16 +1639,37 @@ impl OrchestratorService {
         message: String,
         tx: mpsc::Sender<UnifiedStreamEvent>,
     ) -> ExecutionResult {
-        // Auto-delegate exploration tasks to sub-agents to prevent context overflow.
-        // Non-Claude LLMs often read files directly instead of using the Task tool,
-        // filling up the token budget after ~20 files.
-        if is_exploration_task(&message) {
-            return self.execute_with_analysis_pipeline(message, tx).await;
+        let mut user_message = message;
+        match detect_adaptive_analysis_scope(&user_message) {
+            AdaptiveAnalysisScope::Global => {
+                // Global analysis-first flow for architecture/project-wide asks.
+                return self.execute_with_analysis_pipeline(user_message, tx).await;
+            }
+            AdaptiveAnalysisScope::Local => {
+                if let Some(local_brief) = self
+                    .build_local_preanalysis_brief(&user_message, &tx)
+                    .await
+                {
+                    let _ = tx
+                        .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                            phase_id: "analysis".to_string(),
+                            message:
+                                "Applied automatic local pre-analysis context for execution."
+                                    .to_string(),
+                        })
+                        .await;
+                    user_message = format!(
+                        "{}\n\n[Auto Local Analysis Context]\n{}",
+                        user_message, local_brief
+                    );
+                }
+            }
+            AdaptiveAnalysisScope::None => {}
         }
 
         let tools = get_tool_definitions();
         let use_prompt_fallback = !self.provider.supports_tools();
-        let mut messages = vec![Message::user(message)];
+        let mut messages = vec![Message::user(user_message)];
         let mut total_usage = UsageStats::default();
         let mut iterations = 0;
         let mut fallback_call_counter = 0u32;
@@ -1940,6 +2011,82 @@ impl OrchestratorService {
         }
     }
 
+    async fn build_local_preanalysis_brief(
+        &self,
+        message: &str,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+    ) -> Option<String> {
+        let excluded_roots = analysis_excluded_roots_for_message(message);
+        let inventory = build_file_inventory(&self.config.project_root, &excluded_roots).ok()?;
+        if inventory.total_files == 0 {
+            return None;
+        }
+
+        let mut selected = Vec::<String>::new();
+        let candidates = extract_path_candidates_from_text(message);
+        for candidate in candidates {
+            for item in &inventory.items {
+                if item.path == candidate
+                    || item.path.starts_with(&format!("{}/", candidate))
+                    || candidate.starts_with(&format!("{}/", item.path))
+                {
+                    selected.push(item.path.clone());
+                }
+            }
+        }
+
+        if selected.is_empty() {
+            selected.extend(select_local_seed_files(&inventory));
+        }
+
+        selected.sort();
+        selected.dedup();
+        selected.truncate(14);
+        if selected.is_empty() {
+            return None;
+        }
+
+        let mut component_counts = HashMap::<String, usize>::new();
+        for item in &inventory.items {
+            *component_counts.entry(item.component.clone()).or_insert(0) += 1;
+        }
+        let mut component_pairs = component_counts.into_iter().collect::<Vec<_>>();
+        component_pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Auto local analysis indexed {} files and selected {} likely-relevant files:",
+            inventory.total_files,
+            selected.len()
+        ));
+        for path in &selected {
+            let digest = summarize_file_head(&self.config.project_root.join(path), 2)
+                .unwrap_or_else(|| "head unreadable".to_string());
+            lines.push(format!("- {} :: {}", path, truncate_for_log(&digest, 140)));
+        }
+        lines.push(format!(
+            "Top components by file count: {}",
+            component_pairs
+                .iter()
+                .take(5)
+                .map(|(component, count)| format!("{}={}", component, count))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                phase_id: "analysis".to_string(),
+                message: format!(
+                    "Auto local pre-analysis covered {} candidate files",
+                    selected.len()
+                ),
+            })
+            .await;
+
+        Some(lines.join("\n"))
+    }
+
     /// Execute an analysis task with an evidence-first multi-phase pipeline.
     async fn execute_with_analysis_pipeline(
         &self,
@@ -1977,6 +2124,53 @@ impl OrchestratorService {
                 None
             }
         };
+
+        let excluded_roots = analysis_excluded_roots_for_message(&message);
+        let inventory = match build_file_inventory(&self.config.project_root, &excluded_roots) {
+            Ok(inv) => inv,
+            Err(err) => {
+                let _ = tx
+                    .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                        phase_id: "analysis".to_string(),
+                        message: format!(
+                            "Inventory build failed, fallback to baseline-only mode: {}",
+                            err
+                        ),
+                    })
+                    .await;
+                FileInventory::default()
+            }
+        };
+        let chunk_plan = if inventory.total_files == 0 {
+            ChunkPlan::default()
+        } else {
+            build_chunk_plan(&inventory, &self.config.analysis_limits)
+        };
+        ledger.inventory = Some(inventory.clone());
+        ledger.chunk_plan = Some(chunk_plan.clone());
+        if let Some(run) = run_handle.as_ref() {
+            let _ = run.write_json_artifact("index/file_inventory.json", &inventory);
+            let _ = run.write_json_artifact("index/chunk_plan.json", &chunk_plan);
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisIndexBuilt {
+                    run_id: run.run_id().to_string(),
+                    inventory_total_files: inventory.total_files,
+                    test_files_total: inventory.total_test_files,
+                    chunk_count: chunk_plan.chunks.len(),
+                })
+                .await;
+        }
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                phase_id: "analysis".to_string(),
+                message: format!(
+                    "Indexed {} files (tests={}) into {} chunks",
+                    inventory.total_files,
+                    inventory.total_test_files,
+                    chunk_plan.chunks.len()
+                ),
+            })
+            .await;
 
         let phase1_base_prompt = format!(
             "User request: {}\n\n\
@@ -2091,10 +2285,40 @@ impl OrchestratorService {
             };
         }
 
+        let coverage_report = if let Some(inventory) = ledger.inventory.as_ref() {
+            compute_coverage_report(
+                inventory,
+                &ledger.observed_paths,
+                &ledger.read_paths,
+                ledger
+                    .chunk_plan
+                    .as_ref()
+                    .map(|plan| plan.chunks.len())
+                    .unwrap_or(0),
+                1,
+            )
+        } else {
+            AnalysisCoverageReport::default()
+        };
+        ledger.coverage_report = Some(coverage_report.clone());
+        if let Some(run) = run_handle.as_ref() {
+            let _ = run.write_json_artifact("final/coverage.json", &coverage_report);
+            let _ = run.update_coverage(build_coverage_metrics(&ledger, &coverage_report));
+        }
+
         let has_evidence = !ledger.evidence_lines.is_empty();
         let usable_phases = ledger.successful_phases + ledger.partial_phases;
         let required_usable_phases = 3;
-        let analysis_gate_passed = usable_phases >= required_usable_phases && has_evidence;
+        let coverage_passed = coverage_report.coverage_ratio
+            >= self.config.analysis_limits.target_coverage_ratio
+            || coverage_report.inventory_total_files == 0;
+        let test_coverage_passed = coverage_report.test_coverage_ratio
+            >= self.config.analysis_limits.target_test_coverage_ratio
+            || coverage_report.test_files_total == 0;
+        let analysis_gate_passed = usable_phases >= required_usable_phases
+            && has_evidence
+            && coverage_passed
+            && test_coverage_passed;
         if !analysis_gate_passed {
             let mut failures = Vec::new();
             if usable_phases < required_usable_phases {
@@ -2109,6 +2333,24 @@ impl OrchestratorService {
             if !has_evidence {
                 failures.push("Evidence gate failed: no tool evidence captured".to_string());
             }
+            if !coverage_passed {
+                failures.push(format!(
+                    "Coverage gate failed: {:.2}% < target {:.2}% (indexed_files={}, observed_files={})",
+                    coverage_report.coverage_ratio * 100.0,
+                    self.config.analysis_limits.target_coverage_ratio * 100.0,
+                    coverage_report.inventory_total_files,
+                    ledger.observed_paths.len()
+                ));
+            }
+            if !test_coverage_passed {
+                failures.push(format!(
+                    "Test coverage gate failed: {:.2}% < target {:.2}% (test_files_total={}, test_files_read={})",
+                    coverage_report.test_coverage_ratio * 100.0,
+                    self.config.analysis_limits.target_test_coverage_ratio * 100.0,
+                    coverage_report.test_files_total,
+                    coverage_report.test_files_read
+                ));
+            }
 
             let _ = tx
                 .send(UnifiedStreamEvent::AnalysisRunSummary {
@@ -2117,6 +2359,11 @@ impl OrchestratorService {
                         format!("successful_phases={}", ledger.successful_phases),
                         format!("partial_phases={}", ledger.partial_phases),
                         format!("observed_paths={}", ledger.observed_paths.len()),
+                        format!("coverage_ratio={:.4}", coverage_report.coverage_ratio),
+                        format!(
+                            "test_coverage_ratio={:.4}",
+                            coverage_report.test_coverage_ratio
+                        ),
                     ],
                     total_metrics: serde_json::json!({
                         "input_tokens": total_usage.input_tokens,
@@ -2192,6 +2439,17 @@ impl OrchestratorService {
         } else {
             ledger.phase_summaries.join("\n\n")
         };
+        let chunk_summary_block = if ledger.chunk_summaries.is_empty() {
+            "No chunk summaries were produced.".to_string()
+        } else {
+            ledger
+                .chunk_summaries
+                .iter()
+                .take(80)
+                .map(|s| format!("- {} [{}]: {}", s.chunk_id, s.component, s.summary))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         let warnings_block = if ledger.warnings.is_empty() {
             "None".to_string()
         } else {
@@ -2204,16 +2462,44 @@ impl OrchestratorService {
              User request:\n{}\n\n\
              Observed paths (ground truth):\n{}\n\n\
              Warnings collected:\n{}\n\n\
+             Coverage metrics:\n- indexed_files={}\n- observed_paths={}\n- sampled_read_files={}\n- test_files_total={}\n- test_files_read={}\n- coverage_ratio={:.2}%\n- test_coverage_ratio={:.2}%\n\n\
              Phase summaries:\n{}\n\n\
+             Chunk summaries:\n{}\n\n\
              Evidence log:\n{}\n\n\
              Requirements:\n\
              1) Use only the evidence above.\n\
              2) Do not invent files, modules, frameworks, versions, or runtime details.\n\
              3) If a claim is uncertain, place it under 'Unknowns'.\n\
              4) Include explicit file paths for major claims.\n\
-             5) Output markdown with sections: Project Snapshot, Architecture, Verified Facts, Risks, Unknowns.",
-            message, observed_paths, warnings_block, summary_block, evidence_block
+             5) Do not use placeholders like '[UNVERIFIED]'. Use plain language under 'Unknowns'.\n\
+             6) Mention token-budget/overflow only if it appears in 'Warnings collected'.\n\
+             7) Mention version inconsistency only if at least two concrete files with conflicting versions are cited.\n\
+             8) Include explicit testing evidence when test files are observed (tests/, desktop/src-tauri/tests, desktop/src/components/__tests__).\n\
+             9) Output markdown with sections: Project Snapshot, Architecture, Verified Facts, Testing & Quality Signals, Risks, Unknowns.",
+            message,
+            observed_paths,
+            warnings_block,
+            coverage_report.inventory_total_files,
+            ledger.observed_paths.len(),
+            coverage_report.sampled_read_files,
+            coverage_report.test_files_total,
+            coverage_report.test_files_read,
+            coverage_report.coverage_ratio * 100.0,
+            coverage_report.test_coverage_ratio * 100.0,
+            summary_block,
+            chunk_summary_block,
+            evidence_block
         );
+
+        if let Some(run) = run_handle.as_ref() {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisMergeCompleted {
+                    run_id: run.run_id().to_string(),
+                    phase_count: ledger.total_phases,
+                    chunk_summary_count: ledger.chunk_summaries.len(),
+                })
+                .await;
+        }
 
         let synthesis_messages = vec![Message::user(synthesis_prompt)];
         let synthesis_response = self
@@ -2254,21 +2540,7 @@ impl OrchestratorService {
             Vec::new()
         };
 
-        if validation_issues.is_empty() {
-            let _ = tx
-                .send(UnifiedStreamEvent::AnalysisValidation {
-                    status: "ok".to_string(),
-                    issues: Vec::new(),
-                })
-                .await;
-        } else {
-            let _ = tx
-                .send(UnifiedStreamEvent::AnalysisValidation {
-                    status: "warning".to_string(),
-                    issues: validation_issues.clone(),
-                })
-                .await;
-
+        if !validation_issues.is_empty() {
             if let Some(original) = final_response.clone() {
                 let correction_prompt = format!(
                     "Revise this analysis to remove or mark these path claims as unverified:\n{}\n\n\
@@ -2296,12 +2568,6 @@ impl OrchestratorService {
             }
         }
 
-        if !validation_issues.is_empty() {
-            if let Some(text) = final_response.as_ref() {
-                final_response = Some(sanitize_unverified_path_mentions(text, &validation_issues));
-            }
-        }
-
         let final_validation_issues = if let Some(text) = final_response.as_ref() {
             find_unverified_paths(text, &ledger.observed_paths)
                 .into_iter()
@@ -2311,6 +2577,16 @@ impl OrchestratorService {
         } else {
             Vec::new()
         };
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisValidation {
+                status: if final_validation_issues.is_empty() {
+                    "ok".to_string()
+                } else {
+                    "warning".to_string()
+                },
+                issues: final_validation_issues.clone(),
+            })
+            .await;
 
         if let Some(content) = final_response
             .as_ref()
@@ -2349,6 +2625,12 @@ impl OrchestratorService {
                     format!("successful_phases={}", ledger.successful_phases),
                     format!("partial_phases={}", ledger.partial_phases),
                     format!("observed_paths={}", ledger.observed_paths.len()),
+                    format!("sampled_read_files={}", coverage_report.sampled_read_files),
+                    format!("coverage_ratio={:.4}", coverage_report.coverage_ratio),
+                    format!(
+                        "test_coverage_ratio={:.4}",
+                        coverage_report.test_coverage_ratio
+                    ),
                     format!("validation_issues={}", final_validation_issues.len()),
                     format!("synthesis_success={}", synthesis_success),
                 ],
@@ -2357,6 +2639,11 @@ impl OrchestratorService {
                     "output_tokens": total_usage.output_tokens,
                     "iterations": total_iterations,
                     "evidence_lines": ledger.evidence_lines.len(),
+                    "inventory_total_files": coverage_report.inventory_total_files,
+                    "test_files_total": coverage_report.test_files_total,
+                    "sampled_read_files": coverage_report.sampled_read_files,
+                    "coverage_ratio": coverage_report.coverage_ratio,
+                    "test_coverage_ratio": coverage_report.test_coverage_ratio,
                 }),
             })
             .await;
@@ -2377,7 +2664,7 @@ impl OrchestratorService {
             })
             .await;
 
-        let coverage = build_coverage_metrics(&ledger);
+        let coverage = build_coverage_metrics(&ledger, &coverage_report);
         if let Some(run) = run_handle.as_ref() {
             let _ = run.update_coverage(coverage.clone());
             let _ = tx
@@ -2438,6 +2725,40 @@ impl OrchestratorService {
         files
     }
 
+    fn existing_analysis_dirs(&self, candidates: &[&str], limit: usize) -> Vec<String> {
+        let mut dirs = Vec::<String>::new();
+        for candidate in candidates {
+            let abs = self.config.project_root.join(candidate);
+            if abs.is_dir() {
+                dirs.push(candidate.replace('\\', "/"));
+                if dirs.len() >= limit {
+                    break;
+                }
+            }
+        }
+        dirs
+    }
+
+    fn merge_prioritized_files(
+        &self,
+        primary: Vec<String>,
+        secondary: Vec<String>,
+        limit: usize,
+    ) -> Vec<String> {
+        let mut merged = Vec::new();
+        let mut seen = HashSet::new();
+        for file in primary.into_iter().chain(secondary.into_iter()) {
+            let normalized = file.replace('\\', "/");
+            if seen.insert(normalized.clone()) {
+                merged.push(normalized);
+                if merged.len() >= limit {
+                    break;
+                }
+            }
+        }
+        merged
+    }
+
     fn existing_observed_files(&self, ledger: &AnalysisLedger, limit: usize) -> Vec<String> {
         let mut files = ledger
             .observed_paths
@@ -2490,6 +2811,18 @@ impl OrchestratorService {
                     "Glob".to_string(),
                     serde_json::json!({ "pattern": "Cargo.toml", "path": "." }),
                 ));
+                steps.push((
+                    "Glob".to_string(),
+                    serde_json::json!({ "pattern": "tests/**/*.py", "path": "." }),
+                ));
+                steps.push((
+                    "Glob".to_string(),
+                    serde_json::json!({ "pattern": "desktop/src-tauri/tests/**/*.rs", "path": "." }),
+                ));
+                steps.push((
+                    "Glob".to_string(),
+                    serde_json::json!({ "pattern": "desktop/src/components/__tests__/**/*.tsx", "path": "." }),
+                ));
 
                 let files = self.existing_analysis_files(
                     &[
@@ -2502,6 +2835,9 @@ impl OrchestratorService {
                         "desktop/src-tauri/Cargo.toml",
                         "mcp_server/server.py",
                         "src/plan_cascade/cli/main.py",
+                        "tests/test_orchestrator.py",
+                        "desktop/src-tauri/tests/integration/mod.rs",
+                        "desktop/src/components/__tests__/SimpleMode.test.tsx",
                     ],
                     ANALYSIS_BASELINE_MAX_READ_FILES,
                 );
@@ -2511,70 +2847,125 @@ impl OrchestratorService {
                         serde_json::json!({
                             "file_path": file,
                             "offset": 1,
-                            "limit": 180
+                            "limit": 120
                         }),
                     ));
                 }
             }
             AnalysisPhase::ArchitectureTrace => {
-                steps.push((
-                    "Grep".to_string(),
-                    serde_json::json!({
-                        "pattern": "(class\\s+|def\\s+|fn\\s+|impl\\s+|tauri::command|FastMCP)",
-                        "path": ".",
-                        "output_mode": "files_with_matches",
-                        "head_limit": 80
-                    }),
-                ));
-                let mut files = self.existing_analysis_files(
+                let mut grep_paths = self.existing_analysis_dirs(
+                    &[
+                        "src",
+                        "mcp_server",
+                        "desktop/src-tauri/src",
+                        "desktop/src",
+                        "tests",
+                        "desktop/src-tauri/tests",
+                        "desktop/src/components/__tests__",
+                    ],
+                    7,
+                );
+                if grep_paths.is_empty() {
+                    grep_paths.push(".".to_string());
+                }
+                for grep_path in grep_paths {
+                    steps.push((
+                        "Grep".to_string(),
+                        serde_json::json!({
+                            "pattern": "(class\\s+|def\\s+|fn\\s+|impl\\s+|tauri::command|FastMCP)",
+                            "path": grep_path,
+                            "output_mode": "files_with_matches",
+                            "head_limit": 40
+                        }),
+                    ));
+                }
+                let seeded = self.existing_analysis_files(
                     &[
                         "src/plan_cascade/cli/main.py",
                         "src/plan_cascade/core/orchestrator.py",
                         "src/plan_cascade/backends/factory.py",
+                        "src/plan_cascade/state/state_manager.py",
                         "mcp_server/server.py",
+                        "mcp_server/tools/design_tools.py",
                         "desktop/src-tauri/src/main.rs",
+                        "desktop/src/App.tsx",
                         "desktop/src/main.tsx",
                         "desktop/src/store/execution.ts",
+                        "tests/test_orchestrator.py",
+                        "desktop/src-tauri/tests/integration/mod.rs",
+                        "desktop/src/components/__tests__/SimpleMode.test.tsx",
                     ],
                     ANALYSIS_BASELINE_MAX_READ_FILES,
                 );
-                files.extend(self.existing_observed_files(ledger, 2));
-                files.sort();
-                files.dedup();
-                files.truncate(ANALYSIS_BASELINE_MAX_READ_FILES);
+                let observed =
+                    self.existing_observed_files(ledger, ANALYSIS_BASELINE_MAX_READ_FILES);
+                let files = self.merge_prioritized_files(
+                    seeded,
+                    observed,
+                    ANALYSIS_BASELINE_MAX_READ_FILES,
+                );
                 for file in files {
                     steps.push((
                         "Read".to_string(),
                         serde_json::json!({
                             "file_path": file,
                             "offset": 1,
-                            "limit": 180
+                            "limit": 120
                         }),
                     ));
                 }
             }
             AnalysisPhase::ConsistencyCheck => {
-                steps.push((
-                    "Grep".to_string(),
-                    serde_json::json!({
-                        "pattern": "(?i)version|__version__|\\\"version\\\"|tauri|orchestrator",
-                        "path": ".",
-                        "output_mode": "files_with_matches",
-                        "head_limit": 80
-                    }),
-                ));
-                let mut files = self.existing_observed_files(ledger, ANALYSIS_BASELINE_MAX_READ_FILES);
-                if files.len() < 2 {
-                    files.extend(self.existing_analysis_files(
-                        &[
-                            "pyproject.toml",
-                            "README.md",
-                            "src/plan_cascade/__init__.py",
-                            "mcp_server/server.py",
-                            "desktop/src-tauri/Cargo.toml",
-                        ],
-                        ANALYSIS_BASELINE_MAX_READ_FILES,
+                let mut grep_paths = self.existing_analysis_dirs(
+                    &[
+                        "src",
+                        "mcp_server",
+                        "desktop/src-tauri/src",
+                        "desktop/src",
+                        "tests",
+                        "desktop/src-tauri/tests",
+                        "desktop/src/components/__tests__",
+                    ],
+                    7,
+                );
+                if grep_paths.is_empty() {
+                    grep_paths.push(".".to_string());
+                }
+                for grep_path in grep_paths {
+                    steps.push((
+                        "Grep".to_string(),
+                        serde_json::json!({
+                            "pattern": "(?i)version|__version__|\\\"version\\\"|tauri|orchestrator",
+                            "path": grep_path,
+                            "output_mode": "files_with_matches",
+                            "head_limit": 40
+                        }),
                     ));
+                }
+                let observed =
+                    self.existing_observed_files(ledger, ANALYSIS_BASELINE_MAX_READ_FILES);
+                let mut files = observed;
+                if files.len() < 2 {
+                    files = self.merge_prioritized_files(
+                        self.existing_analysis_files(
+                            &[
+                                "pyproject.toml",
+                                "README.md",
+                                "README_zh.md",
+                                "src/plan_cascade/__init__.py",
+                                "src/plan_cascade/cli/main.py",
+                                "mcp_server/server.py",
+                                "desktop/src-tauri/Cargo.toml",
+                                "desktop/package.json",
+                                "tests/test_orchestrator.py",
+                                "desktop/src-tauri/tests/integration/mod.rs",
+                                "desktop/src/components/__tests__/SimpleMode.test.tsx",
+                            ],
+                            ANALYSIS_BASELINE_MAX_READ_FILES,
+                        ),
+                        files,
+                        ANALYSIS_BASELINE_MAX_READ_FILES,
+                    );
                 }
                 files.sort();
                 files.dedup();
@@ -2585,7 +2976,7 @@ impl OrchestratorService {
                         serde_json::json!({
                             "file_path": file,
                             "offset": 1,
-                            "limit": 180
+                            "limit": 120
                         }),
                     ));
                 }
@@ -2598,6 +2989,7 @@ impl OrchestratorService {
     async fn execute_baseline_tool_step(
         &self,
         phase: AnalysisPhase,
+        tool_id_prefix: &str,
         step_index: usize,
         tool_name: &str,
         args: &serde_json::Value,
@@ -2606,7 +2998,8 @@ impl OrchestratorService {
         run_handle: Option<&AnalysisRunHandle>,
     ) {
         let tool_id = format!(
-            "analysis_baseline_{}_{}_{}",
+            "{}_{}_{}_{}",
+            tool_id_prefix,
             phase.id(),
             step_index + 1,
             tool_name.to_ascii_lowercase()
@@ -2615,9 +3008,11 @@ impl OrchestratorService {
             match prepare_tool_call_for_execution(tool_name, args, Some(phase.id())) {
                 Ok(prepared) => prepared,
                 Err(err) => {
-                    capture
-                        .warnings
-                        .push(format!("{} baseline step dropped: {}", phase.title(), err));
+                    capture.warnings.push(format!(
+                        "{} baseline step dropped: {}",
+                        phase.title(),
+                        err
+                    ));
                     return;
                 }
             };
@@ -2661,8 +3056,9 @@ impl OrchestratorService {
             );
             let record = EvidenceRecord {
                 evidence_id: format!(
-                    "{}-baseline-{}-{}",
+                    "{}-{}-{}-{}",
                     phase.id(),
+                    tool_id_prefix,
                     step_index + 1,
                     chrono::Utc::now().timestamp_millis()
                 ),
@@ -2701,6 +3097,7 @@ impl OrchestratorService {
         for (idx, (tool_name, args)) in steps.iter().enumerate() {
             self.execute_baseline_tool_step(
                 phase,
+                "analysis_baseline",
                 idx,
                 tool_name,
                 args,
@@ -2712,6 +3109,185 @@ impl OrchestratorService {
         }
 
         capture
+    }
+
+    fn select_chunk_read_files(&self, phase: AnalysisPhase, chunk: &InventoryChunk) -> Vec<String> {
+        let mut files = chunk.files.clone();
+        files.sort_by_key(|path| {
+            let mut score = 0i32;
+            let lower = path.to_ascii_lowercase();
+            if lower.contains("orchestrator")
+                || lower.ends_with("main.py")
+                || lower.ends_with("main.rs")
+                || lower.ends_with("app.tsx")
+                || lower.ends_with("mod.rs")
+            {
+                score -= 5;
+            }
+            if lower.contains("test") {
+                score -= 3;
+            }
+            if matches!(phase, AnalysisPhase::ConsistencyCheck) && lower.contains("test") {
+                score -= 3;
+            }
+            if lower.contains("readme") || lower.contains("license") {
+                score += 3;
+            }
+            score
+        });
+        let limit = self.config.analysis_limits.max_reads_per_chunk.max(1);
+        let mut selected = files.iter().take(limit).cloned().collect::<Vec<_>>();
+
+        // Ensure test surface is sampled when a chunk contains tests.
+        if chunk.test_files > 0 && !selected.iter().any(|p| looks_like_test_path(p)) {
+            if let Some(test_file) = files
+                .iter()
+                .find(|p| looks_like_test_path(p))
+                .cloned()
+            {
+                if selected.len() >= limit {
+                    selected.pop();
+                }
+                selected.push(test_file);
+            }
+        }
+
+        selected.sort();
+        selected.dedup();
+        selected
+    }
+
+    async fn collect_chunk_capture(
+        &self,
+        phase: AnalysisPhase,
+        chunk: &InventoryChunk,
+        chunk_index: usize,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+        run_handle: Option<&AnalysisRunHandle>,
+    ) -> (PhaseCapture, ChunkSummaryRecord) {
+        let mut capture = PhaseCapture::default();
+        let prefix = format!("analysis_chunk_{}", chunk.chunk_id.replace('-', "_"));
+
+        // Treat chunk enumeration as observed coverage once this chunk starts.
+        for path in &chunk.files {
+            capture.observed_paths.insert(path.clone());
+        }
+
+        if let Some(run) = run_handle {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisChunkStarted {
+                    run_id: run.run_id().to_string(),
+                    phase_id: phase.id().to_string(),
+                    chunk_id: chunk.chunk_id.clone(),
+                    component: chunk.component.clone(),
+                    file_count: chunk.files.len(),
+                })
+                .await;
+        }
+
+        let _ = tx
+            .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                phase_id: phase.id().to_string(),
+                message: format!(
+                    "Chunk {}/{}: {} ({})",
+                    chunk_index + 1,
+                    self.config.analysis_limits.max_chunks_per_phase.max(1),
+                    chunk.chunk_id,
+                    chunk.component
+                ),
+            })
+            .await;
+
+        let dir_hint = chunk
+            .files
+            .first()
+            .and_then(|p| {
+                let normalized = p.replace('\\', "/");
+                normalized
+                    .rfind('/')
+                    .map(|idx| normalized[..idx].to_string())
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| ".".to_string());
+
+        let mut steps = vec![
+            (
+                "LS".to_string(),
+                serde_json::json!({ "path": dir_hint.clone() }),
+            ),
+            (
+                "Grep".to_string(),
+                serde_json::json!({
+                    "pattern": "(class\\s+|def\\s+|fn\\s+|impl\\s+|tauri::command|FastMCP|test_)",
+                    "path": dir_hint,
+                    "output_mode": "files_with_matches",
+                    "head_limit": 30
+                }),
+            ),
+        ];
+
+        for file in self.select_chunk_read_files(phase, chunk) {
+            steps.push((
+                "Read".to_string(),
+                serde_json::json!({
+                    "file_path": file,
+                    "offset": 1,
+                    "limit": 100
+                }),
+            ));
+        }
+
+        for (idx, (tool_name, args)) in steps.iter().enumerate() {
+            self.execute_baseline_tool_step(
+                phase,
+                &prefix,
+                idx,
+                tool_name,
+                args,
+                &mut capture,
+                tx,
+                run_handle,
+            )
+            .await;
+        }
+
+        let mut observed_paths = capture.observed_paths.iter().cloned().collect::<Vec<_>>();
+        observed_paths.sort();
+        let mut read_files = capture.read_paths.iter().cloned().collect::<Vec<_>>();
+        read_files.sort();
+
+        let summary = format!(
+            "chunk={} component={} tool_calls={} read_calls={} observed_paths={} sampled_files={}",
+            chunk.chunk_id,
+            chunk.component,
+            capture.tool_calls,
+            capture.read_calls,
+            capture.observed_paths.len(),
+            read_files.len()
+        );
+
+        let record = ChunkSummaryRecord {
+            phase_id: phase.id().to_string(),
+            chunk_id: chunk.chunk_id.clone(),
+            component: chunk.component.clone(),
+            summary,
+            observed_paths,
+            read_files,
+        };
+
+        if let Some(run) = run_handle {
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisChunkCompleted {
+                    run_id: run.run_id().to_string(),
+                    phase_id: phase.id().to_string(),
+                    chunk_id: chunk.chunk_id.clone(),
+                    observed_paths: capture.observed_paths.len(),
+                    read_files: capture.read_paths.len(),
+                })
+                .await;
+        }
+
+        (capture, record)
     }
 
     async fn run_analysis_phase_layered(
@@ -2750,11 +3326,80 @@ impl OrchestratorService {
             .observed_paths
             .extend(baseline_capture.observed_paths.iter().cloned());
         aggregate_capture
+            .read_paths
+            .extend(baseline_capture.read_paths.iter().cloned());
+        aggregate_capture
             .evidence_lines
             .extend(baseline_capture.evidence_lines.iter().cloned());
         aggregate_capture
             .warnings
             .extend(baseline_capture.warnings.iter().cloned());
+        let baseline_gate_failures = evaluate_analysis_quota(&baseline_capture, &policy.quota);
+        let baseline_satisfies_phase = matches!(phase, AnalysisPhase::StructureDiscovery)
+            && baseline_gate_failures.is_empty()
+            && analysis_layer_goal_satisfied(phase, &baseline_capture);
+
+        let selected_chunks = ledger
+            .chunk_plan
+            .as_ref()
+            .map(|plan| {
+                select_chunks_for_phase(
+                    phase.id(),
+                    plan,
+                    &self.config.analysis_limits,
+                    &self.config.analysis_profile,
+                )
+            })
+            .unwrap_or_default();
+        let mut phase_chunk_records = Vec::<ChunkSummaryRecord>::new();
+        let mut read_budget_remaining = self
+            .config
+            .analysis_limits
+            .max_total_read_files
+            .saturating_sub(ledger.read_paths.len());
+        for (chunk_idx, chunk) in selected_chunks.iter().enumerate() {
+            if read_budget_remaining == 0 {
+                break;
+            }
+            let (chunk_capture, chunk_record) = self
+                .collect_chunk_capture(phase, chunk, chunk_idx, tx, run_handle)
+                .await;
+            aggregate_capture.tool_calls += chunk_capture.tool_calls;
+            aggregate_capture.read_calls += chunk_capture.read_calls;
+            aggregate_capture.grep_calls += chunk_capture.grep_calls;
+            aggregate_capture.glob_calls += chunk_capture.glob_calls;
+            aggregate_capture.ls_calls += chunk_capture.ls_calls;
+            aggregate_capture.cwd_calls += chunk_capture.cwd_calls;
+            aggregate_capture
+                .observed_paths
+                .extend(chunk_capture.observed_paths.iter().cloned());
+            aggregate_capture
+                .read_paths
+                .extend(chunk_capture.read_paths.iter().cloned());
+            aggregate_capture
+                .evidence_lines
+                .extend(chunk_capture.evidence_lines.iter().cloned());
+            aggregate_capture
+                .warnings
+                .extend(chunk_capture.warnings.iter().cloned());
+            read_budget_remaining = read_budget_remaining.saturating_sub(chunk_capture.read_calls);
+            if let Some(run) = run_handle {
+                let _ = run.write_json_artifact(
+                    &format!("chunks/{}/{}.json", phase.id(), chunk.chunk_id),
+                    &chunk_record,
+                );
+            }
+            phase_chunk_records.push(chunk_record.clone());
+            ledger.chunk_summaries.push(chunk_record);
+        }
+        if !phase_chunk_records.is_empty() {
+            layer_summaries.push(merge_chunk_summaries(
+                phase.id(),
+                phase.title(),
+                &phase_chunk_records,
+                MAX_ANALYSIS_PHASE_SUMMARY_CHARS * 2,
+            ));
+        }
 
         let baseline_digest = baseline_capture
             .evidence_lines
@@ -2821,6 +3466,9 @@ impl OrchestratorService {
         }
 
         for worker in &plan.workers {
+            if baseline_satisfies_phase {
+                break;
+            }
             if let Some(run) = run_handle {
                 let _ = tx
                     .send(UnifiedStreamEvent::AnalysisSubAgentProgress {
@@ -2871,6 +3519,9 @@ impl OrchestratorService {
             aggregate_capture
                 .observed_paths
                 .extend(outcome.capture.observed_paths.iter().cloned());
+            aggregate_capture
+                .read_paths
+                .extend(outcome.capture.read_paths.iter().cloned());
             aggregate_capture
                 .evidence_lines
                 .extend(outcome.capture.evidence_lines.iter().cloned());
@@ -2969,13 +3620,27 @@ impl OrchestratorService {
 
             if analysis_layer_goal_satisfied(phase, &aggregate_capture)
                 && !matches!(outcome.status, AnalysisPhaseStatus::Failed)
+                && sub_agent_results.len() >= phase.min_workers_before_early_exit()
             {
                 break;
             }
         }
 
+        if baseline_satisfies_phase {
+            layer_summaries.push(build_phase_summary_from_evidence(phase, &baseline_capture));
+            let _ = tx
+                .send(UnifiedStreamEvent::AnalysisPhaseProgress {
+                    phase_id: phase.id().to_string(),
+                    message:
+                        "Baseline evidence already satisfies this phase; worker execution skipped."
+                            .to_string(),
+                })
+                .await;
+        }
+
         let phase_gate_failures = evaluate_analysis_quota(&aggregate_capture, &policy.quota);
-        let has_worker_output = !layer_summaries.is_empty();
+        let has_worker_output =
+            !layer_summaries.is_empty() || !aggregate_capture.evidence_lines.is_empty();
         let has_worker_success = sub_agent_results
             .iter()
             .any(|item| item.status == "passed" || item.status == "partial");
@@ -2988,7 +3653,7 @@ impl OrchestratorService {
         };
 
         let phase_summary = if layer_summaries.is_empty() {
-            format!("{} produced no summary.", phase.title())
+            build_phase_summary_from_evidence(phase, &aggregate_capture)
         } else {
             layer_summaries.join("\n\n")
         };
@@ -3065,7 +3730,22 @@ impl OrchestratorService {
                 warnings: aggregate_capture.warnings.clone(),
                 sub_agents: sub_agent_results,
             });
-            let coverage = build_coverage_metrics(ledger);
+            let phase_coverage = if let Some(inventory) = ledger.inventory.as_ref() {
+                compute_coverage_report(
+                    inventory,
+                    &ledger.observed_paths,
+                    &ledger.read_paths,
+                    ledger
+                        .chunk_plan
+                        .as_ref()
+                        .map(|plan| plan.chunks.len())
+                        .unwrap_or(0),
+                    0,
+                )
+            } else {
+                AnalysisCoverageReport::default()
+            };
+            let coverage = build_coverage_metrics(ledger, &phase_coverage);
             let _ = run.update_coverage(coverage.clone());
             let _ = tx
                 .send(UnifiedStreamEvent::AnalysisCoverageUpdated {
@@ -3136,24 +3816,29 @@ impl OrchestratorService {
                 })
                 .await;
 
+            let phase_system_prompt = if enforce_quota_gate {
+                analysis_phase_system_prompt_with_quota(phase, &policy.quota, &gate_failure_history)
+            } else {
+                analysis_phase_worker_prompt(phase)
+            };
             let phase_config = OrchestratorConfig {
                 provider: self.config.provider.clone(),
-                system_prompt: Some(analysis_phase_system_prompt_with_quota(
-                    phase,
-                    &policy.quota,
-                    &gate_failure_history,
-                )),
+                system_prompt: Some(phase_system_prompt),
                 max_iterations: phase.max_iterations(),
                 max_total_tokens: phase_token_budget,
                 project_root: self.config.project_root.clone(),
+                analysis_artifacts_root: self.config.analysis_artifacts_root.clone(),
                 streaming: true,
                 enable_compaction: true,
+                analysis_profile: self.config.analysis_profile.clone(),
+                analysis_limits: self.config.analysis_limits.clone(),
             };
             let phase_agent =
                 OrchestratorService::new_sub_agent(phase_config, self.cancellation_token.clone());
 
             let request_options = LlmRequestOptions {
-                tool_call_mode: if attempt <= policy.force_tool_mode_attempts {
+                tool_call_mode: if enforce_quota_gate && attempt <= policy.force_tool_mode_attempts
+                {
                     ToolCallMode::Required
                 } else {
                     ToolCallMode::Auto
@@ -3211,6 +3896,9 @@ impl OrchestratorService {
                 .observed_paths
                 .extend(attempt_capture.observed_paths.iter().cloned());
             aggregate_capture
+                .read_paths
+                .extend(attempt_capture.read_paths.iter().cloned());
+            aggregate_capture
                 .evidence_lines
                 .extend(attempt_capture.evidence_lines.iter().cloned());
             aggregate_capture
@@ -3245,11 +3933,15 @@ impl OrchestratorService {
                 false
             };
 
-            let has_text_response = attempt_result
-                .response
+            final_response = attempt_result.response.clone().or(final_response);
+            let mut has_text_response = final_response
                 .as_ref()
                 .map(|s| !s.trim().is_empty())
                 .unwrap_or(false);
+            if !has_text_response && !enforce_quota_gate && has_min_evidence {
+                final_response = Some(build_phase_summary_from_evidence(phase, &attempt_capture));
+                has_text_response = true;
+            }
             let soft_success = if enforce_quota_gate {
                 !attempt_result.success
                     && gate_failures.is_empty()
@@ -3263,7 +3955,6 @@ impl OrchestratorService {
             let attempt_partial = !attempt_success
                 && has_min_evidence
                 && (!hard_gate_failure && (token_pressure || attempt == policy.max_attempts));
-            final_response = attempt_result.response.clone().or(final_response);
             if !attempt_success {
                 if let Some(err) = attempt_result.error.as_ref() {
                     gate_failure_history.push(format!("attempt {} error: {}", attempt, err));
@@ -3502,6 +4193,9 @@ impl OrchestratorService {
 
                 if let Some(path) = primary_path.as_ref() {
                     capture.observed_paths.insert(path.clone());
+                    if tool_name == "Read" {
+                        capture.read_paths.insert(path.clone());
+                    }
                 }
                 if let Some(args) = args_json.as_ref() {
                     for p in extract_all_paths_from_arguments(args) {
@@ -4096,6 +4790,10 @@ fn prepare_tool_call_for_execution(
                     serde_json::Value::String(".".to_string()),
                 );
             }
+            if strict_analysis {
+                map.entry("head_limit".to_string())
+                    .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(120)));
+            }
         }
         "Grep" => {
             let pattern = has_nonempty_string_arg(&map, "pattern")
@@ -4113,7 +4811,7 @@ fn prepare_tool_call_for_execution(
                 map.entry("output_mode".to_string())
                     .or_insert_with(|| serde_json::Value::String("files_with_matches".to_string()));
                 map.entry("head_limit".to_string())
-                    .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(80)));
+                    .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(40)));
             }
         }
         "Read" => {
@@ -4129,7 +4827,7 @@ fn prepare_tool_call_for_execution(
                 map.entry("offset".to_string())
                     .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(1)));
                 map.entry("limit".to_string())
-                    .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(180)));
+                    .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(120)));
             }
         }
         "Bash" => {
@@ -4179,7 +4877,10 @@ fn merge_usage(total: &mut UsageStats, delta: &UsageStats) {
     }
 }
 
-fn build_coverage_metrics(ledger: &AnalysisLedger) -> CoverageMetrics {
+fn build_coverage_metrics(
+    ledger: &AnalysisLedger,
+    coverage_report: &AnalysisCoverageReport,
+) -> CoverageMetrics {
     let failed = ledger
         .total_phases
         .saturating_sub(ledger.successful_phases + ledger.partial_phases);
@@ -4189,32 +4890,56 @@ fn build_coverage_metrics(ledger: &AnalysisLedger) -> CoverageMetrics {
         successful_phases: ledger.successful_phases,
         partial_phases: ledger.partial_phases,
         failed_phases: failed,
+        inventory_total_files: coverage_report.inventory_total_files,
+        inventory_indexed_files: coverage_report.inventory_indexed_files,
+        sampled_read_files: coverage_report.sampled_read_files,
+        test_files_total: coverage_report.test_files_total,
+        test_files_read: coverage_report.test_files_read,
+        coverage_ratio: coverage_report.coverage_ratio,
+        test_coverage_ratio: coverage_report.test_coverage_ratio,
+        chunk_count: coverage_report.chunk_count,
+        synthesis_rounds: coverage_report.synthesis_rounds,
     }
 }
 
 fn analysis_phase_token_budget(context_window: u32, phase: AnalysisPhase) -> u32 {
     let phase_cap = match phase {
-        AnalysisPhase::StructureDiscovery => 25_000,
-        AnalysisPhase::ArchitectureTrace => 30_000,
-        AnalysisPhase::ConsistencyCheck => 20_000,
+        AnalysisPhase::StructureDiscovery => 80_000,
+        AnalysisPhase::ArchitectureTrace => 100_000,
+        AnalysisPhase::ConsistencyCheck => 80_000,
     };
-    let scaled = (context_window as f64 * 0.22) as u32;
-    scaled.clamp(8_000, phase_cap)
+    let scaled = (context_window as f64 * 0.55) as u32;
+    scaled.clamp(20_000, phase_cap)
 }
 
 fn analysis_layer_goal_satisfied(phase: AnalysisPhase, capture: &PhaseCapture) -> bool {
     match phase {
         AnalysisPhase::StructureDiscovery => {
-            capture.read_calls >= 1 && capture.observed_paths.len() >= 2
+            capture.read_calls >= 2 && capture.observed_paths.len() >= 4
         }
         AnalysisPhase::ArchitectureTrace => {
-            capture.read_calls >= 1 && capture.observed_paths.len() >= 3
+            capture.read_calls >= 3 && capture.observed_paths.len() >= 8
         }
-        AnalysisPhase::ConsistencyCheck => capture.read_calls >= 1,
+        AnalysisPhase::ConsistencyCheck => {
+            capture.read_calls >= 3
+                && (capture.grep_calls + capture.glob_calls) >= 1
+                && capture.observed_paths.len() >= 6
+        }
     }
 }
 
 fn analysis_scope_guidance(message: &str) -> String {
+    let excludes = analysis_excluded_roots_for_message(message);
+
+    format!(
+        "Focus on first-party project files under the working directory. \
+Avoid expensive full-repo scans. Exclude top-level directories by default: {}. \
+Only enter excluded directories when explicitly requested by the user.",
+        excludes.join(", ")
+    )
+}
+
+fn analysis_excluded_roots_for_message(message: &str) -> Vec<String> {
     let lower = message.to_lowercase();
     let user_mentions_cloned_repos = lower.contains("claude-code") || lower.contains("codex");
 
@@ -4225,13 +4950,7 @@ fn analysis_scope_guidance(message: &str) -> String {
     if user_mentions_cloned_repos {
         excludes.retain(|item| item != "claude-code" && item != "codex");
     }
-
-    format!(
-        "Focus on first-party project files under the working directory. \
-Avoid expensive full-repo scans. Exclude top-level directories by default: {}. \
-Only enter excluded directories when explicitly requested by the user.",
-        excludes.join(", ")
-    )
+    excludes
 }
 
 fn is_valid_analysis_tool_start(tool_name: &str, args: Option<&serde_json::Value>) -> bool {
@@ -4315,6 +5034,21 @@ fn analysis_phase_system_prompt(phase: AnalysisPhase) -> &'static str {
     }
 }
 
+fn analysis_phase_worker_prompt(phase: AnalysisPhase) -> String {
+    let base = analysis_phase_system_prompt(phase);
+    format!(
+        "{base}\n\n\
+         Worker-mode requirements:\n\
+         - You are one layer within a multi-layer phase.\n\
+         - Use targeted read-only tools, then produce a final written summary for this layer.\n\
+         - Do NOT wait for other layers to satisfy global quotas.\n\
+         - Stop once your layer objective is covered with concrete file evidence.\n\
+         - Avoid repetitive LS/Glob loops; prefer Read/Grep on high-signal files.\n\
+         - Keep tool usage compact: usually <= 8 tool calls for this layer unless blocked.\n\
+         - If enough evidence is collected, immediately provide the summary instead of continuing exploration."
+    )
+}
+
 fn analysis_phase_system_prompt_with_quota(
     phase: AnalysisPhase,
     quota: &AnalysisToolQuota,
@@ -4392,6 +5126,41 @@ fn evaluate_analysis_quota(capture: &PhaseCapture, quota: &AnalysisToolQuota) ->
     failures
 }
 
+fn build_phase_summary_from_evidence(phase: AnalysisPhase, capture: &PhaseCapture) -> String {
+    let mut summary_lines = Vec::new();
+    summary_lines.push(format!("### {} (Evidence Fallback)", phase.title()));
+    summary_lines.push(format!(
+        "- Captured tool evidence: tool_calls={}, read_calls={}, grep_calls={}, glob_calls={}, ls_calls={}, cwd_calls={}",
+        capture.tool_calls,
+        capture.read_calls,
+        capture.grep_calls,
+        capture.glob_calls,
+        capture.ls_calls,
+        capture.cwd_calls
+    ));
+
+    let observed = join_sorted_paths(&capture.observed_paths, 15);
+    summary_lines.push("- Observed paths:".to_string());
+    if observed == "(none)" {
+        summary_lines.push("  - (none)".to_string());
+    } else {
+        for line in observed.lines() {
+            summary_lines.push(format!("  - {}", line));
+        }
+    }
+
+    summary_lines.push("- Evidence highlights:".to_string());
+    if capture.evidence_lines.is_empty() {
+        summary_lines.push("  - No per-tool evidence lines captured.".to_string());
+    } else {
+        for item in capture.evidence_lines.iter().take(10) {
+            summary_lines.push(format!("  - {}", truncate_for_log(item, 220)));
+        }
+    }
+
+    summary_lines.join("\n")
+}
+
 fn join_sorted_paths(paths: &HashSet<String>, limit: usize) -> String {
     if paths.is_empty() {
         return "(none)".to_string();
@@ -4441,7 +5210,7 @@ fn tool_output_for_model_context(
     let line_limit = if tool_name == "Read" {
         ANALYSIS_TOOL_RESULT_MAX_LINES
     } else {
-        ANALYSIS_TOOL_RESULT_MAX_LINES / 2
+        ANALYSIS_TOOL_RESULT_MAX_LINES / 3
     };
     let mut lines = raw.lines().take(line_limit).collect::<Vec<_>>().join("\n");
     if lines.len() > ANALYSIS_TOOL_RESULT_MAX_CHARS {
@@ -4459,14 +5228,35 @@ fn tool_output_for_model_context(
     }
 }
 
-fn sanitize_unverified_path_mentions(text: &str, issues: &[String]) -> String {
-    let mut revised = text.to_string();
-    for issue in issues {
-        if let Some(path) = issue.strip_prefix("Unverified path mention: ") {
-            revised = revised.replace(path, "an unverified reference");
+fn trim_line_reference_suffix(path: &str) -> String {
+    let mut normalized = path.to_string();
+
+    if let Some(idx) = normalized.find("#L").or_else(|| normalized.find("#l")) {
+        normalized.truncate(idx);
+    }
+
+    if let Some(idx) = normalized.rfind(':') {
+        let is_drive_prefix = idx == 1
+            && normalized
+                .as_bytes()
+                .first()
+                .map(|b| b.is_ascii_alphabetic())
+                .unwrap_or(false);
+        if !is_drive_prefix {
+            let suffix = &normalized[idx + 1..];
+            let looks_like_line_ref = !suffix.is_empty()
+                && suffix
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == ':' || c == '-');
+            let prefix = &normalized[..idx];
+            let looks_like_path = prefix.contains('/') || prefix.contains('\\');
+            if looks_like_line_ref && looks_like_path {
+                normalized.truncate(idx);
+            }
         }
     }
-    revised
+
+    normalized
 }
 
 fn normalize_candidate_path(raw: &str) -> Option<String> {
@@ -4478,12 +5268,14 @@ fn normalize_candidate_path(raw: &str) -> Option<String> {
         return None;
     }
 
-    let normalized = trimmed
-        .trim_matches(|c: char| "\"'`[](){}<>,".contains(c))
-        .replace('\\', "/")
-        .trim_start_matches("./")
-        .trim_end_matches('/')
-        .to_string();
+    let normalized = trim_line_reference_suffix(
+        &trimmed
+            .trim_matches(|c: char| "\"'`[](){}<>,".contains(c))
+            .replace('\\', "/"),
+    )
+    .trim_start_matches("./")
+    .trim_end_matches('/')
+    .to_string();
 
     if normalized.is_empty() || normalized == "." || normalized == ".." {
         None
@@ -4585,6 +5377,86 @@ fn summarize_tool_activity(
     }
 }
 
+fn select_local_seed_files(inventory: &FileInventory) -> Vec<String> {
+    let preferred_paths = [
+        "src/plan_cascade/cli/main.py",
+        "src/plan_cascade/core/orchestrator.py",
+        "src/plan_cascade/backends/factory.py",
+        "src/plan_cascade/state/state_manager.py",
+        "mcp_server/server.py",
+        "desktop/src-tauri/src/main.rs",
+        "desktop/src/App.tsx",
+        "desktop/package.json",
+        "desktop/src-tauri/Cargo.toml",
+        "pyproject.toml",
+    ];
+
+    let mut selected = Vec::<String>::new();
+    for preferred in preferred_paths {
+        if inventory.items.iter().any(|i| i.path == preferred) {
+            selected.push(preferred.to_string());
+        }
+    }
+
+    let component_order = [
+        "python-core",
+        "mcp-server",
+        "desktop-rust",
+        "desktop-web",
+        "python-tests",
+        "rust-tests",
+        "frontend-tests",
+    ];
+    for component in component_order {
+        if let Some(item) = inventory.items.iter().find(|i| i.component == component) {
+            selected.push(item.path.clone());
+        }
+    }
+
+    selected.sort();
+    selected.dedup();
+    selected
+}
+
+fn summarize_file_head(path: &std::path::Path, max_lines: usize) -> Option<String> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if metadata.len() > 400_000 {
+        return Some("large file (head skipped)".to_string());
+    }
+    let content = std::fs::read_to_string(path).ok()?;
+    if content.is_empty() {
+        return Some("empty file".to_string());
+    }
+    let mut lines = Vec::<String>::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        lines.push(trimmed.to_string());
+        if lines.len() >= max_lines.max(1) {
+            break;
+        }
+    }
+    if lines.is_empty() {
+        Some("no non-empty lines in head".to_string())
+    } else {
+        Some(lines.join(" | "))
+    }
+}
+
+fn looks_like_test_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
+    normalized.starts_with("tests/")
+        || normalized.starts_with("desktop/src-tauri/tests/")
+        || normalized.starts_with("desktop/src/components/__tests__/")
+        || normalized.ends_with("_test.py")
+        || normalized.ends_with(".test.ts")
+        || normalized.ends_with(".test.tsx")
+        || normalized.ends_with(".spec.ts")
+        || normalized.ends_with(".spec.tsx")
+}
+
 fn extract_path_candidates_from_text(text: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for token in text.split_whitespace() {
@@ -4660,11 +5532,169 @@ fn is_observed_path(candidate: &str, observed: &HashSet<String>) -> bool {
     })
 }
 
+fn observed_root_segments(observed: &HashSet<String>) -> HashSet<String> {
+    let mut roots = HashSet::new();
+    for item in observed {
+        if let Some(normalized) = normalize_candidate_path(item) {
+            if let Some(first) = normalized.split('/').next() {
+                let trimmed = first.trim();
+                if !trimmed.is_empty() && trimmed != "." && trimmed != ".." {
+                    roots.insert(trimmed.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+    roots
+}
+
+fn is_concrete_path_reference(candidate: &str, observed_roots: &HashSet<String>) -> bool {
+    let normalized = match normalize_candidate_path(candidate) {
+        Some(path) => path,
+        None => return false,
+    };
+
+    if normalized.starts_with('/')
+        || normalized.starts_with("./")
+        || normalized.starts_with("../")
+        || normalized.starts_with("\\\\")
+    {
+        return true;
+    }
+
+    // Windows drive letter paths like C:/...
+    if normalized.len() >= 2 {
+        let bytes = normalized.as_bytes();
+        if bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+            return true;
+        }
+    }
+
+    let segments = normalized
+        .split('/')
+        .filter(|seg| !seg.is_empty())
+        .collect::<Vec<_>>();
+    if segments.len() < 2 {
+        return false;
+    }
+
+    // Filter documentation labels like "Desktop/CLI" that are not file-system paths.
+    if segments.len() == 2
+        && segments
+            .iter()
+            .all(|seg| seg.chars().all(|c| c.is_ascii_alphabetic()))
+        && segments
+            .iter()
+            .any(|seg| seg.chars().any(|c| c.is_ascii_uppercase()))
+    {
+        return false;
+    }
+
+    if segments
+        .last()
+        .map(|seg| seg.contains('.'))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    if segments.iter().any(|seg| seg.starts_with('.')) {
+        return true;
+    }
+
+    segments
+        .first()
+        .map(|first| observed_roots.contains(&first.to_ascii_lowercase()))
+        .unwrap_or(false)
+}
+
 fn find_unverified_paths(text: &str, observed: &HashSet<String>) -> Vec<String> {
+    let observed_roots = observed_root_segments(observed);
     extract_path_candidates_from_text(text)
         .into_iter()
+        .filter(|path| is_concrete_path_reference(path, &observed_roots))
         .filter(|path| !is_observed_path(path, observed))
         .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdaptiveAnalysisScope {
+    None,
+    Local,
+    Global,
+}
+
+fn detect_adaptive_analysis_scope(message: &str) -> AdaptiveAnalysisScope {
+    if is_exploration_task(message) {
+        return AdaptiveAnalysisScope::Global;
+    }
+
+    let lower = message.to_lowercase();
+    let has_execution_intent = [
+        "implement",
+        "fix",
+        "refactor",
+        "add",
+        "change",
+        "update",
+        "\u{5b9e}\u{73b0}",
+        "\u{4fee}\u{590d}",
+        "\u{91cd}\u{6784}",
+        "\u{65b0}\u{589e}",
+        "\u{4fee}\u{6539}",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw));
+    if !has_execution_intent {
+        return AdaptiveAnalysisScope::None;
+    }
+
+    let has_global_scope = [
+        "whole project",
+        "entire project",
+        "whole repo",
+        "across the repo",
+        "across modules",
+        "project-wide",
+        "global",
+        "\u{6574}\u{4e2a}\u{9879}\u{76ee}",
+        "\u{5168}\u{5c40}",
+        "\u{8de8}\u{6a21}\u{5757}",
+        "\u{6574}\u{4f53}",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw));
+
+    if has_global_scope {
+        return AdaptiveAnalysisScope::Global;
+    }
+
+    let has_path_target = !extract_path_candidates_from_text(message).is_empty();
+    if has_path_target {
+        return AdaptiveAnalysisScope::Local;
+    }
+
+    let has_local_scope_words = [
+        "file",
+        "module",
+        "function",
+        "class",
+        "endpoint",
+        "test",
+        "\u{6587}\u{4ef6}",
+        "\u{6a21}\u{5757}",
+        "\u{51fd}\u{6570}",
+        "\u{7c7b}",
+        "\u{63a5}\u{53e3}",
+        "\u{6d4b}\u{8bd5}",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw));
+
+    if has_local_scope_words {
+        AdaptiveAnalysisScope::Local
+    } else {
+        AdaptiveAnalysisScope::None
+    }
 }
 
 #[allow(dead_code)]
@@ -4843,6 +5873,9 @@ mod tests {
             project_root: std::env::temp_dir(),
             streaming: true,
             enable_compaction: true,
+            analysis_artifacts_root: default_analysis_artifacts_root(),
+            analysis_profile: AnalysisProfile::default(),
+            analysis_limits: AnalysisLimits::default(),
         }
     }
 
@@ -4946,6 +5979,44 @@ mod tests {
         assert!(!is_exploration_task(
             "\u{4fee}\u{590d}\u{767b}\u{5f55}\u{6309}\u{94ae}"
         ));
+    }
+
+    #[test]
+    fn test_detect_adaptive_analysis_scope_global() {
+        assert_eq!(
+            detect_adaptive_analysis_scope("analyze this project architecture"),
+            AdaptiveAnalysisScope::Global
+        );
+        assert_eq!(
+            detect_adaptive_analysis_scope(
+                "\u{91cd}\u{6784}\u{6574}\u{4e2a}\u{9879}\u{76ee}\u{7684}\u{67b6}\u{6784}"
+            ),
+            AdaptiveAnalysisScope::Global
+        );
+    }
+
+    #[test]
+    fn test_detect_adaptive_analysis_scope_local() {
+        assert_eq!(
+            detect_adaptive_analysis_scope(
+                "implement retry logic in src/plan_cascade/core/orchestrator.py"
+            ),
+            AdaptiveAnalysisScope::Local
+        );
+        assert_eq!(
+            detect_adaptive_analysis_scope(
+                "\u{4fee}\u{590d} desktop/src/App.tsx \u{4e2d}\u{7684} \u{5d29}\u{6e83}"
+            ),
+            AdaptiveAnalysisScope::Local
+        );
+    }
+
+    #[test]
+    fn test_detect_adaptive_analysis_scope_none() {
+        assert_eq!(
+            detect_adaptive_analysis_scope("hello there"),
+            AdaptiveAnalysisScope::None
+        );
     }
 
     #[test]
@@ -5111,6 +6182,123 @@ mod tests {
     }
 
     #[test]
+    fn test_find_unverified_paths_ignores_non_path_slash_terms() {
+        let observed = HashSet::from([
+            "src/plan_cascade/core".to_string(),
+            "desktop/src-tauri/src/main.rs".to_string(),
+        ]);
+        let text =
+            "Tech stack includes JavaScript/TypeScript, and architecture mentions backend/core. \
+                    Verified file: desktop/src-tauri/src/main.rs.";
+        let issues = find_unverified_paths(text, &observed);
+        assert!(
+            !issues.iter().any(|p| p == "JavaScript/TypeScript"),
+            "unexpected language-token issue: {:?}",
+            issues
+        );
+        assert!(
+            !issues.iter().any(|p| p == "backend/core"),
+            "unexpected generic-component issue: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn test_find_unverified_paths_ignores_desktop_cli_label() {
+        let observed = HashSet::from([
+            "desktop/src-tauri/src/main.rs".to_string(),
+            "src/plan_cascade/cli/main.py".to_string(),
+        ]);
+        let text = "Modes include Desktop/CLI flows. Verified files: desktop/src-tauri/src/main.rs and src/plan_cascade/cli/main.py.";
+        let issues = find_unverified_paths(text, &observed);
+        assert!(
+            !issues.iter().any(|p| p == "Desktop/CLI"),
+            "unexpected label-like issue: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn test_find_unverified_paths_accepts_path_with_line_span_when_file_observed() {
+        let observed = HashSet::from(["src/plan_cascade/core/orchestrator.py".to_string()]);
+        let text = "Core orchestrator is defined at src/plan_cascade/core/orchestrator.py:58-83.";
+        let issues = find_unverified_paths(text, &observed);
+        assert!(
+            issues.is_empty(),
+            "line-span reference should map to observed file: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn test_architecture_baseline_keeps_seed_files_ahead_of_observed_noise() {
+        let project_root = std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join("..").join(".."))
+            .and_then(|p| p.canonicalize().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let config = OrchestratorConfig {
+            provider: ProviderConfig {
+                provider: ProviderType::Ollama,
+                model: "test-model".to_string(),
+                ..Default::default()
+            },
+            system_prompt: None,
+            max_iterations: 4,
+            max_total_tokens: 8_000,
+            project_root: project_root.clone(),
+            streaming: false,
+            enable_compaction: false,
+            analysis_artifacts_root: default_analysis_artifacts_root(),
+            analysis_profile: AnalysisProfile::default(),
+            analysis_limits: AnalysisLimits::default(),
+        };
+        let orchestrator = OrchestratorService::new(config);
+        let mut ledger = AnalysisLedger::default();
+        ledger
+            .observed_paths
+            .insert(project_root.join("README.md").to_string_lossy().to_string());
+        ledger.observed_paths.insert(
+            project_root
+                .join("pyproject.toml")
+                .to_string_lossy()
+                .to_string(),
+        );
+        ledger.observed_paths.insert(
+            project_root
+                .join("desktop/package.json")
+                .to_string_lossy()
+                .to_string(),
+        );
+
+        let steps =
+            orchestrator.baseline_steps_for_phase(AnalysisPhase::ArchitectureTrace, &ledger);
+        let read_paths = steps
+            .iter()
+            .filter(|(tool, _)| tool == "Read")
+            .filter_map(|(_, args)| {
+                args.get("file_path")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            read_paths
+                .iter()
+                .any(|p| p == "src/plan_cascade/core/orchestrator.py"),
+            "expected seeded orchestrator path in baseline reads, got: {:?}",
+            read_paths
+        );
+        assert!(
+            read_paths.iter().any(|p| p == "desktop/src/App.tsx")
+                || read_paths.iter().any(|p| p == "desktop/src/main.tsx"),
+            "expected frontend entrypoint in baseline reads, got: {:?}",
+            read_paths
+        );
+    }
+
+    #[test]
     fn test_baseline_steps_cover_required_tool_families() {
         let project_root = std::env::current_dir()
             .ok()
@@ -5129,6 +6317,9 @@ mod tests {
             project_root,
             streaming: false,
             enable_compaction: false,
+            analysis_artifacts_root: default_analysis_artifacts_root(),
+            analysis_profile: AnalysisProfile::default(),
+            analysis_limits: AnalysisLimits::default(),
         };
         let orchestrator = OrchestratorService::new(config);
         let ledger = AnalysisLedger::default();
@@ -5137,16 +6328,54 @@ mod tests {
             orchestrator.baseline_steps_for_phase(AnalysisPhase::StructureDiscovery, &ledger);
         assert!(structure_steps.iter().any(|(tool, _)| tool == "Glob"));
         assert!(structure_steps.iter().any(|(tool, _)| tool == "Read"));
+        assert!(
+            structure_steps.iter().any(|(tool, args)| {
+                tool == "Glob"
+                    && args
+                        .get("pattern")
+                        .and_then(|v| v.as_str())
+                        .map(|p| p.contains("tests/**/*.py"))
+                        .unwrap_or(false)
+            }),
+            "expected structure baseline to include Python test glob"
+        );
 
         let architecture_steps =
             orchestrator.baseline_steps_for_phase(AnalysisPhase::ArchitectureTrace, &ledger);
         assert!(architecture_steps.iter().any(|(tool, _)| tool == "Grep"));
         assert!(architecture_steps.iter().any(|(tool, _)| tool == "Read"));
+        assert!(
+            architecture_steps.iter().any(|(tool, args)| {
+                tool == "Grep"
+                    && args
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .map(|p| p == "tests" || p == "desktop/src-tauri/tests")
+                        .unwrap_or(false)
+            }),
+            "expected architecture baseline to include test grep paths"
+        );
 
         let consistency_steps =
             orchestrator.baseline_steps_for_phase(AnalysisPhase::ConsistencyCheck, &ledger);
         assert!(consistency_steps.iter().any(|(tool, _)| tool == "Grep"));
         assert!(consistency_steps.iter().any(|(tool, _)| tool == "Read"));
+    }
+
+    #[test]
+    fn test_analysis_phase_min_workers_before_early_exit() {
+        assert_eq!(
+            AnalysisPhase::StructureDiscovery.min_workers_before_early_exit(),
+            2
+        );
+        assert_eq!(
+            AnalysisPhase::ArchitectureTrace.min_workers_before_early_exit(),
+            2
+        );
+        assert_eq!(
+            AnalysisPhase::ConsistencyCheck.min_workers_before_early_exit(),
+            2
+        );
     }
 
     #[test]

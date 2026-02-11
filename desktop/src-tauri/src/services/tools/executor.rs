@@ -143,6 +143,9 @@ const DEFAULT_SCAN_EXCLUDES: &[&str] = &[
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
+    ".plan-cascade",
+    "builtin-skills",
+    "external-skills",
     "claude-code",
     "codex",
 ];
@@ -558,11 +561,20 @@ impl ToolExecutor {
             Some(p) => p,
             None => return ToolResult::err(missing_param_error("Glob", "pattern")),
         };
+        let head_limit = args.get("head_limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         let explicit_base_path = args.get("path").and_then(|v| v.as_str());
-        let base_path = explicit_base_path
-            .map(PathBuf::from)
-            .unwrap_or_else(|| self.project_root.clone());
+        let base_path = match explicit_base_path {
+            Some(path) => match self.validate_path(path) {
+                Ok(resolved) => resolved,
+                Err(err) => return ToolResult::err(err),
+            },
+            None => self
+                .current_working_dir
+                .lock()
+                .map(|cwd| cwd.clone())
+                .unwrap_or_else(|_| self.project_root.clone()),
+        };
         let apply_default_excludes = explicit_base_path
             .map(|p| {
                 let normalized = p.trim().replace('\\', "/");
@@ -571,7 +583,12 @@ impl ToolExecutor {
             .unwrap_or(true);
 
         // Combine base path with pattern
-        let full_pattern = base_path.join(pattern);
+        let pattern_path = Path::new(pattern);
+        let full_pattern = if pattern_path.is_absolute() {
+            pattern_path.to_path_buf()
+        } else {
+            base_path.join(pattern)
+        };
         let pattern_str = full_pattern.to_string_lossy();
 
         match glob::glob(&pattern_str) {
@@ -594,6 +611,11 @@ impl ToolExecutor {
                     .filter(|(p, _)| {
                         !apply_default_excludes || !is_default_scan_excluded(&base_path, p)
                     })
+                    .take(if head_limit > 0 {
+                        head_limit
+                    } else {
+                        usize::MAX
+                    })
                     .map(|(p, _)| p.to_string_lossy().to_string())
                     .collect();
 
@@ -615,18 +637,27 @@ impl ToolExecutor {
         };
 
         let explicit_search_path = args.get("path").and_then(|v| v.as_str());
-        let search_path = explicit_search_path.map(PathBuf::from).unwrap_or_else(|| {
-            self.current_working_dir
+        let search_path = match explicit_search_path {
+            Some(path) => match self.validate_path(path) {
+                Ok(resolved) => resolved,
+                Err(err) => return ToolResult::err(err),
+            },
+            None => self
+                .current_working_dir
                 .lock()
                 .map(|cwd| cwd.clone())
-                .unwrap_or_else(|_| self.project_root.clone())
-        });
+                .unwrap_or_else(|_| self.project_root.clone()),
+        };
         let apply_default_excludes = explicit_search_path
             .map(|p| {
                 let normalized = p.trim().replace('\\', "/");
                 normalized == "." || normalized == "./"
             })
             .unwrap_or(true);
+
+        if !search_path.exists() {
+            return ToolResult::err(format!("Path not found: {}", search_path.display()));
+        }
 
         let file_glob = args.get("glob").and_then(|v| v.as_str());
         let case_insensitive = args
@@ -1332,6 +1363,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_glob_relative_dot_uses_executor_working_dir() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        let args = serde_json::json!({
+            "pattern": "test.txt",
+            "path": "."
+        });
+
+        let result = executor.execute("Glob", &args).await;
+        assert!(result.success, "glob should succeed: {:?}", result.error);
+        let output = result.output.unwrap_or_default();
+        assert!(
+            output.contains("test.txt"),
+            "expected test.txt in output, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_glob_head_limit_caps_results() {
+        let dir = setup_test_dir();
+        std::fs::write(dir.path().join("another.txt"), "x").unwrap();
+        let executor = ToolExecutor::new(dir.path());
+
+        let args = serde_json::json!({
+            "pattern": "**/*.txt",
+            "path": dir.path().to_string_lossy().to_string(),
+            "head_limit": 1
+        });
+
+        let result = executor.execute("Glob", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap_or_default();
+        let lines = output.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1, "expected one line, got: {}", output);
+    }
+
+    #[tokio::test]
     async fn test_grep() {
         let dir = setup_test_dir();
         let executor = ToolExecutor::new(dir.path());
@@ -1356,6 +1426,26 @@ mod tests {
         let result = executor.execute("Grep", &args).await;
         assert!(result.success);
         assert!(result.output.unwrap().contains("line 1"));
+    }
+
+    #[tokio::test]
+    async fn test_grep_relative_dot_uses_executor_working_dir() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        let args = serde_json::json!({
+            "pattern": "nested",
+            "path": "."
+        });
+
+        let result = executor.execute("Grep", &args).await;
+        assert!(result.success, "grep should succeed: {:?}", result.error);
+        let output = result.output.unwrap_or_default();
+        assert!(
+            output.contains("nested.txt"),
+            "expected nested.txt in output, got: {}",
+            output
+        );
     }
 
     #[tokio::test]
