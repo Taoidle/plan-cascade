@@ -14,6 +14,7 @@
 //! * **Thread-safe** via `Arc<Mutex<...>>` so it can be shared across the
 //!   background indexer and tool executor.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -24,7 +25,7 @@ const MAX_VOCAB_SIZE: usize = 8192;
 const MIN_DOC_FREQUENCY: usize = 1;
 
 /// Result of a semantic search query.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SemanticSearchResult {
     pub file_path: String,
     pub chunk_index: i64,

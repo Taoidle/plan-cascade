@@ -49,6 +49,13 @@ pub struct ProjectIndexSummary {
     pub languages: Vec<String>,
     pub components: Vec<ComponentSummary>,
     pub key_entry_points: Vec<String>,
+    /// Total number of symbols (functions, classes, structs, etc.) across all files.
+    #[serde(default)]
+    pub total_symbols: usize,
+    /// Total number of embedding chunks stored for this project.
+    /// When > 0, semantic search is available.
+    #[serde(default)]
+    pub embedding_chunks: usize,
 }
 
 /// Persistent index store backed by SQLite.
@@ -273,11 +280,29 @@ impl IndexStore {
             .filter_map(|r| r.ok())
             .collect();
 
+        // Total symbol count across all files
+        let total_symbols: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM file_symbols fs
+             JOIN file_index fi ON fi.id = fs.file_index_id
+             WHERE fi.project_path = ?1",
+            params![project_path],
+            |row| row.get(0),
+        )?;
+
+        // Embedding chunk count (indicates semantic search availability)
+        let embedding_chunks: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM file_embeddings WHERE project_path = ?1",
+            params![project_path],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
         Ok(ProjectIndexSummary {
             total_files: total_files as usize,
             languages,
             components,
             key_entry_points,
+            total_symbols: total_symbols as usize,
+            embedding_chunks: embedding_chunks as usize,
         })
     }
 

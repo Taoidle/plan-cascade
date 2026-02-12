@@ -2,6 +2,7 @@
  * IndexStatus Component
  *
  * Displays the current codebase indexing status with real-time progress updates.
+ * Shows two-phase progress (file indexing + embedding) and search capability badges.
  * Listens to Tauri "index-progress" events and provides a re-index button.
  */
 
@@ -18,6 +19,10 @@ interface IndexStatusEvent {
   indexed_files: number;
   total_files: number;
   error_message?: string | null;
+  /** Total parsed symbols across all indexed files */
+  total_symbols?: number;
+  /** Number of embedding chunks stored. When > 0, semantic search is available. */
+  embedding_chunks?: number;
 }
 
 interface CommandResponse<T> {
@@ -40,12 +45,16 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
   const [indexedFiles, setIndexedFiles] = useState(0);
   const [totalFiles, setTotalFiles] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [totalSymbols, setTotalSymbols] = useState(0);
+  const [embeddingChunks, setEmbeddingChunks] = useState(0);
 
   const applyEvent = useCallback((evt: IndexStatusEvent) => {
     setStatus(evt.status);
     setIndexedFiles(evt.indexed_files);
     setTotalFiles(evt.total_files);
     setErrorMessage(evt.error_message ?? null);
+    setTotalSymbols(evt.total_symbols ?? 0);
+    setEmbeddingChunks(evt.embedding_chunks ?? 0);
   }, []);
 
   // Fetch initial status and listen for real-time updates
@@ -55,6 +64,8 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
       setIndexedFiles(0);
       setTotalFiles(0);
       setErrorMessage(null);
+      setTotalSymbols(0);
+      setEmbeddingChunks(0);
       return;
     }
 
@@ -112,7 +123,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     return null;
   }
 
-  // indexing state: animated spinner + progress
+  // indexing state: animated spinner + two-phase progress
   if (status === 'indexing') {
     return (
       <div className={clsx('flex items-center gap-1.5', className)}>
@@ -146,20 +157,24 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
         >
           {compact
             ? `${indexedFiles}/${totalFiles}`
-            : t('indexing.indexingProgress', {
-                current: indexedFiles,
-                total: totalFiles,
-              })}
+            : totalFiles > 0
+              ? t('indexing.indexingPhase1', {
+                  current: indexedFiles,
+                  total: totalFiles,
+                })
+              : t('indexing.indexingPhase2')}
         </span>
       </div>
     );
   }
 
-  // indexed state: green dot + file count + re-index button
+  // indexed state: green dot + file count + capability badges + re-index button
   if (status === 'indexed') {
+    const semanticReady = embeddingChunks > 0;
+
     return (
-      <div className={clsx('flex items-center gap-1.5', className)}>
-        <div className="w-2 h-2 rounded-full bg-green-500" />
+      <div className={clsx('flex items-center gap-1.5 flex-wrap', className)}>
+        <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
         <span
           className={clsx(
             'text-green-600 dark:text-green-400',
@@ -168,11 +183,50 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
         >
           {t('indexing.readyFiles', { count: indexedFiles })}
         </span>
+
+        {/* Symbol count badge */}
+        {totalSymbols > 0 && !compact && (
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            {t('indexing.readySymbols', { count: totalSymbols })}
+          </span>
+        )}
+
+        {/* Semantic search capability badge */}
+        {!compact && (
+          <span
+            className={clsx(
+              'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium',
+              semanticReady
+                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+            )}
+          >
+            {semanticReady
+              ? t('indexing.semanticSearchReady')
+              : t('indexing.semanticSearchUnavailable')}
+          </span>
+        )}
+
+        {/* Compact semantic indicator (small dot) */}
+        {compact && (
+          <div
+            className={clsx(
+              'w-1.5 h-1.5 rounded-full flex-shrink-0',
+              semanticReady ? 'bg-purple-500' : 'bg-gray-400'
+            )}
+            title={
+              semanticReady
+                ? t('indexing.semanticSearchReady')
+                : t('indexing.semanticSearchUnavailable')
+            }
+          />
+        )}
+
         <button
           onClick={handleReindex}
           title={t('indexing.reindexTooltip')}
           className={clsx(
-            'flex items-center justify-center rounded-md transition-colors',
+            'flex items-center justify-center rounded-md transition-colors flex-shrink-0',
             'text-gray-400 dark:text-gray-500',
             'hover:text-gray-600 dark:hover:text-gray-300',
             'hover:bg-gray-100 dark:hover:bg-gray-800',

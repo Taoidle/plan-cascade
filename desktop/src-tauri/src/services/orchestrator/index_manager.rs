@@ -33,6 +33,13 @@ pub struct IndexStatusEvent {
     pub total_files: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// Total number of parsed symbols across all indexed files.
+    #[serde(default)]
+    pub total_symbols: usize,
+    /// Number of embedding chunks stored for this project.
+    /// When > 0, semantic search is available.
+    #[serde(default)]
+    pub embedding_chunks: usize,
 }
 
 /// Internal bookkeeping for a running indexer.
@@ -91,6 +98,8 @@ impl IndexManager {
                     indexed_files: summary.total_files,
                     total_files: summary.total_files,
                     error_message: None,
+                    total_symbols: summary.total_symbols,
+                    embedding_chunks: summary.embedding_chunks,
                 };
                 self.set_status_and_emit(project_path, event).await;
             }
@@ -122,6 +131,8 @@ impl IndexManager {
             indexed_files: 0,
             total_files: 0,
             error_message: None,
+            total_symbols: 0,
+            embedding_chunks: 0,
         };
         self.set_status_and_emit(project_path, initial_event).await;
 
@@ -136,6 +147,8 @@ impl IndexManager {
                 indexed_files: done,
                 total_files: total,
                 error_message: None,
+                total_symbols: 0,
+                embedding_chunks: 0,
             };
             // Update statuses map (blocking write is fine in the sync callback
             // because contention is low and the lock is only briefly held).
@@ -161,16 +174,17 @@ impl IndexManager {
 
             // Determine final status.
             let final_event = if result.is_ok() {
-                let total = index_store
+                let summary = index_store
                     .get_project_summary(&pp_for_task)
-                    .map(|s| s.total_files)
-                    .unwrap_or(0);
+                    .unwrap_or_default();
                 IndexStatusEvent {
                     project_path: pp_for_task.clone(),
                     status: "indexed".to_string(),
-                    indexed_files: total,
-                    total_files: total,
+                    indexed_files: summary.total_files,
+                    total_files: summary.total_files,
                     error_message: None,
+                    total_symbols: summary.total_symbols,
+                    embedding_chunks: summary.embedding_chunks,
                 }
             } else {
                 IndexStatusEvent {
@@ -179,6 +193,8 @@ impl IndexManager {
                     indexed_files: 0,
                     total_files: 0,
                     error_message: Some("Background indexer task failed".to_string()),
+                    total_symbols: 0,
+                    embedding_chunks: 0,
                 }
             };
 
@@ -235,6 +251,8 @@ impl IndexManager {
                 indexed_files: summary.total_files,
                 total_files: summary.total_files,
                 error_message: None,
+                total_symbols: summary.total_symbols,
+                embedding_chunks: summary.embedding_chunks,
             },
             _ => IndexStatusEvent {
                 project_path: project_path.to_string(),
@@ -242,6 +260,8 @@ impl IndexManager {
                 indexed_files: 0,
                 total_files: 0,
                 error_message: None,
+                total_symbols: 0,
+                embedding_chunks: 0,
             },
         }
     }
@@ -456,6 +476,8 @@ mod tests {
                     indexed_files: 5,
                     total_files: 10,
                     error_message: None,
+                    total_symbols: 0,
+                    embedding_chunks: 0,
                 },
             );
         }

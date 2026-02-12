@@ -76,11 +76,19 @@
     "idle": "Not indexed",
     "indexing": "Indexing...",
     "indexingProgress": "Indexing... {{current}}/{{total}} files",
+    "indexingPhase1": "Phase 1: Indexing files... ({{current}}/{{total}})",
+    "indexingPhase2": "Phase 2: Building embeddings...",
     "ready": "Indexed",
     "readyFiles": "{{count}} files",
+    "readySymbols": "{{count}} symbols",
     "error": "Index error",
     "reindex": "Re-index",
-    "reindexTooltip": "Re-index the current directory"
+    "reindexTooltip": "Re-index the current directory",
+    "semanticSearchReady": "Semantic search ready",
+    "semanticSearchUnavailable": "Semantic search unavailable",
+    "searchCapabilities": "Search capabilities",
+    "embeddingProgress": "Building embeddings... ({{current}}/{{total}})",
+    "embeddingComplete": "{{count}} embeddings"
   },
 
   "time": {

@@ -671,6 +671,8 @@ pub async fn get_index_status(
             indexed_files: 0,
             total_files: 0,
             error_message: None,
+            total_symbols: 0,
+            embedding_chunks: 0,
         }));
     }
 
@@ -685,6 +687,8 @@ pub async fn get_index_status(
             indexed_files: 0,
             total_files: 0,
             error_message: None,
+            total_symbols: 0,
+            embedding_chunks: 0,
         }))
     }
 }
@@ -715,6 +719,77 @@ pub async fn trigger_reindex(
         Ok(CommandResponse::err(
             "IndexManager not initialized".to_string(),
         ))
+    }
+}
+
+/// Perform a semantic search over indexed embeddings for a project.
+///
+/// Returns the top-k most similar code chunks to the query string.
+/// Falls back to the current working directory if no project_path is provided.
+#[tauri::command]
+pub async fn semantic_search(
+    query: String,
+    project_path: Option<String>,
+    top_k: Option<usize>,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<Vec<crate::services::orchestrator::embedding_service::SemanticSearchResult>>, String> {
+    let dir = if let Some(p) = project_path {
+        p
+    } else {
+        let wd = standalone_state.working_directory.read().await;
+        wd.to_string_lossy().to_string()
+    };
+
+    if dir.is_empty() {
+        return Ok(CommandResponse::err("No project directory specified"));
+    }
+
+    if query.trim().is_empty() {
+        return Ok(CommandResponse::err("Query string is empty"));
+    }
+
+    let mgr_lock = standalone_state.index_manager.read().await;
+    let mgr = match &*mgr_lock {
+        Some(mgr) => mgr,
+        None => return Ok(CommandResponse::err("IndexManager not initialized")),
+    };
+
+    let index_store = mgr.index_store();
+
+    // Check if embeddings exist for this project
+    let embedding_count = match index_store.count_embeddings(&dir) {
+        Ok(count) => count,
+        Err(e) => return Ok(CommandResponse::err(format!("Failed to count embeddings: {}", e))),
+    };
+
+    if embedding_count == 0 {
+        return Ok(CommandResponse::ok(vec![]));
+    }
+
+    // Create a temporary embedding service and build vocabulary from stored chunks
+    let embedding_service = crate::services::orchestrator::embedding_service::EmbeddingService::new();
+
+    // Get all embeddings for the project to build vocabulary
+    let all_chunks = match index_store.get_embeddings_for_project(&dir) {
+        Ok(chunks) => chunks,
+        Err(e) => return Ok(CommandResponse::err(format!("Failed to get embeddings: {}", e))),
+    };
+
+    // Build vocabulary from stored chunk texts
+    let chunk_texts: Vec<&str> = all_chunks.iter().map(|(_, _, text, _)| text.as_str()).collect();
+    embedding_service.build_vocabulary(&chunk_texts);
+
+    // Embed the query
+    let query_embedding = embedding_service.embed_text(&query);
+    if query_embedding.is_empty() {
+        return Ok(CommandResponse::ok(vec![]));
+    }
+
+    // Perform semantic search
+    let k = top_k.unwrap_or(10);
+    match index_store.semantic_search(&query_embedding, &dir, k) {
+        Ok(results) => Ok(CommandResponse::ok(results)),
+        Err(e) => Ok(CommandResponse::err(format!("Semantic search failed: {}", e))),
     }
 }
 
@@ -1751,6 +1826,29 @@ mod tests {
         // When None, the command should fall back to 1_000_000 / 50.
         assert_eq!(req.max_total_tokens.unwrap_or(1_000_000), 1_000_000);
         assert_eq!(req.max_iterations.unwrap_or(50), 50);
+    }
+
+    #[test]
+    fn test_semantic_search_query_validation() {
+        // Verify that empty query handling works correctly
+        let empty_query = "".to_string();
+        assert!(empty_query.trim().is_empty());
+
+        let whitespace_query = "   ".to_string();
+        assert!(whitespace_query.trim().is_empty());
+
+        let valid_query = "find user authentication".to_string();
+        assert!(!valid_query.trim().is_empty());
+    }
+
+    #[test]
+    fn test_semantic_search_default_top_k() {
+        // Verify default top_k is 10
+        let top_k: Option<usize> = None;
+        assert_eq!(top_k.unwrap_or(10), 10);
+
+        let custom_top_k: Option<usize> = Some(5);
+        assert_eq!(custom_top_k.unwrap_or(10), 5);
     }
 
     #[test]

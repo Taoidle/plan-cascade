@@ -19,11 +19,34 @@ pub fn build_project_summary(summary: &ProjectIndexSummary) -> String {
     lines.push("## Project Structure".to_string());
     lines.push(format!("Total files: {}", summary.total_files));
 
+    // Symbol count
+    if summary.total_symbols > 0 {
+        lines.push(format!("Total symbols: {}", summary.total_symbols));
+    }
+
     // Languages - sorted for determinism
     if !summary.languages.is_empty() {
         let mut langs = summary.languages.clone();
         langs.sort();
         lines.push(format!("Languages: {}", langs.join(", ")));
+    }
+
+    // Search capabilities
+    if summary.total_symbols > 0 || summary.embedding_chunks > 0 {
+        lines.push(String::new());
+        lines.push("### Search Capabilities".to_string());
+        lines.push("- Text search: available (Grep)".to_string());
+        if summary.total_symbols > 0 {
+            lines.push("- Symbol search: available (CodebaseSearch)".to_string());
+        }
+        if summary.embedding_chunks > 0 {
+            lines.push(format!(
+                "- Semantic search: available ({} indexed chunks)",
+                summary.embedding_chunks
+            ));
+        } else {
+            lines.push("- Semantic search: unavailable (no embeddings built)".to_string());
+        }
     }
 
     // Components - sorted alphabetically by name for determinism
@@ -312,6 +335,8 @@ mod tests {
                 "src/app.tsx".to_string(),
                 "src/index.ts".to_string(),
             ],
+            total_symbols: 150,
+            embedding_chunks: 200,
         }
     }
 
@@ -323,8 +348,10 @@ mod tests {
         // Verify expected sections exist
         assert!(text.contains("## Project Structure"));
         assert!(text.contains("Total files: 42"));
+        assert!(text.contains("Total symbols: 150"));
         assert!(text.contains("### Components"));
         assert!(text.contains("### Key Entry Points"));
+        assert!(text.contains("### Search Capabilities"));
 
         // Verify languages are present
         assert!(text.contains("Languages:"));
@@ -383,6 +410,8 @@ mod tests {
                 "src/main.rs".to_string(),
                 "src/app.tsx".to_string(),
             ],
+            total_symbols: 150,
+            embedding_chunks: 200,
         };
 
         let text_reordered = build_project_summary(&summary_reordered);
@@ -474,5 +503,61 @@ mod tests {
 
         // Empty summary (0 files) should not inject a section
         assert!(!prompt.contains("## Project Structure"));
+    }
+
+    // =========================================================================
+    // Feature-004: Search capabilities and symbol count tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_project_summary_includes_symbol_count() {
+        let summary = make_test_summary();
+        let text = build_project_summary(&summary);
+
+        assert!(text.contains("Total symbols: 150"));
+    }
+
+    #[test]
+    fn test_build_project_summary_includes_search_capabilities() {
+        let summary = make_test_summary();
+        let text = build_project_summary(&summary);
+
+        assert!(text.contains("### Search Capabilities"));
+        assert!(text.contains("Text search: available"));
+        assert!(text.contains("Symbol search: available"));
+        assert!(text.contains("Semantic search: available (200 indexed chunks)"));
+    }
+
+    #[test]
+    fn test_build_project_summary_semantic_search_unavailable() {
+        let summary = ProjectIndexSummary {
+            total_files: 10,
+            languages: vec!["rust".to_string()],
+            components: vec![],
+            key_entry_points: vec![],
+            total_symbols: 20,
+            embedding_chunks: 0,
+        };
+        let text = build_project_summary(&summary);
+
+        assert!(text.contains("### Search Capabilities"));
+        assert!(text.contains("Symbol search: available"));
+        assert!(text.contains("Semantic search: unavailable"));
+    }
+
+    #[test]
+    fn test_build_project_summary_no_symbols_no_search_section() {
+        let summary = ProjectIndexSummary {
+            total_files: 5,
+            languages: vec!["rust".to_string()],
+            components: vec![],
+            key_entry_points: vec![],
+            total_symbols: 0,
+            embedding_chunks: 0,
+        };
+        let text = build_project_summary(&summary);
+
+        // No search capabilities section when there are no symbols and no embeddings
+        assert!(!text.contains("### Search Capabilities"));
     }
 }
