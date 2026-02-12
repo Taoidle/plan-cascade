@@ -1789,19 +1789,30 @@ function handleUnifiedExecutionEvent(
       break;
 
     case 'text_replace': {
-      // Replace the accumulated text with a cleaned version (e.g., after
-      // prompt-fallback tool call extraction removes raw XML blocks)
+      // Replace ALL accumulated text lines with a single cleaned version.
+      // During streaming with FallbackToolFormatMode, the LLM often repeats
+      // its reasoning text before/between/after tool call blocks, producing
+      // multiple 'text' lines separated by 'tool' indicator lines.  The
+      // cleaned content from the backend has tool blocks stripped and
+      // duplicates removed, so we collapse all text lines into one.
       const lines = get().streamingOutput;
-      const lastTextIdx = lines.length - 1 - [...lines].reverse().findIndex(l => l.type === 'text');
-      if (lastTextIdx >= 0 && lastTextIdx < lines.length) {
+      const textIndices = lines
+        .map((l, i) => (l.type === 'text' ? i : -1))
+        .filter((i) => i >= 0);
+      if (textIndices.length > 0) {
         const cleaned = payload.content || '';
+        const lastTextIdx = textIndices[textIndices.length - 1];
+        const otherTextIndices = new Set(textIndices.slice(0, -1));
         if (cleaned) {
-          const updated = [...lines];
-          updated[lastTextIdx] = { ...updated[lastTextIdx], content: cleaned };
+          // Keep the last text line with cleaned content, remove earlier text lines
+          const updated = lines.filter((_, i) => !otherTextIndices.has(i));
+          const newLastIdx = lastTextIdx - otherTextIndices.size;
+          updated[newLastIdx] = { ...updated[newLastIdx], content: cleaned };
           set({ streamingOutput: updated });
         } else {
-          // Remove the text line entirely if cleaned is empty
-          set({ streamingOutput: lines.filter((_, i) => i !== lastTextIdx) });
+          // Remove all text lines entirely if cleaned is empty
+          const allTextIndices = new Set(textIndices);
+          set({ streamingOutput: lines.filter((_, i) => !allTextIndices.has(i)) });
         }
       }
       break;

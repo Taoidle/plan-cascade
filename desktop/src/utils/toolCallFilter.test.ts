@@ -445,4 +445,104 @@ describe('ToolCallStreamFilter', () => {
       expect(r.toolIndicator).toBe('[tool_call] Bash');
     });
   });
+
+  // =========================================================================
+  // Bare tool_call patterns (no backtick fences)
+  // =========================================================================
+  describe('bare tool_call patterns (no fences)', () => {
+    it('strips inline bare tool_call\\n{ pattern within a single chunk', () => {
+      const input = 'Let me check the code.\ntool_call\n{"tool": "Cwd"}\nHere is the result.';
+      const result = filter.processChunk(input);
+      expect(result.output).toBe('Let me check the code.\nHere is the result.');
+    });
+
+    it('strips bare tool_call at start of chunk', () => {
+      const input = 'tool_call\n{"tool": "LS"}\nSome text after.';
+      const result = filter.processChunk(input);
+      expect(result.output).toBe('\nSome text after.');
+    });
+
+    it('buffers trailing bare tool_call and suppresses on next chunk with {', () => {
+      const r1 = filter.processChunk('Some explanation text\ntool_call');
+      expect(r1.output).toBe('Some explanation text');
+
+      const r2 = filter.processChunk('\n{"tool": "Read"}\nContinuing...');
+      expect(r2.output).toBe('Continuing...');
+    });
+
+    it('suppresses trailing bare tool_call even when next chunk does not start with {', () => {
+      const r1 = filter.processChunk('Some text\ntool_call');
+      expect(r1.output).toBe('Some text');
+
+      // Bare "tool_call" lines are always LLM syntax — suppress them
+      // regardless of what follows (e.g. blank line then fenced block)
+      const r2 = filter.processChunk('\nActually, let me try something else.');
+      expect(r2.output).toBe('\nActually, let me try something else.');
+    });
+
+    it('handles bare tool_call with colon variant', () => {
+      const input = 'Text before\ntool_call:\n{"tool": "Grep"}\nText after';
+      const result = filter.processChunk(input);
+      expect(result.output).toBe('Text before\nText after');
+    });
+
+    it('does not strip tool_call in middle of a sentence', () => {
+      const input = 'The tool_call mechanism allows the LLM to invoke tools.';
+      const result = filter.processChunk(input);
+      expect(result.output).toBe(input);
+    });
+
+    it('handles bare tool_call with only partial JSON (incomplete)', () => {
+      const input = 'Explanation\ntool_call\n{"';
+      const result = filter.processChunk(input);
+      expect(result.output).toBe('Explanation');
+    });
+
+    it('suppresses pending bare tool_call on flush()', () => {
+      filter.processChunk('Some text\ntool_call');
+      const flushed = filter.flush();
+      // Bare "tool_call" is suppressed even when stream ends
+      expect(flushed).toBe('');
+    });
+
+    it('resets pending bare tool_call on reset()', () => {
+      filter.processChunk('Text\ntool_call');
+      filter.reset();
+      const r = filter.processChunk('Normal text');
+      expect(r.output).toBe('Normal text');
+    });
+
+    it('handles multiple bare tool_call patterns in same chunk', () => {
+      const input = 'First\ntool_call\n{"tool": "A"}\nMiddle\ntool_call\n{"tool": "B"}\nEnd';
+      const result = filter.processChunk(input);
+      expect(result.output).toBe('First\nMiddle\nEnd');
+    });
+
+    it('suppresses bare tool_call\\n{ when { is on a new chunk', () => {
+      const r1 = filter.processChunk('tool_call');
+      expect(r1.output).toBe('');
+
+      const r2 = filter.processChunk('{"incomplete json');
+      expect(r2.output).toBe('');
+    });
+
+    it('suppresses bare tool_call followed by blank line then fenced block', () => {
+      // Real-world pattern: LLM writes "tool_call" header, blank line,
+      // then a fenced block — the bare "tool_call" should be suppressed
+      const r1 = filter.processChunk('Some analysis text\ntool_call');
+      expect(r1.output).toBe('Some analysis text');
+
+      const r2 = filter.processChunk('\n\n```tool_call\n{"tool": "LS", "tool_input": {"path": "."}}\n```');
+      // The bare "tool_call" is suppressed, the fenced block is filtered
+      expect(r2.output).toBe('\n\n');
+      expect(r2.toolIndicator).toBe('[tool_call] LS');
+    });
+
+    it('strips standalone bare tool_call line within a chunk (no JSON after)', () => {
+      const input = 'Text before\ntool_call\n\nMore text after';
+      const result = filter.processChunk(input);
+      // \ntool_call is stripped; the \n after it (from the blank line) remains
+      expect(result.output).toBe('Text before\n\nMore text after');
+    });
+  });
 });

@@ -1091,8 +1091,16 @@ pub async fn execute_standalone_with_session(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Create orchestrator with database
-    let orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
+    // Create orchestrator with database (IndexStore is auto-wired to ToolExecutor)
+    let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
+
+    // Wire embedding service from IndexManager for semantic CodebaseSearch
+    if let Some(ref manager) = *standalone_state.index_manager.read().await {
+        if let Some(emb_svc) = manager.get_embedding_service(&request.project_path).await {
+            orchestrator = orchestrator.with_embedding_service(emb_svc);
+        }
+    }
+
     let orchestrator = Arc::new(orchestrator);
 
     // Create execution session
@@ -1457,7 +1465,15 @@ pub async fn resume_standalone_execution(
         analysis_session_id: Some(request.session_id.clone()),
     };
 
-    let orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
+    let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
+
+    // Wire embedding service from IndexManager for semantic CodebaseSearch
+    if let Some(ref manager) = *standalone_state.index_manager.read().await {
+        if let Some(emb_svc) = manager.get_embedding_service(&session.project_path).await {
+            orchestrator = orchestrator.with_embedding_service(emb_svc);
+        }
+    }
+
     let orchestrator = Arc::new(orchestrator);
 
     // Store orchestrator for potential cancellation

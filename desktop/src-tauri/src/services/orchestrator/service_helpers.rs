@@ -527,6 +527,12 @@ impl OrchestratorService {
         self
     }
 
+    /// Wire an embedding service to the tool executor for semantic CodebaseSearch.
+    pub fn with_embedding_service(mut self, svc: Arc<EmbeddingService>) -> Self {
+        self.tool_executor.set_embedding_service(svc);
+        self
+    }
+
     /// Set the database pool for session persistence.
     ///
     /// Indexing is no longer started here; use `IndexManager::ensure_indexed()`
@@ -535,7 +541,11 @@ impl OrchestratorService {
         if let Err(e) = self.init_session_schema(&pool) {
             eprintln!("Failed to initialize session schema: {}", e);
         }
-        self.index_store = Some(IndexStore::new(pool.clone()));
+        let store = IndexStore::new(pool.clone());
+        // Wire the index store to the tool executor so CodebaseSearch works
+        self.tool_executor
+            .set_index_store(Arc::new(store.clone()));
+        self.index_store = Some(store);
         self.db_pool = Some(pool);
         self
     }

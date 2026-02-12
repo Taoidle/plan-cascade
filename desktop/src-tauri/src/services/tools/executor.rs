@@ -569,7 +569,9 @@ impl ToolExecutor {
                     .enumerate()
                     .map(|(i, line)| {
                         let truncated = if line.len() > 2000 {
-                            format!("{}...", &line[..2000])
+                            let mut end = 2000;
+                            while end > 0 && !line.is_char_boundary(end) { end -= 1; }
+                            format!("{}...", &line[..end])
                         } else {
                             line.to_string()
                         };
@@ -596,7 +598,7 @@ impl ToolExecutor {
                         .iter()
                         .take(5)
                         .map(|l| {
-                            if l.len() > 120 { format!("{}...", &l[..120]) } else { l.to_string() }
+                            if l.len() > 120 { let mut end = 120; while end > 0 && !l.is_char_boundary(end) { end -= 1; } format!("{}...", &l[..end]) } else { l.to_string() }
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
@@ -1458,7 +1460,9 @@ impl ToolExecutor {
                             // Add doc comment (truncated) if available
                             if let Some(ref doc) = sym.doc_comment {
                                 let truncated = if doc.len() > 100 {
-                                    format!("{}...", &doc[..100])
+                                    let mut end = 100;
+                                    while end > 0 && !doc.is_char_boundary(end) { end -= 1; }
+                                    format!("{}...", &doc[..end])
                                 } else {
                                     doc.clone()
                                 };
@@ -1580,9 +1584,11 @@ impl ToolExecutor {
                                     results.len()
                                 );
                                 for result in &results {
-                                    // Truncate chunk text for display
+                                    // Truncate chunk text for display (char-boundary safe)
                                     let display_text = if result.chunk_text.len() > 200 {
-                                        format!("{}...", &result.chunk_text[..200])
+                                        let mut end = 200;
+                                        while end > 0 && !result.chunk_text.is_char_boundary(end) { end -= 1; }
+                                        format!("{}...", &result.chunk_text[..end])
                                     } else {
                                         result.chunk_text.clone()
                                     };

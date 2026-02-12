@@ -1283,6 +1283,28 @@ pub fn extract_text_without_tool_calls(text: &str) -> String {
         cleaned = cleaned.replace("\n\n\n", "\n\n");
     }
 
+    // Pass 7: Deduplicate repeated paragraphs.
+    // LLMs using FallbackToolFormatMode often repeat their reasoning text
+    // before/between/after tool call blocks.  After tool calls are stripped
+    // (passes 1-6) the duplicate text remains.  Split by blank lines and
+    // remove consecutive identical paragraphs.
+    let paragraphs: Vec<&str> = cleaned.split("\n\n").collect();
+    let mut deduped: Vec<&str> = Vec::with_capacity(paragraphs.len());
+    for para in &paragraphs {
+        let trimmed = para.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // Skip if this paragraph is identical to the previous one
+        if let Some(prev) = deduped.last() {
+            if prev.trim() == trimmed {
+                continue;
+            }
+        }
+        deduped.push(para);
+    }
+    cleaned = deduped.join("\n\n");
+
     cleaned.trim().to_string()
 }
 

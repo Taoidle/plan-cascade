@@ -2,12 +2,12 @@
  * ToolCallStreamFilter
  *
  * A state-machine that processes streaming text chunks and filters out
- * triple-backtick tool_call / tool-JSON code blocks emitted by LLMs
- * using the FallbackToolFormatMode.
+ * tool_call blocks emitted by LLMs using the FallbackToolFormatMode.
  *
  * Blocks matching these patterns are suppressed:
- *   ```tool_call\n{"tool": "...", ...}\n```
- *   ```json\n{"tool": "...", ...}\n```
+ *   ```tool_call\n{"tool": "...", ...}\n```       (fenced)
+ *   ```json\n{"tool": "...", ...}\n```             (fenced json)
+ *   tool_call\n{"tool": "...", ...}                (bare, no fences)
  *
  * All other code blocks (```python, ```rust, etc.) pass through unchanged.
  */
@@ -140,11 +140,26 @@ function looksLikeToolJson(text: string): boolean {
   return /^\{\s*"tool/.test(trimmed);
 }
 
+/**
+ * Check if a line (trimmed) is a bare tool_call marker.
+ * Matches: "tool_call", "tool_call:", "tool_call :" (with optional whitespace)
+ */
+function isBareToolCallLine(trimmedLine: string): boolean {
+  return /^tool_call\s*:?\s*$/.test(trimmedLine);
+}
+
 export class ToolCallStreamFilter {
   private state: State = State.NORMAL;
   private buffer = '';
   /** Tracks whether we saw a tool name in the suppressed block */
   private toolName = '';
+  /**
+   * Buffer for a bare "tool_call" line detected at the end of a chunk.
+   * On the next chunk, if the continuation starts with "{", both the
+   * buffered line and the JSON line are suppressed (bare tool call pattern).
+   * Otherwise the buffer is flushed as normal text.
+   */
+  private pendingBareToolCall = '';
 
   /**
    * Process a streaming text chunk.
@@ -153,22 +168,48 @@ export class ToolCallStreamFilter {
    * and optionally a tool indicator when a tool block was fully consumed.
    */
   processChunk(text: string): FilterResult {
+    let input = text;
+    let prefixOutput = '';
+
+    // --- Handle pending bare tool_call from previous chunk ---
+    if (this.pendingBareToolCall) {
+      const trimmedStart = input.trimStart();
+      if (trimmedStart.startsWith('{')) {
+        // Confirmed bare tool call with JSON -- suppress the { line too
+        const bracePos = input.indexOf('{');
+        const newlineAfterBrace = input.indexOf('\n', bracePos);
+        if (newlineAfterBrace !== -1) {
+          // Suppress up to end of the { line, continue with rest
+          input = input.slice(newlineAfterBrace + 1);
+        } else {
+          // The { line extends to end of chunk -- suppress everything
+          this.pendingBareToolCall = '';
+          return { output: '' };
+        }
+      }
+      // Bare "tool_call" lines are always LLM tool-calling syntax —
+      // suppress them regardless of what follows (even without a JSON
+      // body, e.g. when followed by a blank line then a fenced block).
+      this.pendingBareToolCall = '';
+    }
+
+    // --- Run the main state machine ---
     let output = '';
     let toolIndicator: string | undefined;
     let i = 0;
 
-    while (i < text.length) {
+    while (i < input.length) {
       switch (this.state) {
         case State.NORMAL: {
           // Look for opening triple-backtick
-          const fenceIdx = text.indexOf('```', i);
+          const fenceIdx = input.indexOf('```', i);
           if (fenceIdx === -1) {
             // No fence in remaining text
-            output += text.slice(i);
-            i = text.length;
+            output += input.slice(i);
+            i = input.length;
           } else {
             // Output everything before the fence
-            output += text.slice(i, fenceIdx);
+            output += input.slice(i, fenceIdx);
             // Transition to MAYBE_BLOCK, buffer the opening fence
             this.state = State.MAYBE_BLOCK;
             this.buffer = '```';
@@ -183,10 +224,10 @@ export class ToolCallStreamFilter {
           // We need to consume enough text to classify the fence.
 
           // Look for a closing fence that would end this block
-          const closingIdx = text.indexOf('```', i);
+          const closingIdx = input.indexOf('```', i);
 
           // Grab text up to either the closing fence or end of chunk
-          const segment = closingIdx === -1 ? text.slice(i) : text.slice(i, closingIdx);
+          const segment = closingIdx === -1 ? input.slice(i) : input.slice(i, closingIdx);
           this.buffer += segment;
           i += segment.length;
 
@@ -240,14 +281,14 @@ export class ToolCallStreamFilter {
 
         case State.IN_TOOL_BLOCK: {
           // Suppress content, look for closing triple-backtick
-          const closeIdx = text.indexOf('```', i);
+          const closeIdx = input.indexOf('```', i);
           if (closeIdx === -1) {
             // No closing fence yet; buffer everything (for tool name extraction)
-            this.buffer += text.slice(i);
-            i = text.length;
+            this.buffer += input.slice(i);
+            i = input.length;
           } else {
             // Found closing fence
-            this.buffer += text.slice(i, closeIdx);
+            this.buffer += input.slice(i, closeIdx);
             this.extractToolName(this.buffer);
             i = closeIdx + 3;
             const result = this.completeToolBlock();
@@ -258,6 +299,14 @@ export class ToolCallStreamFilter {
       }
     }
 
+    // --- Post-processing: strip inline bare tool_call patterns ---
+    if (this.state === State.NORMAL && output) {
+      output = this.stripInlineBareToolCalls(output);
+      output = this.bufferTrailingBareToolCall(output);
+    }
+
+    output = prefixOutput + output;
+
     return { output, toolIndicator };
   }
 
@@ -267,6 +316,9 @@ export class ToolCallStreamFilter {
    * If we're in IN_TOOL_BLOCK, the buffered content is suppressed (incomplete tool block).
    */
   flush(): string {
+    // Suppress any pending bare tool_call — it's LLM syntax, not user text.
+    this.pendingBareToolCall = '';
+
     const buffered = this.buffer;
     this.buffer = '';
 
@@ -291,6 +343,7 @@ export class ToolCallStreamFilter {
     this.state = State.NORMAL;
     this.buffer = '';
     this.toolName = '';
+    this.pendingBareToolCall = '';
   }
 
   /** Extract tool name from buffered content for the indicator */
@@ -309,5 +362,47 @@ export class ToolCallStreamFilter {
     this.buffer = '';
     this.toolName = '';
     return `[tool_call] ${name}`;
+  }
+
+  /**
+   * Strip bare tool_call patterns that appear entirely within a single chunk.
+   * Matches: \ntool_call\n{...\n  (newline-delimited bare pattern)
+   */
+  private stripInlineBareToolCalls(text: string): string {
+    // Pattern: newline + "tool_call" (optional whitespace/colon) + newline + {-line
+    let result = text.replace(/\ntool_call\s*:?\s*\n\{[^\n]*/g, '');
+    // Also match at start of string
+    result = result.replace(/^tool_call\s*:?\s*\n\{[^\n]*/, '');
+    // Strip bare "tool_call" lines even without a following "{" — these
+    // are always LLM tool-calling syntax, not user-visible content.
+    // Only strip mid-text occurrences (followed by \n); trailing ones are
+    // handled by bufferTrailingBareToolCall for cross-chunk detection.
+    // Use [^\S\n] instead of \s to avoid consuming the newline delimiter.
+    result = result.replace(/\ntool_call[^\S\n]*:?[^\S\n]*(?=\n)/g, '');
+    result = result.replace(/^tool_call[^\S\n]*:?[^\S\n]*(?=\n)/, '');
+    return result;
+  }
+
+  /**
+   * If the output ends with a line that is just "tool_call" (or "tool_call:"),
+   * buffer it. On the next chunk, we'll check if it's followed by "{".
+   */
+  private bufferTrailingBareToolCall(text: string): string {
+    const lastNewlineIdx = text.lastIndexOf('\n');
+    const lastLine = lastNewlineIdx === -1 ? text : text.slice(lastNewlineIdx + 1);
+    const trimmedLastLine = lastLine.trim();
+
+    if (isBareToolCallLine(trimmedLastLine)) {
+      if (lastNewlineIdx === -1) {
+        // Entire output is just "tool_call" -- buffer it all
+        this.pendingBareToolCall = text;
+        return '';
+      }
+      // Buffer from the last newline (inclusive)
+      this.pendingBareToolCall = text.slice(lastNewlineIdx);
+      return text.slice(0, lastNewlineIdx);
+    }
+
+    return text;
   }
 }

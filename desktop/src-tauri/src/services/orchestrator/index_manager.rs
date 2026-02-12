@@ -17,6 +17,7 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use super::background_indexer::{BackgroundIndexer, IndexProgressCallback};
+use super::embedding_service::EmbeddingService;
 use super::index_store::IndexStore;
 use crate::storage::database::DbPool;
 
@@ -56,6 +57,9 @@ pub struct IndexManager {
     active_indexers: RwLock<HashMap<String, IndexerEntry>>,
     statuses: Arc<RwLock<HashMap<String, IndexStatusEvent>>>,
     app_handle: RwLock<Option<AppHandle>>,
+    /// Per-project embedding services, shared between BackgroundIndexer (which
+    /// builds the vocabulary) and ToolExecutor (which queries with it).
+    embedding_services: RwLock<HashMap<String, Arc<EmbeddingService>>>,
 }
 
 impl IndexManager {
@@ -66,6 +70,7 @@ impl IndexManager {
             active_indexers: RwLock::new(HashMap::new()),
             statuses: Arc::new(RwLock::new(HashMap::new())),
             app_handle: RwLock::new(None),
+            embedding_services: RwLock::new(HashMap::new()),
         }
     }
 
@@ -164,10 +169,22 @@ impl IndexManager {
         let pp_for_task = project_path_owned.clone();
         let statuses_for_task = statuses.clone();
         let app_for_task = app_handle_opt;
+        // Get or create the embedding service for this project so that the
+        // BackgroundIndexer builds TF-IDF embeddings and the same service
+        // instance can later be shared with ToolExecutor for semantic search.
+        let embedding_svc = {
+            let mut embeds = self.embedding_services.write().await;
+            embeds
+                .entry(project_path_owned.clone())
+                .or_insert_with(|| Arc::new(EmbeddingService::new()))
+                .clone()
+        };
+
         let handle = tokio::task::spawn(async move {
             let indexer =
                 BackgroundIndexer::new(project_root, index_store.clone())
-                    .with_progress_callback(progress_cb);
+                    .with_progress_callback(progress_cb)
+                    .with_embedding_service(embedding_svc);
 
             let join = indexer.start().await;
             let result = join.await;
@@ -269,6 +286,16 @@ impl IndexManager {
     /// Get a reference to the inner `IndexStore`.
     pub fn index_store(&self) -> &IndexStore {
         &self.index_store
+    }
+
+    /// Get the embedding service for a project directory, if one has been
+    /// created by a previous indexing run.
+    pub async fn get_embedding_service(
+        &self,
+        project_path: &str,
+    ) -> Option<Arc<EmbeddingService>> {
+        let embeds = self.embedding_services.read().await;
+        embeds.get(project_path).cloned()
     }
 
     /// Remove a directory from the manager, aborting any active indexer

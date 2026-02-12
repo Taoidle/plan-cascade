@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
+use super::embedding_service::EmbeddingService;
 use super::index_store::IndexStore;
 use super::analysis_index::{
     build_chunk_plan, build_file_inventory, compute_coverage_report, select_chunks_for_phase,
