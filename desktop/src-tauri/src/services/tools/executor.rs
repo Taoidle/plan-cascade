@@ -33,6 +33,10 @@ pub struct ReadCacheEntry {
     pub offset: usize,
     /// Line limit used when the file was read
     pub limit: usize,
+    /// File extension (e.g. "rs", "py", "ts") for the enhanced dedup message
+    pub extension: String,
+    /// First ~5 lines of the file content for the enhanced dedup message
+    pub first_lines_preview: String,
 }
 
 /// Result of a tool execution
@@ -488,12 +492,33 @@ impl ToolExecutor {
             if let Ok(cache) = self.read_cache.lock() {
                 if let Some(entry) = cache.get(&cache_key) {
                     if entry.modified_time == mtime {
-                        // File unchanged with same offset/limit — return dedup message
+                        // File unchanged with same offset/limit — return enhanced dedup message
+                        // that includes file type, key symbols, and a preview so weak LLMs
+                        // have enough context to proceed without re-reading.
+                        let file_type = if entry.extension.is_empty() {
+                            "unknown".to_string()
+                        } else {
+                            entry.extension.clone()
+                        };
+
+                        // Query IndexStore for key symbols if available
+                        let symbols_section = self.get_dedup_symbols_summary(&path);
+
+                        let preview_section = if entry.first_lines_preview.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\nPreview (first lines):\n{}", entry.first_lines_preview)
+                        };
+
                         return ToolResult::ok(format!(
-                            "[File previously read in this session, unchanged] Path: {} ({} lines, {} bytes)",
+                            "[File previously read in this session, unchanged] Path: {} ({} lines, {} bytes, type: {}){}{}\n\
+                             Do NOT re-read this file. Use the information above to proceed.",
                             path.display(),
                             entry.line_count,
-                            entry.size_bytes
+                            entry.size_bytes,
+                            file_type,
+                            symbols_section,
+                            preview_section,
                         ));
                     }
                     // mtime differs — fall through to re-read (entry will be replaced below)
@@ -557,6 +582,16 @@ impl ToolExecutor {
                     bytes.hash(&mut hasher);
                     let content_hash = hasher.finish();
 
+                    // Build first ~5 lines preview for enhanced dedup messages
+                    let first_lines_preview: String = all_lines
+                        .iter()
+                        .take(5)
+                        .map(|l| {
+                            if l.len() > 120 { format!("{}...", &l[..120]) } else { l.to_string() }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
                     let entry = ReadCacheEntry {
                         path: path.clone(),
                         modified_time: mtime,
@@ -565,6 +600,8 @@ impl ToolExecutor {
                         content_hash,
                         offset,
                         limit,
+                        extension: ext.clone(),
+                        first_lines_preview,
                     };
 
                     if let Ok(mut cache) = self.read_cache.lock() {
@@ -1629,9 +1666,42 @@ impl ToolExecutor {
     ///
     /// This is useful when starting a new logical session or after bulk
     /// file modifications where stale cache entries could cause confusion.
+    /// ADR-004: Called after compaction to prevent stale dedup entries from
+    /// causing infinite read loops with weak LLM providers.
     pub fn clear_read_cache(&self) {
         if let Ok(mut cache) = self.read_cache.lock() {
             cache.clear();
+        }
+    }
+
+    /// Build a symbols summary for enhanced dedup messages.
+    ///
+    /// Queries the IndexStore for key symbols in the given file and returns
+    /// a formatted string section. Returns an empty string if the IndexStore
+    /// is not available or has no symbols for the file.
+    fn get_dedup_symbols_summary(&self, file_path: &Path) -> String {
+        let index_store = match &self.index_store {
+            Some(store) => store,
+            None => return String::new(),
+        };
+
+        let project_path = self.project_root.to_string_lossy().to_string();
+        // Convert absolute file path to relative for IndexStore lookup
+        let relative_path = file_path
+            .strip_prefix(&self.project_root)
+            .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
+            .unwrap_or_else(|_| file_path.to_string_lossy().to_string());
+
+        match index_store.get_file_symbols(&project_path, &relative_path) {
+            Ok(symbols) if !symbols.is_empty() => {
+                let symbol_list: Vec<String> = symbols
+                    .iter()
+                    .take(10) // Limit to 10 key symbols
+                    .map(|s| format!("{}:{} (line {})", s.kind.short_name(), s.name, s.line))
+                    .collect();
+                format!("\nKey symbols: {}", symbol_list.join(", "))
+            }
+            _ => String::new(),
         }
     }
 
@@ -2180,6 +2250,56 @@ mod tests {
         assert!(output2.contains("test.txt"));
         assert!(output2.contains("lines"));
         assert!(output2.contains("bytes"));
+        // Enhanced dedup message should include file type
+        assert!(
+            output2.contains("type: txt"),
+            "dedup message should include file type, got: {}",
+            output2
+        );
+        // Enhanced dedup message should include a preview
+        assert!(
+            output2.contains("Preview (first lines)"),
+            "dedup message should include first lines preview, got: {}",
+            output2
+        );
+        assert!(
+            output2.contains("line 1"),
+            "preview should contain first line content, got: {}",
+            output2
+        );
+        // Enhanced dedup message should include do-not-reread instruction
+        assert!(
+            output2.contains("Do NOT re-read"),
+            "dedup message should instruct LLM not to re-read, got: {}",
+            output2
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dedup_message_includes_extension_for_rust_file() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+        let file = dir.path().join("test_module.rs");
+        std::fs::write(&file, "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+        let file_path = file.to_string_lossy().to_string();
+        let args = serde_json::json!({ "file_path": &file_path });
+
+        // First read
+        executor.execute("Read", &args).await;
+        // Second read should return enhanced dedup
+        let result = executor.execute("Read", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+        assert!(
+            output.contains("type: rs"),
+            "should show rs file type, got: {}",
+            output
+        );
+        assert!(
+            output.contains("fn main()"),
+            "preview should contain first line, got: {}",
+            output
+        );
     }
 
     #[tokio::test]
