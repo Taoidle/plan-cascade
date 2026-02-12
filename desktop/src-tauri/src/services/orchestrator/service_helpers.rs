@@ -292,12 +292,30 @@ fn extract_key_findings(snippets: &[String]) -> Vec<String> {
     findings
 }
 
-/// Detects consecutive identical tool calls to break infinite loops.
+/// Escalation level returned by the loop detector.
+///
+/// Callers match on this to determine the appropriate intervention:
+/// - `Warning`: Inject a warning message into the conversation.
+/// - `StripTools`: Inject warning AND remove the listed tools from subsequent LLM calls.
+/// - `ForceTerminate`: Exit the agentic loop immediately.
+#[derive(Debug, Clone)]
+enum LoopDetection {
+    /// Level 1: First detection - inject warning message
+    Warning(String),
+    /// Level 2: Second detection - warning + list of tool names to strip
+    StripTools(String, Vec<String>),
+    /// Level 3: Third+ detection - must exit loop immediately
+    ForceTerminate(String),
+}
+
+/// Detects consecutive identical tool calls and macro-loop patterns to break infinite loops.
 ///
 /// Tracks the last (tool_name, args_hash) and counts consecutive repetitions.
-/// When the count reaches the configured threshold, returns a break message
-/// that can be injected into the conversation to redirect the LLM.
+/// Also maintains a sliding window of recent calls for macro-pattern detection.
+/// When the count reaches the configured threshold, returns a detection result
+/// that can be used to escalate intervention (warn, strip tools, force terminate).
 ///
+/// ADR-002: Sliding window for macro-loop detection.
 /// ADR-004: Pattern-based loop detection is cheaper than waiting for max_iterations=50.
 #[derive(Debug)]
 struct ToolCallLoopDetector {
@@ -307,22 +325,107 @@ struct ToolCallLoopDetector {
     last_call: Option<(String, u64)>,
     /// Count of consecutive identical calls
     consecutive_count: u32,
+    /// Cumulative detection count across the session (never reset)
+    total_detections: u32,
+    /// Sliding window of recent calls for macro-pattern detection
+    recent_calls: VecDeque<(String, u64)>,
+    /// Maximum size of the sliding window
+    window_size: usize,
+    /// Tool names that have been stripped due to Level 2 escalation
+    stripped_tools: HashSet<String>,
 }
 
 impl ToolCallLoopDetector {
-    fn new(threshold: u32) -> Self {
+    fn new(threshold: u32, window_size: usize) -> Self {
         Self {
             threshold,
             last_call: None,
             consecutive_count: 0,
+            total_detections: 0,
+            recent_calls: VecDeque::with_capacity(window_size),
+            window_size,
+            stripped_tools: HashSet::new(),
         }
     }
 
-    /// Record a tool call and return a break message if a loop is detected.
+    /// Returns the cumulative number of loop detections (never resets).
+    fn total_detections(&self) -> u32 {
+        self.total_detections
+    }
+
+    /// Returns the set of tool names stripped due to Level 2 escalation.
+    fn stripped_tools(&self) -> &HashSet<String> {
+        &self.stripped_tools
+    }
+
+    /// Detect macro-loop (rotating pattern) in the sliding window.
     ///
-    /// Returns `Some(message)` when the same tool+args have been called `threshold`
-    /// times consecutively, `None` otherwise.
-    fn record_call(&mut self, tool_name: &str, args_str: &str) -> Option<String> {
+    /// Examines `recent_calls` for repeating cycles of length 2 through 6.
+    /// Returns `Some((tool_names_in_cycle, cycle_length))` if a macro-loop is found.
+    fn detect_macro_loop(&self) -> Option<(Vec<String>, usize)> {
+        let n = self.recent_calls.len();
+        // Try cycle lengths from 2 to 6
+        for cycle_len in 2..=6 {
+            // Need at least 2 full cycles in the window
+            if n < 2 * cycle_len {
+                continue;
+            }
+            // Extract the candidate pattern from the tail of recent_calls
+            let tail_start = n - cycle_len;
+            let prev_start = n - 2 * cycle_len;
+
+            let mut matched = true;
+            for i in 0..cycle_len {
+                let tail_entry = &self.recent_calls[tail_start + i];
+                let prev_entry = &self.recent_calls[prev_start + i];
+                if tail_entry != prev_entry {
+                    matched = false;
+                    break;
+                }
+            }
+
+            if matched {
+                let tool_names: Vec<String> = (tail_start..tail_start + cycle_len)
+                    .map(|i| self.recent_calls[i].0.clone())
+                    .collect();
+                return Some((tool_names, cycle_len));
+            }
+        }
+        None
+    }
+
+    /// Build the appropriate escalation level based on total_detections.
+    ///
+    /// Adds looping tool names to `stripped_tools` for Level 2+.
+    fn escalate(&mut self, msg: String, tool_names: Vec<String>) -> LoopDetection {
+        match self.total_detections {
+            1 => LoopDetection::Warning(msg),
+            2 => {
+                for t in &tool_names {
+                    self.stripped_tools.insert(t.clone());
+                }
+                LoopDetection::StripTools(msg, tool_names)
+            }
+            _ => {
+                // Level 3+: force terminate. Still record stripped tools for completeness.
+                for t in &tool_names {
+                    self.stripped_tools.insert(t.clone());
+                }
+                LoopDetection::ForceTerminate(format!(
+                    "[FORCE TERMINATE] {} Loop detected {} times. The agent is unable to make progress. \
+                     Terminating the agentic loop. Please review the conversation and intervene manually.",
+                    msg, self.total_detections
+                ))
+            }
+        }
+    }
+
+    /// Record a tool call and return a detection result if a loop is detected.
+    ///
+    /// Returns `Some(LoopDetection)` when the same tool+args have been called `threshold`
+    /// times consecutively, or when a macro-loop pattern is detected. `None` otherwise.
+    /// Each call is also pushed onto the `recent_calls` sliding window.
+    fn record_call(&mut self, tool_name: &str, args_str: &str) -> Option<LoopDetection> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -332,6 +435,12 @@ impl ToolCallLoopDetector {
 
         let call_key = (tool_name.to_string(), args_hash);
 
+        // Push onto sliding window, evicting oldest if at capacity
+        if self.recent_calls.len() >= self.window_size {
+            self.recent_calls.pop_front();
+        }
+        self.recent_calls.push_back(call_key.clone());
+
         if self.last_call.as_ref() == Some(&call_key) {
             self.consecutive_count += 1;
         } else {
@@ -339,20 +448,39 @@ impl ToolCallLoopDetector {
             self.consecutive_count = 1;
         }
 
-        if self.consecutive_count >= self.threshold {
-            // Reset after detection so the detector can catch new loops
-            self.consecutive_count = 0;
-            Some(format!(
+        // Check consecutive-identical detection first
+        if self.consecutive_count >= self.threshold && self.consecutive_count % self.threshold == 0 {
+            self.total_detections += 1;
+            let msg = format!(
                 "[LOOP DETECTED] You have made the same identical tool call ({}) {} times consecutively \
                  with the same arguments. This is an infinite loop. STOP repeating this call. \
                  Use the information you already have from previous tool results to proceed with the task. \
                  If the previous result was a dedup/cache message, the file content was already read earlier \
                  in this session — refer to the session memory above for details.",
-                tool_name, self.threshold
-            ))
-        } else {
-            None
+                tool_name, self.consecutive_count
+            );
+            let tool_names = vec![tool_name.to_string()];
+            return Some(self.escalate(msg, tool_names));
         }
+
+        // If no consecutive detection, check for macro-loop patterns
+        if let Some((cycle_tools, _cycle_len)) = self.detect_macro_loop() {
+            self.total_detections += 1;
+            let cycle_desc = cycle_tools.join(" -> ");
+            let cycle_repeated = format!("{} -> {}", &cycle_desc, &cycle_desc);
+            let msg = format!(
+                "[MACRO-LOOP DETECTED] Repeating cycle: {}. \
+                 You are stuck in a loop repeating the same sequence of tool calls. \
+                 STOP this pattern and use the information you already have to answer the question. \
+                 Do NOT call any of these tools again: {}.",
+                cycle_repeated,
+                cycle_tools.join(", ")
+            );
+            let tool_names = cycle_tools;
+            return Some(self.escalate(msg, tool_names));
+        }
+
+        None
     }
 }
 
@@ -1620,7 +1748,7 @@ impl OrchestratorService {
         let mut fallback_call_counter = 0u32;
         let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
-        let mut loop_detector = ToolCallLoopDetector::new(3);
+        let mut loop_detector = ToolCallLoopDetector::new(3, 20);
 
         // Build a minimal system prompt for sub-agents.
         // Unlike the main agent, sub-agents do NOT get the full build_system_prompt()
@@ -1772,12 +1900,22 @@ impl OrchestratorService {
 
             iterations += 1;
 
-            // Determine which tools to pass to the LLM API
-            let api_tools = if use_prompt_fallback {
-                // Don't pass tools to the API; they're in the system prompt
-                &[] as &[ToolDefinition]
+            // Determine which tools to pass to the LLM API, filtering out any
+            // tools that have been stripped by Level 2 escalation.
+            let stripped = loop_detector.stripped_tools();
+            let filtered_tools: Vec<ToolDefinition> = if !stripped.is_empty() {
+                tools.iter()
+                    .filter(|t| !stripped.contains(&t.name))
+                    .cloned()
+                    .collect()
             } else {
-                tools
+                tools.to_vec()
+            };
+            let api_tools: &[ToolDefinition] = if use_prompt_fallback {
+                // Don't pass tools to the API; they're in the system prompt
+                &[]
+            } else {
+                &filtered_tools
             };
 
             // Call LLM directly with the minimal system prompt (bypasses
@@ -2000,12 +2138,34 @@ impl OrchestratorService {
                     }
 
                     // Check for tool call loop (same tool+args repeated consecutively)
-                    if let Some(break_msg) = loop_detector.record_call(
+                    if let Some(detection) = loop_detector.record_call(
                         &effective_tool_name,
                         &effective_args.to_string(),
                     ) {
-                        eprintln!("[loop-detector] Detected loop: {} called {} consecutive times", effective_tool_name, 3);
-                        messages.push(Message::user(break_msg));
+                        match detection {
+                            LoopDetection::Warning(msg) => {
+                                eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
+                                messages.push(Message::user(msg));
+                            }
+                            LoopDetection::StripTools(msg, _tools) => {
+                                eprintln!("[loop-detector] Level 2 escalation: stripping tools for {}", effective_tool_name);
+                                messages.push(Message::user(msg));
+                            }
+                            LoopDetection::ForceTerminate(msg) => {
+                                eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", effective_tool_name);
+                                let _ = tx.send(UnifiedStreamEvent::Error {
+                                    message: msg.clone(),
+                                    code: None,
+                                }).await;
+                                return ExecutionResult {
+                                    response: last_assistant_text,
+                                    usage: total_usage,
+                                    iterations,
+                                    success: false,
+                                    error: Some(msg),
+                                };
+                            }
+                        }
                     }
                 }
             } else if !parsed_fallback.calls.is_empty() {
@@ -2112,12 +2272,34 @@ impl OrchestratorService {
                     ));
 
                     // Check for tool call loop in fallback path
-                    if let Some(break_msg) = loop_detector.record_call(
+                    if let Some(detection) = loop_detector.record_call(
                         &effective_tool_name,
                         &effective_args.to_string(),
                     ) {
-                        eprintln!("[loop-detector] Detected loop in fallback path: {} called {} consecutive times", effective_tool_name, 3);
-                        tool_results.push(break_msg);
+                        match detection {
+                            LoopDetection::Warning(msg) => {
+                                eprintln!("[loop-detector] Level 1 escalation (fallback): {}", effective_tool_name);
+                                tool_results.push(msg);
+                            }
+                            LoopDetection::StripTools(msg, _tools) => {
+                                eprintln!("[loop-detector] Level 2 escalation (fallback): stripping tools for {}", effective_tool_name);
+                                tool_results.push(msg);
+                            }
+                            LoopDetection::ForceTerminate(msg) => {
+                                eprintln!("[loop-detector] Level 3 escalation (fallback): force terminating for {}", effective_tool_name);
+                                let _ = tx.send(UnifiedStreamEvent::Error {
+                                    message: msg.clone(),
+                                    code: None,
+                                }).await;
+                                return ExecutionResult {
+                                    response: last_assistant_text,
+                                    usage: total_usage,
+                                    iterations,
+                                    success: false,
+                                    error: Some(msg),
+                                };
+                            }
+                        }
                     }
                 }
 
@@ -2206,7 +2388,7 @@ impl OrchestratorService {
         let mut fallback_call_counter = 0u32;
         let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
-        let mut loop_detector = ToolCallLoopDetector::new(3);
+        let mut loop_detector = ToolCallLoopDetector::new(3, 20);
 
         // Create TaskContext for Task tool support in the agentic loop
         let task_spawner = Arc::new(OrchestratorTaskSpawner {
@@ -2344,12 +2526,22 @@ impl OrchestratorService {
                 }
             }
 
-            // Determine which tools to pass to the LLM API
-            let api_tools = if use_prompt_fallback {
-                // Don't pass tools to the API; they're in the system prompt
-                &[] as &[ToolDefinition]
+            // Determine which tools to pass to the LLM API, filtering out any
+            // tools that have been stripped by Level 2 escalation.
+            let stripped = loop_detector.stripped_tools();
+            let filtered_tools: Vec<ToolDefinition> = if !stripped.is_empty() {
+                tools.iter()
+                    .filter(|t| !stripped.contains(&t.name))
+                    .cloned()
+                    .collect()
             } else {
-                &tools
+                tools.clone()
+            };
+            let api_tools: &[ToolDefinition] = if use_prompt_fallback {
+                // Don't pass tools to the API; they're in the system prompt
+                &[]
+            } else {
+                &filtered_tools
             };
 
             // Call LLM - main agent has all tools (including Task)
@@ -2537,12 +2729,34 @@ impl OrchestratorService {
                     }
 
                     // Check for tool call loop (same tool+args repeated consecutively)
-                    if let Some(break_msg) = loop_detector.record_call(
+                    if let Some(detection) = loop_detector.record_call(
                         &tc.name,
                         &tc.arguments.to_string(),
                     ) {
-                        eprintln!("[loop-detector] Detected loop: {} called {} consecutive times", tc.name, 3);
-                        messages.push(Message::user(break_msg));
+                        match detection {
+                            LoopDetection::Warning(msg) => {
+                                eprintln!("[loop-detector] Level 1 escalation: {}", tc.name);
+                                messages.push(Message::user(msg));
+                            }
+                            LoopDetection::StripTools(msg, _tools) => {
+                                eprintln!("[loop-detector] Level 2 escalation: stripping tools for {}", tc.name);
+                                messages.push(Message::user(msg));
+                            }
+                            LoopDetection::ForceTerminate(msg) => {
+                                eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", tc.name);
+                                let _ = tx.send(UnifiedStreamEvent::Error {
+                                    message: msg.clone(),
+                                    code: None,
+                                }).await;
+                                return ExecutionResult {
+                                    response: last_assistant_text,
+                                    usage: total_usage,
+                                    iterations,
+                                    success: false,
+                                    error: Some(msg),
+                                };
+                            }
+                        }
                     }
                 }
             } else if !parsed_fallback.calls.is_empty() {
@@ -2667,12 +2881,34 @@ impl OrchestratorService {
                     ));
 
                     // Check for tool call loop in fallback path
-                    if let Some(break_msg) = loop_detector.record_call(
+                    if let Some(detection) = loop_detector.record_call(
                         &ptc.tool_name,
                         &ptc.arguments.to_string(),
                     ) {
-                        eprintln!("[loop-detector] Detected loop in fallback path: {} called {} consecutive times", ptc.tool_name, 3);
-                        tool_results.push(break_msg);
+                        match detection {
+                            LoopDetection::Warning(msg) => {
+                                eprintln!("[loop-detector] Level 1 escalation (fallback): {}", ptc.tool_name);
+                                tool_results.push(msg);
+                            }
+                            LoopDetection::StripTools(msg, _tools) => {
+                                eprintln!("[loop-detector] Level 2 escalation (fallback): stripping tools for {}", ptc.tool_name);
+                                tool_results.push(msg);
+                            }
+                            LoopDetection::ForceTerminate(msg) => {
+                                eprintln!("[loop-detector] Level 3 escalation (fallback): force terminating for {}", ptc.tool_name);
+                                let _ = tx.send(UnifiedStreamEvent::Error {
+                                    message: msg.clone(),
+                                    code: None,
+                                }).await;
+                                return ExecutionResult {
+                                    response: last_assistant_text,
+                                    usage: total_usage,
+                                    iterations,
+                                    success: false,
+                                    error: Some(msg),
+                                };
+                            }
+                        }
                     }
                 }
 
