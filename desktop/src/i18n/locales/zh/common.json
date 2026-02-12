@@ -76,11 +76,19 @@
     "idle": "未索引",
     "indexing": "索引中...",
     "indexingProgress": "索引中... {{current}}/{{total}} 个文件",
+    "indexingPhase1": "阶段1：索引文件中... ({{current}}/{{total}})",
+    "indexingPhase2": "阶段2：构建嵌入向量...",
     "ready": "已索引",
     "readyFiles": "{{count}} 个文件",
+    "readySymbols": "{{count}} 个符号",
     "error": "索引错误",
     "reindex": "重新索引",
-    "reindexTooltip": "重新索引当前目录"
+    "reindexTooltip": "重新索引当前目录",
+    "semanticSearchReady": "语义搜索就绪",
+    "semanticSearchUnavailable": "语义搜索不可用",
+    "searchCapabilities": "搜索能力",
+    "embeddingProgress": "构建嵌入向量中... ({{current}}/{{total}})",
+    "embeddingComplete": "{{count}} 个嵌入"
   },
 
   "time": {

@@ -76,11 +76,19 @@
     "idle": "未インデックス",
     "indexing": "インデックス中...",
     "indexingProgress": "インデックス中... {{current}}/{{total}} ファイル",
+    "indexingPhase1": "フェーズ1：ファイルインデックス中... ({{current}}/{{total}})",
+    "indexingPhase2": "フェーズ2：エンベディング構築中...",
     "ready": "インデックス済み",
     "readyFiles": "{{count}} ファイル",
+    "readySymbols": "{{count}} シンボル",
     "error": "インデックスエラー",
     "reindex": "再インデックス",
-    "reindexTooltip": "現在のディレクトリを再インデックスする"
+    "reindexTooltip": "現在のディレクトリを再インデックスする",
+    "semanticSearchReady": "セマンティック検索利用可能",
+    "semanticSearchUnavailable": "セマンティック検索利用不可",
+    "searchCapabilities": "検索機能",
+    "embeddingProgress": "エンベディング構築中... ({{current}}/{{total}})",
+    "embeddingComplete": "{{count}} エンベディング"
   },
 
   "time": {
