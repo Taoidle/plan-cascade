@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -286,6 +287,10 @@ pub struct ToolExecutor {
     /// has not changed, a short dedup message is returned instead of re-reading.
     /// ADR-F001: Mutex<HashMap> chosen over mini-moka for determinism and zero eviction.
     read_cache: Mutex<HashMap<(PathBuf, usize, usize), ReadCacheEntry>>,
+    /// Task sub-agent deduplication cache (story-005).
+    /// Keyed by hash of the prompt string. Only successful results are cached.
+    /// This prevents identical Task sub-agent prompts from being re-executed.
+    task_dedup_cache: Mutex<HashMap<u64, String>>,
     /// Persistent working directory for Bash commands
     current_working_dir: Mutex<PathBuf>,
     /// WebFetch service for fetching web pages
@@ -308,6 +313,7 @@ impl ToolExecutor {
             default_timeout: 120_000, // 2 minutes
             read_files: Mutex::new(HashSet::new()),
             read_cache: Mutex::new(HashMap::new()),
+            task_dedup_cache: Mutex::new(HashMap::new()),
             web_fetch: super::web_fetch::WebFetchService::new(),
             web_search: None,
             index_store: None,
@@ -1665,7 +1671,14 @@ impl ToolExecutor {
         }
     }
 
-    /// Execute Task tool — spawn a sub-agent
+    /// Compute a hash of a string using DefaultHasher (story-005).
+    fn hash_prompt(prompt: &str) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        prompt.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Execute Task tool — spawn a sub-agent, with prompt-hash dedup cache (story-005).
     async fn execute_task(
         &self,
         args: &serde_json::Value,
@@ -1680,6 +1693,18 @@ impl ToolExecutor {
             .get("task_type")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+
+        // Check task dedup cache (story-005)
+        let prompt_hash = Self::hash_prompt(&prompt);
+        if let Ok(cache) = self.task_dedup_cache.lock() {
+            if let Some(cached_result) = cache.get(&prompt_hash) {
+                eprintln!(
+                    "[task-dedup] Cache hit for Task prompt hash={}, returning cached result",
+                    prompt_hash
+                );
+                return ToolResult::ok(format!("[cached] {}", cached_result));
+            }
+        }
 
         let sub_agent_id = uuid::Uuid::new_v4().to_string();
 
@@ -1723,17 +1748,31 @@ impl ToolExecutor {
             .await;
 
         if result.success {
-            ToolResult::ok(
-                result
-                    .response
-                    .unwrap_or_else(|| "Task completed with no output".to_string()),
-            )
+            let response_text = result
+                .response
+                .unwrap_or_else(|| "Task completed with no output".to_string());
+            // Cache successful result (story-005)
+            if let Ok(mut cache) = self.task_dedup_cache.lock() {
+                cache.insert(prompt_hash, response_text.clone());
+            }
+            ToolResult::ok(response_text)
         } else {
+            // Do NOT cache failed results
             ToolResult::err(
                 result
                     .error
                     .unwrap_or_else(|| "Task failed with unknown error".to_string()),
             )
+        }
+    }
+
+    /// Clear the task deduplication cache (story-005).
+    ///
+    /// Useful for testing and after compaction resets where cached
+    /// results may no longer be relevant.
+    pub fn clear_task_cache(&self) {
+        if let Ok(mut cache) = self.task_dedup_cache.lock() {
+            cache.clear();
         }
     }
 
@@ -2881,5 +2920,82 @@ mod tests {
             "output should contain symbol name, kind, and file path, got: {}",
             output
         );
+    }
+
+    // ===== Task dedup cache tests (story-005) =====
+
+    #[test]
+    fn test_task_dedup_cache_initialized_empty() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+        let cache = executor.task_dedup_cache.lock().unwrap();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_task_dedup_cache_insert_and_retrieve() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        let prompt = "Analyze the main.rs file";
+        let hash = ToolExecutor::hash_prompt(prompt);
+
+        // Insert into cache
+        {
+            let mut cache = executor.task_dedup_cache.lock().unwrap();
+            cache.insert(hash, "Analysis complete: main.rs has 50 lines.".to_string());
+        }
+
+        // Verify retrieval
+        {
+            let cache = executor.task_dedup_cache.lock().unwrap();
+            assert!(cache.contains_key(&hash));
+            assert_eq!(
+                cache.get(&hash).unwrap(),
+                "Analysis complete: main.rs has 50 lines."
+            );
+        }
+    }
+
+    #[test]
+    fn test_task_dedup_cache_different_prompts_different_hashes() {
+        let hash1 = ToolExecutor::hash_prompt("Analyze main.rs");
+        let hash2 = ToolExecutor::hash_prompt("Analyze lib.rs");
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_task_dedup_cache_same_prompt_same_hash() {
+        let hash1 = ToolExecutor::hash_prompt("Analyze main.rs");
+        let hash2 = ToolExecutor::hash_prompt("Analyze main.rs");
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_task_dedup_cache_clear() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        // Insert something
+        {
+            let mut cache = executor.task_dedup_cache.lock().unwrap();
+            cache.insert(12345, "cached result".to_string());
+        }
+
+        // Clear
+        executor.clear_task_cache();
+
+        // Verify empty
+        let cache = executor.task_dedup_cache.lock().unwrap();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_task_dedup_hash_prompt_deterministic() {
+        // Verify hash_prompt is deterministic
+        for _ in 0..10 {
+            let h = ToolExecutor::hash_prompt("test prompt");
+            assert_eq!(h, ToolExecutor::hash_prompt("test prompt"));
+        }
     }
 }

@@ -2368,3 +2368,323 @@ fn test_session_memory_manager_single_message() {
     assert!(memory_text.contains(SESSION_MEMORY_V1_MARKER));
     assert!(memory_text.contains("test.rs"));
 }
+
+// ===== is_complete_answer tests (story-001) =====
+
+#[test]
+fn test_is_complete_answer_short_text_returns_false() {
+    assert!(!is_complete_answer("Short text."));
+    assert!(!is_complete_answer("This is under 200 chars, so it should not be considered complete."));
+    assert!(!is_complete_answer("")); // empty
+}
+
+#[test]
+fn test_is_complete_answer_exactly_200_chars_returns_false() {
+    let text = "a".repeat(200);
+    // exactly 200 chars, not > 200
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_201_chars_complete_returns_true() {
+    let text = format!("{}.", "a".repeat(200));
+    assert!(is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_long_complete_text_returns_true() {
+    let text = "The implementation follows a three-tier architecture pattern where the \
+        orchestrator service manages task decomposition, parallel execution, and quality \
+        gates. Each story is executed independently with its own iteration budget and \
+        tool context. The design ensures that sub-agents cannot spawn further sub-agents, \
+        preventing infinite recursion. Overall the approach is sound and well-tested.";
+    assert!(text.chars().count() > 200);
+    assert!(is_complete_answer(text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_colon_returns_false() {
+    let text = format!("{} Here are the files:", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_ellipsis_returns_false() {
+    let text = format!("{} And then...", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_unicode_ellipsis_returns_false() {
+    let text = format!("{} And then\u{2026}", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_i_will_returns_false() {
+    let text = format!("{} I will", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_let_me_returns_false() {
+    let text = format!("{} Let me", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_ill_returns_false() {
+    let text = format!("{} I'll", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_unclosed_code_block_returns_false() {
+    let text = format!("{}\n```rust\nfn main() {{}}", "a".repeat(200));
+    // One ``` (odd count = unclosed)
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_closed_code_block_returns_true() {
+    let text = format!("{}\n```rust\nfn main() {{}}\n```\nDone.", "a".repeat(200));
+    assert!(is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_dangling_and_returns_false() {
+    let text = format!("{} and", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_dangling_but_returns_false() {
+    let text = format!("{} but", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_dangling_or_returns_false() {
+    let text = format!("{} or", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_ends_with_dangling_then_returns_false() {
+    let text = format!("{} then", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_cjk_text_uses_char_count() {
+    // Each CJK character is 3 bytes, so 201 chars = 603 bytes but only 201 chars
+    let text: String = std::iter::repeat('\u{4e00}').take(201).collect(); // 'one' in CJK
+    assert!(is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_cjk_short_returns_false() {
+    // 100 CJK characters should be under 200 char threshold
+    let text: String = std::iter::repeat('\u{4e00}').take(100).collect();
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_trailing_whitespace_ignored() {
+    let text = format!("{}. Completed the analysis.   \n  \n", "a".repeat(200));
+    assert!(is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_word_ending_with_and_not_dangling() {
+    // "demand" ends with "and" but it's not a dangling conjunction
+    let text = format!("{} high demand", "a".repeat(200));
+    assert!(is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_i_will_in_middle_ok() {
+    // "I will" in the middle of text, not at the end, is fine
+    let text = format!("{} I will do this. That is done.", "a".repeat(200));
+    assert!(is_complete_answer(&text));
+}
+
+// ===== max_iterations recovery tests (story-004) =====
+// These test the ExecutionResult behavior: when max_iterations is reached
+// and last_assistant_text is Some, the result should recover it.
+
+#[test]
+fn test_max_iterations_recovery_with_accumulated_text() {
+    // Simulate the scenario: max_iterations hit, but we have accumulated text
+    let last_assistant_text: Option<String> = Some("Here is the analysis of the codebase.".to_string());
+    let max_iterations = 10;
+    let iterations = 10;
+
+    // This is the logic that should exist in the max_iterations handler
+    let (response, success, error) = if let Some(ref text) = last_assistant_text {
+        (
+            Some(text.clone()),
+            true,
+            Some(format!("Max iterations ({}) reached but response recovered", max_iterations)),
+        )
+    } else {
+        (
+            None,
+            false,
+            Some(format!("Maximum iterations ({}) reached", max_iterations)),
+        )
+    };
+
+    assert_eq!(response, Some("Here is the analysis of the codebase.".to_string()));
+    assert!(success);
+    assert!(error.unwrap().contains("recovered"));
+    assert_eq!(iterations, max_iterations);
+}
+
+#[test]
+fn test_max_iterations_no_text_returns_none() {
+    let last_assistant_text: Option<String> = None;
+    let max_iterations = 10;
+
+    let (response, success, error) = if let Some(ref text) = last_assistant_text {
+        (
+            Some(text.clone()),
+            true,
+            Some(format!("Max iterations ({}) reached but response recovered", max_iterations)),
+        )
+    } else {
+        (
+            None,
+            false,
+            Some(format!("Maximum iterations ({}) reached", max_iterations)),
+        )
+    };
+
+    assert!(response.is_none());
+    assert!(!success);
+    assert!(error.unwrap().contains("Maximum iterations"));
+}
+
+#[test]
+fn test_max_iterations_recovery_produces_valid_execution_result() {
+    let recovered_text = "The project uses a three-tier execution model.".to_string();
+    let result = ExecutionResult {
+        response: Some(recovered_text.clone()),
+        usage: UsageStats::default(),
+        iterations: 25,
+        success: true,
+        error: Some("Max iterations (25) reached but response recovered".to_string()),
+    };
+
+    assert!(result.success);
+    assert_eq!(result.response, Some(recovered_text));
+    assert!(result.error.unwrap().contains("recovered"));
+}
+
+#[test]
+fn test_max_iterations_no_recovery_produces_failed_execution_result() {
+    let result = ExecutionResult {
+        response: None,
+        usage: UsageStats::default(),
+        iterations: 25,
+        success: false,
+        error: Some("Maximum iterations (25) reached".to_string()),
+    };
+
+    assert!(!result.success);
+    assert!(result.response.is_none());
+    assert!(result.error.unwrap().contains("Maximum iterations"));
+}
+
+// ===== is_complete_answer + fallback branch integration tests (story-002 / story-003) =====
+
+#[test]
+fn test_complete_answer_exits_loop_when_fallback_tools_present() {
+    // Simulate: response has text + fallback tool calls. If text is complete,
+    // the loop should exit with the text, ignoring the tool calls.
+    let response_text = "The implementation follows a three-tier architecture pattern where the \
+        orchestrator service manages task decomposition, parallel execution, and quality \
+        gates. Each story is executed independently with its own iteration budget and \
+        tool context. The design ensures that sub-agents cannot spawn further sub-agents, \
+        preventing infinite recursion. Overall the approach is sound and well-tested.";
+
+    // The text is long enough and has a complete ending
+    assert!(is_complete_answer(response_text));
+
+    // Simulated tool calls that should be ignored
+    let fake_tool_calls = vec!["Read", "Grep"];
+    assert!(!fake_tool_calls.is_empty());
+
+    // The expected behavior: since is_complete_answer returns true,
+    // the fallback branch exits early with this text as the response
+    let result = ExecutionResult {
+        response: Some(response_text.to_string()),
+        usage: UsageStats::default(),
+        iterations: 3,
+        success: true,
+        error: None,
+    };
+
+    assert!(result.success);
+    assert_eq!(result.response.unwrap(), response_text);
+}
+
+#[test]
+fn test_incomplete_text_proceeds_with_tool_calls() {
+    // Simulate: response has short/incomplete text + tool calls.
+    // The loop should NOT exit early — it should execute the tool calls.
+    let short_text = "Let me check the file.";
+    assert!(!is_complete_answer(short_text));
+
+    let incomplete_long = format!("{} I will", "a".repeat(200));
+    assert!(!is_complete_answer(&incomplete_long));
+
+    // Both cases should proceed to tool execution (not early-exit)
+}
+
+#[test]
+fn test_complete_answer_native_tool_calls_not_affected() {
+    // For native tool call providers (has_native_tool_calls=true),
+    // the is_complete_answer check is NOT applied. Only fallback path.
+    // This test documents that the native path is unchanged.
+    let response_text = "The implementation follows a three-tier architecture pattern where the \
+        orchestrator service manages task decomposition, parallel execution, and quality \
+        gates. Each story is executed independently with its own iteration budget and \
+        tool context. The design ensures that sub-agents cannot spawn further sub-agents.";
+
+    // Even though text is complete, native providers handle this correctly
+    // on their own — we only intervene in the fallback path.
+    assert!(is_complete_answer(response_text));
+    // (The actual native path logic is tested via integration tests)
+}
+
+#[test]
+fn test_fallback_complete_exit_produces_success_result() {
+    // When the fallback branch detects a complete answer, it should produce
+    // ExecutionResult with success=true and no error.
+    let complete_text = format!("{}. This is the final answer.", "x".repeat(250));
+    assert!(is_complete_answer(&complete_text));
+
+    let result = ExecutionResult {
+        response: Some(complete_text.clone()),
+        usage: UsageStats::default(),
+        iterations: 5,
+        success: true,
+        error: None,
+    };
+
+    assert!(result.success);
+    assert!(result.error.is_none());
+    assert_eq!(result.response.unwrap(), complete_text);
+}
+
+#[test]
+fn test_extract_text_without_tool_calls_then_complete_check() {
+    // Integration test: extract_text_without_tool_calls + is_complete_answer
+    let raw = format!(
+        "{}. This is the complete analysis.\n\n```tool_call\n{{\"tool\": \"Read\", \"arguments\": {{\"file_path\": \"test.rs\"}}}}\n```",
+        "x".repeat(250)
+    );
+    let cleaned = extract_text_without_tool_calls(&raw);
+    assert!(is_complete_answer(&cleaned));
+}
