@@ -267,12 +267,35 @@ export class ToolCallStreamFilter {
             // Since it's still pending but we've hit a closing fence,
             // the block is very short -- likely not a tool call.
             if (closingIdx !== -1) {
-              // Include the closing fence in the buffer for output
-              this.buffer += '```';
-              output += this.buffer;
-              this.buffer = '';
-              this.state = State.NORMAL;
-              i = closingIdx + 3;
+              // Check the content between the opening and closing fences.
+              // this.buffer starts with '```' and contains everything up to the closing fence.
+              const innerContent = this.buffer.slice(3); // text after opening ```
+              if (innerContent.trim().length === 0) {
+                // Empty or whitespace-only fence block — suppress it entirely
+                // to avoid leaking orphaned ``` artifacts.
+                this.buffer = '';
+                this.state = State.NORMAL;
+                i = closingIdx + 3;
+              } else {
+                // Non-empty content — re-classify the full block now that we
+                // have the complete content. If still pending/not_tool, flush
+                // as a legitimate short code block.
+                const fullClassification = classifyFenceContent(innerContent);
+                if (fullClassification === 'tool') {
+                  // It was a tool block after all — suppress
+                  this.extractToolName(innerContent);
+                  i = closingIdx + 3;
+                  const result = this.completeToolBlock();
+                  toolIndicator = result;
+                } else {
+                  // Include the closing fence in the buffer for output
+                  this.buffer += '```';
+                  output += this.buffer;
+                  this.buffer = '';
+                  this.state = State.NORMAL;
+                  i = closingIdx + 3;
+                }
+              }
             }
             // else: wait for more chunks
           }

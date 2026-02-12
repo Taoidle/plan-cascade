@@ -24,7 +24,7 @@ pub mod web_fetch;
 pub mod web_search;
 
 pub use definitions::{get_basic_tool_definitions, get_tool_definitions};
-pub use executor::{ToolExecutor, ToolResult};
+pub use executor::{ReadCacheEntry, ToolExecutor, ToolResult};
 pub use prompt_fallback::{
     build_tool_call_instructions, extract_text_without_tool_calls, format_tool_result,
     parse_tool_calls, ParsedToolCall,

@@ -545,4 +545,55 @@ describe('ToolCallStreamFilter', () => {
       expect(result.output).toBe('Text before\n\nMore text after');
     });
   });
+
+  // =========================================================================
+  // MAYBE_BLOCK pending+closing-fence edge cases (feature-004 story-002)
+  // =========================================================================
+  describe('MAYBE_BLOCK pending+closing-fence prefix leak fix', () => {
+    it('does not leak ``` artifacts for empty fence block', () => {
+      const input = '```\n```';
+      const result = filter.processChunk(input);
+      // Empty fence block should either be suppressed or passed through cleanly
+      // but NOT produce orphaned ``` artifacts
+      const hasOrphanedFence = result.output === '```' || result.output === '``` ```';
+      expect(hasOrphanedFence).toBe(false);
+    });
+
+    it('does not leak artifacts for whitespace-only fence block', () => {
+      const input = '```  \n  ```';
+      const result = filter.processChunk(input);
+      // Should not produce orphaned ``` artifacts
+      const hasOrphanedFence = result.output === '```' || result.output === '``` ```';
+      expect(hasOrphanedFence).toBe(false);
+    });
+
+    it('passes through very short content between fences as complete block', () => {
+      const input = '```\na\n```';
+      const result = filter.processChunk(input);
+      // Short non-empty content should pass through as a complete code block
+      expect(result.output).toBe('```\na\n```');
+    });
+
+    it('handles pending classification with closing fence in separate chunk cleanly', () => {
+      const r1 = filter.processChunk('```\n');
+      // First chunk: pending classification, buffered
+      expect(r1.output).toBe('');
+
+      const r2 = filter.processChunk('```');
+      // Second chunk contains closing fence — should produce clean output
+      const combined = r1.output + r2.output;
+      const hasOrphanedFence = combined === '```' || combined.trim() === '```';
+      // Should not be just an orphaned fence
+      expect(hasOrphanedFence).toBe(false);
+    });
+
+    it('short code blocks like ```x\\ncode\\n``` are unaffected', () => {
+      const input = '```x\ncode\n```';
+      const result = filter.processChunk(input);
+      // 'x' is not a known language and not a prefix of 'tool_call' or 'json',
+      // so it classifies as 'not_tool' and passes through
+      expect(result.output).toBe(input);
+      expect(result.toolIndicator).toBeUndefined();
+    });
+  });
 });

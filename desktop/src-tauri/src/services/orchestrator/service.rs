@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
@@ -346,6 +346,14 @@ struct OrchestratorTaskSpawner {
     provider_config: ProviderConfig,
     project_root: PathBuf,
     context_window: u32,
+    /// Shared file-read deduplication cache from the parent ToolExecutor.
+    /// Sub-agents created by this spawner reuse the parent's cache so reads
+    /// are not duplicated across the parent/child boundary.
+    shared_read_cache: Arc<Mutex<HashMap<(PathBuf, usize, usize), crate::services::tools::ReadCacheEntry>>>,
+    /// Optional index store for CodebaseSearch in sub-agents.
+    shared_index_store: Option<Arc<IndexStore>>,
+    /// Optional embedding service for semantic search in sub-agents.
+    shared_embedding_service: Option<Arc<EmbeddingService>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
