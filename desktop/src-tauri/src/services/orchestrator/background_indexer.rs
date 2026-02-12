@@ -541,6 +541,19 @@ fn run_embedding_pass(
         total = all_chunks.len(),
         "background indexer: embeddings stored"
     );
+
+    // Persist the vocabulary to SQLite so it survives app restart
+    if let Some(vocab_json) = embedding_service.export_vocabulary() {
+        if let Err(e) = index_store.save_vocabulary(&project_path, &vocab_json) {
+            warn!(
+                error = %e,
+                "background indexer: failed to save vocabulary to SQLite"
+            );
+        } else {
+            info!("background indexer: vocabulary saved to SQLite");
+        }
+    }
+
     Ok(())
 }
 
@@ -577,9 +590,23 @@ fn run_incremental_embedding(
     let _ = index_store.delete_embeddings_for_file(&project_path, &rel_str);
 
     if !embedding_service.is_ready() {
-        // If the vocabulary hasn't been built yet, skip incremental embedding.
-        // It will be regenerated on the next full pass.
-        return Ok(());
+        // Vocabulary not in memory — try to restore from SQLite before giving up.
+        match index_store.load_vocabulary(&project_path) {
+            Ok(Some(json)) => {
+                if let Err(e) = embedding_service.import_vocabulary(&json) {
+                    warn!(
+                        error = %e,
+                        "background indexer: failed to import vocabulary for incremental embedding"
+                    );
+                    return Ok(());
+                }
+                info!("background indexer: restored vocabulary from SQLite for incremental embedding");
+            }
+            _ => {
+                // No vocabulary in DB either — skip. It will be built on the next full pass.
+                return Ok(());
+            }
+        }
     }
 
     let chunks = chunk_file_content(&content, &language);
@@ -1008,6 +1035,137 @@ pub fn process_config(config: &Config) -> String {
         for (_, _, _, bytes) in &embeddings {
             assert!(!bytes.is_empty(), "embedding bytes should not be empty");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Embedding pass saves vocabulary to SQLite (story-003)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn embedding_pass_saves_vocabulary_to_sqlite() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main() {\n    println!(\"hello\");\n}\n\npub fn helper() {\n    // stuff\n}\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub struct Config {\n    name: String,\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        run_full_index(dir.path(), &store, None).expect("full index");
+
+        let emb_svc = EmbeddingService::new();
+        run_embedding_pass(dir.path(), &store, &emb_svc).expect("embedding pass");
+
+        let project_path = dir.path().to_string_lossy().to_string();
+        let vocab_json = store.load_vocabulary(&project_path).expect("load vocab");
+        assert!(
+            vocab_json.is_some(),
+            "vocabulary should be saved after embedding pass"
+        );
+
+        // Verify the saved vocabulary can be imported into a fresh service
+        let fresh_svc = EmbeddingService::new();
+        fresh_svc
+            .import_vocabulary(&vocab_json.unwrap())
+            .expect("import should succeed");
+        assert!(fresh_svc.is_ready(), "fresh service should be ready after import");
+
+        // Verify the imported service produces valid embeddings
+        let vec = fresh_svc.embed_text("pub fn main()");
+        assert!(!vec.is_empty(), "embed_text should produce a vector");
+    }
+
+    // -----------------------------------------------------------------------
+    // Incremental embedding restores vocabulary from DB (story-004)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn incremental_embedding_restores_vocab_from_db_when_not_ready() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main() {\n    println!(\"hello\");\n}\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub struct Config {\n    name: String,\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // First: full index + embedding pass to build and save vocabulary
+        run_full_index(dir.path(), &store, None).expect("full index");
+        let emb_svc1 = EmbeddingService::new();
+        run_embedding_pass(dir.path(), &store, &emb_svc1).expect("embedding pass");
+
+        // Verify vocab was saved
+        assert!(
+            store.load_vocabulary(&project_path).unwrap().is_some(),
+            "vocabulary should be saved"
+        );
+
+        // Create a FRESH embedding service (simulating app restart — vocab not in memory)
+        let emb_svc2 = EmbeddingService::new();
+        assert!(!emb_svc2.is_ready(), "fresh service should not be ready");
+
+        // Modify a file
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main_v2() {\n    println!(\"updated\");\n}\n",
+        )
+        .expect("write");
+
+        // Incremental embedding should restore vocab from DB and proceed
+        let changed_path = dir.path().join("src/main.rs");
+        run_incremental_embedding(dir.path(), &store, &emb_svc2, &changed_path)
+            .expect("incremental embedding");
+
+        // Verify the service is now ready (vocab was restored)
+        assert!(
+            emb_svc2.is_ready(),
+            "service should be ready after incremental restores vocab"
+        );
+
+        // Verify embeddings were stored for the changed file
+        let embeddings = store.get_embeddings_for_project(&project_path).unwrap();
+        let main_embeddings: Vec<_> = embeddings
+            .iter()
+            .filter(|(path, _, _, _)| path.contains("main.rs"))
+            .collect();
+        assert!(
+            !main_embeddings.is_empty(),
+            "should have embeddings for main.rs after incremental"
+        );
+    }
+
+    #[test]
+    fn incremental_embedding_skips_when_no_vocab_in_db() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("test.py"), "x = 1\n").expect("write");
+
+        let store = test_store();
+
+        // Full index but NO embedding pass — so no vocab in DB
+        run_full_index(dir.path(), &store, None).expect("full index");
+
+        let emb_svc = EmbeddingService::new();
+        assert!(!emb_svc.is_ready());
+
+        // Incremental embedding should skip gracefully (no panic, no error)
+        let changed_path = dir.path().join("test.py");
+        let result = run_incremental_embedding(dir.path(), &store, &emb_svc, &changed_path);
+        assert!(result.is_ok(), "should succeed even without vocab in DB");
+        assert!(!emb_svc.is_ready(), "service should remain not-ready");
     }
 
     #[tokio::test]

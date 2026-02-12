@@ -424,6 +424,16 @@ impl Database {
             [],
         )?;
 
+        // Create embedding_vocabulary table for persisting TF-IDF vocabulary (feature-003)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS embedding_vocabulary (
+                project_path TEXT PRIMARY KEY,
+                vocab_json BLOB NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
         Ok(())
     }
 

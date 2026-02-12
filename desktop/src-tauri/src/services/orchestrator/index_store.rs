@@ -529,6 +529,55 @@ impl IndexStore {
         Ok(count as usize)
     }
 
+    // =========================================================================
+    // Vocabulary persistence methods (feature-003, story-002)
+    // =========================================================================
+
+    /// Save a TF-IDF vocabulary JSON blob for a project.
+    ///
+    /// Uses `INSERT OR REPLACE` to upsert on the `project_path` primary key.
+    pub fn save_vocabulary(&self, project_path: &str, vocab_json: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO embedding_vocabulary (project_path, vocab_json, created_at)
+             VALUES (?1, ?2, CURRENT_TIMESTAMP)",
+            params![project_path, vocab_json.as_bytes()],
+        )?;
+        Ok(())
+    }
+
+    /// Load a TF-IDF vocabulary JSON blob for a project.
+    ///
+    /// Returns `None` if no vocabulary has been saved for this project.
+    pub fn load_vocabulary(&self, project_path: &str) -> AppResult<Option<String>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT vocab_json FROM embedding_vocabulary WHERE project_path = ?1",
+            params![project_path],
+            |row| row.get::<_, Vec<u8>>(0),
+        );
+
+        match result {
+            Ok(bytes) => {
+                let json = String::from_utf8(bytes)
+                    .map_err(|e| AppError::database(format!("invalid UTF-8 in vocab: {}", e)))?;
+                Ok(Some(json))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// Delete the saved vocabulary for a project.
+    pub fn delete_vocabulary(&self, project_path: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "DELETE FROM embedding_vocabulary WHERE project_path = ?1",
+            params![project_path],
+        )?;
+        Ok(())
+    }
+
     fn get_connection(
         &self,
     ) -> AppResult<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>> {
@@ -1234,6 +1283,71 @@ mod tests {
         for (i, r) in results.iter().enumerate() {
             assert_eq!(r.1, i as i64);
         }
+    }
+
+    // =========================================================================
+    // Vocabulary persistence tests (feature-003, story-002)
+    // =========================================================================
+
+    #[test]
+    fn save_then_load_vocabulary_roundtrip() {
+        let store = create_test_store();
+        let vocab_json = r#"{"token_to_idx":{"hello":0},"idf":[1.0],"num_docs":1}"#;
+        store.save_vocabulary("/project", vocab_json).unwrap();
+
+        let loaded = store.load_vocabulary("/project").unwrap();
+        assert_eq!(loaded, Some(vocab_json.to_string()));
+    }
+
+    #[test]
+    fn load_vocabulary_returns_none_for_nonexistent() {
+        let store = create_test_store();
+        let loaded = store.load_vocabulary("/nonexistent").unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn save_vocabulary_upserts_on_conflict() {
+        let store = create_test_store();
+        store.save_vocabulary("/project", "v1").unwrap();
+        store.save_vocabulary("/project", "v2").unwrap();
+
+        let loaded = store.load_vocabulary("/project").unwrap();
+        assert_eq!(loaded, Some("v2".to_string()));
+    }
+
+    #[test]
+    fn delete_vocabulary_removes_entry() {
+        let store = create_test_store();
+        store.save_vocabulary("/project", "vocab").unwrap();
+        store.delete_vocabulary("/project").unwrap();
+
+        let loaded = store.load_vocabulary("/project").unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn vocabulary_isolated_per_project() {
+        let store = create_test_store();
+        store.save_vocabulary("/project-a", "vocab-a").unwrap();
+        store.save_vocabulary("/project-b", "vocab-b").unwrap();
+
+        assert_eq!(
+            store.load_vocabulary("/project-a").unwrap(),
+            Some("vocab-a".to_string())
+        );
+        assert_eq!(
+            store.load_vocabulary("/project-b").unwrap(),
+            Some("vocab-b".to_string())
+        );
+
+        // Deleting one should not affect the other
+        store.delete_vocabulary("/project-a").unwrap();
+        assert!(store.load_vocabulary("/project-a").unwrap().is_none());
+        assert_eq!(
+            store.load_vocabulary("/project-b").unwrap(),
+            Some("vocab-b".to_string())
+        );
     }
 
     #[test]

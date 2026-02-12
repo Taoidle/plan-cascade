@@ -55,6 +55,11 @@ pub struct ToolResult {
     /// Optional image data for multimodal responses: (mime_type, base64_data)
     #[serde(skip)]
     pub image_data: Option<(String, String)>,
+    /// Whether this result is a dedup hit (file read cache).
+    /// When true, the agentic loop should push a minimal tool_result to the LLM
+    /// instead of the full content, to prevent weak models from re-reading files.
+    #[serde(default)]
+    pub is_dedup: bool,
 }
 
 impl ToolResult {
@@ -65,6 +70,7 @@ impl ToolResult {
             output: Some(output.into()),
             error: None,
             image_data: None,
+            is_dedup: false,
         }
     }
 
@@ -75,6 +81,7 @@ impl ToolResult {
             output: None,
             error: Some(error.into()),
             image_data: None,
+            is_dedup: false,
         }
     }
 
@@ -89,6 +96,21 @@ impl ToolResult {
             output: Some(output.into()),
             error: None,
             image_data: Some((mime_type, base64_data)),
+            is_dedup: false,
+        }
+    }
+
+    /// Create a successful dedup result (file read cache hit).
+    ///
+    /// Marked with `is_dedup = true` so the agentic loop can suppress
+    /// the full content from the LLM conversation.
+    pub fn ok_dedup(output: impl Into<String>) -> Self {
+        Self {
+            success: true,
+            output: Some(output.into()),
+            error: None,
+            image_data: None,
+            is_dedup: true,
         }
     }
 
@@ -507,33 +529,13 @@ impl ToolExecutor {
             if let Ok(cache) = self.read_cache.lock() {
                 if let Some(entry) = cache.get(&cache_key) {
                     if entry.modified_time == mtime {
-                        // File unchanged with same offset/limit — return enhanced dedup message
-                        // that includes file type, key symbols, and a preview so weak LLMs
-                        // have enough context to proceed without re-reading.
-                        let file_type = if entry.extension.is_empty() {
-                            "unknown".to_string()
-                        } else {
-                            entry.extension.clone()
-                        };
-
-                        // Query IndexStore for key symbols if available
-                        let symbols_section = self.get_dedup_symbols_summary(&path);
-
-                        let preview_section = if entry.first_lines_preview.is_empty() {
-                            String::new()
-                        } else {
-                            format!("\nPreview (first lines):\n{}", entry.first_lines_preview)
-                        };
-
-                        return ToolResult::ok(format!(
-                            "[File previously read in this session, unchanged] Path: {} ({} lines, {} bytes, type: {}){}{}\n\
-                             Do NOT re-read this file. Use the information above to proceed.",
+                        // File unchanged with same offset/limit — return a short
+                        // dedup message marked with is_dedup=true so the agentic
+                        // loop suppresses it from the LLM conversation.
+                        return ToolResult::ok_dedup(format!(
+                            "[DEDUP] {} ({} lines) already read. Content unchanged.",
                             path.display(),
                             entry.line_count,
-                            entry.size_bytes,
-                            file_type,
-                            symbols_section,
-                            preview_section,
                         ));
                     }
                     // mtime differs — fall through to re-read (entry will be replaced below)
@@ -2371,57 +2373,36 @@ mod tests {
     #[tokio::test]
     async fn test_read_cache_dedup_unchanged_file() {
         // Reading the same unchanged file twice should return a short dedup
-        // message on the second read.
+        // message on the second read with is_dedup = true.
         let dir = setup_test_dir();
         let executor = ToolExecutor::new(dir.path());
         let file_path = dir.path().join("test.txt").to_string_lossy().to_string();
         let args = serde_json::json!({ "file_path": &file_path });
 
-        // First read: full content
+        // First read: full content, is_dedup = false
         let result1 = executor.execute("Read", &args).await;
         assert!(result1.success);
+        assert!(!result1.is_dedup, "first read should NOT be dedup");
         let output1 = result1.output.unwrap();
         assert!(output1.contains("line 1"), "first read should have content");
 
-        // Second read: dedup message
+        // Second read: dedup message with is_dedup = true
         let result2 = executor.execute("Read", &args).await;
         assert!(result2.success);
+        assert!(result2.is_dedup, "second unchanged read should be dedup");
         let output2 = result2.output.unwrap();
         assert!(
-            output2.contains("[File previously read in this session, unchanged]"),
+            output2.contains("[DEDUP]"),
             "second read should be dedup message, got: {}",
             output2
         );
         assert!(output2.contains("test.txt"));
         assert!(output2.contains("lines"));
-        assert!(output2.contains("bytes"));
-        // Enhanced dedup message should include file type
-        assert!(
-            output2.contains("type: txt"),
-            "dedup message should include file type, got: {}",
-            output2
-        );
-        // Enhanced dedup message should include a preview
-        assert!(
-            output2.contains("Preview (first lines)"),
-            "dedup message should include first lines preview, got: {}",
-            output2
-        );
-        assert!(
-            output2.contains("line 1"),
-            "preview should contain first line content, got: {}",
-            output2
-        );
-        // Enhanced dedup message should include do-not-reread instruction
-        assert!(
-            output2.contains("Do NOT re-read"),
-            "dedup message should instruct LLM not to re-read, got: {}",
-            output2
-        );
+        assert!(output2.contains("already read"));
     }
 
     #[tokio::test]
-    async fn test_dedup_message_includes_extension_for_rust_file() {
+    async fn test_dedup_message_is_short_format() {
         let dir = setup_test_dir();
         let executor = ToolExecutor::new(dir.path());
         let file = dir.path().join("test_module.rs");
@@ -2431,18 +2412,25 @@ mod tests {
 
         // First read
         executor.execute("Read", &args).await;
-        // Second read should return enhanced dedup
+        // Second read should return short dedup with is_dedup flag
         let result = executor.execute("Read", &args).await;
         assert!(result.success);
+        assert!(result.is_dedup, "should have is_dedup = true");
         let output = result.output.unwrap();
         assert!(
-            output.contains("type: rs"),
-            "should show rs file type, got: {}",
+            output.contains("[DEDUP]"),
+            "should use [DEDUP] format, got: {}",
+            output
+        );
+        // Should NOT contain the old verbose preview/symbols/do-not-reread sections
+        assert!(
+            !output.contains("Preview (first lines)"),
+            "should not have verbose preview, got: {}",
             output
         );
         assert!(
-            output.contains("fn main()"),
-            "preview should contain first line, got: {}",
+            !output.contains("Do NOT re-read"),
+            "should not have do-not-reread instruction, got: {}",
             output
         );
     }
@@ -2462,20 +2450,20 @@ mod tests {
         // First read
         let result1 = executor.execute("Read", &args).await;
         assert!(result1.success);
+        assert!(!result1.is_dedup);
         assert!(result1.output.unwrap().contains("original line 1"));
 
         // Modify the file and force a different mtime.
-        // We sleep briefly to guarantee mtime changes even on file systems
-        // with coarse (1-second) mtime granularity.
         std::thread::sleep(std::time::Duration::from_secs(1));
         std::fs::write(&file, "changed line 1\nchanged line 2\n").unwrap();
 
-        // Second read after modification
+        // Second read after modification — should NOT be dedup
         let result2 = executor.execute("Read", &args).await;
         assert!(result2.success);
+        assert!(!result2.is_dedup, "modified file should NOT be dedup");
         let output2 = result2.output.unwrap();
         assert!(
-            !output2.contains("[File previously read in this session, unchanged]"),
+            !output2.contains("[DEDUP]"),
             "modified file should NOT return dedup message, got: {}",
             output2
         );
@@ -2499,15 +2487,17 @@ mod tests {
         let args1 = serde_json::json!({ "file_path": &file_path });
         let result1 = executor.execute("Read", &args1).await;
         assert!(result1.success);
+        assert!(!result1.is_dedup);
         assert!(result1.output.unwrap().contains("line 1"));
 
         // Second read with different offset — should NOT be dedup
         let args2 = serde_json::json!({ "file_path": &file_path, "offset": 2 });
         let result2 = executor.execute("Read", &args2).await;
         assert!(result2.success);
+        assert!(!result2.is_dedup);
         let output2 = result2.output.unwrap();
         assert!(
-            !output2.contains("[File previously read in this session, unchanged]"),
+            !output2.contains("[DEDUP]"),
             "different offset should return full content, got: {}",
             output2
         );
@@ -2517,9 +2507,10 @@ mod tests {
         let args3 = serde_json::json!({ "file_path": &file_path, "limit": 1 });
         let result3 = executor.execute("Read", &args3).await;
         assert!(result3.success);
+        assert!(!result3.is_dedup);
         let output3 = result3.output.unwrap();
         assert!(
-            !output3.contains("[File previously read in this session, unchanged]"),
+            !output3.contains("[DEDUP]"),
             "different limit should return full content, got: {}",
             output3
         );
@@ -2537,18 +2528,36 @@ mod tests {
         // First read
         let result1 = executor.execute("Read", &args).await;
         assert!(result1.success);
+        assert!(!result1.is_dedup);
         assert!(result1.output.unwrap().contains("line 2"));
 
         // Second read with identical args — should dedup
         let result2 = executor.execute("Read", &args).await;
         assert!(result2.success);
+        assert!(result2.is_dedup, "same offset/limit should set is_dedup");
         assert!(
-            result2
-                .output
-                .unwrap()
-                .contains("[File previously read in this session, unchanged]"),
+            result2.output.unwrap().contains("[DEDUP]"),
             "same offset/limit should dedup"
         );
+    }
+
+    #[test]
+    fn test_tool_result_ok_is_not_dedup() {
+        let result = ToolResult::ok("test output");
+        assert!(!result.is_dedup);
+    }
+
+    #[test]
+    fn test_tool_result_ok_dedup_is_dedup() {
+        let result = ToolResult::ok_dedup("dedup msg");
+        assert!(result.is_dedup);
+        assert!(result.success);
+    }
+
+    #[test]
+    fn test_tool_result_err_is_not_dedup() {
+        let result = ToolResult::err("error");
+        assert!(!result.is_dedup);
     }
 
     #[tokio::test]
@@ -2641,9 +2650,10 @@ mod tests {
         // Reading again after clear should return full content, not dedup
         let result = executor.execute("Read", &args).await;
         assert!(result.success);
+        assert!(!result.is_dedup, "after clear, should not be dedup");
         let output = result.output.unwrap();
         assert!(
-            !output.contains("[File previously read in this session, unchanged]"),
+            !output.contains("[DEDUP]"),
             "after clear, should get full content, got: {}",
             output
         );
