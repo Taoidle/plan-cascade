@@ -150,7 +150,13 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             analysis_session_id: None,
         };
 
-        let sub_agent = OrchestratorService::new_sub_agent(sub_config, cancellation_token);
+        let sub_agent = OrchestratorService::new_sub_agent_with_shared_state(
+            sub_config,
+            cancellation_token,
+            self.shared_read_cache.clone(),
+            self.shared_index_store.clone(),
+            self.shared_embedding_service.clone(),
+        );
         let result = sub_agent
             .execute_story(&prompt, &get_basic_tool_definitions(), tx)
             .await;
@@ -636,6 +642,48 @@ impl OrchestratorService {
         };
 
         let tool_executor = ToolExecutor::new(&config.project_root);
+
+        Self {
+            config,
+            provider,
+            tool_executor,
+            cancellation_token,
+            db_pool: None,
+            active_sessions: Arc::new(RwLock::new(HashMap::new())),
+            analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
+            index_store: None,
+        }
+    }
+
+    /// Create a sub-agent orchestrator that shares the parent's read cache, index store,
+    /// and embedding service. This avoids redundant file reads and enables CodebaseSearch
+    /// in sub-agents.
+    fn new_sub_agent_with_shared_state(
+        config: OrchestratorConfig,
+        cancellation_token: CancellationToken,
+        shared_read_cache: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<(PathBuf, usize, usize), crate::services::tools::ReadCacheEntry>>>,
+        shared_index_store: Option<Arc<IndexStore>>,
+        shared_embedding_service: Option<Arc<EmbeddingService>>,
+    ) -> Self {
+        let analysis_artifacts_root = config.analysis_artifacts_root.clone();
+        let provider: Arc<dyn LlmProvider> = match config.provider.provider {
+            ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config.provider.clone())),
+            ProviderType::OpenAI => Arc::new(OpenAIProvider::new(config.provider.clone())),
+            ProviderType::DeepSeek => Arc::new(DeepSeekProvider::new(config.provider.clone())),
+            ProviderType::Glm => Arc::new(GlmProvider::new(config.provider.clone())),
+            ProviderType::Qwen => Arc::new(QwenProvider::new(config.provider.clone())),
+            ProviderType::Ollama => Arc::new(OllamaProvider::new(config.provider.clone())),
+        };
+
+        let mut tool_executor = ToolExecutor::new_with_shared_cache(&config.project_root, shared_read_cache);
+
+        // Wire the parent's index store and embedding service to the sub-agent's tool executor
+        if let Some(store) = &shared_index_store {
+            tool_executor.set_index_store(Arc::clone(store));
+        }
+        if let Some(svc) = &shared_embedding_service {
+            tool_executor.set_embedding_service(Arc::clone(svc));
+        }
 
         Self {
             config,
@@ -2411,6 +2459,9 @@ impl OrchestratorService {
             provider_config: self.config.provider.clone(),
             project_root: self.config.project_root.clone(),
             context_window: self.provider.context_window(),
+            shared_read_cache: self.tool_executor.shared_read_cache(),
+            shared_index_store: self.tool_executor.get_index_store(),
+            shared_embedding_service: self.tool_executor.get_embedding_service(),
         });
         let task_ctx = TaskContext {
             spawner: task_spawner,

@@ -308,7 +308,8 @@ pub struct ToolExecutor {
     /// If the same file is read with the same offset/limit and the mtime
     /// has not changed, a short dedup message is returned instead of re-reading.
     /// ADR-F001: Mutex<HashMap> chosen over mini-moka for determinism and zero eviction.
-    read_cache: Mutex<HashMap<(PathBuf, usize, usize), ReadCacheEntry>>,
+    /// Wrapped in Arc so sub-agents can share the parent's cache.
+    read_cache: Arc<Mutex<HashMap<(PathBuf, usize, usize), ReadCacheEntry>>>,
     /// Task sub-agent deduplication cache (story-005).
     /// Keyed by hash of the prompt string. Only successful results are cached.
     /// This prevents identical Task sub-agent prompts from being re-executed.
@@ -334,13 +335,44 @@ impl ToolExecutor {
             project_root: root,
             default_timeout: 120_000, // 2 minutes
             read_files: Mutex::new(HashSet::new()),
-            read_cache: Mutex::new(HashMap::new()),
+            read_cache: Arc::new(Mutex::new(HashMap::new())),
             task_dedup_cache: Mutex::new(HashMap::new()),
             web_fetch: super::web_fetch::WebFetchService::new(),
             web_search: None,
             index_store: None,
             embedding_service: None,
         }
+    }
+
+    /// Create a new tool executor that shares a read cache with a parent.
+    ///
+    /// Sub-agents use this constructor so file reads are deduplicated across
+    /// the parent/child boundary, saving tokens and wall-clock time.
+    pub fn new_with_shared_cache(
+        project_root: impl Into<PathBuf>,
+        shared_cache: Arc<Mutex<HashMap<(PathBuf, usize, usize), ReadCacheEntry>>>,
+    ) -> Self {
+        let root: PathBuf = project_root.into();
+        Self {
+            current_working_dir: Mutex::new(root.clone()),
+            project_root: root,
+            default_timeout: 120_000,
+            read_files: Mutex::new(HashSet::new()),
+            read_cache: shared_cache,
+            task_dedup_cache: Mutex::new(HashMap::new()),
+            web_fetch: super::web_fetch::WebFetchService::new(),
+            web_search: None,
+            index_store: None,
+            embedding_service: None,
+        }
+    }
+
+    /// Return a clone of the shared read cache Arc.
+    ///
+    /// Pass this to `new_with_shared_cache` when creating sub-agent executors
+    /// so they share the same deduplication cache.
+    pub fn shared_read_cache(&self) -> Arc<Mutex<HashMap<(PathBuf, usize, usize), ReadCacheEntry>>> {
+        Arc::clone(&self.read_cache)
     }
 
     /// Configure the web search provider
@@ -366,6 +398,16 @@ impl ToolExecutor {
     /// Set the embedding service for semantic search in CodebaseSearch
     pub fn set_embedding_service(&mut self, svc: Arc<EmbeddingService>) {
         self.embedding_service = Some(svc);
+    }
+
+    /// Get the index store Arc (if set), for sharing with sub-agents.
+    pub fn get_index_store(&self) -> Option<Arc<IndexStore>> {
+        self.index_store.clone()
+    }
+
+    /// Get the embedding service Arc (if set), for sharing with sub-agents.
+    pub fn get_embedding_service(&self) -> Option<Arc<EmbeddingService>> {
+        self.embedding_service.clone()
     }
 
     /// Execute a tool by name with given arguments
@@ -1579,7 +1621,8 @@ impl ToolExecutor {
         }
 
         // --- Semantic search ---
-        if scope == "semantic" {
+        if scope == "semantic" || scope == "all" {
+            let is_standalone_semantic = scope == "semantic";
             match &self.embedding_service {
                 Some(emb_svc) if emb_svc.is_ready() => {
                     let query_embedding = emb_svc.embed_text(query);
@@ -1630,19 +1673,31 @@ impl ToolExecutor {
                     }
                 }
                 Some(_) => {
-                    output_sections.push(
-                        "Semantic search not available: embedding vocabulary has not been built yet. \
-                         The project needs to be re-indexed with embedding generation enabled. \
-                         Use 'symbols' or 'files' scope instead."
-                            .to_string(),
-                    );
+                    if is_standalone_semantic {
+                        output_sections.push(
+                            "Semantic search not available: embedding vocabulary has not been built yet. \
+                             The project needs to be re-indexed with embedding generation enabled. \
+                             Use 'symbols' or 'files' scope instead."
+                                .to_string(),
+                        );
+                    } else {
+                        output_sections.push(
+                            "Semantic search: not available (vocabulary not built)".to_string(),
+                        );
+                    }
                 }
                 None => {
-                    output_sections.push(
-                        "Semantic search not available: no embedding service configured. \
-                         Use 'symbols' or 'files' scope instead."
-                            .to_string(),
-                    );
+                    if is_standalone_semantic {
+                        output_sections.push(
+                            "Semantic search not available: no embedding service configured. \
+                             Use 'symbols' or 'files' scope instead."
+                                .to_string(),
+                        );
+                    } else {
+                        output_sections.push(
+                            "Semantic search: not configured".to_string(),
+                        );
+                    }
                 }
             }
         }
@@ -3007,5 +3062,296 @@ mod tests {
             let h = ToolExecutor::hash_prompt("test prompt");
             assert_eq!(h, ToolExecutor::hash_prompt("test prompt"));
         }
+    }
+
+    // =========================================================================
+    // CodebaseSearch scope=all semantic tests (feature-004 story-001)
+    // =========================================================================
+
+    /// Helper to create a ToolExecutor with IndexStore and EmbeddingService
+    /// that has a built vocabulary and stored embeddings.
+    fn create_test_executor_with_embedding() -> (TempDir, ToolExecutor) {
+        use crate::services::orchestrator::embedding_service::{EmbeddingService, embedding_to_bytes};
+        use crate::services::orchestrator::index_store::IndexStore;
+        use crate::storage::database::Database;
+        use crate::services::orchestrator::analysis_index::{FileInventoryItem, SymbolInfo, SymbolKind};
+
+        let dir = setup_test_dir();
+        let mut executor = ToolExecutor::new(dir.path());
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // Insert file index entries
+        let item1 = FileInventoryItem {
+            path: "src/main.rs".to_string(),
+            component: "desktop-rust".to_string(),
+            language: "rust".to_string(),
+            extension: Some("rs".to_string()),
+            size_bytes: 1024,
+            line_count: 50,
+            is_test: false,
+            symbols: vec![
+                SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
+            ],
+        };
+
+        store.upsert_file_index(&project_path, &item1, "h1").unwrap();
+
+        // Build embedding service with vocabulary
+        let emb_svc = Arc::new(EmbeddingService::new());
+        emb_svc.build_vocabulary(&[
+            "fn main rust entry point",
+            "struct config settings",
+            "import react component",
+        ]);
+
+        // Store an embedding for a file chunk
+        let embedding = emb_svc.embed_text("fn main rust entry point");
+        let emb_bytes = embedding_to_bytes(&embedding);
+        store.upsert_chunk_embedding(
+            &project_path,
+            "src/main.rs",
+            0,
+            "fn main() { println!(\"hello\"); }",
+            &emb_bytes,
+        ).unwrap();
+
+        executor.set_index_store(store);
+        executor.set_embedding_service(emb_svc);
+
+        (dir, executor)
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_scope_all_includes_semantic() {
+        let (_dir, executor) = create_test_executor_with_embedding();
+
+        let args = serde_json::json!({
+            "query": "main",
+            "scope": "all"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+
+        // Should include symbols section
+        assert!(
+            output.contains("Symbols matching"),
+            "scope=all should include symbol results, got: {}",
+            output
+        );
+        // Should include semantic section
+        assert!(
+            output.contains("Semantic search"),
+            "scope=all should include semantic results, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_scope_all_without_embedding() {
+        let (_dir, executor) = create_test_executor_with_index();
+        // No embedding service set — scope=all should still return symbol+file results
+        // and include a brief semantic unavailability note
+
+        let args = serde_json::json!({
+            "query": "App",
+            "scope": "all"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+
+        // Should have symbol results
+        assert!(
+            output.contains("Symbols matching"),
+            "scope=all without embedding should still have symbols, got: {}",
+            output
+        );
+        // Should have a brief note about semantic being unavailable (not a full error paragraph)
+        assert!(
+            output.contains("Semantic search: not configured"),
+            "should include brief semantic unavailability note, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_scope_all_with_unready_embedding() {
+        use crate::services::orchestrator::embedding_service::EmbeddingService;
+
+        let (_dir, mut executor) = create_test_executor_with_index();
+        // Set an embedding service that has NOT been initialized (vocabulary not built)
+        let emb_svc = Arc::new(EmbeddingService::new());
+        executor.set_embedding_service(emb_svc);
+
+        let args = serde_json::json!({
+            "query": "App",
+            "scope": "all"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+
+        // Should have symbol results
+        assert!(
+            output.contains("Symbols matching"),
+            "should still have symbols, got: {}",
+            output
+        );
+        // Should have a brief note (not the long multi-sentence error)
+        assert!(
+            output.contains("Semantic search: not available"),
+            "should include brief note about vocabulary not built, got: {}",
+            output
+        );
+        // Should NOT have the long instruction text that scope=semantic would show
+        assert!(
+            !output.contains("The project needs to be re-indexed"),
+            "scope=all should use brief note, not full error paragraph, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_scope_semantic_unchanged() {
+        // scope=semantic should behave identically to before: full error when no service
+        let (_dir, executor) = create_test_executor_with_index();
+
+        let args = serde_json::json!({
+            "query": "App",
+            "scope": "semantic"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+
+        // Should have full error message
+        assert!(
+            output.contains("Semantic search not available: no embedding service configured"),
+            "scope=semantic should show full error, got: {}",
+            output
+        );
+        assert!(
+            output.contains("Use 'symbols' or 'files' scope instead"),
+            "scope=semantic should suggest alternatives, got: {}",
+            output
+        );
+    }
+
+    // =========================================================================
+    // Shared read_cache tests (feature-004 story-003)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_shared_cache_parent_to_child() {
+        let dir = setup_test_dir();
+        let parent = ToolExecutor::new(dir.path());
+        let file_path = dir.path().join("test.txt").to_string_lossy().to_string();
+        let args = serde_json::json!({ "file_path": &file_path });
+
+        // Parent reads the file
+        let result1 = parent.execute("Read", &args).await;
+        assert!(result1.success);
+        assert!(result1.output.unwrap().contains("line 1"));
+
+        // Create child with shared cache
+        let shared_cache = parent.shared_read_cache();
+        let child = ToolExecutor::new_with_shared_cache(dir.path(), shared_cache);
+
+        // Child reads the same file — should get dedup message
+        let result2 = child.execute("Read", &args).await;
+        assert!(result2.success);
+        let output2 = result2.output.unwrap();
+        assert!(
+            output2.contains("[DEDUP]") && output2.contains("already read"),
+            "child should see parent's cached read, got: {}",
+            output2
+        );
+    }
+
+    #[tokio::test]
+    async fn test_shared_cache_child_to_parent() {
+        let dir = setup_test_dir();
+        let parent = ToolExecutor::new(dir.path());
+
+        // Create child with shared cache
+        let shared_cache = parent.shared_read_cache();
+        let child = ToolExecutor::new_with_shared_cache(dir.path(), shared_cache);
+
+        // Child reads a file
+        let nested_path = dir.path().join("subdir").join("nested.txt").to_string_lossy().to_string();
+        let args = serde_json::json!({ "file_path": &nested_path });
+        let result1 = child.execute("Read", &args).await;
+        assert!(result1.success);
+        assert!(result1.output.unwrap().contains("nested content"));
+
+        // Parent should see the child's cache entry
+        let summary = parent.get_read_file_summary();
+        assert!(
+            !summary.is_empty(),
+            "parent should see child's cached read"
+        );
+        assert!(
+            summary.iter().any(|(path, _, _)| path.contains("nested")),
+            "parent should see the nested.txt entry from child, got: {:?}",
+            summary
+        );
+    }
+
+    #[tokio::test]
+    async fn test_new_creates_independent_cache() {
+        let dir = setup_test_dir();
+        let executor1 = ToolExecutor::new(dir.path());
+        let executor2 = ToolExecutor::new(dir.path());
+
+        // Read file with executor1
+        let file_path = dir.path().join("test.txt").to_string_lossy().to_string();
+        let args = serde_json::json!({ "file_path": &file_path });
+        executor1.execute("Read", &args).await;
+
+        // executor2 should NOT see executor1's cache
+        assert!(
+            executor2.get_read_file_summary().is_empty(),
+            "separate ::new() instances should not share cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_shared_cache_concurrent_access() {
+        let dir = setup_test_dir();
+
+        // Create extra test files
+        std::fs::write(dir.path().join("file_a.txt"), "content a\n").unwrap();
+        std::fs::write(dir.path().join("file_b.txt"), "content b\n").unwrap();
+
+        let parent = ToolExecutor::new(dir.path());
+        let shared_cache = parent.shared_read_cache();
+        let child = ToolExecutor::new_with_shared_cache(dir.path(), shared_cache);
+
+        let path_a = dir.path().join("file_a.txt").to_string_lossy().to_string();
+        let path_b = dir.path().join("file_b.txt").to_string_lossy().to_string();
+
+        // Spawn two reads in parallel — one on parent, one on child
+        let args_a = serde_json::json!({ "file_path": &path_a });
+        let args_b = serde_json::json!({ "file_path": &path_b });
+        let (res_a, res_b) = tokio::join!(
+            parent.execute("Read", &args_a),
+            child.execute("Read", &args_b),
+        );
+
+        assert!(res_a.success);
+        assert!(res_b.success);
+
+        // Both entries should be visible from either executor
+        let summary = parent.get_read_file_summary();
+        assert!(
+            summary.len() >= 2,
+            "shared cache should have entries from both executors, got: {:?}",
+            summary
+        );
     }
 }
