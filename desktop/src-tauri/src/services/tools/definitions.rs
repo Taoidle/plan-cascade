@@ -391,11 +391,12 @@ pub fn codebase_search_tool() -> ToolDefinition {
 
     // scope with enum constraint and default
     let mut scope_schema = ParameterSchema::string(Some(
-        "Search scope: 'symbols' (search symbol names), 'files' (search file paths/components), 'all' (merge both). Default: 'all'",
+        "Search scope: 'symbols' (search symbol names), 'files' (search file paths/components), 'semantic' (vector similarity search over code chunks), 'all' (merge symbols + files). Default: 'all'",
     ));
     scope_schema.enum_values = Some(vec![
         "files".to_string(),
         "symbols".to_string(),
+        "semantic".to_string(),
         "all".to_string(),
     ]);
     scope_schema.default = Some(serde_json::Value::String("all".to_string()));
@@ -410,7 +411,7 @@ pub fn codebase_search_tool() -> ToolDefinition {
 
     ToolDefinition {
         name: "CodebaseSearch".to_string(),
-        description: "Search the project's indexed codebase for symbols, files, or both. Uses the pre-built SQLite index for fast lookups without scanning the filesystem. Preferred over Grep/Glob for initial code exploration when the index is available.".to_string(),
+        description: "Search the project's indexed codebase for symbols, files, or semantic similarity. Uses the pre-built SQLite index for fast lookups without scanning the filesystem. The 'semantic' scope performs vector similarity search over code chunks. Preferred over Grep/Glob for initial code exploration when the index is available.".to_string(),
         input_schema: ParameterSchema::object(
             Some("CodebaseSearch parameters"),
             properties,
@@ -557,6 +558,7 @@ mod tests {
         let enum_vals = scope.enum_values.as_ref().unwrap();
         assert!(enum_vals.contains(&"files".to_string()));
         assert!(enum_vals.contains(&"symbols".to_string()));
+        assert!(enum_vals.contains(&"semantic".to_string()));
         assert!(enum_vals.contains(&"all".to_string()));
 
         // scope default is "all"

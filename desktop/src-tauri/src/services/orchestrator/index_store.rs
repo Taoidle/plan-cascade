@@ -11,6 +11,7 @@ use crate::storage::database::DbPool;
 use crate::utils::error::{AppError, AppResult};
 
 use super::analysis_index::{FileInventoryItem, SymbolInfo, SymbolKind};
+use super::embedding_service::{bytes_to_embedding, cosine_similarity, SemanticSearchResult};
 
 /// Result of a symbol query, including the file it belongs to.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,6 +367,141 @@ impl IndexStore {
             .collect();
 
         Ok(symbols)
+    }
+
+    // =========================================================================
+    // Embedding storage methods (feature-003)
+    // =========================================================================
+
+    /// Insert or update a chunk embedding for a file.
+    ///
+    /// Uses `INSERT ... ON CONFLICT` to upsert on the
+    /// `(project_path, file_path, chunk_index)` unique constraint.
+    pub fn upsert_chunk_embedding(
+        &self,
+        project_path: &str,
+        file_path: &str,
+        chunk_index: i64,
+        chunk_text: &str,
+        embedding: &[u8],
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "INSERT INTO file_embeddings (project_path, file_path, chunk_index, chunk_text, embedding, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+             ON CONFLICT(project_path, file_path, chunk_index) DO UPDATE SET
+                 chunk_text = excluded.chunk_text,
+                 embedding = excluded.embedding,
+                 created_at = CURRENT_TIMESTAMP",
+            params![project_path, file_path, chunk_index, chunk_text, embedding],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieve all embeddings for a project.
+    ///
+    /// Returns a vector of `(file_path, chunk_index, chunk_text, embedding_bytes)`.
+    pub fn get_embeddings_for_project(
+        &self,
+        project_path: &str,
+    ) -> AppResult<Vec<(String, i64, String, Vec<u8>)>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT file_path, chunk_index, chunk_text, embedding
+             FROM file_embeddings
+             WHERE project_path = ?1
+             ORDER BY file_path, chunk_index",
+        )?;
+
+        let rows = stmt
+            .query_map(params![project_path], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Delete all embeddings for a specific file within a project.
+    pub fn delete_embeddings_for_file(
+        &self,
+        project_path: &str,
+        file_path: &str,
+    ) -> AppResult<usize> {
+        let conn = self.get_connection()?;
+        let deleted = conn.execute(
+            "DELETE FROM file_embeddings WHERE project_path = ?1 AND file_path = ?2",
+            params![project_path, file_path],
+        )?;
+        Ok(deleted)
+    }
+
+    /// Delete all embeddings for a project.
+    pub fn delete_embeddings_for_project(&self, project_path: &str) -> AppResult<usize> {
+        let conn = self.get_connection()?;
+        let deleted = conn.execute(
+            "DELETE FROM file_embeddings WHERE project_path = ?1",
+            params![project_path],
+        )?;
+        Ok(deleted)
+    }
+
+    /// Perform a semantic search over stored embeddings.
+    ///
+    /// Computes cosine similarity between `query_embedding` and every stored
+    /// embedding for the given project, returning the top-k results ranked by
+    /// descending similarity.
+    pub fn semantic_search(
+        &self,
+        query_embedding: &[f32],
+        project_path: &str,
+        top_k: usize,
+    ) -> AppResult<Vec<SemanticSearchResult>> {
+        let rows = self.get_embeddings_for_project(project_path)?;
+
+        if rows.is_empty() || query_embedding.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Score each chunk against the query
+        let mut scored: Vec<SemanticSearchResult> = rows
+            .into_iter()
+            .map(|(file_path, chunk_index, chunk_text, emb_bytes)| {
+                let stored_emb = bytes_to_embedding(&emb_bytes);
+                let similarity = cosine_similarity(query_embedding, &stored_emb);
+                SemanticSearchResult {
+                    file_path,
+                    chunk_index,
+                    chunk_text,
+                    similarity,
+                }
+            })
+            .collect();
+
+        // Sort by similarity descending
+        scored.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Take top-k
+        scored.truncate(top_k);
+
+        Ok(scored)
+    }
+
+    /// Count the total number of embedding chunks for a project.
+    pub fn count_embeddings(&self, project_path: &str) -> AppResult<usize> {
+        let conn = self.get_connection()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM file_embeddings WHERE project_path = ?1",
+            params![project_path],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
     }
 
     fn get_connection(
@@ -860,6 +996,219 @@ mod tests {
         assert!(stored[2].signature.is_none());
         assert!(stored[2].doc_comment.is_none());
         assert_eq!(stored[2].end_line, 0);
+    }
+
+    // =========================================================================
+    // Embedding storage tests (feature-003)
+    // =========================================================================
+
+    #[test]
+    fn upsert_and_retrieve_chunk_embedding() {
+        let store = create_test_store();
+        let embedding: Vec<u8> = vec![0, 0, 128, 63, 0, 0, 0, 64]; // [1.0f32, 2.0f32] as bytes
+
+        store
+            .upsert_chunk_embedding("/project", "src/main.rs", 0, "fn main() {}", &embedding)
+            .unwrap();
+
+        let results = store.get_embeddings_for_project("/project").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "src/main.rs");
+        assert_eq!(results[0].1, 0);
+        assert_eq!(results[0].2, "fn main() {}");
+        assert_eq!(results[0].3, embedding);
+    }
+
+    #[test]
+    fn upsert_chunk_embedding_updates_on_conflict() {
+        let store = create_test_store();
+        let emb1: Vec<u8> = vec![0, 0, 128, 63]; // 1.0f32
+        let emb2: Vec<u8> = vec![0, 0, 0, 64]; // 2.0f32
+
+        store
+            .upsert_chunk_embedding("/project", "src/main.rs", 0, "original", &emb1)
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "src/main.rs", 0, "updated", &emb2)
+            .unwrap();
+
+        let results = store.get_embeddings_for_project("/project").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].2, "updated");
+        assert_eq!(results[0].3, emb2);
+    }
+
+    #[test]
+    fn delete_embeddings_for_file() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        store
+            .upsert_chunk_embedding("/project", "src/a.rs", 0, "chunk a", &emb)
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "src/b.rs", 0, "chunk b", &emb)
+            .unwrap();
+
+        let deleted = store
+            .delete_embeddings_for_file("/project", "src/a.rs")
+            .unwrap();
+        assert_eq!(deleted, 1);
+
+        let remaining = store.get_embeddings_for_project("/project").unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].0, "src/b.rs");
+    }
+
+    #[test]
+    fn delete_embeddings_for_project() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        store
+            .upsert_chunk_embedding("/project", "src/a.rs", 0, "chunk a", &emb)
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "src/b.rs", 0, "chunk b", &emb)
+            .unwrap();
+
+        let deleted = store
+            .delete_embeddings_for_project("/project")
+            .unwrap();
+        assert_eq!(deleted, 2);
+
+        let remaining = store.get_embeddings_for_project("/project").unwrap();
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn count_embeddings_basic() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        assert_eq!(store.count_embeddings("/project").unwrap(), 0);
+
+        store
+            .upsert_chunk_embedding("/project", "src/a.rs", 0, "chunk 0", &emb)
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "src/a.rs", 1, "chunk 1", &emb)
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "src/b.rs", 0, "chunk 0", &emb)
+            .unwrap();
+
+        assert_eq!(store.count_embeddings("/project").unwrap(), 3);
+    }
+
+    #[test]
+    fn embeddings_isolated_by_project() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        store
+            .upsert_chunk_embedding("/project-a", "src/a.rs", 0, "chunk a", &emb)
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project-b", "src/b.rs", 0, "chunk b", &emb)
+            .unwrap();
+
+        assert_eq!(store.count_embeddings("/project-a").unwrap(), 1);
+        assert_eq!(store.count_embeddings("/project-b").unwrap(), 1);
+
+        let results_a = store.get_embeddings_for_project("/project-a").unwrap();
+        assert_eq!(results_a[0].0, "src/a.rs");
+
+        let results_b = store.get_embeddings_for_project("/project-b").unwrap();
+        assert_eq!(results_b[0].0, "src/b.rs");
+    }
+
+    // =========================================================================
+    // Semantic search tests (story-004)
+    // =========================================================================
+
+    #[test]
+    fn semantic_search_returns_sorted_results() {
+        use super::super::embedding_service::embedding_to_bytes;
+
+        let store = create_test_store();
+
+        // Create embeddings where vec1 is closer to query than vec2
+        let query = vec![1.0f32, 0.0, 0.0];
+        let vec1 = vec![0.9f32, 0.1, 0.0]; // very similar to query
+        let vec2 = vec![0.0f32, 1.0, 0.0]; // orthogonal to query
+        let vec3 = vec![0.5f32, 0.5, 0.0]; // moderately similar
+
+        store.upsert_chunk_embedding("/project", "a.rs", 0, "chunk a", &embedding_to_bytes(&vec1)).unwrap();
+        store.upsert_chunk_embedding("/project", "b.rs", 0, "chunk b", &embedding_to_bytes(&vec2)).unwrap();
+        store.upsert_chunk_embedding("/project", "c.rs", 0, "chunk c", &embedding_to_bytes(&vec3)).unwrap();
+
+        let results = store.semantic_search(&query, "/project", 10).unwrap();
+        assert_eq!(results.len(), 3);
+
+        // First result should be the most similar (vec1 -> "chunk a")
+        assert_eq!(results[0].chunk_text, "chunk a");
+        assert!(results[0].similarity > results[1].similarity);
+
+        // Last result should be the least similar (vec2 -> "chunk b")
+        assert_eq!(results[2].chunk_text, "chunk b");
+    }
+
+    #[test]
+    fn semantic_search_top_k() {
+        use super::super::embedding_service::embedding_to_bytes;
+
+        let store = create_test_store();
+        let emb = embedding_to_bytes(&vec![1.0f32, 0.0]);
+
+        for i in 0..10 {
+            store.upsert_chunk_embedding("/project", &format!("file_{}.rs", i), 0, &format!("chunk {}", i), &emb).unwrap();
+        }
+
+        let query = vec![1.0f32, 0.0];
+        let results = store.semantic_search(&query, "/project", 3).unwrap();
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn semantic_search_empty_project() {
+        let store = create_test_store();
+        let query = vec![1.0f32, 0.0, 0.0];
+
+        let results = store.semantic_search(&query, "/nonexistent", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn semantic_search_empty_query() {
+        use super::super::embedding_service::embedding_to_bytes;
+
+        let store = create_test_store();
+        let emb = embedding_to_bytes(&vec![1.0f32, 0.0]);
+        store.upsert_chunk_embedding("/project", "a.rs", 0, "chunk", &emb).unwrap();
+
+        let empty_query: Vec<f32> = vec![];
+        let results = store.semantic_search(&empty_query, "/project", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn multiple_chunks_per_file() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        for i in 0..5 {
+            store
+                .upsert_chunk_embedding("/project", "src/main.rs", i, &format!("chunk {}", i), &emb)
+                .unwrap();
+        }
+
+        let results = store.get_embeddings_for_project("/project").unwrap();
+        assert_eq!(results.len(), 5);
+        // Should be ordered by chunk_index
+        for (i, r) in results.iter().enumerate() {
+            assert_eq!(r.1, i as i64);
+        }
     }
 
     #[test]

@@ -396,6 +396,34 @@ impl Database {
             [],
         )?;
 
+        // Create file_embeddings table for vector embedding storage (feature-003)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS file_embeddings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_path TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_path, file_path, chunk_index)
+            )",
+            [],
+        )?;
+
+        // Indexes for file_embeddings queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_embeddings_project
+             ON file_embeddings(project_path)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file
+             ON file_embeddings(project_path, file_path)",
+            [],
+        )?;
+
         Ok(())
     }
 
