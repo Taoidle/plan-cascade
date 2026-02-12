@@ -1925,7 +1925,7 @@ impl OrchestratorService {
                         request_options.analysis_phase.as_deref(),
                     );
 
-                    // Emit tool result event
+                    // Emit tool result event (always — for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tc.id.clone(),
@@ -1942,24 +1942,42 @@ impl OrchestratorService {
                         })
                         .await;
 
-                    // Add tool result to messages (with multimodal support)
-                    if let Some((mime, b64)) = &result.image_data {
-                        if self.provider.supports_multimodal() {
-                            use crate::services::llm::types::ContentBlock;
-                            let blocks = vec![
-                                ContentBlock::Text {
-                                    text: context_tool_output.clone(),
-                                },
-                                ContentBlock::Image {
-                                    media_type: mime.clone(),
-                                    data: b64.clone(),
-                                },
-                            ];
-                            messages.push(Message::tool_result_multimodal(
-                                &tc.id,
-                                blocks,
-                                !result.success,
-                            ));
+                    // If the result is a dedup hit, push a minimal tool_result
+                    // so the LLM doesn't see the full dedup content but the
+                    // Anthropic API requirement (every tool_use needs a
+                    // tool_result) is still satisfied.
+                    if result.is_dedup {
+                        messages.push(Message::tool_result(
+                            &tc.id,
+                            ".".to_string(),
+                            false,
+                        ));
+                    } else {
+                        // Add tool result to messages (with multimodal support)
+                        if let Some((mime, b64)) = &result.image_data {
+                            if self.provider.supports_multimodal() {
+                                use crate::services::llm::types::ContentBlock;
+                                let blocks = vec![
+                                    ContentBlock::Text {
+                                        text: context_tool_output.clone(),
+                                    },
+                                    ContentBlock::Image {
+                                        media_type: mime.clone(),
+                                        data: b64.clone(),
+                                    },
+                                ];
+                                messages.push(Message::tool_result_multimodal(
+                                    &tc.id,
+                                    blocks,
+                                    !result.success,
+                                ));
+                            } else {
+                                messages.push(Message::tool_result(
+                                    &tc.id,
+                                    context_tool_output.clone(),
+                                    !result.success,
+                                ));
+                            }
                         } else {
                             messages.push(Message::tool_result(
                                 &tc.id,
@@ -1967,12 +1985,6 @@ impl OrchestratorService {
                                 !result.success,
                             ));
                         }
-                    } else {
-                        messages.push(Message::tool_result(
-                            &tc.id,
-                            context_tool_output.clone(),
-                            !result.success,
-                        ));
                     }
 
                     // Check for tool call loop (same tool+args repeated consecutively)
@@ -2043,6 +2055,7 @@ impl OrchestratorService {
                         request_options.analysis_phase.as_deref(),
                     );
 
+                    // Emit tool result event (always — for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tool_id.clone(),
@@ -2059,12 +2072,15 @@ impl OrchestratorService {
                         })
                         .await;
 
-                    tool_results.push(format_tool_result(
-                        &effective_tool_name,
-                        &tool_id,
-                        &context_tool_output,
-                        !result.success,
-                    ));
+                    // Skip dedup results in fallback path — don't add to tool_results
+                    if !result.is_dedup {
+                        tool_results.push(format_tool_result(
+                            &effective_tool_name,
+                            &tool_id,
+                            &context_tool_output,
+                            !result.success,
+                        ));
+                    }
 
                     // Check for tool call loop in fallback path
                     if let Some(break_msg) = loop_detector.record_call(
@@ -2411,6 +2427,7 @@ impl OrchestratorService {
                     merge_usage(&mut total_usage, &nested_usage);
                     iterations += nested_iterations;
 
+                    // Emit tool result event (always — for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tc.id.clone(),
@@ -2427,31 +2444,49 @@ impl OrchestratorService {
                         })
                         .await;
 
-                    // Truncate tool output for messages vec (LLM context)
-                    // while keeping full content in the ToolResult event above.
-                    let context_content = truncate_tool_output_for_context(
-                        &tc.name,
-                        &result.to_content(),
-                    );
+                    // If the result is a dedup hit, push a minimal tool_result
+                    // so the LLM doesn't see the full dedup content but the
+                    // Anthropic API requirement (every tool_use needs a
+                    // tool_result) is still satisfied.
+                    if result.is_dedup {
+                        messages.push(Message::tool_result(
+                            &tc.id,
+                            ".".to_string(),
+                            false,
+                        ));
+                    } else {
+                        // Truncate tool output for messages vec (LLM context)
+                        // while keeping full content in the ToolResult event above.
+                        let context_content = truncate_tool_output_for_context(
+                            &tc.name,
+                            &result.to_content(),
+                        );
 
-                    // Add tool result to messages (with multimodal support)
-                    if let Some((mime, b64)) = &result.image_data {
-                        if self.provider.supports_multimodal() {
-                            use crate::services::llm::types::ContentBlock;
-                            let blocks = vec![
-                                ContentBlock::Text {
-                                    text: context_content.clone(),
-                                },
-                                ContentBlock::Image {
-                                    media_type: mime.clone(),
-                                    data: b64.clone(),
-                                },
-                            ];
-                            messages.push(Message::tool_result_multimodal(
-                                &tc.id,
-                                blocks,
-                                !result.success,
-                            ));
+                        // Add tool result to messages (with multimodal support)
+                        if let Some((mime, b64)) = &result.image_data {
+                            if self.provider.supports_multimodal() {
+                                use crate::services::llm::types::ContentBlock;
+                                let blocks = vec![
+                                    ContentBlock::Text {
+                                        text: context_content.clone(),
+                                    },
+                                    ContentBlock::Image {
+                                        media_type: mime.clone(),
+                                        data: b64.clone(),
+                                    },
+                                ];
+                                messages.push(Message::tool_result_multimodal(
+                                    &tc.id,
+                                    blocks,
+                                    !result.success,
+                                ));
+                            } else {
+                                messages.push(Message::tool_result(
+                                    &tc.id,
+                                    context_content,
+                                    !result.success,
+                                ));
+                            }
                         } else {
                             messages.push(Message::tool_result(
                                 &tc.id,
@@ -2459,12 +2494,6 @@ impl OrchestratorService {
                                 !result.success,
                             ));
                         }
-                    } else {
-                        messages.push(Message::tool_result(
-                            &tc.id,
-                            context_content,
-                            !result.success,
-                        ));
                     }
 
                     // Check for tool call loop (same tool+args repeated consecutively)
@@ -2527,6 +2556,7 @@ impl OrchestratorService {
                     merge_usage(&mut total_usage, &nested_usage);
                     iterations += nested_iterations;
 
+                    // Emit tool result event (always — for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tool_id.clone(),
@@ -2543,19 +2573,22 @@ impl OrchestratorService {
                         })
                         .await;
 
-                    // Truncate tool output for messages vec (LLM context)
-                    // while keeping full content in the ToolResult event above.
-                    let context_content = truncate_tool_output_for_context(
-                        &ptc.tool_name,
-                        &result.to_content(),
-                    );
+                    // Skip dedup results in fallback path — don't add to tool_results
+                    if !result.is_dedup {
+                        // Truncate tool output for messages vec (LLM context)
+                        // while keeping full content in the ToolResult event above.
+                        let context_content = truncate_tool_output_for_context(
+                            &ptc.tool_name,
+                            &result.to_content(),
+                        );
 
-                    tool_results.push(format_tool_result(
-                        &ptc.tool_name,
-                        &tool_id,
-                        &context_content,
-                        !result.success,
-                    ));
+                        tool_results.push(format_tool_result(
+                            &ptc.tool_name,
+                            &tool_id,
+                            &context_content,
+                            !result.success,
+                        ));
+                    }
 
                     // Check for tool call loop in fallback path
                     if let Some(break_msg) = loop_detector.record_call(

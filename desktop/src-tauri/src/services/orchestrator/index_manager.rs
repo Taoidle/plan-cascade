@@ -97,6 +97,47 @@ impl IndexManager {
         // Check the database for an existing index.
         match self.index_store.get_project_summary(project_path) {
             Ok(summary) if summary.total_files > 0 => {
+                // Restore the TF-IDF vocabulary from SQLite so that semantic
+                // search is available immediately without a full re-embed.
+                let embedding_svc = {
+                    let mut embeds = self.embedding_services.write().await;
+                    embeds
+                        .entry(project_path.to_string())
+                        .or_insert_with(|| Arc::new(EmbeddingService::new()))
+                        .clone()
+                };
+                if !embedding_svc.is_ready() {
+                    match self.index_store.load_vocabulary(project_path) {
+                        Ok(Some(json)) => {
+                            match embedding_svc.import_vocabulary(&json) {
+                                Ok(()) => {
+                                    info!(
+                                        project = %project_path,
+                                        "index manager: restored vocabulary from SQLite"
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        project = %project_path,
+                                        error = %e,
+                                        "index manager: failed to import vocabulary"
+                                    );
+                                }
+                            }
+                        }
+                        Ok(None) => {
+                            // No vocabulary in DB — will be built on next embedding pass
+                        }
+                        Err(e) => {
+                            warn!(
+                                project = %project_path,
+                                error = %e,
+                                "index manager: failed to load vocabulary from SQLite"
+                            );
+                        }
+                    }
+                }
+
                 let event = IndexStatusEvent {
                     project_path: project_path.to_string(),
                     status: "indexed".to_string(),
@@ -342,6 +383,7 @@ impl IndexManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::orchestrator::index_store::IndexStore;
     use crate::storage::database::Database;
     use std::fs;
     use tempfile::tempdir;
@@ -486,6 +528,49 @@ mod tests {
     // -----------------------------------------------------------------------
     // get_status: returns cached status
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // ensure_indexed restores vocabulary from SQLite (story-004)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn ensure_indexed_loads_vocabulary_from_sqlite() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("app.py"), "def run():\n    pass\n").expect("write");
+
+        let pool = test_pool();
+        let mgr = IndexManager::new(pool.clone());
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // First: index the project (this creates the index + embedding)
+        mgr.ensure_indexed(&project_path).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        // Verify the embedding service is ready after indexing
+        let emb = mgr.get_embedding_service(&project_path).await;
+        assert!(emb.is_some(), "should have embedding service after indexing");
+        // The embedding service should be ready (vocab built during embedding pass)
+        // Note: it may or may not be ready depending on how fast the background
+        // indexer ran. The key test is the second call below.
+
+        // Save a vocab manually (simulating what the embedding pass does)
+        let vocab_json = r#"{"token_to_idx":{"def":0,"run":1,"pass":2},"idf":[1.0,1.0,1.0],"num_docs":1}"#;
+        let store = IndexStore::new(pool.clone());
+        store.save_vocabulary(&project_path, vocab_json).unwrap();
+
+        // Create a fresh IndexManager (simulating app restart)
+        let mgr2 = IndexManager::new(pool);
+        mgr2.ensure_indexed(&project_path).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // The embedding service should have restored the vocabulary
+        let emb2 = mgr2.get_embedding_service(&project_path).await;
+        assert!(emb2.is_some(), "should have embedding service after restore");
+        assert!(
+            emb2.unwrap().is_ready(),
+            "embedding service should be ready after vocab restore from SQLite"
+        );
+    }
 
     #[tokio::test]
     async fn get_status_returns_cached_value() {

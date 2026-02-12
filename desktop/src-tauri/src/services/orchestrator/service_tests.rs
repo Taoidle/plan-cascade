@@ -2368,3 +2368,46 @@ fn test_session_memory_manager_single_message() {
     assert!(memory_text.contains(SESSION_MEMORY_V1_MARKER));
     assert!(memory_text.contains("test.rs"));
 }
+
+// =========================================================================
+// Dedup skip logic tests (story-006)
+// =========================================================================
+
+#[test]
+fn test_tool_result_is_dedup_flag_default_false() {
+    use crate::services::tools::ToolResult;
+    let result = ToolResult::ok("some content");
+    assert!(!result.is_dedup, "ToolResult::ok should default is_dedup to false");
+}
+
+#[test]
+fn test_tool_result_ok_dedup_sets_flag() {
+    use crate::services::tools::ToolResult;
+    let result = ToolResult::ok_dedup("[DEDUP] file.rs (50 lines) already read.");
+    assert!(result.is_dedup, "ToolResult::ok_dedup should set is_dedup to true");
+    assert!(result.success, "dedup result should still be successful");
+}
+
+#[test]
+fn test_tool_result_err_is_not_dedup() {
+    use crate::services::tools::ToolResult;
+    let result = ToolResult::err("some error");
+    assert!(!result.is_dedup, "ToolResult::err should not be dedup");
+}
+
+#[test]
+fn test_dedup_minimal_tool_result_preserves_api_compat() {
+    // Verify that the minimal "." tool_result we push for dedup results
+    // is a valid Message that satisfies the Anthropic API requirement.
+    let msg = Message::tool_result("toolu_123", ".".to_string(), false);
+    assert_eq!(msg.role, crate::services::llm::MessageRole::User);
+    // Verify the content has the tool_result
+    assert!(!msg.content.is_empty());
+    match &msg.content[0] {
+        MessageContent::ToolResult { tool_use_id, content, .. } => {
+            assert_eq!(tool_use_id, "toolu_123");
+            assert_eq!(content, ".");
+        }
+        _ => panic!("Expected ToolResult content block"),
+    }
+}

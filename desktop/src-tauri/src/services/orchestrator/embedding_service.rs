@@ -34,7 +34,7 @@ pub struct SemanticSearchResult {
 }
 
 /// Internal vocabulary learned from a corpus.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Vocabulary {
     /// Map from token → column index in the TF-IDF vector.
     token_to_idx: HashMap<String, usize>,
@@ -120,6 +120,35 @@ impl EmbeddingService {
     /// Check whether the vocabulary has been initialised.
     pub fn is_ready(&self) -> bool {
         self.inner.lock().unwrap().vocab.is_some()
+    }
+
+    /// Export the current vocabulary as a JSON string.
+    ///
+    /// Returns `None` if no vocabulary has been built yet.
+    pub fn export_vocabulary(&self) -> Option<String> {
+        let guard = self.inner.lock().unwrap();
+        guard
+            .vocab
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok())
+    }
+
+    /// Import a vocabulary from a JSON string, replacing any existing vocabulary.
+    ///
+    /// Validates that `token_to_idx.len() == idf.len()` before accepting.
+    pub fn import_vocabulary(&self, json: &str) -> Result<(), String> {
+        let vocab: Vocabulary =
+            serde_json::from_str(json).map_err(|e| format!("invalid vocabulary JSON: {}", e))?;
+        if vocab.token_to_idx.len() != vocab.idf.len() {
+            return Err(format!(
+                "vocabulary mismatch: token_to_idx has {} entries but idf has {} entries",
+                vocab.token_to_idx.len(),
+                vocab.idf.len()
+            ));
+        }
+        let mut guard = self.inner.lock().unwrap();
+        guard.vocab = Some(vocab);
+        Ok(())
     }
 }
 
@@ -552,5 +581,90 @@ mod tests {
     fn embedding_service_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<EmbeddingService>();
+    }
+
+    // =========================================================================
+    // Vocabulary export/import tests (story-001)
+    // =========================================================================
+
+    #[test]
+    fn export_vocabulary_returns_none_when_no_vocab() {
+        let svc = EmbeddingService::new();
+        assert!(svc.export_vocabulary().is_none());
+    }
+
+    #[test]
+    fn export_vocabulary_returns_valid_json_after_build() {
+        let svc = EmbeddingService::new();
+        svc.build_vocabulary(&["hello world", "foo bar"]);
+        let json = svc.export_vocabulary();
+        assert!(json.is_some(), "should return Some after build_vocabulary");
+        let json_str = json.unwrap();
+        // Validate it's parseable JSON
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert!(parsed.get("token_to_idx").is_some());
+        assert!(parsed.get("idf").is_some());
+        assert!(parsed.get("num_docs").is_some());
+    }
+
+    #[test]
+    fn import_vocabulary_restores_and_embed_works() {
+        let svc1 = EmbeddingService::new();
+        svc1.build_vocabulary(&["hello world", "foo bar"]);
+        let json = svc1.export_vocabulary().unwrap();
+
+        let svc2 = EmbeddingService::new();
+        assert!(!svc2.is_ready());
+        svc2.import_vocabulary(&json).unwrap();
+        assert!(svc2.is_ready());
+
+        let vec = svc2.embed_text("hello world");
+        assert!(!vec.is_empty(), "embed_text should work after import");
+    }
+
+    #[test]
+    fn roundtrip_build_export_import_produces_identical_vectors() {
+        let corpus = vec!["fn main() { }", "struct Config { }", "pub fn helper() { }"];
+        let svc1 = EmbeddingService::new();
+        svc1.build_vocabulary(&corpus);
+        let v1 = svc1.embed_text("fn main() { }");
+
+        let json = svc1.export_vocabulary().unwrap();
+        let svc2 = EmbeddingService::new();
+        svc2.import_vocabulary(&json).unwrap();
+        let v2 = svc2.embed_text("fn main() { }");
+
+        assert_eq!(v1.len(), v2.len(), "vector dimensions should match");
+        for (a, b) in v1.iter().zip(v2.iter()) {
+            assert!(
+                (a - b).abs() < 1e-9,
+                "vectors should be identical: {} vs {}",
+                a,
+                b
+            );
+        }
+    }
+
+    #[test]
+    fn import_rejects_malformed_json() {
+        let svc = EmbeddingService::new();
+        let result = svc.import_vocabulary("not valid json");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid vocabulary JSON"));
+    }
+
+    #[test]
+    fn import_rejects_mismatched_lengths() {
+        // Craft a JSON where token_to_idx has 2 entries but idf has 3
+        let json = r#"{"token_to_idx":{"hello":0,"world":1},"idf":[1.0,1.0,1.0],"num_docs":2}"#;
+        let svc = EmbeddingService::new();
+        let result = svc.import_vocabulary(json);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("mismatch"),
+            "error should mention mismatch, got: {}",
+            err
+        );
     }
 }
