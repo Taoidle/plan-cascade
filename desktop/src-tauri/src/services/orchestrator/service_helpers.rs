@@ -1287,11 +1287,14 @@ impl OrchestratorService {
         request_options: LlmRequestOptions,
         force_prompt_fallback: bool,
     ) -> ExecutionResult {
-        let use_prompt_fallback = force_prompt_fallback || !self.provider.supports_tools();
+        let reliability = self.provider.tool_call_reliability();
+        let use_prompt_fallback =
+            force_prompt_fallback || matches!(reliability, ToolCallReliability::None);
         let mut messages = vec![Message::user(prompt.to_string())];
         let mut total_usage = UsageStats::default();
         let mut iterations = 0;
         let mut fallback_call_counter = 0u32;
+        let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
 
         // Build a minimal system prompt for sub-agents.
@@ -1315,21 +1318,32 @@ impl OrchestratorService {
                 self.config.project_root.display()
             ));
 
-            // For prompt-fallback providers, add tool call format instructions
-            if use_prompt_fallback
-                || !matches!(
-                    request_options.fallback_tool_format_mode,
-                    FallbackToolFormatMode::Off
-                )
-            {
+            // Determine effective fallback mode for sub-agent
+            let sub_effective_mode = self
+                .config
+                .provider
+                .fallback_tool_format_mode
+                .unwrap_or_else(|| {
+                    if use_prompt_fallback {
+                        FallbackToolFormatMode::Soft
+                    } else if !matches!(
+                        request_options.fallback_tool_format_mode,
+                        FallbackToolFormatMode::Off
+                    ) {
+                        request_options.fallback_tool_format_mode
+                    } else {
+                        self.provider.default_fallback_mode()
+                    }
+                });
+
+            // Add tool call format instructions when mode is not Off
+            if !matches!(sub_effective_mode, FallbackToolFormatMode::Off) {
                 parts.push(build_tool_call_instructions(tools));
-                if matches!(
-                    request_options.fallback_tool_format_mode,
-                    FallbackToolFormatMode::Strict
-                ) {
+                if matches!(sub_effective_mode, FallbackToolFormatMode::Strict) {
                     parts.push(
                         "Strict mode: every tool call MUST be emitted in the exact tool_call format. \
-                         If your prior output was not parseable, output only valid tool_call blocks now."
+                         If your prior output was not parseable, output only valid tool_call blocks now.\n\
+                         严格模式：所有工具调用必须以 tool_call 格式输出。"
                             .to_string(),
                     );
                 }
@@ -1505,6 +1519,7 @@ impl OrchestratorService {
             };
 
             if has_native_tool_calls {
+                repair_retry_count = 0; // Reset on successful tool calls
                 // Native tool calling path
                 let mut content = Vec::new();
                 if let Some(text) = &response.content {
@@ -1615,6 +1630,7 @@ impl OrchestratorService {
                     }
                 }
             } else if !parsed_fallback.calls.is_empty() {
+                repair_retry_count = 0; // Reset on successful tool calls
                 // Prompt-based fallback path
                 if let Some(text) = &response.content {
                     let cleaned = extract_text_without_tool_calls(text);
@@ -1720,7 +1736,31 @@ impl OrchestratorService {
                 }
                 messages.push(Message::user(repair_hint));
             } else {
-                // No tool calls (native or fallback) - this is the final response
+                // No tool calls (native or fallback) detected.
+                // Check for tool-intent-without-invocation pattern
+                let response_text = response.content.as_deref().unwrap_or("");
+                let needs_repair = !matches!(reliability, ToolCallReliability::Reliable)
+                    && repair_retry_count < 2
+                    && text_describes_tool_intent(response_text);
+
+                if needs_repair {
+                    repair_retry_count += 1;
+                    if let Some(text) = &response.content {
+                        messages.push(Message::assistant(text.clone()));
+                    }
+                    let repair_msg = concat!(
+                        "You described what tools you would use but did not actually call them. ",
+                        "Please emit the actual tool call now using this exact format:\n\n",
+                        "```tool_call\n",
+                        "{\"tool\": \"ToolName\", \"arguments\": {\"param\": \"value\"}}\n",
+                        "```\n\n",
+                        "你描述了要使用的工具但没有实际调用。请直接输出 tool_call 代码块。\n",
+                        "Do NOT describe what you will do. Just emit the tool_call block."
+                    );
+                    messages.push(Message::user(repair_msg.to_string()));
+                    continue;
+                }
+
                 let final_content = response
                     .content
                     .as_ref()
@@ -1748,11 +1788,14 @@ impl OrchestratorService {
         let user_message = message;
 
         let tools = get_tool_definitions();
-        let use_prompt_fallback = !self.provider.supports_tools();
+        let reliability = self.provider.tool_call_reliability();
+        // For None reliability (Ollama), don't pass tools to API at all
+        let use_prompt_fallback = matches!(reliability, ToolCallReliability::None);
         let mut messages = vec![Message::user(user_message)];
         let mut total_usage = UsageStats::default();
         let mut iterations = 0;
         let mut fallback_call_counter = 0u32;
+        let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
 
         // Create TaskContext for Task tool support in the agentic loop
@@ -1905,6 +1948,7 @@ impl OrchestratorService {
             };
 
             if has_native_tool_calls {
+                repair_retry_count = 0; // Reset on successful tool calls
                 // Native tool calling path (unchanged)
                 let mut content = Vec::new();
                 if let Some(text) = &response.content {
@@ -1996,6 +2040,7 @@ impl OrchestratorService {
                     }
                 }
             } else if !parsed_fallback.calls.is_empty() {
+                repair_retry_count = 0; // Reset on successful tool calls
                 // Prompt-based fallback path
                 // Add assistant message with tool call blocks stripped from text
                 // (keeps conversation history clean for subsequent LLM calls)
@@ -2085,7 +2130,41 @@ impl OrchestratorService {
                 );
                 messages.push(Message::user(repair_hint));
             } else {
-                // No tool calls (native or fallback) - this is the final response
+                // No tool calls (native or fallback) detected.
+                // For Unreliable providers: check if the model described tool usage
+                // in text without actually invoking tools (repair-hint pattern).
+                let response_text = response.content.as_deref().unwrap_or("");
+                let needs_repair = !matches!(reliability, ToolCallReliability::Reliable)
+                    && repair_retry_count < 2
+                    && text_describes_tool_intent(response_text);
+
+                if needs_repair {
+                    // Send a repair hint to nudge the model into actually calling tools
+                    repair_retry_count += 1;
+                    if let Some(text) = &response.content {
+                        messages.push(Message::assistant(text.clone()));
+                    }
+                    let repair_hint = concat!(
+                        "You described what tools you would use but did not actually call them. ",
+                        "Please emit the actual tool call now using this exact format:\n\n",
+                        "```tool_call\n",
+                        "{\"tool\": \"ToolName\", \"arguments\": {\"param\": \"value\"}}\n",
+                        "```\n\n",
+                        "你描述了要使用的工具但没有实际调用。请使用以下格式直接输出工具调用：\n\n",
+                        "```tool_call\n",
+                        "{\"tool\": \"工具名\", \"arguments\": {\"参数\": \"值\"}}\n",
+                        "```\n\n",
+                        "Do NOT describe what you will do. Just emit the tool_call block.\n",
+                        "不要描述你将要做什么，直接输出 tool_call 代码块。"
+                    );
+                    messages.push(Message::user(repair_hint.to_string()));
+                    // Continue the loop — don't return as final response
+                    continue;
+                }
+
+                // Reset repair counter on successful completion
+                // (reaching here means we have a genuine final response)
+
                 // Always strip any tool call blocks from the response text,
                 // since models may emit text-based tool calls even when using native mode
                 let final_content = response
@@ -4913,26 +4992,39 @@ impl OrchestratorService {
 
         let mut prompt = build_system_prompt(&self.config.project_root, prompt_tools);
 
-        // For providers that don't support native tool calling,
-        // add prompt-based tool call format instructions
-        if !self.provider.supports_tools()
-            || !matches!(
-                request_options.fallback_tool_format_mode,
-                FallbackToolFormatMode::Off
-            )
-        {
+        // Determine effective fallback mode:
+        // 1. User override from ProviderConfig.fallback_tool_format_mode (highest priority)
+        // 2. Explicit request_options.fallback_tool_format_mode (if not Off)
+        // 3. Auto-determine from provider reliability
+        let effective_mode = self
+            .config
+            .provider
+            .fallback_tool_format_mode
+            .unwrap_or_else(|| {
+                if !matches!(
+                    request_options.fallback_tool_format_mode,
+                    FallbackToolFormatMode::Off
+                ) {
+                    request_options.fallback_tool_format_mode
+                } else {
+                    // Auto-determine based on provider reliability
+                    self.provider.default_fallback_mode()
+                }
+            });
+
+        // Inject fallback instructions when mode is not Off
+        if !matches!(effective_mode, FallbackToolFormatMode::Off) {
             let fallback_instructions = build_tool_call_instructions(prompt_tools);
-            prompt = if matches!(
-                request_options.fallback_tool_format_mode,
-                FallbackToolFormatMode::Strict
-            ) {
+            prompt = if matches!(effective_mode, FallbackToolFormatMode::Strict) {
                 format!(
                     "{}\n\n{}\n\n{}",
                     prompt,
                     fallback_instructions,
                     "STRICT TOOL FORMAT MODE: emit only parseable tool_call blocks when using tools. \
                      If your previous output used prose or malformed tags for tools, fix it and output \
-                     valid tool_call blocks only before any explanation."
+                     valid tool_call blocks only before any explanation.\n\
+                     严格工具格式模式：使用工具时必须且只能输出可解析的 tool_call 代码块。\
+                     如果之前的输出使用了文字描述或格式错误的标签来调用工具，请修正并仅输出有效的 tool_call 代码块。"
                 )
             } else {
                 format!("{}\n\n{}", prompt, fallback_instructions)
@@ -5135,6 +5227,82 @@ impl OrchestratorService {
 struct ParsedFallbackCalls {
     calls: Vec<ParsedToolCall>,
     dropped_reasons: Vec<String>,
+}
+
+/// Detect when the model describes tool usage intent in text without actually invoking tools.
+///
+/// Returns true if the text mentions known tool names combined with action/intent phrases
+/// (in both English and Chinese), suggesting the model wants to call tools but failed to
+/// emit them in the expected format.
+fn text_describes_tool_intent(text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+
+    let text_lower = text.to_lowercase();
+
+    // Known tool names to detect
+    let tool_names = [
+        "read", "write", "edit", "bash", "glob", "grep", "ls", "cwd", "analyze", "task",
+        "webfetch", "websearch",
+    ];
+
+    // English intent phrases
+    let en_intent = [
+        "let me use",
+        "i will call",
+        "i'll call",
+        "i will use",
+        "i'll use",
+        "let me call",
+        "i need to use",
+        "i need to call",
+        "using the",
+        "let me run",
+        "i will run",
+        "i'll run",
+        "let me check",
+        "let me read",
+        "let me execute",
+        "i will execute",
+    ];
+
+    // Chinese intent phrases
+    let zh_intent = [
+        "调用",
+        "执行",
+        "使用工具",
+        "让我使用",
+        "让我调用",
+        "我将使用",
+        "我将调用",
+        "我来使用",
+        "我来调用",
+        "我需要使用",
+        "我需要调用",
+        "接下来使用",
+        "接下来调用",
+        "先使用",
+        "先调用",
+        "查看一下",
+        "读取",
+        "检查一下",
+    ];
+
+    let has_tool_mention = tool_names.iter().any(|t| {
+        // Check for tool name as a word boundary (not inside another word)
+        let t_lower = *t;
+        text_lower.contains(t_lower)
+    });
+
+    if !has_tool_mention {
+        return false;
+    }
+
+    let has_en_intent = en_intent.iter().any(|p| text_lower.contains(p));
+    let has_zh_intent = zh_intent.iter().any(|p| text.contains(p));
+
+    has_en_intent || has_zh_intent
 }
 
 fn parse_fallback_tool_calls(

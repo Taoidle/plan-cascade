@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use super::provider::LlmProvider;
 use super::types::{
     LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolDefinition, UsageStats,
+    ProviderConfig, StopReason, ToolCall, ToolCallReliability, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::OllamaAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -247,6 +247,10 @@ impl LlmProvider for OllamaProvider {
     fn supports_tools(&self) -> bool {
         // Ollama tool support is model-dependent and generally limited
         false
+    }
+
+    fn tool_call_reliability(&self) -> ToolCallReliability {
+        ToolCallReliability::None
     }
 
     fn context_window(&self) -> u32 {

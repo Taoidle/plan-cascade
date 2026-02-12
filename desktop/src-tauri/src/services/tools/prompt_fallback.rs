@@ -58,39 +58,50 @@ pub fn build_tool_call_instructions(tools: &[ToolDefinition]) -> String {
     }
 
     format!(
-        r#"## Tool Calling
+        r#"## Tool Calling / 工具调用
 
 You have access to the following tools. To use a tool, output a tool call block in this EXACT format:
+请使用以下格式调用工具（必须严格遵守格式）：
 
 ```tool_call
 {{"tool": "ToolName", "arguments": {{"param1": "value1", "param2": "value2"}}}}
 ```
 
-IMPORTANT:
-- The block MUST start with ```tool_call and end with ```
-- The JSON MUST be valid and on a single line or properly formatted
-- You can make multiple tool calls in a single response
-- After making tool calls, STOP and WAIT for the actual results before continuing
-- NEVER fabricate, predict, or describe tool results. Do NOT write "调用成功" or "returns..." — only use REAL results provided after tool execution
-- Only use tools from the list below
+IMPORTANT / 重要提示:
+- The block MUST start with ```tool_call and end with ``` / 代码块必须以 ```tool_call 开头，以 ``` 结尾
+- The JSON MUST be valid and on a single line or properly formatted / JSON 必须有效且格式正确
+- You can make multiple tool calls in a single response / 可以在一次回复中调用多个工具
+- After making tool calls, STOP and WAIT for the actual results before continuing / 调用工具后，必须停下来等待实际结果，然后再继续
+- NEVER fabricate, predict, or describe tool results. Do NOT write "调用成功" or "returns..." — only use REAL results provided after tool execution / 绝对不要伪造、预测或描述工具结果。不要写"调用成功"或"返回..."——只使用工具执行后提供的真实结果
+- Do NOT describe what you will do — just emit the tool call block / 不要描述你将要做什么——直接输出工具调用代码块
+- Only use tools from the list below / 只使用下面列出的工具
 
-## Available Tools
+## Available Tools / 可用工具
 
-{tool_descriptions}## Example Tool Calls
+{tool_descriptions}## Example Tool Calls / 工具调用示例
 
+读取文件 (Read a file):
 ```tool_call
 {{"tool": "Read", "arguments": {{"file_path": "src/main.rs"}}}}
 ```
 
+列出目录内容 (List directory contents):
 ```tool_call
 {{"tool": "LS", "arguments": {{"path": "."}}}}
 ```
 
+运行命令 (Run a command):
 ```tool_call
 {{"tool": "Bash", "arguments": {{"command": "cargo test"}}}}
 ```
 
-When you receive a tool result, analyze it and decide whether to make more tool calls or provide your final response."#,
+搜索代码 (Search code):
+```tool_call
+{{"tool": "Grep", "arguments": {{"pattern": "fn main", "path": "src/"}}}}
+```
+
+When you receive a tool result, analyze it and decide whether to make more tool calls or provide your final response.
+收到工具结果后，分析结果并决定是否需要继续调用工具或给出最终回答。"#,
         tool_descriptions = tool_descriptions,
     )
 }

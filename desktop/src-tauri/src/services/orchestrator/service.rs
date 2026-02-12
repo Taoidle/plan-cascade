@@ -34,7 +34,8 @@ use crate::models::orchestrator::{
 use crate::services::llm::{
     AnthropicProvider, DeepSeekProvider, FallbackToolFormatMode, GlmProvider, LlmProvider,
     LlmRequestOptions, LlmResponse, Message, MessageContent, OllamaProvider, OpenAIProvider,
-    ProviderConfig, ProviderType, QwenProvider, ToolCallMode, ToolDefinition, UsageStats,
+    ProviderConfig, ProviderType, QwenProvider, ToolCallMode, ToolCallReliability, ToolDefinition,
+    UsageStats,
 };
 use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 use crate::services::streaming::UnifiedStreamEvent;

@@ -48,6 +48,23 @@ impl Default for ToolCallMode {
     }
 }
 
+/// Tool call reliability classification for LLM providers.
+///
+/// Distinguishes between a provider's API-level tool support (`supports_tools()`)
+/// and the actual reliability of the model's tool call emission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallReliability {
+    /// Provider's native tool calling works consistently (Anthropic, OpenAI).
+    Reliable,
+    /// Provider claims tool support but emission is inconsistent (Qwen, DeepSeek, GLM).
+    /// The orchestrator should inject Soft fallback instructions alongside native tools.
+    Unreliable,
+    /// Provider does not support native tool calling (Ollama).
+    /// The orchestrator uses full prompt-based fallback.
+    None,
+}
+
 /// Prompt-fallback tool format mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -114,6 +131,11 @@ pub struct ProviderConfig {
     /// Reasoning effort level (for OpenAI o1/o3)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Optional override for fallback tool format mode.
+    /// When None, the orchestrator auto-determines based on provider reliability.
+    /// When Some(mode), forces that mode regardless of provider reliability.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub fallback_tool_format_mode: Option<FallbackToolFormatMode>,
     /// Provider-specific options
     #[serde(default)]
     pub options: HashMap<String, serde_json::Value>,
@@ -139,6 +161,7 @@ impl Default for ProviderConfig {
             enable_thinking: false,
             thinking_budget: None,
             reasoning_effort: None,
+            fallback_tool_format_mode: None,
             options: HashMap::new(),
         }
     }
@@ -424,7 +447,7 @@ impl From<&str> for StopReason {
             "end_turn" | "stop" => StopReason::EndTurn,
             "max_tokens" | "length" => StopReason::MaxTokens,
             "stop_sequence" => StopReason::StopSequence,
-            "tool_use" | "tool_calls" => StopReason::ToolUse,
+            "tool_use" | "tool_calls" | "function_call" => StopReason::ToolUse,
             other => StopReason::Other(other.to_string()),
         }
     }
@@ -567,6 +590,7 @@ mod tests {
             enable_thinking: false,
             thinking_budget: None,
             reasoning_effort: None,
+            fallback_tool_format_mode: None,
             options: HashMap::new(),
         };
 
@@ -642,7 +666,43 @@ mod tests {
         assert_eq!(StopReason::from("end_turn"), StopReason::EndTurn);
         assert_eq!(StopReason::from("stop"), StopReason::EndTurn);
         assert_eq!(StopReason::from("max_tokens"), StopReason::MaxTokens);
+        assert_eq!(StopReason::from("length"), StopReason::MaxTokens);
+        assert_eq!(StopReason::from("stop_sequence"), StopReason::StopSequence);
         assert_eq!(StopReason::from("tool_use"), StopReason::ToolUse);
+        assert_eq!(StopReason::from("tool_calls"), StopReason::ToolUse);
+        assert_eq!(StopReason::from("function_call"), StopReason::ToolUse);
+        assert_eq!(StopReason::from("TOOL_CALLS"), StopReason::ToolUse);
+        assert_eq!(
+            StopReason::from("unknown_reason"),
+            StopReason::Other("unknown_reason".to_string())
+        );
+    }
+
+    #[test]
+    fn test_tool_call_reliability_serialization() {
+        let reliable = ToolCallReliability::Reliable;
+        let json = serde_json::to_string(&reliable).unwrap();
+        assert_eq!(json, "\"reliable\"");
+
+        let unreliable: ToolCallReliability = serde_json::from_str("\"unreliable\"").unwrap();
+        assert_eq!(unreliable, ToolCallReliability::Unreliable);
+
+        let none: ToolCallReliability = serde_json::from_str("\"none\"").unwrap();
+        assert_eq!(none, ToolCallReliability::None);
+    }
+
+    #[test]
+    fn test_provider_config_with_fallback_mode() {
+        let config = ProviderConfig {
+            fallback_tool_format_mode: Some(FallbackToolFormatMode::Soft),
+            ..ProviderConfig::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("fallback_tool_format_mode"));
+
+        let config_none = ProviderConfig::default();
+        let json_none = serde_json::to_string(&config_none).unwrap();
+        assert!(!json_none.contains("fallback_tool_format_mode"));
     }
 
     #[test]

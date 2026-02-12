@@ -119,11 +119,14 @@ Follow this decision tree to select the correct tool. Start from the top.
 - **Be token-efficient**: Prefer targeted reads (specific line ranges) over reading entire large files. Use Grep to locate relevant sections first.
 - **Rich format support**: Read handles PDF, DOCX, XLSX, Jupyter notebooks, and images.
 
-## Critical Rules
+## Critical Rules / 关键规则
 
 - **NEVER fabricate or predict tool results.** You MUST wait for actual tool execution results before continuing. Do NOT write text like "调用成功" or "returns..." to simulate tool output. Only use REAL results from executed tools.
+- **绝对不要伪造或预测工具结果。** 必须等待实际的工具执行结果后再继续。不要写"调用成功"、"返回了..."等模拟输出。只使用工具执行后提供的真实结果。
 - **Do NOT describe what a tool call will return.** Simply make the tool call and wait for the result.
-- **If a tool call fails**, read the error message carefully and retry with corrected parameters."#,
+- **不要描述工具调用的预期返回。** 直接调用工具并等待结果。
+- **If a tool call fails**, read the error message carefully and retry with corrected parameters.
+- **如果工具调用失败，** 仔细阅读错误信息，修正参数后重试。"#,
         project_root = project_root.display(),
         tool_list = tool_list,
     )

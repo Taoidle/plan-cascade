@@ -693,3 +693,318 @@ fn test_evaluate_analysis_quota_allows_missing_search_with_core_evidence() {
         failures
     );
 }
+
+// --- Story-004: text_describes_tool_intent tests ---
+
+#[test]
+fn test_text_describes_tool_intent_english_future() {
+    // English future intent with tool mention should trigger
+    assert!(text_describes_tool_intent(
+        "Let me use the Read tool to check the file."
+    ));
+    assert!(text_describes_tool_intent(
+        "I will call Bash to run the tests."
+    ));
+    assert!(text_describes_tool_intent(
+        "I'll use Grep to search for the pattern."
+    ));
+}
+
+#[test]
+fn test_text_describes_tool_intent_chinese_intent() {
+    // Chinese intent with tool mention should trigger
+    assert!(text_describes_tool_intent("让我使用 Read 工具来读取文件。"));
+    assert!(text_describes_tool_intent(
+        "我将调用 Bash 来执行测试命令。"
+    ));
+    assert!(text_describes_tool_intent("接下来使用 Grep 搜索代码。"));
+}
+
+#[test]
+fn test_text_describes_tool_intent_no_tool_name() {
+    // Intent phrases without tool names should NOT trigger
+    assert!(!text_describes_tool_intent(
+        "Let me use the function to check."
+    ));
+    assert!(!text_describes_tool_intent("我将调用函数来处理数据。"));
+}
+
+#[test]
+fn test_text_describes_tool_intent_no_intent_phrase() {
+    // Tool names without intent phrases should NOT trigger
+    assert!(!text_describes_tool_intent(
+        "The Read operation returned the file content."
+    ));
+    assert!(!text_describes_tool_intent(
+        "Bash is a command-line shell."
+    ));
+}
+
+#[test]
+fn test_text_describes_tool_intent_past_tense_summary() {
+    // Past-tense summaries referencing tools should NOT trigger
+    // (these use "I used" / "I called" which are NOT in the intent phrases list)
+    assert!(!text_describes_tool_intent(
+        "I used the Read tool to check the file and found the issue."
+    ));
+    assert!(!text_describes_tool_intent(
+        "I called Bash and the tests passed."
+    ));
+    assert!(!text_describes_tool_intent(
+        "After using Grep to search, the results showed the pattern."
+    ));
+}
+
+#[test]
+fn test_text_describes_tool_intent_empty() {
+    assert!(!text_describes_tool_intent(""));
+}
+
+// --- Story-001: tool_call_reliability tests ---
+
+#[test]
+fn test_anthropic_provider_reliable() {
+    let config = ProviderConfig {
+        provider: ProviderType::Anthropic,
+        api_key: Some("test".to_string()),
+        model: "claude-3-5-sonnet".to_string(),
+        ..Default::default()
+    };
+    let provider = AnthropicProvider::new(config);
+    assert_eq!(
+        provider.tool_call_reliability(),
+        ToolCallReliability::Reliable
+    );
+    assert_eq!(
+        provider.default_fallback_mode(),
+        FallbackToolFormatMode::Off
+    );
+}
+
+#[test]
+fn test_openai_provider_reliable() {
+    let config = ProviderConfig {
+        provider: ProviderType::OpenAI,
+        api_key: Some("test".to_string()),
+        model: "gpt-4o".to_string(),
+        ..Default::default()
+    };
+    let provider = OpenAIProvider::new(config);
+    assert_eq!(
+        provider.tool_call_reliability(),
+        ToolCallReliability::Reliable
+    );
+    assert_eq!(
+        provider.default_fallback_mode(),
+        FallbackToolFormatMode::Off
+    );
+}
+
+#[test]
+fn test_qwen_provider_unreliable() {
+    let config = ProviderConfig {
+        provider: ProviderType::Qwen,
+        api_key: Some("test".to_string()),
+        model: "qwen-plus".to_string(),
+        ..Default::default()
+    };
+    let provider = QwenProvider::new(config);
+    assert_eq!(
+        provider.tool_call_reliability(),
+        ToolCallReliability::Unreliable
+    );
+    assert_eq!(
+        provider.default_fallback_mode(),
+        FallbackToolFormatMode::Soft
+    );
+    // Still claims API tool support
+    assert!(provider.supports_tools());
+}
+
+#[test]
+fn test_deepseek_provider_unreliable() {
+    let config = ProviderConfig {
+        provider: ProviderType::DeepSeek,
+        api_key: Some("test".to_string()),
+        model: "deepseek-chat".to_string(),
+        ..Default::default()
+    };
+    let provider = DeepSeekProvider::new(config);
+    assert_eq!(
+        provider.tool_call_reliability(),
+        ToolCallReliability::Unreliable
+    );
+    assert_eq!(
+        provider.default_fallback_mode(),
+        FallbackToolFormatMode::Soft
+    );
+}
+
+#[test]
+fn test_glm_provider_unreliable() {
+    let config = ProviderConfig {
+        provider: ProviderType::Glm,
+        api_key: Some("test".to_string()),
+        model: "glm-4-plus".to_string(),
+        ..Default::default()
+    };
+    let provider = GlmProvider::new(config);
+    assert_eq!(
+        provider.tool_call_reliability(),
+        ToolCallReliability::Unreliable
+    );
+    assert_eq!(
+        provider.default_fallback_mode(),
+        FallbackToolFormatMode::Soft
+    );
+}
+
+#[test]
+fn test_ollama_provider_none() {
+    let config = ProviderConfig {
+        provider: ProviderType::Ollama,
+        model: "llama3".to_string(),
+        ..Default::default()
+    };
+    let provider = OllamaProvider::new(config);
+    assert_eq!(
+        provider.tool_call_reliability(),
+        ToolCallReliability::None
+    );
+    assert_eq!(
+        provider.default_fallback_mode(),
+        FallbackToolFormatMode::Soft
+    );
+    // Does not claim API tool support
+    assert!(!provider.supports_tools());
+}
+
+// --- Story-002: effective_system_prompt adaptive fallback tests ---
+
+#[test]
+fn test_reliable_provider_no_fallback_instructions() {
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: Some("test".to_string()),
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            ..Default::default()
+        },
+        system_prompt: Some("Test prompt.".to_string()),
+        max_iterations: 10,
+        max_total_tokens: 10000,
+        project_root: std::env::temp_dir(),
+        streaming: false,
+        enable_compaction: false,
+        analysis_artifacts_root: default_analysis_artifacts_root(),
+        analysis_profile: AnalysisProfile::default(),
+        analysis_limits: AnalysisLimits::default(),
+        analysis_session_id: None,
+    };
+    let orchestrator = OrchestratorService::new(config);
+    let tools = crate::services::tools::get_tool_definitions();
+    let opts = LlmRequestOptions::default();
+    let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
+    // Reliable providers should NOT get fallback instructions
+    assert!(
+        !prompt.contains("```tool_call"),
+        "Reliable provider should not get fallback tool_call format instructions"
+    );
+}
+
+#[test]
+fn test_unreliable_provider_gets_fallback_instructions() {
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Qwen,
+            api_key: Some("test".to_string()),
+            model: "qwen-plus".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 10,
+        max_total_tokens: 10000,
+        project_root: std::env::temp_dir(),
+        streaming: false,
+        enable_compaction: false,
+        analysis_artifacts_root: default_analysis_artifacts_root(),
+        analysis_profile: AnalysisProfile::default(),
+        analysis_limits: AnalysisLimits::default(),
+        analysis_session_id: None,
+    };
+    let orchestrator = OrchestratorService::new(config);
+    let tools = crate::services::tools::get_tool_definitions();
+    let opts = LlmRequestOptions::default();
+    let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
+    // Unreliable providers should get fallback instructions (bilingual)
+    assert!(
+        prompt.contains("```tool_call"),
+        "Unreliable provider should get fallback tool_call format instructions"
+    );
+    assert!(
+        prompt.contains("请使用以下格式调用工具"),
+        "Unreliable provider should get Chinese tool call instructions"
+    );
+}
+
+#[test]
+fn test_user_override_disables_fallback_for_unreliable() {
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Qwen,
+            api_key: Some("test".to_string()),
+            model: "qwen-plus".to_string(),
+            fallback_tool_format_mode: Some(FallbackToolFormatMode::Off),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 10,
+        max_total_tokens: 10000,
+        project_root: std::env::temp_dir(),
+        streaming: false,
+        enable_compaction: false,
+        analysis_artifacts_root: default_analysis_artifacts_root(),
+        analysis_profile: AnalysisProfile::default(),
+        analysis_limits: AnalysisLimits::default(),
+        analysis_session_id: None,
+    };
+    let orchestrator = OrchestratorService::new(config);
+    let tools = crate::services::tools::get_tool_definitions();
+    let opts = LlmRequestOptions::default();
+    let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
+    // User explicitly set Off → no fallback instructions even for unreliable provider
+    assert!(
+        !prompt.contains("```tool_call"),
+        "User override Off should suppress fallback instructions"
+    );
+}
+
+#[test]
+fn test_none_provider_gets_fallback_instructions() {
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Ollama,
+            model: "llama3".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        max_iterations: 10,
+        max_total_tokens: 10000,
+        project_root: std::env::temp_dir(),
+        streaming: false,
+        enable_compaction: false,
+        analysis_artifacts_root: default_analysis_artifacts_root(),
+        analysis_profile: AnalysisProfile::default(),
+        analysis_limits: AnalysisLimits::default(),
+        analysis_session_id: None,
+    };
+    let orchestrator = OrchestratorService::new(config);
+    let tools = crate::services::tools::get_tool_definitions();
+    let opts = LlmRequestOptions::default();
+    let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
+    // None-reliability providers should get fallback instructions
+    assert!(
+        prompt.contains("```tool_call"),
+        "None-reliability provider should get fallback instructions"
+    );
+}

@@ -10,7 +10,8 @@ use tokio::sync::mpsc;
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
     LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolDefinition, UsageStats,
+    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolCallReliability, ToolDefinition,
+    UsageStats,
 };
 use crate::services::streaming::adapters::GlmAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -346,6 +347,10 @@ impl LlmProvider for GlmProvider {
     }
     fn supports_tools(&self) -> bool {
         true
+    }
+
+    fn tool_call_reliability(&self) -> ToolCallReliability {
+        ToolCallReliability::Unreliable
     }
 
     fn context_window(&self) -> u32 {

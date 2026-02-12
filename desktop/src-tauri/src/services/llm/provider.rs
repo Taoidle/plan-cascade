@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use super::types::{
-    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, ProviderConfig, ToolDefinition,
+    FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
+    ProviderConfig, ToolCallReliability, ToolDefinition,
 };
 use crate::services::streaming::UnifiedStreamEvent;
 
@@ -29,6 +30,29 @@ pub trait LlmProvider: Send + Sync {
 
     /// Returns whether this provider supports tool calling.
     fn supports_tools(&self) -> bool;
+
+    /// Returns the reliability classification for this provider's tool calling.
+    ///
+    /// - `Reliable`: Native tool calls work consistently (Anthropic, OpenAI).
+    /// - `Unreliable`: API claims tool support but emission is inconsistent (Qwen, DeepSeek, GLM).
+    /// - `None`: No native tool calling support (Ollama).
+    ///
+    /// Default returns `Reliable` for backward compatibility.
+    fn tool_call_reliability(&self) -> ToolCallReliability {
+        ToolCallReliability::Reliable
+    }
+
+    /// Returns the recommended FallbackToolFormatMode for this provider.
+    ///
+    /// Based on reliability: Reliable -> Off, Unreliable -> Soft, None -> Soft.
+    /// Can be overridden by `ProviderConfig.fallback_tool_format_mode`.
+    fn default_fallback_mode(&self) -> FallbackToolFormatMode {
+        match self.tool_call_reliability() {
+            ToolCallReliability::Reliable => FallbackToolFormatMode::Off,
+            ToolCallReliability::Unreliable => FallbackToolFormatMode::Soft,
+            ToolCallReliability::None => FallbackToolFormatMode::Soft,
+        }
+    }
 
     /// Returns whether this provider supports multimodal content (images).
     fn supports_multimodal(&self) -> bool {
