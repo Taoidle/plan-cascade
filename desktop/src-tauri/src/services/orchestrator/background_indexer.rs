@@ -11,7 +11,9 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use super::analysis_index::{build_file_inventory, extract_symbols, AnalysisLimits};
+use super::embedding_service::{embedding_to_bytes, EmbeddingService};
 use super::index_store::IndexStore;
+use super::tree_sitter_parser;
 
 /// Callback type for reporting indexing progress.
 ///
@@ -30,6 +32,7 @@ pub type IndexProgressCallback = Arc<dyn Fn(usize, usize) + Send + Sync>;
 pub struct BackgroundIndexer {
     project_root: PathBuf,
     index_store: Arc<IndexStore>,
+    embedding_service: Option<Arc<EmbeddingService>>,
     change_rx: Option<tokio::sync::mpsc::Receiver<PathBuf>>,
     progress_callback: Option<IndexProgressCallback>,
 }
@@ -40,9 +43,19 @@ impl BackgroundIndexer {
         Self {
             project_root,
             index_store,
+            embedding_service: None,
             change_rx: None,
             progress_callback: None,
         }
+    }
+
+    /// Attach an embedding service for generating vector embeddings after indexing.
+    ///
+    /// When set, the indexer will chunk file contents and generate TF-IDF
+    /// embeddings stored in the `file_embeddings` table.
+    pub fn with_embedding_service(mut self, svc: Arc<EmbeddingService>) -> Self {
+        self.embedding_service = Some(svc);
+        self
     }
 
     /// Attach a channel receiver for incremental file-change notifications.
@@ -76,6 +89,7 @@ impl BackgroundIndexer {
     pub async fn start(self) -> tokio::task::JoinHandle<()> {
         let project_root = self.project_root;
         let index_store = self.index_store;
+        let embedding_service = self.embedding_service;
         let change_rx = self.change_rx;
         let progress_callback = self.progress_callback;
 
@@ -95,6 +109,19 @@ impl BackgroundIndexer {
                 info!("background indexer: full index complete");
             }
 
+            // --- Phase 1b: Generate embeddings ---
+            if let Some(ref emb_svc) = embedding_service {
+                info!("background indexer: starting embedding generation");
+                if let Err(e) = run_embedding_pass(&project_root, &index_store, emb_svc) {
+                    warn!(
+                        error = %e,
+                        "background indexer: embedding generation failed"
+                    );
+                } else {
+                    info!("background indexer: embedding generation complete");
+                }
+            }
+
             // --- Phase 2: Incremental updates ---
             if let Some(mut rx) = change_rx {
                 debug!("background indexer: listening for incremental changes");
@@ -107,6 +134,18 @@ impl BackgroundIndexer {
                             error = %e,
                             "background indexer: incremental index failed"
                         );
+                    }
+                    // Re-embed the changed file if embedding service is available
+                    if let Some(ref emb_svc) = embedding_service {
+                        if let Err(e) = run_incremental_embedding(
+                            &project_root, &index_store, emb_svc, &changed_path,
+                        ) {
+                            warn!(
+                                path = %changed_path.display(),
+                                error = %e,
+                                "background indexer: incremental embedding failed"
+                            );
+                        }
                     }
                 }
                 debug!("background indexer: change channel closed, stopping");
@@ -273,6 +312,302 @@ fn estimate_line_count_simple(path: &Path, file_size: u64) -> usize {
         }
         Err(_) => 0,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Chunking — splits source files into semantic pieces for embedding
+// ---------------------------------------------------------------------------
+
+/// Maximum number of lines per chunk for fixed-size windowing.
+const CHUNK_MAX_LINES: usize = 60;
+/// Overlap lines between consecutive fixed-size windows.
+const CHUNK_OVERLAP_LINES: usize = 10;
+/// Maximum file size (in bytes) to attempt embedding (skip very large files).
+const MAX_EMBEDDABLE_FILE_SIZE: u64 = 500_000;
+
+/// A chunk of source code with its origin information.
+#[derive(Debug, Clone)]
+pub struct FileChunk {
+    pub index: usize,
+    pub text: String,
+}
+
+/// Split file content into semantic chunks.
+///
+/// For languages supported by tree-sitter, chunks are aligned to symbol
+/// boundaries (functions, classes, structs, etc.).  For unsupported languages,
+/// a fixed-size sliding window is used.
+pub fn chunk_file_content(content: &str, language: &str) -> Vec<FileChunk> {
+    if content.is_empty() {
+        return Vec::new();
+    }
+
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    if tree_sitter_parser::is_language_supported(language) {
+        let symbols = tree_sitter_parser::parse_symbols(content, language, 200);
+        if !symbols.is_empty() {
+            return chunk_by_symbols(&lines, &symbols);
+        }
+    }
+
+    // Fallback: fixed-size windows
+    chunk_by_window(&lines)
+}
+
+/// Chunk by symbol boundaries.
+///
+/// Each top-level symbol (or group of small adjacent symbols) becomes a chunk.
+/// Gaps between symbols are merged into the preceding or following chunk.
+fn chunk_by_symbols(
+    lines: &[&str],
+    symbols: &[super::analysis_index::SymbolInfo],
+) -> Vec<FileChunk> {
+    // Collect (start_line, end_line) ranges for top-level symbols only (no parent).
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for sym in symbols {
+        if sym.parent.is_some() {
+            continue; // Skip nested symbols — they are inside a parent range
+        }
+        let start = sym.line.saturating_sub(1); // convert 1-based to 0-based
+        let end = if sym.end_line > 0 {
+            sym.end_line.min(lines.len())
+        } else {
+            // If no end_line, estimate: go until next symbol or +30 lines
+            (start + 30).min(lines.len())
+        };
+        ranges.push((start, end));
+    }
+
+    if ranges.is_empty() {
+        return chunk_by_window(lines);
+    }
+
+    // Sort ranges by start line
+    ranges.sort_by_key(|r| r.0);
+
+    // Merge overlapping/adjacent ranges and build chunks
+    let mut chunks = Vec::new();
+    let mut current_start = 0usize; // Include file header (imports, etc.)
+
+    for (sym_start, sym_end) in &ranges {
+        let sym_start = *sym_start;
+        let sym_end = *sym_end;
+
+        // If there is a gap between the current position and this symbol, include
+        // it in the chunk (it might be comments, imports, etc.).
+        if sym_start > current_start + CHUNK_MAX_LINES {
+            // The gap is large — emit the gap as its own chunk
+            let text: String = lines[current_start..sym_start].join("\n");
+            if !text.trim().is_empty() {
+                chunks.push(FileChunk {
+                    index: chunks.len(),
+                    text,
+                });
+            }
+            current_start = sym_start;
+        }
+
+        let chunk_end = sym_end.min(lines.len());
+        if chunk_end > current_start {
+            let text: String = lines[current_start..chunk_end].join("\n");
+            if !text.trim().is_empty() {
+                chunks.push(FileChunk {
+                    index: chunks.len(),
+                    text,
+                });
+            }
+            current_start = chunk_end;
+        }
+    }
+
+    // Remaining tail
+    if current_start < lines.len() {
+        let text: String = lines[current_start..].join("\n");
+        if !text.trim().is_empty() {
+            chunks.push(FileChunk {
+                index: chunks.len(),
+                text,
+            });
+        }
+    }
+
+    // If we somehow produced zero chunks, fall back to window chunking
+    if chunks.is_empty() {
+        return chunk_by_window(lines);
+    }
+
+    chunks
+}
+
+/// Chunk by fixed-size sliding window.
+fn chunk_by_window(lines: &[&str]) -> Vec<FileChunk> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+
+    while start < lines.len() {
+        let end = (start + CHUNK_MAX_LINES).min(lines.len());
+        let text: String = lines[start..end].join("\n");
+        if !text.trim().is_empty() {
+            chunks.push(FileChunk {
+                index: chunks.len(),
+                text,
+            });
+        }
+        if end >= lines.len() {
+            break;
+        }
+        start = end.saturating_sub(CHUNK_OVERLAP_LINES);
+    }
+
+    chunks
+}
+
+// ---------------------------------------------------------------------------
+// Embedding pass — runs after full index to generate TF-IDF vectors
+// ---------------------------------------------------------------------------
+
+/// Run an embedding pass over all indexed files in the project.
+///
+/// 1. Reads each file under `project_root`
+/// 2. Chunks the content using `chunk_file_content`
+/// 3. Builds the TF-IDF vocabulary from all chunks
+/// 4. Generates and stores embedding vectors
+fn run_embedding_pass(
+    project_root: &Path,
+    index_store: &IndexStore,
+    embedding_service: &EmbeddingService,
+) -> Result<(), String> {
+    let project_path = project_root.to_string_lossy().to_string();
+
+    // Collect all chunks first (to build vocabulary from the full corpus)
+    let inventory = build_file_inventory(project_root, &[]).map_err(|e| e.to_string())?;
+
+    let mut all_chunks: Vec<(String, FileChunk)> = Vec::new(); // (relative_path, chunk)
+
+    for item in &inventory.items {
+        if item.size_bytes > MAX_EMBEDDABLE_FILE_SIZE {
+            continue;
+        }
+        let abs_path = project_root.join(&item.path);
+        let content = match std::fs::read_to_string(&abs_path) {
+            Ok(c) => c,
+            Err(_) => continue, // skip unreadable files
+        };
+        let chunks = chunk_file_content(&content, &item.language);
+        for chunk in chunks {
+            all_chunks.push((item.path.clone(), chunk));
+        }
+    }
+
+    if all_chunks.is_empty() {
+        info!("background indexer: no chunks to embed");
+        return Ok(());
+    }
+
+    // Build vocabulary from all chunk texts
+    let texts: Vec<&str> = all_chunks.iter().map(|(_, c)| c.text.as_str()).collect();
+    embedding_service.build_vocabulary(&texts);
+
+    // Generate embeddings and store them
+    let embeddings = embedding_service.embed_batch(&texts);
+    let mut stored = 0usize;
+
+    for ((rel_path, chunk), embedding) in all_chunks.iter().zip(embeddings.iter()) {
+        let bytes = embedding_to_bytes(embedding);
+        if let Err(e) = index_store.upsert_chunk_embedding(
+            &project_path,
+            rel_path,
+            chunk.index as i64,
+            &chunk.text,
+            &bytes,
+        ) {
+            warn!(
+                file = %rel_path,
+                chunk = chunk.index,
+                error = %e,
+                "background indexer: failed to store embedding"
+            );
+        } else {
+            stored += 1;
+        }
+    }
+
+    info!(
+        chunks = stored,
+        total = all_chunks.len(),
+        "background indexer: embeddings stored"
+    );
+    Ok(())
+}
+
+/// Re-embed a single changed file.
+fn run_incremental_embedding(
+    project_root: &Path,
+    index_store: &IndexStore,
+    embedding_service: &EmbeddingService,
+    changed_path: &Path,
+) -> Result<(), String> {
+    if !changed_path.is_file() {
+        return Ok(());
+    }
+
+    let rel = changed_path
+        .strip_prefix(project_root)
+        .map_err(|_| format!("path {:?} is not under project root", changed_path))?;
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+    let project_path = project_root.to_string_lossy().to_string();
+
+    let metadata = std::fs::metadata(changed_path).map_err(|e| e.to_string())?;
+    if metadata.len() > MAX_EMBEDDABLE_FILE_SIZE {
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(changed_path).map_err(|e| e.to_string())?;
+    let ext = changed_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    let language = detect_language_simple(ext.as_deref());
+
+    // Delete old embeddings for this file
+    let _ = index_store.delete_embeddings_for_file(&project_path, &rel_str);
+
+    if !embedding_service.is_ready() {
+        // If the vocabulary hasn't been built yet, skip incremental embedding.
+        // It will be regenerated on the next full pass.
+        return Ok(());
+    }
+
+    let chunks = chunk_file_content(&content, &language);
+    for chunk in &chunks {
+        let embedding = embedding_service.embed_text(&chunk.text);
+        let bytes = embedding_to_bytes(&embedding);
+        if let Err(e) = index_store.upsert_chunk_embedding(
+            &project_path,
+            &rel_str,
+            chunk.index as i64,
+            &chunk.text,
+            &bytes,
+        ) {
+            warn!(
+                file = %rel_str,
+                chunk = chunk.index,
+                error = %e,
+                "background indexer: incremental embedding failed"
+            );
+        }
+    }
+
+    debug!(
+        path = %rel_str,
+        chunks = chunks.len(),
+        "background indexer: incremental embedding updated"
+    );
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -558,6 +893,121 @@ mod tests {
         let project_path = dir.path().to_string_lossy().to_string();
         let summary = store.get_project_summary(&project_path).expect("summary");
         assert_eq!(summary.total_files, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Chunking tests (story-003)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn chunk_by_window_basic() {
+        let content = (0..100).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let lines: Vec<&str> = content.lines().collect();
+        let chunks = chunk_by_window(&lines);
+
+        assert!(!chunks.is_empty());
+        // First chunk should have CHUNK_MAX_LINES lines
+        let first_lines: Vec<&str> = chunks[0].text.lines().collect();
+        assert_eq!(first_lines.len(), CHUNK_MAX_LINES);
+        // Chunk indices should be sequential
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert_eq!(chunk.index, i);
+        }
+    }
+
+    #[test]
+    fn chunk_by_window_small_file() {
+        let content = "line1\nline2\nline3";
+        let lines: Vec<&str> = content.lines().collect();
+        let chunks = chunk_by_window(&lines);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text, content);
+    }
+
+    #[test]
+    fn chunk_file_content_empty() {
+        let chunks = chunk_file_content("", "rust");
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn chunk_file_content_unsupported_language() {
+        let content = (0..100).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let chunks = chunk_file_content(&content, "unknown");
+        // Should fall back to window chunking
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn chunk_file_content_rust_with_symbols() {
+        let content = r#"
+use std::collections::HashMap;
+
+/// A configuration struct.
+pub struct Config {
+    name: String,
+    value: i32,
+}
+
+impl Config {
+    pub fn new(name: String) -> Self {
+        Self { name, value: 0 }
+    }
+
+    pub fn set_value(&mut self, v: i32) {
+        self.value = v;
+    }
+}
+
+/// Process the config.
+pub fn process_config(config: &Config) -> String {
+    format!("Config: {}", config.name)
+}
+"#;
+        let chunks = chunk_file_content(content, "rust");
+        assert!(!chunks.is_empty(), "should produce at least one chunk");
+        // All original content should be represented across chunks
+        let total_text: String = chunks.iter().map(|c| c.text.clone()).collect::<Vec<_>>().join("\n");
+        assert!(total_text.contains("Config"));
+        assert!(total_text.contains("process_config"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Embedding pass integration test
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn embedding_pass_stores_embeddings() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main() {\n    println!(\"hello\");\n}\n\npub fn helper() {\n    // do stuff\n}\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub struct Config {\n    name: String,\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        // First run full index so files are in file_index table
+        run_full_index(dir.path(), &store, None).expect("full index");
+
+        let emb_svc = EmbeddingService::new();
+        run_embedding_pass(dir.path(), &store, &emb_svc).expect("embedding pass");
+
+        let project_path = dir.path().to_string_lossy().to_string();
+        let count = store.count_embeddings(&project_path).expect("count");
+        assert!(count > 0, "should have stored at least one embedding, got {}", count);
+
+        let embeddings = store.get_embeddings_for_project(&project_path).expect("get");
+        assert!(!embeddings.is_empty());
+        // Each embedding should have non-empty bytes
+        for (_, _, _, bytes) in &embeddings {
+            assert!(!bytes.is_empty(), "embedding bytes should not be empty");
+        }
     }
 
     #[tokio::test]

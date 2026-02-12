@@ -9,6 +9,7 @@ mod analysis_scheduler;
 mod analysis_store;
 mod adaptive_scope;
 pub mod background_indexer;
+pub mod embedding_service;
 pub mod index_manager;
 pub mod index_store;
 pub mod tree_sitter_parser;

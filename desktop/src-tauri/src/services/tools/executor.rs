@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 use tokio::process::Command;
 use tokio::time::timeout;
 
+use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::services::orchestrator::index_store::IndexStore;
 
 /// Cache entry for a previously read file, used for deduplication.
@@ -293,6 +294,8 @@ pub struct ToolExecutor {
     web_search: Option<super::web_search::WebSearchService>,
     /// Optional index store for CodebaseSearch tool
     index_store: Option<Arc<IndexStore>>,
+    /// Optional embedding service for semantic search in CodebaseSearch
+    embedding_service: Option<Arc<EmbeddingService>>,
 }
 
 impl ToolExecutor {
@@ -308,6 +311,7 @@ impl ToolExecutor {
             web_fetch: super::web_fetch::WebFetchService::new(),
             web_search: None,
             index_store: None,
+            embedding_service: None,
         }
     }
 
@@ -329,6 +333,11 @@ impl ToolExecutor {
     /// Set the index store for CodebaseSearch tool
     pub fn set_index_store(&mut self, store: Arc<IndexStore>) {
         self.index_store = Some(store);
+    }
+
+    /// Set the embedding service for semantic search in CodebaseSearch
+    pub fn set_embedding_service(&mut self, svc: Arc<EmbeddingService>) {
+        self.embedding_service = Some(svc);
     }
 
     /// Execute a tool by name with given arguments
@@ -1553,6 +1562,73 @@ impl ToolExecutor {
                     Err(e) => {
                         output_sections.push(format!("File search error: {}", e));
                     }
+                }
+            }
+        }
+
+        // --- Semantic search ---
+        if scope == "semantic" {
+            match &self.embedding_service {
+                Some(emb_svc) if emb_svc.is_ready() => {
+                    let query_embedding = emb_svc.embed_text(query);
+                    if !query_embedding.is_empty() {
+                        match index_store.semantic_search(&query_embedding, &project_path, 10) {
+                            Ok(results) if !results.is_empty() => {
+                                let mut section = format!(
+                                    "## Semantic search for '{}' ({} results)\n",
+                                    query,
+                                    results.len()
+                                );
+                                for result in &results {
+                                    // Truncate chunk text for display
+                                    let display_text = if result.chunk_text.len() > 200 {
+                                        format!("{}...", &result.chunk_text[..200])
+                                    } else {
+                                        result.chunk_text.clone()
+                                    };
+                                    let display_text = display_text.replace('\n', " ");
+                                    section.push_str(&format!(
+                                        "  {} (chunk {}, similarity: {:.3})\n    {}\n",
+                                        result.file_path,
+                                        result.chunk_index,
+                                        result.similarity,
+                                        display_text
+                                    ));
+                                }
+                                output_sections.push(section);
+                            }
+                            Ok(_) => {
+                                output_sections.push(format!(
+                                    "No semantic matches found for '{}'.",
+                                    query
+                                ));
+                            }
+                            Err(e) => {
+                                output_sections.push(format!("Semantic search error: {}", e));
+                            }
+                        }
+                    } else {
+                        output_sections.push(
+                            "Semantic search: embedding service produced empty vector. \
+                             The vocabulary may not cover the query terms."
+                                .to_string(),
+                        );
+                    }
+                }
+                Some(_) => {
+                    output_sections.push(
+                        "Semantic search not available: embedding vocabulary has not been built yet. \
+                         The project needs to be re-indexed with embedding generation enabled. \
+                         Use 'symbols' or 'files' scope instead."
+                            .to_string(),
+                    );
+                }
+                None => {
+                    output_sections.push(
+                        "Semantic search not available: no embedding service configured. \
+                         Use 'symbols' or 'files' scope instead."
+                            .to_string(),
+                    );
                 }
             }
         }
