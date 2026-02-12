@@ -12,6 +12,7 @@ import { render, screen, fireEvent, within, waitFor } from '@testing-library/rea
 import { GeneralSection } from '../Settings/GeneralSection';
 import { LLMBackendSection } from '../Settings/LLMBackendSection';
 import { SettingsDialog } from '../Settings/SettingsDialog';
+import { useSettingsStore } from '../../store/settings';
 
 // --------------------------------------------------------------------------
 // Mocks
@@ -43,6 +44,7 @@ vi.mock('react-i18next', () => ({
         'general.executionLimits.title': 'Execution Limits',
         'general.executionLimits.maxParallelStories': 'Max Parallel Stories',
         'general.executionLimits.maxIterations': 'Max Iterations',
+        'general.executionLimits.maxTotalTokens': 'Max Token Budget',
         'general.executionLimits.timeout': 'Timeout (seconds)',
         'buttons.cancel': 'Cancel',
         'buttons.save': 'Save',
@@ -123,6 +125,7 @@ const mockSettingsState = {
   ],
   maxParallelStories: 3,
   maxIterations: 50,
+  maxTotalTokens: 1000000,
   timeoutSeconds: 300,
   onboardingCompleted: true,
   tourCompleted: true,
@@ -285,7 +288,91 @@ describe('GeneralSection', () => {
     expect(screen.getByText('Execution Limits')).toBeInTheDocument();
     expect(screen.getByText('Max Parallel Stories')).toBeInTheDocument();
     expect(screen.getByText('Max Iterations')).toBeInTheDocument();
+    expect(screen.getByText('Max Token Budget')).toBeInTheDocument();
     expect(screen.getByText('Timeout (seconds)')).toBeInTheDocument();
+  });
+
+  it('renders max token budget input with default value', () => {
+    render(<GeneralSection />);
+
+    // The maxTotalTokens field should display the default value (1000000)
+    const tokenInputs = screen.getAllByRole('spinbutton');
+    const tokenInput = tokenInputs.find(
+      (el) => (el as HTMLInputElement).value === '1000000'
+    );
+    expect(tokenInput).toBeDefined();
+  });
+
+  it('renders max iterations input with default value', () => {
+    render(<GeneralSection />);
+
+    // The maxIterations field should display the default value (50)
+    const inputs = screen.getAllByRole('spinbutton');
+    const iterationsInput = inputs.find(
+      (el) => (el as HTMLInputElement).value === '50'
+    );
+    expect(iterationsInput).toBeDefined();
+  });
+
+  it('updates maxTotalTokens via setState when changed', () => {
+    render(<GeneralSection />);
+
+    const tokenInputs = screen.getAllByRole('spinbutton');
+    const tokenInput = tokenInputs.find(
+      (el) => (el as HTMLInputElement).value === '1000000'
+    ) as HTMLInputElement;
+
+    fireEvent.change(tokenInput, { target: { value: '2000000' } });
+
+    expect(useSettingsStore.setState).toHaveBeenCalledWith({ maxTotalTokens: 2000000 });
+  });
+
+  it('enforces min constraint on maxTotalTokens input', () => {
+    render(<GeneralSection />);
+
+    const tokenInputs = screen.getAllByRole('spinbutton');
+    const tokenInput = tokenInputs.find(
+      (el) => (el as HTMLInputElement).value === '1000000'
+    ) as HTMLInputElement;
+
+    expect(tokenInput).toBeDefined();
+    expect(tokenInput.min).toBe('100000');
+  });
+
+  it('enforces max constraint on maxTotalTokens input', () => {
+    render(<GeneralSection />);
+
+    const tokenInputs = screen.getAllByRole('spinbutton');
+    const tokenInput = tokenInputs.find(
+      (el) => (el as HTMLInputElement).value === '1000000'
+    ) as HTMLInputElement;
+
+    expect(tokenInput).toBeDefined();
+    expect(tokenInput.max).toBe('5000000');
+  });
+
+  it('enforces min constraint on maxIterations input', () => {
+    render(<GeneralSection />);
+
+    const inputs = screen.getAllByRole('spinbutton');
+    const iterationsInput = inputs.find(
+      (el) => (el as HTMLInputElement).value === '50'
+    ) as HTMLInputElement;
+
+    expect(iterationsInput).toBeDefined();
+    expect(iterationsInput.min).toBe('10');
+  });
+
+  it('enforces max constraint on maxIterations input', () => {
+    render(<GeneralSection />);
+
+    const inputs = screen.getAllByRole('spinbutton');
+    const iterationsInput = inputs.find(
+      (el) => (el as HTMLInputElement).value === '50'
+    ) as HTMLInputElement;
+
+    expect(iterationsInput).toBeDefined();
+    expect(iterationsInput.max).toBe('200');
   });
 
   it('renders language selector', () => {

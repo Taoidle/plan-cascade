@@ -41,3 +41,4 @@ export { QualityGateBadge } from './QualityGateBadge';
 export { ErrorState } from './ErrorState';
 export { RecoveryPrompt } from './RecoveryPrompt';
 export { ProjectSelector } from './ProjectSelector';
+export { IndexStatus } from './IndexStatus';

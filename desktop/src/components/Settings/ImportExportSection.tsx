@@ -47,6 +47,7 @@ export function ImportExportSection() {
           default_agent: settings.defaultAgent,
           max_parallel_stories: settings.maxParallelStories,
           max_iterations: settings.maxIterations,
+          max_total_tokens: settings.maxTotalTokens,
           timeout_seconds: settings.timeoutSeconds,
           standalone_context_turns: settings.standaloneContextTurns,
         },
@@ -419,6 +420,10 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
 
   if (typeof settings.max_iterations === 'number') {
     useSettingsStore.setState({ maxIterations: settings.max_iterations });
+  }
+
+  if (typeof settings.max_total_tokens === 'number') {
+    useSettingsStore.setState({ maxTotalTokens: settings.max_total_tokens });
   }
 
   if (typeof settings.timeout_seconds === 'number') {

@@ -1,0 +1,98 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+Plan Cascade Desktop is a cross-platform AI programming orchestration app built with **Tauri 2** (React 18 frontend + pure Rust backend, no Python sidecar). It manages LLM-powered task execution with features like agent management, analytics, quality gates, git worktrees, timeline checkpoints, and MCP server integration.
+
+## Build & Development Commands
+
+**Requires**: Node.js with pnpm, Rust toolchain
+
+```bash
+# Frontend
+pnpm install                  # Install dependencies
+pnpm dev                      # Vite dev server only (port 8173)
+pnpm lint                     # ESLint (strict, zero warnings allowed)
+pnpm typecheck                # TypeScript strict mode check
+pnpm test                     # Vitest (jsdom environment)
+pnpm test:watch               # Vitest watch mode
+pnpm test:coverage            # Coverage report (60% threshold)
+
+# Full app
+pnpm tauri:dev                # Tauri dev with hot reload + devtools
+pnpm tauri:build              # Production build for current platform
+pnpm tauri:build:dev          # Debug build
+
+# Backend (from src-tauri/)
+cargo test                    # Rust unit + integration tests
+cargo clippy                  # Rust linting
+cargo check                   # Type checking
+```
+
+Platform-specific builds: `pnpm tauri:build:windows`, `pnpm tauri:build:macos`, `pnpm tauri:build:linux`.
+
+## Architecture
+
+### Three-Layer Structure
+
+```
+Frontend (React/TypeScript)  ──Tauri IPC──>  Commands (Rust)  ──>  Services (Rust)  ──>  Storage (SQLite/Keyring/Config)
+     src/                                  src-tauri/src/commands/  src-tauri/src/services/  src-tauri/src/storage/
+```
+
+**Frontend** (`src/`): React components organized by feature domain (`components/{Agents,Analytics,ClaudeCodeMode,ExpertMode,SimpleMode,Projects,Timeline,Settings,MCP,...}/`). State managed via Zustand stores (`store/`). IPC wrappers in `lib/tauri.ts`. Path alias: `@/*` maps to `src/*`.
+
+**Backend** (`src-tauri/src/`): ~115 Tauri commands across 15 domain modules in `commands/`. Business logic in `services/` (often with subdirectories for complex domains like `analytics/`, `claude_code/`, `orchestrator/`). Data structures in `models/`. Persistence via `storage/` (SQLite with r2d2 connection pooling, OS keyring for API keys, JSON config files).
+
+### App State Architecture
+
+Seven Tauri-managed state objects initialized in `main.rs`:
+- `AppState` — core services (database, keyring, config); lazy-initialized via `init_app` command
+- `ClaudeCodeState`, `AnalyticsState`, `QualityGatesState`, `WorktreeState`, `StandaloneState`, `SpecInterviewState` — domain-specific state
+
+State is accessed in commands via `tauri::State<'_, T>`. `AppState` uses `Arc<RwLock<Option<T>>>` for lazy initialization — services start as `None` and are populated by `init_app`.
+
+### IPC Pattern
+
+Commands return `Result<CommandResponse<T>, String>`. Frontend calls via `invoke<CommandResponse<T>>('command_name', { params })`. Real-time updates use Tauri event system (`listen`/`emit`).
+
+### Key Backend Patterns
+
+- **Command layer**: `#[tauri::command]` async functions that extract state, delegate to services, wrap results in `CommandResponse`
+- **Service layer**: constructed with database pool, implements async business logic, returns `AppResult<T>`
+- **Error handling**: `AppError` enum with typed variants (Database, Keyring, Config, etc.), `AppResult<T>` alias
+- **Database access**: `state.with_database(|db| ...)` callback pattern for pool access
+
+### Context Management Architecture
+
+The orchestrator uses a three-layer context architecture to optimize token usage and prompt caching:
+
+- **Layer 1 (Stable)**: System prompt + project index summary + tool definitions — maximum cache hit rate
+- **Layer 2 (Semi-stable)**: Session memory with `[SESSION_MEMORY_V1]` marker — updated during compaction and before each LLM call
+- **Layer 3 (Volatile)**: Conversation messages — grows and gets trimmed during compaction
+
+Key components:
+
+- **File Read Dedup Cache** (`executor.rs`): `Mutex<HashMap<(PathBuf, offset, limit), ReadCacheEntry>>` prevents redundant file reads. Second read of unchanged file returns short dedup message instead of full content.
+- **Tool Result Truncation** (`service_helpers.rs`): Bounds tool output injected into LLM context (Read: 200 lines, Grep: 100, LS: 150, Bash: 150). Frontend ToolResult events retain full content.
+- **SessionMemoryManager** (`service_helpers.rs`): Maintains session memory at fixed index 1 in messages vec. Accumulates file reads and findings, updates before each LLM call. Both compaction strategies preserve Layer 1+2.
+- **Symbol Extraction** (`analysis_index.rs`): Regex-based extraction of functions, classes, structs, enums for Python, Rust, TypeScript, JavaScript, Go, Java. Max 30 symbols per file, skips files >500KB.
+- **IndexStore** (`index_store.rs`): SQLite persistence for file index and symbols. Tables: `file_index` (with UNIQUE on project_path+file_path) and `file_symbols` (FK with CASCADE delete). Methods: `upsert_file_index()`, `query_symbols()`, `get_project_summary()`, `is_index_stale()`.
+- **BackgroundIndexer** (`background_indexer.rs`): Tokio async task for non-blocking indexing. Full index on startup, incremental updates via mpsc channel from file watcher. SHA-256 content hashing for staleness detection.
+- **CodebaseSearch Tool** (`executor.rs`, `definitions.rs`): Index-backed search with scopes: `symbols`, `files`, `all`. Optional component filter. Falls back to suggesting Grep when index unavailable.
+- **Project Summary Injection** (`system_prompt.rs`): Deterministic (alphabetically sorted) project structure summary injected into system prompt. Critical for Ollama KV-cache stability.
+- **Prefix-Stable Compaction** (`service_helpers.rs`): For non-Claude providers (Ollama/Qwen/DeepSeek/GLM), uses sliding-window deletion instead of LLM-summary rewrite. Preserves head (2 msgs) + tail (6 msgs), no LLM call needed.
+- **Anthropic cache_control** (`anthropic.rs`): `anthropic-beta: prompt-caching-2024-07-31` header, system prompt as structured block with `cache_control: ephemeral`, last tool definition gets `cache_control`.
+
+Compaction strategy is selected by provider reliability: `Reliable` (Anthropic/OpenAI) uses LLM-summary, `Unreliable`/`None` (Ollama/Qwen/DeepSeek/GLM) uses prefix-stable deletion.
+
+## Code Conventions
+
+- TypeScript strict mode with `noUnusedLocals`, `noUnusedParameters`
+- ESLint zero-warning policy (`--max-warnings 0`)
+- Unused variables prefixed with `_` (both TypeScript and Rust)
+- Frontend tests in `src/**/*.{test,spec}.{ts,tsx}` using Vitest + jsdom + Testing Library
+- Backend integration tests in `src-tauri/tests/integration/`
+- Release builds use LTO, `opt-level = "s"`, and strip symbols

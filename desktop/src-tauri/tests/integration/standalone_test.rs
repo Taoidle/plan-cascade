@@ -458,6 +458,9 @@ fn test_execute_with_session_request() {
         system_prompt: Some("Custom prompt".to_string()),
         run_quality_gates: true,
         story_ids: Some(vec!["story-001".to_string(), "story-002".to_string()]),
+        enable_thinking: None,
+        max_total_tokens: None,
+        max_iterations: None,
     };
 
     assert_eq!(request.project_path, "/test/project");

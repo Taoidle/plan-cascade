@@ -20,7 +20,8 @@
     "stop": "Cancel",
     "export": "Export",
     "startNewTask": "Start New Task",
-    "getStarted": "Get Started"
+    "getStarted": "Get Started",
+    "clearDirectory": "Clear directory"
   },
 
   "status": {
@@ -69,6 +70,17 @@
     "connectionFailed": "Connection failed",
     "saveFailed": "Failed to save",
     "loadFailed": "Failed to load"
+  },
+
+  "indexing": {
+    "idle": "Not indexed",
+    "indexing": "Indexing...",
+    "indexingProgress": "Indexing... {{current}}/{{total}} files",
+    "ready": "Indexed",
+    "readyFiles": "{{count}} files",
+    "error": "Index error",
+    "reindex": "Re-index",
+    "reindexTooltip": "Re-index the current directory"
   },
 
   "time": {

@@ -3,11 +3,14 @@
 //! Coordinates LLM provider calls with tool execution in an agentic loop.
 //! Supports session-based execution with SQLite persistence for crash recovery.
 
-mod analysis_index;
+pub mod analysis_index;
 mod analysis_merge;
 mod analysis_scheduler;
 mod analysis_store;
 mod adaptive_scope;
+pub mod background_indexer;
+pub mod index_manager;
+pub mod index_store;
 mod service;
 
 pub use service::{

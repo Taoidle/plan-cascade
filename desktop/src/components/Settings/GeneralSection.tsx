@@ -133,7 +133,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
           {t('general.executionLimits.title')}
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
               {t('general.executionLimits.maxParallelStories')}
@@ -164,13 +164,38 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
             </label>
             <input
               type="number"
-              min={1}
+              min={10}
               max={200}
               value={useSettingsStore.getState().maxIterations}
               onChange={(e) => {
                 const value = parseInt(e.target.value, 10);
                 if (!isNaN(value)) {
                   useSettingsStore.setState({ maxIterations: value });
+                }
+              }}
+              className={clsx(
+                'w-full px-3 py-2 rounded-lg border',
+                'border-gray-200 dark:border-gray-700',
+                'bg-white dark:bg-gray-800',
+                'text-gray-900 dark:text-white',
+                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              )}
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+              {t('general.executionLimits.maxTotalTokens')}
+            </label>
+            <input
+              type="number"
+              min={100000}
+              max={5000000}
+              step={100000}
+              value={useSettingsStore.getState().maxTotalTokens}
+              onChange={(e) => {
+                const value = parseInt(e.target.value, 10);
+                if (!isNaN(value)) {
+                  useSettingsStore.setState({ maxTotalTokens: value });
                 }
               }}
               className={clsx(

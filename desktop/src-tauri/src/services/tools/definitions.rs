@@ -21,6 +21,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         web_fetch_tool(),
         web_search_tool(),
         notebook_edit_tool(),
+        codebase_search_tool(),
     ]
 }
 
@@ -38,6 +39,7 @@ pub fn get_basic_tool_definitions() -> Vec<ToolDefinition> {
         web_fetch_tool(),
         web_search_tool(),
         notebook_edit_tool(),
+        codebase_search_tool(),
     ]
 }
 
@@ -377,6 +379,46 @@ fn web_search_tool() -> ToolDefinition {
     }
 }
 
+/// CodebaseSearch tool definition
+pub fn codebase_search_tool() -> ToolDefinition {
+    let mut properties = HashMap::new();
+    properties.insert(
+        "query".to_string(),
+        ParameterSchema::string(Some(
+            "Search pattern — symbol name, file path fragment, or keyword to search for",
+        )),
+    );
+
+    // scope with enum constraint and default
+    let mut scope_schema = ParameterSchema::string(Some(
+        "Search scope: 'symbols' (search symbol names), 'files' (search file paths/components), 'all' (merge both). Default: 'all'",
+    ));
+    scope_schema.enum_values = Some(vec![
+        "files".to_string(),
+        "symbols".to_string(),
+        "all".to_string(),
+    ]);
+    scope_schema.default = Some(serde_json::Value::String("all".to_string()));
+    properties.insert("scope".to_string(), scope_schema);
+
+    properties.insert(
+        "component".to_string(),
+        ParameterSchema::string(Some(
+            "Optional component name to narrow results (e.g., 'desktop-rust', 'desktop-web')",
+        )),
+    );
+
+    ToolDefinition {
+        name: "CodebaseSearch".to_string(),
+        description: "Search the project's indexed codebase for symbols, files, or both. Uses the pre-built SQLite index for fast lookups without scanning the filesystem. Preferred over Grep/Glob for initial code exploration when the index is available.".to_string(),
+        input_schema: ParameterSchema::object(
+            Some("CodebaseSearch parameters"),
+            properties,
+            vec!["query".to_string()],
+        ),
+    }
+}
+
 /// NotebookEdit tool definition
 fn notebook_edit_tool() -> ToolDefinition {
     let mut properties = HashMap::new();
@@ -421,7 +463,7 @@ mod tests {
     #[test]
     fn test_get_tool_definitions() {
         let tools = get_tool_definitions();
-        assert_eq!(tools.len(), 13);
+        assert_eq!(tools.len(), 14);
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"Read"));
@@ -434,15 +476,17 @@ mod tests {
         assert!(names.contains(&"Cwd"));
         assert!(names.contains(&"Analyze"));
         assert!(names.contains(&"Task"));
+        assert!(names.contains(&"CodebaseSearch"));
     }
 
     #[test]
     fn test_get_basic_tool_definitions() {
         let tools = get_basic_tool_definitions();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 12);
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(!names.contains(&"Task"));
+        assert!(names.contains(&"CodebaseSearch"));
     }
 
     #[test]
@@ -486,5 +530,41 @@ mod tests {
             mode_desc.contains("quick") && mode_desc.contains("deep"),
             "Mode parameter should describe quick and deep modes"
         );
+    }
+
+    #[test]
+    fn test_codebase_search_tool_schema() {
+        let tool = codebase_search_tool();
+        assert_eq!(tool.name, "CodebaseSearch");
+
+        // Description should indicate index-based search
+        assert!(
+            tool.description.contains("index"),
+            "Description should mention index"
+        );
+
+        let props = tool.input_schema.properties.as_ref().unwrap();
+
+        // query is required
+        let required = tool.input_schema.required.as_ref().unwrap();
+        assert!(required.contains(&"query".to_string()));
+
+        // query param exists
+        assert!(props.contains_key("query"));
+
+        // scope param with enum values
+        let scope = props.get("scope").unwrap();
+        let enum_vals = scope.enum_values.as_ref().unwrap();
+        assert!(enum_vals.contains(&"files".to_string()));
+        assert!(enum_vals.contains(&"symbols".to_string()));
+        assert!(enum_vals.contains(&"all".to_string()));
+
+        // scope default is "all"
+        let default_val = scope.default.as_ref().unwrap();
+        assert_eq!(default_val, &serde_json::Value::String("all".to_string()));
+
+        // component param exists and is optional
+        assert!(props.contains_key("component"));
+        assert!(!required.contains(&"component".to_string()));
     }
 }

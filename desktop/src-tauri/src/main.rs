@@ -159,6 +159,8 @@ fn main() {
             plan_cascade_desktop::commands::standalone::cleanup_standalone_sessions,
             plan_cascade_desktop::commands::standalone::get_working_directory,
             plan_cascade_desktop::commands::standalone::set_working_directory,
+            plan_cascade_desktop::commands::standalone::get_index_status,
+            plan_cascade_desktop::commands::standalone::trigger_reindex,
             // Strategy commands
             plan_cascade_desktop::commands::strategy::analyze_task_strategy,
             plan_cascade_desktop::commands::strategy::get_strategy_options,

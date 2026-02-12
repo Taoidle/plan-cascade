@@ -47,6 +47,7 @@ interface SettingsState {
   // Execution settings
   maxParallelStories: number;
   maxIterations: number;
+  maxTotalTokens: number;
   timeoutSeconds: number;
 
   // UI settings
@@ -91,6 +92,7 @@ interface SettingsState {
   setShowReasoningOutput: (show: boolean) => void;
   setEnableThinking: (enable: boolean) => void;
   setShowSubAgentEvents: (show: boolean) => void;
+  setMaxTotalTokens: (tokens: number) => void;
   setSearchProvider: (provider: 'tavily' | 'brave' | 'duckduckgo') => void;
 
   // Chat UI actions
@@ -134,6 +136,7 @@ const defaultSettings = {
   // Execution
   maxParallelStories: 3,
   maxIterations: 50,
+  maxTotalTokens: 1_000_000,
   timeoutSeconds: 300,
 
   // UI
@@ -216,6 +219,8 @@ export const useSettingsStore = create<SettingsState>()(
       setEnableMarkdownMath: (enableMarkdownMath) => set({ enableMarkdownMath }),
       setEnableCodeBlockCopy: (enableCodeBlockCopy) => set({ enableCodeBlockCopy }),
 
+      setMaxTotalTokens: (maxTotalTokens) => set({ maxTotalTokens }),
+
       setSearchProvider: (searchProvider) => set({ searchProvider }),
 
       setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
@@ -223,11 +228,9 @@ export const useSettingsStore = create<SettingsState>()(
       setWorkspacePath: (workspacePath) => {
         set({ workspacePath });
         // Sync to backend StandaloneState for tool executor working directory
-        if (workspacePath) {
-          import('@tauri-apps/api/core').then(({ invoke }) => {
-            invoke('set_working_directory', { path: workspacePath }).catch(() => {});
-          });
-        }
+        import('@tauri-apps/api/core').then(({ invoke }) => {
+          invoke('set_working_directory', { path: workspacePath }).catch(() => {});
+        });
       },
     }),
     {

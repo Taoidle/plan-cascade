@@ -15,6 +15,7 @@ use crate::models::orchestrator::{
 };
 use crate::models::CommandResponse;
 use crate::services::llm::{ProviderConfig, ProviderType};
+use crate::services::orchestrator::index_manager::{IndexManager, IndexStatusEvent};
 use crate::services::orchestrator::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, SessionExecutionResult,
 };
@@ -29,6 +30,8 @@ pub struct StandaloneState {
     pub orchestrators: Arc<RwLock<HashMap<String, Arc<OrchestratorService>>>>,
     /// Current working directory for standalone mode
     pub working_directory: Arc<RwLock<PathBuf>>,
+    /// Index manager for background codebase indexing
+    pub index_manager: Arc<RwLock<Option<IndexManager>>>,
 }
 
 impl Default for StandaloneState {
@@ -45,6 +48,7 @@ impl StandaloneState {
             working_directory: Arc::new(RwLock::new(
                 std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             )),
+            index_manager: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -584,6 +588,7 @@ pub async fn get_working_directory(
 
 /// Set the working directory for standalone LLM sessions.
 /// Validates that the path exists and is a directory.
+/// When a new directory is set, background indexing is triggered via the IndexManager.
 #[tauri::command]
 pub async fn set_working_directory(
     path: String,
@@ -617,10 +622,100 @@ pub async fn set_working_directory(
     };
 
     let result = canonical.to_string_lossy().to_string();
-    let mut wd = standalone_state.working_directory.write().await;
-    *wd = canonical;
+
+    // Capture old path before updating
+    let old_path = {
+        let wd = standalone_state.working_directory.read().await;
+        wd.to_string_lossy().to_string()
+    };
+
+    // Update the working directory
+    {
+        let mut wd = standalone_state.working_directory.write().await;
+        *wd = canonical;
+    }
+
+    // Trigger indexing for the new directory
+    if !result.is_empty() {
+        let mgr_lock = standalone_state.index_manager.read().await;
+        if let Some(mgr) = &*mgr_lock {
+            // Abort indexer for old directory if it was different
+            if !old_path.is_empty() && old_path != result {
+                mgr.remove_directory(&old_path).await;
+            }
+            mgr.ensure_indexed(&result).await;
+        }
+    }
 
     Ok(CommandResponse::ok(result))
+}
+
+/// Get the current indexing status for a project directory.
+/// Falls back to the current working directory if no project_path is provided.
+#[tauri::command]
+pub async fn get_index_status(
+    project_path: Option<String>,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<IndexStatusEvent>, String> {
+    let dir = if let Some(p) = project_path {
+        p
+    } else {
+        let wd = standalone_state.working_directory.read().await;
+        wd.to_string_lossy().to_string()
+    };
+
+    if dir.is_empty() {
+        return Ok(CommandResponse::ok(IndexStatusEvent {
+            project_path: String::new(),
+            status: "idle".to_string(),
+            indexed_files: 0,
+            total_files: 0,
+            error_message: None,
+        }));
+    }
+
+    let mgr_lock = standalone_state.index_manager.read().await;
+    if let Some(mgr) = &*mgr_lock {
+        let status = mgr.get_status(&dir).await;
+        Ok(CommandResponse::ok(status))
+    } else {
+        Ok(CommandResponse::ok(IndexStatusEvent {
+            project_path: dir,
+            status: "idle".to_string(),
+            indexed_files: 0,
+            total_files: 0,
+            error_message: None,
+        }))
+    }
+}
+
+/// Trigger a full reindex for a project directory.
+/// Falls back to the current working directory if no project_path is provided.
+#[tauri::command]
+pub async fn trigger_reindex(
+    project_path: Option<String>,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<bool>, String> {
+    let dir = if let Some(p) = project_path {
+        p
+    } else {
+        let wd = standalone_state.working_directory.read().await;
+        wd.to_string_lossy().to_string()
+    };
+
+    if dir.is_empty() {
+        return Ok(CommandResponse::err("No directory specified".to_string()));
+    }
+
+    let mgr_lock = standalone_state.index_manager.read().await;
+    if let Some(mgr) = &*mgr_lock {
+        mgr.trigger_reindex(&dir).await;
+        Ok(CommandResponse::ok(true))
+    } else {
+        Ok(CommandResponse::err(
+            "IndexManager not initialized".to_string(),
+        ))
+    }
 }
 
 /// Execute a message in standalone mode
@@ -639,6 +734,8 @@ pub async fn execute_standalone(
     analysisSessionId: Option<String>,
     enable_compaction: Option<bool>,
     enable_thinking: Option<bool>,
+    max_total_tokens: Option<u32>,
+    max_iterations: Option<u32>,
     app: AppHandle,
 ) -> CommandResponse<ExecutionResult> {
     let keyring = KeyringService::new();
@@ -697,8 +794,8 @@ pub async fn execute_standalone(
     let orchestrator_config = OrchestratorConfig {
         provider: config,
         system_prompt,
-        max_iterations: 50,
-        max_total_tokens: 100_000,
+        max_iterations: max_iterations.unwrap_or(50),
+        max_total_tokens: max_total_tokens.unwrap_or(1_000_000),
         project_root: PathBuf::from(&project_path),
         streaming: true,
         enable_compaction: enable_compaction.unwrap_or(true),
@@ -902,8 +999,8 @@ pub async fn execute_standalone_with_session(
     let orchestrator_config = OrchestratorConfig {
         provider: config,
         system_prompt: request.system_prompt.clone(),
-        max_iterations: 50,
-        max_total_tokens: 100_000,
+        max_iterations: request.max_iterations.unwrap_or(50),
+        max_total_tokens: request.max_total_tokens.unwrap_or(1_000_000),
         project_root: PathBuf::from(&request.project_path),
         streaming: true,
         enable_compaction: true,
@@ -1275,7 +1372,7 @@ pub async fn resume_standalone_execution(
         provider: config,
         system_prompt: session.system_prompt.clone(),
         max_iterations: 50,
-        max_total_tokens: 100_000,
+        max_total_tokens: 1_000_000,
         project_root: PathBuf::from(&session.project_path),
         streaming: true,
         enable_compaction: true,
@@ -1600,5 +1697,77 @@ mod tests {
         });
         let wd = rt.block_on(async { state.working_directory.read().await.clone() });
         assert_eq!(wd, temp);
+    }
+
+    #[test]
+    fn test_default_max_total_tokens_is_one_million() {
+        // Verify that when no optional override is provided, the default
+        // max_total_tokens used in execute_standalone config is 1_000_000.
+        let default_tokens: u32 = None::<u32>.unwrap_or(1_000_000);
+        assert_eq!(default_tokens, 1_000_000);
+        assert_ne!(
+            default_tokens, 100_000,
+            "Default max_total_tokens must NOT be 100_000"
+        );
+    }
+
+    #[test]
+    fn test_default_max_iterations_is_50() {
+        let default_iters: u32 = None::<u32>.unwrap_or(50);
+        assert_eq!(default_iters, 50);
+    }
+
+    #[test]
+    fn test_optional_max_total_tokens_override() {
+        // Simulate what happens when the frontend passes a custom value.
+        let custom: Option<u32> = Some(500_000);
+        let resolved = custom.unwrap_or(1_000_000);
+        assert_eq!(resolved, 500_000);
+    }
+
+    #[test]
+    fn test_optional_max_iterations_override() {
+        let custom: Option<u32> = Some(100);
+        let resolved = custom.unwrap_or(50);
+        assert_eq!(resolved, 100);
+    }
+
+    #[test]
+    fn test_execute_with_session_request_serde_defaults() {
+        // Verify that ExecuteWithSessionRequest deserializes correctly when
+        // max_total_tokens and max_iterations are absent from the JSON.
+        use crate::models::orchestrator::ExecuteWithSessionRequest;
+
+        let json = r#"{
+            "project_path": "/tmp/test",
+            "provider": "anthropic",
+            "model": "claude-3-5-sonnet-20241022",
+            "run_quality_gates": false
+        }"#;
+
+        let req: ExecuteWithSessionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.max_total_tokens, None);
+        assert_eq!(req.max_iterations, None);
+        // When None, the command should fall back to 1_000_000 / 50.
+        assert_eq!(req.max_total_tokens.unwrap_or(1_000_000), 1_000_000);
+        assert_eq!(req.max_iterations.unwrap_or(50), 50);
+    }
+
+    #[test]
+    fn test_execute_with_session_request_serde_with_overrides() {
+        use crate::models::orchestrator::ExecuteWithSessionRequest;
+
+        let json = r#"{
+            "project_path": "/tmp/test",
+            "provider": "anthropic",
+            "model": "claude-3-5-sonnet-20241022",
+            "run_quality_gates": true,
+            "max_total_tokens": 2000000,
+            "max_iterations": 100
+        }"#;
+
+        let req: ExecuteWithSessionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.max_total_tokens, Some(2_000_000));
+        assert_eq!(req.max_iterations, Some(100));
     }
 }

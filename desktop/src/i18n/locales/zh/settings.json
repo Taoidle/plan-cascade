@@ -43,6 +43,7 @@
       "title": "执行限制",
       "maxParallelStories": "最大并行故事数",
       "maxIterations": "最大迭代次数",
+      "maxTotalTokens": "最大令牌预算",
       "timeout": "超时时间（秒）"
     }
   },

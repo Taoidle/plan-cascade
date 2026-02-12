@@ -140,11 +140,11 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             provider: self.provider_config.clone(),
             system_prompt: Some(task_prefix.to_string()),
             max_iterations: 25,
-            max_total_tokens: sub_agent_token_budget(self.context_window),
+            max_total_tokens: sub_agent_token_budget(self.context_window, task_type.as_deref()),
             project_root: self.project_root.clone(),
             analysis_artifacts_root: default_analysis_artifacts_root(),
             streaming: true,
-            enable_compaction: false, // Sub-agents are short-lived, no compaction needed
+            enable_compaction: true, // Enable compaction to reduce token waste on long-running sub-agents
             analysis_profile: AnalysisProfile::default(),
             analysis_limits: AnalysisLimits::default(),
             analysis_session_id: None,
@@ -162,6 +162,245 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             success: result.success,
             error: result.error,
         }
+    }
+}
+
+/// Session memory injected into compacted conversations to prevent post-compaction re-reads.
+///
+/// Built from the tool executor's read cache and conversation snippets before LLM summary
+/// compaction. After compaction, the memory is placed between the original prompt and the
+/// LLM summary so the agent retains awareness of files it has already read and key findings.
+#[derive(Debug, Clone)]
+struct SessionMemory {
+    /// Files previously read in this session: (path, line_count, size_bytes)
+    files_read: Vec<(String, usize, u64)>,
+    /// Key findings extracted from compacted conversation snippets
+    key_findings: Vec<String>,
+    /// Original task description (first user message, truncated)
+    task_description: String,
+    /// Tool usage counts: tool_name -> count
+    tool_usage_counts: HashMap<String, usize>,
+}
+
+impl SessionMemory {
+    /// Generate a structured context string for injection into the conversation.
+    ///
+    /// The output explicitly lists files already read with sizes and includes a
+    /// "Do NOT re-read" instruction to prevent wasteful duplicate file reads after
+    /// context compaction.
+    fn to_context_string(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+
+        parts.push("[Session Memory - Preserved across context compaction]".to_string());
+
+        // Task description
+        if !self.task_description.is_empty() {
+            parts.push(format!("\n## Task\n{}", self.task_description));
+        }
+
+        // Files already read
+        if !self.files_read.is_empty() {
+            parts.push("\n## Files Already Read".to_string());
+            parts.push(
+                "IMPORTANT: Do NOT re-read these files. Their contents were already processed."
+                    .to_string(),
+            );
+            for (path, lines, bytes) in &self.files_read {
+                parts.push(format!("- {} ({} lines, {} bytes)", path, lines, bytes));
+            }
+        }
+
+        // Key findings
+        if !self.key_findings.is_empty() {
+            parts.push("\n## Key Findings".to_string());
+            for finding in &self.key_findings {
+                parts.push(format!("- {}", finding));
+            }
+        }
+
+        // Tool usage summary
+        if !self.tool_usage_counts.is_empty() {
+            let mut sorted_tools: Vec<(&String, &usize)> =
+                self.tool_usage_counts.iter().collect();
+            sorted_tools.sort_by(|a, b| b.1.cmp(a.1));
+            let tool_summary: Vec<String> = sorted_tools
+                .iter()
+                .map(|(name, count)| format!("{}({})", name, count))
+                .collect();
+            parts.push(format!("\n## Tool Usage\n{}", tool_summary.join(", ")));
+        }
+
+        parts.join("\n")
+    }
+}
+
+/// Extract key findings from conversation snippets being compacted.
+///
+/// Scans text snippets for lines that look like conclusions, discoveries, or decisions.
+/// Returns deduplicated findings sorted by length (shortest first) to keep summaries concise.
+fn extract_key_findings(snippets: &[String]) -> Vec<String> {
+    let finding_indicators = [
+        "found",
+        "discovered",
+        "confirmed",
+        "determined",
+        "decided",
+        "issue:",
+        "error:",
+        "warning:",
+        "note:",
+        "important:",
+        "conclusion:",
+        "result:",
+        "observation:",
+        "the file contains",
+        "the code uses",
+        "the project uses",
+        "implemented",
+        "fixed",
+        "created",
+        "modified",
+        "updated",
+    ];
+
+    let mut findings: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let max_findings = 15;
+
+    for snippet in snippets {
+        for line in snippet.lines() {
+            let trimmed = line.trim();
+            if trimmed.len() < 20 || trimmed.len() > 300 {
+                continue;
+            }
+            let lower = trimmed.to_lowercase();
+            let is_finding = finding_indicators.iter().any(|ind| lower.contains(ind));
+            if is_finding {
+                // Normalize to avoid near-duplicates
+                let normalized = trimmed.to_string();
+                if !seen.contains(&lower) {
+                    seen.insert(lower);
+                    findings.push(normalized);
+                    if findings.len() >= max_findings {
+                        return findings;
+                    }
+                }
+            }
+        }
+    }
+
+    findings
+}
+
+/// Marker string embedded in session memory messages for compaction identification.
+///
+/// Both `compact_messages()` (LLM-summary) and `compact_messages_prefix_stable()` use
+/// this marker to locate and preserve the Layer 2 session memory message during compaction.
+const SESSION_MEMORY_V1_MARKER: &str = "[SESSION_MEMORY_V1]";
+
+/// Manages the Layer 2 session memory within the three-layer context architecture.
+///
+/// # Three-Layer Context Architecture
+/// - **Layer 1 (Stable):** System prompt + index summary + tools (message index 0)
+/// - **Layer 2 (Semi-stable):** Session memory — files read, key findings (fixed index)
+/// - **Layer 3 (Volatile):** Conversation messages (tool calls, responses, etc.)
+///
+/// `SessionMemoryManager` maintains the session memory at a fixed message index,
+/// accumulates file reads and findings, and updates the memory in-place before
+/// each LLM call. The `[SESSION_MEMORY_V1]` marker enables compaction strategies
+/// to identify and preserve this layer.
+struct SessionMemoryManager {
+    /// Fixed position in the messages vec (after system prompt at index 0)
+    memory_index: usize,
+    /// Marker string prepended to session memory content
+    marker: &'static str,
+}
+
+impl SessionMemoryManager {
+    /// Create a new SessionMemoryManager with the given memory index.
+    ///
+    /// Typically `memory_index` is 1 (right after the system prompt at index 0).
+    fn new(memory_index: usize) -> Self {
+        Self {
+            memory_index,
+            marker: SESSION_MEMORY_V1_MARKER,
+        }
+    }
+
+    /// Build a session memory message with the V1 marker prepended.
+    ///
+    /// The message is an assistant-role message containing:
+    /// 1. The `[SESSION_MEMORY_V1]` marker (for compaction identification)
+    /// 2. The full session memory context string (files read, findings, etc.)
+    fn build_memory_message(
+        &self,
+        files_read: Vec<(String, usize, u64)>,
+        findings: Vec<String>,
+    ) -> Message {
+        let memory = SessionMemory {
+            files_read,
+            key_findings: findings,
+            task_description: String::new(),
+            tool_usage_counts: HashMap::new(),
+        };
+
+        let content = format!("{}\n{}", self.marker, memory.to_context_string());
+        Message::assistant(content)
+    }
+
+    /// Update existing session memory in-place, or insert a new one if none exists.
+    ///
+    /// If the message at `memory_index` contains the `SESSION_MEMORY_V1` marker,
+    /// it is replaced with a new session memory message built from the provided data.
+    /// Otherwise, a new message is inserted at `memory_index`.
+    fn update_or_insert(
+        &self,
+        messages: &mut Vec<Message>,
+        files_read: Vec<(String, usize, u64)>,
+        findings: Vec<String>,
+    ) {
+        let new_msg = self.build_memory_message(files_read, findings);
+
+        // Check if there's already a session memory message at the expected index
+        if self.memory_index < messages.len() {
+            if Self::message_has_marker(&messages[self.memory_index]) {
+                // Replace in-place
+                messages[self.memory_index] = new_msg;
+                return;
+            }
+        }
+
+        // Also scan for the marker elsewhere (in case messages shifted)
+        if let Some(idx) = Self::find_memory_index(messages) {
+            messages[idx] = new_msg;
+            return;
+        }
+
+        // No existing session memory — insert at the memory_index position
+        let insert_at = self.memory_index.min(messages.len());
+        messages.insert(insert_at, new_msg);
+    }
+
+    /// Scan messages for the SESSION_MEMORY_V1 marker and return the index if found.
+    fn find_memory_index(messages: &[Message]) -> Option<usize> {
+        for (i, msg) in messages.iter().enumerate() {
+            if Self::message_has_marker(msg) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Check whether a message contains the SESSION_MEMORY_V1 marker.
+    fn message_has_marker(msg: &Message) -> bool {
+        for content in &msg.content {
+            if let MessageContent::Text { text } = content {
+                if text.contains(SESSION_MEMORY_V1_MARKER) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -188,6 +427,7 @@ impl OrchestratorService {
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
+            index_store: None,
         }
     }
 
@@ -213,15 +453,25 @@ impl OrchestratorService {
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
+            index_store: None,
         }
     }
 
-    /// Set the database pool for session persistence
+    /// Set the index store for project summary injection into the system prompt.
+    pub fn with_index_store(mut self, store: IndexStore) -> Self {
+        self.index_store = Some(store);
+        self
+    }
+
+    /// Set the database pool for session persistence.
+    ///
+    /// Indexing is no longer started here; use `IndexManager::ensure_indexed()`
+    /// instead.
     pub fn with_database(mut self, pool: Pool<SqliteConnectionManager>) -> Self {
-        // Initialize schema
         if let Err(e) = self.init_session_schema(&pool) {
             eprintln!("Failed to initialize session schema: {}", e);
         }
+        self.index_store = Some(IndexStore::new(pool.clone()));
         self.db_pool = Some(pool);
         self
     }
@@ -1498,7 +1748,26 @@ impl OrchestratorService {
                             .await;
                     }
                 } else {
-                    self.compact_messages(&mut messages, &tx).await;
+                    // Provider-aware compaction: Reliable -> LLM summary,
+                    // Unreliable/None -> prefix-stable deletion.
+                    match self.provider.tool_call_reliability() {
+                        ToolCallReliability::Reliable => {
+                            self.compact_messages(&mut messages, &tx).await;
+                        }
+                        ToolCallReliability::Unreliable | ToolCallReliability::None => {
+                            let before = messages.len();
+                            if Self::compact_messages_prefix_stable(&mut messages) {
+                                let removed_count = before - messages.len();
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::ContextCompaction {
+                                        messages_compacted: removed_count,
+                                        messages_preserved: messages.len(),
+                                        compaction_tokens: 0,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1810,6 +2079,9 @@ impl OrchestratorService {
             cancellation_token: self.cancellation_token.clone(),
         };
 
+        // Session memory manager for Layer 2 context (placed at index 1, after system prompt)
+        let session_memory_manager = SessionMemoryManager::new(1);
+
         loop {
             // Check for cancellation
             if self.cancellation_token.is_cancelled() {
@@ -1877,6 +2149,36 @@ impl OrchestratorService {
 
             iterations += 1;
 
+            // Update Layer 2 session memory before each LLM call.
+            // Accumulates file reads from the tool executor and key findings
+            // from conversation snippets, updating the memory in-place.
+            {
+                let files_read = self.tool_executor.get_read_file_summary();
+                if !files_read.is_empty() {
+                    // Extract findings from recent assistant messages
+                    let recent_snippets: Vec<String> = messages
+                        .iter()
+                        .rev()
+                        .take(6)
+                        .filter_map(|msg| {
+                            msg.content.iter().find_map(|c| {
+                                if let MessageContent::Text { text } = c {
+                                    Some(text.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                        .collect();
+                    let findings = extract_key_findings(&recent_snippets);
+                    session_memory_manager.update_or_insert(
+                        &mut messages,
+                        files_read,
+                        findings,
+                    );
+                }
+            }
+
             // Determine which tools to pass to the LLM API
             let api_tools = if use_prompt_fallback {
                 // Don't pass tools to the API; they're in the system prompt
@@ -1925,9 +2227,30 @@ impl OrchestratorService {
             let last_input_tokens = response.usage.input_tokens;
             merge_usage(&mut total_usage, &response.usage);
 
-            // Check for context compaction before processing tool calls
+            // Check for context compaction before processing tool calls.
+            // Strategy selection: Reliable providers (Anthropic, OpenAI) use
+            // LLM-summary compaction; Unreliable/None providers (Ollama, Qwen,
+            // DeepSeek, GLM) use prefix-stable sliding-window deletion to avoid
+            // an extra LLM call and preserve KV-cache prefix stability.
             if self.should_compact(last_input_tokens, false) {
-                self.compact_messages(&mut messages, &tx).await;
+                match self.provider.tool_call_reliability() {
+                    ToolCallReliability::Reliable => {
+                        self.compact_messages(&mut messages, &tx).await;
+                    }
+                    ToolCallReliability::Unreliable | ToolCallReliability::None => {
+                        let removed = messages.len();
+                        if Self::compact_messages_prefix_stable(&mut messages) {
+                            let removed_count = removed - messages.len();
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ContextCompaction {
+                                    messages_compacted: removed_count,
+                                    messages_preserved: messages.len(),
+                                    compaction_tokens: 0,
+                                })
+                                .await;
+                        }
+                    }
+                }
             }
 
             // Track the latest assistant text so we can return it if the
@@ -2006,13 +2329,20 @@ impl OrchestratorService {
                         })
                         .await;
 
+                    // Truncate tool output for messages vec (LLM context)
+                    // while keeping full content in the ToolResult event above.
+                    let context_content = truncate_tool_output_for_context(
+                        &tc.name,
+                        &result.to_content(),
+                    );
+
                     // Add tool result to messages (with multimodal support)
                     if let Some((mime, b64)) = &result.image_data {
                         if self.provider.supports_multimodal() {
                             use crate::services::llm::types::ContentBlock;
                             let blocks = vec![
                                 ContentBlock::Text {
-                                    text: result.to_content(),
+                                    text: context_content.clone(),
                                 },
                                 ContentBlock::Image {
                                     media_type: mime.clone(),
@@ -2027,14 +2357,14 @@ impl OrchestratorService {
                         } else {
                             messages.push(Message::tool_result(
                                 &tc.id,
-                                result.to_content(),
+                                context_content,
                                 !result.success,
                             ));
                         }
                     } else {
                         messages.push(Message::tool_result(
                             &tc.id,
-                            result.to_content(),
+                            context_content,
                             !result.success,
                         ));
                     }
@@ -2106,10 +2436,17 @@ impl OrchestratorService {
                         })
                         .await;
 
+                    // Truncate tool output for messages vec (LLM context)
+                    // while keeping full content in the ToolResult event above.
+                    let context_content = truncate_tool_output_for_context(
+                        &ptc.tool_name,
+                        &result.to_content(),
+                    );
+
                     tool_results.push(format_tool_result(
                         &ptc.tool_name,
                         &tool_id,
-                        &result.to_content(),
+                        &context_content,
                         !result.success,
                     ));
                 }
@@ -4824,6 +5161,16 @@ impl OrchestratorService {
 
     /// Compact conversation messages by summarizing older messages while preserving recent ones.
     ///
+    /// Builds a `SessionMemory` from the tool executor's read cache and conversation snippets,
+    /// then calls the LLM to summarize the compacted portion. The final message structure is:
+    ///
+    /// ```text
+    /// [original_prompt, session_memory_msg, llm_summary, ...preserved_tail]
+    /// ```
+    ///
+    /// The session memory explicitly lists all previously-read files with sizes and an
+    /// instruction to avoid re-reading them, preventing wasteful duplicate reads after compaction.
+    ///
     /// Returns `true` if compaction was successful, `false` if it failed or was skipped.
     /// On failure, messages are left untouched and execution continues normally.
     async fn compact_messages(
@@ -4836,21 +5183,32 @@ impl OrchestratorService {
             return false;
         }
 
-        // Preserve the first message (original prompt) and last 6 messages (recent context)
+        // Preserve the first message (original prompt / Layer 1) and last 6 messages (recent context)
         let preserved_tail_count = 6;
         let first_msg = messages[0].clone();
         let compact_range_end = messages.len() - preserved_tail_count;
 
+        // Determine the start of the compaction range.
+        // If a Layer 2 session memory (identified by SESSION_MEMORY_V1 marker) exists
+        // at index 1, skip it — it will be rebuilt after compaction.
+        let compact_range_start = if messages.len() > 1
+            && SessionMemoryManager::message_has_marker(&messages[1])
+        {
+            2 // Skip both Layer 1 (index 0) and existing Layer 2 (index 1)
+        } else {
+            1 // Skip only Layer 1 (index 0)
+        };
+
         // Nothing to compact if range is too small
-        if compact_range_end <= 1 {
+        if compact_range_end <= compact_range_start {
             return false;
         }
 
-        let messages_to_compact = &messages[1..compact_range_end];
+        let messages_to_compact = &messages[compact_range_start..compact_range_end];
         let messages_compacted_count = messages_to_compact.len();
 
         // Extract summary information from messages being compacted
-        let mut tool_names: Vec<String> = Vec::new();
+        let mut tool_usage_counts: HashMap<String, usize> = HashMap::new();
         let mut file_paths: Vec<String> = Vec::new();
         let mut conversation_snippets: Vec<String> = Vec::new();
 
@@ -4862,9 +5220,7 @@ impl OrchestratorService {
                         conversation_snippets.push(snippet);
                     }
                     MessageContent::ToolUse { name, .. } => {
-                        if !tool_names.contains(name) {
-                            tool_names.push(name.clone());
-                        }
+                        *tool_usage_counts.entry(name.clone()).or_insert(0) += 1;
                     }
                     MessageContent::ToolResult { content, .. } => {
                         // Extract file paths from tool results
@@ -4897,6 +5253,37 @@ impl OrchestratorService {
                 }
             }
         }
+
+        // Build SessionMemory from tool executor cache + extracted findings
+        let files_read = self.tool_executor.get_read_file_summary();
+        let key_findings = extract_key_findings(&conversation_snippets);
+
+        // Extract task description from the first user message
+        let task_description = first_msg
+            .content
+            .iter()
+            .find_map(|c| {
+                if let MessageContent::Text { text } = c {
+                    Some(truncate_for_log(text, 500))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+
+        let session_memory = SessionMemory {
+            files_read,
+            key_findings,
+            task_description,
+            tool_usage_counts: tool_usage_counts.clone(),
+        };
+
+        // Collect unique tool names for the compaction prompt
+        let tool_names: Vec<String> = {
+            let mut names: Vec<String> = tool_usage_counts.keys().cloned().collect();
+            names.sort();
+            names
+        };
 
         // Truncate collected data to keep the compaction prompt reasonable
         let snippets_summary = conversation_snippets
@@ -4937,7 +5324,16 @@ impl OrchestratorService {
                     .unwrap_or_else(|| "Previous conversation context was compacted.".to_string());
                 let compaction_tokens = response.usage.output_tokens;
 
-                // Build new message list: original prompt + summary + preserved tail
+                // Build session memory message with V1 marker for compaction identification.
+                // The marker allows both LLM-summary and prefix-stable compaction to
+                // locate and preserve this Layer 2 message in subsequent compaction rounds.
+                let session_memory_msg = Message::assistant(format!(
+                    "{}\n{}",
+                    SESSION_MEMORY_V1_MARKER,
+                    session_memory.to_context_string()
+                ));
+
+                // Build new message list: original prompt + session memory + summary + preserved tail
                 let preserved_tail: Vec<Message> = messages[compact_range_end..].to_vec();
                 let summary_msg = Message::user(format!(
                     "[Context Summary - {} earlier messages compacted]\n\n{}",
@@ -4946,6 +5342,7 @@ impl OrchestratorService {
 
                 messages.clear();
                 messages.push(first_msg);
+                messages.push(session_memory_msg);
                 messages.push(summary_msg);
                 messages.extend(preserved_tail);
 
@@ -4959,8 +5356,9 @@ impl OrchestratorService {
                     .await;
 
                 eprintln!(
-                    "[compaction] Compacted {} messages, preserved {}, summary {} tokens",
-                    messages_compacted_count, preserved_tail_count, compaction_tokens
+                    "[compaction] Compacted {} messages, preserved {}, summary {} tokens, session memory with {} files",
+                    messages_compacted_count, preserved_tail_count, compaction_tokens,
+                    session_memory.files_read.len(),
                 );
 
                 true
@@ -4970,6 +5368,41 @@ impl OrchestratorService {
                 false
             }
         }
+    }
+
+    /// Prefix-stable compaction: remove middle messages without inserting new content.
+    ///
+    /// Preserves the head (first 2 messages: original prompt + session memory) and
+    /// the tail (last 6 messages: recent context). All middle messages are deleted.
+    /// This is a synchronous, deterministic operation that does NOT call the LLM,
+    /// making it suitable for providers with unreliable or no tool calling support
+    /// (Ollama, Qwen, DeepSeek, GLM) where an LLM-summary compaction call may fail
+    /// or produce poor results.
+    ///
+    /// Returns `true` if messages were removed, `false` if skipped (too few messages).
+    fn compact_messages_prefix_stable(messages: &mut Vec<Message>) -> bool {
+        let keep_head = 2usize;
+        let keep_tail = 6usize;
+        let min_required = keep_head + keep_tail + 1; // need at least 1 middle message
+
+        if messages.len() < min_required {
+            return false;
+        }
+
+        let middle_end = messages.len() - keep_tail;
+        let removed = middle_end - keep_head;
+
+        messages.drain(keep_head..middle_end);
+
+        eprintln!(
+            "[compaction] Prefix-stable: removed {} middle messages, kept {} head + {} tail = {} total",
+            removed,
+            keep_head,
+            keep_tail,
+            messages.len(),
+        );
+
+        true
     }
 
     /// Build the effective system prompt, merging tool context with user prompt.
@@ -4990,7 +5423,17 @@ impl OrchestratorService {
             return self.config.system_prompt.clone();
         }
 
-        let mut prompt = build_system_prompt(&self.config.project_root, prompt_tools);
+        // Fetch project summary from index store if available
+        let project_summary = self.index_store.as_ref().and_then(|store| {
+            let project_path = self.config.project_root.to_string_lossy();
+            store.get_project_summary(&project_path).ok()
+        });
+
+        let mut prompt = build_system_prompt(
+            &self.config.project_root,
+            prompt_tools,
+            project_summary.as_ref(),
+        );
 
         // Determine effective fallback mode:
         // 1. User override from ProviderConfig.fallback_tool_format_mode (highest priority)
@@ -6458,6 +6901,47 @@ fn tool_output_for_model_context(
     } else {
         lines
     }
+}
+
+/// Truncate tool output for the messages vector during regular (non-analysis) execution.
+///
+/// This applies bounded truncation so that large tool results do not bloat the LLM
+/// context window. The frontend ToolResult event still receives the full content;
+/// only the messages vec (what the LLM sees) is truncated.
+fn truncate_tool_output_for_context(tool_name: &str, content: &str) -> String {
+    if content.is_empty() {
+        return String::new();
+    }
+
+    let (max_lines, max_chars) = match tool_name {
+        "Read" => (REGULAR_READ_MAX_LINES, REGULAR_READ_MAX_CHARS),
+        "Grep" => (REGULAR_GREP_MAX_LINES, REGULAR_GREP_MAX_CHARS),
+        "LS" | "Glob" => (REGULAR_LS_MAX_LINES, REGULAR_LS_MAX_CHARS),
+        "Bash" => (REGULAR_BASH_MAX_LINES, REGULAR_BASH_MAX_CHARS),
+        _ => (REGULAR_BASH_MAX_LINES, REGULAR_BASH_MAX_CHARS),
+    };
+
+    let original_len = content.len();
+    let original_line_count = content.lines().count();
+
+    // If under both limits, pass through unchanged
+    if original_line_count <= max_lines && original_len <= max_chars {
+        return content.to_string();
+    }
+
+    // Truncate by line count first
+    let mut truncated: String = content.lines().take(max_lines).collect::<Vec<_>>().join("\n");
+
+    // Then truncate by char limit if still over
+    if truncated.len() > max_chars {
+        truncated = truncate_for_log(&truncated, max_chars);
+    }
+
+    let truncated_len = truncated.len();
+    format!(
+        "{}\n\n[truncated for context: {} -> {} chars, {} -> {} lines]",
+        truncated, original_len, truncated_len, original_line_count, max_lines
+    )
 }
 
 fn trim_line_reference_suffix(path: &str) -> String {

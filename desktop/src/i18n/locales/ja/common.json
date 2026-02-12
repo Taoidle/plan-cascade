@@ -20,7 +20,8 @@
     "stop": "キャンセル",
     "export": "エクスポート",
     "startNewTask": "新しいタスクを開始",
-    "getStarted": "始める"
+    "getStarted": "始める",
+    "clearDirectory": "ディレクトリをクリア"
   },
 
   "status": {
@@ -69,6 +70,17 @@
     "connectionFailed": "接続に失敗しました",
     "saveFailed": "保存に失敗しました",
     "loadFailed": "読み込みに失敗しました"
+  },
+
+  "indexing": {
+    "idle": "未インデックス",
+    "indexing": "インデックス中...",
+    "indexingProgress": "インデックス中... {{current}}/{{total}} ファイル",
+    "ready": "インデックス済み",
+    "readyFiles": "{{count}} ファイル",
+    "error": "インデックスエラー",
+    "reindex": "再インデックス",
+    "reindexTooltip": "現在のディレクトリを再インデックスする"
   },
 
   "time": {

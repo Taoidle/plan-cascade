@@ -11,6 +11,7 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { useSettingsStore } from './settings';
 import { useModeStore } from './mode';
 import type { StreamEventPayload } from '../lib/claudeCodeClient';
+import { ToolCallStreamFilter } from '../utils/toolCallFilter';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
@@ -310,6 +311,9 @@ interface ExecutionState {
 
   /** Accumulated token usage for current chat session */
   sessionUsageTotals: BackendUsageStats | null;
+
+  /** Filter for stripping tool_call code blocks from streaming text */
+  toolCallFilter: ToolCallStreamFilter;
 
   // Actions
   /** Initialize Tauri event listeners */
@@ -659,6 +663,7 @@ const initialState = {
   standaloneSessionId: null as string | null,
   latestUsage: null as BackendUsageStats | null,
   sessionUsageTotals: null as BackendUsageStats | null,
+  toolCallFilter: new ToolCallStreamFilter(),
 };
 
 export const useExecutionStore = create<ExecutionState>()((set, get) => ({
@@ -731,6 +736,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       sessionUsageTotals: preserveSimpleConversation ? get().sessionUsageTotals : null,
     });
 
+    // Reset the tool-call filter for the new execution turn
+    get().toolCallFilter.reset();
+
     get().addLog(`Starting execution in ${mode} mode...`);
     get().addLog(`Task: ${description}`);
     if (mode === 'simple' && !isClaudeBackend) {
@@ -800,6 +808,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           analysisSessionId: standaloneSessionId,
           enableCompaction: settings.enableContextCompaction ?? true,
           enableThinking: settings.enableThinking ?? false,
+          maxTotalTokens: settings.maxTotalTokens ?? undefined,
+          maxIterations: settings.maxIterations ?? undefined,
         });
 
         if (!result.success || !result.data) {
@@ -993,6 +1003,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     // and the next text_delta will start a fresh text block.
     get().appendStreamLine(prompt, 'info');
 
+    // Reset the tool-call filter for the new follow-up turn
+    get().toolCallFilter.reset();
+
     // Keep existing streaming output (conversation history) and switch to running
     set({
       status: 'running',
@@ -1086,6 +1099,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       ...initialState,
       connectionStatus: state.connectionStatus,
       history: get().history,
+      toolCallFilter: new ToolCallStreamFilter(),
     });
   },
 
@@ -1764,7 +1778,13 @@ function handleUnifiedExecutionEvent(
 
     case 'text_delta':
       if (payload.content) {
-        get().appendStreamLine(payload.content, 'text');
+        const filterResult = get().toolCallFilter.processChunk(payload.content);
+        if (filterResult.output) {
+          get().appendStreamLine(filterResult.output, 'text');
+        }
+        if (filterResult.toolIndicator) {
+          get().appendStreamLine(filterResult.toolIndicator, 'tool');
+        }
       }
       break;
 
@@ -2261,6 +2281,12 @@ function handleUnifiedExecutionEvent(
       break;
 
     case 'complete': {
+      // Flush any buffered content from the tool-call filter
+      const flushedText = get().toolCallFilter.flush();
+      if (flushedText) {
+        get().appendStreamLine(flushedText, 'text');
+      }
+
       // For standalone one-shot execution, this is the final completion signal.
       if (get().status === 'running' || get().status === 'paused') {
         const completedStories = get().stories.filter((s) => s.status === 'completed').length;
@@ -2439,9 +2465,16 @@ async function setupTauriEventListeners(
       }
 
       switch (streamEvent.type) {
-        case 'text_delta':
-          get().appendStreamLine(streamEvent.content, 'text');
+        case 'text_delta': {
+          const filterResult = get().toolCallFilter.processChunk(streamEvent.content);
+          if (filterResult.output) {
+            get().appendStreamLine(filterResult.output, 'text');
+          }
+          if (filterResult.toolIndicator) {
+            get().appendStreamLine(filterResult.toolIndicator, 'tool');
+          }
           break;
+        }
 
         case 'thinking_start':
           if (useSettingsStore.getState().showReasoningOutput) {
@@ -2494,6 +2527,12 @@ async function setupTauriEventListeners(
           break;
 
         case 'complete': {
+          // Flush any buffered content from the tool-call filter
+          const ccFlushed = get().toolCallFilter.flush();
+          if (ccFlushed) {
+            get().appendStreamLine(ccFlushed, 'text');
+          }
+
           if (get().isChatSession) {
             // Chat session: stay ready for follow-up messages
             // Keep streamingOutput visible, go back to idle

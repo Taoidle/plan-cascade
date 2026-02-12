@@ -177,7 +177,7 @@ pub enum MessageRole {
 }
 
 /// Content type within a message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessageContent {
     /// Plain text content
@@ -213,7 +213,7 @@ pub enum MessageContent {
 }
 
 /// A content block that can be text or image (for multimodal tool results)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     /// Text content
@@ -223,7 +223,7 @@ pub enum ContentBlock {
 }
 
 /// A message in the conversation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     /// Role of the message sender
     pub role: MessageRole,

@@ -5,6 +5,7 @@
 
 use crate::utils::error::AppResult;
 use ignore::WalkBuilder;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -34,6 +35,7 @@ pub struct AnalysisLimits {
     pub target_coverage_ratio: f64,
     pub target_test_coverage_ratio: f64,
     pub target_sampled_read_ratio: f64,
+    pub max_symbols_per_file: usize,
 }
 
 impl Default for AnalysisLimits {
@@ -48,8 +50,28 @@ impl Default for AnalysisLimits {
             target_coverage_ratio: 0.80,
             target_test_coverage_ratio: 0.50,
             target_sampled_read_ratio: 0.35,
+            max_symbols_per_file: 30,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SymbolKind {
+    Function,
+    Class,
+    Struct,
+    Enum,
+    Interface,
+    Type,
+    Const,
+    Module,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SymbolInfo {
+    pub name: String,
+    pub kind: SymbolKind,
+    pub line: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +83,7 @@ pub struct FileInventoryItem {
     pub size_bytes: u64,
     pub line_count: usize,
     pub is_test: bool,
+    pub symbols: Vec<SymbolInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -106,6 +129,15 @@ pub fn build_file_inventory(
     project_root: &Path,
     excluded_roots: &[String],
 ) -> AppResult<FileInventory> {
+    build_file_inventory_with_limits(project_root, excluded_roots, &AnalysisLimits::default())
+}
+
+pub fn build_file_inventory_with_limits(
+    project_root: &Path,
+    excluded_roots: &[String],
+    limits: &AnalysisLimits,
+) -> AppResult<FileInventory> {
+    let max_symbol_file_size: u64 = 500_000; // 500KB threshold for symbol extraction
     let mut excluded = HashSet::new();
     for root in excluded_roots {
         excluded.insert(root.trim().replace('\\', "/"));
@@ -149,6 +181,12 @@ pub fn build_file_inventory(
         let component = detect_component(&rel_norm);
         let line_count = estimate_line_count(path, metadata.len()).unwrap_or(0);
 
+        let symbols = if metadata.len() <= max_symbol_file_size {
+            extract_symbols(path, &language, limits.max_symbols_per_file)
+        } else {
+            Vec::new()
+        };
+
         items.push(FileInventoryItem {
             path: rel_norm,
             component,
@@ -157,6 +195,7 @@ pub fn build_file_inventory(
             size_bytes: metadata.len(),
             line_count,
             is_test,
+            symbols,
         });
     }
 
@@ -393,6 +432,95 @@ pub fn compute_coverage_report(
     }
 }
 
+/// Extract top-level symbol definitions from a source file using regex patterns.
+///
+/// Supports Python, Rust, TypeScript, JavaScript, Go, and Java.
+/// Returns up to `max_symbols` results. Symbols are extracted line-by-line, so
+/// only top-level definitions that match the language-specific patterns are found.
+pub fn extract_symbols(path: &Path, language: &str, max_symbols: usize) -> Vec<SymbolInfo> {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    extract_symbols_from_str(&content, language, max_symbols)
+}
+
+/// Inner helper that operates on a string slice (simplifies testing).
+fn extract_symbols_from_str(content: &str, language: &str, max_symbols: usize) -> Vec<SymbolInfo> {
+    let patterns: Vec<(Regex, SymbolKind)> = match language {
+        "python" => vec![
+            (Regex::new(r"^def\s+([A-Za-z_]\w*)\s*\(").unwrap(), SymbolKind::Function),
+            (Regex::new(r"^class\s+([A-Za-z_]\w*)[\s:(]").unwrap(), SymbolKind::Class),
+        ],
+        "rust" => vec![
+            (Regex::new(r"^\s*pub(?:\s*\([^)]*\))?\s+fn\s+([A-Za-z_]\w*)\s*[<(]").unwrap(), SymbolKind::Function),
+            (Regex::new(r"^\s*fn\s+([A-Za-z_]\w*)\s*[<(]").unwrap(), SymbolKind::Function),
+            (Regex::new(r"^\s*pub(?:\s*\([^)]*\))?\s+struct\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Struct),
+            (Regex::new(r"^\s*struct\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Struct),
+            (Regex::new(r"^\s*pub(?:\s*\([^)]*\))?\s+enum\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Enum),
+            (Regex::new(r"^\s*enum\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Enum),
+            (Regex::new(r"^\s*pub(?:\s*\([^)]*\))?\s+trait\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Interface),
+            (Regex::new(r"^\s*trait\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Interface),
+            (Regex::new(r"^\s*pub(?:\s*\([^)]*\))?\s+type\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Type),
+            (Regex::new(r"^\s*type\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Type),
+            (Regex::new(r"^\s*pub(?:\s*\([^)]*\))?\s+mod\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Module),
+            (Regex::new(r"^\s*mod\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Module),
+        ],
+        "typescript" => vec![
+            (Regex::new(r"(?:^|[\s;])(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$]\w*)\s*[<(]").unwrap(), SymbolKind::Function),
+            (Regex::new(r"(?:^|[\s;])(?:export\s+)?class\s+([A-Za-z_$]\w*)").unwrap(), SymbolKind::Class),
+            (Regex::new(r"(?:^|[\s;])(?:export\s+)?interface\s+([A-Za-z_$]\w*)").unwrap(), SymbolKind::Interface),
+            (Regex::new(r"(?:^|[\s;])(?:export\s+)?type\s+([A-Za-z_$]\w*)\s*[<=]").unwrap(), SymbolKind::Type),
+            (Regex::new(r"(?:^|[\s;])(?:export\s+)?enum\s+([A-Za-z_$]\w*)").unwrap(), SymbolKind::Enum),
+            (Regex::new(r"(?:^|[\s;])(?:export\s+)?const\s+([A-Za-z_$]\w*)\s*[=:]").unwrap(), SymbolKind::Const),
+        ],
+        "javascript" => vec![
+            (Regex::new(r"(?:^|[\s;])(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$]\w*)\s*[<(]").unwrap(), SymbolKind::Function),
+            (Regex::new(r"(?:^|[\s;])(?:export\s+)?class\s+([A-Za-z_$]\w*)").unwrap(), SymbolKind::Class),
+        ],
+        "go" => vec![
+            (Regex::new(r"^func\s+(?:\([^)]*\)\s+)?([A-Za-z_]\w*)\s*\(").unwrap(), SymbolKind::Function),
+            (Regex::new(r"^type\s+([A-Za-z_]\w*)\s+struct\b").unwrap(), SymbolKind::Struct),
+            (Regex::new(r"^type\s+([A-Za-z_]\w*)\s+interface\b").unwrap(), SymbolKind::Interface),
+            (Regex::new(r"^type\s+([A-Za-z_]\w*)\s").unwrap(), SymbolKind::Type),
+        ],
+        "java" => vec![
+            (Regex::new(r"(?:public|private|protected)?\s*(?:static\s+)?(?:final\s+)?class\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Class),
+            (Regex::new(r"(?:public|private|protected)?\s*interface\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Interface),
+            (Regex::new(r"(?:public|private|protected)?\s*enum\s+([A-Za-z_]\w*)").unwrap(), SymbolKind::Enum),
+        ],
+        _ => return Vec::new(),
+    };
+
+    let mut symbols = Vec::new();
+    let mut seen_names = HashSet::new();
+
+    for (line_number, line) in content.lines().enumerate() {
+        if symbols.len() >= max_symbols {
+            break;
+        }
+        for (re, kind) in &patterns {
+            if let Some(caps) = re.captures(line) {
+                if let Some(name_match) = caps.get(1) {
+                    let name = name_match.as_str().to_string();
+                    // Deduplicate: a pub fn will match both pub fn and bare fn patterns
+                    let dedup_key = format!("{}:{}", name, line_number);
+                    if seen_names.insert(dedup_key) {
+                        symbols.push(SymbolInfo {
+                            name,
+                            kind: *kind,
+                            line: line_number + 1, // 1-based line numbers
+                        });
+                    }
+                    break; // first match per line wins
+                }
+            }
+        }
+    }
+
+    symbols
+}
+
 fn phase_slot(phase_id: &str) -> usize {
     match phase_id {
         "structure_discovery" => 0,
@@ -452,7 +580,10 @@ fn detect_language(ext: Option<&str>) -> String {
     match ext {
         Some("py") => "python",
         Some("rs") => "rust",
-        Some("ts") | Some("tsx") | Some("js") | Some("jsx") => "typescript",
+        Some("ts") | Some("tsx") => "typescript",
+        Some("js") | Some("jsx") => "javascript",
+        Some("go") => "go",
+        Some("java") => "java",
         Some("json") | Some("toml") | Some("yaml") | Some("yml") => "config",
         Some("md") => "markdown",
         _ => "other",
@@ -637,6 +768,7 @@ mod tests {
                     size_bytes: 10,
                     line_count: 1,
                     is_test: false,
+                    symbols: vec![],
                 },
                 FileInventoryItem {
                     path: "tests/test_a.py".to_string(),
@@ -646,6 +778,7 @@ mod tests {
                     size_bytes: 10,
                     line_count: 1,
                     is_test: true,
+                    symbols: vec![],
                 },
                 FileInventoryItem {
                     path: "tests/test_b.py".to_string(),
@@ -655,6 +788,7 @@ mod tests {
                     size_bytes: 10,
                     line_count: 1,
                     is_test: true,
+                    symbols: vec![],
                 },
                 FileInventoryItem {
                     path: "README.md".to_string(),
@@ -664,6 +798,7 @@ mod tests {
                     size_bytes: 10,
                     line_count: 1,
                     is_test: false,
+                    symbols: vec![],
                 },
             ],
         };
@@ -680,5 +815,419 @@ mod tests {
         assert_eq!(report.test_files_read, 0);
         assert!((report.observed_test_coverage_ratio - 1.0).abs() < 1e-6);
         assert!((report.test_coverage_ratio - 0.0).abs() < 1e-6);
+    }
+
+    // =====================================================================
+    // Symbol extraction tests
+    // =====================================================================
+
+    #[test]
+    fn extract_python_symbols() {
+        let src = r#"
+import os
+
+def greet(name):
+    return f"Hello {name}"
+
+class MyService:
+    def __init__(self):
+        pass
+
+    def run(self):
+        pass
+
+def helper():
+    pass
+
+class AnotherClass(Base):
+    pass
+"#;
+        let symbols = extract_symbols_from_str(src, "python", 30);
+        assert_eq!(symbols.len(), 4);
+
+        assert_eq!(symbols[0].name, "greet");
+        assert_eq!(symbols[0].kind, SymbolKind::Function);
+        assert_eq!(symbols[0].line, 4);
+
+        assert_eq!(symbols[1].name, "MyService");
+        assert_eq!(symbols[1].kind, SymbolKind::Class);
+        assert_eq!(symbols[1].line, 7);
+
+        // Indented method `__init__` and `run` should NOT match (not top-level)
+        assert_eq!(symbols[2].name, "helper");
+        assert_eq!(symbols[2].kind, SymbolKind::Function);
+        assert_eq!(symbols[2].line, 14);
+
+        assert_eq!(symbols[3].name, "AnotherClass");
+        assert_eq!(symbols[3].kind, SymbolKind::Class);
+        assert_eq!(symbols[3].line, 17);
+    }
+
+    #[test]
+    fn extract_rust_symbols() {
+        let src = r#"
+use std::io;
+
+pub fn main() {
+    println!("hello");
+}
+
+fn helper_fn(x: i32) -> i32 {
+    x + 1
+}
+
+pub struct Config {
+    name: String,
+}
+
+struct InternalState {
+    count: usize,
+}
+
+pub enum Status {
+    Active,
+    Inactive,
+}
+
+enum InternalEnum {
+    A,
+    B,
+}
+
+pub trait Processor {
+    fn process(&self);
+}
+
+trait InternalTrait {
+    fn run(&self);
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+type InternalAlias = Vec<String>;
+
+pub mod utils;
+
+mod internal;
+"#;
+        let symbols = extract_symbols_from_str(src, "rust", 30);
+
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"main"), "should find pub fn main");
+        assert!(names.contains(&"helper_fn"), "should find fn helper_fn");
+        assert!(names.contains(&"Config"), "should find pub struct Config");
+        assert!(names.contains(&"InternalState"), "should find struct InternalState");
+        assert!(names.contains(&"Status"), "should find pub enum Status");
+        assert!(names.contains(&"InternalEnum"), "should find enum InternalEnum");
+        assert!(names.contains(&"Processor"), "should find pub trait Processor");
+        assert!(names.contains(&"InternalTrait"), "should find trait InternalTrait");
+        assert!(names.contains(&"Result"), "should find pub type Result");
+        assert!(names.contains(&"InternalAlias"), "should find type InternalAlias");
+        assert!(names.contains(&"utils"), "should find pub mod utils");
+        assert!(names.contains(&"internal"), "should find mod internal");
+
+        // Verify kinds
+        let main_sym = symbols.iter().find(|s| s.name == "main").unwrap();
+        assert_eq!(main_sym.kind, SymbolKind::Function);
+
+        let config_sym = symbols.iter().find(|s| s.name == "Config").unwrap();
+        assert_eq!(config_sym.kind, SymbolKind::Struct);
+
+        let status_sym = symbols.iter().find(|s| s.name == "Status").unwrap();
+        assert_eq!(status_sym.kind, SymbolKind::Enum);
+
+        let processor_sym = symbols.iter().find(|s| s.name == "Processor").unwrap();
+        assert_eq!(processor_sym.kind, SymbolKind::Interface);
+
+        let result_sym = symbols.iter().find(|s| s.name == "Result").unwrap();
+        assert_eq!(result_sym.kind, SymbolKind::Type);
+
+        let utils_sym = symbols.iter().find(|s| s.name == "utils").unwrap();
+        assert_eq!(utils_sym.kind, SymbolKind::Module);
+    }
+
+    #[test]
+    fn extract_typescript_symbols() {
+        let src = r#"
+import { useState } from 'react';
+
+export function createApp(config: AppConfig) {
+    return new App(config);
+}
+
+export async function fetchData<T>(url: string): Promise<T> {
+    return fetch(url).then(r => r.json());
+}
+
+export class AppService {
+    constructor() {}
+}
+
+export interface Config {
+    name: string;
+    port: number;
+}
+
+export type Status = 'active' | 'inactive';
+
+export enum Direction {
+    Up,
+    Down,
+}
+
+export const MAX_RETRIES = 5;
+
+const INTERNAL_TIMEOUT = 1000;
+
+function helperFn() {}
+"#;
+        let symbols = extract_symbols_from_str(src, "typescript", 30);
+
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"createApp"), "should find export function createApp");
+        assert!(names.contains(&"fetchData"), "should find export async function fetchData");
+        assert!(names.contains(&"AppService"), "should find export class");
+        assert!(names.contains(&"Config"), "should find export interface");
+        assert!(names.contains(&"Status"), "should find export type");
+        assert!(names.contains(&"Direction"), "should find export enum");
+        assert!(names.contains(&"MAX_RETRIES"), "should find export const");
+        assert!(names.contains(&"INTERNAL_TIMEOUT"), "should find const");
+        assert!(names.contains(&"helperFn"), "should find plain function");
+
+        // Verify kinds
+        let create_app = symbols.iter().find(|s| s.name == "createApp").unwrap();
+        assert_eq!(create_app.kind, SymbolKind::Function);
+
+        let config = symbols.iter().find(|s| s.name == "Config").unwrap();
+        assert_eq!(config.kind, SymbolKind::Interface);
+
+        let status = symbols.iter().find(|s| s.name == "Status").unwrap();
+        assert_eq!(status.kind, SymbolKind::Type);
+
+        let direction = symbols.iter().find(|s| s.name == "Direction").unwrap();
+        assert_eq!(direction.kind, SymbolKind::Enum);
+
+        let max_retries = symbols.iter().find(|s| s.name == "MAX_RETRIES").unwrap();
+        assert_eq!(max_retries.kind, SymbolKind::Const);
+    }
+
+    #[test]
+    fn extract_javascript_symbols() {
+        let src = r#"
+const util = require('util');
+
+function processData(items) {
+    return items.map(i => i.value);
+}
+
+export class DataManager {
+    constructor() {}
+}
+
+async function loadConfig() {
+    return {};
+}
+"#;
+        let symbols = extract_symbols_from_str(src, "javascript", 30);
+
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"processData"), "should find function processData");
+        assert!(names.contains(&"DataManager"), "should find class DataManager");
+        assert!(names.contains(&"loadConfig"), "should find async function loadConfig");
+
+        let process = symbols.iter().find(|s| s.name == "processData").unwrap();
+        assert_eq!(process.kind, SymbolKind::Function);
+
+        let manager = symbols.iter().find(|s| s.name == "DataManager").unwrap();
+        assert_eq!(manager.kind, SymbolKind::Class);
+    }
+
+    #[test]
+    fn extract_go_symbols() {
+        let src = r#"
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("hello")
+}
+
+func (s *Server) Start() error {
+    return nil
+}
+
+type Config struct {
+    Name string
+    Port int
+}
+
+type Handler interface {
+    Handle(req Request) Response
+}
+
+type StringSlice []string
+"#;
+        let symbols = extract_symbols_from_str(src, "go", 30);
+
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"main"), "should find func main");
+        assert!(names.contains(&"Start"), "should find method Start");
+        assert!(names.contains(&"Config"), "should find type Config struct");
+        assert!(names.contains(&"Handler"), "should find type Handler interface");
+        assert!(names.contains(&"StringSlice"), "should find type alias");
+
+        let config = symbols.iter().find(|s| s.name == "Config").unwrap();
+        assert_eq!(config.kind, SymbolKind::Struct);
+
+        let handler = symbols.iter().find(|s| s.name == "Handler").unwrap();
+        assert_eq!(handler.kind, SymbolKind::Interface);
+    }
+
+    #[test]
+    fn extract_java_symbols() {
+        let src = r#"
+package com.example;
+
+import java.util.List;
+
+public class UserService {
+    private final UserRepository repo;
+
+    public UserService(UserRepository repo) {
+        this.repo = repo;
+    }
+}
+
+public interface UserRepository {
+    User findById(String id);
+}
+
+public enum Status {
+    ACTIVE,
+    INACTIVE;
+}
+
+class InternalHelper {
+    // package-private
+}
+"#;
+        let symbols = extract_symbols_from_str(src, "java", 30);
+
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"UserService"), "should find public class");
+        assert!(names.contains(&"UserRepository"), "should find public interface");
+        assert!(names.contains(&"Status"), "should find public enum");
+        assert!(names.contains(&"InternalHelper"), "should find package-private class");
+
+        let svc = symbols.iter().find(|s| s.name == "UserService").unwrap();
+        assert_eq!(svc.kind, SymbolKind::Class);
+
+        let repo = symbols.iter().find(|s| s.name == "UserRepository").unwrap();
+        assert_eq!(repo.kind, SymbolKind::Interface);
+
+        let status = symbols.iter().find(|s| s.name == "Status").unwrap();
+        assert_eq!(status.kind, SymbolKind::Enum);
+    }
+
+    #[test]
+    fn extract_symbols_respects_max_limit() {
+        let mut src = String::new();
+        for i in 0..50 {
+            src.push_str(&format!("def func_{}():\n    pass\n\n", i));
+        }
+        let symbols = extract_symbols_from_str(&src, "python", 5);
+        assert_eq!(symbols.len(), 5);
+        assert_eq!(symbols[0].name, "func_0");
+        assert_eq!(symbols[4].name, "func_4");
+    }
+
+    #[test]
+    fn extract_symbols_returns_empty_for_unknown_language() {
+        let src = "some random content\nwith no structure\n";
+        let symbols = extract_symbols_from_str(src, "config", 30);
+        assert!(symbols.is_empty());
+    }
+
+    #[test]
+    fn extract_symbols_returns_empty_for_empty_content() {
+        let symbols = extract_symbols_from_str("", "python", 30);
+        assert!(symbols.is_empty());
+    }
+
+    #[test]
+    fn extract_symbols_correct_line_numbers() {
+        let src = "# comment\n\ndef first():\n    pass\n\ndef second():\n    pass\n";
+        let symbols = extract_symbols_from_str(src, "python", 30);
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols[0].name, "first");
+        assert_eq!(symbols[0].line, 3); // 1-based
+        assert_eq!(symbols[1].name, "second");
+        assert_eq!(symbols[1].line, 6);
+    }
+
+    #[test]
+    fn extract_symbols_rust_no_duplicates_for_pub_fn() {
+        // pub fn should match the pub fn pattern but not create a duplicate from the bare fn pattern
+        let src = "pub fn my_function(x: i32) -> i32 {\n    x\n}\n";
+        let symbols = extract_symbols_from_str(src, "rust", 30);
+        let fn_count = symbols.iter().filter(|s| s.name == "my_function").count();
+        assert_eq!(fn_count, 1, "pub fn should not produce duplicate entries");
+    }
+
+    #[test]
+    fn build_inventory_extracts_symbols_for_small_files() {
+        let dir = tempdir().expect("temp dir");
+        fs::create_dir_all(dir.path().join("src/plan_cascade/core")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/plan_cascade/core/service.py"),
+            "def start():\n    pass\n\nclass Engine:\n    pass\n",
+        )
+        .expect("write");
+
+        let inventory = build_file_inventory(dir.path(), &[]).expect("inventory");
+        assert_eq!(inventory.items.len(), 1);
+        let item = &inventory.items[0];
+        assert_eq!(item.symbols.len(), 2);
+        assert_eq!(item.symbols[0].name, "start");
+        assert_eq!(item.symbols[0].kind, SymbolKind::Function);
+        assert_eq!(item.symbols[1].name, "Engine");
+        assert_eq!(item.symbols[1].kind, SymbolKind::Class);
+    }
+
+    #[test]
+    fn build_inventory_skips_symbols_for_large_files() {
+        let dir = tempdir().expect("temp dir");
+        fs::create_dir_all(dir.path().join("src/plan_cascade/core")).expect("mkdir");
+        // Create a file larger than 500KB
+        let mut content = String::new();
+        for i in 0..20_000 {
+            content.push_str(&format!("def func_{}():\n    pass\n\n", i));
+        }
+        assert!(content.len() > 500_000, "test content should exceed 500KB");
+        fs::write(
+            dir.path().join("src/plan_cascade/core/huge.py"),
+            &content,
+        )
+        .expect("write");
+
+        let inventory = build_file_inventory(dir.path(), &[]).expect("inventory");
+        assert_eq!(inventory.items.len(), 1);
+        let item = &inventory.items[0];
+        assert!(item.symbols.is_empty(), "symbols should be empty for files > 500KB");
+    }
+
+    #[test]
+    fn symbol_kind_serialization() {
+        let info = SymbolInfo {
+            name: "test_fn".to_string(),
+            kind: SymbolKind::Function,
+            line: 1,
+        };
+        let json = serde_json::to_string(&info).expect("serialize");
+        assert!(json.contains("Function"));
+        let deserialized: SymbolInfo = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized.kind, SymbolKind::Function);
+        assert_eq!(deserialized.name, "test_fn");
     }
 }

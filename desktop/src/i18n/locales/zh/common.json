@@ -20,7 +20,8 @@
     "stop": "取消",
     "export": "导出",
     "startNewTask": "开始新任务",
-    "getStarted": "开始使用"
+    "getStarted": "开始使用",
+    "clearDirectory": "清除目录"
   },
 
   "status": {
@@ -69,6 +70,17 @@
     "connectionFailed": "连接失败",
     "saveFailed": "保存失败",
     "loadFailed": "加载失败"
+  },
+
+  "indexing": {
+    "idle": "未索引",
+    "indexing": "索引中...",
+    "indexingProgress": "索引中... {{current}}/{{total}} 个文件",
+    "ready": "已索引",
+    "readyFiles": "{{count}} 个文件",
+    "error": "索引错误",
+    "reindex": "重新索引",
+    "reindexTooltip": "重新索引当前目录"
   },
 
   "time": {

@@ -18,9 +18,9 @@ use tempfile::TempDir;
 // ============================================================================
 
 #[test]
-fn test_get_tool_definitions_returns_13_tools() {
+fn test_get_tool_definitions_returns_14_tools() {
     let tools = get_tool_definitions();
-    assert_eq!(tools.len(), 13, "Expected exactly 13 tool definitions");
+    assert_eq!(tools.len(), 14, "Expected exactly 14 tool definitions");
 }
 
 #[test]
@@ -42,6 +42,7 @@ fn test_all_tool_names_present() {
         "WebFetch",
         "WebSearch",
         "NotebookEdit",
+        "CodebaseSearch",
     ];
     for name in &expected {
         assert!(
@@ -312,7 +313,7 @@ fn test_tool_definitions_all_serializable_to_json_array() {
     assert!(!json_str.is_empty());
 
     let deserialized: Vec<ToolDefinition> = serde_json::from_str(&json_str).unwrap();
-    assert_eq!(deserialized.len(), 13);
+    assert_eq!(deserialized.len(), 14);
 }
 
 // ============================================================================
@@ -323,7 +324,7 @@ fn test_tool_definitions_all_serializable_to_json_array() {
 fn test_system_prompt_includes_working_directory() {
     let tools = get_tool_definitions();
     let project_root = PathBuf::from("D:\\test\\my-project");
-    let prompt = build_system_prompt(&project_root, &tools);
+    let prompt = build_system_prompt(&project_root, &tools, None);
 
     assert!(
         prompt.contains("D:\\test\\my-project"),
@@ -335,7 +336,7 @@ fn test_system_prompt_includes_working_directory() {
 fn test_system_prompt_includes_all_tool_names() {
     let tools = get_tool_definitions();
     let project_root = PathBuf::from("/test/project");
-    let prompt = build_system_prompt(&project_root, &tools);
+    let prompt = build_system_prompt(&project_root, &tools, None);
 
     for tool in &tools {
         assert!(
@@ -350,7 +351,7 @@ fn test_system_prompt_includes_all_tool_names() {
 fn test_system_prompt_includes_tool_descriptions() {
     let tools = get_tool_definitions();
     let project_root = PathBuf::from("/test/project");
-    let prompt = build_system_prompt(&project_root, &tools);
+    let prompt = build_system_prompt(&project_root, &tools, None);
 
     // At least check a few key descriptions are present
     assert!(prompt.contains("Read the contents of a file"));
@@ -362,11 +363,11 @@ fn test_system_prompt_includes_tool_descriptions() {
 fn test_system_prompt_includes_usage_guidelines() {
     let tools = get_tool_definitions();
     let project_root = PathBuf::from("/test/project");
-    let prompt = build_system_prompt(&project_root, &tools);
+    let prompt = build_system_prompt(&project_root, &tools, None);
 
-    assert!(prompt.contains("Tool Usage Guidelines"));
-    assert!(prompt.contains("Always read before modifying"));
-    assert!(prompt.contains("Workflow Pattern"));
+    assert!(prompt.contains("General Guidelines"));
+    assert!(prompt.contains("Read before modifying"));
+    assert!(prompt.contains("Decision Tree"));
 }
 
 #[test]
@@ -1371,7 +1372,7 @@ fn test_tool_result_ok_has_no_image_data() {
 fn test_system_prompt_includes_web_fetch_guidance() {
     let tools = get_tool_definitions();
     let project_root = PathBuf::from("/test/project");
-    let prompt = build_system_prompt(&project_root, &tools);
+    let prompt = build_system_prompt(&project_root, &tools, None);
 
     assert!(
         prompt.contains("WebFetch"),

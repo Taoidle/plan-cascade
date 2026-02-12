@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
+use super::index_store::IndexStore;
 use super::analysis_index::{
     build_chunk_plan, build_file_inventory, compute_coverage_report, select_chunks_for_phase,
     AnalysisCoverageReport, AnalysisLimits, AnalysisProfile, ChunkPlan, FileInventory,
@@ -114,14 +115,16 @@ fn default_analysis_artifacts_root() -> PathBuf {
 
 /// Compute a reasonable token budget for sub-agents based on the model's context window.
 ///
-/// Sub-agents do multiple iterations, each re-sending the full conversation. The total
-/// tokens consumed across all iterations is typically 2-3x the context window for a
-/// productive 6-10 iteration session. We use `context_window * 2` as the budget,
-/// capped at a sensible maximum.
-fn sub_agent_token_budget(context_window: u32) -> u32 {
-    // Budget = 2x context window, allowing ~6-10 iterations with growing conversation.
-    // Minimum 20k (even tiny models need some room), maximum 500k.
-    (context_window * 2).clamp(20_000, 500_000)
+/// Sub-agents do multiple iterations, each re-sending the full conversation. With compaction
+/// enabled, the effective budget can support more iterations. We use `context_window * 3`
+/// as the base budget, allowing ~10-15 iterations with compaction.
+/// Explore/analyze tasks get a higher multiplier since they read many files.
+fn sub_agent_token_budget(context_window: u32, task_type: Option<&str>) -> u32 {
+    let multiplier = match task_type {
+        Some("explore") | Some("analyze") => 4,
+        _ => 3,
+    };
+    (context_window * multiplier).clamp(20_000, 1_000_000)
 }
 
 /// Limit evidence verbosity to keep synthesis prompt focused and token-efficient.
@@ -140,6 +143,28 @@ const MAX_SYNTHESIS_CHUNK_CONTEXT_CHARS: usize = 1400;
 const MAX_SYNTHESIS_EVIDENCE_LINES: usize = 36;
 /// Bound observed-path context passed to synthesis.
 const MAX_SYNTHESIS_OBSERVED_PATHS: usize = 90;
+
+// --- Regular (non-analysis) tool result truncation limits ---
+// Applied when tool results are injected into the messages vec for the LLM
+// during normal execution (outside analysis_phase mode). Frontend ToolResult
+// events still receive the full untruncated content.
+
+/// Maximum lines for Read tool output in regular execution context.
+const REGULAR_READ_MAX_LINES: usize = 200;
+/// Maximum characters for Read tool output in regular execution context.
+const REGULAR_READ_MAX_CHARS: usize = 8000;
+/// Maximum lines for Grep tool output in regular execution context.
+const REGULAR_GREP_MAX_LINES: usize = 100;
+/// Maximum characters for Grep tool output in regular execution context.
+const REGULAR_GREP_MAX_CHARS: usize = 6000;
+/// Maximum lines for LS/Glob tool output in regular execution context.
+const REGULAR_LS_MAX_LINES: usize = 150;
+/// Maximum characters for LS/Glob tool output in regular execution context.
+const REGULAR_LS_MAX_CHARS: usize = 5000;
+/// Maximum lines for Bash tool output in regular execution context.
+const REGULAR_BASH_MAX_LINES: usize = 150;
+/// Maximum characters for Bash tool output in regular execution context.
+const REGULAR_BASH_MAX_CHARS: usize = 8000;
 
 #[derive(Debug, Clone, Copy)]
 struct EffectiveAnalysisTargets {
@@ -311,6 +336,8 @@ pub struct OrchestratorService {
     active_sessions: Arc<RwLock<HashMap<String, ExecutionSession>>>,
     /// Persistent analysis artifacts store (run manifests, evidence, reports)
     analysis_store: AnalysisRunStore,
+    /// Optional index store for project summary injection into system prompt
+    index_store: Option<IndexStore>,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances

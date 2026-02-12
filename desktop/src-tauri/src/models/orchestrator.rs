@@ -455,6 +455,12 @@ pub struct ExecuteWithSessionRequest {
     pub story_ids: Option<Vec<String>>,
     /// Enable extended thinking/reasoning for supported models
     pub enable_thinking: Option<bool>,
+    /// Maximum total tokens for the execution
+    #[serde(default)]
+    pub max_total_tokens: Option<u32>,
+    /// Maximum iterations for the execution
+    #[serde(default)]
+    pub max_iterations: Option<u32>,
 }
 
 /// Request to resume a paused/failed execution

@@ -55,9 +55,13 @@ impl AnthropicProvider {
             "stream": stream,
         });
 
-        // Add system prompt if provided
+        // Add system prompt as structured block with cache_control hint
         if let Some(sys) = system {
-            body["system"] = serde_json::json!(sys);
+            body["system"] = serde_json::json!([{
+                "type": "text",
+                "text": sys,
+                "cache_control": { "type": "ephemeral" }
+            }]);
         }
 
         // Add temperature (only if not using extended thinking)
@@ -75,10 +79,20 @@ impl AnthropicProvider {
             .collect();
         body["messages"] = serde_json::json!(claude_messages);
 
-        // Add tools if provided
+        // Add tools if provided, with cache_control on the last tool
         if !tools.is_empty() {
-            let claude_tools: Vec<serde_json::Value> =
-                tools.iter().map(|t| self.tool_to_claude(t)).collect();
+            let tool_count = tools.len();
+            let claude_tools: Vec<serde_json::Value> = tools
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    if i == tool_count - 1 {
+                        self.tool_to_claude_with_cache(t)
+                    } else {
+                        self.tool_to_claude(t)
+                    }
+                })
+                .collect();
             body["tools"] = serde_json::json!(claude_tools);
             if matches!(request_options.tool_call_mode, ToolCallMode::Required) {
                 body["tool_choice"] = serde_json::json!({
@@ -215,6 +229,16 @@ impl AnthropicProvider {
         })
     }
 
+    /// Convert a ToolDefinition to Claude API format with cache_control hint
+    fn tool_to_claude_with_cache(&self, tool: &ToolDefinition) -> serde_json::Value {
+        serde_json::json!({
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.input_schema,
+            "cache_control": { "type": "ephemeral" }
+        })
+    }
+
     /// Parse a response from Claude API
     fn parse_response(&self, response: &ClaudeResponse) -> LlmResponse {
         let mut content = None;
@@ -322,6 +346,7 @@ impl LlmProvider for AnthropicProvider {
             .post(self.base_url())
             .header("x-api-key", api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("anthropic-beta", "prompt-caching-2024-07-31")
             .header("content-type", "application/json")
             .json(&body)
             .send()
@@ -369,6 +394,7 @@ impl LlmProvider for AnthropicProvider {
             .post(self.base_url())
             .header("x-api-key", api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("anthropic-beta", "prompt-caching-2024-07-31")
             .header("content-type", "application/json")
             .json(&body)
             .send()
@@ -654,7 +680,210 @@ mod tests {
             &LlmRequestOptions::default(),
         );
         assert_eq!(body["model"], "claude-3-5-sonnet-20241022");
-        assert_eq!(body["system"], "Be helpful");
         assert_eq!(body["stream"], false);
+    }
+
+    #[test]
+    fn test_system_prompt_structured_block_with_cache_control() {
+        let provider = AnthropicProvider::new(test_config());
+        let messages = vec![Message::user("Hello")];
+
+        let body = provider.build_request_body(
+            &messages,
+            Some("Be helpful"),
+            &[],
+            false,
+            &LlmRequestOptions::default(),
+        );
+
+        // System prompt should be an array of structured blocks
+        let system = &body["system"];
+        assert!(system.is_array(), "system should be an array of blocks");
+
+        let blocks = system.as_array().unwrap();
+        assert_eq!(blocks.len(), 1, "should have exactly one system block");
+
+        let block = &blocks[0];
+        assert_eq!(block["type"], "text");
+        assert_eq!(block["text"], "Be helpful");
+        assert_eq!(
+            block["cache_control"]["type"], "ephemeral",
+            "system block must have cache_control with type ephemeral"
+        );
+    }
+
+    #[test]
+    fn test_no_system_prompt_omits_system_field() {
+        let provider = AnthropicProvider::new(test_config());
+        let messages = vec![Message::user("Hello")];
+
+        let body = provider.build_request_body(
+            &messages,
+            None,
+            &[],
+            false,
+            &LlmRequestOptions::default(),
+        );
+
+        assert!(body.get("system").is_none(), "system field should be absent when no system prompt");
+    }
+
+    #[test]
+    fn test_last_tool_has_cache_control() {
+        let provider = AnthropicProvider::new(test_config());
+        let messages = vec![Message::user("Hello")];
+
+        let tools = vec![
+            ToolDefinition {
+                name: "read_file".to_string(),
+                description: "Read a file".to_string(),
+                input_schema: super::super::types::ParameterSchema::object(
+                    None,
+                    std::collections::HashMap::new(),
+                    vec![],
+                ),
+            },
+            ToolDefinition {
+                name: "write_file".to_string(),
+                description: "Write a file".to_string(),
+                input_schema: super::super::types::ParameterSchema::object(
+                    None,
+                    std::collections::HashMap::new(),
+                    vec![],
+                ),
+            },
+            ToolDefinition {
+                name: "list_dir".to_string(),
+                description: "List directory".to_string(),
+                input_schema: super::super::types::ParameterSchema::object(
+                    None,
+                    std::collections::HashMap::new(),
+                    vec![],
+                ),
+            },
+        ];
+
+        let body = provider.build_request_body(
+            &messages,
+            None,
+            &tools,
+            false,
+            &LlmRequestOptions::default(),
+        );
+
+        let tool_array = body["tools"].as_array().unwrap();
+        assert_eq!(tool_array.len(), 3);
+
+        // First tool should NOT have cache_control
+        assert!(
+            tool_array[0].get("cache_control").is_none(),
+            "first tool should not have cache_control"
+        );
+
+        // Second tool should NOT have cache_control
+        assert!(
+            tool_array[1].get("cache_control").is_none(),
+            "middle tool should not have cache_control"
+        );
+
+        // Last tool MUST have cache_control
+        assert_eq!(
+            tool_array[2]["cache_control"]["type"], "ephemeral",
+            "last tool must have cache_control with type ephemeral"
+        );
+    }
+
+    #[test]
+    fn test_single_tool_has_cache_control() {
+        let provider = AnthropicProvider::new(test_config());
+        let messages = vec![Message::user("Hello")];
+
+        let tools = vec![ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read a file".to_string(),
+            input_schema: super::super::types::ParameterSchema::object(
+                None,
+                std::collections::HashMap::new(),
+                vec![],
+            ),
+        }];
+
+        let body = provider.build_request_body(
+            &messages,
+            None,
+            &tools,
+            false,
+            &LlmRequestOptions::default(),
+        );
+
+        let tool_array = body["tools"].as_array().unwrap();
+        assert_eq!(tool_array.len(), 1);
+
+        // Single tool is also the last tool, should have cache_control
+        assert_eq!(
+            tool_array[0]["cache_control"]["type"], "ephemeral",
+            "single tool (which is last) must have cache_control"
+        );
+    }
+
+    #[test]
+    fn test_no_tools_no_cache_control() {
+        let provider = AnthropicProvider::new(test_config());
+        let messages = vec![Message::user("Hello")];
+
+        let body = provider.build_request_body(
+            &messages,
+            None,
+            &[],
+            false,
+            &LlmRequestOptions::default(),
+        );
+
+        assert!(
+            body.get("tools").is_none(),
+            "tools field should be absent when no tools provided"
+        );
+    }
+
+    #[test]
+    fn test_tool_to_claude_no_cache_control() {
+        let provider = AnthropicProvider::new(test_config());
+        let tool = ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read a file".to_string(),
+            input_schema: super::super::types::ParameterSchema::object(
+                None,
+                std::collections::HashMap::new(),
+                vec![],
+            ),
+        };
+
+        let result = provider.tool_to_claude(&tool);
+        assert!(
+            result.get("cache_control").is_none(),
+            "tool_to_claude should not include cache_control"
+        );
+    }
+
+    #[test]
+    fn test_tool_to_claude_with_cache_has_cache_control() {
+        let provider = AnthropicProvider::new(test_config());
+        let tool = ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read a file".to_string(),
+            input_schema: super::super::types::ParameterSchema::object(
+                None,
+                std::collections::HashMap::new(),
+                vec![],
+            ),
+        };
+
+        let result = provider.tool_to_claude_with_cache(&tool);
+        assert_eq!(result["name"], "read_file");
+        assert_eq!(result["description"], "Read a file");
+        assert_eq!(
+            result["cache_control"]["type"], "ephemeral",
+            "tool_to_claude_with_cache must include cache_control"
+        );
     }
 }

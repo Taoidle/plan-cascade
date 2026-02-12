@@ -313,6 +313,68 @@ impl Database {
             [],
         )?;
 
+        // Enable foreign keys (must be set per-connection in SQLite)
+        conn.execute_batch("PRAGMA foreign_keys = ON")?;
+
+        // Create file_index table for persistent file index storage
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS file_index (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_path TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                component TEXT NOT NULL DEFAULT '',
+                language TEXT NOT NULL DEFAULT '',
+                extension TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                line_count INTEGER NOT NULL DEFAULT 0,
+                is_test INTEGER NOT NULL DEFAULT 0,
+                content_hash TEXT NOT NULL DEFAULT '',
+                modified_at TEXT,
+                indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_path, file_path)
+            )",
+            [],
+        )?;
+
+        // Create file_symbols table with cascade delete
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS file_symbols (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_index_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                line_number INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (file_index_id) REFERENCES file_index(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        // Indexes for file_index queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_index_project_path
+             ON file_index(project_path)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_index_component
+             ON file_index(project_path, component)",
+            [],
+        )?;
+
+        // Indexes for file_symbols queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_symbols_file_index_id
+             ON file_symbols(file_index_id)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_symbols_name
+             ON file_symbols(name)",
+            [],
+        )?;
+
         Ok(())
     }
 

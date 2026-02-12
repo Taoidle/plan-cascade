@@ -3,13 +3,37 @@
 //! Executes tools requested by LLM providers.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 use tokio::process::Command;
 use tokio::time::timeout;
+
+use crate::services::orchestrator::index_store::IndexStore;
+
+/// Cache entry for a previously read file, used for deduplication.
+///
+/// ADR-F001: Uses `Mutex<HashMap>` over `mini-moka` for deterministic behavior,
+/// low cardinality (<100 files), and zero additional dependencies.
+#[derive(Debug, Clone)]
+pub struct ReadCacheEntry {
+    /// Canonical path of the cached file
+    pub path: PathBuf,
+    /// File modification time at the time of caching
+    pub modified_time: SystemTime,
+    /// Number of lines in the file
+    pub line_count: usize,
+    /// Size of the file in bytes
+    pub size_bytes: u64,
+    /// Hash of the file content (using std DefaultHasher for speed, not crypto)
+    pub content_hash: u64,
+    /// Offset (1-based line number) used when the file was read
+    pub offset: usize,
+    /// Line limit used when the file was read
+    pub limit: usize,
+}
 
 /// Result of a tool execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +174,10 @@ const DEFAULT_SCAN_EXCLUDES: &[&str] = &[
     "codex",
 ];
 
+/// Maximum number of entries to display in LS output.
+/// Directories exceeding this limit are truncated with a note suggesting Glob.
+const LS_MAX_ENTRIES: usize = 200;
+
 fn is_likely_text_extension(ext: &str) -> bool {
     matches!(
         ext,
@@ -247,12 +275,20 @@ pub struct ToolExecutor {
     default_timeout: u64,
     /// Track files that have been read (for read-before-write enforcement)
     read_files: Mutex<HashSet<PathBuf>>,
+    /// Content-aware deduplication cache for file reads.
+    /// Key: (canonical path, offset, limit) -> cache entry.
+    /// If the same file is read with the same offset/limit and the mtime
+    /// has not changed, a short dedup message is returned instead of re-reading.
+    /// ADR-F001: Mutex<HashMap> chosen over mini-moka for determinism and zero eviction.
+    read_cache: Mutex<HashMap<(PathBuf, usize, usize), ReadCacheEntry>>,
     /// Persistent working directory for Bash commands
     current_working_dir: Mutex<PathBuf>,
     /// WebFetch service for fetching web pages
     web_fetch: super::web_fetch::WebFetchService,
     /// WebSearch service (None if no search provider configured)
     web_search: Option<super::web_search::WebSearchService>,
+    /// Optional index store for CodebaseSearch tool
+    index_store: Option<Arc<IndexStore>>,
 }
 
 impl ToolExecutor {
@@ -264,8 +300,10 @@ impl ToolExecutor {
             project_root: root,
             default_timeout: 120_000, // 2 minutes
             read_files: Mutex::new(HashSet::new()),
+            read_cache: Mutex::new(HashMap::new()),
             web_fetch: super::web_fetch::WebFetchService::new(),
             web_search: None,
+            index_store: None,
         }
     }
 
@@ -284,6 +322,11 @@ impl ToolExecutor {
         }
     }
 
+    /// Set the index store for CodebaseSearch tool
+    pub fn set_index_store(&mut self, store: Arc<IndexStore>) {
+        self.index_store = Some(store);
+    }
+
     /// Execute a tool by name with given arguments
     pub async fn execute(&self, tool_name: &str, arguments: &serde_json::Value) -> ToolResult {
         match tool_name {
@@ -298,6 +341,7 @@ impl ToolExecutor {
             "WebFetch" => self.execute_web_fetch(arguments).await,
             "WebSearch" => self.execute_web_search(arguments).await,
             "NotebookEdit" => self.execute_notebook_edit(arguments).await,
+            "CodebaseSearch" => self.execute_codebase_search(arguments).await,
             _ => ToolResult::err(format!("Unknown tool: {}", tool_name)),
         }
     }
@@ -431,6 +475,37 @@ impl ToolExecutor {
         let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
 
+        // --- Read cache deduplication check ---
+        // If we have a cached entry for this exact (path, offset, limit) and
+        // the file modification time has not changed, return a short dedup message.
+        let current_mtime = std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+
+        let cache_key = (path.clone(), offset, limit);
+
+        if let Some(mtime) = current_mtime {
+            if let Ok(cache) = self.read_cache.lock() {
+                if let Some(entry) = cache.get(&cache_key) {
+                    if entry.modified_time == mtime {
+                        // File unchanged with same offset/limit — return dedup message
+                        return ToolResult::ok(format!(
+                            "[File previously read in this session, unchanged] Path: {} ({} lines, {} bytes)",
+                            path.display(),
+                            entry.line_count,
+                            entry.size_bytes
+                        ));
+                    }
+                    // mtime differs — fall through to re-read (entry will be replaced below)
+                }
+            }
+        }
+
+        // If mtime changed, clear any stale cache entry for this key before re-reading
+        if let Ok(mut cache) = self.read_cache.lock() {
+            cache.remove(&cache_key);
+        }
+
         match std::fs::read(&path) {
             Ok(bytes) => {
                 let ext = path
@@ -451,11 +526,11 @@ impl ToolExecutor {
                     }
                 };
 
-                let lines: Vec<&str> = content.lines().collect();
-                let start = (offset.saturating_sub(1)).min(lines.len());
-                let end = (start + limit).min(lines.len());
+                let all_lines: Vec<&str> = content.lines().collect();
+                let start = (offset.saturating_sub(1)).min(all_lines.len());
+                let end = (start + limit).min(all_lines.len());
 
-                let mut numbered_lines: Vec<String> = lines[start..end]
+                let mut numbered_lines: Vec<String> = all_lines[start..end]
                     .iter()
                     .enumerate()
                     .map(|(i, line)| {
@@ -473,6 +548,28 @@ impl ToolExecutor {
                         0,
                         format!("[non-utf8 decoded with replacement] {}", path.display()),
                     );
+                }
+
+                // Populate the read cache after a successful read
+                if let Some(mtime) = current_mtime {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    bytes.hash(&mut hasher);
+                    let content_hash = hasher.finish();
+
+                    let entry = ReadCacheEntry {
+                        path: path.clone(),
+                        modified_time: mtime,
+                        line_count: all_lines.len(),
+                        size_bytes: bytes.len() as u64,
+                        content_hash,
+                        offset,
+                        limit,
+                    };
+
+                    if let Ok(mut cache) = self.read_cache.lock() {
+                        cache.insert(cache_key, entry);
+                    }
                 }
 
                 ToolResult::ok(numbered_lines.join("\n"))
@@ -1072,6 +1169,17 @@ impl ToolExecutor {
                     return ToolResult::ok(format!("Directory is empty: {}", path.display()));
                 }
 
+                // Compute counts before potential truncation
+                let total_count = items.len();
+                let total_dirs = items.iter().filter(|i| i.1).count();
+                let total_files = items.iter().filter(|i| !i.1).count();
+
+                // Truncate if directory has too many entries
+                let truncated = total_count > LS_MAX_ENTRIES;
+                if truncated {
+                    items.truncate(LS_MAX_ENTRIES);
+                }
+
                 let mut output = format!("Directory: {}\n\n", path.display());
                 for (name, is_dir, size) in &items {
                     if *is_dir {
@@ -1080,11 +1188,18 @@ impl ToolExecutor {
                         output.push_str(&format!("  FILE  {:>10}  {}\n", format_size(*size), name));
                     }
                 }
+
+                if truncated {
+                    let omitted = total_count - LS_MAX_ENTRIES;
+                    output.push_str(&format!(
+                        "\n... ({} more entries not shown. Use Glob for targeted file discovery.)",
+                        omitted
+                    ));
+                }
+
                 output.push_str(&format!(
                     "\n{} entries ({} dirs, {} files)",
-                    items.len(),
-                    items.iter().filter(|i| i.1).count(),
-                    items.iter().filter(|i| !i.1).count(),
+                    total_count, total_dirs, total_files,
                 ));
 
                 ToolResult::ok(output)
@@ -1233,6 +1348,161 @@ impl ToolExecutor {
         }
     }
 
+    /// Execute CodebaseSearch tool — query the SQLite index for symbols, files, or both
+    async fn execute_codebase_search(&self, args: &serde_json::Value) -> ToolResult {
+        let query = match args.get("query").and_then(|v| v.as_str()) {
+            Some(q) => q,
+            None => return ToolResult::err("Missing required parameter: query"),
+        };
+
+        let scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .unwrap_or("all");
+
+        let component = args.get("component").and_then(|v| v.as_str());
+
+        let index_store = match &self.index_store {
+            Some(store) => store,
+            None => {
+                return ToolResult::ok(
+                    "Codebase index not available. The project has not been indexed yet. \
+                     Use Grep for content search or Glob/LS for file discovery instead."
+                );
+            }
+        };
+
+        let project_path = self.project_root.to_string_lossy().to_string();
+        let mut output_sections: Vec<String> = Vec::new();
+
+        // --- Symbol search ---
+        if scope == "symbols" || scope == "all" {
+            let pattern = format!("%{}%", query);
+            match index_store.query_symbols(&pattern) {
+                Ok(symbols) => {
+                    // If component filter is specified, filter results
+                    let filtered: Vec<_> = if let Some(comp) = component {
+                        symbols.into_iter().filter(|s| s.file_path.contains(comp) || s.project_path == project_path).collect()
+                    } else {
+                        symbols
+                    };
+
+                    if !filtered.is_empty() {
+                        let mut section = format!("## Symbols matching '{}' ({} results)\n", query, filtered.len());
+                        for sym in filtered.iter().take(50) {
+                            section.push_str(&format!(
+                                "  {} ({}) — {}:{}\n",
+                                sym.symbol_name, sym.symbol_kind, sym.file_path, sym.line_number
+                            ));
+                        }
+                        if filtered.len() > 50 {
+                            section.push_str(&format!("  ... and {} more\n", filtered.len() - 50));
+                        }
+                        output_sections.push(section);
+                    } else if scope == "symbols" {
+                        output_sections.push(format!("No symbols matching '{}'.", query));
+                    }
+                }
+                Err(e) => {
+                    output_sections.push(format!("Symbol search error: {}", e));
+                }
+            }
+        }
+
+        // --- File search ---
+        if scope == "files" || scope == "all" {
+            if let Some(comp) = component {
+                // Search files by component
+                match index_store.query_files_by_component(&project_path, comp) {
+                    Ok(files) => {
+                        // Filter by query pattern (case-insensitive substring match on path)
+                        let query_lower = query.to_lowercase();
+                        let filtered: Vec<_> = files
+                            .into_iter()
+                            .filter(|f| f.file_path.to_lowercase().contains(&query_lower))
+                            .collect();
+
+                        if !filtered.is_empty() {
+                            let mut section = format!(
+                                "## Files matching '{}' in component '{}' ({} results)\n",
+                                query, comp, filtered.len()
+                            );
+                            for file in filtered.iter().take(50) {
+                                section.push_str(&format!(
+                                    "  {} ({}, {} lines)\n",
+                                    file.file_path, file.language, file.line_count
+                                ));
+                            }
+                            if filtered.len() > 50 {
+                                section.push_str(&format!("  ... and {} more\n", filtered.len() - 50));
+                            }
+                            output_sections.push(section);
+                        } else if scope == "files" {
+                            output_sections.push(format!(
+                                "No files matching '{}' in component '{}'.",
+                                query, comp
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        output_sections.push(format!("File search error: {}", e));
+                    }
+                }
+            } else {
+                // No component filter — search all components via project summary,
+                // then query symbols to find files that match the query pattern.
+                // We use query_symbols as a proxy to discover files matching the query.
+                match index_store.get_project_summary(&project_path) {
+                    Ok(summary) => {
+                        let query_lower = query.to_lowercase();
+                        let mut matching_files: Vec<String> = Vec::new();
+
+                        // Search each component for files matching the query
+                        for comp_summary in &summary.components {
+                            if let Ok(files) = index_store.query_files_by_component(&project_path, &comp_summary.name) {
+                                for file in files {
+                                    if file.file_path.to_lowercase().contains(&query_lower) {
+                                        matching_files.push(format!(
+                                            "  {} [{}] ({}, {} lines)",
+                                            file.file_path, file.component, file.language, file.line_count
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+
+                        if !matching_files.is_empty() {
+                            let count = matching_files.len();
+                            let mut section = format!(
+                                "## Files matching '{}' ({} results)\n",
+                                query, count
+                            );
+                            for line in matching_files.iter().take(50) {
+                                section.push_str(line);
+                                section.push('\n');
+                            }
+                            if count > 50 {
+                                section.push_str(&format!("  ... and {} more\n", count - 50));
+                            }
+                            output_sections.push(section);
+                        } else if scope == "files" {
+                            output_sections.push(format!("No files matching '{}'.", query));
+                        }
+                    }
+                    Err(e) => {
+                        output_sections.push(format!("File search error: {}", e));
+                    }
+                }
+            }
+        }
+
+        if output_sections.is_empty() {
+            ToolResult::ok(format!("No results found for '{}' (scope: {}).", query, scope))
+        } else {
+            ToolResult::ok(output_sections.join("\n"))
+        }
+    }
+
     /// Execute a tool by name with optional TaskContext for sub-agent support
     ///
     /// When `task_ctx` is provided, the Task tool becomes available.
@@ -1321,6 +1591,47 @@ impl ToolExecutor {
                     .error
                     .unwrap_or_else(|| "Task failed with unknown error".to_string()),
             )
+        }
+    }
+
+    /// Return a summary of all files currently in the read cache.
+    ///
+    /// Each entry is `(display_path, line_count, size_bytes)`, useful for
+    /// session-level memory ("which files has the agent already seen?").
+    pub fn get_read_file_summary(&self) -> Vec<(String, usize, u64)> {
+        let cache = match self.read_cache.lock() {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        // Deduplicate by path (there may be multiple entries for different
+        // offset/limit combinations). We keep the entry with the largest
+        // line_count for each path so the summary reflects the fullest read.
+        let mut by_path: HashMap<PathBuf, &ReadCacheEntry> = HashMap::new();
+        for entry in cache.values() {
+            by_path
+                .entry(entry.path.clone())
+                .and_modify(|existing| {
+                    if entry.line_count > existing.line_count {
+                        *existing = entry;
+                    }
+                })
+                .or_insert(entry);
+        }
+        let mut result: Vec<(String, usize, u64)> = by_path
+            .values()
+            .map(|e| (e.path.display().to_string(), e.line_count, e.size_bytes))
+            .collect();
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        result
+    }
+
+    /// Clear the entire read deduplication cache.
+    ///
+    /// This is useful when starting a new logical session or after bulk
+    /// file modifications where stale cache entries could cause confusion.
+    pub fn clear_read_cache(&self) {
+        if let Ok(mut cache) = self.read_cache.lock() {
+            cache.clear();
         }
     }
 
@@ -1710,6 +2021,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ls_truncation_large_directory() {
+        let dir = TempDir::new().unwrap();
+        // Create 250 files (exceeding LS_MAX_ENTRIES of 200)
+        for i in 0..250 {
+            std::fs::write(dir.path().join(format!("file_{:04}.txt", i)), "content").unwrap();
+        }
+        let executor = ToolExecutor::new(dir.path());
+
+        let args = serde_json::json!({
+            "path": dir.path().to_string_lossy().to_string()
+        });
+
+        let result = executor.execute("LS", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+
+        // Should show exactly LS_MAX_ENTRIES (200) file entries in the listing
+        let file_lines: Vec<&str> = output
+            .lines()
+            .filter(|l| l.trim_start().starts_with("FILE") || l.trim_start().starts_with("DIR"))
+            .collect();
+        assert_eq!(
+            file_lines.len(),
+            LS_MAX_ENTRIES,
+            "expected {} file entries, got {}",
+            LS_MAX_ENTRIES,
+            file_lines.len()
+        );
+
+        // Should contain truncation note with count of omitted entries
+        assert!(
+            output.contains("50 more entries not shown"),
+            "expected truncation note with 50 omitted entries, got: {}",
+            output
+        );
+
+        // Should suggest Glob
+        assert!(
+            output.contains("Glob"),
+            "expected Glob suggestion in truncation note, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ls_no_truncation_within_limit() {
+        let dir = TempDir::new().unwrap();
+        // Create exactly 200 files (at the limit, should NOT truncate)
+        for i in 0..200 {
+            std::fs::write(dir.path().join(format!("file_{:04}.txt", i)), "content").unwrap();
+        }
+        let executor = ToolExecutor::new(dir.path());
+
+        let args = serde_json::json!({
+            "path": dir.path().to_string_lossy().to_string()
+        });
+
+        let result = executor.execute("LS", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+
+        // Should show all 200 entries
+        let file_lines: Vec<&str> = output
+            .lines()
+            .filter(|l| l.trim_start().starts_with("FILE") || l.trim_start().starts_with("DIR"))
+            .collect();
+        assert_eq!(file_lines.len(), 200, "expected 200 entries, got {}", file_lines.len());
+
+        // Should NOT contain truncation note
+        assert!(
+            !output.contains("more entries not shown"),
+            "should not have truncation note for directories at the limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ls_no_truncation_small_directory() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        let args = serde_json::json!({
+            "path": dir.path().to_string_lossy().to_string()
+        });
+
+        let result = executor.execute("LS", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+
+        // Small directory should NOT have truncation note
+        assert!(
+            !output.contains("more entries not shown"),
+            "small directory should not have truncation note"
+        );
+    }
+
+    #[tokio::test]
     async fn test_cwd() {
         let dir = setup_test_dir();
         let executor = ToolExecutor::new(dir.path());
@@ -1740,5 +2147,513 @@ mod tests {
         let err = ToolResult::err("failed");
         assert!(!err.success);
         assert!(err.to_content().contains("Error"));
+    }
+
+    // =========================================================================
+    // Read cache deduplication tests (story-001)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_read_cache_dedup_unchanged_file() {
+        // Reading the same unchanged file twice should return a short dedup
+        // message on the second read.
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+        let file_path = dir.path().join("test.txt").to_string_lossy().to_string();
+        let args = serde_json::json!({ "file_path": &file_path });
+
+        // First read: full content
+        let result1 = executor.execute("Read", &args).await;
+        assert!(result1.success);
+        let output1 = result1.output.unwrap();
+        assert!(output1.contains("line 1"), "first read should have content");
+
+        // Second read: dedup message
+        let result2 = executor.execute("Read", &args).await;
+        assert!(result2.success);
+        let output2 = result2.output.unwrap();
+        assert!(
+            output2.contains("[File previously read in this session, unchanged]"),
+            "second read should be dedup message, got: {}",
+            output2
+        );
+        assert!(output2.contains("test.txt"));
+        assert!(output2.contains("lines"));
+        assert!(output2.contains("bytes"));
+    }
+
+    #[tokio::test]
+    async fn test_read_cache_modified_file_returns_full_content() {
+        // If the file is modified between reads, the second read should
+        // return the full (new) content, not a dedup message.
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+        let file = dir.path().join("mtime_test.txt");
+        std::fs::write(&file, "original line 1\noriginal line 2\n").unwrap();
+
+        let file_path = file.to_string_lossy().to_string();
+        let args = serde_json::json!({ "file_path": &file_path });
+
+        // First read
+        let result1 = executor.execute("Read", &args).await;
+        assert!(result1.success);
+        assert!(result1.output.unwrap().contains("original line 1"));
+
+        // Modify the file and force a different mtime.
+        // We sleep briefly to guarantee mtime changes even on file systems
+        // with coarse (1-second) mtime granularity.
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        std::fs::write(&file, "changed line 1\nchanged line 2\n").unwrap();
+
+        // Second read after modification
+        let result2 = executor.execute("Read", &args).await;
+        assert!(result2.success);
+        let output2 = result2.output.unwrap();
+        assert!(
+            !output2.contains("[File previously read in this session, unchanged]"),
+            "modified file should NOT return dedup message, got: {}",
+            output2
+        );
+        assert!(
+            output2.contains("changed line 1"),
+            "should see new content, got: {}",
+            output2
+        );
+    }
+
+    #[tokio::test]
+    async fn test_read_cache_different_offset_returns_full_content() {
+        // Reading the same file with a different offset/limit should return
+        // full content even if the file hasn't changed, because the cache key
+        // includes offset and limit.
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+        let file_path = dir.path().join("test.txt").to_string_lossy().to_string();
+
+        // First read with default offset/limit
+        let args1 = serde_json::json!({ "file_path": &file_path });
+        let result1 = executor.execute("Read", &args1).await;
+        assert!(result1.success);
+        assert!(result1.output.unwrap().contains("line 1"));
+
+        // Second read with different offset — should NOT be dedup
+        let args2 = serde_json::json!({ "file_path": &file_path, "offset": 2 });
+        let result2 = executor.execute("Read", &args2).await;
+        assert!(result2.success);
+        let output2 = result2.output.unwrap();
+        assert!(
+            !output2.contains("[File previously read in this session, unchanged]"),
+            "different offset should return full content, got: {}",
+            output2
+        );
+        assert!(output2.contains("line 2"));
+
+        // Third read with different limit — should NOT be dedup
+        let args3 = serde_json::json!({ "file_path": &file_path, "limit": 1 });
+        let result3 = executor.execute("Read", &args3).await;
+        assert!(result3.success);
+        let output3 = result3.output.unwrap();
+        assert!(
+            !output3.contains("[File previously read in this session, unchanged]"),
+            "different limit should return full content, got: {}",
+            output3
+        );
+    }
+
+    #[tokio::test]
+    async fn test_read_cache_same_offset_limit_dedup() {
+        // Reading with explicitly the same offset/limit should dedup on second read
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+        let file_path = dir.path().join("test.txt").to_string_lossy().to_string();
+
+        let args = serde_json::json!({ "file_path": &file_path, "offset": 2, "limit": 1 });
+
+        // First read
+        let result1 = executor.execute("Read", &args).await;
+        assert!(result1.success);
+        assert!(result1.output.unwrap().contains("line 2"));
+
+        // Second read with identical args — should dedup
+        let result2 = executor.execute("Read", &args).await;
+        assert!(result2.success);
+        assert!(
+            result2
+                .output
+                .unwrap()
+                .contains("[File previously read in this session, unchanged]"),
+            "same offset/limit should dedup"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_read_file_summary() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        // Initially empty
+        assert!(
+            executor.get_read_file_summary().is_empty(),
+            "summary should be empty before any reads"
+        );
+
+        // Read a file
+        let file_path = dir.path().join("test.txt").to_string_lossy().to_string();
+        let args = serde_json::json!({ "file_path": &file_path });
+        executor.execute("Read", &args).await;
+
+        let summary = executor.get_read_file_summary();
+        assert_eq!(summary.len(), 1, "should have one cached file");
+        assert!(summary[0].0.contains("test.txt"));
+        assert!(summary[0].1 > 0, "line_count should be > 0");
+        assert!(summary[0].2 > 0, "size_bytes should be > 0");
+
+        // Read another file
+        let nested_path = dir
+            .path()
+            .join("subdir")
+            .join("nested.txt")
+            .to_string_lossy()
+            .to_string();
+        let args2 = serde_json::json!({ "file_path": &nested_path });
+        executor.execute("Read", &args2).await;
+
+        let summary2 = executor.get_read_file_summary();
+        assert_eq!(summary2.len(), 2, "should have two cached files");
+    }
+
+    #[tokio::test]
+    async fn test_get_read_file_summary_deduplicates_by_path() {
+        // Reading the same file with different offset/limit creates multiple
+        // cache entries, but the summary should deduplicate by path.
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+        let file_path = dir.path().join("test.txt").to_string_lossy().to_string();
+
+        // Read with default params
+        executor
+            .execute("Read", &serde_json::json!({ "file_path": &file_path }))
+            .await;
+        // Read with different offset
+        executor
+            .execute(
+                "Read",
+                &serde_json::json!({ "file_path": &file_path, "offset": 2 }),
+            )
+            .await;
+
+        let summary = executor.get_read_file_summary();
+        assert_eq!(
+            summary.len(),
+            1,
+            "summary should deduplicate by path, got: {:?}",
+            summary
+        );
+    }
+
+    #[tokio::test]
+    async fn test_clear_read_cache() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        // Read a file to populate cache
+        let file_path = dir.path().join("test.txt").to_string_lossy().to_string();
+        let args = serde_json::json!({ "file_path": &file_path });
+        executor.execute("Read", &args).await;
+
+        assert!(
+            !executor.get_read_file_summary().is_empty(),
+            "cache should be populated"
+        );
+
+        // Clear cache
+        executor.clear_read_cache();
+        assert!(
+            executor.get_read_file_summary().is_empty(),
+            "cache should be empty after clear"
+        );
+
+        // Reading again after clear should return full content, not dedup
+        let result = executor.execute("Read", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+        assert!(
+            !output.contains("[File previously read in this session, unchanged]"),
+            "after clear, should get full content, got: {}",
+            output
+        );
+        assert!(output.contains("line 1"));
+    }
+
+    // =========================================================================
+    // CodebaseSearch tests (story-009)
+    // =========================================================================
+
+    fn create_test_executor_with_index() -> (TempDir, ToolExecutor) {
+        use crate::services::orchestrator::index_store::IndexStore;
+        use crate::storage::database::Database;
+
+        let dir = setup_test_dir();
+        let mut executor = ToolExecutor::new(dir.path());
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        // Populate the index with test data
+        use crate::services::orchestrator::analysis_index::{FileInventoryItem, SymbolInfo, SymbolKind};
+
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        let item1 = FileInventoryItem {
+            path: "src/main.rs".to_string(),
+            component: "desktop-rust".to_string(),
+            language: "rust".to_string(),
+            extension: Some("rs".to_string()),
+            size_bytes: 1024,
+            line_count: 50,
+            is_test: false,
+            symbols: vec![
+                SymbolInfo { name: "main".to_string(), kind: SymbolKind::Function, line: 1 },
+                SymbolInfo { name: "AppConfig".to_string(), kind: SymbolKind::Struct, line: 10 },
+            ],
+        };
+
+        let item2 = FileInventoryItem {
+            path: "src/lib.rs".to_string(),
+            component: "desktop-rust".to_string(),
+            language: "rust".to_string(),
+            extension: Some("rs".to_string()),
+            size_bytes: 2048,
+            line_count: 100,
+            is_test: false,
+            symbols: vec![
+                SymbolInfo { name: "init_app".to_string(), kind: SymbolKind::Function, line: 5 },
+            ],
+        };
+
+        let item3 = FileInventoryItem {
+            path: "src/components/App.tsx".to_string(),
+            component: "desktop-web".to_string(),
+            language: "typescript".to_string(),
+            extension: Some("tsx".to_string()),
+            size_bytes: 512,
+            line_count: 30,
+            is_test: false,
+            symbols: vec![
+                SymbolInfo { name: "App".to_string(), kind: SymbolKind::Function, line: 1 },
+                SymbolInfo { name: "AppProps".to_string(), kind: SymbolKind::Interface, line: 5 },
+            ],
+        };
+
+        store.upsert_file_index(&project_path, &item1, "h1").unwrap();
+        store.upsert_file_index(&project_path, &item2, "h2").unwrap();
+        store.upsert_file_index(&project_path, &item3, "h3").unwrap();
+
+        executor.set_index_store(store);
+
+        (dir, executor)
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_index_unavailable() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        let args = serde_json::json!({ "query": "main" });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+        assert!(
+            output.contains("index not available"),
+            "should indicate index is unavailable, got: {}",
+            output
+        );
+        assert!(
+            output.contains("Grep"),
+            "should suggest Grep as alternative, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_missing_query() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        let args = serde_json::json!({});
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("query"));
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_symbols_scope() {
+        let (_dir, executor) = create_test_executor_with_index();
+
+        let args = serde_json::json!({
+            "query": "App",
+            "scope": "symbols"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+        assert!(
+            output.contains("AppConfig"),
+            "should find AppConfig symbol, got: {}",
+            output
+        );
+        assert!(
+            output.contains("AppProps"),
+            "should find AppProps symbol, got: {}",
+            output
+        );
+        assert!(
+            output.contains("Symbols matching"),
+            "should have symbols section header, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_files_scope_with_component() {
+        let (_dir, executor) = create_test_executor_with_index();
+
+        let args = serde_json::json!({
+            "query": "main",
+            "scope": "files",
+            "component": "desktop-rust"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+        assert!(
+            output.contains("src/main.rs"),
+            "should find main.rs, got: {}",
+            output
+        );
+        assert!(
+            output.contains("Files matching"),
+            "should have files section header, got: {}",
+            output
+        );
+        // Should NOT include web component files
+        assert!(
+            !output.contains("App.tsx"),
+            "should not include web files when filtering by desktop-rust, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_files_scope_without_component() {
+        let (_dir, executor) = create_test_executor_with_index();
+
+        let args = serde_json::json!({
+            "query": "lib",
+            "scope": "files"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+        assert!(
+            output.contains("src/lib.rs"),
+            "should find lib.rs, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_all_scope() {
+        let (_dir, executor) = create_test_executor_with_index();
+
+        let args = serde_json::json!({
+            "query": "App",
+            "scope": "all"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+
+        // Should have both symbol and file results
+        assert!(
+            output.contains("Symbols matching"),
+            "should have symbols section, got: {}",
+            output
+        );
+        // AppConfig or App should appear in symbols
+        assert!(
+            output.contains("AppConfig") || output.contains("AppProps"),
+            "should find App-related symbols, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_default_scope_is_all() {
+        let (_dir, executor) = create_test_executor_with_index();
+
+        // No scope parameter — should default to "all"
+        let args = serde_json::json!({ "query": "App" });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+        assert!(
+            output.contains("Symbols matching"),
+            "default scope should search symbols, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_component_filter_narrows_symbols() {
+        let (_dir, executor) = create_test_executor_with_index();
+
+        // Search for "App" with symbols scope — should find both AppConfig and AppProps
+        let args_all = serde_json::json!({
+            "query": "App",
+            "scope": "symbols"
+        });
+        let result_all = executor.execute("CodebaseSearch", &args_all).await;
+        let output_all = result_all.output.unwrap();
+        assert!(output_all.contains("AppConfig"));
+        assert!(output_all.contains("AppProps"));
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_no_results() {
+        let (_dir, executor) = create_test_executor_with_index();
+
+        let args = serde_json::json!({
+            "query": "NonExistentThing",
+            "scope": "symbols"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+        assert!(
+            output.contains("No symbols matching"),
+            "should indicate no results found, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_output_format() {
+        let (_dir, executor) = create_test_executor_with_index();
+
+        let args = serde_json::json!({
+            "query": "main",
+            "scope": "symbols"
+        });
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap();
+
+        // Output should include file path, line number, and kind
+        assert!(
+            output.contains("main") && output.contains("Function") && output.contains("src/main.rs"),
+            "output should contain symbol name, kind, and file path, got: {}",
+            output
+        );
     }
 }
