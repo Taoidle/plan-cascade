@@ -292,6 +292,70 @@ fn extract_key_findings(snippets: &[String]) -> Vec<String> {
     findings
 }
 
+/// Detects consecutive identical tool calls to break infinite loops.
+///
+/// Tracks the last (tool_name, args_hash) and counts consecutive repetitions.
+/// When the count reaches the configured threshold, returns a break message
+/// that can be injected into the conversation to redirect the LLM.
+///
+/// ADR-004: Pattern-based loop detection is cheaper than waiting for max_iterations=50.
+#[derive(Debug)]
+struct ToolCallLoopDetector {
+    /// Threshold of consecutive identical calls before triggering
+    threshold: u32,
+    /// Last seen (tool_name, args_hash) tuple
+    last_call: Option<(String, u64)>,
+    /// Count of consecutive identical calls
+    consecutive_count: u32,
+}
+
+impl ToolCallLoopDetector {
+    fn new(threshold: u32) -> Self {
+        Self {
+            threshold,
+            last_call: None,
+            consecutive_count: 0,
+        }
+    }
+
+    /// Record a tool call and return a break message if a loop is detected.
+    ///
+    /// Returns `Some(message)` when the same tool+args have been called `threshold`
+    /// times consecutively, `None` otherwise.
+    fn record_call(&mut self, tool_name: &str, args_str: &str) -> Option<String> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        args_str.hash(&mut hasher);
+        let args_hash = hasher.finish();
+
+        let call_key = (tool_name.to_string(), args_hash);
+
+        if self.last_call.as_ref() == Some(&call_key) {
+            self.consecutive_count += 1;
+        } else {
+            self.last_call = Some(call_key);
+            self.consecutive_count = 1;
+        }
+
+        if self.consecutive_count >= self.threshold {
+            // Reset after detection so the detector can catch new loops
+            self.consecutive_count = 0;
+            Some(format!(
+                "[LOOP DETECTED] You have made the same identical tool call ({}) {} times consecutively \
+                 with the same arguments. This is an infinite loop. STOP repeating this call. \
+                 Use the information you already have from previous tool results to proceed with the task. \
+                 If the previous result was a dedup/cache message, the file content was already read earlier \
+                 in this session — refer to the session memory above for details.",
+                tool_name, self.threshold
+            ))
+        } else {
+            None
+        }
+    }
+}
+
 /// Marker string embedded in session memory messages for compaction identification.
 ///
 /// Both `compact_messages()` (LLM-summary) and `compact_messages_prefix_stable()` use
@@ -1546,6 +1610,7 @@ impl OrchestratorService {
         let mut fallback_call_counter = 0u32;
         let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
+        let mut loop_detector = ToolCallLoopDetector::new(3);
 
         // Build a minimal system prompt for sub-agents.
         // Unlike the main agent, sub-agents do NOT get the full build_system_prompt()
@@ -1757,6 +1822,8 @@ impl OrchestratorService {
                         ToolCallReliability::Unreliable | ToolCallReliability::None => {
                             let before = messages.len();
                             if Self::compact_messages_prefix_stable(&mut messages) {
+                                // ADR-004: Clear dedup cache after prefix-stable compaction
+                                self.tool_executor.clear_read_cache();
                                 let removed_count = before - messages.len();
                                 let _ = tx
                                     .send(UnifiedStreamEvent::ContextCompaction {
@@ -1897,6 +1964,15 @@ impl OrchestratorService {
                             !result.success,
                         ));
                     }
+
+                    // Check for tool call loop (same tool+args repeated consecutively)
+                    if let Some(break_msg) = loop_detector.record_call(
+                        &effective_tool_name,
+                        &effective_args.to_string(),
+                    ) {
+                        eprintln!("[loop-detector] Detected loop: {} called {} consecutive times", effective_tool_name, 3);
+                        messages.push(Message::user(break_msg));
+                    }
                 }
             } else if !parsed_fallback.calls.is_empty() {
                 repair_retry_count = 0; // Reset on successful tool calls
@@ -1979,6 +2055,15 @@ impl OrchestratorService {
                         &context_tool_output,
                         !result.success,
                     ));
+
+                    // Check for tool call loop in fallback path
+                    if let Some(break_msg) = loop_detector.record_call(
+                        &effective_tool_name,
+                        &effective_args.to_string(),
+                    ) {
+                        eprintln!("[loop-detector] Detected loop in fallback path: {} called {} consecutive times", effective_tool_name, 3);
+                        tool_results.push(break_msg);
+                    }
                 }
 
                 // Feed all tool results back as a user message
@@ -2066,6 +2151,7 @@ impl OrchestratorService {
         let mut fallback_call_counter = 0u32;
         let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
+        let mut loop_detector = ToolCallLoopDetector::new(3);
 
         // Create TaskContext for Task tool support in the agentic loop
         let task_spawner = Arc::new(OrchestratorTaskSpawner {
@@ -2240,6 +2326,8 @@ impl OrchestratorService {
                     ToolCallReliability::Unreliable | ToolCallReliability::None => {
                         let removed = messages.len();
                         if Self::compact_messages_prefix_stable(&mut messages) {
+                            // ADR-004: Clear dedup cache after prefix-stable compaction
+                            self.tool_executor.clear_read_cache();
                             let removed_count = removed - messages.len();
                             let _ = tx
                                 .send(UnifiedStreamEvent::ContextCompaction {
@@ -2368,6 +2456,15 @@ impl OrchestratorService {
                             !result.success,
                         ));
                     }
+
+                    // Check for tool call loop (same tool+args repeated consecutively)
+                    if let Some(break_msg) = loop_detector.record_call(
+                        &tc.name,
+                        &tc.arguments.to_string(),
+                    ) {
+                        eprintln!("[loop-detector] Detected loop: {} called {} consecutive times", tc.name, 3);
+                        messages.push(Message::user(break_msg));
+                    }
                 }
             } else if !parsed_fallback.calls.is_empty() {
                 repair_retry_count = 0; // Reset on successful tool calls
@@ -2449,6 +2546,15 @@ impl OrchestratorService {
                         &context_content,
                         !result.success,
                     ));
+
+                    // Check for tool call loop in fallback path
+                    if let Some(break_msg) = loop_detector.record_call(
+                        &ptc.tool_name,
+                        &ptc.arguments.to_string(),
+                    ) {
+                        eprintln!("[loop-detector] Detected loop in fallback path: {} called {} consecutive times", ptc.tool_name, 3);
+                        tool_results.push(break_msg);
+                    }
                 }
 
                 // Feed all tool results back as a user message
@@ -5355,8 +5461,14 @@ impl OrchestratorService {
                     })
                     .await;
 
+                // ADR-004: Clear the dedup cache after compaction so files can be
+                // re-read fresh. Without this, the cache retains stale entries for
+                // file reads that were just compacted away, causing LLMs to get
+                // only the short dedup message instead of actual content.
+                self.tool_executor.clear_read_cache();
+
                 eprintln!(
-                    "[compaction] Compacted {} messages, preserved {}, summary {} tokens, session memory with {} files",
+                    "[compaction] Compacted {} messages, preserved {}, summary {} tokens, session memory with {} files (dedup cache cleared)",
                     messages_compacted_count, preserved_tail_count, compaction_tokens,
                     session_memory.files_read.len(),
                 );

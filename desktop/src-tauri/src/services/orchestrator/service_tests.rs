@@ -2228,6 +2228,97 @@ fn test_only_layer3_trimmed() {
     assert!(l2_text.contains("Finding B"));
 }
 
+// --- Feature-001 Story-001: Clear dedup cache on compaction tests ---
+
+#[test]
+fn test_compact_messages_prefix_stable_clears_read_cache_flag() {
+    // compact_messages_prefix_stable returns true when it compacts.
+    // The caller is responsible for clearing the dedup cache.
+    // This test verifies the function returns true (indicating cache should be cleared).
+    let mut messages: Vec<Message> = Vec::new();
+    messages.push(Message::user("prompt"));
+    messages.push(Message::assistant("memory"));
+    for i in 0..5 {
+        messages.push(Message::user(format!("mid-{}", i)));
+    }
+    for i in 0..6 {
+        messages.push(Message::assistant(format!("tail-{}", i)));
+    }
+
+    let compacted = OrchestratorService::compact_messages_prefix_stable(&mut messages);
+    assert!(compacted, "Should indicate compaction happened (caller must clear cache)");
+}
+
+// --- Feature-001 Story-002: Tool call loop detection tests ---
+
+#[test]
+fn test_tool_call_loop_detector_no_loop_on_different_calls() {
+    let mut detector = ToolCallLoopDetector::new(3);
+    // Different tool calls should not trigger loop
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    assert!(detector.record_call("Grep", r#"{"pattern":"foo"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"b.rs"}"#).is_none());
+}
+
+#[test]
+fn test_tool_call_loop_detector_detects_consecutive_identical() {
+    let mut detector = ToolCallLoopDetector::new(3);
+    // 3 consecutive identical calls should trigger
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    assert!(msg.is_some(), "Should detect loop after 3 identical calls");
+    let break_msg = msg.unwrap();
+    assert!(break_msg.contains("identical tool call"), "Break message should explain the loop: {}", break_msg);
+}
+
+#[test]
+fn test_tool_call_loop_detector_resets_on_different_call() {
+    let mut detector = ToolCallLoopDetector::new(3);
+    // Two identical, then a different one, then the same two again
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    // Different call resets the counter
+    assert!(detector.record_call("Grep", r#"{"pattern":"foo"}"#).is_none());
+    // Start the same call again - counter should be 1 now
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    // This is the 3rd consecutive identical call
+    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    assert!(msg.is_some(), "Should detect loop after 3 consecutive identical calls");
+}
+
+#[test]
+fn test_tool_call_loop_detector_same_tool_different_args_no_loop() {
+    let mut detector = ToolCallLoopDetector::new(3);
+    // Same tool but different arguments should not trigger
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"b.rs"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"c.rs"}"#).is_none());
+}
+
+#[test]
+fn test_tool_call_loop_detector_threshold_customizable() {
+    let mut detector = ToolCallLoopDetector::new(2);
+    // With threshold 2, should trigger after 2 identical calls
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    assert!(msg.is_some(), "Should detect loop after 2 identical calls with threshold=2");
+}
+
+#[test]
+fn test_tool_call_loop_detector_continues_after_detection() {
+    let mut detector = ToolCallLoopDetector::new(3);
+    // Trigger loop detection
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    assert!(msg.is_some());
+
+    // After detection, a different call should reset
+    assert!(detector.record_call("Grep", r#"{"pattern":"bar"}"#).is_none());
+}
+
 #[test]
 fn test_session_memory_manager_empty_messages() {
     // Edge case: update_or_insert with empty messages vec

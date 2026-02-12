@@ -67,6 +67,22 @@ pub enum SymbolKind {
     Module,
 }
 
+impl SymbolKind {
+    /// Short display name for use in compact summaries (e.g. dedup messages).
+    pub fn short_name(self) -> &'static str {
+        match self {
+            SymbolKind::Function => "fn",
+            SymbolKind::Class => "class",
+            SymbolKind::Struct => "struct",
+            SymbolKind::Enum => "enum",
+            SymbolKind::Interface => "iface",
+            SymbolKind::Type => "type",
+            SymbolKind::Const => "const",
+            SymbolKind::Module => "mod",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SymbolInfo {
     pub name: String,
