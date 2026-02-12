@@ -107,6 +107,14 @@ base64 = "0.22"
 # Caching
 mini-moka = "0.10"
 
+# Tree-sitter parsing for accurate symbol extraction
+tree-sitter = "0.24"
+tree-sitter-python = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-java = "0.23"
+
 [dev-dependencies]
 # Testing
 tempfile = "3"

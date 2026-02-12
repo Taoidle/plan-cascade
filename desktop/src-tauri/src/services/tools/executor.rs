@@ -1390,10 +1390,34 @@ impl ToolExecutor {
                     if !filtered.is_empty() {
                         let mut section = format!("## Symbols matching '{}' ({} results)\n", query, filtered.len());
                         for sym in filtered.iter().take(50) {
-                            section.push_str(&format!(
-                                "  {} ({}) — {}:{}\n",
+                            // Base info: name, kind, file, line
+                            let mut line = format!(
+                                "  {} ({}) — {}:{}",
                                 sym.symbol_name, sym.symbol_kind, sym.file_path, sym.line_number
-                            ));
+                            );
+                            // Add end line range if available
+                            if sym.end_line > 0 && sym.end_line != sym.line_number {
+                                line.push_str(&format!("-{}", sym.end_line));
+                            }
+                            // Add parent context if available
+                            if let Some(ref parent) = sym.parent_symbol {
+                                line.push_str(&format!(" [in {}]", parent));
+                            }
+                            line.push('\n');
+                            section.push_str(&line);
+                            // Add signature on its own line if available
+                            if let Some(ref sig) = sym.signature {
+                                section.push_str(&format!("    sig: {}\n", sig));
+                            }
+                            // Add doc comment (truncated) if available
+                            if let Some(ref doc) = sym.doc_comment {
+                                let truncated = if doc.len() > 100 {
+                                    format!("{}...", &doc[..100])
+                                } else {
+                                    doc.clone()
+                                };
+                                section.push_str(&format!("    doc: {}\n", truncated));
+                            }
                         }
                         if filtered.len() > 50 {
                             section.push_str(&format!("  ... and {} more\n", filtered.len() - 50));
@@ -2413,8 +2437,8 @@ mod tests {
             line_count: 50,
             is_test: false,
             symbols: vec![
-                SymbolInfo { name: "main".to_string(), kind: SymbolKind::Function, line: 1 },
-                SymbolInfo { name: "AppConfig".to_string(), kind: SymbolKind::Struct, line: 10 },
+                SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
+                SymbolInfo::basic("AppConfig".to_string(), SymbolKind::Struct, 10),
             ],
         };
 
@@ -2427,7 +2451,7 @@ mod tests {
             line_count: 100,
             is_test: false,
             symbols: vec![
-                SymbolInfo { name: "init_app".to_string(), kind: SymbolKind::Function, line: 5 },
+                SymbolInfo::basic("init_app".to_string(), SymbolKind::Function, 5),
             ],
         };
 
@@ -2440,8 +2464,8 @@ mod tests {
             line_count: 30,
             is_test: false,
             symbols: vec![
-                SymbolInfo { name: "App".to_string(), kind: SymbolKind::Function, line: 1 },
-                SymbolInfo { name: "AppProps".to_string(), kind: SymbolKind::Interface, line: 5 },
+                SymbolInfo::basic("App".to_string(), SymbolKind::Function, 1),
+                SymbolInfo::basic("AppProps".to_string(), SymbolKind::Interface, 5),
             ],
         };
 

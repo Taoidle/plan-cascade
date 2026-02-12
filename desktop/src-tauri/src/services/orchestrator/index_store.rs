@@ -20,6 +20,18 @@ pub struct SymbolMatch {
     pub symbol_name: String,
     pub symbol_kind: String,
     pub line_number: usize,
+    /// Parent symbol (e.g., class for a method)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_symbol: Option<String>,
+    /// Function/method signature
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// Documentation comment
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_comment: Option<String>,
+    /// End line of the symbol
+    #[serde(default)]
+    pub end_line: usize,
 }
 
 /// Component entry in a project summary.
@@ -106,10 +118,10 @@ impl IndexStore {
             params![file_index_id],
         )?;
 
-        // Insert new symbols
+        // Insert new symbols with extended fields
         let mut stmt = conn.prepare(
-            "INSERT INTO file_symbols (file_index_id, name, kind, line_number)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO file_symbols (file_index_id, name, kind, line_number, parent_symbol, signature, doc_comment, start_line, end_line)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
 
         for symbol in &item.symbols {
@@ -119,6 +131,11 @@ impl IndexStore {
                 symbol.name,
                 kind_str,
                 symbol.line as i64,
+                symbol.parent,
+                symbol.signature,
+                symbol.doc_comment,
+                symbol.line as i64,  // start_line = line
+                symbol.end_line as i64,
             ])?;
         }
 
@@ -132,7 +149,8 @@ impl IndexStore {
         let conn = self.get_connection()?;
 
         let mut stmt = conn.prepare(
-            "SELECT fi.file_path, fi.project_path, fs.name, fs.kind, fs.line_number
+            "SELECT fi.file_path, fi.project_path, fs.name, fs.kind, fs.line_number,
+                    fs.parent_symbol, fs.signature, fs.doc_comment, fs.end_line
              FROM file_symbols fs
              JOIN file_index fi ON fi.id = fs.file_index_id
              WHERE fs.name LIKE ?1
@@ -147,6 +165,10 @@ impl IndexStore {
                     symbol_name: row.get(2)?,
                     symbol_kind: row.get(3)?,
                     line_number: row.get::<_, i64>(4)? as usize,
+                    parent_symbol: row.get(5)?,
+                    signature: row.get(6)?,
+                    doc_comment: row.get(7)?,
+                    end_line: row.get::<_, i64>(8).unwrap_or(0) as usize,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -315,7 +337,8 @@ impl IndexStore {
         };
 
         let mut stmt = conn.prepare(
-            "SELECT name, kind, line_number FROM file_symbols
+            "SELECT name, kind, line_number, parent_symbol, signature, doc_comment, end_line
+             FROM file_symbols
              WHERE file_index_id = ?1
              ORDER BY line_number",
         )?;
@@ -325,10 +348,18 @@ impl IndexStore {
                 let name: String = row.get(0)?;
                 let kind_str: String = row.get(1)?;
                 let line: i64 = row.get(2)?;
+                let parent: Option<String> = row.get(3)?;
+                let signature: Option<String> = row.get(4)?;
+                let doc_comment: Option<String> = row.get(5)?;
+                let end_line: i64 = row.get::<_, i64>(6).unwrap_or(0);
                 Ok(SymbolInfo {
                     name,
                     kind: str_to_symbol_kind(&kind_str),
                     line: line as usize,
+                    parent,
+                    signature,
+                    doc_comment,
+                    end_line: end_line as usize,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -420,7 +451,7 @@ mod tests {
     fn upsert_inserts_new_file_index() {
         let store = create_test_store();
         let item = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "main".to_string(), kind: SymbolKind::Function, line: 1 },
+            SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
         ]);
 
         store.upsert_file_index("/project", &item, "abc123").unwrap();
@@ -438,14 +469,14 @@ mod tests {
 
         // Initial insert
         let item_v1 = make_item("src/lib.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "init".to_string(), kind: SymbolKind::Function, line: 5 },
+            SymbolInfo::basic("init".to_string(), SymbolKind::Function, 5),
         ]);
         store.upsert_file_index("/project", &item_v1, "hash_v1").unwrap();
 
         // Update with new symbols
         let item_v2 = make_item("src/lib.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "init".to_string(), kind: SymbolKind::Function, line: 5 },
-            SymbolInfo { name: "Config".to_string(), kind: SymbolKind::Struct, line: 20 },
+            SymbolInfo::basic("init".to_string(), SymbolKind::Function, 5),
+            SymbolInfo::basic("Config".to_string(), SymbolKind::Struct, 20),
         ]);
         store.upsert_file_index("/project", &item_v2, "hash_v2").unwrap();
 
@@ -462,15 +493,15 @@ mod tests {
 
         // Initial insert with 3 symbols
         let item_v1 = make_item("src/service.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "foo".to_string(), kind: SymbolKind::Function, line: 1 },
-            SymbolInfo { name: "bar".to_string(), kind: SymbolKind::Function, line: 10 },
-            SymbolInfo { name: "Baz".to_string(), kind: SymbolKind::Struct, line: 20 },
+            SymbolInfo::basic("foo".to_string(), SymbolKind::Function, 1),
+            SymbolInfo::basic("bar".to_string(), SymbolKind::Function, 10),
+            SymbolInfo::basic("Baz".to_string(), SymbolKind::Struct, 20),
         ]);
         store.upsert_file_index("/project", &item_v1, "h1").unwrap();
 
         // Update with only 1 symbol
         let item_v2 = make_item("src/service.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "new_fn".to_string(), kind: SymbolKind::Function, line: 1 },
+            SymbolInfo::basic("new_fn".to_string(), SymbolKind::Function, 1),
         ]);
         store.upsert_file_index("/project", &item_v2, "h2").unwrap();
 
@@ -488,11 +519,11 @@ mod tests {
         let store = create_test_store();
 
         let item1 = make_item("src/controller.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "UserController".to_string(), kind: SymbolKind::Struct, line: 5 },
-            SymbolInfo { name: "handle_request".to_string(), kind: SymbolKind::Function, line: 15 },
+            SymbolInfo::basic("UserController".to_string(), SymbolKind::Struct, 5),
+            SymbolInfo::basic("handle_request".to_string(), SymbolKind::Function, 15),
         ]);
         let item2 = make_item("src/admin.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "AdminController".to_string(), kind: SymbolKind::Struct, line: 3 },
+            SymbolInfo::basic("AdminController".to_string(), SymbolKind::Struct, 3),
         ]);
 
         store.upsert_file_index("/project", &item1, "h1").unwrap();
@@ -509,7 +540,7 @@ mod tests {
         let store = create_test_store();
 
         let item = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "main".to_string(), kind: SymbolKind::Function, line: 1 },
+            SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
         ]);
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
@@ -522,8 +553,8 @@ mod tests {
         let store = create_test_store();
 
         let item = make_item("src/models.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "Config".to_string(), kind: SymbolKind::Struct, line: 1 },
-            SymbolInfo { name: "ConfigBuilder".to_string(), kind: SymbolKind::Struct, line: 20 },
+            SymbolInfo::basic("Config".to_string(), SymbolKind::Struct, 1),
+            SymbolInfo::basic("ConfigBuilder".to_string(), SymbolKind::Struct, 20),
         ]);
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
@@ -577,10 +608,10 @@ mod tests {
         let store = create_test_store();
 
         let item1 = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "main".to_string(), kind: SymbolKind::Function, line: 1 },
+            SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
         ]);
         let item2 = make_item("src/app.tsx", "desktop-web", "typescript", vec![
-            SymbolInfo { name: "app".to_string(), kind: SymbolKind::Function, line: 1 },
+            SymbolInfo::basic("app".to_string(), SymbolKind::Function, 1),
         ]);
         let item3 = make_item("src/utils.py", "python-core", "python", vec![]);
 
@@ -654,8 +685,8 @@ mod tests {
         let store = create_test_store();
 
         let item = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "main".to_string(), kind: SymbolKind::Function, line: 1 },
-            SymbolInfo { name: "Config".to_string(), kind: SymbolKind::Struct, line: 10 },
+            SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
+            SymbolInfo::basic("Config".to_string(), SymbolKind::Struct, 10),
         ]);
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
@@ -685,10 +716,10 @@ mod tests {
         let store = create_test_store();
 
         let item_a = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "main_a".to_string(), kind: SymbolKind::Function, line: 1 },
+            SymbolInfo::basic("main_a".to_string(), SymbolKind::Function, 1),
         ]);
         let item_b = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo { name: "main_b".to_string(), kind: SymbolKind::Function, line: 1 },
+            SymbolInfo::basic("main_b".to_string(), SymbolKind::Function, 1),
         ]);
 
         store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
@@ -716,14 +747,14 @@ mod tests {
         let store = create_test_store();
 
         let all_kinds = vec![
-            SymbolInfo { name: "my_func".to_string(), kind: SymbolKind::Function, line: 1 },
-            SymbolInfo { name: "MyClass".to_string(), kind: SymbolKind::Class, line: 2 },
-            SymbolInfo { name: "MyStruct".to_string(), kind: SymbolKind::Struct, line: 3 },
-            SymbolInfo { name: "MyEnum".to_string(), kind: SymbolKind::Enum, line: 4 },
-            SymbolInfo { name: "MyInterface".to_string(), kind: SymbolKind::Interface, line: 5 },
-            SymbolInfo { name: "MyType".to_string(), kind: SymbolKind::Type, line: 6 },
-            SymbolInfo { name: "MY_CONST".to_string(), kind: SymbolKind::Const, line: 7 },
-            SymbolInfo { name: "my_module".to_string(), kind: SymbolKind::Module, line: 8 },
+            SymbolInfo::basic("my_func".to_string(), SymbolKind::Function, 1),
+            SymbolInfo::basic("MyClass".to_string(), SymbolKind::Class, 2),
+            SymbolInfo::basic("MyStruct".to_string(), SymbolKind::Struct, 3),
+            SymbolInfo::basic("MyEnum".to_string(), SymbolKind::Enum, 4),
+            SymbolInfo::basic("MyInterface".to_string(), SymbolKind::Interface, 5),
+            SymbolInfo::basic("MyType".to_string(), SymbolKind::Type, 6),
+            SymbolInfo::basic("MY_CONST".to_string(), SymbolKind::Const, 7),
+            SymbolInfo::basic("my_module".to_string(), SymbolKind::Module, 8),
         ];
 
         let item = make_item("src/all_kinds.rs", "desktop-rust", "rust", all_kinds.clone());
@@ -749,11 +780,11 @@ mod tests {
 
         for i in 0..50 {
             let symbols: Vec<SymbolInfo> = (0..5)
-                .map(|j| SymbolInfo {
-                    name: format!("symbol_{i}_{j}"),
-                    kind: SymbolKind::Function,
-                    line: j + 1,
-                })
+                .map(|j| SymbolInfo::basic(
+                    format!("symbol_{i}_{j}"),
+                    SymbolKind::Function,
+                    j + 1,
+                ))
                 .collect();
 
             let item = make_item(
@@ -771,5 +802,90 @@ mod tests {
         // Query for a specific symbol pattern
         let results = store.query_symbols("symbol_25_%").unwrap();
         assert_eq!(results.len(), 5);
+    }
+
+    // =========================================================================
+    // Extended symbol fields roundtrip test
+    // =========================================================================
+
+    #[test]
+    fn extended_symbol_fields_roundtrip() {
+        let store = create_test_store();
+
+        let symbols = vec![
+            SymbolInfo {
+                name: "MyClass".to_string(),
+                kind: SymbolKind::Class,
+                line: 5,
+                parent: None,
+                signature: Some("class MyClass(Base):".to_string()),
+                doc_comment: Some("A sample class".to_string()),
+                end_line: 25,
+            },
+            SymbolInfo {
+                name: "my_method".to_string(),
+                kind: SymbolKind::Function,
+                line: 10,
+                parent: Some("MyClass".to_string()),
+                signature: Some("def my_method(self, x: int) -> str:".to_string()),
+                doc_comment: Some("Does something useful".to_string()),
+                end_line: 20,
+            },
+            SymbolInfo::basic("standalone_fn".to_string(), SymbolKind::Function, 30),
+        ];
+
+        let item = make_item("src/example.py", "python-core", "python", symbols);
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        let stored = store.get_file_symbols("/project", "src/example.py").unwrap();
+        assert_eq!(stored.len(), 3);
+
+        // Check extended fields for MyClass
+        assert_eq!(stored[0].name, "MyClass");
+        assert_eq!(stored[0].signature.as_deref(), Some("class MyClass(Base):"));
+        assert_eq!(stored[0].doc_comment.as_deref(), Some("A sample class"));
+        assert_eq!(stored[0].end_line, 25);
+        assert!(stored[0].parent.is_none());
+
+        // Check extended fields for my_method
+        assert_eq!(stored[1].name, "my_method");
+        assert_eq!(stored[1].parent.as_deref(), Some("MyClass"));
+        assert_eq!(stored[1].signature.as_deref(), Some("def my_method(self, x: int) -> str:"));
+        assert_eq!(stored[1].doc_comment.as_deref(), Some("Does something useful"));
+        assert_eq!(stored[1].end_line, 20);
+
+        // Check that basic symbol has None for extended fields
+        assert_eq!(stored[2].name, "standalone_fn");
+        assert!(stored[2].parent.is_none());
+        assert!(stored[2].signature.is_none());
+        assert!(stored[2].doc_comment.is_none());
+        assert_eq!(stored[2].end_line, 0);
+    }
+
+    #[test]
+    fn query_symbols_returns_extended_fields() {
+        let store = create_test_store();
+
+        let symbols = vec![
+            SymbolInfo {
+                name: "process".to_string(),
+                kind: SymbolKind::Function,
+                line: 10,
+                parent: Some("Handler".to_string()),
+                signature: Some("fn process(&self, data: &[u8]) -> Result<()>".to_string()),
+                doc_comment: Some("Process incoming data".to_string()),
+                end_line: 30,
+            },
+        ];
+
+        let item = make_item("src/handler.rs", "desktop-rust", "rust", symbols);
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        let results = store.query_symbols("%process%").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].parent_symbol.as_deref(), Some("Handler"));
+        assert_eq!(results[0].signature.as_deref(), Some("fn process(&self, data: &[u8]) -> Result<()>"));
+        assert_eq!(results[0].doc_comment.as_deref(), Some("Process incoming data"));
+        assert_eq!(results[0].end_line, 30);
     }
 }

@@ -72,6 +72,34 @@ pub struct SymbolInfo {
     pub name: String,
     pub kind: SymbolKind,
     pub line: usize,
+    /// Parent symbol (e.g., class name for a method)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// Function/method signature (e.g., "fn foo(x: i32) -> bool")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// Documentation comment extracted from the source
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_comment: Option<String>,
+    /// End line of the symbol definition (0 if unknown)
+    #[serde(default)]
+    pub end_line: usize,
+}
+
+impl SymbolInfo {
+    /// Create a basic SymbolInfo with only name, kind, and line.
+    /// Extended fields (parent, signature, doc_comment, end_line) default to None/0.
+    pub fn basic(name: String, kind: SymbolKind, line: usize) -> Self {
+        Self {
+            name,
+            kind,
+            line,
+            parent: None,
+            signature: None,
+            doc_comment: None,
+            end_line: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -446,7 +474,20 @@ pub fn extract_symbols(path: &Path, language: &str, max_symbols: usize) -> Vec<S
 }
 
 /// Inner helper that operates on a string slice (simplifies testing).
+///
+/// Uses tree-sitter for accurate parsing when the language is supported,
+/// falling back to regex-based extraction for unsupported languages.
 fn extract_symbols_from_str(content: &str, language: &str, max_symbols: usize) -> Vec<SymbolInfo> {
+    // Try tree-sitter first for supported languages
+    if super::tree_sitter_parser::is_language_supported(language) {
+        let symbols = super::tree_sitter_parser::parse_symbols(content, language, max_symbols);
+        if !symbols.is_empty() {
+            return symbols;
+        }
+        // Fall through to regex if tree-sitter returned empty (parse failure)
+    }
+
+    // Regex fallback for unsupported languages or tree-sitter parse failures
     let patterns: Vec<(Regex, SymbolKind)> = match language {
         "python" => vec![
             (Regex::new(r"^def\s+([A-Za-z_]\w*)\s*\(").unwrap(), SymbolKind::Function),
@@ -506,11 +547,11 @@ fn extract_symbols_from_str(content: &str, language: &str, max_symbols: usize) -
                     // Deduplicate: a pub fn will match both pub fn and bare fn patterns
                     let dedup_key = format!("{}:{}", name, line_number);
                     if seen_names.insert(dedup_key) {
-                        symbols.push(SymbolInfo {
+                        symbols.push(SymbolInfo::basic(
                             name,
-                            kind: *kind,
-                            line: line_number + 1, // 1-based line numbers
-                        });
+                            *kind,
+                            line_number + 1, // 1-based line numbers
+                        ));
                     }
                     break; // first match per line wins
                 }
@@ -1219,11 +1260,7 @@ class InternalHelper {
 
     #[test]
     fn symbol_kind_serialization() {
-        let info = SymbolInfo {
-            name: "test_fn".to_string(),
-            kind: SymbolKind::Function,
-            line: 1,
-        };
+        let info = SymbolInfo::basic("test_fn".to_string(), SymbolKind::Function, 1);
         let json = serde_json::to_string(&info).expect("serialize");
         assert!(json.contains("Function"));
         let deserialized: SymbolInfo = serde_json::from_str(&json).expect("deserialize");
