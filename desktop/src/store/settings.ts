@@ -69,6 +69,7 @@ interface SettingsState {
   // Context compaction
   enableContextCompaction: boolean;
   showReasoningOutput: boolean;
+  enableThinking: boolean;
   showSubAgentEvents: boolean;
 
   // Search provider settings
@@ -88,6 +89,7 @@ interface SettingsState {
   resetToDefaults: () => void;
   setEnableContextCompaction: (enable: boolean) => void;
   setShowReasoningOutput: (show: boolean) => void;
+  setEnableThinking: (enable: boolean) => void;
   setShowSubAgentEvents: (show: boolean) => void;
   setSearchProvider: (provider: 'tavily' | 'brave' | 'duckduckgo') => void;
 
@@ -154,6 +156,7 @@ const defaultSettings = {
   // Context compaction
   enableContextCompaction: true,
   showReasoningOutput: false,
+  enableThinking: false,
   showSubAgentEvents: true,
 
   // Search provider
@@ -205,6 +208,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       setEnableContextCompaction: (enableContextCompaction) => set({ enableContextCompaction }),
       setShowReasoningOutput: (showReasoningOutput) => set({ showReasoningOutput }),
+      setEnableThinking: (enableThinking) => set({ enableThinking }),
       setShowSubAgentEvents: (showSubAgentEvents) => set({ showSubAgentEvents }),
 
       setShowLineNumbers: (showLineNumbers) => set({ showLineNumbers }),

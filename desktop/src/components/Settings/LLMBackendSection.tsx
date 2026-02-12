@@ -153,7 +153,7 @@ const FALLBACK_MODELS_BY_PROVIDER: Record<string, string[]> = {
     'glm-4v-plus-0111',
     'glm-4v-flash',
   ],
-  qwen: ['qwen-plus', 'qwen-turbo'],
+  qwen: ['qwen3-plus', 'qwq-plus', 'qwen-plus', 'qwen-turbo'],
   ollama: ['llama3.2', 'deepseek-r1:14b', 'qwq:32b'],
 };
 const API_KEY_REQUIRED_PROVIDERS = dedupeModels(
@@ -234,6 +234,8 @@ export function LLMBackendSection() {
     setEnableContextCompaction,
     showReasoningOutput,
     setShowReasoningOutput,
+    enableThinking,
+    setEnableThinking,
     showSubAgentEvents,
     setShowSubAgentEvents,
     searchProvider,
@@ -904,6 +906,22 @@ export function LLMBackendSection() {
             </span>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Off by default. Enable only for debugging verbose model behavior.
+            </p>
+          </div>
+        </label>
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={enableThinking}
+            onChange={(e) => setEnableThinking(e.target.checked)}
+            className="mt-1 text-primary-600 rounded"
+          />
+          <div>
+            <span className="text-sm font-medium text-gray-900 dark:text-white">
+              Enable model thinking/reasoning
+            </span>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Enable extended thinking for supported models (Qwen3, QwQ, DeepSeek-R1, etc.). The model will reason through problems step-by-step before responding.
             </p>
           </div>
         </label>

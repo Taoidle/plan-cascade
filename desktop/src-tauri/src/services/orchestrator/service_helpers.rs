@@ -1223,7 +1223,7 @@ impl OrchestratorService {
             .await;
 
         match mode.as_str() {
-            "project" | "global" | "full" => {
+            "deep" | "project" | "global" | "full" => {
                 self.run_project_analyze_with_cache(&enriched_query, path_hint_ref, tx)
                     .await
             }
@@ -1231,42 +1231,10 @@ impl OrchestratorService {
                 self.run_local_analyze_with_cache(&enriched_query, path_hint_ref, tx)
                     .await
             }
-            "auto" => {
-                let has_path_target = !extract_path_candidates_from_text(&enriched_query).is_empty();
-                match detect_adaptive_analysis_scope(&enriched_query, has_path_target) {
-                AdaptiveAnalysisScope::Global => {
-                    self.run_project_analyze_with_cache(&enriched_query, path_hint_ref, tx)
-                        .await
-                }
-                AdaptiveAnalysisScope::Local => {
-                    let local = self
-                        .run_local_analyze_with_cache(&enriched_query, path_hint_ref, tx)
-                        .await;
-                    if local.success {
-                        local
-                    } else {
-                        self.run_project_analyze_with_cache(&enriched_query, path_hint_ref, tx)
-                            .await
-                    }
-                }
-                AdaptiveAnalysisScope::None => {
-                    let message =
-                        "Analyze(auto) skipped: request does not require repository analysis.";
-                    let _ = tx
-                        .send(UnifiedStreamEvent::AnalysisPhaseProgress {
-                            phase_id: "analysis".to_string(),
-                            message: message.to_string(),
-                        })
-                        .await;
-                    ExecutionResult {
-                        response: Some(message.to_string()),
-                        usage: UsageStats::default(),
-                        iterations: 0,
-                        success: true,
-                        error: None,
-                    }
-                }
-                }
+            "auto" | "quick" => {
+                // Quick mode (default): lightweight context brief from file inventory
+                self.run_local_analyze_with_cache(&enriched_query, path_hint_ref, tx)
+                    .await
             }
             _ => ExecutionResult {
                 response: None,
@@ -1274,7 +1242,7 @@ impl OrchestratorService {
                 iterations: 0,
                 success: false,
                 error: Some(format!(
-                    "Invalid Analyze mode '{}'. Use auto|local|project.",
+                    "Invalid Analyze mode '{}'. Use quick|deep|local.",
                     mode
                 )),
             },
@@ -1324,6 +1292,7 @@ impl OrchestratorService {
         let mut total_usage = UsageStats::default();
         let mut iterations = 0;
         let mut fallback_call_counter = 0u32;
+        let mut last_assistant_text: Option<String> = None;
 
         // Build a minimal system prompt for sub-agents.
         // Unlike the main agent, sub-agents do NOT get the full build_system_prompt()
@@ -1516,6 +1485,14 @@ impl OrchestratorService {
                     }
                 } else {
                     self.compact_messages(&mut messages, &tx).await;
+                }
+            }
+
+            // Track the latest assistant text for fallback if the final
+            // response is empty after tool-calling iterations.
+            if let Some(text) = &response.content {
+                if !text.trim().is_empty() {
+                    last_assistant_text = Some(text.clone());
                 }
             }
 
@@ -1747,7 +1724,9 @@ impl OrchestratorService {
                 let final_content = response
                     .content
                     .as_ref()
-                    .map(|t| extract_text_without_tool_calls(t));
+                    .map(|t| extract_text_without_tool_calls(t))
+                    .filter(|t| !t.trim().is_empty())
+                    .or(last_assistant_text);
 
                 return ExecutionResult {
                     response: final_content,
@@ -1766,53 +1745,7 @@ impl OrchestratorService {
         message: String,
         tx: mpsc::Sender<UnifiedStreamEvent>,
     ) -> ExecutionResult {
-        let mut user_message = message;
-        let has_path_target = !extract_path_candidates_from_text(&user_message).is_empty();
-        match detect_adaptive_analysis_scope(&user_message, has_path_target) {
-            AdaptiveAnalysisScope::Global => {
-                // Global analysis-first flow for architecture/project-wide asks.
-                return self
-                    .run_project_analyze_with_cache(&user_message, None, &tx)
-                    .await;
-            }
-            AdaptiveAnalysisScope::Local => {
-                let local_result = self
-                    .run_local_analyze_with_cache(&user_message, None, &tx)
-                    .await;
-                if local_result.success {
-                    let local_brief = local_result.response.unwrap_or_default();
-                    if !local_brief.trim().is_empty() {
-                        let _ = tx
-                            .send(UnifiedStreamEvent::AnalysisPhaseProgress {
-                                phase_id: "analysis".to_string(),
-                                message:
-                                    "Applied automatic local pre-analysis context for execution."
-                                        .to_string(),
-                            })
-                            .await;
-                        user_message = format!(
-                            "{}\n\n[Auto Local Analysis Context]\n{}",
-                            user_message, local_brief
-                        );
-                    }
-                } else if let Some(local_brief) =
-                    self.build_local_preanalysis_brief(&user_message, &tx).await
-                {
-                    let _ = tx
-                        .send(UnifiedStreamEvent::AnalysisPhaseProgress {
-                            phase_id: "analysis".to_string(),
-                            message: "Applied automatic local pre-analysis context for execution."
-                                .to_string(),
-                        })
-                        .await;
-                    user_message = format!(
-                        "{}\n\n[Auto Local Analysis Context]\n{}",
-                        user_message, local_brief
-                    );
-                }
-            }
-            AdaptiveAnalysisScope::None => {}
-        }
+        let user_message = message;
 
         let tools = get_tool_definitions();
         let use_prompt_fallback = !self.provider.supports_tools();
@@ -1820,6 +1753,7 @@ impl OrchestratorService {
         let mut total_usage = UsageStats::default();
         let mut iterations = 0;
         let mut fallback_call_counter = 0u32;
+        let mut last_assistant_text: Option<String> = None;
 
         // Create TaskContext for Task tool support in the agentic loop
         let task_spawner = Arc::new(OrchestratorTaskSpawner {
@@ -1951,6 +1885,14 @@ impl OrchestratorService {
             // Check for context compaction before processing tool calls
             if self.should_compact(last_input_tokens, false) {
                 self.compact_messages(&mut messages, &tx).await;
+            }
+
+            // Track the latest assistant text so we can return it if the
+            // loop ends during a tool-calling turn (e.g. iteration/token limit).
+            if let Some(text) = &response.content {
+                if !text.trim().is_empty() {
+                    last_assistant_text = Some(text.clone());
+                }
             }
 
             // Handle tool calls - either native or prompt-based fallback
@@ -2149,7 +2091,9 @@ impl OrchestratorService {
                 let final_content = response
                     .content
                     .as_ref()
-                    .map(|t| extract_text_without_tool_calls(t));
+                    .map(|t| extract_text_without_tool_calls(t))
+                    .filter(|t| !t.trim().is_empty())
+                    .or(last_assistant_text);
 
                 // Emit completion event
                 let _ = tx

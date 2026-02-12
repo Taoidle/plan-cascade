@@ -20,31 +20,6 @@ import { StreamingOutput, GlobalProgressBar, ErrorState, ProjectSelector } from 
 
 type WorkflowMode = 'chat' | 'task';
 
-function inferTaskFlowIntent(message: string): boolean {
-  const lower = message.toLowerCase();
-  const keywords = [
-    'implement',
-    'fix',
-    'refactor',
-    'write code',
-    'add feature',
-    'update code',
-    'build',
-    'analyze project',
-    'analyze this project',
-    'project analysis',
-    'review codebase',
-    'cross-module',
-    '\u{5b9e}\u{73b0}', // 实现
-    '\u{4fee}\u{590d}', // 修复
-    '\u{91cd}\u{6784}', // 重构
-    '\u{65b0}\u{589e}\u{529f}\u{80fd}', // 新增功能
-    '\u{5206}\u{6790}\u{8fd9}\u{4e2a}\u{9879}\u{76ee}', // 分析这个项目
-    '\u{5206}\u{6790}\u{9879}\u{76ee}', // 分析项目
-  ];
-  return keywords.some((kw) => lower.includes(kw));
-}
-
 function formatNumber(value: number | null | undefined): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '0';
   return value.toLocaleString();
@@ -110,9 +85,7 @@ export function SimpleMode() {
   const handleStart = useCallback(async () => {
     if (!description.trim() || isSubmitting || isAnalyzingStrategy) return;
 
-    const shouldUseTaskFlow =
-      workflowMode === 'task' || inferTaskFlowIntent(description);
-    if (shouldUseTaskFlow) {
+    if (workflowMode === 'task') {
       await analyzeStrategy(description);
     }
 

@@ -799,6 +799,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           apiKey: providerApiKey,
           analysisSessionId: standaloneSessionId,
           enableCompaction: settings.enableContextCompaction ?? true,
+          enableThinking: settings.enableThinking ?? false,
         });
 
         if (!result.success || !result.data) {

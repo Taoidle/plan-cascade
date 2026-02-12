@@ -638,6 +638,7 @@ pub async fn execute_standalone(
     analysis_session_id: Option<String>,
     analysisSessionId: Option<String>,
     enable_compaction: Option<bool>,
+    enable_thinking: Option<bool>,
     app: AppHandle,
 ) -> CommandResponse<ExecutionResult> {
     let keyring = KeyringService::new();
@@ -685,6 +686,7 @@ pub async fn execute_standalone(
         api_key,
         base_url: None,
         model,
+        enable_thinking: enable_thinking.unwrap_or(false),
         ..Default::default()
     };
     let analysis_session_id = analysis_session_id
@@ -891,6 +893,7 @@ pub async fn execute_standalone_with_session(
         api_key,
         base_url: None,
         model: request.model.clone(),
+        enable_thinking: request.enable_thinking.unwrap_or(false),
         ..Default::default()
     };
     // Generate session ID first so analysis cache reuse is scoped to this execution session.

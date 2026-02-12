@@ -453,6 +453,8 @@ pub struct ExecuteWithSessionRequest {
     pub run_quality_gates: bool,
     /// Specific story IDs to execute (all if empty)
     pub story_ids: Option<Vec<String>>,
+    /// Enable extended thinking/reasoning for supported models
+    pub enable_thinking: Option<bool>,
 }
 
 /// Request to resume a paused/failed execution

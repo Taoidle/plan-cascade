@@ -291,19 +291,19 @@ fn analyze_tool() -> ToolDefinition {
     properties.insert(
         "mode".to_string(),
         ParameterSchema::string(Some(
-            "Analysis mode: 'auto' (default), 'local' (focused), or 'project' (full deep pipeline).",
+            "Analysis mode: 'quick' (default — lightweight file inventory brief), 'deep' (full multi-phase analysis pipeline, use only when explicitly needed), or 'local' (focused on specific paths).",
         )),
     );
     properties.insert(
         "path_hint".to_string(),
         ParameterSchema::string(Some(
-            "Optional path/file hint for local analysis (e.g., 'src/plan_cascade/core').",
+            "Optional path/file hint to focus the analysis scope (e.g., 'src/plan_cascade/core').",
         )),
     );
 
     ToolDefinition {
         name: "Analyze".to_string(),
-        description: "Run the orchestrator's structured analysis capability. Supports local-focused analysis and full project analysis with inventory chunking and summary merge. Returns a concise analysis brief that can be reused for implementation decisions.".to_string(),
+        description: "Gather project context for informed decisions. Defaults to quick mode: returns a concise project brief from file inventory (relevant files, components, test coverage). Use mode='deep' ONLY when the user explicitly requests comprehensive architectural analysis, cross-module dependency tracing, or full codebase review. Do NOT use this tool for simple questions — use Cwd, LS, Read, Glob, or Grep instead.".to_string(),
         input_schema: ParameterSchema::object(
             Some("Analyze parameters"),
             properties,
@@ -452,5 +452,39 @@ mod tests {
             let json = serde_json::to_string(&tool).unwrap();
             assert!(!json.is_empty());
         }
+    }
+
+    #[test]
+    fn test_analyze_tool_describes_quick_and_deep_modes() {
+        let tools = get_tool_definitions();
+        let analyze = tools.iter().find(|t| t.name == "Analyze").unwrap();
+
+        // Description should mention quick mode (default) and deep mode
+        assert!(
+            analyze.description.contains("quick mode"),
+            "Analyze description should mention quick mode"
+        );
+        assert!(
+            analyze.description.contains("deep"),
+            "Analyze description should mention deep mode"
+        );
+        assert!(
+            analyze.description.contains("Do NOT use this tool for simple questions"),
+            "Analyze description should discourage use for simple questions"
+        );
+
+        // Mode parameter should describe quick and deep
+        let mode_schema = analyze
+            .input_schema
+            .properties
+            .as_ref()
+            .unwrap()
+            .get("mode")
+            .unwrap();
+        let mode_desc = mode_schema.description.as_deref().unwrap_or("");
+        assert!(
+            mode_desc.contains("quick") && mode_desc.contains("deep"),
+            "Mode parameter should describe quick and deep modes"
+        );
     }
 }

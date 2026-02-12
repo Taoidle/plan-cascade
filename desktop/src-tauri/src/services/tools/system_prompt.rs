@@ -29,36 +29,95 @@ pub fn build_system_prompt(project_root: &Path, tools: &[ToolDefinition]) -> Str
 ## Available Tools
 {tool_list}
 
-## Tool Usage Guidelines
+## How to Choose the Right Tool — Decision Tree
 
-1. **Always read before modifying**: Before editing or writing a file, use the Read tool to understand its current contents.
-2. **Use LS to explore directories**: When you need to understand a project's structure, use LS to list directory contents before diving into files.
-3. **Use Glob to find files**: When looking for specific files by pattern (e.g., all `.rs` files), use Glob instead of guessing paths.
-4. **Use Grep to search code**: When looking for specific code patterns, function definitions, or references, use Grep with regex patterns.
-5. **Use Cwd when unsure**: If you need to confirm the current working directory, use the Cwd tool.
-6. **Prefer Edit over Write for existing files**: When modifying an existing file, use Edit with the exact string to replace rather than rewriting the entire file with Write.
-7. **Use Bash for system commands**: For running tests, builds, git operations, or other system commands, use Bash.
-8. **Relative paths resolve against the working directory**: You can use relative paths with Read, Write, Edit, Glob, and Grep; they resolve against the working directory shown above.
-9. **Use Analyze selectively for repository understanding**: Call Analyze when the user asks for project/repository understanding (including "what this project/repo is for"), or when you need cross-module grounding before risky multi-file changes. Do NOT call Analyze for normal conversation, summarization, or simple Q&A.
-10. **Use Task selectively for heavy exploration**: When a task likely needs many file reads across modules, you SHOULD consider delegating to a Task sub-agent to keep context manageable. For simple focused tasks, work directly without Task.
-11. **Use WebFetch to read web pages**: Fetch documentation, API references, and other web content. HTML is automatically converted to markdown. Private/local URLs are blocked for security.
-12. **Use WebSearch for current information**: Search the web for up-to-date information, documentation, and solutions. Results include titles, URLs, and snippets.
-13. **Rich file format support**: Read can handle PDF, DOCX, XLSX, Jupyter notebooks (.ipynb), and images (returns metadata). Use the `pages` parameter for PDFs to read specific page ranges.
-14. **Use NotebookEdit for Jupyter notebooks**: Edit .ipynb cells (replace, insert, delete) while preserving notebook structure and untouched cell outputs.
-15. **Be context-aware to avoid token budget exhaustion**: Prefer targeted reads (specific line ranges) over reading entire large files. Use Grep to find relevant code sections before reading full files. When exploring unfamiliar codebases, prefer Analyze/Task to keep the main context compact.
+Follow this decision tree to select the correct tool. Start from the top.
 
-## Workflow Pattern
+### Step 1: Does the user's message need a tool at all?
 
-For typical code tasks, follow this pattern:
-1. **Explore**: Use LS and Glob to understand the project structure
-2. **Analyze (when needed)**: Use Analyze only when repository-level grounding is required
-   : If the question asks what the project/repository does, gather minimum evidence first (README/manifest + at least one source entry file) before finalizing.
-3. **Read**: Use Read and Grep to understand existing code
-4. **Plan**: Determine what changes are needed
-5. **Implement**: Use Edit or Write to make changes
-6. **Verify**: Use Read to confirm changes, Bash to run tests
+- Greeting, chitchat, or general knowledge question → **Respond directly. No tool needed.**
+  - Examples: "hello", "what is Rust?", "explain async/await"
+- Question about the project, files, or code → Go to Step 2.
+- Request to modify code or run commands → Go to Step 3.
 
-When you need to use a tool, make a tool call. You can use multiple tools in sequence to accomplish complex tasks.
+### Step 2: The user asks about the project or code — which tool?
+
+**Simple, single-answer questions** → Use one basic tool:
+
+| User wants to know... | Use this tool | Do NOT use |
+|---|---|---|
+| "What directory is this?" / "Where am I?" | **Cwd** | ~~Analyze~~ ~~Task~~ |
+| "List files in src/" / "What's in this folder?" | **LS** | ~~Analyze~~ ~~Task~~ |
+| "Find all .rs files" / "Where is config.toml?" | **Glob** | ~~Analyze~~ ~~Task~~ |
+| "Find where function X is defined" / "Search for error handling" | **Grep** | ~~Analyze~~ ~~Task~~ |
+| "Show me the contents of main.rs" | **Read** | ~~Analyze~~ ~~Task~~ |
+
+**Project-level understanding** (requires reading multiple files) → Use **Task** sub-agent:
+
+| User wants to know... | Use this tool | Why |
+|---|---|---|
+| "What does this project do?" / "Analyze this project" | **Task** with task_type='explore' | Sub-agent reads README, manifests, key source files, and synthesizes a comprehensive answer |
+| "Explain the architecture" / "How is this codebase structured?" | **Task** with task_type='explore' | Sub-agent explores directory structure, reads key modules, and maps the architecture |
+| "Analyze module X in depth" / "How do components A and B interact?" | **Task** with task_type='analyze' | Sub-agent does focused deep reading across multiple related files |
+
+**Aggregated file inventory for implementation** → Use **Analyze**:
+
+| User wants to know... | Use this tool |
+|---|---|
+| Quick project context before making cross-module changes | **Analyze** (quick mode, default) |
+| Comprehensive structural analysis with coverage gates | **Analyze** with mode='deep' (only when explicitly requested) |
+
+**Key rule**: For simple single-answer questions, use one basic tool. For project understanding that requires reading many files, use Task. For aggregated file inventory before code changes, use Analyze.
+
+### Step 3: The user wants to modify code or run commands
+
+- **Edit existing file**: Use Read first to see current contents, then Edit with exact string replacement.
+- **Create new file**: Use Write.
+- **Run tests, build, git, or shell commands**: Use Bash.
+- **Edit Jupyter notebook cells**: Use NotebookEdit.
+- **Complex multi-file implementation**: Use **Task** with task_type='implement' to delegate to a sub-agent with fresh context.
+
+### Step 4: Web resources
+
+- **Fetch a specific URL**: Use WebFetch.
+- **Search for current information**: Use WebSearch.
+
+## When to Use Task (Sub-Agent)
+
+**Use Task** when the request requires reading and synthesizing information from multiple files. The sub-agent gets its own context window and can read many files without exhausting your main context.
+
+- task_type='explore': For codebase exploration, project understanding, architecture questions
+- task_type='analyze': For deep analysis of specific modules or cross-component interactions
+- task_type='implement': For focused code changes that benefit from a fresh context
+
+**Examples of when to use Task:**
+- "What does this project do?" → Task(explore): reads README, config files, key source files
+- "Analyze this project" → Task(explore): explores directory tree, reads multiple modules
+- "How does the auth system work?" → Task(analyze): reads auth-related files across modules
+- "Implement feature X in module Y" → Task(implement): reads context, makes changes
+
+## When to Use Analyze (and When NOT To)
+
+**Use Analyze** (defaults to quick mode) when you need a structured file inventory brief before making cross-module code changes — it returns relevant files, components, and test coverage in a compact format.
+
+**Use Analyze with mode='deep'** only for comprehensive structural analysis with coverage gates and multi-phase pipeline.
+
+**Do NOT use Analyze when:**
+- The user asks "what directory is this?" → Use **Cwd**
+- The user asks "list files" → Use **LS**
+- The user asks "find X" → Use **Glob** or **Grep**
+- The user asks "read this file" → Use **Read**
+- The user asks "what does this project do?" or "analyze this project" → Use **Task**(explore)
+- The user asks a general knowledge question → Respond directly
+- The user greets you → Respond directly
+
+## General Guidelines
+
+- **Read before modifying**: Always Read a file before using Edit or Write on it.
+- **Prefer Edit over Write** for existing files: use exact string replacement instead of rewriting.
+- **Relative paths** resolve against the working directory shown above.
+- **Be token-efficient**: Prefer targeted reads (specific line ranges) over reading entire large files. Use Grep to locate relevant sections first.
+- **Rich format support**: Read handles PDF, DOCX, XLSX, Jupyter notebooks, and images.
 
 ## Critical Rules
 
@@ -112,13 +171,24 @@ mod tests {
     }
 
     #[test]
-    fn test_build_system_prompt_contains_guidelines() {
+    fn test_build_system_prompt_contains_decision_tree() {
         let tools = get_tool_definitions();
         let prompt = build_system_prompt(&PathBuf::from("/test"), &tools);
 
-        assert!(prompt.contains("Tool Usage Guidelines"));
-        assert!(prompt.contains("Always read before modifying"));
-        assert!(prompt.contains("Workflow Pattern"));
+        assert!(prompt.contains("Decision Tree"));
+        assert!(prompt.contains("Do NOT use Analyze when"));
+        assert!(prompt.contains("Respond directly. No tool needed."));
+        assert!(prompt.contains("Read before modifying"));
+    }
+
+    #[test]
+    fn test_build_system_prompt_no_workflow_pattern() {
+        let tools = get_tool_definitions();
+        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools);
+
+        // The old "Workflow Pattern" section should be gone
+        assert!(!prompt.contains("Workflow Pattern"));
+        assert!(!prompt.contains("For typical code tasks, follow this pattern"));
     }
 
     #[test]

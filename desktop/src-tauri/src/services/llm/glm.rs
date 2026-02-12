@@ -254,7 +254,11 @@ impl GlmProvider {
                 .join("\n");
 
             let mut msg = serde_json::json!({"role": role, "tool_calls": tool_calls});
-            if !text_content.is_empty() {
+            // Always include content field — some OpenAI-compatible APIs
+            // require it even when the assistant only emits tool calls.
+            if text_content.is_empty() {
+                msg["content"] = serde_json::Value::Null;
+            } else {
                 msg["content"] = serde_json::json!(text_content);
             }
             return msg;
@@ -582,13 +586,15 @@ impl LlmProvider for GlmProvider {
                                 _ => {}
                             }
                             // Forward streaming events to the frontend, but suppress
-                            // Complete and Usage — those are internal to the LLM call
-                            // and don't mean execution is done (tool calls may follow).
-                            // The orchestrator emits its own Complete when truly finished.
+                            // Suppress internal signals — the orchestrator emits its
+                            // own Complete, Usage, and tool lifecycle events after
+                            // executing tools.
                             if !matches!(
                                 &event,
                                 UnifiedStreamEvent::Complete { .. }
                                     | UnifiedStreamEvent::Usage { .. }
+                                    | UnifiedStreamEvent::ToolStart { .. }
+                                    | UnifiedStreamEvent::ToolComplete { .. }
                             ) {
                                 let _ = tx.send(event).await;
                             }

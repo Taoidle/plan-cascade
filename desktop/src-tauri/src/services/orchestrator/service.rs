@@ -27,7 +27,6 @@ use super::analysis_store::{
     AnalysisPhaseResultRecord, AnalysisRunHandle, AnalysisRunStore, CoverageMetrics,
     EvidenceRecord, SubAgentResultRecord,
 };
-use super::adaptive_scope::{detect_adaptive_analysis_scope, AdaptiveAnalysisScope};
 use crate::models::orchestrator::{
     ExecutionProgress, ExecutionSession, ExecutionSessionSummary, ExecutionStatus,
     StoryExecutionState,

@@ -178,7 +178,11 @@ impl QwenProvider {
                 .join("\n");
 
             let mut msg = serde_json::json!({"role": role, "tool_calls": tool_calls});
-            if !text_content.is_empty() {
+            // Always include content field for OpenAI-compatible APIs —
+            // DashScope and others require it even when empty.
+            if text_content.is_empty() {
+                msg["content"] = serde_json::Value::Null;
+            } else {
                 msg["content"] = serde_json::json!(text_content);
             }
             return msg;
@@ -460,13 +464,15 @@ impl LlmProvider for QwenProvider {
                                 }
                                 _ => {}
                             }
-                            // Forward streaming events but suppress Complete/Usage —
-                            // those are internal signals; the orchestrator emits its own
-                            // Complete after tool calls are done.
+                            // Forward streaming events but suppress internal signals —
+                            // the orchestrator emits its own Complete, Usage, and
+                            // tool lifecycle events after executing tools.
                             if !matches!(
                                 &event,
                                 UnifiedStreamEvent::Complete { .. }
                                     | UnifiedStreamEvent::Usage { .. }
+                                    | UnifiedStreamEvent::ToolStart { .. }
+                                    | UnifiedStreamEvent::ToolComplete { .. }
                             ) {
                                 let _ = tx.send(event).await;
                             }

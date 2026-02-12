@@ -1,8 +1,12 @@
 //! Adaptive analysis scope classification helpers.
 //!
-//! Keep intent/scope heuristics out of the main orchestrator service to improve
-//! readability and maintainability.
+//! **DEPRECATED**: These functions are no longer called from the main execution
+//! pipeline. The `execute()` method now passes all messages directly to the
+//! agentic loop, and the Analyze tool defaults to quick mode instead of using
+//! keyword-based scope detection. These functions are retained for reference
+//! and may be removed in a future cleanup.
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AdaptiveAnalysisScope {
     None,
@@ -10,6 +14,7 @@ pub(super) enum AdaptiveAnalysisScope {
     Global,
 }
 
+#[allow(dead_code)]
 pub(super) fn detect_adaptive_analysis_scope(
     message: &str,
     has_path_target: bool,
@@ -92,6 +97,7 @@ pub(super) fn detect_adaptive_analysis_scope(
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn is_project_purpose_question(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
 
@@ -172,6 +178,7 @@ pub(super) fn is_project_purpose_question(message: &str) -> bool {
     has_zh_context && has_zh_intent
 }
 
+#[allow(dead_code)]
 pub(super) fn is_exploration_task(message: &str) -> bool {
     if is_project_purpose_question(message) {
         return true;
