@@ -632,6 +632,11 @@ fn normalize_tool_arguments(tool_name: &str, args: &mut serde_json::Value) {
         // WebSearch: search → query, q → query
         ("WebSearch", "search", "query"),
         ("WebSearch", "q", "query"),
+        // Analyze: scope → mode, focus/path/file → path_hint
+        ("Analyze", "scope", "mode"),
+        ("Analyze", "focus", "path_hint"),
+        ("Analyze", "path", "path_hint"),
+        ("Analyze", "file", "path_hint"),
         // NotebookEdit: path → notebook_path, filepath → notebook_path
         ("NotebookEdit", "path", "notebook_path"),
         ("NotebookEdit", "filepath", "notebook_path"),
@@ -671,6 +676,7 @@ const KNOWN_TOOLS: &[&str] = &[
     "Grep",
     "LS",
     "Cwd",
+    "Analyze",
     "Task",
     "WebFetch",
     "WebSearch",

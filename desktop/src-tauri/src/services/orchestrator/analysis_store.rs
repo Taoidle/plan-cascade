@@ -29,6 +29,8 @@ pub struct CoverageMetrics {
     pub test_files_read: usize,
     pub coverage_ratio: f64,
     pub test_coverage_ratio: f64,
+    pub sampled_read_ratio: f64,
+    pub observed_test_coverage_ratio: f64,
     pub chunk_count: usize,
     pub synthesis_rounds: usize,
 }

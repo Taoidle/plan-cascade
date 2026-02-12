@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AnalysisProfile {
     Fast,
     Balanced,
@@ -24,6 +24,7 @@ impl Default for AnalysisProfile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AnalysisLimits {
     pub max_files_per_chunk: usize,
     pub max_chunks_per_phase: usize,
@@ -32,6 +33,7 @@ pub struct AnalysisLimits {
     pub max_index_file_size_bytes: u64,
     pub target_coverage_ratio: f64,
     pub target_test_coverage_ratio: f64,
+    pub target_sampled_read_ratio: f64,
 }
 
 impl Default for AnalysisLimits {
@@ -45,6 +47,7 @@ impl Default for AnalysisLimits {
             max_index_file_size_bytes: 1_500_000,
             target_coverage_ratio: 0.80,
             target_test_coverage_ratio: 0.50,
+            target_sampled_read_ratio: 0.35,
         }
     }
 }
@@ -84,6 +87,7 @@ pub struct ChunkPlan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct AnalysisCoverageReport {
     pub inventory_total_files: usize,
     pub inventory_indexed_files: usize,
@@ -92,6 +96,8 @@ pub struct AnalysisCoverageReport {
     pub test_files_read: usize,
     pub coverage_ratio: f64,
     pub test_coverage_ratio: f64,
+    pub sampled_read_ratio: f64,
+    pub observed_test_coverage_ratio: f64,
     pub chunk_count: usize,
     pub synthesis_rounds: usize,
 }
@@ -350,17 +356,26 @@ pub fn compute_coverage_report(
         .iter()
         .filter(|p| test_set.contains(*p))
         .count();
-    let effective_test_covered = test_read.max(test_observed);
 
     let coverage_ratio = if inventory.total_files == 0 {
         1.0
     } else {
         covered_files.len() as f64 / inventory.total_files as f64
     };
+    let sampled_read_ratio = if inventory.total_files == 0 {
+        1.0
+    } else {
+        sampled_read_files.len() as f64 / inventory.total_files as f64
+    };
+    let observed_test_coverage_ratio = if inventory.total_test_files == 0 {
+        1.0
+    } else {
+        test_observed as f64 / inventory.total_test_files as f64
+    };
     let test_coverage_ratio = if inventory.total_test_files == 0 {
         1.0
     } else {
-        effective_test_covered as f64 / inventory.total_test_files as f64
+        test_read as f64 / inventory.total_test_files as f64
     };
 
     AnalysisCoverageReport {
@@ -368,9 +383,11 @@ pub fn compute_coverage_report(
         inventory_indexed_files: inventory.indexed_files,
         sampled_read_files: sampled_read_files.len(),
         test_files_total: inventory.total_test_files,
-        test_files_read: effective_test_covered,
+        test_files_read: test_read,
         coverage_ratio,
         test_coverage_ratio,
+        sampled_read_ratio,
+        observed_test_coverage_ratio,
         chunk_count,
         synthesis_rounds,
     }
@@ -606,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_counts_observed_tests_even_with_sampled_reads_limited() {
+    fn coverage_tracks_sampled_and_observed_test_ratios_separately() {
         let inventory = FileInventory {
             total_files: 4,
             total_test_files: 2,
@@ -660,7 +677,8 @@ mod tests {
 
         assert_eq!(report.inventory_total_files, 4);
         assert_eq!(report.test_files_total, 2);
-        assert_eq!(report.test_files_read, 2);
-        assert!((report.test_coverage_ratio - 1.0).abs() < 1e-6);
+        assert_eq!(report.test_files_read, 0);
+        assert!((report.observed_test_coverage_ratio - 1.0).abs() < 1e-6);
+        assert!((report.test_coverage_ratio - 0.0).abs() < 1e-6);
     }
 }

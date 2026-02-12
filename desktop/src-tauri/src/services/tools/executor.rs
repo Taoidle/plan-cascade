@@ -150,6 +150,95 @@ const DEFAULT_SCAN_EXCLUDES: &[&str] = &[
     "codex",
 ];
 
+fn is_likely_text_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "txt"
+            | "md"
+            | "markdown"
+            | "rst"
+            | "json"
+            | "jsonl"
+            | "yaml"
+            | "yml"
+            | "toml"
+            | "ini"
+            | "cfg"
+            | "conf"
+            | "lock"
+            | "env"
+            | "gitignore"
+            | "gitattributes"
+            | "py"
+            | "rs"
+            | "ts"
+            | "tsx"
+            | "js"
+            | "jsx"
+            | "java"
+            | "kt"
+            | "go"
+            | "c"
+            | "h"
+            | "cpp"
+            | "hpp"
+            | "cs"
+            | "rb"
+            | "php"
+            | "swift"
+            | "scala"
+            | "sql"
+            | "sh"
+            | "bash"
+            | "ps1"
+            | "zsh"
+            | "fish"
+            | "xml"
+            | "html"
+            | "htm"
+            | "css"
+            | "scss"
+            | "less"
+            | "svg"
+            | "vue"
+            | "svelte"
+    )
+}
+
+fn is_probably_binary(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+
+    let sample_len = bytes.len().min(4096);
+    let sample = &bytes[..sample_len];
+    if sample.contains(&0) {
+        return true;
+    }
+
+    let mut suspicious = 0usize;
+    for b in sample {
+        let is_text_like = matches!(*b, 0x09 | 0x0A | 0x0D | 0x20..=0x7E);
+        if !is_text_like {
+            suspicious += 1;
+        }
+    }
+    (suspicious as f64 / sample_len as f64) > 0.30
+}
+
+fn decode_read_text(bytes: &[u8], ext: &str) -> Option<(String, bool)> {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => Some((text.to_string(), false)),
+        Err(_) => {
+            if is_likely_text_extension(ext) || !is_probably_binary(bytes) {
+                Some((String::from_utf8_lossy(bytes).into_owned(), true))
+            } else {
+                None
+            }
+        }
+    }
+}
+
 /// Tool executor for running tools locally
 pub struct ToolExecutor {
     /// Project root for path validation
@@ -282,6 +371,19 @@ impl ToolExecutor {
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
+        let parser_error_result = |err: String| {
+            let lower = err.to_ascii_lowercase();
+            if lower.contains("utf-8") || lower.contains("utf8") {
+                let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                ToolResult::ok(format!(
+                    "[binary/non-utf8 file skipped] {} ({} bytes).",
+                    path.display(),
+                    size
+                ))
+            } else {
+                ToolResult::err(err)
+            }
+        };
         match ext.as_str() {
             "pdf" => {
                 let pages = args.get("pages").and_then(|v| v.as_str());
@@ -292,16 +394,26 @@ impl ToolExecutor {
             }
             "ipynb" => match super::file_parsers::parse_jupyter(&path) {
                 Ok(content) => return ToolResult::ok(content),
-                Err(e) => return ToolResult::err(e),
+                Err(e) => return parser_error_result(e),
             },
             "docx" => match super::file_parsers::parse_docx(&path) {
                 Ok(content) => return ToolResult::ok(content),
-                Err(e) => return ToolResult::err(e),
+                Err(e) => return parser_error_result(e),
             },
             "xlsx" | "xls" | "ods" => match super::file_parsers::parse_xlsx(&path) {
                 Ok(content) => return ToolResult::ok(content),
-                Err(e) => return ToolResult::err(e),
+                Err(e) => return parser_error_result(e),
             },
+            "zip" | "7z" | "rar" | "tar" | "gz" | "bz2" | "xz" | "jar" | "war" | "class"
+            | "woff" | "woff2" | "ttf" | "otf" | "eot" | "ico" | "mp3" | "wav" | "ogg" | "mp4"
+            | "mov" | "avi" | "webm" | "exe" | "dll" | "so" | "dylib" | "bin" => {
+                let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                return ToolResult::ok(format!(
+                    "[binary file skipped] {} ({} bytes). Use parser-specific tools for binary/document formats.",
+                    path.display(),
+                    size
+                ));
+            }
             "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" => {
                 let metadata = match super::file_parsers::read_image_metadata(&path) {
                     Ok(m) => m,
@@ -319,13 +431,31 @@ impl ToolExecutor {
         let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
 
-        match std::fs::read_to_string(&path) {
-            Ok(content) => {
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+
+                let decoded = decode_read_text(&bytes, &ext);
+                let (content, lossy_decoded) = match decoded {
+                    Some(tuple) => tuple,
+                    None => {
+                        return ToolResult::ok(format!(
+                            "[binary file skipped] {} ({} bytes). Use parser-specific tools for binary/document formats.",
+                            path.display(),
+                            bytes.len()
+                        ));
+                    }
+                };
+
                 let lines: Vec<&str> = content.lines().collect();
                 let start = (offset.saturating_sub(1)).min(lines.len());
                 let end = (start + limit).min(lines.len());
 
-                let numbered_lines: Vec<String> = lines[start..end]
+                let mut numbered_lines: Vec<String> = lines[start..end]
                     .iter()
                     .enumerate()
                     .map(|(i, line)| {
@@ -337,6 +467,13 @@ impl ToolExecutor {
                         format!("{:6}\t{}", start + i + 1, truncated)
                     })
                     .collect();
+
+                if lossy_decoded {
+                    numbered_lines.insert(
+                        0,
+                        format!("[non-utf8 decoded with replacement] {}", path.display()),
+                    );
+                }
 
                 ToolResult::ok(numbered_lines.join("\n"))
             }
@@ -414,9 +551,23 @@ impl ToolExecutor {
             return ToolResult::err(format!("File not found: {}", file_path));
         }
 
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
             Err(e) => return ToolResult::err(format!("Failed to read file: {}", e)),
+        };
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let (content, _) = match decode_read_text(&bytes, &ext) {
+            Some(value) => value,
+            None => {
+                return ToolResult::err(format!(
+                    "Cannot edit binary file: {}",
+                    path.display()
+                ))
+            }
         };
 
         // Check if old_string exists
@@ -1232,6 +1383,46 @@ mod tests {
         let result = executor.execute("Read", &args).await;
         assert!(result.success);
         assert!(result.output.unwrap().contains("line 1"));
+    }
+
+    #[tokio::test]
+    async fn test_read_non_utf8_text_file_uses_lossy_decode() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+        let file = dir.path().join("latin1.txt");
+        std::fs::write(
+            &file,
+            vec![0x66, 0x6f, 0x6f, 0x20, 0x80, 0x20, 0x62, 0x61, 0x72],
+        )
+        .unwrap();
+
+        let args = serde_json::json!({
+            "file_path": file.to_string_lossy().to_string()
+        });
+
+        let result = executor.execute("Read", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap_or_default();
+        assert!(output.contains("[non-utf8 decoded with replacement]"));
+        assert!(output.contains("foo"));
+    }
+
+    #[tokio::test]
+    async fn test_read_binary_file_returns_skip_message_not_error() {
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+        let file = dir.path().join("archive.zip");
+        std::fs::write(&file, vec![0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0xff, 0x00]).unwrap();
+
+        let args = serde_json::json!({
+            "file_path": file.to_string_lossy().to_string()
+        });
+
+        let result = executor.execute("Read", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap_or_default();
+        assert!(output.contains("[binary file skipped]"));
+        assert!(output.contains("archive.zip"));
     }
 
     #[tokio::test]

@@ -18,9 +18,9 @@ use tempfile::TempDir;
 // ============================================================================
 
 #[test]
-fn test_get_tool_definitions_returns_12_tools() {
+fn test_get_tool_definitions_returns_13_tools() {
     let tools = get_tool_definitions();
-    assert_eq!(tools.len(), 12, "Expected exactly 12 tool definitions");
+    assert_eq!(tools.len(), 13, "Expected exactly 13 tool definitions");
 }
 
 #[test]
@@ -37,6 +37,7 @@ fn test_all_tool_names_present() {
         "Grep",
         "LS",
         "Cwd",
+        "Analyze",
         "Task",
         "WebFetch",
         "WebSearch",
@@ -311,7 +312,7 @@ fn test_tool_definitions_all_serializable_to_json_array() {
     assert!(!json_str.is_empty());
 
     let deserialized: Vec<ToolDefinition> = serde_json::from_str(&json_str).unwrap();
-    assert_eq!(deserialized.len(), 12);
+    assert_eq!(deserialized.len(), 13);
 }
 
 // ============================================================================
@@ -667,7 +668,8 @@ async fn test_executor_grep_tool() {
 
     let args = serde_json::json!({
         "pattern": "UNIQUE_MARKER",
-        "path": dir.path().to_string_lossy().to_string()
+        "path": dir.path().to_string_lossy().to_string(),
+        "output_mode": "content"
     });
 
     let result = executor.execute("Grep", &args).await;
@@ -691,7 +693,8 @@ async fn test_executor_grep_tool_case_insensitive() {
     let args = serde_json::json!({
         "pattern": "unique_marker",
         "path": dir.path().to_string_lossy().to_string(),
-        "case_insensitive": true
+        "case_insensitive": true,
+        "output_mode": "content"
     });
 
     let result = executor.execute("Grep", &args).await;
@@ -939,7 +942,8 @@ async fn test_ls_then_glob_then_grep_flow() {
     let grep_args = serde_json::json!({
         "pattern": "fn main",
         "path": dir.path().to_string_lossy().to_string(),
-        "glob": "*.rs"
+        "glob": "*.rs",
+        "output_mode": "content"
     });
     let grep_result = executor.execute("Grep", &grep_args).await;
     assert!(grep_result.success);

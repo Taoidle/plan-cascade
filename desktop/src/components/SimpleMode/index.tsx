@@ -1,29 +1,60 @@
 /**
  * SimpleMode Component
  *
- * Container for Simple mode interface.
- * Provides a streamlined experience with:
- * - Single input for task description
- * - Automatic strategy selection
- * - Progress visualization with real-time streaming output
- * - Results display with error feedback
- * - Execution history
- * - Multi-turn chat with Claude Code backend
- *
- * Story 008: Added StreamingOutput, GlobalProgressBar, and ErrorState
+ * Three-panel layout:
+ * - Left: conversation/session manager
+ * - Middle: normal chat view
+ * - Right (optional): detailed output/tool activity
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
 import { InputBox } from './InputBox';
 import { ProgressView } from './ProgressView';
-import { ResultView } from './ResultView';
-import { HistoryPanel } from './HistoryPanel';
 import { ConnectionStatus } from './ConnectionStatus';
-import { useExecutionStore } from '../../store/execution';
+import { useExecutionStore, type ExecutionHistoryItem, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { StreamingOutput, GlobalProgressBar, ErrorState, ProjectSelector } from '../shared';
+
+type WorkflowMode = 'chat' | 'task';
+
+function inferTaskFlowIntent(message: string): boolean {
+  const lower = message.toLowerCase();
+  const keywords = [
+    'implement',
+    'fix',
+    'refactor',
+    'write code',
+    'add feature',
+    'update code',
+    'build',
+    'analyze project',
+    'analyze this project',
+    'project analysis',
+    'review codebase',
+    'cross-module',
+    '\u{5b9e}\u{73b0}', // 实现
+    '\u{4fee}\u{590d}', // 修复
+    '\u{91cd}\u{6784}', // 重构
+    '\u{65b0}\u{589e}\u{529f}\u{80fd}', // 新增功能
+    '\u{5206}\u{6790}\u{8fd9}\u{4e2a}\u{9879}\u{76ee}', // 分析这个项目
+    '\u{5206}\u{6790}\u{9879}\u{76ee}', // 分析项目
+  ];
+  return keywords.some((kw) => lower.includes(kw));
+}
+
+function formatNumber(value: number | null | undefined): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '0';
+  return value.toLocaleString();
+}
+
+function normalizeWorkspacePath(path: string | null | undefined): string | null {
+  const value = (path || '').trim();
+  if (!value) return null;
+  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
 
 export function SimpleMode() {
   const { t } = useTranslation('simpleMode');
@@ -35,7 +66,6 @@ export function SimpleMode() {
     start,
     sendFollowUp,
     reset,
-    result,
     initialize,
     cleanup,
     analyzeStrategy,
@@ -45,12 +75,21 @@ export function SimpleMode() {
     isChatSession,
     streamingOutput,
     standaloneTurns,
+    analysisCoverage,
+    logs,
+    history,
+    clearHistory,
+    renameHistory,
+    restoreFromHistory,
+    sessionUsageTotals,
+    latestUsage,
   } = useExecutionStore();
   const workspacePath = useSettingsStore((s) => s.workspacePath);
-  const [description, setDescription] = useState('');
-  const [showHistory, setShowHistory] = useState(false);
 
-  // Initialize Tauri event listeners on mount
+  const [description, setDescription] = useState('');
+  const [showOutputPanel, setShowOutputPanel] = useState(false);
+  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
+
   useEffect(() => {
     initialize();
     return () => {
@@ -58,8 +97,6 @@ export function SimpleMode() {
     };
   }, [initialize, cleanup]);
 
-  // When workspacePath changes while a chat session is active, reset it
-  // so the next task starts a fresh session with the new directory.
   const prevPathRef = useRef(workspacePath);
   useEffect(() => {
     if (prevPathRef.current !== workspacePath && isChatSession) {
@@ -70,18 +107,25 @@ export function SimpleMode() {
     prevPathRef.current = workspacePath;
   }, [workspacePath, isChatSession, reset, clearStrategyAnalysis]);
 
-  const handleStart = async () => {
+  const handleStart = useCallback(async () => {
     if (!description.trim() || isSubmitting || isAnalyzingStrategy) return;
 
-    // Step 1: Analyze strategy automatically
-    const analysis = await analyzeStrategy(description);
-
-    // Step 2: Start execution with the auto-selected strategy
-    if (analysis) {
-      await start(description, 'simple');
-      setDescription('');
+    const shouldUseTaskFlow =
+      workflowMode === 'task' || inferTaskFlowIntent(description);
+    if (shouldUseTaskFlow) {
+      await analyzeStrategy(description);
     }
-  };
+
+    await start(description, 'simple');
+    setDescription('');
+  }, [
+    analyzeStrategy,
+    description,
+    isAnalyzingStrategy,
+    isSubmitting,
+    start,
+    workflowMode,
+  ]);
 
   const handleFollowUp = useCallback(async () => {
     if (!description.trim() || isSubmitting) return;
@@ -90,29 +134,77 @@ export function SimpleMode() {
     await sendFollowUp(prompt);
   }, [description, isSubmitting, sendFollowUp]);
 
-  const handleNewTask = () => {
+  const handleNewTask = useCallback(() => {
     reset();
     clearStrategyAnalysis();
     setDescription('');
-  };
+  }, [reset, clearStrategyAnalysis]);
+
+  const handleRestoreHistory = useCallback(
+    (historyId: string) => {
+      restoreFromHistory(historyId);
+      setShowOutputPanel(false);
+      setWorkflowMode('chat');
+    },
+    [restoreFromHistory]
+  );
 
   const isRunning = status === 'running' || status === 'paused';
-  const isCompleted = status === 'completed' || status === 'failed';
   const isDisabled = isRunning || isSubmitting || isAnalyzingStrategy;
 
-  // Show conversation layout whenever there is streamed content.
-  // This keeps Simple mode interactive after standalone responses too.
-  const hasChatContent = streamingOutput.length > 0;
+  const detailLineCount = useMemo(
+    () => streamingOutput.filter((line) => line.type !== 'text' && line.type !== 'info').length,
+    [streamingOutput]
+  );
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header with Connection Status and History Toggle */}
-      <div className="flex items-center justify-between px-6 py-3 shrink-0 max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full">
+      <div className="flex items-center justify-between px-6 py-3 shrink-0 max-w-[2200px] mx-auto w-full">
         <div className="flex items-center gap-2">
           <ConnectionStatus status={connectionStatus} />
           <ProjectSelector compact />
+          <TokenUsageInline latestUsage={latestUsage} totals={sessionUsageTotals} />
         </div>
+
         <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-700 overflow-hidden">
+            <button
+              onClick={() => setWorkflowMode('chat')}
+              className={clsx(
+                'px-3 py-1.5 text-xs font-medium transition-colors',
+                workflowMode === 'chat'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+              )}
+            >
+              Chat
+            </button>
+            <button
+              onClick={() => setWorkflowMode('task')}
+              className={clsx(
+                'px-3 py-1.5 text-xs font-medium transition-colors',
+                workflowMode === 'task'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+              )}
+            >
+              Task
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowOutputPanel((v) => !v)}
+            className={clsx(
+              'text-sm px-3 py-1.5 rounded-lg transition-colors',
+              'text-gray-600 dark:text-gray-400',
+              'hover:bg-gray-100 dark:hover:bg-gray-800',
+              showOutputPanel && 'bg-gray-100 dark:bg-gray-800'
+            )}
+            title="Toggle detailed output panel"
+          >
+            Output{detailLineCount > 0 ? ` (${detailLineCount})` : ''}
+          </button>
+
           {(isChatSession || standaloneTurns.length > 0) && (
             <button
               onClick={handleNewTask}
@@ -125,61 +217,33 @@ export function SimpleMode() {
               {t('buttons.startNewTask', { ns: 'common', defaultValue: 'New Chat' })}
             </button>
           )}
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className={clsx(
-              'text-sm px-3 py-1.5 rounded-lg transition-colors',
-              'text-gray-600 dark:text-gray-400',
-              'hover:bg-gray-100 dark:hover:bg-gray-800',
-              showHistory && 'bg-gray-100 dark:bg-gray-800'
-            )}
-          >
-            {t('history.button')}
-          </button>
         </div>
       </div>
 
-      {showHistory ? (
-        <div className="flex-1 overflow-auto px-6">
-          <HistoryPanel onClose={() => setShowHistory(false)} />
-        </div>
-      ) : hasChatContent || isRunning ? (
-        /* ============================================================
-         * Chat / Streaming layout: output fills available space, input at bottom
-         * ============================================================ */
-        <>
-          {/* Streaming output area — fills available space */}
-          <div className="flex-1 overflow-auto px-6 min-h-0">
-            <div className="max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full space-y-4">
-              {/* Strategy Analysis Banner */}
-              {(isAnalyzingStrategy || strategyAnalysis) && (
-                <StrategyBanner
-                  isAnalyzing={isAnalyzingStrategy}
-                  analysis={strategyAnalysis}
-                  t={t}
-                />
-              )}
+      <div className="flex-1 min-h-0 px-6 pb-4">
+        <div
+          className={clsx(
+            'h-full max-w-[2200px] mx-auto w-full grid gap-4',
+            showOutputPanel
+              ? 'grid-cols-1 xl:grid-cols-[280px_minmax(480px,1fr)_minmax(520px,0.95fr)]'
+              : 'grid-cols-1 xl:grid-cols-[280px_minmax(640px,1fr)]'
+          )}
+        >
+          <SessionSidebar
+            history={history}
+            workspacePath={workspacePath}
+            onClear={clearHistory}
+            onRename={renameHistory}
+            onRestore={handleRestoreHistory}
+            currentTask={isChatSession ? (streamingOutput[0]?.content || null) : null}
+          />
 
-              {isRunning && !isChatSession && (
-                <>
-                  <GlobalProgressBar compact showStoryLabels={false} />
-                  <ProgressView />
-                </>
-              )}
-
-              <StreamingOutput
-                maxHeight="none"
-                compact={false}
-                showClear={false}
-              />
-
-              {isRunning && !isChatSession && <ErrorState maxErrors={3} />}
+          <div className="min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+            <div className="flex-1 min-h-0">
+              <ChatTranscript lines={streamingOutput} status={status} />
             </div>
-          </div>
 
-          {/* Input at bottom — always visible during chat */}
-          <div className="shrink-0 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-            <div className="max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full">
+            <div className="shrink-0 p-4 border-t border-gray-200 dark:border-gray-700">
               <InputBox
                 value={description}
                 onChange={setDescription}
@@ -188,7 +252,13 @@ export function SimpleMode() {
                 placeholder={
                   isRunning
                     ? t('input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
-                    : t('input.followUpPlaceholder', { defaultValue: 'Send a follow-up message...' })
+                    : workflowMode === 'task'
+                      ? t('input.placeholder', {
+                          defaultValue: 'Describe a task (implementation / analysis / refactor)...',
+                        })
+                      : t('input.followUpPlaceholder', {
+                          defaultValue: 'Type a normal chat message...',
+                        })
                 }
                 isLoading={isRunning}
               />
@@ -199,85 +269,306 @@ export function SimpleMode() {
               )}
             </div>
           </div>
-        </>
-      ) : isCompleted ? (
-        /* ============================================================
-         * Non-chat completed: show result view (PRD execution etc.)
-         * ============================================================ */
-        <div className="flex-1 overflow-auto px-6 pt-8">
-          <div className="max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full space-y-4">
-            <ErrorState maxErrors={5} />
-            <ResultView result={result} />
-            <div className="flex justify-center">
-              <button
-                onClick={handleNewTask}
-                className={clsx(
-                  'px-4 py-2 rounded-lg text-sm font-medium',
-                  'bg-primary-600 text-white',
-                  'hover:bg-primary-700',
-                  'transition-colors'
+
+          {showOutputPanel && (
+            <div className="min-h-0 flex flex-col">
+              <div className="shrink-0 space-y-2 mb-2">
+                {(isAnalyzingStrategy || strategyAnalysis) && workflowMode === 'task' && (
+                  <StrategyBanner
+                    isAnalyzing={isAnalyzingStrategy}
+                    analysis={strategyAnalysis}
+                    t={t}
+                  />
                 )}
-              >
-                {t('buttons.startNewTask', { ns: 'common' })}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        /* ============================================================
-         * Idle (no chat): initial input + empty state
-         * ============================================================ */
-        <div className="flex-1 flex flex-col px-6 pt-6">
-          {/* Input Area */}
-          <div className="max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full">
-            <InputBox
-              value={description}
-              onChange={setDescription}
-              onSubmit={handleStart}
-              disabled={isDisabled}
-              placeholder={t('input.placeholder')}
-              isLoading={isSubmitting}
-            />
-
-            {apiError && (
-              <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                <p className="text-sm text-red-600 dark:text-red-400">{apiError}</p>
+                {analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
+                {isRunning && !isChatSession && (
+                  <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+                    <GlobalProgressBar compact showStoryLabels={false} />
+                    <div className="mt-2">
+                      <ProgressView />
+                    </div>
+                  </div>
+                )}
+                <ExecutionLogsCard logs={logs} />
+                <ErrorState maxErrors={3} />
               </div>
-            )}
-          </div>
-
-          {/* Strategy Analysis Banner */}
-          {(isAnalyzingStrategy || strategyAnalysis) && (
-            <div className="max-w-2xl mx-auto w-full mt-4">
-              <StrategyBanner
-                isAnalyzing={isAnalyzingStrategy}
-                analysis={strategyAnalysis}
-                t={t}
-              />
+              <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0" />
             </div>
           )}
-
-          {/* Empty state */}
-          <div className="flex-1 flex flex-col items-center justify-center text-center">
-            <div className="text-6xl mb-4">
-              <span role="img" aria-label="rocket">&#128640;</span>
-            </div>
-            <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">
-              {t('empty.title')}
-            </h2>
-            <p className="text-gray-500 dark:text-gray-400 max-w-md">
-              {t('empty.description')}
-            </p>
-          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-// ============================================================================
-// StrategyBanner Component
-// ============================================================================
+function SessionSidebar({
+  history,
+  workspacePath,
+  onClear,
+  onRename,
+  onRestore,
+  currentTask,
+}: {
+  history: ExecutionHistoryItem[];
+  workspacePath?: string | null;
+  onClear: () => void;
+  onRename: (id: string, title: string) => void;
+  onRestore: (id: string) => void;
+  currentTask: string | null;
+}) {
+  const activeWorkspace = normalizeWorkspacePath(workspacePath);
+  const visibleHistory = useMemo(() => {
+    if (!activeWorkspace) return history;
+    return history.filter((item) => {
+      const scope = normalizeWorkspacePath(item.workspacePath);
+      return !scope || scope === activeWorkspace;
+    });
+  }, [activeWorkspace, history]);
+
+  const grouped = useMemo(() => {
+    const withScope: ExecutionHistoryItem[] = [];
+    const noScope: ExecutionHistoryItem[] = [];
+    for (const item of visibleHistory) {
+      const scope = normalizeWorkspacePath(item.workspacePath);
+      if (scope) {
+        withScope.push(item);
+      } else {
+        noScope.push(item);
+      }
+    }
+    return { withScope, noScope };
+  }, [visibleHistory]);
+
+  const handleRename = useCallback(
+    (item: ExecutionHistoryItem) => {
+      const current = item.title || item.taskDescription;
+      const next = window.prompt('Rename session', current);
+      if (next === null) return;
+      onRename(item.id, next);
+    },
+    [onRename]
+  );
+
+  return (
+    <div className="min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Sessions</h3>
+        <button
+          onClick={onClear}
+          className="text-xs px-2 py-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+        >
+          Clear
+        </button>
+      </div>
+
+      {currentTask && (
+        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 text-xs">
+          <p className="text-gray-500 dark:text-gray-400">Current</p>
+          <p className="text-gray-700 dark:text-gray-200 line-clamp-2">{currentTask}</p>
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
+        {visibleHistory.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-xs text-gray-500 dark:text-gray-400">
+            No saved sessions
+          </div>
+        ) : (
+          <>
+            {grouped.withScope.length > 0 && (
+              <div className="space-y-2">
+                <p className="px-1 text-2xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  {activeWorkspace ? 'Current Workspace' : 'Scoped Sessions'}
+                </p>
+                {grouped.withScope.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => onRestore(item.id)}
+                    className={clsx(
+                      'w-full text-left p-2 rounded border transition-colors cursor-pointer',
+                      'border-gray-200 dark:border-gray-700',
+                      'hover:bg-gray-50 dark:hover:bg-gray-800'
+                    )}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') onRestore(item.id);
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-medium text-gray-900 dark:text-white line-clamp-2">
+                        {item.title || item.taskDescription}
+                      </p>
+                      <button
+                        className="shrink-0 text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRename(item);
+                        }}
+                        title="Rename session"
+                      >
+                        rename
+                      </button>
+                    </div>
+                    <p className="text-2xs mt-1 text-gray-500 dark:text-gray-400 line-clamp-1">
+                      {item.workspacePath}
+                    </p>
+                    <p className="text-2xs mt-1 text-gray-500 dark:text-gray-400">
+                      {new Date(item.startedAt).toLocaleString()} | {item.success ? 'success' : 'failed'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {grouped.noScope.length > 0 && (
+              <div className="space-y-2 pt-1">
+                <p className="px-1 text-2xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  No Workspace
+                </p>
+                {grouped.noScope.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => onRestore(item.id)}
+                    className={clsx(
+                      'w-full text-left p-2 rounded border transition-colors cursor-pointer',
+                      'border-gray-200 dark:border-gray-700',
+                      'hover:bg-gray-50 dark:hover:bg-gray-800'
+                    )}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') onRestore(item.id);
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-medium text-gray-900 dark:text-white line-clamp-2">
+                        {item.title || item.taskDescription}
+                      </p>
+                      <button
+                        className="shrink-0 text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRename(item);
+                        }}
+                        title="Rename session"
+                      >
+                        rename
+                      </button>
+                    </div>
+                    <p className="text-2xs mt-1 text-gray-500 dark:text-gray-400">
+                      {new Date(item.startedAt).toLocaleString()} | {item.success ? 'success' : 'failed'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChatTranscript({
+  lines,
+  status,
+}: {
+  lines: StreamLine[];
+  status: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const visibleLines = useMemo(
+    () =>
+      lines.filter((line) =>
+        line.type === 'info' ||
+        line.type === 'text' ||
+        line.type === 'error' ||
+        line.type === 'success' ||
+        line.type === 'warning'
+      ),
+    [lines]
+  );
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    containerRef.current.scrollTop = containerRef.current.scrollHeight;
+  }, [visibleLines]);
+
+  if (visibleLines.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
+        {status === 'running' ? 'Thinking...' : 'Start a conversation on the right input box.'}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} className="h-full overflow-y-auto px-4 py-4 space-y-4">
+      {visibleLines.map((line) => {
+        if (line.type === 'info') {
+          return (
+            <div key={line.id} className="flex justify-end">
+              <div className="max-w-[82%] px-4 py-2 rounded-2xl rounded-br-sm bg-primary-600 text-white text-sm whitespace-pre-wrap">
+                {line.content}
+              </div>
+            </div>
+          );
+        }
+        if (line.type === 'text') {
+          return (
+            <div key={line.id} className="flex justify-start">
+              <div className="max-w-[88%] px-4 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+                <MarkdownRenderer content={line.content} className="text-sm" />
+              </div>
+            </div>
+          );
+        }
+        const toneClass =
+          line.type === 'error'
+            ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'
+            : line.type === 'warning'
+              ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
+              : 'border-green-300 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300';
+        return (
+          <div key={line.id} className={clsx('text-xs px-3 py-2 rounded border', toneClass)}>
+            {line.content}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TokenUsageInline({
+  latestUsage,
+  totals,
+}: {
+  latestUsage: ReturnType<typeof useExecutionStore.getState>['latestUsage'];
+  totals: ReturnType<typeof useExecutionStore.getState>['sessionUsageTotals'];
+}) {
+  if (!latestUsage && !totals) return null;
+
+  const latest = latestUsage || {
+    input_tokens: 0,
+    output_tokens: 0,
+    thinking_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+  };
+  const total = totals || latest;
+
+  return (
+    <div className="hidden xl:flex items-center gap-2 ml-1">
+      <span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-2xs">
+        turn in {formatNumber(latest.input_tokens)} / out {formatNumber(latest.output_tokens)}
+      </span>
+      <span className="px-2 py-1 rounded bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 text-2xs">
+        session in {formatNumber(total.input_tokens)} / out {formatNumber(total.output_tokens)}
+      </span>
+    </div>
+  );
+}
 
 function StrategyBanner({
   isAnalyzing,
@@ -299,26 +590,111 @@ function StrategyBanner({
     );
   }
 
-  if (analysis) {
-    return (
-      <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-green-700 dark:text-green-300">
-            {t('strategy.selected', { defaultValue: 'Strategy' })}:{' '}
-            <span className="font-semibold">{analysis.strategy.replace(/_/g, ' ')}</span>
-            <span className="ml-2 text-xs text-green-600 dark:text-green-400">
-              ({(analysis.confidence * 100).toFixed(0)}% confidence)
-            </span>
-          </p>
-        </div>
-        <p className="text-xs text-green-600 dark:text-green-400 mt-1">
-          {analysis.reasoning}
+  if (!analysis) return null;
+
+  return (
+    <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-green-700 dark:text-green-300">
+          {t('strategy.selected', { defaultValue: 'Strategy' })}:{' '}
+          <span className="font-semibold">{analysis.strategy.replace(/_/g, ' ')}</span>
+          <span className="ml-2 text-xs text-green-600 dark:text-green-400">
+            ({(analysis.confidence * 100).toFixed(0)}% confidence)
+          </span>
         </p>
       </div>
-    );
-  }
+      <p className="text-xs text-green-600 dark:text-green-400 mt-1">{analysis.reasoning}</p>
+    </div>
+  );
+}
 
-  return null;
+function pct(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function AnalysisCoveragePanel({
+  coverage,
+}: {
+  coverage: NonNullable<ReturnType<typeof useExecutionStore.getState>['analysisCoverage']>;
+}) {
+  const coverageProgress = Math.max(0, Math.min(100, (coverage.coverageRatio || 0) * 100));
+  const sampledProgress = Math.max(0, Math.min(100, (coverage.sampledReadRatio || 0) * 100));
+  const testsProgress = Math.max(0, Math.min(100, (coverage.testCoverageRatio || 0) * 100));
+
+  return (
+    <div className="p-3 rounded-lg bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-sky-700 dark:text-sky-300">Analysis Coverage</p>
+        <span className="text-xs text-sky-600 dark:text-sky-400">{coverage.status}</span>
+      </div>
+
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+        <MetricBar label="Observed" value={pct(coverage.coverageRatio)} progress={coverageProgress} />
+        <MetricBar label="Read Depth" value={pct(coverage.sampledReadRatio)} progress={sampledProgress} />
+        <MetricBar label="Tests Read" value={pct(coverage.testCoverageRatio)} progress={testsProgress} />
+      </div>
+
+      <div className="mt-2 text-xs text-sky-700/90 dark:text-sky-300/90">
+        files {coverage.observedPaths}/{coverage.inventoryTotalFiles} | sampled {coverage.sampledReadFiles} | tests {coverage.testFilesRead}/{coverage.testFilesTotal}
+      </div>
+
+      {(coverage.coverageTargetRatio || coverage.sampledReadTargetRatio || coverage.testCoverageTargetRatio) && (
+        <div className="mt-1 text-xs text-sky-600 dark:text-sky-400">
+          targets: observed {pct(coverage.coverageTargetRatio)} | read depth {pct(coverage.sampledReadTargetRatio)} | tests {pct(coverage.testCoverageTargetRatio)}
+        </div>
+      )}
+
+      {coverage.validationIssues.length > 0 && (
+        <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+          validation: {coverage.validationIssues.slice(0, 2).join(' ; ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricBar({
+  label,
+  value,
+  progress,
+}: {
+  label: string;
+  value: string;
+  progress: number;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between text-sky-700 dark:text-sky-300">
+        <span>{label}</span>
+        <span>{value}</span>
+      </div>
+      <div className="mt-1 h-1.5 rounded bg-sky-100 dark:bg-sky-900/50 overflow-hidden">
+        <div className="h-full bg-sky-500" style={{ width: `${progress}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function ExecutionLogsCard({ logs }: { logs: string[] }) {
+  const recent = logs.slice(-20).reverse();
+  if (recent.length === 0) return null;
+
+  return (
+    <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Execution Logs</p>
+        <span className="text-2xs text-gray-500 dark:text-gray-400">{recent.length}</span>
+      </div>
+      <div className="mt-2 max-h-32 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-2 font-mono text-2xs text-gray-700 dark:text-gray-300 space-y-1">
+        {recent.map((line, idx) => (
+          <div key={`${idx}-${line.slice(0, 16)}`} className="whitespace-pre-wrap break-words">
+            {line}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default SimpleMode;

@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { clsx } from 'clsx';
+import { invoke } from '@tauri-apps/api/core';
 import {
   ArrowDownIcon,
   Cross2Icon,
@@ -17,7 +18,8 @@ import {
   CheckCircledIcon,
   CrossCircledIcon,
 } from '@radix-ui/react-icons';
-import { useExecutionStore, StreamLineType } from '../../store/execution';
+import { useExecutionStore, StreamLine, StreamLineType } from '../../store/execution';
+import { useModeStore } from '../../store/mode';
 import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
 
 // ============================================================================
@@ -33,6 +35,46 @@ interface StreamingOutputProps {
   showClear?: boolean;
   /** Compact mode for SimpleMode (reduced padding, smaller text) */
   compact?: boolean;
+}
+
+interface CommandResponse<T> {
+  success: boolean;
+  data: T | null;
+  error: string | null;
+}
+
+async function saveTextWithDialog(filename: string, content: string): Promise<boolean> {
+  const { save } = await import('@tauri-apps/plugin-dialog');
+  const selected = await save({
+    title: 'Export Output',
+    defaultPath: filename,
+    canCreateDirectories: true,
+  });
+  if (!selected || Array.isArray(selected)) return false;
+  const result = await invoke<CommandResponse<boolean>>('save_output_export', {
+    path: selected,
+    content,
+  });
+  if (!result.success) {
+    throw new Error(result.error || 'Failed to save export');
+  }
+  return true;
+}
+
+function serializeAllOutput(lines: StreamLine[]): string {
+  return lines
+    .map((line) => {
+      const prefix = LINE_TYPE_PREFIX[line.type];
+      if (line.type === 'text') return line.content;
+      return `${prefix}${line.content}`;
+    })
+    .join('\n');
+}
+
+function collectAssistantReplies(lines: StreamLine[]): Array<{ id: number; content: string }> {
+  return lines
+    .filter((line) => line.type === 'text' && line.content.trim().length > 0)
+    .map((line) => ({ id: line.id, content: line.content }));
 }
 
 // ============================================================================
@@ -77,10 +119,19 @@ export function StreamingOutput({
   showClear = true,
   compact = false,
 }: StreamingOutputProps) {
+  const isFillHeight = maxHeight === 'none';
   const { streamingOutput, clearStreamingOutput, status } = useExecutionStore();
+  const mode = useModeStore((state) => state.mode);
+  const isSimpleMode = mode === 'simple';
+  const displayBlocks = buildDisplayBlocks(streamingOutput, isSimpleMode);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportNotice, setExportNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(
+    null
+  );
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Track content changes for auto-scroll (length alone won't change when
   // text deltas are concatenated into the last entry)
@@ -112,6 +163,18 @@ export function StreamingOutput({
     }
   }, [scrollTrigger, isAutoScroll]);
 
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (!exportMenuRef.current) return;
+      if (!exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    window.addEventListener('mousedown', onMouseDown);
+    return () => window.removeEventListener('mousedown', onMouseDown);
+  }, [showExportMenu]);
+
   const scrollToBottom = useCallback(() => {
     if (bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -119,6 +182,89 @@ export function StreamingOutput({
       setShowScrollButton(false);
     }
   }, []);
+
+  const notifyExport = useCallback((type: 'ok' | 'error', text: string) => {
+    setExportNotice({ type, text });
+    window.setTimeout(() => {
+      setExportNotice((current) => (current?.text === text ? null : current));
+    }, 3000);
+  }, []);
+  const assistantReplies = collectAssistantReplies(streamingOutput);
+
+  const exportAll = useCallback(async () => {
+    try {
+      const content = serializeAllOutput(streamingOutput);
+      if (!content.trim()) {
+        notifyExport('error', 'No output available to export.');
+        return;
+      }
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const saved = await saveTextWithDialog(`output-${stamp}.txt`, content);
+      if (!saved) {
+        notifyExport('error', 'Export canceled.');
+        return;
+      }
+      notifyExport('ok', 'Output exported.');
+    } catch (error) {
+      console.error('Failed to export full output:', error);
+      notifyExport('error', `Export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }, [notifyExport, streamingOutput]);
+
+  const exportLatestReply = useCallback(async () => {
+    try {
+      const latest = assistantReplies[assistantReplies.length - 1];
+      if (!latest) {
+        notifyExport('error', 'No AI reply available to export.');
+        return;
+      }
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const saved = await saveTextWithDialog(`ai-reply-latest-${stamp}.md`, latest.content);
+      if (!saved) {
+        notifyExport('error', 'Export canceled.');
+        return;
+      }
+      notifyExport('ok', 'Latest AI reply exported.');
+    } catch (error) {
+      console.error('Failed to export latest reply:', error);
+      notifyExport('error', `Export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }, [assistantReplies, notifyExport]);
+
+  const exportReplyByNumber = useCallback(async () => {
+    try {
+      if (assistantReplies.length === 0) {
+        notifyExport('error', 'No AI replies available to export.');
+        return;
+      }
+      const raw = window.prompt(
+        `Export which AI reply? Enter 1-${assistantReplies.length}`,
+        String(assistantReplies.length)
+      );
+      if (!raw) return;
+      const selected = Number(raw);
+      if (!Number.isFinite(selected)) {
+        notifyExport('error', 'Invalid reply number.');
+        return;
+      }
+      const index = Math.floor(selected) - 1;
+      if (index < 0 || index >= assistantReplies.length) {
+        notifyExport('error', `Reply number must be in range 1-${assistantReplies.length}.`);
+        return;
+      }
+      const reply = assistantReplies[index];
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const saved = await saveTextWithDialog(`ai-reply-${index + 1}-${stamp}.md`, reply.content);
+      if (!saved) {
+        notifyExport('error', 'Export canceled.');
+        return;
+      }
+      notifyExport('ok', `AI reply #${index + 1} exported.`);
+    } catch (error) {
+      console.error('Failed to export selected reply:', error);
+      notifyExport('error', `Export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }, [assistantReplies, notifyExport]);
 
 
   if (streamingOutput.length === 0) {
@@ -146,7 +292,7 @@ export function StreamingOutput({
   }
 
   return (
-    <div className={clsx('relative', className)}>
+    <div className={clsx('relative', isFillHeight && 'h-full min-h-0 flex flex-col', className)}>
       {/* Header bar */}
       <div
         className={clsx(
@@ -183,13 +329,69 @@ export function StreamingOutput({
           )}
         </div>
         {showClear && (
-          <button
-            onClick={clearStreamingOutput}
-            className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
-            title="Clear output"
-          >
-            <Cross2Icon className="w-3 h-3" />
-          </button>
+          <div className="flex items-center gap-2">
+            {exportNotice && (
+              <span
+                className={clsx(
+                  'text-2xs font-mono',
+                  exportNotice.type === 'ok' ? 'text-green-400' : 'text-red-400'
+                )}
+              >
+                {exportNotice.text}
+              </span>
+            )}
+            <div ref={exportMenuRef} className="relative">
+              <button
+                onClick={() => setShowExportMenu((v) => !v)}
+                disabled={streamingOutput.length === 0}
+                className="px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed text-2xs font-mono transition-colors"
+                title="Export output"
+              >
+                export
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 mt-1 w-44 rounded border border-gray-700 bg-gray-900 shadow-lg z-20 p-1">
+                  <button
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportLatestReply();
+                    }}
+                    disabled={assistantReplies.length === 0}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    latest AI reply
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportReplyByNumber();
+                    }}
+                    disabled={assistantReplies.length === 0}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    choose reply number
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportAll();
+                    }}
+                    disabled={streamingOutput.length === 0}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    full output
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={clearStreamingOutput}
+              className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+              title="Clear output"
+            >
+              <Cross2Icon className="w-3 h-3" />
+            </button>
+          </div>
         )}
       </div>
 
@@ -198,11 +400,25 @@ export function StreamingOutput({
         className={clsx(
           'rounded-b-lg overflow-y-auto overflow-x-hidden',
           'bg-gray-950 border border-gray-800',
-          compact ? 'text-2xs p-2' : 'text-xs p-3'
+          compact ? 'text-2xs p-2' : 'text-xs p-3',
+          isFillHeight && 'flex-1 min-h-0'
         )}
-        style={{ maxHeight }}
+        style={isFillHeight ? undefined : { maxHeight }}
       >
-        {streamingOutput.map((line) => {
+        {displayBlocks.map((block) => {
+          if (block.kind === 'group') {
+            return (
+              <EventGroupLine
+                key={block.groupId}
+                groupId={block.groupId}
+                kind={block.groupKind}
+                lines={block.lines}
+                compact={compact}
+              />
+            );
+          }
+
+          const line = block.line;
           // Text content: render as markdown (accumulated by appendStreamLine)
           if (line.type === 'text') {
             return (
@@ -329,6 +545,161 @@ export function StreamingOutput({
 // ============================================================================
 // Tool Call Display Components
 // ============================================================================
+
+type DisplayBlock =
+  | { kind: 'line'; line: StreamLine }
+  | {
+      kind: 'group';
+      groupId: string;
+      groupKind: 'tool_activity' | 'analysis_activity';
+      lines: StreamLine[];
+    };
+
+function classifyGroupKind(line: StreamLine): 'tool_activity' | 'analysis_activity' | null {
+  if (line.type === 'tool' || line.type === 'tool_result') {
+    return 'tool_activity';
+  }
+  if (line.type === 'analysis') {
+    if (
+      line.content.startsWith('[analysis:evidence:') ||
+      line.content.startsWith('[analysis:phase_progress:')
+    ) {
+      return 'analysis_activity';
+    }
+  }
+  return null;
+}
+
+function buildDisplayBlocks(lines: StreamLine[], compactMode: boolean): DisplayBlock[] {
+  if (!compactMode || lines.length === 0) {
+    return lines.map((line) => ({ kind: 'line', line }));
+  }
+
+  const blocks: DisplayBlock[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const kind = classifyGroupKind(lines[i]);
+    if (!kind) {
+      blocks.push({ kind: 'line', line: lines[i] });
+      i += 1;
+      continue;
+    }
+
+    const group: StreamLine[] = [lines[i]];
+    let j = i + 1;
+    while (j < lines.length) {
+      const nextKind = classifyGroupKind(lines[j]);
+      if (nextKind !== kind) break;
+      group.push(lines[j]);
+      j += 1;
+    }
+
+    if (group.length >= 4) {
+      const first = group[0];
+      const last = group[group.length - 1];
+      blocks.push({
+        kind: 'group',
+        groupId: `group-${first.id}-${last.id}`,
+        groupKind: kind,
+        lines: group,
+      });
+    } else {
+      for (const line of group) {
+        blocks.push({ kind: 'line', line });
+      }
+    }
+    i = j;
+  }
+
+  return blocks;
+}
+
+function EventGroupLine({
+  groupId,
+  kind,
+  lines,
+  compact,
+}: {
+  groupId: string;
+  kind: 'tool_activity' | 'analysis_activity';
+  lines: StreamLine[];
+  compact: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const toolCalls = lines.filter((line) => line.type === 'tool').length;
+  const toolResults = lines.filter((line) => line.type === 'tool_result').length;
+  const analysisEvents = lines.filter((line) => line.type === 'analysis').length;
+
+  const title =
+    kind === 'tool_activity'
+      ? `Tool activity (${lines.length} events)`
+      : `Analysis activity (${lines.length} events)`;
+  const summary =
+    kind === 'tool_activity'
+      ? `${toolCalls} calls, ${toolResults} results`
+      : `${analysisEvents} evidence/progress updates`;
+
+  return (
+    <div
+      className={clsx(
+        'my-1 rounded border',
+        kind === 'tool_activity'
+          ? 'border-purple-800/40 bg-purple-950/20'
+          : 'border-sky-800/40 bg-sky-950/20',
+        compact ? 'px-2 py-1' : 'px-3 py-1.5'
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <GearIcon
+          className={clsx(
+            'w-3 h-3 flex-shrink-0',
+            kind === 'tool_activity' ? 'text-purple-300' : 'text-sky-300'
+          )}
+        />
+        <span
+          className={clsx(
+            'font-mono text-xs font-semibold',
+            kind === 'tool_activity' ? 'text-purple-300' : 'text-sky-300'
+          )}
+        >
+          {title}
+        </span>
+        <span
+          className={clsx(
+            'font-mono text-xs truncate',
+            kind === 'tool_activity' ? 'text-purple-400/80' : 'text-sky-400/80'
+          )}
+        >
+          {summary}
+        </span>
+        <button
+          onClick={() => setExpanded((value) => !value)}
+          className="ml-auto text-2xs text-gray-400 hover:text-gray-200"
+        >
+          {expanded ? 'collapse' : 'expand'}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="mt-2 space-y-1 border-t border-gray-700/40 pt-2">
+          {lines.map((line) => (
+            <div
+              key={`${groupId}-${line.id}`}
+              className={clsx(
+                'font-mono text-xs whitespace-pre-wrap break-all',
+                LINE_TYPE_COLORS[line.type]
+              )}
+            >
+              {LINE_TYPE_PREFIX[line.type]}
+              {line.content}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Parse tool name and arguments from formatted content like "[tool:Read] /path/to/file" */
 function parseToolContent(content: string): { toolName: string; args: string } {

@@ -16,6 +16,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         grep_tool(),
         ls_tool(),
         cwd_tool(),
+        analyze_tool(),
         task_tool(),
         web_fetch_tool(),
         web_search_tool(),
@@ -278,6 +279,39 @@ fn task_tool() -> ToolDefinition {
     }
 }
 
+/// Analyze tool definition
+fn analyze_tool() -> ToolDefinition {
+    let mut properties = HashMap::new();
+    properties.insert(
+        "query".to_string(),
+        ParameterSchema::string(Some(
+            "What to analyze. Use concise objective language (e.g., 'analyze architecture and test strategy').",
+        )),
+    );
+    properties.insert(
+        "mode".to_string(),
+        ParameterSchema::string(Some(
+            "Analysis mode: 'auto' (default), 'local' (focused), or 'project' (full deep pipeline).",
+        )),
+    );
+    properties.insert(
+        "path_hint".to_string(),
+        ParameterSchema::string(Some(
+            "Optional path/file hint for local analysis (e.g., 'src/plan_cascade/core').",
+        )),
+    );
+
+    ToolDefinition {
+        name: "Analyze".to_string(),
+        description: "Run the orchestrator's structured analysis capability. Supports local-focused analysis and full project analysis with inventory chunking and summary merge. Returns a concise analysis brief that can be reused for implementation decisions.".to_string(),
+        input_schema: ParameterSchema::object(
+            Some("Analyze parameters"),
+            properties,
+            vec!["query".to_string()],
+        ),
+    }
+}
+
 /// Current working directory tool definition
 fn cwd_tool() -> ToolDefinition {
     ToolDefinition {
@@ -387,7 +421,7 @@ mod tests {
     #[test]
     fn test_get_tool_definitions() {
         let tools = get_tool_definitions();
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 13);
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"Read"));
@@ -398,6 +432,7 @@ mod tests {
         assert!(names.contains(&"Grep"));
         assert!(names.contains(&"LS"));
         assert!(names.contains(&"Cwd"));
+        assert!(names.contains(&"Analyze"));
         assert!(names.contains(&"Task"));
     }
 

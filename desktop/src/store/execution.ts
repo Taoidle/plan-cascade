@@ -84,6 +84,35 @@ export interface StreamLine {
   timestamp: number;
 }
 
+export interface HistoryConversationLine {
+  type: StreamLineType;
+  content: string;
+}
+
+export interface AnalysisCoverageSnapshot {
+  runId?: string;
+  status: 'idle' | 'running' | 'completed' | 'failed';
+  successfulPhases: number;
+  partialPhases: number;
+  failedPhases: number;
+  observedPaths: number;
+  inventoryTotalFiles: number;
+  sampledReadFiles: number;
+  testFilesTotal: number;
+  testFilesRead: number;
+  coverageRatio: number;
+  sampledReadRatio: number;
+  testCoverageRatio: number;
+  observedTestCoverageRatio: number;
+  coverageTargetRatio?: number;
+  sampledReadTargetRatio?: number;
+  testCoverageTargetRatio?: number;
+  validationIssues: string[];
+  manifestPath?: string;
+  reportPath?: string;
+  updatedAt: number;
+}
+
 // ============================================================================
 // Quality Gate Result Types
 // ============================================================================
@@ -139,7 +168,9 @@ export interface ExecutionResult {
 
 export interface ExecutionHistoryItem {
   id: string;
+  title?: string;
   taskDescription: string;
+  workspacePath?: string | null;
   strategy: Strategy;
   status: ExecutionStatus;
   startedAt: number;
@@ -151,6 +182,8 @@ export interface ExecutionHistoryItem {
   error?: string;
   /** Serialized conversation content from streamingOutput */
   conversationContent?: string;
+  /** Structured conversation lines for lossless restore */
+  conversationLines?: HistoryConversationLine[];
   /** Session ID for potential reconnection */
   sessionId?: string;
 }
@@ -251,6 +284,9 @@ interface ExecutionState {
   /** Counter for unique stream line IDs */
   streamLineCounter: number;
 
+  /** Structured analysis coverage snapshot for Simple mode visualization */
+  analysisCoverage: AnalysisCoverageSnapshot | null;
+
   /** Quality gate results per story */
   qualityGateResults: QualityGateResult[];
 
@@ -265,6 +301,15 @@ interface ExecutionState {
 
   /** Local multi-turn context for standalone providers (glm/openai/deepseek/qwen/ollama) */
   standaloneTurns: StandaloneTurn[];
+
+  /** Session identifier for standalone conversation-scoped analysis reuse */
+  standaloneSessionId: string | null;
+
+  /** Last usage payload reported by backend for current turn */
+  latestUsage: BackendUsageStats | null;
+
+  /** Accumulated token usage for current chat session */
+  sessionUsageTotals: BackendUsageStats | null;
 
   // Actions
   /** Initialize Tauri event listeners */
@@ -311,6 +356,9 @@ interface ExecutionState {
 
   /** Clear history */
   clearHistory: () => void;
+
+  /** Rename a history item */
+  renameHistory: (historyId: string, title: string) => void;
 
   /** Restore a conversation from history into the streaming output view */
   restoreFromHistory: (historyId: string) => void;
@@ -459,6 +507,79 @@ function buildStandaloneConversationMessage(turns: StandaloneTurn[], userInput: 
   ].join('\n');
 }
 
+function createStandaloneSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `simple-${crypto.randomUUID()}`;
+  }
+  return `simple-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+}
+
+function buildHistorySessionId(taskId: string | null, standaloneSessionId: string | null): string | null {
+  if (taskId && taskId.trim().length > 0) {
+    return `claude:${taskId.trim()}`;
+  }
+  if (standaloneSessionId && standaloneSessionId.trim().length > 0) {
+    return `standalone:${standaloneSessionId.trim()}`;
+  }
+  return null;
+}
+
+function hasAssistantTextLineSince(lines: StreamLine[], minExclusiveLineId: number): boolean {
+  return lines.some(
+    (line) =>
+      line.id > minExclusiveLineId &&
+      line.type === 'text' &&
+      line.content.trim().length > 0
+  );
+}
+
+function collectAssistantTextSince(lines: StreamLine[], minExclusiveLineId: number): string {
+  return lines
+    .filter(
+      (line) =>
+        line.id > minExclusiveLineId &&
+        line.type === 'text' &&
+        line.content.trim().length > 0
+    )
+    .map((line) => line.content)
+    .join('')
+    .trim();
+}
+
+function appendTextWithTypewriter(
+  append: (content: string, type: StreamLineType) => void,
+  content: string,
+  chunkSize = 28,
+  delayMs = 14
+): Promise<void> {
+  const text = content.trim();
+  if (!text) return Promise.resolve();
+  // Avoid very long UI replays blocking finalization; stream large payloads as a single line.
+  if (text.length > 4000) {
+    append(text, 'text');
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    let cursor = 0;
+    const pushChunk = () => {
+      const next = text.slice(cursor, cursor + chunkSize);
+      if (!next) {
+        resolve();
+        return;
+      }
+      append(next, 'text');
+      cursor += next.length;
+      if (cursor >= text.length) {
+        resolve();
+        return;
+      }
+      globalThis.setTimeout(pushChunk, delayMs);
+    };
+    pushChunk();
+  });
+}
+
 /** Format tool arguments for display in a human-readable way */
 function formatToolArgs(toolName: string, rawArgs?: string): string {
   if (!rawArgs) return '';
@@ -503,10 +624,6 @@ function isBackendStandaloneExecutionResult(data: unknown): data is BackendStand
   return typeof value.iterations === 'number' && typeof value.success === 'boolean' && typeof value.usage === 'object' && value.usage !== null;
 }
 
-function hasAssistantTextLine(lines: StreamLine[]): boolean {
-  return lines.some((line) => line.type === 'text' && line.content.trim().length > 0);
-}
-
 // Track event unlisteners
 let unlisteners: UnlistenFn[] = [];
 let listenerSetupVersion = 0;
@@ -533,11 +650,15 @@ const initialState = {
   strategyOptions: [] as StrategyOptionInfo[],
   streamingOutput: [] as StreamLine[],
   streamLineCounter: 0,
+  analysisCoverage: null as AnalysisCoverageSnapshot | null,
   qualityGateResults: [] as QualityGateResult[],
   executionErrors: [] as ExecutionError[],
   estimatedTimeRemaining: null as number | null,
   isChatSession: false,
   standaloneTurns: [] as StandaloneTurn[],
+  standaloneSessionId: null as string | null,
+  latestUsage: null as BackendUsageStats | null,
+  sessionUsageTotals: null as BackendUsageStats | null,
 };
 
 export const useExecutionStore = create<ExecutionState>()((set, get) => ({
@@ -570,11 +691,19 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   start: async (description, mode) => {
     const settingsSnapshot = useSettingsStore.getState();
     const backendSnapshot = String((settingsSnapshot as { backend?: unknown }).backend || '');
+    const isClaudeBackend = isClaudeCodeBackend(backendSnapshot);
     const existingStandaloneTurns = get().standaloneTurns;
+    const existingStandaloneSessionId = get().standaloneSessionId;
     const preserveSimpleConversation =
       mode === 'simple' &&
       get().streamingOutput.length > 0 &&
-      !isClaudeCodeBackend(backendSnapshot);
+      !isClaudeBackend;
+    const nextStandaloneSessionId =
+      mode === 'simple' && !isClaudeBackend
+        ? preserveSimpleConversation && existingStandaloneSessionId
+          ? existingStandaloneSessionId
+          : createStandaloneSessionId()
+        : null;
 
     set({
       isSubmitting: true,
@@ -583,6 +712,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       taskDescription: description,
       startedAt: Date.now(),
       result: null,
+      taskId: isClaudeBackend ? get().taskId : null,
+      isChatSession: isClaudeBackend ? get().isChatSession : false,
       logs: [],
       stories: [],
       batches: [],
@@ -591,15 +722,19 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       progress: 0,
       streamingOutput: preserveSimpleConversation ? get().streamingOutput : [],
       streamLineCounter: preserveSimpleConversation ? get().streamLineCounter : 0,
+      analysisCoverage: null,
       qualityGateResults: [],
       executionErrors: [],
       estimatedTimeRemaining: null,
+      standaloneSessionId: nextStandaloneSessionId,
+      latestUsage: preserveSimpleConversation ? get().latestUsage : null,
+      sessionUsageTotals: preserveSimpleConversation ? get().sessionUsageTotals : null,
     });
 
     get().addLog(`Starting execution in ${mode} mode...`);
     get().addLog(`Task: ${description}`);
-    if (preserveSimpleConversation) {
-      // Keep simple-mode conversation visible and append user turn.
+    if (mode === 'simple' && !isClaudeBackend) {
+      // In standalone simple mode, always render the user bubble.
       get().appendStreamLine(description, 'info');
     }
 
@@ -638,6 +773,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         const model = settings.model || 'claude-sonnet-4-20250514';
         const providerApiKey = getLocalProviderApiKey(provider);
         const isSimpleStandalone = mode === 'simple';
+        const turnStartLineId = get().streamLineCounter;
+        const standaloneSessionId = get().standaloneSessionId;
         const contextTurnsLimit = getStandaloneContextTurnsLimit();
         const recentStandaloneTurns = trimStandaloneTurns(existingStandaloneTurns, contextTurnsLimit);
         const messageToSend =
@@ -660,6 +797,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           projectPath: settings.workspacePath || '.',
           enableTools: true,
           apiKey: providerApiKey,
+          analysisSessionId: standaloneSessionId,
           enableCompaction: settings.enableContextCompaction ?? true,
         });
 
@@ -681,8 +819,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         if (isBackendStandaloneExecutionResult(result.data)) {
           const execution = result.data;
           const assistantResponse = execution.response?.trim() || '';
+          const streamedAssistantText = collectAssistantTextSince(get().streamingOutput, turnStartLineId);
+          const assistantTurnText = assistantResponse || streamedAssistantText;
 
-          if (mode === 'simple' && assistantResponse) {
+          if (mode === 'simple' && assistantTurnText) {
             const retentionLimit = getStandaloneContextTurnsLimit();
             set((state) => ({
               standaloneTurns: trimStandaloneTurns(
@@ -690,7 +830,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
                   ...state.standaloneTurns,
                   {
                     user: description,
-                    assistant: assistantResponse,
+                    assistant: assistantTurnText,
                     createdAt: Date.now(),
                   },
                 ],
@@ -702,16 +842,33 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           // Mark submission complete regardless of stream event timing.
           set({ isSubmitting: false });
 
-          const ensureAssistantResponseVisible = () => {
-            if (!assistantResponse) return;
-            if (!hasAssistantTextLine(get().streamingOutput)) {
-              get().appendStreamLine(assistantResponse, 'text');
+          let ensuredAssistantOutput = false;
+          const ensureAssistantResponseVisible = async () => {
+            if (ensuredAssistantOutput) return;
+
+            const hasStreamedAssistantText = hasAssistantTextLineSince(
+              get().streamingOutput,
+              turnStartLineId
+            );
+            if (hasStreamedAssistantText) {
+              ensuredAssistantOutput = true;
+              return;
+            }
+
+            if (assistantTurnText) {
+              ensuredAssistantOutput = true;
+              await appendTextWithTypewriter(
+                (chunk, type) => get().appendStreamLine(chunk, type),
+                assistantTurnText
+              );
+              return;
+            }
+
+            if (isSimpleStandalone) {
+              ensuredAssistantOutput = true;
+              get().appendStreamLine('No assistant response returned for this turn.', 'warning');
             }
           };
-
-          // Ensure final response is visible even when only tool/sub-agent
-          // events are streamed.
-          ensureAssistantResponseVisible();
 
           // The invoke() resolves when the Rust command returns, but streaming
           // events are forwarded via a separate async task and may still be in
@@ -721,18 +878,18 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           // Strategy: wait briefly for the streaming `complete` event to arrive
           // and set the status.  Only fall back to setting status from the
           // invoke result if no streaming event did so.
-          const finalizeFromInvoke = () => {
+          const finalizeFromInvoke = async () => {
             if (get().status !== 'running') {
               // Stream event already finalized status. Persist completed runs
               // once the invoke() response has been reconciled.
               if (get().status === 'completed') {
-                ensureAssistantResponseVisible();
+                await ensureAssistantResponseVisible();
                 get().saveToHistory();
               }
               return;
             }
             const succeeded = execution.success;
-            ensureAssistantResponseVisible();
+            await ensureAssistantResponseVisible();
 
             const duration = Date.now() - (get().startedAt || Date.now());
             const durationStr = duration >= 60000
@@ -783,17 +940,19 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           };
 
           if (get().status === 'running') {
-            if (get().streamingOutput.length > 0) {
+            if (get().streamLineCounter > turnStartLineId) {
               // Streaming events were received, so the orchestrator's complete
               // event should arrive via the listener and finalize status.
               // Use a fallback timeout in case the event is lost.
-              setTimeout(finalizeFromInvoke, 3000);
+              globalThis.setTimeout(() => {
+                void finalizeFromInvoke();
+              }, 3000);
             } else {
               // No streaming events at all; finalize immediately.
-              finalizeFromInvoke();
+              void finalizeFromInvoke();
             }
           } else if (get().status === 'completed') {
-            finalizeFromInvoke();
+            void finalizeFromInvoke();
           }
           return;
         }
@@ -976,6 +1135,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   saveToHistory: () => {
     const state = get();
     if (!state.taskDescription) return;
+    const settings = useSettingsStore.getState();
+    const workspacePath = (settings.workspacePath || '').trim() || null;
+    const sessionId = buildHistorySessionId(state.taskId, state.standaloneSessionId) || undefined;
 
     // Serialize streaming output into readable conversation content
     const TYPE_PREFIX: Record<StreamLineType, string> = {
@@ -991,15 +1153,23 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       thinking: '[Thinking] ',
       code: '[Code] ',
     };
-    const conversationContent = state.streamingOutput.length > 0
-      ? state.streamingOutput
-          .map((line) => `${TYPE_PREFIX[line.type]}${line.content}`)
-          .join('\n')
-      : undefined;
+    const conversationLines: HistoryConversationLine[] | undefined =
+      state.streamingOutput.length > 0
+        ? state.streamingOutput.map((line) => ({
+            type: line.type,
+            content: line.content,
+          }))
+        : undefined;
+    const conversationContent =
+      state.streamingOutput.length > 0
+        ? state.streamingOutput
+            .map((line) => `${TYPE_PREFIX[line.type]}${line.content}`)
+            .join('\n')
+        : undefined;
 
-    const historyItem: ExecutionHistoryItem = {
-      id: state.taskId || `local_${Date.now()}`,
+    const baseItem: Omit<ExecutionHistoryItem, 'id'> = {
       taskDescription: state.taskDescription,
+      workspacePath,
       strategy: state.strategy,
       status: state.status,
       startedAt: state.startedAt || Date.now(),
@@ -1010,11 +1180,41 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       success: state.status === 'completed',
       error: state.result?.error,
       conversationContent,
-      sessionId: state.taskId || undefined,
+      conversationLines,
+      sessionId,
     };
 
     set((prevState) => {
-      const newHistory = [historyItem, ...prevState.history].slice(0, MAX_HISTORY_ITEMS);
+      let newHistory: ExecutionHistoryItem[] = prevState.history;
+      if (sessionId) {
+        const existingIndex = prevState.history.findIndex((item) => item.sessionId === sessionId);
+        if (existingIndex >= 0) {
+          const existing = prevState.history[existingIndex];
+          const updated: ExecutionHistoryItem = {
+            ...baseItem,
+            id: existing.id,
+            title: existing.title,
+            taskDescription: existing.taskDescription || baseItem.taskDescription,
+            startedAt: existing.startedAt,
+            duration: Date.now() - existing.startedAt,
+          };
+          const cloned = [...prevState.history];
+          cloned.splice(existingIndex, 1);
+          newHistory = [updated, ...cloned].slice(0, MAX_HISTORY_ITEMS);
+        } else {
+          const created: ExecutionHistoryItem = {
+            ...baseItem,
+            id: `history_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          };
+          newHistory = [created, ...prevState.history].slice(0, MAX_HISTORY_ITEMS);
+        }
+      } else {
+        const created: ExecutionHistoryItem = {
+          ...baseItem,
+          id: `history_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        };
+        newHistory = [created, ...prevState.history].slice(0, MAX_HISTORY_ITEMS);
+      }
 
       // Save to localStorage
       try {
@@ -1036,9 +1236,29 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     set({ history: [] });
   },
 
+  renameHistory: (historyId, title) => {
+    const trimmed = title.trim();
+    set((state) => {
+      const next = state.history.map((item) =>
+        item.id === historyId
+          ? {
+              ...item,
+              title: trimmed.length > 0 ? trimmed : undefined,
+            }
+          : item
+      );
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore localStorage errors
+      }
+      return { history: next };
+    });
+  },
+
   restoreFromHistory: (historyId: string) => {
     const item = get().history.find((h) => h.id === historyId);
-    if (!item || !item.conversationContent) return;
+    if (!item) return;
 
     // Parse serialized content back into StreamLine entries
     const PREFIX_TO_TYPE: Record<string, StreamLineType> = {
@@ -1058,25 +1278,75 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     const lines: StreamLine[] = [];
     let counter = 0;
 
-    for (const raw of item.conversationContent.split('\n')) {
-      let type: StreamLineType = 'text';
-      let content = raw;
+    if (item.conversationLines && item.conversationLines.length > 0) {
+      for (const line of item.conversationLines) {
+        counter++;
+        lines.push({
+          id: counter,
+          content: line.content,
+          type: line.type,
+          timestamp: item.startedAt,
+        });
+      }
+    } else if (item.conversationContent) {
+      for (const raw of item.conversationContent.split('\n')) {
+        let type: StreamLineType = 'text';
+        let content = raw;
 
-      for (const [prefix, lineType] of Object.entries(PREFIX_TO_TYPE)) {
-        if (raw.startsWith(prefix)) {
-          type = lineType;
-          content = raw.slice(prefix.length);
-          break;
+        for (const [prefix, lineType] of Object.entries(PREFIX_TO_TYPE)) {
+          if (raw.startsWith(prefix)) {
+            type = lineType;
+            content = raw.slice(prefix.length);
+            break;
+          }
+        }
+
+        counter++;
+        lines.push({
+          id: counter,
+          content,
+          type,
+          timestamp: item.startedAt,
+        });
+      }
+    } else {
+      return;
+    }
+
+    const restoredSessionId = item.sessionId || null;
+    const claudePrefix = 'claude:';
+    const standalonePrefix = 'standalone:';
+    const isClaudeSession =
+      restoredSessionId !== null && restoredSessionId.startsWith(claudePrefix);
+    const isStandaloneSession =
+      restoredSessionId !== null && restoredSessionId.startsWith(standalonePrefix);
+
+    const restoredStandaloneTurns: StandaloneTurn[] = [];
+    if (isStandaloneSession) {
+      let pendingUser: string | null = null;
+      let assistantSegments: string[] = [];
+      for (const line of lines) {
+        if (line.type === 'info') {
+          if (pendingUser && assistantSegments.join('').trim().length > 0) {
+            restoredStandaloneTurns.push({
+              user: pendingUser,
+              assistant: assistantSegments.join(''),
+              createdAt: line.timestamp,
+            });
+          }
+          pendingUser = line.content;
+          assistantSegments = [];
+        } else if (line.type === 'text' && pendingUser) {
+          assistantSegments.push(line.content);
         }
       }
-
-      counter++;
-      lines.push({
-        id: counter,
-        content,
-        type,
-        timestamp: item.startedAt,
-      });
+      if (pendingUser && assistantSegments.join('').trim().length > 0) {
+        restoredStandaloneTurns.push({
+          user: pendingUser,
+          assistant: assistantSegments.join(''),
+          createdAt: Date.now(),
+        });
+      }
     }
 
     set({
@@ -1085,8 +1355,15 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       history: get().history,
       streamingOutput: lines,
       streamLineCounter: counter,
-      isChatSession: true,
-      taskDescription: item.taskDescription,
+      isChatSession: isClaudeSession,
+      taskId: isClaudeSession ? restoredSessionId!.slice(claudePrefix.length) : null,
+      standaloneSessionId: isStandaloneSession
+        ? restoredSessionId!.slice(standalonePrefix.length)
+        : null,
+      standaloneTurns: isStandaloneSession
+        ? trimStandaloneTurns(restoredStandaloneTurns, getStandaloneContextTurnsLimit())
+        : [],
+      taskDescription: item.title || item.taskDescription,
     });
   },
 
@@ -1323,6 +1600,28 @@ function parseOptionalNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function parseMetricNumber(
+  source: Record<string, unknown> | undefined,
+  key: string
+): number | undefined {
+  if (!source) return undefined;
+  return parseOptionalNumber(source[key]);
+}
+
+function parsePhaseResultMetrics(phaseResults: string[]): Record<string, number> {
+  const parsed: Record<string, number> = {};
+  for (const item of phaseResults) {
+    const idx = item.indexOf('=');
+    if (idx <= 0) continue;
+    const key = item.slice(0, idx).trim();
+    const rawValue = item.slice(idx + 1).trim();
+    const numberValue = Number(rawValue);
+    if (!Number.isFinite(numberValue)) continue;
+    parsed[key] = numberValue;
+  }
+  return parsed;
+}
+
 function formatSubAgentUsage(usage?: Record<string, unknown>): string {
   if (!usage || typeof usage !== 'object') return '';
   const inputTokens = parseOptionalNumber(usage.input_tokens);
@@ -1351,6 +1650,9 @@ function formatAnalysisMetrics(metrics?: Record<string, unknown>): string {
   const globCalls = parseOptionalNumber(metrics.glob_calls);
   const cwdCalls = parseOptionalNumber(metrics.cwd_calls);
   const observedPaths = parseOptionalNumber(metrics.observed_paths);
+  const coverageRatio = parseOptionalNumber(metrics.coverage_ratio);
+  const sampledReadRatio = parseOptionalNumber(metrics.sampled_read_ratio);
+  const testCoverageRatio = parseOptionalNumber(metrics.test_coverage_ratio);
   const fragments: string[] = [];
 
   if (typeof toolCalls === 'number') fragments.push(`tools=${toolCalls}`);
@@ -1359,6 +1661,9 @@ function formatAnalysisMetrics(metrics?: Record<string, unknown>): string {
   if (typeof globCalls === 'number') fragments.push(`glob=${globCalls}`);
   if (typeof cwdCalls === 'number') fragments.push(`cwd=${cwdCalls}`);
   if (typeof observedPaths === 'number') fragments.push(`paths=${observedPaths}`);
+  if (typeof coverageRatio === 'number') fragments.push(`coverage=${(coverageRatio * 100).toFixed(1)}%`);
+  if (typeof sampledReadRatio === 'number') fragments.push(`read_depth=${(sampledReadRatio * 100).toFixed(1)}%`);
+  if (typeof testCoverageRatio === 'number') fragments.push(`tests=${(testCoverageRatio * 100).toFixed(1)}%`);
   return fragments.length > 0 ? ` (${fragments.join(', ')})` : '';
 }
 
@@ -1382,6 +1687,26 @@ function handleUnifiedExecutionEvent(
       const runId = toShortText(payload.run_id, 'run');
       const runDir = toShortText(payload.run_dir);
       const request = toShortText(payload.request);
+      set({
+        analysisCoverage: {
+          runId,
+          status: 'running',
+          successfulPhases: 0,
+          partialPhases: 0,
+          failedPhases: 0,
+          observedPaths: 0,
+          inventoryTotalFiles: 0,
+          sampledReadFiles: 0,
+          testFilesTotal: 0,
+          testFilesRead: 0,
+          coverageRatio: 0,
+          sampledReadRatio: 0,
+          testCoverageRatio: 0,
+          observedTestCoverageRatio: 0,
+          validationIssues: [],
+          updatedAt: Date.now(),
+        },
+      });
       if (showAnalysisDetails) {
         const suffix = runDir ? ` | ${runDir}` : '';
         get().appendStreamLine(`[analysis:run_start:${runId}] ${request || 'analysis started'}${suffix}`, 'analysis');
@@ -1655,6 +1980,16 @@ function handleUnifiedExecutionEvent(
           suggestedFix: 'Review evidence lines and rerun analysis if needed.',
         });
       }
+      const currentCoverage = get().analysisCoverage;
+      if (currentCoverage) {
+        set({
+          analysisCoverage: {
+            ...currentCoverage,
+            validationIssues: issues.slice(0, 20),
+            updatedAt: Date.now(),
+          },
+        });
+      }
       break;
     }
 
@@ -1670,6 +2005,86 @@ function handleUnifiedExecutionEvent(
         `[analysis:run_summary:${payload.success ? 'success' : 'failed'}] ${summary}${suffix}`,
         'analysis'
       );
+      const parsedPhaseMetrics = parsePhaseResultMetrics(phaseResults);
+      const totalMetrics =
+        payload.total_metrics && typeof payload.total_metrics === 'object'
+          ? payload.total_metrics
+          : undefined;
+      const current = get().analysisCoverage;
+      const next: AnalysisCoverageSnapshot = {
+        runId: current?.runId || toShortText(payload.run_id) || undefined,
+        status: payload.success === false ? 'failed' : 'completed',
+        successfulPhases:
+          parseMetricNumber(parsedPhaseMetrics, 'successful_phases') ??
+          current?.successfulPhases ??
+          0,
+        partialPhases:
+          parseMetricNumber(parsedPhaseMetrics, 'partial_phases') ??
+          current?.partialPhases ??
+          0,
+        failedPhases:
+          parseMetricNumber(parsedPhaseMetrics, 'failed_phases') ??
+          current?.failedPhases ??
+          0,
+        observedPaths:
+          parseMetricNumber(parsedPhaseMetrics, 'observed_paths') ??
+          parseMetricNumber(totalMetrics, 'observed_paths') ??
+          current?.observedPaths ??
+          0,
+        inventoryTotalFiles:
+          parseMetricNumber(totalMetrics, 'inventory_total_files') ??
+          current?.inventoryTotalFiles ??
+          0,
+        sampledReadFiles:
+          parseMetricNumber(parsedPhaseMetrics, 'sampled_read_files') ??
+          parseMetricNumber(totalMetrics, 'sampled_read_files') ??
+          current?.sampledReadFiles ??
+          0,
+        testFilesTotal:
+          parseMetricNumber(totalMetrics, 'test_files_total') ??
+          current?.testFilesTotal ??
+          0,
+        testFilesRead:
+          parseMetricNumber(totalMetrics, 'test_files_read') ??
+          current?.testFilesRead ??
+          0,
+        coverageRatio:
+          parseMetricNumber(parsedPhaseMetrics, 'coverage_ratio') ??
+          parseMetricNumber(totalMetrics, 'coverage_ratio') ??
+          current?.coverageRatio ??
+          0,
+        sampledReadRatio:
+          parseMetricNumber(parsedPhaseMetrics, 'sampled_read_ratio') ??
+          parseMetricNumber(totalMetrics, 'sampled_read_ratio') ??
+          current?.sampledReadRatio ??
+          0,
+        testCoverageRatio:
+          parseMetricNumber(parsedPhaseMetrics, 'test_coverage_ratio') ??
+          parseMetricNumber(totalMetrics, 'test_coverage_ratio') ??
+          current?.testCoverageRatio ??
+          0,
+        observedTestCoverageRatio:
+          parseMetricNumber(totalMetrics, 'observed_test_coverage_ratio') ??
+          current?.observedTestCoverageRatio ??
+          0,
+        coverageTargetRatio:
+          parseMetricNumber(parsedPhaseMetrics, 'coverage_target_ratio') ??
+          parseMetricNumber(totalMetrics, 'coverage_target_ratio') ??
+          current?.coverageTargetRatio,
+        sampledReadTargetRatio:
+          parseMetricNumber(parsedPhaseMetrics, 'sampled_read_target_ratio') ??
+          parseMetricNumber(totalMetrics, 'sampled_read_target_ratio') ??
+          current?.sampledReadTargetRatio,
+        testCoverageTargetRatio:
+          parseMetricNumber(parsedPhaseMetrics, 'test_coverage_target_ratio') ??
+          parseMetricNumber(totalMetrics, 'test_coverage_target_ratio') ??
+          current?.testCoverageTargetRatio,
+        validationIssues: current?.validationIssues || [],
+        manifestPath: current?.manifestPath,
+        reportPath: current?.reportPath,
+        updatedAt: Date.now(),
+      };
+      set({ analysisCoverage: next });
       break;
     }
 
@@ -1678,6 +2093,76 @@ function handleUnifiedExecutionEvent(
         ? payload.metrics
         : undefined;
       const summary = metrics ? formatAnalysisMetrics(metrics) : '';
+      if (metrics) {
+        const current = get().analysisCoverage;
+        set({
+          analysisCoverage: {
+            runId: current?.runId || toShortText(payload.run_id) || undefined,
+            status: current?.status || 'running',
+            successfulPhases:
+              parseMetricNumber(metrics, 'successful_phases') ??
+              current?.successfulPhases ??
+              0,
+            partialPhases:
+              parseMetricNumber(metrics, 'partial_phases') ??
+              current?.partialPhases ??
+              0,
+            failedPhases:
+              parseMetricNumber(metrics, 'failed_phases') ??
+              current?.failedPhases ??
+              0,
+            observedPaths:
+              parseMetricNumber(metrics, 'observed_paths') ??
+              current?.observedPaths ??
+              0,
+            inventoryTotalFiles:
+              parseMetricNumber(metrics, 'inventory_total_files') ??
+              current?.inventoryTotalFiles ??
+              0,
+            sampledReadFiles:
+              parseMetricNumber(metrics, 'sampled_read_files') ??
+              current?.sampledReadFiles ??
+              0,
+            testFilesTotal:
+              parseMetricNumber(metrics, 'test_files_total') ??
+              current?.testFilesTotal ??
+              0,
+            testFilesRead:
+              parseMetricNumber(metrics, 'test_files_read') ??
+              current?.testFilesRead ??
+              0,
+            coverageRatio:
+              parseMetricNumber(metrics, 'coverage_ratio') ??
+              current?.coverageRatio ??
+              0,
+            sampledReadRatio:
+              parseMetricNumber(metrics, 'sampled_read_ratio') ??
+              current?.sampledReadRatio ??
+              0,
+            testCoverageRatio:
+              parseMetricNumber(metrics, 'test_coverage_ratio') ??
+              current?.testCoverageRatio ??
+              0,
+            observedTestCoverageRatio:
+              parseMetricNumber(metrics, 'observed_test_coverage_ratio') ??
+              current?.observedTestCoverageRatio ??
+              0,
+            coverageTargetRatio:
+              parseMetricNumber(metrics, 'coverage_target_ratio') ??
+              current?.coverageTargetRatio,
+            sampledReadTargetRatio:
+              parseMetricNumber(metrics, 'sampled_read_target_ratio') ??
+              current?.sampledReadTargetRatio,
+            testCoverageTargetRatio:
+              parseMetricNumber(metrics, 'test_coverage_target_ratio') ??
+              current?.testCoverageTargetRatio,
+            validationIssues: current?.validationIssues || [],
+            manifestPath: current?.manifestPath,
+            reportPath: current?.reportPath,
+            updatedAt: Date.now(),
+          },
+        });
+      }
       if (showAnalysisDetails) {
         get().appendStreamLine(
           `[analysis:coverage] updated${summary}`,
@@ -1698,6 +2183,19 @@ function handleUnifiedExecutionEvent(
         `[analysis] run ${status} (${runId})${suffix}`,
         payload.success === false ? 'warning' : 'success'
       );
+      const currentCoverage = get().analysisCoverage;
+      if (currentCoverage) {
+        set({
+          analysisCoverage: {
+            ...currentCoverage,
+            runId,
+            status: payload.success === false ? 'failed' : 'completed',
+            manifestPath: manifestPath || currentCoverage.manifestPath,
+            reportPath: reportPath || currentCoverage.reportPath,
+            updatedAt: Date.now(),
+          },
+        });
+      }
       break;
     }
 
@@ -1715,6 +2213,34 @@ function handleUnifiedExecutionEvent(
 
     case 'usage':
       if (typeof payload.input_tokens === 'number' && typeof payload.output_tokens === 'number') {
+        const payloadRecord = payload as unknown as Record<string, unknown>;
+        const usage: BackendUsageStats = {
+          input_tokens: payload.input_tokens,
+          output_tokens: payload.output_tokens,
+          thinking_tokens:
+            typeof payload.thinking_tokens === 'number' ? payload.thinking_tokens : null,
+          cache_read_tokens:
+            typeof payloadRecord.cache_read_tokens === 'number'
+              ? payloadRecord.cache_read_tokens
+              : null,
+          cache_creation_tokens:
+            typeof payloadRecord.cache_creation_tokens === 'number'
+              ? payloadRecord.cache_creation_tokens
+              : null,
+        };
+        const prev = get().sessionUsageTotals;
+        const nextTotals: BackendUsageStats = {
+          input_tokens: (prev?.input_tokens || 0) + usage.input_tokens,
+          output_tokens: (prev?.output_tokens || 0) + usage.output_tokens,
+          thinking_tokens: (prev?.thinking_tokens || 0) + (usage.thinking_tokens || 0),
+          cache_read_tokens: (prev?.cache_read_tokens || 0) + (usage.cache_read_tokens || 0),
+          cache_creation_tokens:
+            (prev?.cache_creation_tokens || 0) + (usage.cache_creation_tokens || 0),
+        };
+        set({
+          latestUsage: usage,
+          sessionUsageTotals: nextTotals,
+        });
         get().addLog(
           `Usage: in=${payload.input_tokens}, out=${payload.output_tokens}${typeof payload.thinking_tokens === 'number' ? `, thinking=${payload.thinking_tokens}` : ''}`
         );

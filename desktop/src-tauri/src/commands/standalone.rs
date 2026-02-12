@@ -545,6 +545,7 @@ pub async fn check_provider_health(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: None,
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config);
@@ -634,6 +635,8 @@ pub async fn execute_standalone(
     enable_tools: bool,
     api_key: Option<String>,
     apiKey: Option<String>,
+    analysis_session_id: Option<String>,
+    analysisSessionId: Option<String>,
     enable_compaction: Option<bool>,
     app: AppHandle,
 ) -> CommandResponse<ExecutionResult> {
@@ -684,6 +687,10 @@ pub async fn execute_standalone(
         model,
         ..Default::default()
     };
+    let analysis_session_id = analysis_session_id
+        .or(analysisSessionId)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let orchestrator_config = OrchestratorConfig {
         provider: config,
@@ -696,6 +703,7 @@ pub async fn execute_standalone(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id,
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config);
@@ -719,6 +727,24 @@ pub async fn execute_standalone(
     };
 
     CommandResponse::ok(result)
+}
+
+/// Save text output to a user-selected file path.
+#[tauri::command]
+pub async fn save_output_export(path: String, content: String) -> CommandResponse<bool> {
+    let target = PathBuf::from(path.trim());
+    if target.as_os_str().is_empty() {
+        return CommandResponse::err("Invalid target path");
+    }
+    if let Some(parent) = target.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return CommandResponse::err(format!("Failed to prepare export directory: {}", e));
+        }
+    }
+    match std::fs::write(&target, content) {
+        Ok(_) => CommandResponse::ok(true),
+        Err(e) => CommandResponse::err(format!("Failed to save export: {}", e)),
+    }
 }
 
 /// Get usage statistics from the database
@@ -867,6 +893,8 @@ pub async fn execute_standalone_with_session(
         model: request.model.clone(),
         ..Default::default()
     };
+    // Generate session ID first so analysis cache reuse is scoped to this execution session.
+    let session_id = uuid::Uuid::new_v4().to_string();
 
     let orchestrator_config = OrchestratorConfig {
         provider: config,
@@ -879,6 +907,7 @@ pub async fn execute_standalone_with_session(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: Some(session_id.clone()),
     };
 
     // Get database pool for session persistence
@@ -890,9 +919,6 @@ pub async fn execute_standalone_with_session(
     // Create orchestrator with database
     let orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
     let orchestrator = Arc::new(orchestrator);
-
-    // Generate session ID
-    let session_id = uuid::Uuid::new_v4().to_string();
 
     // Create execution session
     let mut session = ExecutionSession::new(
@@ -1027,6 +1053,7 @@ pub async fn get_standalone_status(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1100,6 +1127,7 @@ pub async fn get_standalone_progress(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1154,6 +1182,7 @@ pub async fn resume_standalone_execution(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: None,
     };
 
     let temp_orchestrator = OrchestratorService::new(temp_config).with_database(pool.clone());
@@ -1250,6 +1279,7 @@ pub async fn resume_standalone_execution(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: Some(request.session_id.clone()),
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
@@ -1319,6 +1349,7 @@ pub async fn get_standalone_session(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1375,6 +1406,7 @@ pub async fn list_standalone_sessions(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1423,6 +1455,7 @@ pub async fn delete_standalone_session(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1471,6 +1504,7 @@ pub async fn cleanup_standalone_sessions(
         analysis_artifacts_root: analysis_artifacts_root(),
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
+        analysis_session_id: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);

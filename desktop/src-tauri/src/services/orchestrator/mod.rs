@@ -7,6 +7,7 @@ mod analysis_index;
 mod analysis_merge;
 mod analysis_scheduler;
 mod analysis_store;
+mod adaptive_scope;
 mod service;
 
 pub use service::{

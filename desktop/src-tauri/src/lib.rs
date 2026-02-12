@@ -141,6 +141,7 @@ pub use commands::{
     run_quality_gates,
     run_specific_gates,
     save_claude_md,
+    save_output_export,
     // Markdown commands
     scan_claude_md,
     search_projects,
