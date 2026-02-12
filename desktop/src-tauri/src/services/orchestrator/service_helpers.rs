@@ -1695,10 +1695,34 @@ impl OrchestratorService {
 
             // Check iteration limit
             if iterations >= self.config.max_iterations {
-                let error_msg = format!(
-                    "Maximum iterations ({}) reached",
-                    self.config.max_iterations
-                );
+                // Recover last_assistant_text if available (story-004)
+                let (response, success, error_msg, stop_reason) =
+                    if let Some(ref text) = last_assistant_text {
+                        eprintln!(
+                            "[max-iterations] execute_task: recovering {} chars of accumulated text",
+                            text.len()
+                        );
+                        (
+                            Some(text.clone()),
+                            true,
+                            format!(
+                                "Max iterations ({}) reached but response recovered",
+                                self.config.max_iterations
+                            ),
+                            "max_iterations_with_recovery".to_string(),
+                        )
+                    } else {
+                        (
+                            None,
+                            false,
+                            format!(
+                                "Maximum iterations ({}) reached",
+                                self.config.max_iterations
+                            ),
+                            "max_iterations".to_string(),
+                        )
+                    };
+
                 let _ = tx
                     .send(UnifiedStreamEvent::Error {
                         message: error_msg.clone(),
@@ -1707,14 +1731,14 @@ impl OrchestratorService {
                     .await;
                 let _ = tx
                     .send(UnifiedStreamEvent::Complete {
-                        stop_reason: Some("max_iterations".to_string()),
+                        stop_reason: Some(stop_reason),
                     })
                     .await;
                 return ExecutionResult {
-                    response: None,
+                    response,
                     usage: total_usage,
                     iterations,
-                    success: false,
+                    success,
                     error: Some(error_msg),
                 };
             }
@@ -1986,6 +2010,27 @@ impl OrchestratorService {
                 }
             } else if !parsed_fallback.calls.is_empty() {
                 repair_retry_count = 0; // Reset on successful tool calls
+
+                // Story-002: Check if the text alongside fallback tool calls is
+                // already a complete answer. If so, exit the loop with that text
+                // instead of executing the (unnecessary) tool calls.
+                if let Some(text) = &response.content {
+                    let cleaned = extract_text_without_tool_calls(text);
+                    if is_complete_answer(&cleaned) {
+                        eprintln!(
+                            "[loop-exit] Exiting with complete text response, ignoring {} fallback tool calls",
+                            parsed_fallback.calls.len()
+                        );
+                        return ExecutionResult {
+                            response: Some(cleaned),
+                            usage: total_usage,
+                            iterations,
+                            success: true,
+                            error: None,
+                        };
+                    }
+                }
+
                 // Prompt-based fallback path
                 if let Some(text) = &response.content {
                     let cleaned = extract_text_without_tool_calls(text);
@@ -2192,10 +2237,34 @@ impl OrchestratorService {
 
             // Check iteration limit
             if iterations >= self.config.max_iterations {
-                let error_msg = format!(
-                    "Maximum iterations ({}) reached",
-                    self.config.max_iterations
-                );
+                // Recover last_assistant_text if available (story-004)
+                let (response, success, error_msg, stop_reason) =
+                    if let Some(ref text) = last_assistant_text {
+                        eprintln!(
+                            "[max-iterations] execute: recovering {} chars of accumulated text",
+                            text.len()
+                        );
+                        (
+                            Some(text.clone()),
+                            true,
+                            format!(
+                                "Max iterations ({}) reached but response recovered",
+                                self.config.max_iterations
+                            ),
+                            "max_iterations_with_recovery".to_string(),
+                        )
+                    } else {
+                        (
+                            None,
+                            false,
+                            format!(
+                                "Maximum iterations ({}) reached",
+                                self.config.max_iterations
+                            ),
+                            "max_iterations".to_string(),
+                        )
+                    };
+
                 let _ = tx
                     .send(UnifiedStreamEvent::Error {
                         message: error_msg.clone(),
@@ -2204,14 +2273,14 @@ impl OrchestratorService {
                     .await;
                 let _ = tx
                     .send(UnifiedStreamEvent::Complete {
-                        stop_reason: Some("max_iterations".to_string()),
+                        stop_reason: Some(stop_reason),
                     })
                     .await;
                 return ExecutionResult {
-                    response: None,
+                    response,
                     usage: total_usage,
                     iterations,
-                    success: false,
+                    success,
                     error: Some(error_msg),
                 };
             }
@@ -2478,6 +2547,46 @@ impl OrchestratorService {
                 }
             } else if !parsed_fallback.calls.is_empty() {
                 repair_retry_count = 0; // Reset on successful tool calls
+
+                // Story-003: Check if the text alongside fallback tool calls is
+                // already a complete answer. If so, exit the loop with that text
+                // instead of executing the (unnecessary) tool calls.
+                if let Some(text) = &response.content {
+                    let cleaned = extract_text_without_tool_calls(text);
+                    if is_complete_answer(&cleaned) {
+                        eprintln!(
+                            "[loop-exit] Exiting execute with complete text response, ignoring {} fallback tool calls",
+                            parsed_fallback.calls.len()
+                        );
+
+                        // Emit completion event with special stop_reason
+                        let _ = tx
+                            .send(UnifiedStreamEvent::Complete {
+                                stop_reason: Some("complete_text_exit".to_string()),
+                            })
+                            .await;
+
+                        // Emit usage event
+                        let _ = tx
+                            .send(UnifiedStreamEvent::Usage {
+                                input_tokens: total_usage.input_tokens,
+                                output_tokens: total_usage.output_tokens,
+                                thinking_tokens: total_usage.thinking_tokens,
+                                cache_read_tokens: total_usage.cache_read_tokens,
+                                cache_creation_tokens: total_usage.cache_creation_tokens,
+                            })
+                            .await;
+
+                        return ExecutionResult {
+                            response: Some(cleaned),
+                            usage: total_usage,
+                            iterations,
+                            success: true,
+                            error: None,
+                        };
+                    }
+                }
+
                 // Prompt-based fallback path
                 // Add assistant message with tool call blocks stripped from text
                 // (keeps conversation history clean for subsequent LLM calls)
@@ -5792,6 +5901,79 @@ impl OrchestratorService {
 struct ParsedFallbackCalls {
     calls: Vec<ParsedToolCall>,
     dropped_reasons: Vec<String>,
+}
+
+/// Determine whether an LLM response text constitutes a complete answer.
+///
+/// ADR-001: The heuristic checks:
+///   1. text character count > 200 (using `.chars().count()` for CJK correctness)
+///   2. the text does NOT end with incomplete sentence patterns such as:
+///      - trailing colons, ellipses
+///      - "I will", "Let me", "I'll"
+///      - unclosed code blocks (odd number of ```)
+///      - dangling conjunctions: "and", "but", "or", "then"
+///
+/// Returns true when the text looks like a substantive, complete answer.
+fn is_complete_answer(text: &str) -> bool {
+    let trimmed = text.trim();
+    // Must be > 200 characters (char count for CJK safety)
+    if trimmed.chars().count() <= 200 {
+        return false;
+    }
+
+    // Check for unclosed code blocks (odd count of ```)
+    let backtick_block_count = trimmed.matches("```").count();
+    if backtick_block_count % 2 != 0 {
+        return false;
+    }
+
+    // Get the last non-empty line for trailing-pattern checks
+    let last_line = trimmed.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+    let last_trimmed = last_line.trim();
+    let last_lower = last_trimmed.to_lowercase();
+
+    // Incomplete trailing patterns
+    let incomplete_endings: &[&str] = &[
+        ":", "...", "\u{2026}", // ellipsis unicode
+    ];
+    for pat in incomplete_endings {
+        if last_trimmed.ends_with(pat) {
+            return false;
+        }
+    }
+
+    // Intent phrases that suggest the model is about to do something, not done
+    let intent_prefixes: &[&str] = &[
+        "i will",
+        "i'll",
+        "let me",
+        "i am going to",
+        "i'm going to",
+        "next i will",
+        "next, i will",
+        "now i will",
+        "now i'll",
+        "now let me",
+    ];
+    for prefix in intent_prefixes {
+        if last_lower.ends_with(prefix) || last_lower.ends_with(&format!("{prefix},")) {
+            return false;
+        }
+    }
+
+    // Dangling conjunctions at end of last line
+    let dangling: &[&str] = &["and", "but", "or", "then", "and,", "but,", "or,", "then,"];
+    for word in dangling {
+        if last_lower.ends_with(word) {
+            // Ensure it's a whole word — check that the char before is whitespace or start
+            let prefix_len = last_lower.len() - word.len();
+            if prefix_len == 0 || last_lower.as_bytes().get(prefix_len - 1) == Some(&b' ') {
+                return false;
+            }
+        }
+    }
+
+    true
 }
 
 /// Detect when the model describes tool usage intent in text without actually invoking tools.
