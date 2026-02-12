@@ -344,10 +344,31 @@ impl Database {
                 name TEXT NOT NULL,
                 kind TEXT NOT NULL,
                 line_number INTEGER NOT NULL DEFAULT 0,
+                parent_symbol TEXT,
+                signature TEXT,
+                doc_comment TEXT,
+                start_line INTEGER NOT NULL DEFAULT 0,
+                end_line INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (file_index_id) REFERENCES file_index(id) ON DELETE CASCADE
             )",
             [],
         )?;
+
+        // Migration: add new columns to existing file_symbols tables that lack them.
+        // SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN, so we
+        // check column existence via PRAGMA and add only missing columns.
+        {
+            let has_parent = Self::table_has_column(&conn, "file_symbols", "parent_symbol");
+            if !has_parent {
+                let _ = conn.execute_batch(
+                    "ALTER TABLE file_symbols ADD COLUMN parent_symbol TEXT;
+                     ALTER TABLE file_symbols ADD COLUMN signature TEXT;
+                     ALTER TABLE file_symbols ADD COLUMN doc_comment TEXT;
+                     ALTER TABLE file_symbols ADD COLUMN start_line INTEGER NOT NULL DEFAULT 0;
+                     ALTER TABLE file_symbols ADD COLUMN end_line INTEGER NOT NULL DEFAULT 0;"
+                );
+            }
+        }
 
         // Indexes for file_index queries
         conn.execute(
@@ -376,6 +397,21 @@ impl Database {
         )?;
 
         Ok(())
+    }
+
+    /// Check whether a table has a given column (via PRAGMA table_info).
+    fn table_has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
+        let sql = format!("PRAGMA table_info({})", table);
+        if let Ok(mut stmt) = conn.prepare(&sql) {
+            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(1)) {
+                for row in rows.flatten() {
+                    if row == column {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// Get a connection from the pool

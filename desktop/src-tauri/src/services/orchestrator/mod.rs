@@ -11,6 +11,7 @@ mod adaptive_scope;
 pub mod background_indexer;
 pub mod index_manager;
 pub mod index_store;
+pub mod tree_sitter_parser;
 mod service;
 
 pub use service::{
