@@ -49,114 +49,283 @@
   },
 
   "llm": {
-    "title": "LLM后端配置",
-    "description": "配置用于代码生成的AI提供商。",
-
-    "backend": {
-      "label": "后端",
-      "claudeCode": "Claude Code（推荐）",
-      "claudeApi": "Claude API",
-      "openai": "OpenAI",
-      "deepseek": "DeepSeek",
-      "ollama": "Ollama（本地）"
-    },
+    "title": "LLM后端",
+    "description": "选择你偏好的LLM提供商并配置API访问。",
 
     "provider": {
       "label": "提供商"
     },
 
-    "model": {
-      "label": "模型",
-      "placeholder": "选择或输入模型名称"
+    "providers": {
+      "claude-code": {
+        "name": "Claude Code (Claude Max)",
+        "description": "使用 Claude Code 作为LLM后端。无需API密钥。"
+      },
+      "claude-api": {
+        "name": "Claude API",
+        "description": "直接访问Anthropic Claude API。"
+      },
+      "openai": {
+        "name": "OpenAI",
+        "description": "OpenAI GPT系列模型 (GPT-4, GPT-4o 等)。"
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "description": "DeepSeek代码生成模型。"
+      },
+      "glm": {
+        "name": "GLM (智谱AI)",
+        "description": "智谱AI GLM系列模型。"
+      },
+      "qwen": {
+        "name": "Qwen (DashScope)",
+        "description": "阿里云通义千问 Qwen系列模型。"
+      },
+      "ollama": {
+        "name": "Ollama (本地)",
+        "description": "使用Ollama在本地运行模型。"
+      }
     },
 
     "apiKey": {
       "label": "API密钥",
+      "title": "{{name}} 的API密钥",
       "placeholder": "输入你的API密钥",
-      "description": "你的API密钥将被安全存储，绝不会被共享。"
+      "placeholderConfigured": "API密钥已配置（点击眼睛图标查看）",
+      "configured": "已配置",
+      "required": "需要API密钥",
+      "save": "保存",
+      "saving": "保存中...",
+      "remove": "移除",
+      "loading": "正在加载已保存的API密钥...",
+      "saveSuccess": "API密钥保存成功",
+      "saveError": "保存API密钥失败",
+      "removeSuccess": "API密钥已移除",
+      "removeError": "移除API密钥失败"
+    },
+
+    "model": {
+      "label": "模型",
+      "providerDefault": "使用提供商默认模型",
+      "customModel": "自定义模型",
+      "customPrefix": "自定义: {{model}}",
+      "add": "添加",
+      "removeCustom": "移除自定义模型",
+      "help": "从下拉菜单中选择内置模型，或添加自定义模型。",
+      "placeholders": {
+        "claude-api": "例如 claude-3-opus-20240229",
+        "openai": "例如 gpt-4o",
+        "deepseek": "例如 deepseek-coder",
+        "glm": "例如 glm-4-flash-250414",
+        "qwen": "例如 qwen-plus",
+        "ollama": "例如 codellama:13b",
+        "default": "模型名称"
+      }
+    },
+
+    "contextTurns": {
+      "label": "对话上下文轮次",
+      "unlimited": "无限制",
+      "help": "简单模式的独立后端保留最近N轮对话作为上下文。"
+    },
+
+    "contextManagement": {
+      "label": "上下文管理",
+      "compaction": "启用自动上下文压缩",
+      "compactionHelp": "当对话上下文过大时，自动摘要较旧的消息以保持在令牌预算内。这可以防止长时间分析任务中因上下文溢出导致的执行失败。"
+    },
+
+    "streaming": {
+      "label": "流式输出",
+      "subAgentEvents": "显示子代理进度事件",
+      "subAgentEventsHelp": "显示委托探索和分析阶段的结构化开始/结束事件。",
+      "reasoningTraces": "显示模型推理/思考轨迹",
+      "reasoningTracesHelp": "默认关闭。仅在调试详细模型行为时启用。",
+      "enableThinking": "启用模型思考/推理",
+      "enableThinkingHelp": "为支持的模型（Qwen3、QwQ、DeepSeek-R1等）启用扩展思考。模型将在响应前逐步推理问题。"
+    },
+
+    "searchProvider": {
+      "label": "网络搜索提供商",
+      "duckduckgo": "DuckDuckGo（无需API密钥）",
+      "tavily": "Tavily（需要API密钥）",
+      "brave": "Brave搜索（需要API密钥）",
+      "help": "WebSearch工具的搜索提供商。Tavily和Brave需要API密钥（在上方相应的提供商名称下配置）。"
     }
   },
 
   "agents": {
     "title": "代理配置",
-    "description": "配置用于代码生成的执行代理。",
+    "description": "配置执行代理及其选择策略。",
 
     "name": "代理名称",
+    "namePlaceholder": "例如 my-agent",
     "command": "命令",
+    "commandPlaceholder": "例如 agent-cli",
+    "commandHelp": "调用此代理的CLI命令",
     "enabled": "启用",
     "default": "默认",
+    "disabled": "（已禁用）",
+    "commandLabel": "命令：",
+    "setDefault": "设为默认",
     "addAgent": "添加代理",
     "removeAgent": "移除代理",
+    "configuredAgents": "已配置的代理",
+    "emptyState": "未配置代理。添加一个代理以开始使用。",
 
     "selection": {
-      "title": "代理选择模式",
-      "smart": "智能选择",
-      "smartDescription": "自动为每个任务选择最佳代理",
-      "preferDefault": "优先默认",
-      "preferDefaultDescription": "除非覆盖，否则使用默认代理",
-      "manual": "手动",
-      "manualDescription": "为每个故事手动选择代理"
+      "title": "代理选择策略",
+      "smart": "智能（根据任务AI自动选择）",
+      "smartDescription": "AI将为每个任务类型选择最佳代理。",
+      "preferDefault": "优先使用默认代理",
+      "preferDefaultDescription": "除非被覆盖，否则始终使用默认代理。",
+      "manual": "手动选择",
+      "manualDescription": "系统将提示你为每个任务选择代理。"
+    },
+
+    "dialog": {
+      "addTitle": "添加代理",
+      "editTitle": "编辑代理",
+      "deleteTitle": "删除代理",
+      "deleteConfirm": "确定要删除「{{name}}」吗？此操作无法撤销。",
+      "cancel": "取消",
+      "delete": "删除",
+      "add": "添加",
+      "save": "保存",
+      "close": "关闭"
     }
   },
 
   "quality": {
-    "title": "质量门禁配置",
-    "description": "配置每个故事完成后运行的质量检查。",
+    "title": "质量门禁",
+    "description": "配置在故事标记完成前必须通过的质量检查。",
+
+    "enabledGates": "已启用的门禁",
 
     "typecheck": {
       "label": "类型检查",
-      "description": "运行TypeScript类型检查"
+      "description": "在故事完成前运行类型检查（mypy、pyright、tsc）。"
     },
     "test": {
       "label": "测试",
-      "description": "运行测试套件"
+      "description": "运行测试（pytest、jest、npm test）以验证功能。"
     },
     "lint": {
       "label": "代码检查",
-      "description": "运行代码检查工具"
+      "description": "运行代码检查（ruff、eslint）以确保代码质量。"
     },
     "custom": {
       "label": "自定义脚本",
-      "description": "运行自定义验证脚本"
+      "description": "运行自定义质量检查脚本。"
     },
+
     "customScript": {
-      "label": "自定义脚本命令",
-      "placeholder": "npm run validate"
+      "label": "自定义脚本",
+      "placeholder": "例如 ./scripts/quality-check.sh",
+      "help": "输入要运行的脚本或命令。退出代码0表示成功。"
     },
-    "maxRetries": {
-      "label": "最大重试次数",
-      "description": "质量门禁失败时的最大重试次数"
+
+    "retry": {
+      "label": "重试设置",
+      "maxRetries": "最大重试次数",
+      "help": "质量门禁失败时重试故事的次数（0-10）。"
+    },
+
+    "summary": {
+      "label": "摘要",
+      "noGates": "未启用质量门禁。故事将在没有验证的情况下标记为完成。",
+      "mustPass": "故事必须通过{{gates}}才能被视为完成。{{retryMessage}}",
+      "retryMessage": "如果门禁失败，代理将最多重试{{count}}次。",
+      "retryMessage_plural": "如果门禁失败，代理将最多重试{{count}}次。",
+      "noRetries": "重试已禁用。",
+      "typecheck": "类型检查",
+      "test": "测试",
+      "lint": "代码检查",
+      "custom": "自定义脚本"
     }
   },
 
   "phases": {
-    "title": "阶段代理配置",
-    "description": "配置不同执行阶段使用的代理。",
+    "title": "阶段代理分配",
+    "description": "为每个执行阶段分配默认代理和备选链。",
 
-    "planning": "规划阶段",
-    "implementation": "实现阶段",
-    "review": "审查阶段"
+    "columns": {
+      "phase": "阶段",
+      "defaultAgent": "默认代理",
+      "fallbackChain": "备选链"
+    },
+
+    "planning": {
+      "name": "规划",
+      "description": "PRD生成和故事创建"
+    },
+    "implementation": {
+      "name": "实现",
+      "description": "代码生成和功能开发"
+    },
+    "retry": {
+      "name": "重试",
+      "description": "修复失败的质量门禁"
+    },
+    "refactor": {
+      "name": "重构",
+      "description": "代码重构和清理"
+    },
+    "review": {
+      "name": "审查",
+      "description": "代码审查和验证"
+    },
+
+    "fallback": {
+      "title": "备选链配置",
+      "help": "如果默认代理失败，系统将按顺序尝试备选链中的代理直到成功。",
+      "noFallbacks": "未配置备选",
+      "addFallback": "+ 添加备选代理...",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "remove": "移除"
+    },
+
+    "info": {
+      "title": "阶段分配工作原理",
+      "description": "每个执行阶段可以分配一个默认代理。如果该代理失败或不可用，系统将按顺序尝试备选链中的代理。这允许具有优雅降级的稳健多代理编排。"
+    }
   },
 
   "importExport": {
-    "title": "导入/导出设置",
-    "description": "备份或恢复你的设置。",
+    "title": "导入和导出",
+    "description": "备份你的设置或将其转移到另一个安装。",
 
     "export": {
       "title": "导出设置",
-      "button": "导出",
-      "description": "将当前设置下载为JSON文件。"
+      "description": "将当前设置下载为JSON文件以进行备份或转移。",
+      "button": "导出设置",
+      "exporting": "导出中...",
+      "success": "设置导出成功",
+      "error": "导出设置失败。请重试。"
     },
     "import": {
       "title": "导入设置",
-      "button": "导入",
-      "description": "上传设置文件以恢复配置。"
+      "description": "从之前导出的JSON文件中导入设置。",
+      "button": "选择文件",
+      "dialogTitle": "导入设置",
+      "dialogDescription": "这将覆盖你当前的设置。确定要继续吗？",
+      "preview": "设置预览",
+      "cancel": "取消",
+      "importButton": "导入",
+      "importing": "导入中...",
+      "close": "关闭",
+      "success": "设置导入成功",
+      "error": "导入设置失败。请重试。",
+      "invalidFormat": "无效的设置文件格式。需要 \"version\" 和 \"settings\" 字段。",
+      "parseError": "解析设置文件失败。请确保它是有效的JSON。"
     },
     "reset": {
       "title": "重置为默认",
-      "button": "重置",
-      "description": "将所有设置重置为默认值。",
-      "confirm": "确定要将所有设置重置为默认值吗？"
+      "description": "这将把所有设置重置为默认值。此操作无法撤销。",
+      "button": "重置所有设置",
+      "success": "设置已重置为默认值",
+      "error": "重置设置失败。请重试。"
     }
   }
 }

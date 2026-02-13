@@ -7,12 +7,12 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { ChevronDownIcon, Cross2Icon } from '@radix-ui/react-icons';
+import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
 
 interface PhaseConfig {
   id: string;
-  name: string;
-  description: string;
+  i18nKey: string;
   defaultAgent: string;
   fallbackChain: string[];
 }
@@ -20,42 +20,38 @@ interface PhaseConfig {
 const defaultPhases: PhaseConfig[] = [
   {
     id: 'planning',
-    name: 'Planning',
-    description: 'PRD generation and story creation',
+    i18nKey: 'planning',
     defaultAgent: 'codex',
     fallbackChain: ['claude-code'],
   },
   {
     id: 'implementation',
-    name: 'Implementation',
-    description: 'Code generation and feature development',
+    i18nKey: 'implementation',
     defaultAgent: 'claude-code',
     fallbackChain: ['codex', 'aider'],
   },
   {
     id: 'retry',
-    name: 'Retry',
-    description: 'Fixing failed quality gates',
+    i18nKey: 'retry',
     defaultAgent: 'claude-code',
     fallbackChain: ['aider'],
   },
   {
     id: 'refactor',
-    name: 'Refactor',
-    description: 'Code refactoring and cleanup',
+    i18nKey: 'refactor',
     defaultAgent: 'aider',
     fallbackChain: ['claude-code'],
   },
   {
     id: 'review',
-    name: 'Review',
-    description: 'Code review and validation',
+    i18nKey: 'review',
     defaultAgent: 'claude-code',
     fallbackChain: ['codex'],
   },
 ];
 
 export function PhaseAgentSection() {
+  const { t } = useTranslation('settings');
   const { agents } = useSettingsStore();
   const [phases, setPhases] = useState<PhaseConfig[]>(defaultPhases);
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
@@ -115,10 +111,10 @@ export function PhaseAgentSection() {
     <div className="space-y-8">
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          Phase Agent Assignment
+          {t('phases.title')}
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Assign default agents and fallback chains to each execution phase.
+          {t('phases.description')}
         </p>
       </div>
 
@@ -133,9 +129,9 @@ export function PhaseAgentSection() {
               'text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'
             )}
           >
-            <div className="col-span-3">Phase</div>
-            <div className="col-span-4">Default Agent</div>
-            <div className="col-span-5">Fallback Chain</div>
+            <div className="col-span-3">{t('phases.columns.phase')}</div>
+            <div className="col-span-4">{t('phases.columns.defaultAgent')}</div>
+            <div className="col-span-5">{t('phases.columns.fallbackChain')}</div>
           </div>
 
           {/* Rows */}
@@ -164,10 +160,10 @@ export function PhaseAgentSection() {
                       />
                       <div>
                         <div className="font-medium text-gray-900 dark:text-white">
-                          {phase.name}
+                          {t(`phases.${phase.i18nKey}.name`)}
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {phase.description}
+                          {t(`phases.${phase.i18nKey}.description`)}
                         </div>
                       </div>
                     </button>
@@ -211,7 +207,7 @@ export function PhaseAgentSection() {
                         ))
                       ) : (
                         <span className="text-sm text-gray-400 dark:text-gray-500">
-                          No fallbacks configured
+                          {t('phases.fallback.noFallbacks')}
                         </span>
                       )}
                     </div>
@@ -230,10 +226,10 @@ export function PhaseAgentSection() {
                     <div className="ml-6 space-y-4">
                       <div>
                         <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Fallback Chain Configuration
+                          {t('phases.fallback.title')}
                         </h4>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                          If the default agent fails, agents will be tried in order until one succeeds.
+                          {t('phases.fallback.help')}
                         </p>
 
                         {/* Fallback List */}
@@ -262,9 +258,9 @@ export function PhaseAgentSection() {
                                     'hover:bg-gray-100 dark:hover:bg-gray-700',
                                     'disabled:opacity-30 disabled:cursor-not-allowed'
                                   )}
-                                  title="Move up"
+                                  title={t('phases.fallback.moveUp')}
                                 >
-                                  <span className="sr-only">Move up</span>
+                                  <span className="sr-only">{t('phases.fallback.moveUp')}</span>
                                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <polyline points="18 15 12 9 6 15" />
                                   </svg>
@@ -277,9 +273,9 @@ export function PhaseAgentSection() {
                                     'hover:bg-gray-100 dark:hover:bg-gray-700',
                                     'disabled:opacity-30 disabled:cursor-not-allowed'
                                   )}
-                                  title="Move down"
+                                  title={t('phases.fallback.moveDown')}
                                 >
-                                  <span className="sr-only">Move down</span>
+                                  <span className="sr-only">{t('phases.fallback.moveDown')}</span>
                                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <polyline points="6 9 12 15 18 9" />
                                   </svg>
@@ -290,7 +286,7 @@ export function PhaseAgentSection() {
                                     'p-1 rounded text-red-500 hover:text-red-700',
                                     'hover:bg-red-50 dark:hover:bg-red-900/20'
                                   )}
-                                  title="Remove"
+                                  title={t('phases.fallback.remove')}
                                 >
                                   <Cross2Icon className="w-4 h-4" />
                                 </button>
@@ -316,7 +312,7 @@ export function PhaseAgentSection() {
                               'focus:outline-none focus:ring-2 focus:ring-primary-500'
                             )}
                           >
-                            <option value="">+ Add fallback agent...</option>
+                            <option value="">{t('phases.fallback.addFallback')}</option>
                             {enabledAgents
                               .filter(
                                 (a) =>
@@ -350,12 +346,10 @@ export function PhaseAgentSection() {
           )}
         >
           <h4 className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">
-            How Phase Assignment Works
+            {t('phases.info.title')}
           </h4>
           <p className="text-sm text-blue-700 dark:text-blue-400">
-            Each execution phase can be assigned a default agent. If that agent fails or is
-            unavailable, the system will try agents from the fallback chain in order. This
-            allows for robust multi-agent orchestration with graceful degradation.
+            {t('phases.info.description')}
           </p>
         </div>
       </section>

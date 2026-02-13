@@ -49,114 +49,283 @@
   },
 
   "llm": {
-    "title": "LLMバックエンド設定",
-    "description": "コード生成用のAIプロバイダーを設定します。",
-
-    "backend": {
-      "label": "バックエンド",
-      "claudeCode": "Claude Code（推奨）",
-      "claudeApi": "Claude API",
-      "openai": "OpenAI",
-      "deepseek": "DeepSeek",
-      "ollama": "Ollama（ローカル）"
-    },
+    "title": "LLMバックエンド",
+    "description": "お好みのLLMプロバイダーを選択してAPIアクセスを構成します。",
 
     "provider": {
       "label": "プロバイダー"
     },
 
-    "model": {
-      "label": "モデル",
-      "placeholder": "モデル名を選択または入力"
+    "providers": {
+      "claude-code": {
+        "name": "Claude Code (Claude Max)",
+        "description": "Claude CodeをLLMバックエンドとして使用。APIキー不要。"
+      },
+      "claude-api": {
+        "name": "Claude API",
+        "description": "Anthropic Claude APIへの直接アクセス。"
+      },
+      "openai": {
+        "name": "OpenAI",
+        "description": "OpenAI GPTモデル（GPT-4、GPT-4oなど）。"
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "description": "コード生成用DeepSeekモデル。"
+      },
+      "glm": {
+        "name": "GLM (ZhipuAI)",
+        "description": "智谱AI GLMモデル。"
+      },
+      "qwen": {
+        "name": "Qwen (DashScope)",
+        "description": "阿里雲通義千問 Qwenモデル。"
+      },
+      "ollama": {
+        "name": "Ollama (ローカル)",
+        "description": "Ollamaでモデルをローカル実行。"
+      }
     },
 
     "apiKey": {
       "label": "APIキー",
+      "title": "{{name}}のAPIキー",
       "placeholder": "APIキーを入力",
-      "description": "APIキーは安全に保存され、共有されることはありません。"
+      "placeholderConfigured": "APIキーは設定済みです（目のアイコンをクリックして表示）",
+      "configured": "設定済み",
+      "required": "APIキーが必要",
+      "save": "保存",
+      "saving": "保存中...",
+      "remove": "削除",
+      "loading": "保存されたAPIキーを読み込み中...",
+      "saveSuccess": "APIキーの保存に成功しました",
+      "saveError": "APIキーの保存に失敗しました",
+      "removeSuccess": "APIキーを削除しました",
+      "removeError": "APIキーの削除に失敗しました"
+    },
+
+    "model": {
+      "label": "モデル",
+      "providerDefault": "プロバイダーのデフォルトを使用",
+      "customModel": "カスタムモデル",
+      "customPrefix": "カスタム: {{model}}",
+      "add": "追加",
+      "removeCustom": "カスタムモデルを削除",
+      "help": "ドロップダウンから組み込みモデルを選択するか、カスタムモデルを追加してください。",
+      "placeholders": {
+        "claude-api": "例: claude-3-opus-20240229",
+        "openai": "例: gpt-4o",
+        "deepseek": "例: deepseek-coder",
+        "glm": "例: glm-4-flash-250414",
+        "qwen": "例: qwen-plus",
+        "ollama": "例: codellama:13b",
+        "default": "モデル名"
+      }
+    },
+
+    "contextTurns": {
+      "label": "会話コンテキストターン数",
+      "unlimited": "無制限",
+      "help": "シンプルモードのスタンドアロンバックエンドは最新N回の会話ターンをコンテキストとして保持します。"
+    },
+
+    "contextManagement": {
+      "label": "コンテキスト管理",
+      "compaction": "自動コンテキスト圧縮を有効にする",
+      "compactionHelp": "会話コンテキストが大きくなりすぎた場合、古いメッセージを自動的に要約してトークン予算内に収めます。長時間の分析タスクでのコンテキストオーバーフローによる実行失敗を防ぎます。"
+    },
+
+    "streaming": {
+      "label": "ストリーミング出力",
+      "subAgentEvents": "サブエージェント進捗イベントを表示",
+      "subAgentEventsHelp": "委任された探索・分析フェーズの構造化された開始/終了イベントを表示します。",
+      "reasoningTraces": "モデルの推論/思考トレースを表示",
+      "reasoningTracesHelp": "デフォルトはオフ。詳細なモデル動作をデバッグする場合のみ有効にしてください。",
+      "enableThinking": "モデルの思考/推論を有効にする",
+      "enableThinkingHelp": "対応モデル（Qwen3、QwQ、DeepSeek-R1など）で拡張思考を有効にします。モデルは応答前に段階的に問題を推論します。"
+    },
+
+    "searchProvider": {
+      "label": "Web検索プロバイダー",
+      "duckduckgo": "DuckDuckGo（APIキー不要）",
+      "tavily": "Tavily（APIキーが必要）",
+      "brave": "Brave Search（APIキーが必要）",
+      "help": "WebSearchツールの検索プロバイダー。TavilyとBraveはAPIキーが必要です（上記のそれぞれのプロバイダー名で設定してください）。"
     }
   },
 
   "agents": {
     "title": "エージェント設定",
-    "description": "コード生成用の実行エージェントを設定します。",
+    "description": "実行エージェントとその選択戦略を設定します。",
 
     "name": "エージェント名",
+    "namePlaceholder": "例: my-agent",
     "command": "コマンド",
+    "commandPlaceholder": "例: agent-cli",
+    "commandHelp": "このエージェントを呼び出すCLIコマンド",
     "enabled": "有効",
     "default": "デフォルト",
+    "disabled": "（無効）",
+    "commandLabel": "コマンド:",
+    "setDefault": "デフォルトに設定",
     "addAgent": "エージェントを追加",
     "removeAgent": "エージェントを削除",
+    "configuredAgents": "設定済みエージェント",
+    "emptyState": "エージェントが設定されていません。エージェントを追加して開始してください。",
 
     "selection": {
-      "title": "エージェント選択モード",
-      "smart": "スマート選択",
-      "smartDescription": "各タスクに最適なエージェントを自動選択",
-      "preferDefault": "デフォルト優先",
-      "preferDefaultDescription": "オーバーライドしない限りデフォルトエージェントを使用",
-      "manual": "手動",
-      "manualDescription": "各ストーリーのエージェントを手動で選択"
+      "title": "エージェント選択戦略",
+      "smart": "スマート（タスクに基づきAIが選択）",
+      "smartDescription": "AIが各タスクタイプに最適なエージェントを選択します。",
+      "preferDefault": "デフォルトエージェントを優先",
+      "preferDefaultDescription": "オーバーライドされない限り、常にデフォルトエージェントを使用します。",
+      "manual": "手動選択",
+      "manualDescription": "各タスクのエージェントを手動で選択するよう求められます。"
+    },
+
+    "dialog": {
+      "addTitle": "エージェントを追加",
+      "editTitle": "エージェントを編集",
+      "deleteTitle": "エージェントを削除",
+      "deleteConfirm": "「{{name}}」を削除しますか？この操作は元に戻せません。",
+      "cancel": "キャンセル",
+      "delete": "削除",
+      "add": "追加",
+      "save": "保存",
+      "close": "閉じる"
     }
   },
 
   "quality": {
-    "title": "品質ゲート設定",
-    "description": "各ストーリー完了後に実行する品質チェックを設定します。",
+    "title": "品質ゲート",
+    "description": "ストーリーが完了とマークされる前に合格する必要がある品質チェックを設定します。",
+
+    "enabledGates": "有効なゲート",
 
     "typecheck": {
       "label": "型チェック",
-      "description": "TypeScript型チェックを実行"
+      "description": "ストーリー完了前に型チェック（mypy、pyright、tsc）を実行します。"
     },
     "test": {
       "label": "テスト",
-      "description": "テストスイートを実行"
+      "description": "機能を検証するためにテスト（pytest、jest、npm test）を実行します。"
     },
     "lint": {
       "label": "リント",
-      "description": "コードリンターを実行"
+      "description": "コード品質を確保するためにリント（ruff、eslint）を実行します。"
     },
     "custom": {
       "label": "カスタムスクリプト",
-      "description": "カスタム検証スクリプトを実行"
+      "description": "カスタム品質チェックスクリプトを実行します。"
     },
+
     "customScript": {
-      "label": "カスタムスクリプトコマンド",
-      "placeholder": "npm run validate"
+      "label": "カスタムスクリプト",
+      "placeholder": "例: ./scripts/quality-check.sh",
+      "help": "実行するスクリプトまたはコマンドを入力してください。終了コード0は成功を意味します。"
     },
-    "maxRetries": {
-      "label": "最大リトライ回数",
-      "description": "品質ゲート失敗時の最大リトライ回数"
+
+    "retry": {
+      "label": "リトライ設定",
+      "maxRetries": "最大リトライ回数",
+      "help": "品質ゲート失敗時にストーリーをリトライする回数（0-10）。"
+    },
+
+    "summary": {
+      "label": "概要",
+      "noGates": "品質ゲートが有効になっていません。ストーリーは検証なしで完了とマークされます。",
+      "mustPass": "ストーリーは完了と見なされるために{{gates}}に合格する必要があります。{{retryMessage}}",
+      "retryMessage": "ゲートが失敗した場合、エージェントは最大{{count}}回リトライします。",
+      "retryMessage_plural": "ゲートが失敗した場合、エージェントは最大{{count}}回リトライします。",
+      "noRetries": "リトライは無効です。",
+      "typecheck": "型チェック",
+      "test": "テスト",
+      "lint": "リント",
+      "custom": "カスタムスクリプト"
     }
   },
 
   "phases": {
-    "title": "フェーズエージェント設定",
-    "description": "異なる実行フェーズを担当するエージェントを設定します。",
+    "title": "フェーズエージェント割り当て",
+    "description": "各実行フェーズにデフォルトエージェントとフォールバックチェーンを割り当てます。",
 
-    "planning": "計画フェーズ",
-    "implementation": "実装フェーズ",
-    "review": "レビューフェーズ"
+    "columns": {
+      "phase": "フェーズ",
+      "defaultAgent": "デフォルトエージェント",
+      "fallbackChain": "フォールバックチェーン"
+    },
+
+    "planning": {
+      "name": "計画",
+      "description": "PRD生成とストーリー作成"
+    },
+    "implementation": {
+      "name": "実装",
+      "description": "コード生成と機能開発"
+    },
+    "retry": {
+      "name": "リトライ",
+      "description": "失敗した品質ゲートの修正"
+    },
+    "refactor": {
+      "name": "リファクタリング",
+      "description": "コードのリファクタリングとクリーンアップ"
+    },
+    "review": {
+      "name": "レビュー",
+      "description": "コードレビューと検証"
+    },
+
+    "fallback": {
+      "title": "フォールバックチェーン設定",
+      "help": "デフォルトエージェントが失敗した場合、成功するまで順番にエージェントが試行されます。",
+      "noFallbacks": "フォールバック未設定",
+      "addFallback": "+ フォールバックエージェントを追加...",
+      "moveUp": "上に移動",
+      "moveDown": "下に移動",
+      "remove": "削除"
+    },
+
+    "info": {
+      "title": "フェーズ割り当ての仕組み",
+      "description": "各実行フェーズにはデフォルトエージェントを割り当てることができます。そのエージェントが失敗または利用不可の場合、システムはフォールバックチェーンのエージェントを順番に試行します。これにより、グレースフルデグラデーションを備えた堅牢なマルチエージェント編成が可能になります。"
+    }
   },
 
   "importExport": {
-    "title": "インポート/エクスポート設定",
-    "description": "設定のバックアップまたは復元。",
+    "title": "インポート＆エクスポート",
+    "description": "設定をバックアップするか、別のインストールに転送します。",
 
     "export": {
       "title": "設定をエクスポート",
-      "button": "エクスポート",
-      "description": "現在の設定をJSONファイルとしてダウンロード。"
+      "description": "バックアップまたは転送のために現在の設定をJSONファイルとしてダウンロードします。",
+      "button": "設定をエクスポート",
+      "exporting": "エクスポート中...",
+      "success": "設定のエクスポートに成功しました",
+      "error": "設定のエクスポートに失敗しました。もう一度お試しください。"
     },
     "import": {
       "title": "設定をインポート",
-      "button": "インポート",
-      "description": "設定ファイルをアップロードして設定を復元。"
+      "description": "以前にエクスポートしたJSONファイルから設定をインポートします。",
+      "button": "ファイルを選択",
+      "dialogTitle": "設定をインポート",
+      "dialogDescription": "現在の設定が上書きされます。続行しますか？",
+      "preview": "設定プレビュー",
+      "cancel": "キャンセル",
+      "importButton": "インポート",
+      "importing": "インポート中...",
+      "close": "閉じる",
+      "success": "設定のインポートに成功しました",
+      "error": "設定のインポートに失敗しました。もう一度お試しください。",
+      "invalidFormat": "無効な設定ファイル形式です。\"version\"と\"settings\"フィールドが必要です。",
+      "parseError": "設定ファイルの解析に失敗しました。有効なJSONであることを確認してください。"
     },
     "reset": {
       "title": "デフォルトにリセット",
-      "button": "リセット",
-      "description": "すべての設定をデフォルト値にリセット。",
-      "confirm": "すべての設定をデフォルトにリセットしますか？"
+      "description": "すべての設定がデフォルト値にリセットされます。この操作は元に戻せません。",
+      "button": "すべての設定をリセット",
+      "success": "設定をデフォルトにリセットしました",
+      "error": "設定のリセットに失敗しました。もう一度お試しください。"
     }
   }
 }

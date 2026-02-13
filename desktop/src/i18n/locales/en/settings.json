@@ -49,114 +49,283 @@
   },
 
   "llm": {
-    "title": "LLM Backend Configuration",
-    "description": "Configure the AI provider for code generation.",
-
-    "backend": {
-      "label": "Backend",
-      "claudeCode": "Claude Code (Recommended)",
-      "claudeApi": "Claude API",
-      "openai": "OpenAI",
-      "deepseek": "DeepSeek",
-      "ollama": "Ollama (Local)"
-    },
+    "title": "LLM Backend",
+    "description": "Select your preferred LLM provider and configure API access.",
 
     "provider": {
       "label": "Provider"
     },
 
-    "model": {
-      "label": "Model",
-      "placeholder": "Select or enter model name"
+    "providers": {
+      "claude-code": {
+        "name": "Claude Code (Claude Max)",
+        "description": "Use Claude Code as LLM backend. No API key required."
+      },
+      "claude-api": {
+        "name": "Claude API",
+        "description": "Direct Anthropic Claude API access."
+      },
+      "openai": {
+        "name": "OpenAI",
+        "description": "OpenAI GPT models (GPT-4, GPT-4o, etc.)."
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "description": "DeepSeek models for code generation."
+      },
+      "glm": {
+        "name": "GLM (ZhipuAI)",
+        "description": "\u667a\u8c31AI GLM models."
+      },
+      "qwen": {
+        "name": "Qwen (DashScope)",
+        "description": "\u963f\u91cc\u4e91\u901a\u4e49\u5343\u95ee Qwen models."
+      },
+      "ollama": {
+        "name": "Ollama (Local)",
+        "description": "Run models locally with Ollama."
+      }
     },
 
     "apiKey": {
       "label": "API Key",
+      "title": "API Key for {{name}}",
       "placeholder": "Enter your API key",
-      "description": "Your API key will be stored securely and never shared."
+      "placeholderConfigured": "API key is configured (click eye icon to reveal)",
+      "configured": "Configured",
+      "required": "API Key Required",
+      "save": "Save",
+      "saving": "Saving...",
+      "remove": "Remove",
+      "loading": "Loading saved API key...",
+      "saveSuccess": "API key saved successfully",
+      "saveError": "Failed to save API key",
+      "removeSuccess": "API key removed",
+      "removeError": "Failed to remove API key"
+    },
+
+    "model": {
+      "label": "Model",
+      "providerDefault": "Use provider default",
+      "customModel": "Custom model",
+      "customPrefix": "Custom: {{model}}",
+      "add": "Add",
+      "removeCustom": "Remove custom model",
+      "help": "Choose a built-in model from the dropdown, or add your own custom model.",
+      "placeholders": {
+        "claude-api": "e.g., claude-3-opus-20240229",
+        "openai": "e.g., gpt-4o",
+        "deepseek": "e.g., deepseek-coder",
+        "glm": "e.g., glm-4-flash-250414",
+        "qwen": "e.g., qwen-plus",
+        "ollama": "e.g., codellama:13b",
+        "default": "Model name"
+      }
+    },
+
+    "contextTurns": {
+      "label": "Conversation Context Turns",
+      "unlimited": "Unlimited",
+      "help": "Simple mode standalone backends keep the latest N conversation turns as context."
+    },
+
+    "contextManagement": {
+      "label": "Context Management",
+      "compaction": "Enable automatic context compaction",
+      "compactionHelp": "When the conversation context grows too large, automatically summarize older messages to stay within the token budget. This prevents execution failures from context overflow during long analysis tasks."
+    },
+
+    "streaming": {
+      "label": "Streaming Output",
+      "subAgentEvents": "Show sub-agent progress events",
+      "subAgentEventsHelp": "Display structured start/end events for delegated exploration and analysis phases.",
+      "reasoningTraces": "Show model reasoning/thinking traces",
+      "reasoningTracesHelp": "Off by default. Enable only for debugging verbose model behavior.",
+      "enableThinking": "Enable model thinking/reasoning",
+      "enableThinkingHelp": "Enable extended thinking for supported models (Qwen3, QwQ, DeepSeek-R1, etc.). The model will reason through problems step-by-step before responding."
+    },
+
+    "searchProvider": {
+      "label": "Web Search Provider",
+      "duckduckgo": "DuckDuckGo (No API key required)",
+      "tavily": "Tavily (API key required)",
+      "brave": "Brave Search (API key required)",
+      "help": "Search provider for the WebSearch tool. Tavily and Brave require API keys (configure above under their respective provider names)."
     }
   },
 
   "agents": {
     "title": "Agent Configuration",
-    "description": "Configure execution agents for code generation.",
+    "description": "Configure execution agents and their selection strategy.",
 
     "name": "Agent Name",
+    "namePlaceholder": "e.g., my-agent",
     "command": "Command",
+    "commandPlaceholder": "e.g., agent-cli",
+    "commandHelp": "The CLI command to invoke this agent",
     "enabled": "Enabled",
     "default": "Default",
+    "disabled": "(disabled)",
+    "commandLabel": "Command:",
+    "setDefault": "Set Default",
     "addAgent": "Add Agent",
     "removeAgent": "Remove Agent",
+    "configuredAgents": "Configured Agents",
+    "emptyState": "No agents configured. Add an agent to get started.",
 
     "selection": {
-      "title": "Agent Selection Mode",
-      "smart": "Smart Selection",
-      "smartDescription": "Automatically select the best agent for each task",
-      "preferDefault": "Prefer Default",
-      "preferDefaultDescription": "Use the default agent unless overridden",
-      "manual": "Manual",
-      "manualDescription": "Manually select agent for each story"
+      "title": "Agent Selection Strategy",
+      "smart": "Smart (AI-selected based on task)",
+      "smartDescription": "AI will choose the best agent for each task type.",
+      "preferDefault": "Prefer Default Agent",
+      "preferDefaultDescription": "Always use the default agent unless overridden.",
+      "manual": "Manual Selection",
+      "manualDescription": "You will be prompted to select an agent for each task."
+    },
+
+    "dialog": {
+      "addTitle": "Add Agent",
+      "editTitle": "Edit Agent",
+      "deleteTitle": "Delete Agent",
+      "deleteConfirm": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "add": "Add",
+      "save": "Save",
+      "close": "Close"
     }
   },
 
   "quality": {
-    "title": "Quality Gates Configuration",
-    "description": "Configure quality checks that run after each story.",
+    "title": "Quality Gates",
+    "description": "Configure quality checks that must pass before a story is marked complete.",
+
+    "enabledGates": "Enabled Gates",
 
     "typecheck": {
       "label": "Type Check",
-      "description": "Run TypeScript type checking"
+      "description": "Run type checking (mypy, pyright, tsc) before considering a story complete."
     },
     "test": {
       "label": "Tests",
-      "description": "Run test suite"
+      "description": "Run tests (pytest, jest, npm test) to verify functionality."
     },
     "lint": {
-      "label": "Linting",
-      "description": "Run code linter"
+      "label": "Lint",
+      "description": "Run linting (ruff, eslint) to ensure code quality."
     },
     "custom": {
       "label": "Custom Script",
-      "description": "Run a custom validation script"
+      "description": "Run a custom quality check script."
     },
+
     "customScript": {
-      "label": "Custom Script Command",
-      "placeholder": "npm run validate"
+      "label": "Custom Script",
+      "placeholder": "e.g., ./scripts/quality-check.sh",
+      "help": "Enter a script or command to run. Exit code 0 means success."
     },
-    "maxRetries": {
-      "label": "Max Retries",
-      "description": "Maximum retry attempts when quality gates fail"
+
+    "retry": {
+      "label": "Retry Settings",
+      "maxRetries": "Maximum Retries",
+      "help": "Number of times to retry a story if quality gates fail (0-10)."
+    },
+
+    "summary": {
+      "label": "Summary",
+      "noGates": "No quality gates enabled. Stories will be marked complete without validation.",
+      "mustPass": "Stories must pass {{gates}} to be considered complete. {{retryMessage}}",
+      "retryMessage": "If gates fail, the agent will retry up to {{count}} time.",
+      "retryMessage_plural": "If gates fail, the agent will retry up to {{count}} times.",
+      "noRetries": "Retries are disabled.",
+      "typecheck": "type checking",
+      "test": "tests",
+      "lint": "linting",
+      "custom": "custom script"
     }
   },
 
   "phases": {
-    "title": "Phase Agent Configuration",
-    "description": "Configure which agents handle different execution phases.",
+    "title": "Phase Agent Assignment",
+    "description": "Assign default agents and fallback chains to each execution phase.",
 
-    "planning": "Planning Phase",
-    "implementation": "Implementation Phase",
-    "review": "Review Phase"
+    "columns": {
+      "phase": "Phase",
+      "defaultAgent": "Default Agent",
+      "fallbackChain": "Fallback Chain"
+    },
+
+    "planning": {
+      "name": "Planning",
+      "description": "PRD generation and story creation"
+    },
+    "implementation": {
+      "name": "Implementation",
+      "description": "Code generation and feature development"
+    },
+    "retry": {
+      "name": "Retry",
+      "description": "Fixing failed quality gates"
+    },
+    "refactor": {
+      "name": "Refactor",
+      "description": "Code refactoring and cleanup"
+    },
+    "review": {
+      "name": "Review",
+      "description": "Code review and validation"
+    },
+
+    "fallback": {
+      "title": "Fallback Chain Configuration",
+      "help": "If the default agent fails, agents will be tried in order until one succeeds.",
+      "noFallbacks": "No fallbacks configured",
+      "addFallback": "+ Add fallback agent...",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "remove": "Remove"
+    },
+
+    "info": {
+      "title": "How Phase Assignment Works",
+      "description": "Each execution phase can be assigned a default agent. If that agent fails or is unavailable, the system will try agents from the fallback chain in order. This allows for robust multi-agent orchestration with graceful degradation."
+    }
   },
 
   "importExport": {
-    "title": "Import/Export Settings",
-    "description": "Backup or restore your settings.",
+    "title": "Import & Export",
+    "description": "Backup your settings or transfer them to another installation.",
 
     "export": {
       "title": "Export Settings",
-      "button": "Export",
-      "description": "Download your current settings as a JSON file."
+      "description": "Download your current settings as a JSON file for backup or transfer.",
+      "button": "Export Settings",
+      "exporting": "Exporting...",
+      "success": "Settings exported successfully",
+      "error": "Failed to export settings. Please try again."
     },
     "import": {
       "title": "Import Settings",
-      "button": "Import",
-      "description": "Upload a settings file to restore your configuration."
+      "description": "Import settings from a previously exported JSON file.",
+      "button": "Choose File",
+      "dialogTitle": "Import Settings",
+      "dialogDescription": "This will overwrite your current settings. Are you sure you want to continue?",
+      "preview": "Settings Preview",
+      "cancel": "Cancel",
+      "importButton": "Import",
+      "importing": "Importing...",
+      "close": "Close",
+      "success": "Settings imported successfully",
+      "error": "Failed to import settings. Please try again.",
+      "invalidFormat": "Invalid settings file format. Expected \"version\" and \"settings\" fields.",
+      "parseError": "Failed to parse settings file. Please ensure it is valid JSON."
     },
     "reset": {
       "title": "Reset to Defaults",
-      "button": "Reset",
-      "description": "Reset all settings to their default values.",
-      "confirm": "Are you sure you want to reset all settings to defaults?"
+      "description": "This will reset all settings to their default values. This action cannot be undone.",
+      "button": "Reset All Settings",
+      "success": "Settings reset to defaults",
+      "error": "Failed to reset settings. Please try again."
     }
   }
 }

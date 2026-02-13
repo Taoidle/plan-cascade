@@ -7,46 +7,29 @@
 
 import * as Switch from '@radix-ui/react-switch';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
 
+type GateId = 'typecheck' | 'test' | 'lint' | 'custom';
+
 interface QualityGateInfo {
-  id: 'typecheck' | 'test' | 'lint' | 'custom';
-  name: string;
-  description: string;
+  id: GateId;
+  i18nKey: string;
   icon: string;
 }
 
 const qualityGates: QualityGateInfo[] = [
-  {
-    id: 'typecheck',
-    name: 'Type Check',
-    description: 'Run type checking (mypy, pyright, tsc) before considering a story complete.',
-    icon: 'T',
-  },
-  {
-    id: 'test',
-    name: 'Tests',
-    description: 'Run tests (pytest, jest, npm test) to verify functionality.',
-    icon: 'TS',
-  },
-  {
-    id: 'lint',
-    name: 'Lint',
-    description: 'Run linting (ruff, eslint) to ensure code quality.',
-    icon: 'L',
-  },
-  {
-    id: 'custom',
-    name: 'Custom Script',
-    description: 'Run a custom quality check script.',
-    icon: 'C',
-  },
+  { id: 'typecheck', i18nKey: 'typecheck', icon: 'T' },
+  { id: 'test', i18nKey: 'test', icon: 'TS' },
+  { id: 'lint', i18nKey: 'lint', icon: 'L' },
+  { id: 'custom', i18nKey: 'custom', icon: 'C' },
 ];
 
 export function QualityGatesSection() {
+  const { t } = useTranslation('settings');
   const { qualityGates: gateSettings, updateQualityGates } = useSettingsStore();
 
-  const handleToggle = (gateId: 'typecheck' | 'test' | 'lint' | 'custom', checked: boolean) => {
+  const handleToggle = (gateId: GateId, checked: boolean) => {
     updateQualityGates({ [gateId]: checked });
   };
 
@@ -54,17 +37,17 @@ export function QualityGatesSection() {
     <div className="space-y-8">
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          Quality Gates
+          {t('quality.title')}
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Configure quality checks that must pass before a story is marked complete.
+          {t('quality.description')}
         </p>
       </div>
 
       {/* Quality Gate Toggles */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Enabled Gates
+          {t('quality.enabledGates')}
         </h3>
         <div className="space-y-3">
           {qualityGates.map((gate) => (
@@ -92,10 +75,10 @@ export function QualityGatesSection() {
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="font-medium text-gray-900 dark:text-white">
-                      {gate.name}
+                      {t(`quality.${gate.i18nKey}.label`)}
                     </div>
                     <div className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                      {gate.description}
+                      {t(`quality.${gate.i18nKey}.description`)}
                     </div>
                   </div>
 
@@ -130,14 +113,14 @@ export function QualityGatesSection() {
       {gateSettings.custom && (
         <section className="space-y-4">
           <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            Custom Script
+            {t('quality.customScript.label')}
           </h3>
           <div>
             <input
               type="text"
               value={gateSettings.customScript}
               onChange={(e) => updateQualityGates({ customScript: e.target.value })}
-              placeholder="e.g., ./scripts/quality-check.sh"
+              placeholder={t('quality.customScript.placeholder')}
               className={clsx(
                 'w-full px-3 py-2 rounded-lg border',
                 'border-gray-200 dark:border-gray-700',
@@ -147,7 +130,7 @@ export function QualityGatesSection() {
               )}
             />
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              Enter a script or command to run. Exit code 0 means success.
+              {t('quality.customScript.help')}
             </p>
           </div>
         </section>
@@ -156,11 +139,11 @@ export function QualityGatesSection() {
       {/* Retry Settings */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Retry Settings
+          {t('quality.retry.label')}
         </h3>
         <div className="max-w-xs">
           <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-            Maximum Retries
+            {t('quality.retry.maxRetries')}
           </label>
           <input
             type="number"
@@ -182,7 +165,7 @@ export function QualityGatesSection() {
             )}
           />
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-            Number of times to retry a story if quality gates fail (0-10).
+            {t('quality.retry.help')}
           </p>
         </div>
       </section>
@@ -190,7 +173,7 @@ export function QualityGatesSection() {
       {/* Summary */}
       <section className="space-y-2">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Summary
+          {t('quality.summary.label')}
         </h3>
         <div
           className={clsx(
@@ -200,7 +183,7 @@ export function QualityGatesSection() {
           )}
         >
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            {getGateSummary(gateSettings)}
+            {getGateSummary(gateSettings, t)}
           </p>
         </div>
       </section>
@@ -208,32 +191,35 @@ export function QualityGatesSection() {
   );
 }
 
-function getGateSummary(gates: {
-  typecheck: boolean;
-  test: boolean;
-  lint: boolean;
-  custom: boolean;
-  maxRetries: number;
-}): string {
+function getGateSummary(
+  gates: {
+    typecheck: boolean;
+    test: boolean;
+    lint: boolean;
+    custom: boolean;
+    maxRetries: number;
+  },
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
   const enabled = [];
-  if (gates.typecheck) enabled.push('type checking');
-  if (gates.test) enabled.push('tests');
-  if (gates.lint) enabled.push('linting');
-  if (gates.custom) enabled.push('custom script');
+  if (gates.typecheck) enabled.push(t('quality.summary.typecheck'));
+  if (gates.test) enabled.push(t('quality.summary.test'));
+  if (gates.lint) enabled.push(t('quality.summary.lint'));
+  if (gates.custom) enabled.push(t('quality.summary.custom'));
 
   if (enabled.length === 0) {
-    return 'No quality gates enabled. Stories will be marked complete without validation.';
+    return t('quality.summary.noGates');
   }
 
   const gateList = enabled.length === 1
     ? enabled[0]
     : enabled.slice(0, -1).join(', ') + ' and ' + enabled[enabled.length - 1];
 
-  return `Stories must pass ${gateList} to be considered complete. ${
-    gates.maxRetries > 0
-      ? `If gates fail, the agent will retry up to ${gates.maxRetries} time${gates.maxRetries === 1 ? '' : 's'}.`
-      : 'Retries are disabled.'
-  }`;
+  const retryMessage = gates.maxRetries > 0
+    ? t(gates.maxRetries === 1 ? 'quality.summary.retryMessage' : 'quality.summary.retryMessage_plural', { count: gates.maxRetries })
+    : t('quality.summary.noRetries');
+
+  return t('quality.summary.mustPass', { gates: gateList, retryMessage });
 }
 
 export default QualityGatesSection;

@@ -8,6 +8,7 @@ import { useState, useRef } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { clsx } from 'clsx';
 import { DownloadIcon, UploadIcon, Cross2Icon, CheckCircledIcon, ExclamationTriangleIcon } from '@radix-ui/react-icons';
+import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
 
 type MessageType = 'success' | 'error' | 'warning';
@@ -18,6 +19,7 @@ interface StatusMessage {
 }
 
 export function ImportExportSection() {
+  const { t } = useTranslation('settings');
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [message, setMessage] = useState<StatusMessage | null>(null);
@@ -64,10 +66,10 @@ export function ImportExportSection() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      setMessage({ type: 'success', text: 'Settings exported successfully' });
+      setMessage({ type: 'success', text: t('importExport.export.success') });
     } catch (error) {
       console.error('Export failed:', error);
-      setMessage({ type: 'error', text: 'Failed to export settings. Please try again.' });
+      setMessage({ type: 'error', text: t('importExport.export.error') });
     } finally {
       setIsExporting(false);
     }
@@ -87,7 +89,7 @@ export function ImportExportSection() {
         if (!parsed.version || !parsed.settings) {
           setMessage({
             type: 'error',
-            text: 'Invalid settings file format. Expected "version" and "settings" fields.',
+            text: t('importExport.import.invalidFormat'),
           });
           return;
         }
@@ -95,7 +97,7 @@ export function ImportExportSection() {
         setImportPreview(parsed);
         setShowConfirmDialog(true);
       } catch {
-        setMessage({ type: 'error', text: 'Failed to parse settings file. Please ensure it is valid JSON.' });
+        setMessage({ type: 'error', text: t('importExport.import.parseError') });
       }
     };
     reader.readAsText(file);
@@ -117,12 +119,12 @@ export function ImportExportSection() {
       const { settings } = importPreview as { settings: Record<string, unknown> };
       syncSettingsToStore(settings);
 
-      setMessage({ type: 'success', text: 'Settings imported successfully' });
+      setMessage({ type: 'success', text: t('importExport.import.success') });
       setShowConfirmDialog(false);
       setImportPreview(null);
     } catch (error) {
       console.error('Import failed:', error);
-      setMessage({ type: 'error', text: 'Failed to import settings. Please try again.' });
+      setMessage({ type: 'error', text: t('importExport.import.error') });
     } finally {
       setIsImporting(false);
     }
@@ -135,10 +137,10 @@ export function ImportExportSection() {
       // Reset frontend store (v5.0 - Pure Rust backend)
       useSettingsStore.getState().resetToDefaults();
 
-      setMessage({ type: 'success', text: 'Settings reset to defaults' });
+      setMessage({ type: 'success', text: t('importExport.reset.success') });
     } catch (error) {
       console.error('Reset failed:', error);
-      setMessage({ type: 'error', text: 'Failed to reset settings. Please try again.' });
+      setMessage({ type: 'error', text: t('importExport.reset.error') });
     }
   };
 
@@ -146,10 +148,10 @@ export function ImportExportSection() {
     <div className="space-y-8">
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          Import & Export
+          {t('importExport.title')}
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Backup your settings or transfer them to another installation.
+          {t('importExport.description')}
         </p>
       </div>
 
@@ -182,7 +184,7 @@ export function ImportExportSection() {
       {/* Export Section */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Export Settings
+          {t('importExport.export.title')}
         </h3>
         <div
           className={clsx(
@@ -193,7 +195,7 @@ export function ImportExportSection() {
         >
           <DownloadIcon className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500 mb-4" />
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Download your current settings as a JSON file for backup or transfer.
+            {t('importExport.export.description')}
           </p>
           <button
             onClick={handleExport}
@@ -207,7 +209,7 @@ export function ImportExportSection() {
             )}
           >
             <DownloadIcon className="w-4 h-4" />
-            {isExporting ? 'Exporting...' : 'Export Settings'}
+            {isExporting ? t('importExport.export.exporting') : t('importExport.export.button')}
           </button>
         </div>
       </section>
@@ -215,7 +217,7 @@ export function ImportExportSection() {
       {/* Import Section */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Import Settings
+          {t('importExport.import.title')}
         </h3>
         <div
           className={clsx(
@@ -226,7 +228,7 @@ export function ImportExportSection() {
         >
           <UploadIcon className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500 mb-4" />
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Import settings from a previously exported JSON file.
+            {t('importExport.import.description')}
           </p>
           <input
             ref={fileInputRef}
@@ -247,7 +249,7 @@ export function ImportExportSection() {
             )}
           >
             <UploadIcon className="w-4 h-4" />
-            Choose File
+            {t('importExport.import.button')}
           </label>
         </div>
       </section>
@@ -255,7 +257,7 @@ export function ImportExportSection() {
       {/* Reset Section */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Reset to Defaults
+          {t('importExport.reset.title')}
         </h3>
         <div
           className={clsx(
@@ -268,7 +270,7 @@ export function ImportExportSection() {
             <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-500 shrink-0 mt-0.5" />
             <div className="flex-1">
               <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-3">
-                This will reset all settings to their default values. This action cannot be undone.
+                {t('importExport.reset.description')}
               </p>
               <button
                 onClick={handleReset}
@@ -279,7 +281,7 @@ export function ImportExportSection() {
                   'focus:outline-none focus:ring-2 focus:ring-yellow-500'
                 )}
               >
-                Reset All Settings
+                {t('importExport.reset.button')}
               </button>
             </div>
           </div>
@@ -300,17 +302,17 @@ export function ImportExportSection() {
             )}
           >
             <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
-              Import Settings
+              {t('importExport.import.dialogTitle')}
             </Dialog.Title>
             <Dialog.Description className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              This will overwrite your current settings. Are you sure you want to continue?
+              {t('importExport.import.dialogDescription')}
             </Dialog.Description>
 
             {/* Preview */}
             {importPreview && (
               <div className="mt-4">
                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Settings Preview
+                  {t('importExport.import.preview')}
                 </h4>
                 <div
                   className={clsx(
@@ -335,7 +337,7 @@ export function ImportExportSection() {
                     'hover:bg-gray-200 dark:hover:bg-gray-700'
                   )}
                 >
-                  Cancel
+                  {t('importExport.import.cancel')}
                 </button>
               </Dialog.Close>
               <button
@@ -348,7 +350,7 @@ export function ImportExportSection() {
                   'disabled:opacity-50 disabled:cursor-not-allowed'
                 )}
               >
-                {isImporting ? 'Importing...' : 'Import'}
+                {isImporting ? t('importExport.import.importing') : t('importExport.import.importButton')}
               </button>
             </div>
 
@@ -358,7 +360,7 @@ export function ImportExportSection() {
                   'absolute top-4 right-4 p-1 rounded-lg',
                   'hover:bg-gray-100 dark:hover:bg-gray-800'
                 )}
-                aria-label="Close"
+                aria-label={t('importExport.import.close')}
               >
                 <Cross2Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
               </button>

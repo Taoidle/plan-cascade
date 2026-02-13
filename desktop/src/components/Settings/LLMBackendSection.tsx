@@ -8,12 +8,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import { CheckCircledIcon, CrossCircledIcon, EyeOpenIcon, EyeNoneIcon } from '@radix-ui/react-icons';
+import { useTranslation } from 'react-i18next';
 import { useSettingsStore, Backend, StandaloneContextTurns } from '../../store/settings';
 
 interface BackendOption {
   id: Backend;
-  name: string;
-  description: string;
+  i18nKey: string;
   requiresApiKey: boolean;
   provider?: string;
 }
@@ -21,68 +21,49 @@ interface BackendOption {
 const backendOptions: BackendOption[] = [
   {
     id: 'claude-code',
-    name: 'Claude Code (Claude Max)',
-    description: 'Use Claude Code as LLM backend. No API key required.',
+    i18nKey: 'claude-code',
     requiresApiKey: false,
     provider: 'anthropic',
   },
   {
     id: 'claude-api',
-    name: 'Claude API',
-    description: 'Direct Anthropic Claude API access.',
+    i18nKey: 'claude-api',
     requiresApiKey: true,
     provider: 'anthropic',
   },
   {
     id: 'openai',
-    name: 'OpenAI',
-    description: 'OpenAI GPT models (GPT-4, GPT-4o, etc.).',
+    i18nKey: 'openai',
     requiresApiKey: true,
     provider: 'openai',
   },
   {
     id: 'deepseek',
-    name: 'DeepSeek',
-    description: 'DeepSeek models for code generation.',
+    i18nKey: 'deepseek',
     requiresApiKey: true,
     provider: 'deepseek',
   },
   {
     id: 'glm',
-    name: 'GLM (ZhipuAI)',
-    description: '\u667A\u8C31AI GLM models.',
+    i18nKey: 'glm',
     requiresApiKey: true,
     provider: 'glm',
   },
   {
     id: 'qwen',
-    name: 'Qwen (DashScope)',
-    description: '\u963F\u91CC\u4E91\u901A\u4E49\u5343\u95EE Qwen models.',
+    i18nKey: 'qwen',
     requiresApiKey: true,
     provider: 'qwen',
   },
   {
     id: 'ollama',
-    name: 'Ollama (Local)',
-    description: 'Run models locally with Ollama.',
+    i18nKey: 'ollama',
     requiresApiKey: false,
     provider: 'ollama',
   },
 ];
 
-const standaloneContextTurnOptions: { value: StandaloneContextTurns; label: string }[] = [
-  { value: 2, label: '2' },
-  { value: 4, label: '4' },
-  { value: 6, label: '6' },
-  { value: 8, label: '8' },
-  { value: 10, label: '10' },
-  { value: 20, label: '20' },
-  { value: 50, label: '50' },
-  { value: 100, label: '100' },
-  { value: 200, label: '200' },
-  { value: 500, label: '500' },
-  { value: -1, label: 'Unlimited' },
-];
+const standaloneContextTurnValues: StandaloneContextTurns[] = [2, 4, 6, 8, 10, 20, 50, 100, 200, 500, -1];
 
 interface ApiKeyStatus {
   [provider: string]: boolean;
@@ -222,6 +203,7 @@ function getLocalProviderApiKeyStatuses(): ApiKeyStatus {
 }
 
 export function LLMBackendSection() {
+  const { t } = useTranslation('settings');
   const {
     backend,
     setBackend,
@@ -400,10 +382,10 @@ export function LLMBackendSection() {
       setApiKeyStatuses(currentStatuses);
       setApiKeyInputs((prev) => ({ ...prev, [canonicalProvider]: apiKey.trim() }));
       setLocalProviderApiKey(canonicalProvider, apiKey.trim());
-      setKeyMessage({ provider: canonicalProvider, type: 'success', message: 'API key saved successfully' });
+      setKeyMessage({ provider: canonicalProvider, type: 'success', message: t('llm.apiKey.saveSuccess') });
       await fetchApiKeyStatuses();
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to save API key';
+      const msg = error instanceof Error ? error.message : t('llm.apiKey.saveError');
       setKeyMessage({ provider: canonicalProvider, type: 'error', message: msg });
     } finally {
       setSavingKey(null);
@@ -432,10 +414,10 @@ export function LLMBackendSection() {
       setApiKeyStatuses(currentStatuses);
       setApiKeyInputs((prev) => ({ ...prev, [canonicalProvider]: '' }));
       setLocalProviderApiKey(canonicalProvider, '');
-      setKeyMessage({ provider: canonicalProvider, type: 'success', message: 'API key removed' });
+      setKeyMessage({ provider: canonicalProvider, type: 'success', message: t('llm.apiKey.removeSuccess') });
       await fetchApiKeyStatuses();
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to remove API key';
+      const msg = error instanceof Error ? error.message : t('llm.apiKey.removeError');
       setKeyMessage({ provider: canonicalProvider, type: 'error', message: msg });
     } finally {
       setSavingKey(null);
@@ -544,22 +526,29 @@ export function LLMBackendSection() {
     persistCustomModels(next);
   };
 
+  const selectedOptionName = selectedOption ? t(`llm.providers.${selectedOption.i18nKey}.name`) : '';
+
+  const getModelPlaceholder = (b: Backend): string => {
+    const key = `llm.model.placeholders.${b}`;
+    const result = t(key);
+    return result !== key ? result : t('llm.model.placeholders.default');
+  };
 
   return (
     <div className="space-y-8">
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          LLM Backend
+          {t('llm.title')}
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Select your preferred LLM provider and configure API access.
+          {t('llm.description')}
         </p>
       </div>
 
       {/* Backend Selection */}
       <section className="space-y-3">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Provider
+          {t('llm.provider.label')}
         </h3>
         <div className="space-y-2">
           {backendOptions.map((option) => (
@@ -584,7 +573,7 @@ export function LLMBackendSection() {
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-gray-900 dark:text-white">
-                    {option.name}
+                    {t(`llm.providers.${option.i18nKey}.name`)}
                   </span>
                   {option.requiresApiKey && (
                     (() => {
@@ -601,11 +590,11 @@ export function LLMBackendSection() {
                     >
                       {configured ? (
                         <>
-                          <CheckCircledIcon className="w-3 h-3" /> Configured
+                          <CheckCircledIcon className="w-3 h-3" /> {t('llm.apiKey.configured')}
                         </>
                       ) : (
                         <>
-                          <CrossCircledIcon className="w-3 h-3" /> API Key Required
+                          <CrossCircledIcon className="w-3 h-3" /> {t('llm.apiKey.required')}
                         </>
                       )}
                     </span>
@@ -614,7 +603,7 @@ export function LLMBackendSection() {
                   )}
                 </div>
                 <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  {option.description}
+                  {t(`llm.providers.${option.i18nKey}.description`)}
                 </div>
               </div>
             </label>
@@ -626,7 +615,7 @@ export function LLMBackendSection() {
       {selectedOption?.requiresApiKey && (
         <section className="space-y-4">
           <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            API Key for {selectedOption.name}
+            {t('llm.apiKey.title', { name: selectedOptionName })}
           </h3>
 
           <div className="space-y-3">
@@ -641,8 +630,8 @@ export function LLMBackendSection() {
                   type={showApiKey[provider] ? 'text' : 'password'}
                   placeholder={
                     configured
-                      ? 'API key is configured (click eye icon to reveal)'
-                      : 'Enter your API key'
+                      ? t('llm.apiKey.placeholderConfigured')
+                      : t('llm.apiKey.placeholder')
                   }
                   value={inputValue}
                   onChange={(e) => {
@@ -691,7 +680,7 @@ export function LLMBackendSection() {
                   'disabled:opacity-50 disabled:cursor-not-allowed'
                 )}
               >
-                {savingKey === normalizeProvider(selectedOption.provider || '') ? 'Saving...' : 'Save'}
+                {savingKey === normalizeProvider(selectedOption.provider || '') ? t('llm.apiKey.saving') : t('llm.apiKey.save')}
               </button>
               {apiKeyStatuses[normalizeProvider(selectedOption.provider || '')] && (
                 <button
@@ -705,13 +694,13 @@ export function LLMBackendSection() {
                     'disabled:opacity-50 disabled:cursor-not-allowed'
                   )}
                 >
-                  Remove
+                  {t('llm.apiKey.remove')}
                 </button>
               )}
             </div>
             {loadingSavedKey === normalizeProvider(selectedOption.provider || '') && (
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Loading saved API key...
+                {t('llm.apiKey.loading')}
               </p>
             )}
 
@@ -734,7 +723,7 @@ export function LLMBackendSection() {
       {/* Model Selection */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Model
+          {t('llm.model.label')}
         </h3>
         <select
           value={modelSelectValue}
@@ -760,14 +749,14 @@ export function LLMBackendSection() {
             'focus:outline-none focus:ring-2 focus:ring-primary-500'
           )}
         >
-          <option value={MODEL_DEFAULT_VALUE}>Use provider default</option>
+          <option value={MODEL_DEFAULT_VALUE}>{t('llm.model.providerDefault')}</option>
           {allModels.map((modelId) => (
             <option key={modelId} value={modelId}>
               {modelId}
             </option>
           ))}
           <option value={MODEL_CUSTOM_VALUE}>
-            {model?.trim() && !allModels.includes(model) ? `Custom: ${model}` : 'Custom model'}
+            {model?.trim() && !allModels.includes(model) ? t('llm.model.customPrefix', { model }) : t('llm.model.customModel')}
           </option>
         </select>
         <div className="flex gap-2 max-w-md">
@@ -795,7 +784,7 @@ export function LLMBackendSection() {
               'disabled:opacity-50 disabled:cursor-not-allowed'
             )}
           >
-            Add
+            {t('llm.model.add')}
           </button>
         </div>
         {customModels.length > 0 && (
@@ -810,7 +799,7 @@ export function LLMBackendSection() {
                   'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-100 dark:hover:bg-gray-800'
                 )}
-                title="Remove custom model"
+                title={t('llm.model.removeCustom')}
               >
                 {customModel} x
               </button>
@@ -818,13 +807,13 @@ export function LLMBackendSection() {
           </div>
         )}
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Choose a built-in model from the dropdown, or add your own custom model.
+          {t('llm.model.help')}
         </p>
       </section>
 
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Conversation Context Turns
+          {t('llm.contextTurns.label')}
         </h3>
         <select
           value={String(standaloneContextTurns)}
@@ -837,14 +826,14 @@ export function LLMBackendSection() {
             'focus:outline-none focus:ring-2 focus:ring-primary-500'
           )}
         >
-          {standaloneContextTurnOptions.map((option) => (
-            <option key={option.value} value={String(option.value)}>
-              {option.label}
+          {standaloneContextTurnValues.map((value) => (
+            <option key={value} value={String(value)}>
+              {value === -1 ? t('llm.contextTurns.unlimited') : String(value)}
             </option>
           ))}
         </select>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Simple mode standalone backends keep the latest N conversation turns as context.
+          {t('llm.contextTurns.help')}
         </p>
       </section>
 
@@ -852,7 +841,7 @@ export function LLMBackendSection() {
       {backend !== 'claude-code' && (
         <section className="space-y-4">
           <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            Context Management
+            {t('llm.contextManagement.label')}
           </h3>
           <label className="flex items-start gap-3 cursor-pointer">
             <input
@@ -863,10 +852,10 @@ export function LLMBackendSection() {
             />
             <div>
               <span className="text-sm font-medium text-gray-900 dark:text-white">
-                Enable automatic context compaction
+                {t('llm.contextManagement.compaction')}
               </span>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                When the conversation context grows too large, automatically summarize older messages to stay within the token budget. This prevents execution failures from context overflow during long analysis tasks.
+                {t('llm.contextManagement.compactionHelp')}
               </p>
             </div>
           </label>
@@ -875,7 +864,7 @@ export function LLMBackendSection() {
 
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Streaming Output
+          {t('llm.streaming.label')}
         </h3>
         <label className="flex items-start gap-3 cursor-pointer">
           <input
@@ -886,10 +875,10 @@ export function LLMBackendSection() {
           />
           <div>
             <span className="text-sm font-medium text-gray-900 dark:text-white">
-              Show sub-agent progress events
+              {t('llm.streaming.subAgentEvents')}
             </span>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Display structured start/end events for delegated exploration and analysis phases.
+              {t('llm.streaming.subAgentEventsHelp')}
             </p>
           </div>
         </label>
@@ -902,10 +891,10 @@ export function LLMBackendSection() {
           />
           <div>
             <span className="text-sm font-medium text-gray-900 dark:text-white">
-              Show model reasoning/thinking traces
+              {t('llm.streaming.reasoningTraces')}
             </span>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Off by default. Enable only for debugging verbose model behavior.
+              {t('llm.streaming.reasoningTracesHelp')}
             </p>
           </div>
         </label>
@@ -918,10 +907,10 @@ export function LLMBackendSection() {
           />
           <div>
             <span className="text-sm font-medium text-gray-900 dark:text-white">
-              Enable model thinking/reasoning
+              {t('llm.streaming.enableThinking')}
             </span>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Enable extended thinking for supported models (Qwen3, QwQ, DeepSeek-R1, etc.). The model will reason through problems step-by-step before responding.
+              {t('llm.streaming.enableThinkingHelp')}
             </p>
           </div>
         </label>
@@ -930,7 +919,7 @@ export function LLMBackendSection() {
       {/* Search Provider */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Web Search Provider
+          {t('llm.searchProvider.label')}
         </h3>
         <select
           value={searchProvider}
@@ -943,35 +932,16 @@ export function LLMBackendSection() {
             'focus:outline-none focus:ring-2 focus:ring-primary-500'
           )}
         >
-          <option value="duckduckgo">DuckDuckGo (No API key required)</option>
-          <option value="tavily">Tavily (API key required)</option>
-          <option value="brave">Brave Search (API key required)</option>
+          <option value="duckduckgo">{t('llm.searchProvider.duckduckgo')}</option>
+          <option value="tavily">{t('llm.searchProvider.tavily')}</option>
+          <option value="brave">{t('llm.searchProvider.brave')}</option>
         </select>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Search provider for the WebSearch tool. Tavily and Brave require API keys (configure above under their respective provider names).
+          {t('llm.searchProvider.help')}
         </p>
       </section>
     </div>
   );
-}
-
-function getModelPlaceholder(backend: Backend): string {
-  switch (backend) {
-    case 'claude-api':
-      return 'e.g., claude-3-opus-20240229';
-    case 'openai':
-      return 'e.g., gpt-4o';
-    case 'deepseek':
-      return 'e.g., deepseek-coder';
-    case 'glm':
-      return 'e.g., glm-4-flash-250414';
-    case 'qwen':
-      return 'e.g., qwen-plus';
-    case 'ollama':
-      return 'e.g., codellama:13b';
-    default:
-      return 'Model name';
-  }
 }
 
 export default LLMBackendSection;

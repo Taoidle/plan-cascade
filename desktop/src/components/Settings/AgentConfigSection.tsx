@@ -9,6 +9,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import * as Switch from '@radix-ui/react-switch';
 import { clsx } from 'clsx';
 import { PlusIcon, Pencil1Icon, TrashIcon, Cross2Icon, StarFilledIcon } from '@radix-ui/react-icons';
+import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
 
 interface Agent {
@@ -25,6 +26,7 @@ interface AgentFormData {
 }
 
 export function AgentConfigSection() {
+  const { t } = useTranslation('settings');
   const { agents, defaultAgent, agentSelection, updateAgent } = useSettingsStore();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
@@ -88,17 +90,17 @@ export function AgentConfigSection() {
     <div className="space-y-8">
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          Agent Configuration
+          {t('agents.title')}
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Configure execution agents and their selection strategy.
+          {t('agents.description')}
         </p>
       </div>
 
       {/* Agent Selection Strategy */}
       <section className="space-y-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          Agent Selection Strategy
+          {t('agents.selection.title')}
         </h3>
         <select
           value={agentSelection}
@@ -111,14 +113,14 @@ export function AgentConfigSection() {
             'focus:outline-none focus:ring-2 focus:ring-primary-500'
           )}
         >
-          <option value="smart">Smart (AI-selected based on task)</option>
-          <option value="prefer_default">Prefer Default Agent</option>
-          <option value="manual">Manual Selection</option>
+          <option value="smart">{t('agents.selection.smart')}</option>
+          <option value="prefer_default">{t('agents.selection.preferDefault')}</option>
+          <option value="manual">{t('agents.selection.manual')}</option>
         </select>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          {agentSelection === 'smart' && 'AI will choose the best agent for each task type.'}
-          {agentSelection === 'prefer_default' && 'Always use the default agent unless overridden.'}
-          {agentSelection === 'manual' && 'You will be prompted to select an agent for each task.'}
+          {agentSelection === 'smart' && t('agents.selection.smartDescription')}
+          {agentSelection === 'prefer_default' && t('agents.selection.preferDefaultDescription')}
+          {agentSelection === 'manual' && t('agents.selection.manualDescription')}
         </p>
       </section>
 
@@ -126,7 +128,7 @@ export function AgentConfigSection() {
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            Configured Agents
+            {t('agents.configuredAgents')}
           </h3>
           <button
             onClick={() => setIsAddDialogOpen(true)}
@@ -138,7 +140,7 @@ export function AgentConfigSection() {
             )}
           >
             <PlusIcon className="w-4 h-4" />
-            Add Agent
+            {t('agents.addAgent')}
           </button>
         </div>
 
@@ -181,17 +183,17 @@ export function AgentConfigSection() {
                     </span>
                     {agent.isDefault && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
-                        <StarFilledIcon className="w-3 h-3" /> Default
+                        <StarFilledIcon className="w-3 h-3" /> {t('agents.default')}
                       </span>
                     )}
                     {!agent.enabled && (
                       <span className="text-xs text-gray-400 dark:text-gray-500">
-                        (disabled)
+                        {t('agents.disabled')}
                       </span>
                     )}
                   </div>
                   <div className="text-sm text-gray-500 dark:text-gray-400">
-                    Command: <code className="text-xs bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">{agent.command}</code>
+                    {t('agents.commandLabel')} <code className="text-xs bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">{agent.command}</code>
                   </div>
                 </div>
               </div>
@@ -206,7 +208,7 @@ export function AgentConfigSection() {
                       'hover:bg-gray-200 dark:hover:bg-gray-600'
                     )}
                   >
-                    Set Default
+                    {t('agents.setDefault')}
                   </button>
                 )}
                 <button
@@ -237,7 +239,7 @@ export function AgentConfigSection() {
 
           {agents.length === 0 && (
             <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              No agents configured. Add an agent to get started.
+              {t('agents.emptyState')}
             </div>
           )}
         </div>
@@ -247,18 +249,20 @@ export function AgentConfigSection() {
       <AgentFormDialog
         open={isAddDialogOpen}
         onOpenChange={setIsAddDialogOpen}
-        title="Add Agent"
+        title={t('agents.dialog.addTitle')}
         onSubmit={handleAddAgent}
+        t={t}
       />
 
       {/* Edit Agent Dialog */}
       <AgentFormDialog
         open={!!editingAgent}
         onOpenChange={(open) => !open && setEditingAgent(null)}
-        title="Edit Agent"
+        title={t('agents.dialog.editTitle')}
         initialData={editingAgent || undefined}
         onSubmit={handleEditAgent}
         isEdit
+        t={t}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -274,10 +278,10 @@ export function AgentConfigSection() {
             )}
           >
             <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
-              Delete Agent
+              {t('agents.dialog.deleteTitle')}
             </Dialog.Title>
             <Dialog.Description className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              Are you sure you want to delete "{deleteConfirm}"? This action cannot be undone.
+              {t('agents.dialog.deleteConfirm', { name: deleteConfirm })}
             </Dialog.Description>
             <div className="mt-6 flex justify-end gap-3">
               <Dialog.Close asChild>
@@ -289,7 +293,7 @@ export function AgentConfigSection() {
                     'hover:bg-gray-200 dark:hover:bg-gray-700'
                   )}
                 >
-                  Cancel
+                  {t('agents.dialog.cancel')}
                 </button>
               </Dialog.Close>
               <button
@@ -300,7 +304,7 @@ export function AgentConfigSection() {
                   'hover:bg-red-700'
                 )}
               >
-                Delete
+                {t('agents.dialog.delete')}
               </button>
             </div>
           </Dialog.Content>
@@ -317,6 +321,7 @@ interface AgentFormDialogProps {
   initialData?: AgentFormData;
   onSubmit: (data: AgentFormData) => void;
   isEdit?: boolean;
+  t: (key: string) => string;
 }
 
 function AgentFormDialog({
@@ -326,12 +331,12 @@ function AgentFormDialog({
   initialData,
   onSubmit,
   isEdit = false,
+  t,
 }: AgentFormDialogProps) {
   const [name, setName] = useState(initialData?.name || '');
   const [command, setCommand] = useState(initialData?.command || '');
   const [enabled, setEnabled] = useState(initialData?.enabled ?? true);
 
-  // Reset form when dialog opens/closes or initialData changes
   const resetForm = () => {
     setName(initialData?.name || '');
     setCommand(initialData?.command || '');
@@ -370,13 +375,13 @@ function AgentFormDialog({
           <form onSubmit={handleSubmit} className="mt-4 space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Agent Name
+                {t('agents.name')}
               </label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., my-agent"
+                placeholder={t('agents.namePlaceholder')}
                 disabled={isEdit}
                 className={clsx(
                   'w-full px-3 py-2 rounded-lg border',
@@ -391,13 +396,13 @@ function AgentFormDialog({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Command
+                {t('agents.command')}
               </label>
               <input
                 type="text"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
-                placeholder="e.g., agent-cli"
+                placeholder={t('agents.commandPlaceholder')}
                 className={clsx(
                   'w-full px-3 py-2 rounded-lg border',
                   'border-gray-200 dark:border-gray-700',
@@ -407,7 +412,7 @@ function AgentFormDialog({
                 )}
               />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                The CLI command to invoke this agent
+                {t('agents.commandHelp')}
               </p>
             </div>
 
@@ -432,7 +437,7 @@ function AgentFormDialog({
                 />
               </Switch.Root>
               <span className="text-sm text-gray-700 dark:text-gray-300">
-                Enabled
+                {t('agents.enabled')}
               </span>
             </div>
 
@@ -447,7 +452,7 @@ function AgentFormDialog({
                     'hover:bg-gray-200 dark:hover:bg-gray-700'
                   )}
                 >
-                  Cancel
+                  {t('agents.dialog.cancel')}
                 </button>
               </Dialog.Close>
               <button
@@ -460,7 +465,7 @@ function AgentFormDialog({
                   'disabled:opacity-50 disabled:cursor-not-allowed'
                 )}
               >
-                {isEdit ? 'Save' : 'Add'}
+                {isEdit ? t('agents.dialog.save') : t('agents.dialog.add')}
               </button>
             </div>
           </form>
@@ -471,7 +476,7 @@ function AgentFormDialog({
                 'absolute top-4 right-4 p-1 rounded-lg',
                 'hover:bg-gray-100 dark:hover:bg-gray-800'
               )}
-              aria-label="Close"
+              aria-label={t('agents.dialog.close')}
             >
               <Cross2Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
             </button>
