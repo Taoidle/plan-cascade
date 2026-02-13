@@ -78,7 +78,7 @@ Key components:
 - **File Read Dedup Cache** (`executor.rs`): `Mutex<HashMap<(PathBuf, offset, limit), ReadCacheEntry>>` prevents redundant file reads. Second read of unchanged file returns short dedup message instead of full content.
 - **Tool Result Truncation** (`service_helpers.rs`): Bounds tool output injected into LLM context (Read: 200 lines, Grep: 100, LS: 150, Bash: 150). Frontend ToolResult events retain full content.
 - **SessionMemoryManager** (`service_helpers.rs`): Maintains session memory at fixed index 1 in messages vec. Accumulates file reads and findings, updates before each LLM call. Both compaction strategies preserve Layer 1+2.
-- **Symbol Extraction** (`analysis_index.rs`): Regex-based extraction of functions, classes, structs, enums for Python, Rust, TypeScript, JavaScript, Go, Java. Max 30 symbols per file, skips files >500KB.
+- **Symbol Extraction** (`tree_sitter_parser.rs`, `analysis_index.rs`): Tree-sitter grammar-based extraction of functions, classes, structs, enums for Python, Rust, TypeScript, JavaScript, Go, Java. Max 30 symbols per file, skips files >500KB.
 - **IndexStore** (`index_store.rs`): SQLite persistence for file index and symbols. Tables: `file_index` (with UNIQUE on project_path+file_path) and `file_symbols` (FK with CASCADE delete). Methods: `upsert_file_index()`, `query_symbols()`, `get_project_summary()`, `is_index_stale()`.
 - **BackgroundIndexer** (`background_indexer.rs`): Tokio async task for non-blocking indexing. Full index on startup, incremental updates via mpsc channel from file watcher. SHA-256 content hashing for staleness detection.
 - **CodebaseSearch Tool** (`executor.rs`, `definitions.rs`): Index-backed search with scopes: `symbols`, `files`, `all`. Optional component filter. Falls back to suggesting Grep when index unavailable.
@@ -86,7 +86,29 @@ Key components:
 - **Prefix-Stable Compaction** (`service_helpers.rs`): For non-Claude providers (Ollama/Qwen/DeepSeek/GLM), uses sliding-window deletion instead of LLM-summary rewrite. Preserves head (2 msgs) + tail (6 msgs), no LLM call needed.
 - **Anthropic cache_control** (`anthropic.rs`): `anthropic-beta: prompt-caching-2024-07-31` header, system prompt as structured block with `cache_control: ephemeral`, last tool definition gets `cache_control`.
 
-Compaction strategy is selected by provider reliability: `Reliable` (Anthropic/OpenAI) uses LLM-summary, `Unreliable`/`None` (Ollama/Qwen/DeepSeek/GLM) uses prefix-stable deletion.
+### LLM Provider Abstraction
+
+Six providers in `services/llm/` with different tool-calling reliability levels:
+
+- **Reliable** (Anthropic, OpenAI): Native tool use, LLM-summary compaction
+- **Unreliable** (Qwen, DeepSeek, GLM): Dual-channel tool calling — tools passed via native API AND prompt-based fallback instructions. Native `tool_calls` checked first, then text-based parsing with repair-hint retry.
+- **None** (Ollama): Prompt-only tool calling, no native tool support
+
+Compaction strategy follows provider reliability: reliable providers use LLM-summary rewrite, unreliable/none use prefix-stable sliding-window deletion (preserves head 2 + tail 6 messages).
+
+### Streaming & Events
+
+Real-time updates use Tauri's event system. Backend emits via `AppHandle::emit("event-name", &payload)` with `tokio::sync::mpsc` channels. Frontend listens via `listen()` from `@tauri-apps/api/event` in `useEffect` cleanup patterns.
+
+### Adding a New Feature (End-to-End)
+
+1. Create data model in `src-tauri/src/models/`
+2. Create service in `src-tauri/src/services/` (constructed with database pool, returns `AppResult<T>`)
+3. Create command module in `src-tauri/src/commands/` (async functions returning `Result<CommandResponse<T>, String>`)
+4. Register commands in `main.rs` `invoke_handler![]`
+5. Create TypeScript API wrapper in `src/lib/`
+6. Create Zustand store in `src/store/`
+7. Create React components in `src/components/`
 
 ## Code Conventions
 
@@ -96,3 +118,4 @@ Compaction strategy is selected by provider reliability: `Reliable` (Anthropic/O
 - Frontend tests in `src/**/*.{test,spec}.{ts,tsx}` using Vitest + jsdom + Testing Library
 - Backend integration tests in `src-tauri/tests/integration/`
 - Release builds use LTO, `opt-level = "s"`, and strip symbols
+- Conventional commits: `type(scope): description` (e.g., `feat(analytics): add CSV export`, `fix(agents): resolve duplicate ID issue`)
