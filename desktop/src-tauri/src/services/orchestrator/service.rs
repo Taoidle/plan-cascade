@@ -503,6 +503,7 @@ enum AnalysisPhaseStatus {
 
 #[path = "service_helpers.rs"]
 mod service_helpers;
+pub(crate) use service_helpers::text_describes_pending_action;
 
 /// Information about the current provider
 #[derive(Debug, Clone, Serialize, Deserialize)]

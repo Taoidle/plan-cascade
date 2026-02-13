@@ -9,9 +9,9 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolCallReliability, ToolDefinition,
-    UsageStats,
+    FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
+    MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
+    ToolCallReliability, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::QwenAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -111,7 +111,18 @@ impl QwenProvider {
                 })
                 .collect();
             body["tools"] = serde_json::json!(api_tools);
-            if matches!(request_options.tool_call_mode, ToolCallMode::Required) {
+            // DashScope documentation recommends parallel_tool_calls for all
+            // function-calling requests.
+            body["parallel_tool_calls"] = serde_json::json!(true);
+
+            let thinking_active =
+                self.config.enable_thinking && self.model_supports_reasoning();
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required)
+                && !thinking_active
+            {
+                // tool_choice "required" is NOT supported when enable_thinking
+                // is active — DashScope only allows "auto" or "none" for thinking
+                // models. Skip it; the model defaults to "auto".
                 body["tool_choice"] = serde_json::json!("required");
             }
         }
@@ -274,7 +285,24 @@ impl LlmProvider for QwenProvider {
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
+        // Qwen documentation shows native function calling support, but in practice
+        // models with enable_thinking may not emit native tool_calls reliably.
+        // Keep Unreliable to use prompt-based fallback which works consistently.
         ToolCallReliability::Unreliable
+    }
+
+    fn default_fallback_mode(&self) -> FallbackToolFormatMode {
+        if self.config.enable_thinking && self.model_supports_reasoning() {
+            // When thinking is enabled, Qwen models support native tool calling
+            // via the tools API. Injecting Soft fallback instructions (```tool_call
+            // markdown format) into the system prompt confuses the model, causing it
+            // to emit tool calls as text instead of native tool_calls. Disable the
+            // prompt-based fallback entirely — rely only on native tools API.
+            FallbackToolFormatMode::Off
+        } else {
+            // Non-thinking Qwen models are Unreliable — use Soft fallback
+            FallbackToolFormatMode::Soft
+        }
     }
 
     fn context_window(&self) -> u32 {

@@ -1000,7 +1000,7 @@ fn test_user_override_disables_fallback_for_unreliable() {
     let tools = crate::services::tools::get_tool_definitions();
     let opts = LlmRequestOptions::default();
     let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
-    // User explicitly set Off 鈫?no fallback instructions even for unreliable provider
+    // User explicitly set Off — no fallback instructions even for unreliable provider
     assert!(
         !prompt.contains("```tool_call"),
         "User override Off should suppress fallback instructions"

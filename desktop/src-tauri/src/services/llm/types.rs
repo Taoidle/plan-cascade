@@ -57,8 +57,9 @@ impl Default for ToolCallMode {
 pub enum ToolCallReliability {
     /// Provider's native tool calling works consistently (Anthropic, OpenAI).
     Reliable,
-    /// Provider claims tool support but emission is inconsistent (Qwen, DeepSeek, GLM).
-    /// The orchestrator should inject Soft fallback instructions alongside native tools.
+    /// Provider claims tool support but native tool_calls emission is inconsistent,
+    /// especially when thinking/reasoning mode is enabled (Qwen, DeepSeek, GLM).
+    /// The orchestrator injects Soft fallback instructions alongside native tools.
     Unreliable,
     /// Provider does not support native tool calling (Ollama).
     /// The orchestrator uses full prompt-based fallback.
@@ -518,6 +519,28 @@ pub enum LlmError {
     },
     /// Other error
     Other { message: String },
+}
+
+impl LlmError {
+    /// Whether this error is transient and should be retried.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            LlmError::NetworkError { .. }
+                | LlmError::RateLimited { .. }
+                | LlmError::ServerError { .. }
+                | LlmError::ProviderUnavailable { .. }
+        )
+    }
+
+    /// For rate-limited errors, return the suggested wait time in seconds.
+    pub fn retry_after_secs(&self) -> Option<u64> {
+        if let LlmError::RateLimited { retry_after, .. } = self {
+            retry_after.map(|s| s as u64)
+        } else {
+            None
+        }
+    }
 }
 
 impl std::fmt::Display for LlmError {

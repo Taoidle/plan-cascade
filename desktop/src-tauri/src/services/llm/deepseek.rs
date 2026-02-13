@@ -9,9 +9,9 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolCallReliability, ToolDefinition,
-    UsageStats,
+    FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
+    MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
+    ToolCallReliability, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::DeepSeekAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -95,7 +95,14 @@ impl DeepSeekProvider {
             let api_tools: Vec<serde_json::Value> =
                 tools.iter().map(|t| self.tool_to_deepseek(t)).collect();
             body["tools"] = serde_json::json!(api_tools);
-            if matches!(request_options.tool_call_mode, ToolCallMode::Required) {
+            let thinking_active =
+                self.config.enable_thinking && self.model_supports_thinking();
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required)
+                && !thinking_active
+            {
+                // DeepSeek R1 (thinking model) does not reliably support
+                // tool_choice "required" — skip it and let the model default
+                // to "auto".
                 body["tool_choice"] = serde_json::json!("required");
             }
         }
@@ -375,7 +382,21 @@ impl LlmProvider for DeepSeekProvider {
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
+        // DeepSeek API supports native function calling, but in practice
+        // models with thinking/reasoning may not emit native tool_calls reliably.
+        // Keep Unreliable to use prompt-based fallback which works consistently.
         ToolCallReliability::Unreliable
+    }
+
+    fn default_fallback_mode(&self) -> FallbackToolFormatMode {
+        if self.config.enable_thinking && self.model_supports_thinking() {
+            // DeepSeek R1 with thinking enabled: disable prompt-based fallback
+            // to avoid confusing the model with dual-channel tool calling
+            // (native tools API + prompt instructions compete).
+            FallbackToolFormatMode::Off
+        } else {
+            FallbackToolFormatMode::Soft
+        }
     }
 
     fn context_window(&self) -> u32 {

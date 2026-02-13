@@ -210,23 +210,29 @@ impl StreamAdapter for QwenAdapter {
                 // Handle tool calls
                 if let Some(tool_calls) = delta.tool_calls {
                     for tc in tool_calls {
-                        if let Some(id) = tc.id {
-                            // New tool call starting — flush any previous pending tool
-                            if let Some(tool_event) = self.flush_pending_tool() {
-                                events.push(tool_event);
-                            }
-                            self.tool_id = Some(id.clone());
-                            if let Some(func) = &tc.function {
-                                self.tool_name = func.name.clone();
-                            }
-                            self.tool_args_buffer.clear();
+                        // Only treat as a NEW tool call when id is present AND
+                        // non-empty. DashScope sends continuation chunks with
+                        // id: "" (empty string) which should NOT flush the
+                        // pending tool or start a new one.
+                        if let Some(id) = tc.id.as_deref() {
+                            if !id.is_empty() {
+                                // New tool call starting — flush any previous pending tool
+                                if let Some(tool_event) = self.flush_pending_tool() {
+                                    events.push(tool_event);
+                                }
+                                self.tool_id = Some(id.to_string());
+                                if let Some(func) = &tc.function {
+                                    self.tool_name = func.name.clone();
+                                }
+                                self.tool_args_buffer.clear();
 
-                            if let Some(name) = &self.tool_name {
-                                events.push(UnifiedStreamEvent::ToolStart {
-                                    tool_id: id,
-                                    tool_name: name.clone(),
-                                    arguments: None,
-                                });
+                                if let Some(name) = &self.tool_name {
+                                    events.push(UnifiedStreamEvent::ToolStart {
+                                        tool_id: id.to_string(),
+                                        tool_name: name.clone(),
+                                        arguments: None,
+                                    });
+                                }
                             }
                         }
 
@@ -332,5 +338,43 @@ mod tests {
         let mut adapter = QwenAdapter::new("qwen-plus");
         let events = adapter.adapt("data: [DONE]").unwrap();
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_tool_call_empty_id_continuation() {
+        let mut adapter = QwenAdapter::new("qwen3-max");
+
+        // First chunk: new tool call with a real ID
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "call_abc123", "type": "function", "function": {"name": "Read", "arguments": "{\"file"}}]}}]}"#)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            UnifiedStreamEvent::ToolStart { tool_id, tool_name, .. } => {
+                assert_eq!(tool_id, "call_abc123");
+                assert_eq!(tool_name, "Read");
+            }
+            _ => panic!("Expected ToolStart"),
+        }
+
+        // Continuation chunk: empty id should NOT flush or start a new tool
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "", "function": {"arguments": "_path\": \"src/main.rs\"}"}}]}}]}"#)
+            .unwrap();
+        // Should produce no events (just accumulates arguments)
+        assert!(events.is_empty());
+
+        // Done signal should flush the completed tool
+        let events = adapter.adapt("data: [DONE]").unwrap();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            UnifiedStreamEvent::ToolComplete { tool_id, tool_name, arguments } => {
+                assert_eq!(tool_id, "call_abc123");
+                assert_eq!(tool_name, "Read");
+                assert!(arguments.contains("file_path"));
+                assert!(arguments.contains("src/main.rs"));
+            }
+            _ => panic!("Expected ToolComplete"),
+        }
     }
 }

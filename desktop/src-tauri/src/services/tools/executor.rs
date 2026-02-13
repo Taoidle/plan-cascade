@@ -14,6 +14,7 @@ use tokio::time::timeout;
 
 use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::services::orchestrator::index_store::IndexStore;
+use crate::services::orchestrator::text_describes_pending_action;
 
 /// Cache entry for a previously read file, used for deduplication.
 ///
@@ -1830,8 +1831,14 @@ impl ToolExecutor {
             let response_text = result
                 .response
                 .unwrap_or_else(|| "Task completed with no output".to_string());
-            // Cache successful result (story-005)
-            if let Ok(mut cache) = self.task_dedup_cache.lock() {
+            // Cache successful result (story-005), but skip narration-only responses
+            // that contain no useful content (e.g. "Let me check..." / "我先查看...")
+            if text_describes_pending_action(&response_text) {
+                eprintln!(
+                    "[task-dedup] Skipping cache for narration-only result (hash={})",
+                    prompt_hash
+                );
+            } else if let Ok(mut cache) = self.task_dedup_cache.lock() {
                 cache.insert(prompt_hash, response_text.clone());
             }
             ToolResult::ok(response_text)

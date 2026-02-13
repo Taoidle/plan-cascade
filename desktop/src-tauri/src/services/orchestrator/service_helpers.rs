@@ -136,8 +136,16 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             _ => format!("You are an AI coding assistant. Complete the requested task using the available tools.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with bullet points covering what was done, key findings, and any recommendations. Do NOT include raw file contents - summarize and reference file paths instead."),
         };
 
+        // Sub-agents perform basic tool calls (LS, Read, Grep, Bash) and don't
+        // benefit from thinking/reasoning mode. Disable it to avoid:
+        // 1. Wasting tokens on reasoning for simple file operations
+        // 2. Compatibility issues (e.g., Qwen thinking mode conflicts with
+        //    tool_choice and prompt fallback)
+        let mut sub_provider = self.provider_config.clone();
+        sub_provider.enable_thinking = false;
+
         let sub_config = OrchestratorConfig {
-            provider: self.provider_config.clone(),
+            provider: sub_provider,
             system_prompt: Some(task_prefix.to_string()),
             max_iterations: 25,
             max_total_tokens: sub_agent_token_budget(self.context_window, task_type.as_deref()),
@@ -150,10 +158,15 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             analysis_session_id: None,
         };
 
+        // Give each sub-agent a fresh read cache. Sub-agents have their own conversation
+        // context and cannot reference "session memory" from the parent — so a shared cache
+        // would return [DEDUP] for files the sub-agent has never seen, causing loops.
+        let isolated_read_cache =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let sub_agent = OrchestratorService::new_sub_agent_with_shared_state(
             sub_config,
             cancellation_token,
-            self.shared_read_cache.clone(),
+            isolated_read_cache,
             self.shared_index_store.clone(),
             self.shared_embedding_service.clone(),
         );
@@ -2067,6 +2080,7 @@ impl OrchestratorService {
                             if Self::compact_messages_prefix_stable(&mut messages) {
                                 // ADR-004: Clear dedup cache after prefix-stable compaction
                                 self.tool_executor.clear_read_cache();
+                                self.tool_executor.clear_task_cache();
                                 let removed_count = before - messages.len();
                                 let _ = tx
                                     .send(UnifiedStreamEvent::ContextCompaction {
@@ -2572,6 +2586,12 @@ impl OrchestratorService {
         let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
         let mut loop_detector = ToolCallLoopDetector::new(3, 20);
+        // Track consecutive iterations where the ONLY tool calls are Task
+        // delegations. This catches the "infinite delegation" pattern where the
+        // main agent keeps spawning sub-agents with different prompts but never
+        // does any direct work itself.
+        let mut consecutive_task_only_iterations = 0u32;
+        const MAX_CONSECUTIVE_TASK_ONLY: u32 = 3;
 
         // Create TaskContext for Task tool support in the agentic loop
         let task_spawner = Arc::new(OrchestratorTaskSpawner {
@@ -2782,6 +2802,7 @@ impl OrchestratorService {
                         if Self::compact_messages_prefix_stable(&mut messages) {
                             // ADR-004: Clear dedup cache after prefix-stable compaction
                             self.tool_executor.clear_read_cache();
+                            self.tool_executor.clear_task_cache();
                             let removed_count = removed - messages.len();
                             let _ = tx
                                 .send(UnifiedStreamEvent::ContextCompaction {
@@ -2962,45 +2983,6 @@ impl OrchestratorService {
                 }
             } else if !parsed_fallback.calls.is_empty() {
                 repair_retry_count = 0; // Reset on successful tool calls
-
-                // Story-003: Check if the text alongside fallback tool calls is
-                // already a complete answer. If so, exit the loop with that text
-                // instead of executing the (unnecessary) tool calls.
-                if let Some(text) = &response.content {
-                    let cleaned = extract_text_without_tool_calls(text);
-                    if is_complete_answer(&cleaned) {
-                        eprintln!(
-                            "[loop-exit] Exiting execute with complete text response, ignoring {} fallback tool calls",
-                            parsed_fallback.calls.len()
-                        );
-
-                        // Emit completion event with special stop_reason
-                        let _ = tx
-                            .send(UnifiedStreamEvent::Complete {
-                                stop_reason: Some("complete_text_exit".to_string()),
-                            })
-                            .await;
-
-                        // Emit usage event
-                        let _ = tx
-                            .send(UnifiedStreamEvent::Usage {
-                                input_tokens: total_usage.input_tokens,
-                                output_tokens: total_usage.output_tokens,
-                                thinking_tokens: total_usage.thinking_tokens,
-                                cache_read_tokens: total_usage.cache_read_tokens,
-                                cache_creation_tokens: total_usage.cache_creation_tokens,
-                            })
-                            .await;
-
-                        return ExecutionResult {
-                            response: Some(cleaned),
-                            usage: total_usage,
-                            iterations,
-                            success: true,
-                            error: None,
-                        };
-                    }
-                }
 
                 // Prompt-based fallback path
                 // Add assistant message with tool call blocks stripped from text
@@ -3281,6 +3263,44 @@ impl OrchestratorService {
                     success: true,
                     error: None,
                 };
+            }
+
+            // Track consecutive iterations where ALL tool calls are Task delegations.
+            // This catches the "infinite delegation" anti-pattern where the main agent
+            // keeps spawning sub-agents with different prompts but never does any
+            // direct work itself. The existing loop detector cannot catch this because
+            // each Task call has different arguments (different prompts).
+            {
+                let tool_names: Vec<&str> = if has_native_tool_calls {
+                    response.tool_calls.iter().map(|tc| tc.name.as_str()).collect()
+                } else if !parsed_fallback.calls.is_empty() {
+                    parsed_fallback.calls.iter().map(|ptc| ptc.tool_name.as_str()).collect()
+                } else {
+                    vec![]
+                };
+                let all_task = !tool_names.is_empty()
+                    && tool_names.iter().all(|n| *n == "Task");
+                if all_task {
+                    consecutive_task_only_iterations += 1;
+                } else {
+                    consecutive_task_only_iterations = 0;
+                }
+                if consecutive_task_only_iterations >= MAX_CONSECUTIVE_TASK_ONLY {
+                    eprintln!(
+                        "[task-delegation-limit] {} consecutive Task-only iterations, injecting direct-work hint",
+                        consecutive_task_only_iterations
+                    );
+                    messages.push(Message::user(
+                        "[DELEGATION LIMIT] You have delegated to sub-agents multiple times in a row \
+                         without doing any direct work yourself. Sub-agents have limited capabilities \
+                         and cannot fully replace your own tool use. You MUST now use tools directly \
+                         (Read, Grep, LS, Edit, Write, Bash, etc.) to make progress on the task. \
+                         Do NOT call the Task tool again until you have done meaningful direct work."
+                            .to_string(),
+                    ));
+                    // Reset counter so the model gets another chance
+                    consecutive_task_only_iterations = 0;
+                }
             }
         }
     }
@@ -6104,6 +6124,7 @@ impl OrchestratorService {
                 // file reads that were just compacted away, causing LLMs to get
                 // only the short dedup message instead of actual content.
                 self.tool_executor.clear_read_cache();
+                self.tool_executor.clear_task_cache();
 
                 eprintln!(
                     "[compaction] Compacted {} messages, preserved {}, summary {} tokens, session memory with {} files (dedup cache cleared)",
@@ -6232,6 +6253,9 @@ impl OrchestratorService {
     ///
     /// `api_tools` are sent to the provider API (empty for prompt-fallback providers).
     /// `prompt_tools` are listed in the system prompt for guidance.
+    ///
+    /// Retries transient errors (network, rate-limit, server, provider-unavailable)
+    /// with exponential backoff (1s → 60s cap, max 10 retries).
     async fn call_llm(
         &self,
         messages: &[Message],
@@ -6240,20 +6264,48 @@ impl OrchestratorService {
         request_options: LlmRequestOptions,
     ) -> Result<LlmResponse, crate::services::llm::LlmError> {
         let system = self.effective_system_prompt(prompt_tools, &request_options);
-        self.provider
-            .send_message(
-                messages.to_vec(),
-                system,
-                api_tools.to_vec(),
-                request_options,
-            )
-            .await
+        let max_retries: u32 = 10;
+        let max_delay_secs: u64 = 60;
+
+        for attempt in 0..=max_retries {
+            let result = self
+                .provider
+                .send_message(
+                    messages.to_vec(),
+                    system.clone(),
+                    api_tools.to_vec(),
+                    request_options.clone(),
+                )
+                .await;
+            match result {
+                Ok(r) => return Ok(r),
+                Err(e) if e.is_retryable() && attempt < max_retries => {
+                    let delay = std::cmp::min(1u64 << attempt, max_delay_secs);
+                    let wait = e.retry_after_secs().map_or(delay, |r| std::cmp::max(r, delay));
+                    eprintln!(
+                        "[llm:retry] {} on attempt {}/{}, retrying in {}s",
+                        e,
+                        attempt + 1,
+                        max_retries,
+                        wait
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        unreachable!()
     }
 
     /// Call the LLM with streaming mode.
     ///
     /// `api_tools` are sent to the provider API (empty for prompt-fallback providers).
     /// `prompt_tools` are listed in the system prompt for guidance.
+    ///
+    /// Retries transient errors (network, rate-limit, server, provider-unavailable)
+    /// with exponential backoff (1s → 60s cap, max 10 retries).
+    /// Network errors from `.send().await` mean the connection never succeeded,
+    /// so no streaming events were emitted and retry is safe.
     async fn call_llm_streaming(
         &self,
         messages: &[Message],
@@ -6263,15 +6315,38 @@ impl OrchestratorService {
         request_options: LlmRequestOptions,
     ) -> Result<LlmResponse, crate::services::llm::LlmError> {
         let system = self.effective_system_prompt(prompt_tools, &request_options);
-        self.provider
-            .stream_message(
-                messages.to_vec(),
-                system,
-                api_tools.to_vec(),
-                tx,
-                request_options,
-            )
-            .await
+        let max_retries: u32 = 10;
+        let max_delay_secs: u64 = 60;
+
+        for attempt in 0..=max_retries {
+            let result = self
+                .provider
+                .stream_message(
+                    messages.to_vec(),
+                    system.clone(),
+                    api_tools.to_vec(),
+                    tx.clone(),
+                    request_options.clone(),
+                )
+                .await;
+            match result {
+                Ok(r) => return Ok(r),
+                Err(e) if e.is_retryable() && attempt < max_retries => {
+                    let delay = std::cmp::min(1u64 << attempt, max_delay_secs);
+                    let wait = e.retry_after_secs().map_or(delay, |r| std::cmp::max(r, delay));
+                    eprintln!(
+                        "[llm:retry] {} on attempt {}/{}, retrying in {}s",
+                        e,
+                        attempt + 1,
+                        max_retries,
+                        wait
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        unreachable!()
     }
 
     /// Execute a simple message without the agentic loop (single turn)
@@ -6594,7 +6669,7 @@ fn text_describes_tool_intent(text: &str) -> bool {
 /// - "Let me check README next."
 /// - "我先查看 README 文件。"
 /// - "接下来我会继续分析。"
-fn text_describes_pending_action(text: &str) -> bool {
+pub(crate) fn text_describes_pending_action(text: &str) -> bool {
     if text.trim().is_empty() {
         return false;
     }

@@ -18,3 +18,4 @@ pub mod tree_sitter_parser;
 pub use service::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, ProviderInfo, SessionExecutionResult,
 };
+pub(crate) use service::text_describes_pending_action;

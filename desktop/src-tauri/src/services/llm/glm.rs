@@ -9,9 +9,9 @@ use tokio::sync::mpsc;
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
-    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolCallReliability, ToolDefinition,
-    UsageStats,
+    FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
+    MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
+    ToolCallReliability, ToolDefinition, UsageStats,
 };
 use crate::services::streaming::adapters::GlmAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
@@ -122,7 +122,13 @@ impl GlmProvider {
                 })
                 .collect();
             body["tools"] = serde_json::json!(api_tools);
-            if matches!(request_options.tool_call_mode, ToolCallMode::Required) {
+            let thinking_active =
+                self.config.enable_thinking && self.model_supports_reasoning();
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required)
+                && !thinking_active
+            {
+                // GLM thinking models may not support tool_choice "required" —
+                // skip it and let the model default to "auto".
                 body["tool_choice"] = serde_json::json!("required");
             }
         }
@@ -350,7 +356,21 @@ impl LlmProvider for GlmProvider {
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
+        // GLM API supports native function calling, but in practice
+        // models with thinking/reasoning may not emit native tool_calls reliably.
+        // Keep Unreliable to use prompt-based fallback which works consistently.
         ToolCallReliability::Unreliable
+    }
+
+    fn default_fallback_mode(&self) -> FallbackToolFormatMode {
+        if self.config.enable_thinking && self.model_supports_reasoning() {
+            // GLM thinking models: disable prompt-based fallback to avoid
+            // dual-channel confusion between native tools API and prompt
+            // instructions.
+            FallbackToolFormatMode::Off
+        } else {
+            FallbackToolFormatMode::Soft
+        }
     }
 
     fn context_window(&self) -> u32 {
