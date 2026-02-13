@@ -311,7 +311,7 @@ impl IndexManager {
             },
             _ => IndexStatusEvent {
                 project_path: project_path.to_string(),
-                status: "indexed".to_string(),
+                status: "idle".to_string(),
                 indexed_files: 0,
                 total_files: 0,
                 error_message: None,

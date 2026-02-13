@@ -49,11 +49,11 @@ export function SimpleMode() {
     clearStrategyAnalysis,
     isChatSession,
     streamingOutput,
-    standaloneTurns,
     analysisCoverage,
     logs,
     history,
     clearHistory,
+    deleteHistory,
     renameHistory,
     restoreFromHistory,
     sessionUsageTotals,
@@ -179,18 +179,16 @@ export function SimpleMode() {
             Output{detailLineCount > 0 ? ` (${detailLineCount})` : ''}
           </button>
 
-          {(isChatSession || standaloneTurns.length > 0) && (
-            <button
-              onClick={handleNewTask}
-              className={clsx(
-                'text-sm px-3 py-1.5 rounded-lg transition-colors',
-                'text-gray-600 dark:text-gray-400',
-                'hover:bg-gray-100 dark:hover:bg-gray-800'
-              )}
-            >
-              {t('buttons.startNewTask', { ns: 'common', defaultValue: 'New Chat' })}
-            </button>
-          )}
+          <button
+            onClick={handleNewTask}
+            className={clsx(
+              'text-sm px-3 py-1.5 rounded-lg transition-colors',
+              'text-gray-600 dark:text-gray-400',
+              'hover:bg-gray-100 dark:hover:bg-gray-800'
+            )}
+          >
+            {t('buttons.startNewTask', { ns: 'common', defaultValue: 'New Chat' })}
+          </button>
         </div>
       </div>
 
@@ -207,6 +205,7 @@ export function SimpleMode() {
             history={history}
             workspacePath={workspacePath}
             onClear={clearHistory}
+            onDelete={deleteHistory}
             onRename={renameHistory}
             onRestore={handleRestoreHistory}
             currentTask={isChatSession ? (streamingOutput[0]?.content || null) : null}
@@ -279,6 +278,7 @@ function SessionSidebar({
   history,
   workspacePath,
   onClear,
+  onDelete,
   onRename,
   onRestore,
   currentTask,
@@ -286,6 +286,7 @@ function SessionSidebar({
   history: ExecutionHistoryItem[];
   workspacePath?: string | null;
   onClear: () => void;
+  onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onRestore: (id: string) => void;
   currentTask: string | null;
@@ -373,16 +374,28 @@ function SessionSidebar({
                       <p className="text-xs font-medium text-gray-900 dark:text-white line-clamp-2">
                         {item.title || item.taskDescription}
                       </p>
-                      <button
-                        className="shrink-0 text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRename(item);
-                        }}
-                        title="Rename session"
-                      >
-                        rename
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRename(item);
+                          }}
+                          title="Rename session"
+                        >
+                          rename
+                        </button>
+                        <button
+                          className="text-2xs px-1 py-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(item.id);
+                          }}
+                          title="Delete session"
+                        >
+                          &times;
+                        </button>
+                      </div>
                     </div>
                     <p className="text-2xs mt-1 text-gray-500 dark:text-gray-400 line-clamp-1">
                       {item.workspacePath}
@@ -419,16 +432,28 @@ function SessionSidebar({
                       <p className="text-xs font-medium text-gray-900 dark:text-white line-clamp-2">
                         {item.title || item.taskDescription}
                       </p>
-                      <button
-                        className="shrink-0 text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRename(item);
-                        }}
-                        title="Rename session"
-                      >
-                        rename
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRename(item);
+                          }}
+                          title="Rename session"
+                        >
+                          rename
+                        </button>
+                        <button
+                          className="text-2xs px-1 py-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(item.id);
+                          }}
+                          title="Delete session"
+                        >
+                          &times;
+                        </button>
+                      </div>
                     </div>
                     <p className="text-2xs mt-1 text-gray-500 dark:text-gray-400">
                       {new Date(item.startedAt).toLocaleString()} | {item.success ? 'success' : 'failed'}

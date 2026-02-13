@@ -285,6 +285,9 @@ interface ExecutionState {
   /** Counter for unique stream line IDs */
   streamLineCounter: number;
 
+  /** Line ID at the start of the current turn (for scoping text_replace) */
+  currentTurnStartLineId: number;
+
   /** Structured analysis coverage snapshot for Simple mode visualization */
   analysisCoverage: AnalysisCoverageSnapshot | null;
 
@@ -360,6 +363,9 @@ interface ExecutionState {
 
   /** Clear history */
   clearHistory: () => void;
+
+  /** Delete a single history item */
+  deleteHistory: (historyId: string) => void;
 
   /** Rename a history item */
   renameHistory: (historyId: string, title: string) => void;
@@ -654,6 +660,7 @@ const initialState = {
   strategyOptions: [] as StrategyOptionInfo[],
   streamingOutput: [] as StreamLine[],
   streamLineCounter: 0,
+  currentTurnStartLineId: 0,
   analysisCoverage: null as AnalysisCoverageSnapshot | null,
   qualityGateResults: [] as QualityGateResult[],
   executionErrors: [] as ExecutionError[],
@@ -782,6 +789,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         const providerApiKey = getLocalProviderApiKey(provider);
         const isSimpleStandalone = mode === 'simple';
         const turnStartLineId = get().streamLineCounter;
+        set({ currentTurnStartLineId: turnStartLineId });
         const standaloneSessionId = get().standaloneSessionId;
         const contextTurnsLimit = getStandaloneContextTurnsLimit();
         const recentStandaloneTurns = trimStandaloneTurns(existingStandaloneTurns, contextTurnsLimit);
@@ -1262,6 +1270,18 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       // Ignore localStorage errors
     }
     set({ history: [] });
+  },
+
+  deleteHistory: (historyId: string) => {
+    set((state) => {
+      const next = state.history.filter((item) => item.id !== historyId);
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore localStorage errors
+      }
+      return { history: next };
+    });
   },
 
   renameHistory: (historyId, title) => {
@@ -1802,28 +1822,33 @@ function handleUnifiedExecutionEvent(
       break;
 
     case 'text_replace': {
-      // Replace ALL accumulated text lines with a single cleaned version.
-      // During streaming with FallbackToolFormatMode, the LLM often repeats
-      // its reasoning text before/between/after tool call blocks, producing
-      // multiple 'text' lines separated by 'tool' indicator lines.  The
-      // cleaned content from the backend has tool blocks stripped and
-      // duplicates removed, so we collapse all text lines into one.
+      // Replace accumulated text lines from the CURRENT TURN with a single
+      // cleaned version.  During streaming with FallbackToolFormatMode, the
+      // LLM often repeats its reasoning text before/between/after tool call
+      // blocks, producing multiple 'text' lines separated by 'tool' indicator
+      // lines.  The cleaned content from the backend has tool blocks stripped
+      // and duplicates removed, so we collapse current-turn text lines into one.
+      //
+      // IMPORTANT: Only touch lines whose id > currentTurnStartLineId so that
+      // previous turns' content is preserved in multi-turn conversations.
       const lines = get().streamingOutput;
+      const turnBoundary = get().currentTurnStartLineId;
       const textIndices = lines
-        .map((l, i) => (l.type === 'text' ? i : -1))
+        .map((l, i) => (l.type === 'text' && l.id > turnBoundary ? i : -1))
         .filter((i) => i >= 0);
       if (textIndices.length > 0) {
         const cleaned = payload.content || '';
         const lastTextIdx = textIndices[textIndices.length - 1];
         const otherTextIndices = new Set(textIndices.slice(0, -1));
         if (cleaned) {
-          // Keep the last text line with cleaned content, remove earlier text lines
+          // Keep the last current-turn text line with cleaned content,
+          // remove earlier current-turn text lines
           const updated = lines.filter((_, i) => !otherTextIndices.has(i));
           const newLastIdx = lastTextIdx - otherTextIndices.size;
           updated[newLastIdx] = { ...updated[newLastIdx], content: cleaned };
           set({ streamingOutput: updated });
         } else {
-          // Remove all text lines entirely if cleaned is empty
+          // Remove all current-turn text lines if cleaned is empty
           const allTextIndices = new Set(textIndices);
           set({ streamingOutput: lines.filter((_, i) => !allTextIndices.has(i)) });
         }

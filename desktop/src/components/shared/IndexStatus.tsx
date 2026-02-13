@@ -70,6 +70,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     }
 
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     // Fetch initial status
     invoke<CommandResponse<IndexStatusEvent>>('get_index_status', {
@@ -78,6 +79,20 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
       .then((response) => {
         if (!cancelled && response.success && response.data) {
           applyEvent(response.data);
+          // If status is idle, retry after delay (backend may not be ready yet)
+          if (response.data.status === 'idle') {
+            retryTimer = setTimeout(() => {
+              if (!cancelled) {
+                invoke<CommandResponse<IndexStatusEvent>>('get_index_status', {
+                  projectPath: workspacePath,
+                })
+                  .then((r) => {
+                    if (!cancelled && r.success && r.data) applyEvent(r.data);
+                  })
+                  .catch(() => {});
+              }
+            }, 2000);
+          }
         }
       })
       .catch(() => {
@@ -104,6 +119,9 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
 
     return () => {
       cancelled = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
       if (unlisten) {
         unlisten();
       }

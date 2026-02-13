@@ -679,6 +679,20 @@ pub async fn get_index_status(
     let mgr_lock = standalone_state.index_manager.read().await;
     if let Some(mgr) = &*mgr_lock {
         let status = mgr.get_status(&dir).await;
+
+        // If status is idle, trigger ensure_indexed in background so vocabulary
+        // is restored and real-time events are emitted for the frontend listener.
+        if status.status == "idle" {
+            let mgr_arc = standalone_state.index_manager.clone();
+            let dir_clone = dir.clone();
+            tokio::spawn(async move {
+                let lock = mgr_arc.read().await;
+                if let Some(m) = &*lock {
+                    m.ensure_indexed(&dir_clone).await;
+                }
+            });
+        }
+
         Ok(CommandResponse::ok(status))
     } else {
         Ok(CommandResponse::ok(IndexStatusEvent {
