@@ -210,19 +210,21 @@ impl StreamAdapter for QwenAdapter {
                 // Handle tool calls
                 if let Some(tool_calls) = delta.tool_calls {
                     for tc in tool_calls {
-                        // Only treat as a NEW tool call when id is present AND
-                        // non-empty. DashScope sends continuation chunks with
-                        // id: "" (empty string) which should NOT flush the
+                        // Only treat as a NEW tool call when id is present,
+                        // non-empty, AND different from the pending tool_id.
+                        // DashScope sends continuation chunks with id: ""
+                        // (standard Qwen), or with the SAME non-empty id
+                        // (Qwen3-Omni-Flash). Both should NOT flush the
                         // pending tool or start a new one.
                         if let Some(id) = tc.id.as_deref() {
-                            if !id.is_empty() {
-                                // New tool call starting — flush any previous pending tool
+                            if !id.is_empty() && self.tool_id.as_deref() != Some(id) {
+                                // New tool call starting (different id) — flush any previous pending tool
                                 if let Some(tool_event) = self.flush_pending_tool() {
                                     events.push(tool_event);
                                 }
                                 self.tool_id = Some(id.to_string());
                                 if let Some(func) = &tc.function {
-                                    self.tool_name = func.name.clone();
+                                    self.tool_name = func.name.clone().filter(|n| !n.is_empty());
                                 }
                                 self.tool_args_buffer.clear();
 
@@ -236,8 +238,14 @@ impl StreamAdapter for QwenAdapter {
                             }
                         }
 
-                        // Accumulate function arguments
+                        // Accumulate function arguments (and pick up tool name
+                        // from continuation chunks if we don't have one yet)
                         if let Some(func) = tc.function {
+                            if self.tool_name.is_none() {
+                                if let Some(name) = func.name.as_ref().filter(|n| !n.is_empty()) {
+                                    self.tool_name = Some(name.clone());
+                                }
+                            }
                             if let Some(args) = func.arguments {
                                 self.tool_args_buffer.push_str(&args);
                             }
@@ -375,6 +383,127 @@ mod tests {
                 assert!(arguments.contains("src/main.rs"));
             }
             _ => panic!("Expected ToolComplete"),
+        }
+    }
+
+    #[test]
+    fn test_empty_tool_name_filtered() {
+        let mut adapter = QwenAdapter::new("qwen3-max");
+
+        // First chunk: tool call with empty string name (Qwen3-MAX bug)
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "call_xyz", "type": "function", "function": {"name": "", "arguments": "{\"path\":"}}]}}]}"#)
+            .unwrap();
+        // No ToolStart because tool_name is empty and gets filtered to None
+        assert!(events.is_empty(), "Expected no events when tool name is empty, got: {:?}", events);
+
+        // Continuation chunk with arguments
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "", "function": {"arguments": " \"foo\"}"}}]}}]}"#)
+            .unwrap();
+        assert!(events.is_empty());
+
+        // Done: flush_pending_tool requires both tool_id and tool_name to be Some.
+        // Since tool_name was filtered to None, no ToolComplete should be emitted.
+        let events = adapter.adapt("data: [DONE]").unwrap();
+        assert!(events.is_empty(), "Expected no ToolComplete with empty tool name, got: {:?}", events);
+    }
+
+    #[test]
+    fn test_same_id_continuation_no_premature_flush() {
+        let mut adapter = QwenAdapter::new("qwen3-omni-flash");
+
+        // First chunk: new tool call with id and name
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "call_omni_1", "type": "function", "function": {"name": "Bash", "arguments": "{\"cmd\":"}}]}}]}"#)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            UnifiedStreamEvent::ToolStart { tool_id, tool_name, .. } => {
+                assert_eq!(tool_id, "call_omni_1");
+                assert_eq!(tool_name, "Bash");
+            }
+            _ => panic!("Expected ToolStart, got {:?}", events[0]),
+        }
+
+        // Continuation chunk: SAME non-empty id (Qwen3-Omni-Flash behavior)
+        // Should NOT flush and NOT start a new tool — just accumulate arguments
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "call_omni_1", "function": {"arguments": " \"ls -la\"}"}}]}}]}"#)
+            .unwrap();
+        assert!(events.is_empty(), "Same-id continuation should not produce events, got: {:?}", events);
+
+        // Flush via finish_reason
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"finish_reason": "tool_calls"}]}"#)
+            .unwrap();
+        // Should get ToolComplete then Complete
+        assert_eq!(events.len(), 2, "Expected ToolComplete + Complete, got: {:?}", events);
+        match &events[0] {
+            UnifiedStreamEvent::ToolComplete { tool_id, tool_name, arguments } => {
+                assert_eq!(tool_id, "call_omni_1");
+                assert_eq!(tool_name, "Bash");
+                assert_eq!(arguments, r#"{"cmd": "ls -la"}"#);
+            }
+            _ => panic!("Expected ToolComplete, got {:?}", events[0]),
+        }
+        match &events[1] {
+            UnifiedStreamEvent::Complete { stop_reason } => {
+                assert_eq!(stop_reason, &Some("tool_calls".to_string()));
+            }
+            _ => panic!("Expected Complete, got {:?}", events[1]),
+        }
+    }
+
+    #[test]
+    fn test_different_id_flushes_previous_tool() {
+        let mut adapter = QwenAdapter::new("qwen3-max");
+
+        // First tool call
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "call_first", "type": "function", "function": {"name": "Read", "arguments": "{\"path\": \"a.rs\"}"}}]}}]}"#)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            UnifiedStreamEvent::ToolStart { tool_id, tool_name, .. } => {
+                assert_eq!(tool_id, "call_first");
+                assert_eq!(tool_name, "Read");
+            }
+            _ => panic!("Expected ToolStart for first tool"),
+        }
+
+        // Second tool call with a DIFFERENT id — should flush the first
+        let events = adapter
+            .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "call_second", "type": "function", "function": {"name": "Bash", "arguments": "{\"cmd\": \"echo hi\"}"}}]}}]}"#)
+            .unwrap();
+        // Should get ToolComplete (flushed first tool) + ToolStart (new tool)
+        assert_eq!(events.len(), 2, "Expected ToolComplete + ToolStart, got: {:?}", events);
+        match &events[0] {
+            UnifiedStreamEvent::ToolComplete { tool_id, tool_name, arguments } => {
+                assert_eq!(tool_id, "call_first");
+                assert_eq!(tool_name, "Read");
+                assert!(arguments.contains("a.rs"));
+            }
+            _ => panic!("Expected ToolComplete for first tool, got {:?}", events[0]),
+        }
+        match &events[1] {
+            UnifiedStreamEvent::ToolStart { tool_id, tool_name, .. } => {
+                assert_eq!(tool_id, "call_second");
+                assert_eq!(tool_name, "Bash");
+            }
+            _ => panic!("Expected ToolStart for second tool, got {:?}", events[1]),
+        }
+
+        // Flush second tool via [DONE]
+        let events = adapter.adapt("data: [DONE]").unwrap();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            UnifiedStreamEvent::ToolComplete { tool_id, tool_name, arguments } => {
+                assert_eq!(tool_id, "call_second");
+                assert_eq!(tool_name, "Bash");
+                assert!(arguments.contains("echo hi"));
+            }
+            _ => panic!("Expected ToolComplete for second tool"),
         }
     }
 }

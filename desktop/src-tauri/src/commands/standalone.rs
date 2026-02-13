@@ -846,11 +846,12 @@ pub async fn execute_standalone(
     max_total_tokens: Option<u32>,
     max_iterations: Option<u32>,
     app: AppHandle,
-) -> CommandResponse<ExecutionResult> {
+    app_state: State<'_, AppState>,
+) -> Result<CommandResponse<ExecutionResult>, String> {
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&provider) {
         Some(p) => p,
-        None => return CommandResponse::err(format!("Unknown provider: {}", provider)),
+        None => return Ok(CommandResponse::err(format!("Unknown provider: {}", provider))),
     };
     let provided_api_key = api_key
         .or(apiKey)
@@ -861,7 +862,7 @@ pub async fn execute_standalone(
     let mut api_key = match get_api_key_with_aliases(&keyring, canonical_provider) {
         Ok(key) => key,
         Err(e) => {
-            return CommandResponse::err(format!("Failed to get API key: {}", e));
+            return Ok(CommandResponse::err(format!("Failed to get API key: {}", e)));
         }
     };
 
@@ -876,15 +877,15 @@ pub async fn execute_standalone(
 
     let provider_type = match provider_type_from_name(canonical_provider) {
         Some(p) => p,
-        None => return CommandResponse::err(format!("Unknown provider: {}", provider)),
+        None => return Ok(CommandResponse::err(format!("Unknown provider: {}", provider))),
     };
 
     // Validate API key for non-Ollama providers
     if provider_type != ProviderType::Ollama && api_key.is_none() {
-        return CommandResponse::err(format!(
+        return Ok(CommandResponse::err(format!(
             "API key not configured for provider '{}'",
             canonical_provider
-        ));
+        )));
     }
 
     let config = ProviderConfig {
@@ -914,7 +915,17 @@ pub async fn execute_standalone(
         analysis_session_id,
     };
 
-    let orchestrator = OrchestratorService::new(orchestrator_config);
+    let mut orchestrator = OrchestratorService::new(orchestrator_config);
+
+    // Wire database pool so IndexStore is available for CodebaseSearch
+    match app_state.with_database(|db| Ok(db.pool().clone())).await {
+        Ok(pool) => {
+            orchestrator = orchestrator.with_database(pool);
+        }
+        Err(e) => {
+            eprintln!("[execute_standalone] Database not available, CodebaseSearch will be disabled: {}", e);
+        }
+    }
 
     // Create channel for streaming events
     let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
@@ -934,7 +945,7 @@ pub async fn execute_standalone(
         orchestrator.execute_single(message, tx).await
     };
 
-    CommandResponse::ok(result)
+    Ok(CommandResponse::ok(result))
 }
 
 /// Save text output to a user-selected file path.

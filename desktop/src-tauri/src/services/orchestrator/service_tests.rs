@@ -3189,6 +3189,68 @@ fn test_force_terminate_includes_useful_message() {
 }
 
 // =========================================================================
+// Empty tool name skip tests (story-004)
+// =========================================================================
+
+#[test]
+fn test_record_call_skips_empty_tool_name() {
+    let mut detector = ToolCallLoopDetector::new(3, 20);
+    // Empty string should return None and not be recorded
+    let result = detector.record_call("", r#"{"file":"a.rs"}"#, false);
+    assert!(result.is_none(), "Empty tool name should return None");
+    assert_eq!(detector.recent_calls.len(), 0, "Empty tool name should not appear in sliding window");
+    assert_eq!(detector.consecutive_count, 0, "Empty tool name should not increment consecutive count");
+}
+
+#[test]
+fn test_record_call_skips_whitespace_only_tool_name() {
+    let mut detector = ToolCallLoopDetector::new(3, 20);
+    // Whitespace-only names should also be skipped
+    let result = detector.record_call("   ", r#"{"file":"a.rs"}"#, false);
+    assert!(result.is_none(), "Whitespace-only tool name should return None");
+    assert_eq!(detector.recent_calls.len(), 0, "Whitespace-only tool name should not appear in sliding window");
+    assert_eq!(detector.consecutive_count, 0, "Whitespace-only tool name should not increment consecutive count");
+
+    let result = detector.record_call("\t\n", r#"{"file":"a.rs"}"#, false);
+    assert!(result.is_none(), "Tab/newline tool name should return None");
+    assert_eq!(detector.recent_calls.len(), 0, "Tab/newline tool name should not appear in sliding window");
+}
+
+#[test]
+fn test_empty_tool_names_do_not_inflate_loop_detection() {
+    let mut detector = ToolCallLoopDetector::new(3, 20);
+
+    // Interleave empty tool name calls with valid calls — empty ones should be invisible
+    detector.record_call("", r#"{"file":"a.rs"}"#, false);
+    detector.record_call("", r#"{"file":"a.rs"}"#, false);
+    detector.record_call("", r#"{"file":"a.rs"}"#, false);
+
+    // Only 1 valid call — should not trigger detection
+    let result = detector.record_call("Read", r#"{"file":"a.rs"}"#, false);
+    assert!(result.is_none(), "Single valid call after empty names should not trigger detection");
+    assert_eq!(detector.recent_calls.len(), 1, "Only valid calls should be in sliding window");
+    assert_eq!(detector.consecutive_count, 1, "Consecutive count should reflect only valid calls");
+}
+
+#[test]
+fn test_valid_calls_work_correctly_after_empty_name_calls() {
+    let mut detector = ToolCallLoopDetector::new(3, 20);
+
+    // Fire many empty-name calls — none should be recorded
+    for _ in 0..10 {
+        let result = detector.record_call("", r#"{"x":1}"#, false);
+        assert!(result.is_none());
+    }
+
+    // Now valid calls should still trigger detection at the normal threshold
+    detector.record_call("Read", r#"{"file":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file":"a.rs"}"#, false);
+    let result = detector.record_call("Read", r#"{"file":"a.rs"}"#, false);
+    assert!(result.is_some(), "Third consecutive valid call should trigger detection");
+    assert_eq!(detector.recent_calls.len(), 3, "Sliding window should have exactly 3 valid calls");
+}
+
+// =========================================================================
 // Dedup skip logic tests (story-006)
 // =========================================================================
 

@@ -452,6 +452,13 @@ impl ToolCallLoopDetector {
         args_str: &str,
         is_dedup: bool,
     ) -> Option<LoopDetection> {
+        // Skip invalid tool calls with empty names — these are adapter
+        // parse errors (e.g. Qwen3-MAX producing empty tool names) and
+        // should not pollute loop detection.
+        if tool_name.trim().is_empty() {
+            return None;
+        }
+
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -2131,6 +2138,7 @@ impl OrchestratorService {
                 });
 
                 // Execute each tool call
+                let mut successful_native_calls: usize = 0;
                 for tc in &response.tool_calls {
                     let (effective_tool_name, effective_args) =
                         match prepare_tool_call_for_execution(
@@ -2151,6 +2159,7 @@ impl OrchestratorService {
                                 continue;
                             }
                         };
+                    successful_native_calls += 1;
 
                     // Emit tool start event
                     let _ = tx
@@ -2274,6 +2283,20 @@ impl OrchestratorService {
                             }
                         }
                     }
+                }
+
+                // Story-003: When ALL native tool calls failed validation (e.g. empty
+                // tool names, malformed arguments from Qwen thinking mode), inject a
+                // repair hint so the model retries with correct tool call format.
+                if successful_native_calls == 0 && !response.tool_calls.is_empty() {
+                    eprintln!(
+                        "[native-tool-repair] All {} native tool call(s) failed validation, injecting repair hint",
+                        response.tool_calls.len()
+                    );
+                    messages.push(Message::user(
+                        "All tool calls failed validation. Please retry with correct tool names and valid JSON arguments. \
+                        Available tools: Read, Write, Edit, Bash, Glob, Grep, LS, Cwd, CodebaseSearch, WebFetch, WebSearch.".to_string()
+                    ));
                 }
             } else if !parsed_fallback.calls.is_empty() {
                 repair_retry_count = 0; // Reset on successful tool calls
@@ -2853,21 +2876,44 @@ impl OrchestratorService {
                 });
 
                 // Execute each tool call
+                let mut successful_native_calls: usize = 0;
                 for tc in &response.tool_calls {
+                    // Validate tool name and arguments before execution
+                    let (effective_tool_name, effective_args) =
+                        match prepare_tool_call_for_execution(
+                            &tc.name,
+                            &tc.arguments,
+                            None,
+                        ) {
+                            Ok(prepared) => prepared,
+                            Err(error_message) => {
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::ToolResult {
+                                        tool_id: tc.id.clone(),
+                                        result: None,
+                                        error: Some(error_message.clone()),
+                                    })
+                                    .await;
+                                messages.push(Message::tool_result(&tc.id, error_message, true));
+                                continue;
+                            }
+                        };
+                    successful_native_calls += 1;
+
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolStart {
                             tool_id: tc.id.clone(),
-                            tool_name: tc.name.clone(),
-                            arguments: Some(tc.arguments.to_string()),
+                            tool_name: effective_tool_name.clone(),
+                            arguments: Some(effective_args.to_string()),
                         })
                         .await;
 
-                    let (result, nested_usage, nested_iterations) = if tc.name == "Analyze" {
-                        self.execute_analyze_tool_result(&tc.arguments, &tx).await
+                    let (result, nested_usage, nested_iterations) = if effective_tool_name == "Analyze" {
+                        self.execute_analyze_tool_result(&effective_args, &tx).await
                     } else {
                         (
                             self.tool_executor
-                                .execute_with_context(&tc.name, &tc.arguments, Some(&task_ctx))
+                                .execute_with_context(&effective_tool_name, &effective_args, Some(&task_ctx))
                                 .await,
                             UsageStats::default(),
                             0,
@@ -2876,7 +2922,7 @@ impl OrchestratorService {
                     merge_usage(&mut total_usage, &nested_usage);
                     iterations += nested_iterations;
 
-                    // Emit tool result event (always 閳?for frontend display)
+                    // Emit tool result event (always for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tc.id.clone(),
@@ -2905,7 +2951,7 @@ impl OrchestratorService {
                         // Truncate tool output for messages vec (LLM context)
                         // while keeping full content in the ToolResult event above.
                         let context_content =
-                            truncate_tool_output_for_context(&tc.name, &result.to_content());
+                            truncate_tool_output_for_context(&effective_tool_name, &result.to_content());
 
                         // Add tool result to messages (with multimodal support)
                         if let Some((mime, b64)) = &result.image_data {
@@ -2943,26 +2989,26 @@ impl OrchestratorService {
 
                     // Check for tool call loop (same tool+args repeated consecutively)
                     if let Some(detection) = loop_detector.record_call(
-                        &tc.name,
-                        &tc.arguments.to_string(),
+                        &effective_tool_name,
+                        &effective_args.to_string(),
                         result.is_dedup,
                     ) {
                         match detection {
                             LoopDetection::Warning(msg) => {
-                                eprintln!("[loop-detector] Level 1 escalation: {}", tc.name);
+                                eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
                                 messages.push(Message::user(msg));
                             }
                             LoopDetection::StripTools(msg, _tools) => {
                                 eprintln!(
                                     "[loop-detector] Level 2 escalation: stripping tools for {}",
-                                    tc.name
+                                    effective_tool_name
                                 );
                                 messages.push(Message::user(msg));
                             }
                             LoopDetection::ForceTerminate(msg) => {
                                 eprintln!(
                                     "[loop-detector] Level 3 escalation: force terminating for {}",
-                                    tc.name
+                                    effective_tool_name
                                 );
                                 let _ = tx
                                     .send(UnifiedStreamEvent::Error {
@@ -2980,6 +3026,20 @@ impl OrchestratorService {
                             }
                         }
                     }
+                }
+
+                // Story-003: When ALL native tool calls failed validation (e.g. empty
+                // tool names, malformed arguments from Qwen thinking mode), inject a
+                // repair hint so the model retries with correct tool call format.
+                if successful_native_calls == 0 && !response.tool_calls.is_empty() {
+                    eprintln!(
+                        "[native-tool-repair] All {} native tool call(s) failed validation, injecting repair hint",
+                        response.tool_calls.len()
+                    );
+                    messages.push(Message::user(
+                        "All tool calls failed validation. Please retry with correct tool names and valid JSON arguments. \
+                        Available tools: Read, Write, Edit, Bash, Glob, Grep, LS, Cwd, CodebaseSearch, WebFetch, WebSearch.".to_string()
+                    ));
                 }
             } else if !parsed_fallback.calls.is_empty() {
                 repair_retry_count = 0; // Reset on successful tool calls
@@ -6796,6 +6856,7 @@ fn canonical_tool_name(name: &str) -> Option<&'static str> {
         "webfetch" => Some("WebFetch"),
         "websearch" => Some("WebSearch"),
         "notebookedit" => Some("NotebookEdit"),
+        "codebasesearch" => Some("CodebaseSearch"),
         _ => None,
     }
 }
