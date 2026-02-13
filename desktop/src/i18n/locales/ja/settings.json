@@ -104,6 +104,23 @@
       "removeError": "APIキーの削除に失敗しました"
     },
 
+    "glmEndpoint": {
+      "label": "APIエンドポイント",
+      "help": "GLMプランに合ったエンドポイントを選択してください。コーディングプランにはコーディングエンドポイントが必要です。",
+      "options": {
+        "standard": {
+          "name": "標準エンドポイント",
+          "description": "ほとんどのGLMプラン向けの汎用APIエンドポイント。",
+          "url": "https://open.bigmodel.cn/api/paas/v4/"
+        },
+        "coding": {
+          "name": "コーディングエンドポイント",
+          "description": "GLMコーディングプラン専用エンドポイント。コーディングプラン利用時に必須。",
+          "url": "https://open.bigmodel.cn/api/coding/paas/v4/"
+        }
+      }
+    },
+
     "model": {
       "label": "モデル",
       "providerDefault": "プロバイダーのデフォルトを使用",

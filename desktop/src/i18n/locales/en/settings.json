@@ -104,6 +104,23 @@
       "removeError": "Failed to remove API key"
     },
 
+    "glmEndpoint": {
+      "label": "API Endpoint",
+      "help": "Select the endpoint matching your GLM plan. The Coding endpoint is required for GLM Coding plans.",
+      "options": {
+        "standard": {
+          "name": "Standard Endpoint",
+          "description": "General-purpose API endpoint for most GLM plans.",
+          "url": "https://open.bigmodel.cn/api/paas/v4/"
+        },
+        "coding": {
+          "name": "Coding Endpoint",
+          "description": "Dedicated endpoint for GLM Coding plans. Required when using the Coding plan.",
+          "url": "https://open.bigmodel.cn/api/coding/paas/v4/"
+        }
+      }
+    },
+
     "model": {
       "label": "Model",
       "providerDefault": "Use provider default",

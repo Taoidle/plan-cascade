@@ -472,6 +472,23 @@ function resolveStandaloneProvider(
   return backendCandidate || providerCandidate || modelCandidate || 'anthropic';
 }
 
+const GLM_CODING_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions';
+
+/**
+ * Resolve provider-specific base URL override from user settings.
+ * Currently only GLM has an alternate endpoint (Coding plan).
+ */
+function resolveProviderBaseUrl(
+  provider: string,
+  settings: { glmEndpoint?: string },
+): string | undefined {
+  const normalized = normalizeProviderName(provider);
+  if (normalized === 'glm' && settings.glmEndpoint === 'coding') {
+    return GLM_CODING_BASE_URL;
+  }
+  return undefined;
+}
+
 function getLocalProviderApiKey(provider: string): string | undefined {
   try {
     if (typeof localStorage === 'undefined') return undefined;
@@ -806,6 +823,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           get().addLog(`Using standalone conversation context (${recentStandaloneTurns.length}/${contextLabel} turns)`);
         }
 
+        // Resolve provider-specific base URL override (e.g. GLM Coding endpoint)
+        const baseUrl = resolveProviderBaseUrl(provider, settings);
+
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: messageToSend,
           provider,
@@ -813,6 +833,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           projectPath: settings.workspacePath || '.',
           enableTools: true,
           apiKey: providerApiKey,
+          baseUrl,
           analysisSessionId: standaloneSessionId,
           enableCompaction: settings.enableContextCompaction ?? true,
           enableThinking: settings.enableThinking ?? false,

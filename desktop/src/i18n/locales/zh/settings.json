@@ -104,6 +104,23 @@
       "removeError": "移除API密钥失败"
     },
 
+    "glmEndpoint": {
+      "label": "API 端点",
+      "help": "请选择与您的 GLM 套餐匹配的端点。使用编码套餐时必须选择编码端点。",
+      "options": {
+        "standard": {
+          "name": "通用端点",
+          "description": "适用于大多数 GLM 套餐的通用 API 端点。",
+          "url": "https://open.bigmodel.cn/api/paas/v4/"
+        },
+        "coding": {
+          "name": "编码端点",
+          "description": "GLM 编码套餐专用端点。使用编码套餐时必须配置此端点。",
+          "url": "https://open.bigmodel.cn/api/coding/paas/v4/"
+        }
+      }
+    },
+
     "model": {
       "label": "模型",
       "providerDefault": "使用提供商默认模型",

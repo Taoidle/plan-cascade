@@ -839,6 +839,8 @@ pub async fn execute_standalone(
     enable_tools: bool,
     api_key: Option<String>,
     apiKey: Option<String>,
+    base_url: Option<String>,
+    baseUrl: Option<String>,
     analysis_session_id: Option<String>,
     analysisSessionId: Option<String>,
     enable_compaction: Option<bool>,
@@ -888,10 +890,29 @@ pub async fn execute_standalone(
         )));
     }
 
+    // Resolve base_url: explicit parameter > DB setting > provider default (None)
+    let mut resolved_base_url = base_url
+        .or(baseUrl)
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty());
+
+    if resolved_base_url.is_none() {
+        // Fallback: read from database settings
+        let key = format!("provider_{}_base_url", canonical_provider);
+        if let Ok(Some(db_url)) = app_state
+            .with_database(|db| db.get_setting(&key))
+            .await
+        {
+            if !db_url.is_empty() {
+                resolved_base_url = Some(db_url);
+            }
+        }
+    }
+
     let config = ProviderConfig {
         provider: provider_type,
         api_key,
-        base_url: None,
+        base_url: resolved_base_url,
         model,
         enable_thinking: enable_thinking.unwrap_or(false),
         ..Default::default()
