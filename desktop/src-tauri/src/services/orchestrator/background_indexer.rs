@@ -138,7 +138,10 @@ impl BackgroundIndexer {
                     // Re-embed the changed file if embedding service is available
                     if let Some(ref emb_svc) = embedding_service {
                         if let Err(e) = run_incremental_embedding(
-                            &project_root, &index_store, emb_svc, &changed_path,
+                            &project_root,
+                            &index_store,
+                            emb_svc,
+                            &changed_path,
                         ) {
                             warn!(
                                 path = %changed_path.display(),
@@ -197,10 +200,7 @@ fn run_full_index(
         cb(total_files, total_files);
     }
 
-    info!(
-        files = total_files,
-        "background indexer: full index stored"
-    );
+    info!(files = total_files, "background indexer: full index stored");
     Ok(())
 }
 
@@ -600,7 +600,9 @@ fn run_incremental_embedding(
                     );
                     return Ok(());
                 }
-                info!("background indexer: restored vocabulary from SQLite for incremental embedding");
+                info!(
+                    "background indexer: restored vocabulary from SQLite for incremental embedding"
+                );
             }
             _ => {
                 // No vocabulary in DB either — skip. It will be built on the next full pass.
@@ -703,11 +705,7 @@ mod tests {
             "pub fn main() {\n    println!(\"hi\");\n}\n",
         )
         .expect("write");
-        fs::write(
-            dir.path().join("src/lib.rs"),
-            "pub struct Config;\n",
-        )
-        .expect("write");
+        fs::write(dir.path().join("src/lib.rs"), "pub struct Config;\n").expect("write");
 
         let store = test_store();
         run_full_index(dir.path(), &store, None).expect("full index");
@@ -904,11 +902,7 @@ mod tests {
     #[tokio::test]
     async fn start_completes_full_index_in_background() {
         let dir = tempdir().expect("tempdir");
-        fs::write(
-            dir.path().join("main.py"),
-            "def entry():\n    pass\n",
-        )
-        .expect("write");
+        fs::write(dir.path().join("main.py"), "def entry():\n    pass\n").expect("write");
 
         let store = test_store();
         let indexer = BackgroundIndexer::new(dir.path().to_path_buf(), store.clone());
@@ -928,7 +922,10 @@ mod tests {
 
     #[test]
     fn chunk_by_window_basic() {
-        let content = (0..100).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let content = (0..100)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let lines: Vec<&str> = content.lines().collect();
         let chunks = chunk_by_window(&lines);
 
@@ -959,7 +956,10 @@ mod tests {
 
     #[test]
     fn chunk_file_content_unsupported_language() {
-        let content = (0..100).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let content = (0..100)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let chunks = chunk_file_content(&content, "unknown");
         // Should fall back to window chunking
         assert!(!chunks.is_empty());
@@ -994,7 +994,11 @@ pub fn process_config(config: &Config) -> String {
         let chunks = chunk_file_content(content, "rust");
         assert!(!chunks.is_empty(), "should produce at least one chunk");
         // All original content should be represented across chunks
-        let total_text: String = chunks.iter().map(|c| c.text.clone()).collect::<Vec<_>>().join("\n");
+        let total_text: String = chunks
+            .iter()
+            .map(|c| c.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(total_text.contains("Config"));
         assert!(total_text.contains("process_config"));
     }
@@ -1027,9 +1031,15 @@ pub fn process_config(config: &Config) -> String {
 
         let project_path = dir.path().to_string_lossy().to_string();
         let count = store.count_embeddings(&project_path).expect("count");
-        assert!(count > 0, "should have stored at least one embedding, got {}", count);
+        assert!(
+            count > 0,
+            "should have stored at least one embedding, got {}",
+            count
+        );
 
-        let embeddings = store.get_embeddings_for_project(&project_path).expect("get");
+        let embeddings = store
+            .get_embeddings_for_project(&project_path)
+            .expect("get");
         assert!(!embeddings.is_empty());
         // Each embedding should have non-empty bytes
         for (_, _, _, bytes) in &embeddings {
@@ -1074,7 +1084,10 @@ pub fn process_config(config: &Config) -> String {
         fresh_svc
             .import_vocabulary(&vocab_json.unwrap())
             .expect("import should succeed");
-        assert!(fresh_svc.is_ready(), "fresh service should be ready after import");
+        assert!(
+            fresh_svc.is_ready(),
+            "fresh service should be ready after import"
+        );
 
         // Verify the imported service produces valid embeddings
         let vec = fresh_svc.embed_text("pub fn main()");

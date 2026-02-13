@@ -717,15 +717,13 @@ mod tests {
         let provider = AnthropicProvider::new(test_config());
         let messages = vec![Message::user("Hello")];
 
-        let body = provider.build_request_body(
-            &messages,
-            None,
-            &[],
-            false,
-            &LlmRequestOptions::default(),
-        );
+        let body =
+            provider.build_request_body(&messages, None, &[], false, &LlmRequestOptions::default());
 
-        assert!(body.get("system").is_none(), "system field should be absent when no system prompt");
+        assert!(
+            body.get("system").is_none(),
+            "system field should be absent when no system prompt"
+        );
     }
 
     #[test]
@@ -831,13 +829,8 @@ mod tests {
         let provider = AnthropicProvider::new(test_config());
         let messages = vec![Message::user("Hello")];
 
-        let body = provider.build_request_body(
-            &messages,
-            None,
-            &[],
-            false,
-            &LlmRequestOptions::default(),
-        );
+        let body =
+            provider.build_request_body(&messages, None, &[], false, &LlmRequestOptions::default());
 
         assert!(
             body.get("tools").is_none(),

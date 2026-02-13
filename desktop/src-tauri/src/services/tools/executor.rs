@@ -371,7 +371,9 @@ impl ToolExecutor {
     ///
     /// Pass this to `new_with_shared_cache` when creating sub-agent executors
     /// so they share the same deduplication cache.
-    pub fn shared_read_cache(&self) -> Arc<Mutex<HashMap<(PathBuf, usize, usize), ReadCacheEntry>>> {
+    pub fn shared_read_cache(
+        &self,
+    ) -> Arc<Mutex<HashMap<(PathBuf, usize, usize), ReadCacheEntry>>> {
         Arc::clone(&self.read_cache)
     }
 
@@ -620,7 +622,9 @@ impl ToolExecutor {
                     .map(|(i, line)| {
                         let truncated = if line.len() > 2000 {
                             let mut end = 2000;
-                            while end > 0 && !line.is_char_boundary(end) { end -= 1; }
+                            while end > 0 && !line.is_char_boundary(end) {
+                                end -= 1;
+                            }
                             format!("{}...", &line[..end])
                         } else {
                             line.to_string()
@@ -648,7 +652,15 @@ impl ToolExecutor {
                         .iter()
                         .take(5)
                         .map(|l| {
-                            if l.len() > 120 { let mut end = 120; while end > 0 && !l.is_char_boundary(end) { end -= 1; } format!("{}...", &l[..end]) } else { l.to_string() }
+                            if l.len() > 120 {
+                                let mut end = 120;
+                                while end > 0 && !l.is_char_boundary(end) {
+                                    end -= 1;
+                                }
+                                format!("{}...", &l[..end])
+                            } else {
+                                l.to_string()
+                            }
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
@@ -757,12 +769,7 @@ impl ToolExecutor {
             .to_lowercase();
         let (content, _) = match decode_read_text(&bytes, &ext) {
             Some(value) => value,
-            None => {
-                return ToolResult::err(format!(
-                    "Cannot edit binary file: {}",
-                    path.display()
-                ))
-            }
+            None => return ToolResult::err(format!("Cannot edit binary file: {}", path.display())),
         };
 
         // Check if old_string exists
@@ -1453,10 +1460,7 @@ impl ToolExecutor {
             None => return ToolResult::err("Missing required parameter: query"),
         };
 
-        let scope = args
-            .get("scope")
-            .and_then(|v| v.as_str())
-            .unwrap_or("all");
+        let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("all");
 
         let component = args.get("component").and_then(|v| v.as_str());
 
@@ -1465,7 +1469,7 @@ impl ToolExecutor {
             None => {
                 return ToolResult::ok(
                     "Codebase index not available. The project has not been indexed yet. \
-                     Use Grep for content search or Glob/LS for file discovery instead."
+                     Use Grep for content search or Glob/LS for file discovery instead.",
                 );
             }
         };
@@ -1480,13 +1484,22 @@ impl ToolExecutor {
                 Ok(symbols) => {
                     // If component filter is specified, filter results
                     let filtered: Vec<_> = if let Some(comp) = component {
-                        symbols.into_iter().filter(|s| s.file_path.contains(comp) || s.project_path == project_path).collect()
+                        symbols
+                            .into_iter()
+                            .filter(|s| {
+                                s.file_path.contains(comp) || s.project_path == project_path
+                            })
+                            .collect()
                     } else {
                         symbols
                     };
 
                     if !filtered.is_empty() {
-                        let mut section = format!("## Symbols matching '{}' ({} results)\n", query, filtered.len());
+                        let mut section = format!(
+                            "## Symbols matching '{}' ({} results)\n",
+                            query,
+                            filtered.len()
+                        );
                         for sym in filtered.iter().take(50) {
                             // Base info: name, kind, file, line
                             let mut line = format!(
@@ -1511,7 +1524,9 @@ impl ToolExecutor {
                             if let Some(ref doc) = sym.doc_comment {
                                 let truncated = if doc.len() > 100 {
                                     let mut end = 100;
-                                    while end > 0 && !doc.is_char_boundary(end) { end -= 1; }
+                                    while end > 0 && !doc.is_char_boundary(end) {
+                                        end -= 1;
+                                    }
                                     format!("{}...", &doc[..end])
                                 } else {
                                     doc.clone()
@@ -1549,7 +1564,9 @@ impl ToolExecutor {
                         if !filtered.is_empty() {
                             let mut section = format!(
                                 "## Files matching '{}' in component '{}' ({} results)\n",
-                                query, comp, filtered.len()
+                                query,
+                                comp,
+                                filtered.len()
                             );
                             for file in filtered.iter().take(50) {
                                 section.push_str(&format!(
@@ -1558,7 +1575,8 @@ impl ToolExecutor {
                                 ));
                             }
                             if filtered.len() > 50 {
-                                section.push_str(&format!("  ... and {} more\n", filtered.len() - 50));
+                                section
+                                    .push_str(&format!("  ... and {} more\n", filtered.len() - 50));
                             }
                             output_sections.push(section);
                         } else if scope == "files" {
@@ -1583,12 +1601,17 @@ impl ToolExecutor {
 
                         // Search each component for files matching the query
                         for comp_summary in &summary.components {
-                            if let Ok(files) = index_store.query_files_by_component(&project_path, &comp_summary.name) {
+                            if let Ok(files) = index_store
+                                .query_files_by_component(&project_path, &comp_summary.name)
+                            {
                                 for file in files {
                                     if file.file_path.to_lowercase().contains(&query_lower) {
                                         matching_files.push(format!(
                                             "  {} [{}] ({}, {} lines)",
-                                            file.file_path, file.component, file.language, file.line_count
+                                            file.file_path,
+                                            file.component,
+                                            file.language,
+                                            file.line_count
                                         ));
                                     }
                                 }
@@ -1597,10 +1620,8 @@ impl ToolExecutor {
 
                         if !matching_files.is_empty() {
                             let count = matching_files.len();
-                            let mut section = format!(
-                                "## Files matching '{}' ({} results)\n",
-                                query, count
-                            );
+                            let mut section =
+                                format!("## Files matching '{}' ({} results)\n", query, count);
                             for line in matching_files.iter().take(50) {
                                 section.push_str(line);
                                 section.push('\n');
@@ -1638,7 +1659,9 @@ impl ToolExecutor {
                                     // Truncate chunk text for display (char-boundary safe)
                                     let display_text = if result.chunk_text.len() > 200 {
                                         let mut end = 200;
-                                        while end > 0 && !result.chunk_text.is_char_boundary(end) { end -= 1; }
+                                        while end > 0 && !result.chunk_text.is_char_boundary(end) {
+                                            end -= 1;
+                                        }
                                         format!("{}...", &result.chunk_text[..end])
                                     } else {
                                         result.chunk_text.clone()
@@ -1655,10 +1678,8 @@ impl ToolExecutor {
                                 output_sections.push(section);
                             }
                             Ok(_) => {
-                                output_sections.push(format!(
-                                    "No semantic matches found for '{}'.",
-                                    query
-                                ));
+                                output_sections
+                                    .push(format!("No semantic matches found for '{}'.", query));
                             }
                             Err(e) => {
                                 output_sections.push(format!("Semantic search error: {}", e));
@@ -1694,16 +1715,17 @@ impl ToolExecutor {
                                 .to_string(),
                         );
                     } else {
-                        output_sections.push(
-                            "Semantic search: not configured".to_string(),
-                        );
+                        output_sections.push("Semantic search: not configured".to_string());
                     }
                 }
             }
         }
 
         if output_sections.is_empty() {
-            ToolResult::ok(format!("No results found for '{}' (scope: {}).", query, scope))
+            ToolResult::ok(format!(
+                "No results found for '{}' (scope: {}).",
+                query, scope
+            ))
         } else {
             ToolResult::ok(output_sections.join("\n"))
         }
@@ -2359,7 +2381,12 @@ mod tests {
             .lines()
             .filter(|l| l.trim_start().starts_with("FILE") || l.trim_start().starts_with("DIR"))
             .collect();
-        assert_eq!(file_lines.len(), 200, "expected 200 entries, got {}", file_lines.len());
+        assert_eq!(
+            file_lines.len(),
+            200,
+            "expected 200 entries, got {}",
+            file_lines.len()
+        );
 
         // Should NOT contain truncation note
         assert!(
@@ -2730,7 +2757,9 @@ mod tests {
         let store = Arc::new(IndexStore::new(db.pool().clone()));
 
         // Populate the index with test data
-        use crate::services::orchestrator::analysis_index::{FileInventoryItem, SymbolInfo, SymbolKind};
+        use crate::services::orchestrator::analysis_index::{
+            FileInventoryItem, SymbolInfo, SymbolKind,
+        };
 
         let project_path = dir.path().to_string_lossy().to_string();
 
@@ -2756,9 +2785,11 @@ mod tests {
             size_bytes: 2048,
             line_count: 100,
             is_test: false,
-            symbols: vec![
-                SymbolInfo::basic("init_app".to_string(), SymbolKind::Function, 5),
-            ],
+            symbols: vec![SymbolInfo::basic(
+                "init_app".to_string(),
+                SymbolKind::Function,
+                5,
+            )],
         };
 
         let item3 = FileInventoryItem {
@@ -2775,9 +2806,15 @@ mod tests {
             ],
         };
 
-        store.upsert_file_index(&project_path, &item1, "h1").unwrap();
-        store.upsert_file_index(&project_path, &item2, "h2").unwrap();
-        store.upsert_file_index(&project_path, &item3, "h3").unwrap();
+        store
+            .upsert_file_index(&project_path, &item1, "h1")
+            .unwrap();
+        store
+            .upsert_file_index(&project_path, &item2, "h2")
+            .unwrap();
+        store
+            .upsert_file_index(&project_path, &item3, "h3")
+            .unwrap();
 
         executor.set_index_store(store);
 
@@ -2981,7 +3018,9 @@ mod tests {
 
         // Output should include file path, line number, and kind
         assert!(
-            output.contains("main") && output.contains("Function") && output.contains("src/main.rs"),
+            output.contains("main")
+                && output.contains("Function")
+                && output.contains("src/main.rs"),
             "output should contain symbol name, kind, and file path, got: {}",
             output
         );
@@ -3071,10 +3110,14 @@ mod tests {
     /// Helper to create a ToolExecutor with IndexStore and EmbeddingService
     /// that has a built vocabulary and stored embeddings.
     fn create_test_executor_with_embedding() -> (TempDir, ToolExecutor) {
-        use crate::services::orchestrator::embedding_service::{EmbeddingService, embedding_to_bytes};
+        use crate::services::orchestrator::analysis_index::{
+            FileInventoryItem, SymbolInfo, SymbolKind,
+        };
+        use crate::services::orchestrator::embedding_service::{
+            embedding_to_bytes, EmbeddingService,
+        };
         use crate::services::orchestrator::index_store::IndexStore;
         use crate::storage::database::Database;
-        use crate::services::orchestrator::analysis_index::{FileInventoryItem, SymbolInfo, SymbolKind};
 
         let dir = setup_test_dir();
         let mut executor = ToolExecutor::new(dir.path());
@@ -3093,12 +3136,16 @@ mod tests {
             size_bytes: 1024,
             line_count: 50,
             is_test: false,
-            symbols: vec![
-                SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
-            ],
+            symbols: vec![SymbolInfo::basic(
+                "main".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         };
 
-        store.upsert_file_index(&project_path, &item1, "h1").unwrap();
+        store
+            .upsert_file_index(&project_path, &item1, "h1")
+            .unwrap();
 
         // Build embedding service with vocabulary
         let emb_svc = Arc::new(EmbeddingService::new());
@@ -3111,13 +3158,15 @@ mod tests {
         // Store an embedding for a file chunk
         let embedding = emb_svc.embed_text("fn main rust entry point");
         let emb_bytes = embedding_to_bytes(&embedding);
-        store.upsert_chunk_embedding(
-            &project_path,
-            "src/main.rs",
-            0,
-            "fn main() { println!(\"hello\"); }",
-            &emb_bytes,
-        ).unwrap();
+        store
+            .upsert_chunk_embedding(
+                &project_path,
+                "src/main.rs",
+                0,
+                "fn main() { println!(\"hello\"); }",
+                &emb_bytes,
+            )
+            .unwrap();
 
         executor.set_index_store(store);
         executor.set_embedding_service(emb_svc);
@@ -3283,7 +3332,12 @@ mod tests {
         let child = ToolExecutor::new_with_shared_cache(dir.path(), shared_cache);
 
         // Child reads a file
-        let nested_path = dir.path().join("subdir").join("nested.txt").to_string_lossy().to_string();
+        let nested_path = dir
+            .path()
+            .join("subdir")
+            .join("nested.txt")
+            .to_string_lossy()
+            .to_string();
         let args = serde_json::json!({ "file_path": &nested_path });
         let result1 = child.execute("Read", &args).await;
         assert!(result1.success);
@@ -3291,10 +3345,7 @@ mod tests {
 
         // Parent should see the child's cache entry
         let summary = parent.get_read_file_summary();
-        assert!(
-            !summary.is_empty(),
-            "parent should see child's cached read"
-        );
+        assert!(!summary.is_empty(), "parent should see child's cached read");
         assert!(
             summary.iter().any(|(path, _, _)| path.contains("nested")),
             "parent should see the nested.txt entry from child, got: {:?}",

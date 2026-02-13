@@ -260,8 +260,7 @@ fn build_vocab(corpus: &[&str]) -> Vocabulary {
     for doc in corpus {
         let tokens = tokenize(doc);
         // De-duplicate tokens within this document.
-        let unique: std::collections::HashSet<&str> =
-            tokens.iter().map(|s| s.as_str()).collect();
+        let unique: std::collections::HashSet<&str> = tokens.iter().map(|s| s.as_str()).collect();
         for tok in unique {
             *doc_freq.entry(tok.to_string()).or_insert(0) += 1;
         }
@@ -430,7 +429,10 @@ mod tests {
 
     #[test]
     fn tfidf_vector_has_correct_dimension() {
-        let corpus = vec!["fn main() { println!(\"hello\"); }", "struct Config { name: String }"];
+        let corpus = vec![
+            "fn main() { println!(\"hello\"); }",
+            "struct Config { name: String }",
+        ];
         let vocab = build_vocab(&corpus);
         let vec = tfidf_vector("fn main() { }", &vocab);
         assert_eq!(vec.len(), vocab.idf.len());
@@ -443,7 +445,11 @@ mod tests {
         let vec = tfidf_vector("hello world", &vocab);
         let mag: f32 = vec.iter().map(|v| v * v).sum::<f32>().sqrt();
         // Should be approximately 1.0
-        assert!((mag - 1.0).abs() < 0.01, "magnitude should be ~1.0, got {}", mag);
+        assert!(
+            (mag - 1.0).abs() < 0.01,
+            "magnitude should be ~1.0, got {}",
+            mag
+        );
     }
 
     #[test]

@@ -61,7 +61,7 @@ async function saveTextWithDialog(filename: string, content: string): Promise<bo
   return true;
 }
 
-function serializeAllOutput(lines: StreamLine[]): string {
+function serializeRawOutput(lines: StreamLine[]): string {
   return lines
     .map((line) => {
       const prefix = LINE_TYPE_PREFIX[line.type];
@@ -69,6 +69,34 @@ function serializeAllOutput(lines: StreamLine[]): string {
       return `${prefix}${line.content}`;
     })
     .join('\n');
+}
+
+function serializeConversationOutput(lines: StreamLine[]): string {
+  const out: string[] = [];
+  for (const line of lines) {
+    const content = line.content.trim();
+    if (!content) continue;
+    switch (line.type) {
+      case 'info':
+        out.push(`User: ${content}`);
+        break;
+      case 'text':
+        out.push(`Assistant: ${content}`);
+        break;
+      case 'error':
+        out.push(`Error: ${content}`);
+        break;
+      case 'warning':
+        out.push(`Warning: ${content}`);
+        break;
+      case 'success':
+        out.push(`Status: ${content}`);
+        break;
+      default:
+        break;
+    }
+  }
+  return out.join('\n\n');
 }
 
 function collectAssistantReplies(lines: StreamLine[]): Array<{ id: number; content: string }> {
@@ -193,20 +221,40 @@ export function StreamingOutput({
 
   const exportAll = useCallback(async () => {
     try {
-      const content = serializeAllOutput(streamingOutput);
+      const content = serializeConversationOutput(streamingOutput);
+      if (!content.trim()) {
+        notifyExport('error', 'No conversation content available to export.');
+        return;
+      }
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const saved = await saveTextWithDialog(`conversation-${stamp}.txt`, content);
+      if (!saved) {
+        notifyExport('error', 'Export canceled.');
+        return;
+      }
+      notifyExport('ok', 'Conversation transcript exported.');
+    } catch (error) {
+      console.error('Failed to export conversation transcript:', error);
+      notifyExport('error', `Export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }, [notifyExport, streamingOutput]);
+
+  const exportRaw = useCallback(async () => {
+    try {
+      const content = serializeRawOutput(streamingOutput);
       if (!content.trim()) {
         notifyExport('error', 'No output available to export.');
         return;
       }
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const saved = await saveTextWithDialog(`output-${stamp}.txt`, content);
+      const saved = await saveTextWithDialog(`output-raw-${stamp}.txt`, content);
       if (!saved) {
         notifyExport('error', 'Export canceled.');
         return;
       }
-      notifyExport('ok', 'Output exported.');
+      notifyExport('ok', 'Raw output exported.');
     } catch (error) {
-      console.error('Failed to export full output:', error);
+      console.error('Failed to export raw output:', error);
       notifyExport('error', `Export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }, [notifyExport, streamingOutput]);
@@ -354,6 +402,16 @@ export function StreamingOutput({
                   <button
                     onClick={() => {
                       setShowExportMenu(false);
+                      void exportAll();
+                    }}
+                    disabled={streamingOutput.length === 0}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    conversation transcript
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowExportMenu(false);
                       void exportLatestReply();
                     }}
                     disabled={assistantReplies.length === 0}
@@ -374,12 +432,12 @@ export function StreamingOutput({
                   <button
                     onClick={() => {
                       setShowExportMenu(false);
-                      void exportAll();
+                      void exportRaw();
                     }}
                     disabled={streamingOutput.length === 0}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    full output
+                    raw full output
                   </button>
                 </div>
               )}

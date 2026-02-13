@@ -875,6 +875,19 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
               return;
             }
 
+            // Check if thinking lines exist — don't show "no response" if the model did reason
+            const hasThinkingLines = get().streamingOutput.some(
+              (line) =>
+                line.id > turnStartLineId &&
+                line.type === 'thinking' &&
+                line.content.trim().length > 0
+            );
+            if (hasThinkingLines) {
+              ensuredAssistantOutput = true;
+              // Thinking was displayed — no need for a warning
+              return;
+            }
+
             if (isSimpleStandalone) {
               ensuredAssistantOutput = true;
               get().appendStreamLine('No assistant response returned for this turn.', 'warning');

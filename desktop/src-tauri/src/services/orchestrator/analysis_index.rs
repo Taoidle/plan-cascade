@@ -973,13 +973,28 @@ mod internal;
         assert!(names.contains(&"main"), "should find pub fn main");
         assert!(names.contains(&"helper_fn"), "should find fn helper_fn");
         assert!(names.contains(&"Config"), "should find pub struct Config");
-        assert!(names.contains(&"InternalState"), "should find struct InternalState");
+        assert!(
+            names.contains(&"InternalState"),
+            "should find struct InternalState"
+        );
         assert!(names.contains(&"Status"), "should find pub enum Status");
-        assert!(names.contains(&"InternalEnum"), "should find enum InternalEnum");
-        assert!(names.contains(&"Processor"), "should find pub trait Processor");
-        assert!(names.contains(&"InternalTrait"), "should find trait InternalTrait");
+        assert!(
+            names.contains(&"InternalEnum"),
+            "should find enum InternalEnum"
+        );
+        assert!(
+            names.contains(&"Processor"),
+            "should find pub trait Processor"
+        );
+        assert!(
+            names.contains(&"InternalTrait"),
+            "should find trait InternalTrait"
+        );
         assert!(names.contains(&"Result"), "should find pub type Result");
-        assert!(names.contains(&"InternalAlias"), "should find type InternalAlias");
+        assert!(
+            names.contains(&"InternalAlias"),
+            "should find type InternalAlias"
+        );
         assert!(names.contains(&"utils"), "should find pub mod utils");
         assert!(names.contains(&"internal"), "should find mod internal");
 
@@ -1041,8 +1056,14 @@ function helperFn() {}
         let symbols = extract_symbols_from_str(src, "typescript", 30);
 
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"createApp"), "should find export function createApp");
-        assert!(names.contains(&"fetchData"), "should find export async function fetchData");
+        assert!(
+            names.contains(&"createApp"),
+            "should find export function createApp"
+        );
+        assert!(
+            names.contains(&"fetchData"),
+            "should find export async function fetchData"
+        );
         assert!(names.contains(&"AppService"), "should find export class");
         assert!(names.contains(&"Config"), "should find export interface");
         assert!(names.contains(&"Status"), "should find export type");
@@ -1088,9 +1109,18 @@ async function loadConfig() {
         let symbols = extract_symbols_from_str(src, "javascript", 30);
 
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"processData"), "should find function processData");
-        assert!(names.contains(&"DataManager"), "should find class DataManager");
-        assert!(names.contains(&"loadConfig"), "should find async function loadConfig");
+        assert!(
+            names.contains(&"processData"),
+            "should find function processData"
+        );
+        assert!(
+            names.contains(&"DataManager"),
+            "should find class DataManager"
+        );
+        assert!(
+            names.contains(&"loadConfig"),
+            "should find async function loadConfig"
+        );
 
         let process = symbols.iter().find(|s| s.name == "processData").unwrap();
         assert_eq!(process.kind, SymbolKind::Function);
@@ -1131,7 +1161,10 @@ type StringSlice []string
         assert!(names.contains(&"main"), "should find func main");
         assert!(names.contains(&"Start"), "should find method Start");
         assert!(names.contains(&"Config"), "should find type Config struct");
-        assert!(names.contains(&"Handler"), "should find type Handler interface");
+        assert!(
+            names.contains(&"Handler"),
+            "should find type Handler interface"
+        );
         assert!(names.contains(&"StringSlice"), "should find type alias");
 
         let config = symbols.iter().find(|s| s.name == "Config").unwrap();
@@ -1173,9 +1206,15 @@ class InternalHelper {
 
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"UserService"), "should find public class");
-        assert!(names.contains(&"UserRepository"), "should find public interface");
+        assert!(
+            names.contains(&"UserRepository"),
+            "should find public interface"
+        );
         assert!(names.contains(&"Status"), "should find public enum");
-        assert!(names.contains(&"InternalHelper"), "should find package-private class");
+        assert!(
+            names.contains(&"InternalHelper"),
+            "should find package-private class"
+        );
 
         let svc = symbols.iter().find(|s| s.name == "UserService").unwrap();
         assert_eq!(svc.kind, SymbolKind::Class);
@@ -1262,16 +1301,15 @@ class InternalHelper {
             content.push_str(&format!("def func_{}():\n    pass\n\n", i));
         }
         assert!(content.len() > 500_000, "test content should exceed 500KB");
-        fs::write(
-            dir.path().join("src/plan_cascade/core/huge.py"),
-            &content,
-        )
-        .expect("write");
+        fs::write(dir.path().join("src/plan_cascade/core/huge.py"), &content).expect("write");
 
         let inventory = build_file_inventory(dir.path(), &[]).expect("inventory");
         assert_eq!(inventory.items.len(), 1);
         let item = &inventory.items[0];
-        assert!(item.symbols.is_empty(), "symbols should be empty for files > 500KB");
+        assert!(
+            item.symbols.is_empty(),
+            "symbols should be empty for files > 500KB"
+        );
     }
 
     #[test]

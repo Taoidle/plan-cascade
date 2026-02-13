@@ -514,7 +514,9 @@ mod tests {
             "Analyze description should mention deep mode"
         );
         assert!(
-            analyze.description.contains("Do NOT use this tool for simple questions"),
+            analyze
+                .description
+                .contains("Do NOT use this tool for simple questions"),
             "Analyze description should discourage use for simple questions"
         );
 

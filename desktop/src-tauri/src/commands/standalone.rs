@@ -732,7 +732,10 @@ pub async fn semantic_search(
     project_path: Option<String>,
     top_k: Option<usize>,
     standalone_state: State<'_, StandaloneState>,
-) -> Result<CommandResponse<Vec<crate::services::orchestrator::embedding_service::SemanticSearchResult>>, String> {
+) -> Result<
+    CommandResponse<Vec<crate::services::orchestrator::embedding_service::SemanticSearchResult>>,
+    String,
+> {
     let dir = if let Some(p) = project_path {
         p
     } else {
@@ -759,7 +762,12 @@ pub async fn semantic_search(
     // Check if embeddings exist for this project
     let embedding_count = match index_store.count_embeddings(&dir) {
         Ok(count) => count,
-        Err(e) => return Ok(CommandResponse::err(format!("Failed to count embeddings: {}", e))),
+        Err(e) => {
+            return Ok(CommandResponse::err(format!(
+                "Failed to count embeddings: {}",
+                e
+            )))
+        }
     };
 
     if embedding_count == 0 {
@@ -767,16 +775,25 @@ pub async fn semantic_search(
     }
 
     // Create a temporary embedding service and build vocabulary from stored chunks
-    let embedding_service = crate::services::orchestrator::embedding_service::EmbeddingService::new();
+    let embedding_service =
+        crate::services::orchestrator::embedding_service::EmbeddingService::new();
 
     // Get all embeddings for the project to build vocabulary
     let all_chunks = match index_store.get_embeddings_for_project(&dir) {
         Ok(chunks) => chunks,
-        Err(e) => return Ok(CommandResponse::err(format!("Failed to get embeddings: {}", e))),
+        Err(e) => {
+            return Ok(CommandResponse::err(format!(
+                "Failed to get embeddings: {}",
+                e
+            )))
+        }
     };
 
     // Build vocabulary from stored chunk texts
-    let chunk_texts: Vec<&str> = all_chunks.iter().map(|(_, _, text, _)| text.as_str()).collect();
+    let chunk_texts: Vec<&str> = all_chunks
+        .iter()
+        .map(|(_, _, text, _)| text.as_str())
+        .collect();
     embedding_service.build_vocabulary(&chunk_texts);
 
     // Embed the query
@@ -789,7 +806,10 @@ pub async fn semantic_search(
     let k = top_k.unwrap_or(10);
     match index_store.semantic_search(&query_embedding, &dir, k) {
         Ok(results) => Ok(CommandResponse::ok(results)),
-        Err(e) => Ok(CommandResponse::err(format!("Semantic search failed: {}", e))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Semantic search failed: {}",
+            e
+        ))),
     }
 }
 

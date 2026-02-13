@@ -15,13 +15,10 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
-use super::embedding_service::EmbeddingService;
-use super::index_store::IndexStore;
 use super::analysis_index::{
     build_chunk_plan, build_file_inventory, compute_coverage_report, select_chunks_for_phase,
     AnalysisCoverageReport, AnalysisLimits, AnalysisProfile, ChunkPlan, FileInventory,
-    FileInventoryItem,
-    InventoryChunk,
+    FileInventoryItem, InventoryChunk,
 };
 use super::analysis_merge::{merge_chunk_summaries, ChunkSummaryRecord};
 use super::analysis_scheduler::build_phase_plan;
@@ -29,6 +26,8 @@ use super::analysis_store::{
     AnalysisPhaseResultRecord, AnalysisRunHandle, AnalysisRunStore, CoverageMetrics,
     EvidenceRecord, SubAgentResultRecord,
 };
+use super::embedding_service::EmbeddingService;
+use super::index_store::IndexStore;
 use crate::models::orchestrator::{
     ExecutionProgress, ExecutionSession, ExecutionSessionSummary, ExecutionStatus,
     StoryExecutionState,
@@ -349,7 +348,8 @@ struct OrchestratorTaskSpawner {
     /// Shared file-read deduplication cache from the parent ToolExecutor.
     /// Sub-agents created by this spawner reuse the parent's cache so reads
     /// are not duplicated across the parent/child boundary.
-    shared_read_cache: Arc<Mutex<HashMap<(PathBuf, usize, usize), crate::services::tools::ReadCacheEntry>>>,
+    shared_read_cache:
+        Arc<Mutex<HashMap<(PathBuf, usize, usize), crate::services::tools::ReadCacheEntry>>>,
     /// Optional index store for CodebaseSearch in sub-agents.
     shared_index_store: Option<Arc<IndexStore>>,
     /// Optional embedding service for semantic search in sub-agents.
@@ -512,4 +512,3 @@ pub struct ProviderInfo {
     pub supports_thinking: bool,
     pub supports_tools: bool,
 }
-

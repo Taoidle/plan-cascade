@@ -226,8 +226,7 @@ impl SessionMemory {
 
         // Tool usage summary
         if !self.tool_usage_counts.is_empty() {
-            let mut sorted_tools: Vec<(&String, &usize)> =
-                self.tool_usage_counts.iter().collect();
+            let mut sorted_tools: Vec<(&String, &usize)> = self.tool_usage_counts.iter().collect();
             sorted_tools.sort_by(|a, b| b.1.cmp(a.1));
             let tool_summary: Vec<String> = sorted_tools
                 .iter()
@@ -431,7 +430,15 @@ impl ToolCallLoopDetector {
     /// Returns `Some(LoopDetection)` when the same tool+args have been called `threshold`
     /// times consecutively, or when a macro-loop pattern is detected. `None` otherwise.
     /// Each call is also pushed onto the `recent_calls` sliding window.
-    fn record_call(&mut self, tool_name: &str, args_str: &str) -> Option<LoopDetection> {
+    ///
+    /// When `is_dedup` is true, a lower threshold (2) is used for consecutive detection
+    /// since dedup results are deterministic and repeating them wastes tokens.
+    fn record_call(
+        &mut self,
+        tool_name: &str,
+        args_str: &str,
+        is_dedup: bool,
+    ) -> Option<LoopDetection> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -454,15 +461,24 @@ impl ToolCallLoopDetector {
             self.consecutive_count = 1;
         }
 
+        // Use a lower threshold for dedup cycles (deterministic, no need to wait)
+        let effective_threshold = if is_dedup {
+            self.threshold.min(2)
+        } else {
+            self.threshold
+        };
+
         // Check consecutive-identical detection first
-        if self.consecutive_count >= self.threshold && self.consecutive_count % self.threshold == 0 {
+        if self.consecutive_count >= effective_threshold
+            && self.consecutive_count % effective_threshold == 0
+        {
             self.total_detections += 1;
             let msg = format!(
                 "[LOOP DETECTED] You have made the same identical tool call ({}) {} times consecutively \
                  with the same arguments. This is an infinite loop. STOP repeating this call. \
                  Use the information you already have from previous tool results to proceed with the task. \
                  If the previous result was a dedup/cache message, the file content was already read earlier \
-                 in this session — refer to the session memory above for details.",
+                 in this session 閳?refer to the session memory above for details.",
                 tool_name, self.consecutive_count
             );
             let tool_names = vec![tool_name.to_string()];
@@ -500,7 +516,7 @@ const SESSION_MEMORY_V1_MARKER: &str = "[SESSION_MEMORY_V1]";
 ///
 /// # Three-Layer Context Architecture
 /// - **Layer 1 (Stable):** System prompt + index summary + tools (message index 0)
-/// - **Layer 2 (Semi-stable):** Session memory — files read, key findings (fixed index)
+/// - **Layer 2 (Semi-stable):** Session memory 閳?files read, key findings (fixed index)
 /// - **Layer 3 (Volatile):** Conversation messages (tool calls, responses, etc.)
 ///
 /// `SessionMemoryManager` maintains the session memory at a fixed message index,
@@ -574,7 +590,7 @@ impl SessionMemoryManager {
             return;
         }
 
-        // No existing session memory — insert at the memory_index position
+        // No existing session memory 閳?insert at the memory_index position
         let insert_at = self.memory_index.min(messages.len());
         messages.insert(insert_at, new_msg);
     }
@@ -661,7 +677,14 @@ impl OrchestratorService {
     fn new_sub_agent_with_shared_state(
         config: OrchestratorConfig,
         cancellation_token: CancellationToken,
-        shared_read_cache: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<(PathBuf, usize, usize), crate::services::tools::ReadCacheEntry>>>,
+        shared_read_cache: std::sync::Arc<
+            std::sync::Mutex<
+                std::collections::HashMap<
+                    (PathBuf, usize, usize),
+                    crate::services::tools::ReadCacheEntry,
+                >,
+            >,
+        >,
         shared_index_store: Option<Arc<IndexStore>>,
         shared_embedding_service: Option<Arc<EmbeddingService>>,
     ) -> Self {
@@ -675,7 +698,8 @@ impl OrchestratorService {
             ProviderType::Ollama => Arc::new(OllamaProvider::new(config.provider.clone())),
         };
 
-        let mut tool_executor = ToolExecutor::new_with_shared_cache(&config.project_root, shared_read_cache);
+        let mut tool_executor =
+            ToolExecutor::new_with_shared_cache(&config.project_root, shared_read_cache);
 
         // Wire the parent's index store and embedding service to the sub-agent's tool executor
         if let Some(store) = &shared_index_store {
@@ -719,8 +743,7 @@ impl OrchestratorService {
         }
         let store = IndexStore::new(pool.clone());
         // Wire the index store to the tool executor so CodebaseSearch works
-        self.tool_executor
-            .set_index_store(Arc::new(store.clone()));
+        self.tool_executor.set_index_store(Arc::new(store.clone()));
         self.index_store = Some(store);
         self.db_pool = Some(pool);
         self
@@ -1436,9 +1459,9 @@ impl OrchestratorService {
             "refresh",
             "reanalyze",
             "re-analyze",
-            "\u{5f3a}\u{5236}", // 寮哄埗
-            "\u{91cd}\u{65b0}\u{5206}\u{6790}", // 閲嶆柊鍒嗘瀽
-            "\u{5237}\u{65b0}", // 鍒锋柊
+            "\u{5f3a}\u{5236}",                 // 强制
+            "\u{91cd}\u{65b0}\u{5206}\u{6790}", // 重新分析
+            "\u{5237}\u{65b0}",                 // 刷新
         ]
         .iter()
         .any(|kw| lower.contains(kw))
@@ -1843,8 +1866,7 @@ impl OrchestratorService {
                 if matches!(sub_effective_mode, FallbackToolFormatMode::Strict) {
                     parts.push(
                         "Strict mode: every tool call MUST be emitted in the exact tool_call format. \
-                         If your prior output was not parseable, output only valid tool_call blocks now.\n\
-                         严格模式：所有工具调用必须以 tool_call 格式输出。"
+                         If your prior output was not parseable, output only valid tool_call blocks now."
                             .to_string(),
                     );
                 }
@@ -1875,9 +1897,9 @@ impl OrchestratorService {
                 let (response, success, error_msg, stop_reason) =
                     if let Some(ref text) = last_assistant_text {
                         eprintln!(
-                            "[max-iterations] execute_task: recovering {} chars of accumulated text",
-                            text.len()
-                        );
+                        "[max-iterations] execute_task: recovering {} chars of accumulated text",
+                        text.len()
+                    );
                         (
                             Some(text.clone()),
                             true,
@@ -1952,7 +1974,8 @@ impl OrchestratorService {
             // tools that have been stripped by Level 2 escalation.
             let stripped = loop_detector.stripped_tools();
             let filtered_tools: Vec<ToolDefinition> = if !stripped.is_empty() {
-                tools.iter()
+                tools
+                    .iter()
                     .filter(|t| !stripped.contains(&t.name))
                     .cloned()
                     .collect()
@@ -2076,7 +2099,7 @@ impl OrchestratorService {
 
             if has_native_tool_calls {
                 repair_retry_count = 0; // Reset on successful tool calls
-                // Native tool calling path
+                                        // Native tool calling path
                 let mut content = Vec::new();
                 if let Some(text) = &response.content {
                     content.push(MessageContent::Text { text: text.clone() });
@@ -2135,7 +2158,7 @@ impl OrchestratorService {
                         request_options.analysis_phase.as_deref(),
                     );
 
-                    // Emit tool result event (always — for frontend display)
+                    // Emit tool result event (always 閳?for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tc.id.clone(),
@@ -2152,16 +2175,14 @@ impl OrchestratorService {
                         })
                         .await;
 
-                    // If the result is a dedup hit, push a minimal tool_result
-                    // so the LLM doesn't see the full dedup content but the
-                    // Anthropic API requirement (every tool_use needs a
-                    // tool_result) is still satisfied.
+                    // If the result is a dedup hit, push a short informative
+                    // tool_result so the LLM knows the file was already read
+                    // and should use session memory instead of re-reading.
                     if result.is_dedup {
-                        messages.push(Message::tool_result(
-                            &tc.id,
-                            ".".to_string(),
-                            false,
-                        ));
+                        let dedup_msg = result.output.as_deref().unwrap_or(
+                            "[File already read] Content is in session memory above. Do NOT re-read."
+                        );
+                        messages.push(Message::tool_result(&tc.id, dedup_msg.to_string(), false));
                     } else {
                         // Add tool result to messages (with multimodal support)
                         if let Some((mime, b64)) = &result.image_data {
@@ -2201,22 +2222,34 @@ impl OrchestratorService {
                     if let Some(detection) = loop_detector.record_call(
                         &effective_tool_name,
                         &effective_args.to_string(),
+                        result.is_dedup,
                     ) {
                         match detection {
                             LoopDetection::Warning(msg) => {
-                                eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
+                                eprintln!(
+                                    "[loop-detector] Level 1 escalation: {}",
+                                    effective_tool_name
+                                );
                                 messages.push(Message::user(msg));
                             }
                             LoopDetection::StripTools(msg, _tools) => {
-                                eprintln!("[loop-detector] Level 2 escalation: stripping tools for {}", effective_tool_name);
+                                eprintln!(
+                                    "[loop-detector] Level 2 escalation: stripping tools for {}",
+                                    effective_tool_name
+                                );
                                 messages.push(Message::user(msg));
                             }
                             LoopDetection::ForceTerminate(msg) => {
-                                eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", effective_tool_name);
-                                let _ = tx.send(UnifiedStreamEvent::Error {
-                                    message: msg.clone(),
-                                    code: None,
-                                }).await;
+                                eprintln!(
+                                    "[loop-detector] Level 3 escalation: force terminating for {}",
+                                    effective_tool_name
+                                );
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::Error {
+                                        message: msg.clone(),
+                                        code: None,
+                                    })
+                                    .await;
                                 return ExecutionResult {
                                     response: last_assistant_text,
                                     usage: total_usage,
@@ -2308,7 +2341,7 @@ impl OrchestratorService {
                         request_options.analysis_phase.as_deref(),
                     );
 
-                    // Emit tool result event (always — for frontend display)
+                    // Emit tool result event (always 閳?for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tool_id.clone(),
@@ -2325,8 +2358,20 @@ impl OrchestratorService {
                         })
                         .await;
 
-                    // Skip dedup results in fallback path — don't add to tool_results
-                    if !result.is_dedup {
+                    // For dedup results, push the dedup message so the LLM
+                    // knows the file was already read. For normal results,
+                    // push the full (truncated) tool output.
+                    if result.is_dedup {
+                        let dedup_msg = result.output.as_deref().unwrap_or(
+                            "[File already read] Content is in session memory above. Do NOT re-read."
+                        );
+                        tool_results.push(format_tool_result(
+                            &effective_tool_name,
+                            &tool_id,
+                            dedup_msg,
+                            false,
+                        ));
+                    } else {
                         tool_results.push(format_tool_result(
                             &effective_tool_name,
                             &tool_id,
@@ -2339,10 +2384,14 @@ impl OrchestratorService {
                     if let Some(detection) = loop_detector.record_call(
                         &effective_tool_name,
                         &effective_args.to_string(),
+                        result.is_dedup,
                     ) {
                         match detection {
                             LoopDetection::Warning(msg) => {
-                                eprintln!("[loop-detector] Level 1 escalation (fallback): {}", effective_tool_name);
+                                eprintln!(
+                                    "[loop-detector] Level 1 escalation (fallback): {}",
+                                    effective_tool_name
+                                );
                                 tool_results.push(msg);
                             }
                             LoopDetection::StripTools(msg, _tools) => {
@@ -2351,10 +2400,12 @@ impl OrchestratorService {
                             }
                             LoopDetection::ForceTerminate(msg) => {
                                 eprintln!("[loop-detector] Level 3 escalation (fallback): force terminating for {}", effective_tool_name);
-                                let _ = tx.send(UnifiedStreamEvent::Error {
-                                    message: msg.clone(),
-                                    code: None,
-                                }).await;
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::Error {
+                                        message: msg.clone(),
+                                        code: None,
+                                    })
+                                    .await;
                                 return ExecutionResult {
                                     response: last_assistant_text,
                                     usage: total_usage,
@@ -2392,35 +2443,103 @@ impl OrchestratorService {
                 messages.push(Message::user(repair_hint));
             } else {
                 // No tool calls (native or fallback) detected.
-                // Check for tool-intent-without-invocation pattern
+                // Check whether the model is narrating "next steps" instead of
+                // executing tools, then inject a repair hint.
                 let response_text = response.content.as_deref().unwrap_or("");
-                let needs_repair = !matches!(reliability, ToolCallReliability::Reliable)
-                    && repair_retry_count < 2
-                    && text_describes_tool_intent(response_text);
+                let content_is_empty = response_text.trim().is_empty();
+                let thinking_text = response.thinking.as_deref().unwrap_or("");
+                let thinking_has_content = !thinking_text.trim().is_empty();
+
+                // Check content first, then thinking if content is empty.
+                // We repair when the model narrates a pending next step
+                // without issuing tool calls.
+                let pending_action_intent = text_describes_pending_action(response_text)
+                    || (content_is_empty
+                        && thinking_has_content
+                        && text_describes_pending_action(thinking_text));
+                let tool_intent_without_call = text_describes_tool_intent(response_text)
+                    || (content_is_empty
+                        && thinking_has_content
+                        && text_describes_tool_intent(thinking_text));
+                let has_cached_assistant_text = last_assistant_text
+                    .as_ref()
+                    .map(|t| !t.trim().is_empty())
+                    .unwrap_or(false);
+                let empty_response_without_signals =
+                    content_is_empty && !thinking_has_content && !has_cached_assistant_text;
+                let needs_repair = repair_retry_count < 2
+                    && (empty_response_without_signals
+                        || pending_action_intent
+                        || (!matches!(reliability, ToolCallReliability::Reliable)
+                            && tool_intent_without_call));
 
                 if needs_repair {
                     repair_retry_count += 1;
+                    // Push thinking or content as assistant context
                     if let Some(text) = &response.content {
-                        messages.push(Message::assistant(text.clone()));
+                        if !text.trim().is_empty() {
+                            messages.push(Message::assistant(text.clone()));
+                        }
                     }
-                    let repair_msg = concat!(
-                        "You described what tools you would use but did not actually call them. ",
-                        "Please emit the actual tool call now using this exact format:\n\n",
-                        "```tool_call\n",
-                        "{\"tool\": \"ToolName\", \"arguments\": {\"param\": \"value\"}}\n",
-                        "```\n\n",
-                        "你描述了要使用的工具但没有实际调用。请直接输出 tool_call 代码块。\n",
-                        "Do NOT describe what you will do. Just emit the tool_call block."
-                    );
+                    if content_is_empty && thinking_has_content {
+                        // For thinking-only responses, include thinking as context
+                        messages.push(Message::assistant(format!(
+                            "[Your reasoning contained tool usage plans but no tool was called]\n{}",
+                            thinking_text
+                        )));
+                    }
+                    let repair_msg = if empty_response_without_signals {
+                        concat!(
+                            "Your previous response was empty.\n",
+                            "Either emit a valid tool_call block now, or provide a direct final answer.\n\n",
+                            "Tool call format:\n",
+                            "```tool_call\n",
+                            "{\"tool\": \"ToolName\", \"arguments\": {\"param\": \"value\"}}\n",
+                            "```"
+                        )
+                    } else {
+                        concat!(
+                            "Your response describes a pending next step, but no actual tool call was emitted.\n",
+                            "Either emit the required tool call now, or provide the final answer directly.\n\n",
+                            "Tool call format:\n",
+                            "```tool_call\n",
+                            "{\"tool\": \"ToolName\", \"arguments\": {\"param\": \"value\"}}\n",
+                            "```\n\n",
+                            "Do NOT narrate future actions without executing them."
+                        )
+                    };
                     messages.push(Message::user(repair_msg.to_string()));
                     continue;
                 }
 
+                if empty_response_without_signals {
+                    return ExecutionResult {
+                        response: None,
+                        usage: total_usage,
+                        iterations,
+                        success: false,
+                        error: Some(
+                            "Model returned an empty response without tool calls after retries."
+                                .to_string(),
+                        ),
+                    };
+                }
+
+                // Build final content: prefer content, fall back to thinking, then last_assistant_text
                 let final_content = response
                     .content
                     .as_ref()
                     .map(|t| extract_text_without_tool_calls(t))
                     .filter(|t| !t.trim().is_empty())
+                    .or_else(|| {
+                        // When content is empty but thinking has content (and no tool intent),
+                        // use thinking as fallback response
+                        if thinking_has_content {
+                            Some(thinking_text.to_string())
+                        } else {
+                            None
+                        }
+                    })
                     .or(last_assistant_text);
 
                 return ExecutionResult {
@@ -2585,11 +2704,7 @@ impl OrchestratorService {
                         })
                         .collect();
                     let findings = extract_key_findings(&recent_snippets);
-                    session_memory_manager.update_or_insert(
-                        &mut messages,
-                        files_read,
-                        findings,
-                    );
+                    session_memory_manager.update_or_insert(&mut messages, files_read, findings);
                 }
             }
 
@@ -2597,7 +2712,8 @@ impl OrchestratorService {
             // tools that have been stripped by Level 2 escalation.
             let stripped = loop_detector.stripped_tools();
             let filtered_tools: Vec<ToolDefinition> = if !stripped.is_empty() {
-                tools.iter()
+                tools
+                    .iter()
                     .filter(|t| !stripped.contains(&t.name))
                     .cloned()
                     .collect()
@@ -2698,7 +2814,7 @@ impl OrchestratorService {
 
             if has_native_tool_calls {
                 repair_retry_count = 0; // Reset on successful tool calls
-                // Native tool calling path (unchanged)
+                                        // Native tool calling path (unchanged)
                 let mut content = Vec::new();
                 if let Some(text) = &response.content {
                     content.push(MessageContent::Text { text: text.clone() });
@@ -2739,7 +2855,7 @@ impl OrchestratorService {
                     merge_usage(&mut total_usage, &nested_usage);
                     iterations += nested_iterations;
 
-                    // Emit tool result event (always — for frontend display)
+                    // Emit tool result event (always 閳?for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tc.id.clone(),
@@ -2756,23 +2872,19 @@ impl OrchestratorService {
                         })
                         .await;
 
-                    // If the result is a dedup hit, push a minimal tool_result
-                    // so the LLM doesn't see the full dedup content but the
-                    // Anthropic API requirement (every tool_use needs a
-                    // tool_result) is still satisfied.
+                    // If the result is a dedup hit, push a short informative
+                    // tool_result so the LLM knows the file was already read
+                    // and should use session memory instead of re-reading.
                     if result.is_dedup {
-                        messages.push(Message::tool_result(
-                            &tc.id,
-                            ".".to_string(),
-                            false,
-                        ));
+                        let dedup_msg = result.output.as_deref().unwrap_or(
+                            "[File already read] Content is in session memory above. Do NOT re-read."
+                        );
+                        messages.push(Message::tool_result(&tc.id, dedup_msg.to_string(), false));
                     } else {
                         // Truncate tool output for messages vec (LLM context)
                         // while keeping full content in the ToolResult event above.
-                        let context_content = truncate_tool_output_for_context(
-                            &tc.name,
-                            &result.to_content(),
-                        );
+                        let context_content =
+                            truncate_tool_output_for_context(&tc.name, &result.to_content());
 
                         // Add tool result to messages (with multimodal support)
                         if let Some((mime, b64)) = &result.image_data {
@@ -2812,6 +2924,7 @@ impl OrchestratorService {
                     if let Some(detection) = loop_detector.record_call(
                         &tc.name,
                         &tc.arguments.to_string(),
+                        result.is_dedup,
                     ) {
                         match detection {
                             LoopDetection::Warning(msg) => {
@@ -2819,15 +2932,23 @@ impl OrchestratorService {
                                 messages.push(Message::user(msg));
                             }
                             LoopDetection::StripTools(msg, _tools) => {
-                                eprintln!("[loop-detector] Level 2 escalation: stripping tools for {}", tc.name);
+                                eprintln!(
+                                    "[loop-detector] Level 2 escalation: stripping tools for {}",
+                                    tc.name
+                                );
                                 messages.push(Message::user(msg));
                             }
                             LoopDetection::ForceTerminate(msg) => {
-                                eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", tc.name);
-                                let _ = tx.send(UnifiedStreamEvent::Error {
-                                    message: msg.clone(),
-                                    code: None,
-                                }).await;
+                                eprintln!(
+                                    "[loop-detector] Level 3 escalation: force terminating for {}",
+                                    tc.name
+                                );
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::Error {
+                                        message: msg.clone(),
+                                        code: None,
+                                    })
+                                    .await;
                                 return ExecutionResult {
                                     response: last_assistant_text,
                                     usage: total_usage,
@@ -2930,7 +3051,7 @@ impl OrchestratorService {
                     merge_usage(&mut total_usage, &nested_usage);
                     iterations += nested_iterations;
 
-                    // Emit tool result event (always — for frontend display)
+                    // Emit tool result event (always 閳?for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tool_id.clone(),
@@ -2947,14 +3068,24 @@ impl OrchestratorService {
                         })
                         .await;
 
-                    // Skip dedup results in fallback path — don't add to tool_results
-                    if !result.is_dedup {
+                    // For dedup results, push the dedup message so the LLM
+                    // knows the file was already read. For normal results,
+                    // push the full (truncated) tool output.
+                    if result.is_dedup {
+                        let dedup_msg = result.output.as_deref().unwrap_or(
+                            "[File already read] Content is in session memory above. Do NOT re-read."
+                        );
+                        tool_results.push(format_tool_result(
+                            &ptc.tool_name,
+                            &tool_id,
+                            dedup_msg,
+                            false,
+                        ));
+                    } else {
                         // Truncate tool output for messages vec (LLM context)
                         // while keeping full content in the ToolResult event above.
-                        let context_content = truncate_tool_output_for_context(
-                            &ptc.tool_name,
-                            &result.to_content(),
-                        );
+                        let context_content =
+                            truncate_tool_output_for_context(&ptc.tool_name, &result.to_content());
 
                         tool_results.push(format_tool_result(
                             &ptc.tool_name,
@@ -2968,10 +3099,14 @@ impl OrchestratorService {
                     if let Some(detection) = loop_detector.record_call(
                         &ptc.tool_name,
                         &ptc.arguments.to_string(),
+                        result.is_dedup,
                     ) {
                         match detection {
                             LoopDetection::Warning(msg) => {
-                                eprintln!("[loop-detector] Level 1 escalation (fallback): {}", ptc.tool_name);
+                                eprintln!(
+                                    "[loop-detector] Level 1 escalation (fallback): {}",
+                                    ptc.tool_name
+                                );
                                 tool_results.push(msg);
                             }
                             LoopDetection::StripTools(msg, _tools) => {
@@ -2980,10 +3115,12 @@ impl OrchestratorService {
                             }
                             LoopDetection::ForceTerminate(msg) => {
                                 eprintln!("[loop-detector] Level 3 escalation (fallback): force terminating for {}", ptc.tool_name);
-                                let _ = tx.send(UnifiedStreamEvent::Error {
-                                    message: msg.clone(),
-                                    code: None,
-                                }).await;
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::Error {
+                                        message: msg.clone(),
+                                        code: None,
+                                    })
+                                    .await;
                                 return ExecutionResult {
                                     response: last_assistant_text,
                                     usage: total_usage,
@@ -3013,47 +3150,110 @@ impl OrchestratorService {
                 messages.push(Message::user(repair_hint));
             } else {
                 // No tool calls (native or fallback) detected.
-                // For Unreliable providers: check if the model described tool usage
-                // in text without actually invoking tools (repair-hint pattern).
+                // Check whether the model is narrating "next steps" instead of
+                // executing tools, then inject a repair hint.
                 let response_text = response.content.as_deref().unwrap_or("");
-                let needs_repair = !matches!(reliability, ToolCallReliability::Reliable)
-                    && repair_retry_count < 2
-                    && text_describes_tool_intent(response_text);
+                let content_is_empty = response_text.trim().is_empty();
+                let thinking_text = response.thinking.as_deref().unwrap_or("");
+                let thinking_has_content = !thinking_text.trim().is_empty();
+
+                // Check content first, then thinking if content is empty.
+                // We repair when the model narrates a pending next step
+                // without issuing tool calls.
+                let pending_action_intent = text_describes_pending_action(response_text)
+                    || (content_is_empty
+                        && thinking_has_content
+                        && text_describes_pending_action(thinking_text));
+                let tool_intent_without_call = text_describes_tool_intent(response_text)
+                    || (content_is_empty
+                        && thinking_has_content
+                        && text_describes_tool_intent(thinking_text));
+                let has_cached_assistant_text = last_assistant_text
+                    .as_ref()
+                    .map(|t| !t.trim().is_empty())
+                    .unwrap_or(false);
+                let empty_response_without_signals =
+                    content_is_empty && !thinking_has_content && !has_cached_assistant_text;
+                let needs_repair = repair_retry_count < 2
+                    && (empty_response_without_signals
+                        || pending_action_intent
+                        || (!matches!(reliability, ToolCallReliability::Reliable)
+                            && tool_intent_without_call));
 
                 if needs_repair {
                     // Send a repair hint to nudge the model into actually calling tools
                     repair_retry_count += 1;
                     if let Some(text) = &response.content {
-                        messages.push(Message::assistant(text.clone()));
+                        if !text.trim().is_empty() {
+                            messages.push(Message::assistant(text.clone()));
+                        }
                     }
-                    let repair_hint = concat!(
-                        "You described what tools you would use but did not actually call them. ",
-                        "Please emit the actual tool call now using this exact format:\n\n",
-                        "```tool_call\n",
-                        "{\"tool\": \"ToolName\", \"arguments\": {\"param\": \"value\"}}\n",
-                        "```\n\n",
-                        "你描述了要使用的工具但没有实际调用。请使用以下格式直接输出工具调用：\n\n",
-                        "```tool_call\n",
-                        "{\"tool\": \"工具名\", \"arguments\": {\"参数\": \"值\"}}\n",
-                        "```\n\n",
-                        "Do NOT describe what you will do. Just emit the tool_call block.\n",
-                        "不要描述你将要做什么，直接输出 tool_call 代码块。"
-                    );
+                    if content_is_empty && thinking_has_content {
+                        // For thinking-only responses, include thinking as context
+                        messages.push(Message::assistant(format!(
+                            "[Your reasoning contained tool usage plans but no tool was called]\n{}",
+                            thinking_text
+                        )));
+                    }
+                    let repair_hint = if empty_response_without_signals {
+                        concat!(
+                            "Your previous response was empty.\n",
+                            "Either emit a valid tool_call block now, or provide a direct final answer.\n\n",
+                            "Tool call format:\n",
+                            "```tool_call\n",
+                            "{\"tool\": \"ToolName\", \"arguments\": {\"param\": \"value\"}}\n",
+                            "```"
+                        )
+                    } else {
+                        concat!(
+                            "Your response describes a pending next step, but no actual tool call was emitted.\n",
+                            "Either emit the required tool call now, or provide the final answer directly.\n\n",
+                            "Tool call format:\n",
+                            "```tool_call\n",
+                            "{\"tool\": \"ToolName\", \"arguments\": {\"param\": \"value\"}}\n",
+                            "```\n\n",
+                            "Do NOT narrate future actions without executing them."
+                        )
+                    };
                     messages.push(Message::user(repair_hint.to_string()));
-                    // Continue the loop — don't return as final response
+                    // Continue the loop; do not return as final response.
                     continue;
                 }
 
-                // Reset repair counter on successful completion
-                // (reaching here means we have a genuine final response)
+                if empty_response_without_signals {
+                    let error_msg =
+                        "Model returned an empty response without tool calls after retries."
+                            .to_string();
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Error {
+                            message: error_msg.clone(),
+                            code: Some("empty_response".to_string()),
+                        })
+                        .await;
+                    return ExecutionResult {
+                        response: None,
+                        usage: total_usage,
+                        iterations,
+                        success: false,
+                        error: Some(error_msg),
+                    };
+                }
 
-                // Always strip any tool call blocks from the response text,
-                // since models may emit text-based tool calls even when using native mode
+                // Build final content: prefer content, fall back to thinking, then last_assistant_text
                 let final_content = response
                     .content
                     .as_ref()
                     .map(|t| extract_text_without_tool_calls(t))
                     .filter(|t| !t.trim().is_empty())
+                    .or_else(|| {
+                        // When content is empty but thinking has content (and no tool intent),
+                        // use thinking as fallback response
+                        if thinking_has_content {
+                            Some(thinking_text.to_string())
+                        } else {
+                            None
+                        }
+                    })
                     .or(last_assistant_text);
 
                 // Emit completion event
@@ -5735,14 +5935,13 @@ impl OrchestratorService {
 
         // Determine the start of the compaction range.
         // If a Layer 2 session memory (identified by SESSION_MEMORY_V1 marker) exists
-        // at index 1, skip it — it will be rebuilt after compaction.
-        let compact_range_start = if messages.len() > 1
-            && SessionMemoryManager::message_has_marker(&messages[1])
-        {
-            2 // Skip both Layer 1 (index 0) and existing Layer 2 (index 1)
-        } else {
-            1 // Skip only Layer 1 (index 0)
-        };
+        // at index 1, skip it 閳?it will be rebuilt after compaction.
+        let compact_range_start =
+            if messages.len() > 1 && SessionMemoryManager::message_has_marker(&messages[1]) {
+                2 // Skip both Layer 1 (index 0) and existing Layer 2 (index 1)
+            } else {
+                1 // Skip only Layer 1 (index 0)
+            };
 
         // Nothing to compact if range is too small
         if compact_range_end <= compact_range_start {
@@ -6016,9 +6215,7 @@ impl OrchestratorService {
                     fallback_instructions,
                     "STRICT TOOL FORMAT MODE: emit only parseable tool_call blocks when using tools. \
                      If your previous output used prose or malformed tags for tools, fix it and output \
-                     valid tool_call blocks only before any explanation.\n\
-                     严格工具格式模式：使用工具时必须且只能输出可解析的 tool_call 代码块。\
-                     如果之前的输出使用了文字描述或格式错误的标签来调用工具，请修正并仅输出有效的 tool_call 代码块。"
+                     valid tool_call blocks only before any explanation."
                 )
             } else {
                 format!("{}\n\n{}", prompt, fallback_instructions)
@@ -6248,7 +6445,11 @@ fn is_complete_answer(text: &str) -> bool {
     }
 
     // Get the last non-empty line for trailing-pattern checks
-    let last_line = trimmed.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+    let last_line = trimmed
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("");
     let last_trimmed = last_line.trim();
     let last_lower = last_trimmed.to_lowercase();
 
@@ -6285,12 +6486,17 @@ fn is_complete_answer(text: &str) -> bool {
     let dangling: &[&str] = &["and", "but", "or", "then", "and,", "but,", "or,", "then,"];
     for word in dangling {
         if last_lower.ends_with(word) {
-            // Ensure it's a whole word — check that the char before is whitespace or start
+            // Ensure it's a whole word; check that the char before is whitespace or start.
             let prefix_len = last_lower.len() - word.len();
             if prefix_len == 0 || last_lower.as_bytes().get(prefix_len - 1) == Some(&b' ') {
                 return false;
             }
         }
+    }
+
+    // If the last line still narrates a pending next step, it's not complete yet.
+    if text_describes_pending_action(last_trimmed) {
+        return false;
     }
 
     true
@@ -6302,7 +6508,7 @@ fn is_complete_answer(text: &str) -> bool {
 /// (in both English and Chinese), suggesting the model wants to call tools but failed to
 /// emit them in the expected format.
 fn text_describes_tool_intent(text: &str) -> bool {
-    if text.is_empty() {
+    if text.trim().is_empty() {
         return false;
     }
 
@@ -6310,8 +6516,18 @@ fn text_describes_tool_intent(text: &str) -> bool {
 
     // Known tool names to detect
     let tool_names = [
-        "read", "write", "edit", "bash", "glob", "grep", "ls", "cwd", "analyze", "task",
-        "webfetch", "websearch",
+        "read",
+        "write",
+        "edit",
+        "bash",
+        "glob",
+        "grep",
+        "ls",
+        "cwd",
+        "analyze",
+        "task",
+        "webfetch",
+        "websearch",
     ];
 
     // English intent phrases
@@ -6336,24 +6552,24 @@ fn text_describes_tool_intent(text: &str) -> bool {
 
     // Chinese intent phrases
     let zh_intent = [
-        "调用",
-        "执行",
-        "使用工具",
-        "让我使用",
-        "让我调用",
-        "我将使用",
-        "我将调用",
-        "我来使用",
-        "我来调用",
-        "我需要使用",
-        "我需要调用",
-        "接下来使用",
-        "接下来调用",
-        "先使用",
-        "先调用",
-        "查看一下",
-        "读取",
-        "检查一下",
+        "\u{8c03}\u{7528}",
+        "\u{6267}\u{884c}",
+        "\u{4f7f}\u{7528}\u{5de5}\u{5177}",
+        "\u{8ba9}\u{6211}\u{4f7f}\u{7528}",
+        "\u{8ba9}\u{6211}\u{8c03}\u{7528}",
+        "\u{6211}\u{5c06}\u{4f7f}\u{7528}",
+        "\u{6211}\u{5c06}\u{8c03}\u{7528}",
+        "\u{6211}\u{6765}\u{4f7f}\u{7528}",
+        "\u{6211}\u{6765}\u{8c03}\u{7528}",
+        "\u{6211}\u{9700}\u{8981}\u{4f7f}\u{7528}",
+        "\u{6211}\u{9700}\u{8981}\u{8c03}\u{7528}",
+        "\u{63a5}\u{4e0b}\u{6765}\u{4f7f}\u{7528}",
+        "\u{63a5}\u{4e0b}\u{6765}\u{8c03}\u{7528}",
+        "\u{5148}\u{4f7f}\u{7528}",
+        "\u{5148}\u{8c03}\u{7528}",
+        "\u{67e5}\u{770b}",
+        "\u{8bfb}\u{53d6}",
+        "\u{68c0}\u{67e5}",
     ];
 
     let has_tool_mention = tool_names.iter().any(|t| {
@@ -6370,6 +6586,92 @@ fn text_describes_tool_intent(text: &str) -> bool {
     let has_zh_intent = zh_intent.iter().any(|p| text.contains(p));
 
     has_en_intent || has_zh_intent
+}
+
+/// Detect unfinished "next-step narration" even when tool names are not explicitly mentioned.
+///
+/// Examples:
+/// - "Let me check README next."
+/// - "我先查看 README 文件。"
+/// - "接下来我会继续分析。"
+fn text_describes_pending_action(text: &str) -> bool {
+    if text.trim().is_empty() {
+        return false;
+    }
+
+    let text_lower = text.to_lowercase();
+
+    let en_pending_markers = [
+        "let me",
+        "i will",
+        "i'll",
+        "i am going to",
+        "i'm going to",
+        "i need to",
+        "next i",
+        "next, i",
+        "now i",
+        "now, i",
+    ];
+
+    let zh_pending_markers = [
+        "\u{8ba9}\u{6211}",         // 让我
+        "\u{8ba9}\u{6211}\u{5148}", // 让我先
+        "\u{6211}\u{5148}",         // 我先
+        "\u{6211}\u{5c06}",         // 我将
+        "\u{6211}\u{4f1a}",         // 我会
+        "\u{6211}\u{6765}",         // 我来
+        "\u{63a5}\u{4e0b}\u{6765}", // 接下来
+        "\u{4e0b}\u{4e00}\u{6b65}", // 下一步
+    ];
+
+    let en_action_terms = [
+        "check",
+        "read",
+        "inspect",
+        "analyze",
+        "review",
+        "open",
+        "list",
+        "search",
+        "explore",
+        "verify",
+        "look at",
+        "look into",
+    ];
+
+    let zh_action_terms = [
+        "\u{67e5}\u{770b}",         // 查看
+        "\u{8bfb}\u{53d6}",         // 读取
+        "\u{9605}\u{8bfb}",         // 阅读
+        "\u{68c0}\u{67e5}",         // 检查
+        "\u{5206}\u{6790}",         // 分析
+        "\u{641c}\u{7d22}",         // 搜索
+        "\u{6253}\u{5f00}",         // 打开
+        "\u{5217}\u{51fa}",         // 列出
+        "\u{770b}\u{4e00}\u{4e0b}", // 看一下
+    ];
+
+    let has_pending_marker = en_pending_markers.iter().any(|p| text_lower.contains(p))
+        || zh_pending_markers.iter().any(|p| text.contains(p));
+    if !has_pending_marker {
+        return false;
+    }
+
+    let has_action_term = en_action_terms.iter().any(|p| text_lower.contains(p))
+        || zh_action_terms.iter().any(|p| text.contains(p));
+    if has_action_term {
+        return true;
+    }
+
+    // Fallback: mention of file/directory targets after a pending marker.
+    text_lower.contains("readme")
+        || text_lower.contains(".md")
+        || text_lower.contains(".rs")
+        || text_lower.contains(".ts")
+        || text_lower.contains(".py")
+        || text.contains("\u{6587}\u{4ef6}") // 文件
+        || text.contains("\u{76ee}\u{5f55}") // 目录
 }
 
 fn parse_fallback_tool_calls(
@@ -7136,7 +7438,10 @@ fn observed_root_buckets(
             items.sort();
             items.dedup();
             let count = items.len();
-            let samples = items.into_iter().take(sample_limit.max(1)).collect::<Vec<_>>();
+            let samples = items
+                .into_iter()
+                .take(sample_limit.max(1))
+                .collect::<Vec<_>>();
             (root, count, samples)
         })
         .collect()
@@ -7374,7 +7679,10 @@ fn build_deterministic_analysis_fallback_report(
         || sample_paths_with_prefix(&ledger.observed_paths, "test/", 1)
             .first()
             .is_some()
-        || ledger.observed_paths.iter().any(|path| looks_like_test_path(path));
+        || ledger
+            .observed_paths
+            .iter()
+            .any(|path| looks_like_test_path(path));
     if !has_test_evidence {
         unknown_count += 1;
         lines.push("- Test implementation details were not sufficiently sampled.".to_string());
@@ -7397,8 +7705,7 @@ fn build_deterministic_analysis_fallback_report(
     if has_budget_warning {
         unknown_count += 1;
         lines.push(
-            "- Some areas may require a rerun after resolving provider/runtime limits."
-                .to_string(),
+            "- Some areas may require a rerun after resolving provider/runtime limits.".to_string(),
         );
     }
     if unknown_count == 0 {
@@ -7554,7 +7861,11 @@ fn truncate_tool_output_for_context(tool_name: &str, content: &str) -> String {
     }
 
     // Truncate by line count first
-    let mut truncated: String = content.lines().take(max_lines).collect::<Vec<_>>().join("\n");
+    let mut truncated: String = content
+        .lines()
+        .take(max_lines)
+        .collect::<Vec<_>>()
+        .join("\n");
 
     // Then truncate by char limit if still over
     if truncated.len() > max_chars {
@@ -8023,4 +8334,3 @@ mod tests {
     use super::*;
     include!("service_tests.rs");
 }
-

@@ -108,23 +108,21 @@ impl IndexManager {
                 };
                 if !embedding_svc.is_ready() {
                     match self.index_store.load_vocabulary(project_path) {
-                        Ok(Some(json)) => {
-                            match embedding_svc.import_vocabulary(&json) {
-                                Ok(()) => {
-                                    info!(
-                                        project = %project_path,
-                                        "index manager: restored vocabulary from SQLite"
-                                    );
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        project = %project_path,
-                                        error = %e,
-                                        "index manager: failed to import vocabulary"
-                                    );
-                                }
+                        Ok(Some(json)) => match embedding_svc.import_vocabulary(&json) {
+                            Ok(()) => {
+                                info!(
+                                    project = %project_path,
+                                    "index manager: restored vocabulary from SQLite"
+                                );
                             }
-                        }
+                            Err(e) => {
+                                warn!(
+                                    project = %project_path,
+                                    error = %e,
+                                    "index manager: failed to import vocabulary"
+                                );
+                            }
+                        },
                         Ok(None) => {
                             // No vocabulary in DB — will be built on next embedding pass
                         }
@@ -222,10 +220,9 @@ impl IndexManager {
         };
 
         let handle = tokio::task::spawn(async move {
-            let indexer =
-                BackgroundIndexer::new(project_root, index_store.clone())
-                    .with_progress_callback(progress_cb)
-                    .with_embedding_service(embedding_svc);
+            let indexer = BackgroundIndexer::new(project_root, index_store.clone())
+                .with_progress_callback(progress_cb)
+                .with_embedding_service(embedding_svc);
 
             let join = indexer.start().await;
             let result = join.await;
@@ -331,10 +328,7 @@ impl IndexManager {
 
     /// Get the embedding service for a project directory, if one has been
     /// created by a previous indexing run.
-    pub async fn get_embedding_service(
-        &self,
-        project_path: &str,
-    ) -> Option<Arc<EmbeddingService>> {
+    pub async fn get_embedding_service(&self, project_path: &str) -> Option<Arc<EmbeddingService>> {
         let embeds = self.embedding_services.read().await;
         embeds.get(project_path).cloned()
     }
@@ -548,13 +542,17 @@ mod tests {
 
         // Verify the embedding service is ready after indexing
         let emb = mgr.get_embedding_service(&project_path).await;
-        assert!(emb.is_some(), "should have embedding service after indexing");
+        assert!(
+            emb.is_some(),
+            "should have embedding service after indexing"
+        );
         // The embedding service should be ready (vocab built during embedding pass)
         // Note: it may or may not be ready depending on how fast the background
         // indexer ran. The key test is the second call below.
 
         // Save a vocab manually (simulating what the embedding pass does)
-        let vocab_json = r#"{"token_to_idx":{"def":0,"run":1,"pass":2},"idf":[1.0,1.0,1.0],"num_docs":1}"#;
+        let vocab_json =
+            r#"{"token_to_idx":{"def":0,"run":1,"pass":2},"idf":[1.0,1.0,1.0],"num_docs":1}"#;
         let store = IndexStore::new(pool.clone());
         store.save_vocabulary(&project_path, vocab_json).unwrap();
 
@@ -565,7 +563,10 @@ mod tests {
 
         // The embedding service should have restored the vocabulary
         let emb2 = mgr2.get_embedding_service(&project_path).await;
-        assert!(emb2.is_some(), "should have embedding service after restore");
+        assert!(
+            emb2.is_some(),
+            "should have embedding service after restore"
+        );
         assert!(
             emb2.unwrap().is_ready(),
             "embedding service should be ready after vocab restore from SQLite"

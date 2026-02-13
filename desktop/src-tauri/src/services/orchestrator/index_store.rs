@@ -142,7 +142,7 @@ impl IndexStore {
                 symbol.parent,
                 symbol.signature,
                 symbol.doc_comment,
-                symbol.line as i64,  // start_line = line
+                symbol.line as i64, // start_line = line
                 symbol.end_line as i64,
             ])?;
         }
@@ -290,11 +290,13 @@ impl IndexStore {
         )?;
 
         // Embedding chunk count (indicates semantic search availability)
-        let embedding_chunks: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM file_embeddings WHERE project_path = ?1",
-            params![project_path],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        let embedding_chunks: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM file_embeddings WHERE project_path = ?1",
+                params![project_path],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
 
         Ok(ProjectIndexSummary {
             total_files: total_files as usize,
@@ -510,7 +512,11 @@ impl IndexStore {
             .collect();
 
         // Sort by similarity descending
-        scored.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Take top-k
         scored.truncate(top_k);
@@ -640,7 +646,12 @@ mod tests {
         IndexStore::new(db.pool().clone())
     }
 
-    fn make_item(path: &str, component: &str, language: &str, symbols: Vec<SymbolInfo>) -> FileInventoryItem {
+    fn make_item(
+        path: &str,
+        component: &str,
+        language: &str,
+        symbols: Vec<SymbolInfo>,
+    ) -> FileInventoryItem {
         FileInventoryItem {
             path: path.to_string(),
             component: component.to_string(),
@@ -660,11 +671,20 @@ mod tests {
     #[test]
     fn upsert_inserts_new_file_index() {
         let store = create_test_store();
-        let item = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
-        ]);
+        let item = make_item(
+            "src/main.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "main".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
+        );
 
-        store.upsert_file_index("/project", &item, "abc123").unwrap();
+        store
+            .upsert_file_index("/project", &item, "abc123")
+            .unwrap();
 
         let symbols = store.get_file_symbols("/project", "src/main.rs").unwrap();
         assert_eq!(symbols.len(), 1);
@@ -678,17 +698,33 @@ mod tests {
         let store = create_test_store();
 
         // Initial insert
-        let item_v1 = make_item("src/lib.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("init".to_string(), SymbolKind::Function, 5),
-        ]);
-        store.upsert_file_index("/project", &item_v1, "hash_v1").unwrap();
+        let item_v1 = make_item(
+            "src/lib.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "init".to_string(),
+                SymbolKind::Function,
+                5,
+            )],
+        );
+        store
+            .upsert_file_index("/project", &item_v1, "hash_v1")
+            .unwrap();
 
         // Update with new symbols
-        let item_v2 = make_item("src/lib.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("init".to_string(), SymbolKind::Function, 5),
-            SymbolInfo::basic("Config".to_string(), SymbolKind::Struct, 20),
-        ]);
-        store.upsert_file_index("/project", &item_v2, "hash_v2").unwrap();
+        let item_v2 = make_item(
+            "src/lib.rs",
+            "desktop-rust",
+            "rust",
+            vec![
+                SymbolInfo::basic("init".to_string(), SymbolKind::Function, 5),
+                SymbolInfo::basic("Config".to_string(), SymbolKind::Struct, 20),
+            ],
+        );
+        store
+            .upsert_file_index("/project", &item_v2, "hash_v2")
+            .unwrap();
 
         let symbols = store.get_file_symbols("/project", "src/lib.rs").unwrap();
         assert_eq!(symbols.len(), 2);
@@ -702,20 +738,34 @@ mod tests {
         let store = create_test_store();
 
         // Initial insert with 3 symbols
-        let item_v1 = make_item("src/service.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("foo".to_string(), SymbolKind::Function, 1),
-            SymbolInfo::basic("bar".to_string(), SymbolKind::Function, 10),
-            SymbolInfo::basic("Baz".to_string(), SymbolKind::Struct, 20),
-        ]);
+        let item_v1 = make_item(
+            "src/service.rs",
+            "desktop-rust",
+            "rust",
+            vec![
+                SymbolInfo::basic("foo".to_string(), SymbolKind::Function, 1),
+                SymbolInfo::basic("bar".to_string(), SymbolKind::Function, 10),
+                SymbolInfo::basic("Baz".to_string(), SymbolKind::Struct, 20),
+            ],
+        );
         store.upsert_file_index("/project", &item_v1, "h1").unwrap();
 
         // Update with only 1 symbol
-        let item_v2 = make_item("src/service.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("new_fn".to_string(), SymbolKind::Function, 1),
-        ]);
+        let item_v2 = make_item(
+            "src/service.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "new_fn".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
+        );
         store.upsert_file_index("/project", &item_v2, "h2").unwrap();
 
-        let symbols = store.get_file_symbols("/project", "src/service.rs").unwrap();
+        let symbols = store
+            .get_file_symbols("/project", "src/service.rs")
+            .unwrap();
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "new_fn");
     }
@@ -728,13 +778,25 @@ mod tests {
     fn query_symbols_by_name_pattern() {
         let store = create_test_store();
 
-        let item1 = make_item("src/controller.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("UserController".to_string(), SymbolKind::Struct, 5),
-            SymbolInfo::basic("handle_request".to_string(), SymbolKind::Function, 15),
-        ]);
-        let item2 = make_item("src/admin.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("AdminController".to_string(), SymbolKind::Struct, 3),
-        ]);
+        let item1 = make_item(
+            "src/controller.rs",
+            "desktop-rust",
+            "rust",
+            vec![
+                SymbolInfo::basic("UserController".to_string(), SymbolKind::Struct, 5),
+                SymbolInfo::basic("handle_request".to_string(), SymbolKind::Function, 15),
+            ],
+        );
+        let item2 = make_item(
+            "src/admin.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "AdminController".to_string(),
+                SymbolKind::Struct,
+                3,
+            )],
+        );
 
         store.upsert_file_index("/project", &item1, "h1").unwrap();
         store.upsert_file_index("/project", &item2, "h2").unwrap();
@@ -749,9 +811,16 @@ mod tests {
     fn query_symbols_returns_empty_for_no_match() {
         let store = create_test_store();
 
-        let item = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
-        ]);
+        let item = make_item(
+            "src/main.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "main".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
+        );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         let results = store.query_symbols("%NonExistent%").unwrap();
@@ -762,10 +831,15 @@ mod tests {
     fn query_symbols_exact_name() {
         let store = create_test_store();
 
-        let item = make_item("src/models.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("Config".to_string(), SymbolKind::Struct, 1),
-            SymbolInfo::basic("ConfigBuilder".to_string(), SymbolKind::Struct, 20),
-        ]);
+        let item = make_item(
+            "src/models.rs",
+            "desktop-rust",
+            "rust",
+            vec![
+                SymbolInfo::basic("Config".to_string(), SymbolKind::Struct, 1),
+                SymbolInfo::basic("ConfigBuilder".to_string(), SymbolKind::Struct, 20),
+            ],
+        );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         let results = store.query_symbols("Config").unwrap();
@@ -783,17 +857,26 @@ mod tests {
 
         let item1 = make_item("src/main.rs", "desktop-rust", "rust", vec![]);
         let item2 = make_item("src/lib.rs", "desktop-rust", "rust", vec![]);
-        let item3 = make_item("src/components/App.tsx", "desktop-web", "typescript", vec![]);
+        let item3 = make_item(
+            "src/components/App.tsx",
+            "desktop-web",
+            "typescript",
+            vec![],
+        );
 
         store.upsert_file_index("/project", &item1, "h1").unwrap();
         store.upsert_file_index("/project", &item2, "h2").unwrap();
         store.upsert_file_index("/project", &item3, "h3").unwrap();
 
-        let rust_files = store.query_files_by_component("/project", "desktop-rust").unwrap();
+        let rust_files = store
+            .query_files_by_component("/project", "desktop-rust")
+            .unwrap();
         assert_eq!(rust_files.len(), 2);
         assert!(rust_files.iter().all(|f| f.component == "desktop-rust"));
 
-        let web_files = store.query_files_by_component("/project", "desktop-web").unwrap();
+        let web_files = store
+            .query_files_by_component("/project", "desktop-web")
+            .unwrap();
         assert_eq!(web_files.len(), 1);
         assert_eq!(web_files[0].file_path, "src/components/App.tsx");
     }
@@ -805,7 +888,9 @@ mod tests {
         let item = make_item("src/main.rs", "desktop-rust", "rust", vec![]);
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
-        let files = store.query_files_by_component("/project", "nonexistent").unwrap();
+        let files = store
+            .query_files_by_component("/project", "nonexistent")
+            .unwrap();
         assert!(files.is_empty());
     }
 
@@ -817,12 +902,26 @@ mod tests {
     fn get_project_summary_basic() {
         let store = create_test_store();
 
-        let item1 = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
-        ]);
-        let item2 = make_item("src/app.tsx", "desktop-web", "typescript", vec![
-            SymbolInfo::basic("app".to_string(), SymbolKind::Function, 1),
-        ]);
+        let item1 = make_item(
+            "src/main.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "main".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
+        );
+        let item2 = make_item(
+            "src/app.tsx",
+            "desktop-web",
+            "typescript",
+            vec![SymbolInfo::basic(
+                "app".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
+        );
         let item3 = make_item("src/utils.py", "python-core", "python", vec![]);
 
         store.upsert_file_index("/project", &item1, "h1").unwrap();
@@ -860,7 +959,9 @@ mod tests {
     fn is_index_stale_returns_true_for_missing_file() {
         let store = create_test_store();
 
-        let stale = store.is_index_stale("/project", "src/missing.rs", "somehash").unwrap();
+        let stale = store
+            .is_index_stale("/project", "src/missing.rs", "somehash")
+            .unwrap();
         assert!(stale);
     }
 
@@ -869,9 +970,13 @@ mod tests {
         let store = create_test_store();
 
         let item = make_item("src/main.rs", "desktop-rust", "rust", vec![]);
-        store.upsert_file_index("/project", &item, "abc123").unwrap();
+        store
+            .upsert_file_index("/project", &item, "abc123")
+            .unwrap();
 
-        let stale = store.is_index_stale("/project", "src/main.rs", "abc123").unwrap();
+        let stale = store
+            .is_index_stale("/project", "src/main.rs", "abc123")
+            .unwrap();
         assert!(!stale);
     }
 
@@ -880,9 +985,13 @@ mod tests {
         let store = create_test_store();
 
         let item = make_item("src/main.rs", "desktop-rust", "rust", vec![]);
-        store.upsert_file_index("/project", &item, "abc123").unwrap();
+        store
+            .upsert_file_index("/project", &item, "abc123")
+            .unwrap();
 
-        let stale = store.is_index_stale("/project", "src/main.rs", "def456").unwrap();
+        let stale = store
+            .is_index_stale("/project", "src/main.rs", "def456")
+            .unwrap();
         assert!(stale);
     }
 
@@ -894,10 +1003,15 @@ mod tests {
     fn cascade_delete_removes_symbols() {
         let store = create_test_store();
 
-        let item = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
-            SymbolInfo::basic("Config".to_string(), SymbolKind::Struct, 10),
-        ]);
+        let item = make_item(
+            "src/main.rs",
+            "desktop-rust",
+            "rust",
+            vec![
+                SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
+                SymbolInfo::basic("Config".to_string(), SymbolKind::Struct, 10),
+            ],
+        );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         // Verify symbols exist
@@ -925,15 +1039,33 @@ mod tests {
     fn separate_projects_are_isolated() {
         let store = create_test_store();
 
-        let item_a = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("main_a".to_string(), SymbolKind::Function, 1),
-        ]);
-        let item_b = make_item("src/main.rs", "desktop-rust", "rust", vec![
-            SymbolInfo::basic("main_b".to_string(), SymbolKind::Function, 1),
-        ]);
+        let item_a = make_item(
+            "src/main.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "main_a".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
+        );
+        let item_b = make_item(
+            "src/main.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "main_b".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
+        );
 
-        store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
-        store.upsert_file_index("/project-b", &item_b, "hb").unwrap();
+        store
+            .upsert_file_index("/project-a", &item_a, "ha")
+            .unwrap();
+        store
+            .upsert_file_index("/project-b", &item_b, "hb")
+            .unwrap();
 
         let summary_a = store.get_project_summary("/project-a").unwrap();
         assert_eq!(summary_a.total_files, 1);
@@ -967,10 +1099,17 @@ mod tests {
             SymbolInfo::basic("my_module".to_string(), SymbolKind::Module, 8),
         ];
 
-        let item = make_item("src/all_kinds.rs", "desktop-rust", "rust", all_kinds.clone());
+        let item = make_item(
+            "src/all_kinds.rs",
+            "desktop-rust",
+            "rust",
+            all_kinds.clone(),
+        );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
-        let stored = store.get_file_symbols("/project", "src/all_kinds.rs").unwrap();
+        let stored = store
+            .get_file_symbols("/project", "src/all_kinds.rs")
+            .unwrap();
         assert_eq!(stored.len(), 8);
 
         for (original, stored) in all_kinds.iter().zip(stored.iter()) {
@@ -990,11 +1129,7 @@ mod tests {
 
         for i in 0..50 {
             let symbols: Vec<SymbolInfo> = (0..5)
-                .map(|j| SymbolInfo::basic(
-                    format!("symbol_{i}_{j}"),
-                    SymbolKind::Function,
-                    j + 1,
-                ))
+                .map(|j| SymbolInfo::basic(format!("symbol_{i}_{j}"), SymbolKind::Function, j + 1))
                 .collect();
 
             let item = make_item(
@@ -1003,7 +1138,9 @@ mod tests {
                 "rust",
                 symbols,
             );
-            store.upsert_file_index("/project", &item, &format!("hash_{i}")).unwrap();
+            store
+                .upsert_file_index("/project", &item, &format!("hash_{i}"))
+                .unwrap();
         }
 
         let summary = store.get_project_summary("/project").unwrap();
@@ -1047,7 +1184,9 @@ mod tests {
         let item = make_item("src/example.py", "python-core", "python", symbols);
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
-        let stored = store.get_file_symbols("/project", "src/example.py").unwrap();
+        let stored = store
+            .get_file_symbols("/project", "src/example.py")
+            .unwrap();
         assert_eq!(stored.len(), 3);
 
         // Check extended fields for MyClass
@@ -1060,8 +1199,14 @@ mod tests {
         // Check extended fields for my_method
         assert_eq!(stored[1].name, "my_method");
         assert_eq!(stored[1].parent.as_deref(), Some("MyClass"));
-        assert_eq!(stored[1].signature.as_deref(), Some("def my_method(self, x: int) -> str:"));
-        assert_eq!(stored[1].doc_comment.as_deref(), Some("Does something useful"));
+        assert_eq!(
+            stored[1].signature.as_deref(),
+            Some("def my_method(self, x: int) -> str:")
+        );
+        assert_eq!(
+            stored[1].doc_comment.as_deref(),
+            Some("Does something useful")
+        );
         assert_eq!(stored[1].end_line, 20);
 
         // Check that basic symbol has None for extended fields
@@ -1146,9 +1291,7 @@ mod tests {
             .upsert_chunk_embedding("/project", "src/b.rs", 0, "chunk b", &emb)
             .unwrap();
 
-        let deleted = store
-            .delete_embeddings_for_project("/project")
-            .unwrap();
+        let deleted = store.delete_embeddings_for_project("/project").unwrap();
         assert_eq!(deleted, 2);
 
         let remaining = store.get_embeddings_for_project("/project").unwrap();
@@ -1213,9 +1356,15 @@ mod tests {
         let vec2 = vec![0.0f32, 1.0, 0.0]; // orthogonal to query
         let vec3 = vec![0.5f32, 0.5, 0.0]; // moderately similar
 
-        store.upsert_chunk_embedding("/project", "a.rs", 0, "chunk a", &embedding_to_bytes(&vec1)).unwrap();
-        store.upsert_chunk_embedding("/project", "b.rs", 0, "chunk b", &embedding_to_bytes(&vec2)).unwrap();
-        store.upsert_chunk_embedding("/project", "c.rs", 0, "chunk c", &embedding_to_bytes(&vec3)).unwrap();
+        store
+            .upsert_chunk_embedding("/project", "a.rs", 0, "chunk a", &embedding_to_bytes(&vec1))
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "b.rs", 0, "chunk b", &embedding_to_bytes(&vec2))
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "c.rs", 0, "chunk c", &embedding_to_bytes(&vec3))
+            .unwrap();
 
         let results = store.semantic_search(&query, "/project", 10).unwrap();
         assert_eq!(results.len(), 3);
@@ -1236,7 +1385,15 @@ mod tests {
         let emb = embedding_to_bytes(&vec![1.0f32, 0.0]);
 
         for i in 0..10 {
-            store.upsert_chunk_embedding("/project", &format!("file_{}.rs", i), 0, &format!("chunk {}", i), &emb).unwrap();
+            store
+                .upsert_chunk_embedding(
+                    "/project",
+                    &format!("file_{}.rs", i),
+                    0,
+                    &format!("chunk {}", i),
+                    &emb,
+                )
+                .unwrap();
         }
 
         let query = vec![1.0f32, 0.0];
@@ -1259,7 +1416,9 @@ mod tests {
 
         let store = create_test_store();
         let emb = embedding_to_bytes(&vec![1.0f32, 0.0]);
-        store.upsert_chunk_embedding("/project", "a.rs", 0, "chunk", &emb).unwrap();
+        store
+            .upsert_chunk_embedding("/project", "a.rs", 0, "chunk", &emb)
+            .unwrap();
 
         let empty_query: Vec<f32> = vec![];
         let results = store.semantic_search(&empty_query, "/project", 10).unwrap();
@@ -1354,17 +1513,15 @@ mod tests {
     fn query_symbols_returns_extended_fields() {
         let store = create_test_store();
 
-        let symbols = vec![
-            SymbolInfo {
-                name: "process".to_string(),
-                kind: SymbolKind::Function,
-                line: 10,
-                parent: Some("Handler".to_string()),
-                signature: Some("fn process(&self, data: &[u8]) -> Result<()>".to_string()),
-                doc_comment: Some("Process incoming data".to_string()),
-                end_line: 30,
-            },
-        ];
+        let symbols = vec![SymbolInfo {
+            name: "process".to_string(),
+            kind: SymbolKind::Function,
+            line: 10,
+            parent: Some("Handler".to_string()),
+            signature: Some("fn process(&self, data: &[u8]) -> Result<()>".to_string()),
+            doc_comment: Some("Process incoming data".to_string()),
+            end_line: 30,
+        }];
 
         let item = make_item("src/handler.rs", "desktop-rust", "rust", symbols);
         store.upsert_file_index("/project", &item, "h1").unwrap();
@@ -1372,8 +1529,14 @@ mod tests {
         let results = store.query_symbols("%process%").unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].parent_symbol.as_deref(), Some("Handler"));
-        assert_eq!(results[0].signature.as_deref(), Some("fn process(&self, data: &[u8]) -> Result<()>"));
-        assert_eq!(results[0].doc_comment.as_deref(), Some("Process incoming data"));
+        assert_eq!(
+            results[0].signature.as_deref(),
+            Some("fn process(&self, data: &[u8]) -> Result<()>")
+        );
+        assert_eq!(
+            results[0].doc_comment.as_deref(),
+            Some("Process incoming data")
+        );
         assert_eq!(results[0].end_line, 30);
     }
 }

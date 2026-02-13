@@ -106,7 +106,15 @@ fn extract_from_node(
             return;
         }
         if let Some(child) = node.child(i) {
-            extract_from_node(child, source, lines, language, parent_name, symbols, max_symbols);
+            extract_from_node(
+                child,
+                source,
+                lines,
+                language,
+                parent_name,
+                symbols,
+                max_symbols,
+            );
         }
     }
 }
@@ -116,8 +124,13 @@ fn extract_from_node(
 fn is_container_node(kind: &str, language: &str) -> bool {
     match language {
         "python" => kind == "class_definition",
-        "rust" => matches!(kind, "struct_item" | "enum_item" | "trait_item" | "impl_item"),
-        "typescript" | "javascript" => matches!(kind, "class_declaration" | "interface_declaration"),
+        "rust" => matches!(
+            kind,
+            "struct_item" | "enum_item" | "trait_item" | "impl_item"
+        ),
+        "typescript" | "javascript" => {
+            matches!(kind, "class_declaration" | "interface_declaration")
+        }
         "go" => false, // Go methods are at file scope via receiver syntax
         "java" => matches!(
             kind,
@@ -141,7 +154,9 @@ fn try_extract_symbol(
     let end_line = node.end_position().row + 1;
 
     match language {
-        "python" => extract_python_symbol(node, kind, source, lines, start_line, end_line, parent_name),
+        "python" => {
+            extract_python_symbol(node, kind, source, lines, start_line, end_line, parent_name)
+        }
         "rust" => extract_rust_symbol(node, kind, source, lines, start_line, end_line, parent_name),
         "typescript" | "javascript" => {
             extract_ts_symbol(node, kind, source, lines, start_line, end_line, parent_name)
@@ -646,9 +661,7 @@ fn find_go_receiver(node: tree_sitter::Node, source: &str) -> Option<String> {
                 // The receiver is the first parameter_list before the method name
                 let text = node_text(child, source);
                 // Extract type name: (s *Server) -> Server, (s Server) -> Server
-                let cleaned = text
-                    .trim_start_matches('(')
-                    .trim_end_matches(')');
+                let cleaned = text.trim_start_matches('(').trim_end_matches(')');
                 // Split by whitespace, take the last part, remove * prefix
                 if let Some(type_part) = cleaned.split_whitespace().last() {
                     return Some(type_part.trim_start_matches('*').to_string());
@@ -856,18 +869,28 @@ def helper():
     pass
 "#;
         let symbols = parse_symbols(src, "python", 30);
-        assert!(symbols.len() >= 4, "Expected at least 4 symbols, got {}", symbols.len());
+        assert!(
+            symbols.len() >= 4,
+            "Expected at least 4 symbols, got {}",
+            symbols.len()
+        );
 
         let greet = symbols.iter().find(|s| s.name == "greet").expect("greet");
         assert_eq!(greet.kind, SymbolKind::Function);
         assert!(greet.parent.is_none());
         assert!(greet.doc_comment.is_some(), "greet should have docstring");
 
-        let svc = symbols.iter().find(|s| s.name == "MyService").expect("MyService");
+        let svc = symbols
+            .iter()
+            .find(|s| s.name == "MyService")
+            .expect("MyService");
         assert_eq!(svc.kind, SymbolKind::Class);
         assert!(svc.doc_comment.is_some(), "MyService should have docstring");
 
-        let init = symbols.iter().find(|s| s.name == "__init__").expect("__init__");
+        let init = symbols
+            .iter()
+            .find(|s| s.name == "__init__")
+            .expect("__init__");
         assert_eq!(init.kind, SymbolKind::Function);
         assert_eq!(init.parent.as_deref(), Some("MyService"));
 
@@ -910,7 +933,11 @@ pub mod utils;
         let symbols = parse_symbols(src, "rust", 30);
 
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"main"), "should find main. Got: {:?}", names);
+        assert!(
+            names.contains(&"main"),
+            "should find main. Got: {:?}",
+            names
+        );
         assert!(names.contains(&"helper_fn"), "should find helper_fn");
         assert!(names.contains(&"Config"), "should find Config");
         assert!(names.contains(&"Status"), "should find Status");
@@ -920,11 +947,17 @@ pub mod utils;
 
         let main_sym = symbols.iter().find(|s| s.name == "main").unwrap();
         assert_eq!(main_sym.kind, SymbolKind::Function);
-        assert!(main_sym.doc_comment.is_some(), "main should have doc comment");
+        assert!(
+            main_sym.doc_comment.is_some(),
+            "main should have doc comment"
+        );
 
         let config_sym = symbols.iter().find(|s| s.name == "Config").unwrap();
         assert_eq!(config_sym.kind, SymbolKind::Struct);
-        assert!(config_sym.doc_comment.is_some(), "Config should have doc comment");
+        assert!(
+            config_sym.doc_comment.is_some(),
+            "Config should have doc comment"
+        );
 
         let status_sym = symbols.iter().find(|s| s.name == "Status").unwrap();
         assert_eq!(status_sym.kind, SymbolKind::Enum);
@@ -965,7 +998,11 @@ export const MAX_RETRIES = 5;
         let symbols = parse_symbols(src, "typescript", 30);
 
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"createApp"), "should find createApp. Got: {:?}", names);
+        assert!(
+            names.contains(&"createApp"),
+            "should find createApp. Got: {:?}",
+            names
+        );
         assert!(names.contains(&"AppService"), "should find AppService");
         assert!(names.contains(&"Config"), "should find Config");
         assert!(names.contains(&"Status"), "should find Status");
@@ -1013,7 +1050,11 @@ type StringSlice []string
         let symbols = parse_symbols(src, "go", 30);
 
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"main"), "should find main. Got: {:?}", names);
+        assert!(
+            names.contains(&"main"),
+            "should find main. Got: {:?}",
+            names
+        );
         assert!(names.contains(&"Start"), "should find Start");
         assert!(names.contains(&"Config"), "should find Config");
         assert!(names.contains(&"Handler"), "should find Handler");
@@ -1062,8 +1103,15 @@ public enum Status {
         let symbols = parse_symbols(src, "java", 30);
 
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"UserService"), "should find UserService. Got: {:?}", names);
-        assert!(names.contains(&"UserRepository"), "should find UserRepository");
+        assert!(
+            names.contains(&"UserService"),
+            "should find UserService. Got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"UserRepository"),
+            "should find UserRepository"
+        );
         assert!(names.contains(&"Status"), "should find Status");
 
         let svc = symbols.iter().find(|s| s.name == "UserService").unwrap();
@@ -1123,7 +1171,11 @@ def farewell(name):
         let symbols = parse_symbols(src, "python", 30);
         assert_eq!(symbols.len(), 2);
         for sym in &symbols {
-            assert!(sym.end_line > sym.line, "end_line should be > start line for {}", sym.name);
+            assert!(
+                sym.end_line > sym.line,
+                "end_line should be > start line for {}",
+                sym.name
+            );
         }
     }
 
@@ -1146,9 +1198,21 @@ impl MyStruct {
 "#;
         let symbols = parse_symbols(src, "rust", 30);
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"MyStruct"), "should find MyStruct. Got: {:?}", names);
-        assert!(names.contains(&"new"), "should find new method. Got: {:?}", names);
-        assert!(names.contains(&"get_value"), "should find get_value method. Got: {:?}", names);
+        assert!(
+            names.contains(&"MyStruct"),
+            "should find MyStruct. Got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"new"),
+            "should find new method. Got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"get_value"),
+            "should find get_value method. Got: {:?}",
+            names
+        );
 
         let new_fn = symbols.iter().find(|s| s.name == "new").unwrap();
         assert_eq!(new_fn.kind, SymbolKind::Function);
@@ -1170,6 +1234,9 @@ pub fn process_data(items: &[Item], config: &Config) -> Result<Vec<Output>> {
             "signature should be populated"
         );
         let sig = symbols[0].signature.as_ref().unwrap();
-        assert!(sig.contains("process_data"), "signature should contain function name");
+        assert!(
+            sig.contains("process_data"),
+            "signature should contain function name"
+        );
     }
 }

@@ -202,7 +202,7 @@ fn test_extract_primary_path_from_arguments_prefers_file_path() {
 
 #[test]
 fn test_truncate_for_log_handles_unicode_boundary() {
-    let text = "浣犲ソ涓栫晫浣犲ソ涓栫晫";
+    let text = "\u{4f60}\u{597d}\u{4e16}\u{754c}\u{4f60}\u{597d}\u{4e16}\u{754c}";
     let truncated = truncate_for_log(text, 5);
     assert!(truncated.ends_with("..."));
     assert_ne!(truncated, text.to_string());
@@ -715,11 +715,15 @@ fn test_text_describes_tool_intent_english_future() {
 #[test]
 fn test_text_describes_tool_intent_chinese_intent() {
     // Chinese intent with tool mention should trigger
-    assert!(text_describes_tool_intent("让我使用 Read 工具来读取文件。"));
     assert!(text_describes_tool_intent(
-        "我将调用 Bash 来执行测试命令。"
+        "\u{8ba9}\u{6211}\u{4f7f}\u{7528} Read \u{5de5}\u{5177}\u{6765}\u{8bfb}\u{53d6}\u{6587}\u{4ef6}\u{3002}"
     ));
-    assert!(text_describes_tool_intent("接下来使用 Grep 搜索代码。"));
+    assert!(text_describes_tool_intent(
+        "\u{6211}\u{5c06}\u{8c03}\u{7528} Bash \u{6765}\u{6267}\u{884c}\u{6d4b}\u{8bd5}\u{547d}\u{4ee4}\u{3002}"
+    ));
+    assert!(text_describes_tool_intent(
+        "\u{63a5}\u{4e0b}\u{6765}\u{4f7f}\u{7528} Grep \u{641c}\u{7d22}\u{4ee3}\u{7801}\u{3002}"
+    ));
 }
 
 #[test]
@@ -728,7 +732,9 @@ fn test_text_describes_tool_intent_no_tool_name() {
     assert!(!text_describes_tool_intent(
         "Let me use the function to check."
     ));
-    assert!(!text_describes_tool_intent("我将调用函数来处理数据。"));
+    assert!(!text_describes_tool_intent(
+        "\u{6211}\u{5c06}\u{8c03}\u{7528}\u{51fd}\u{6570}\u{6765}\u{5904}\u{7406}\u{6570}\u{636e}\u{3002}"
+    ));
 }
 
 #[test]
@@ -760,6 +766,26 @@ fn test_text_describes_tool_intent_past_tense_summary() {
 #[test]
 fn test_text_describes_tool_intent_empty() {
     assert!(!text_describes_tool_intent(""));
+}
+
+#[test]
+fn test_text_describes_pending_action_english_and_chinese() {
+    assert!(text_describes_pending_action(
+        "I see a few directories. Let me read README.md next."
+    ));
+    assert!(text_describes_pending_action(
+        "\u{6211}\u{5148}\u{67e5}\u{770b} README \u{6587}\u{4ef6}\u{3002}"
+    ));
+}
+
+#[test]
+fn test_text_describes_pending_action_rejects_completed_summary() {
+    assert!(!text_describes_pending_action(
+        "I already read README.md and summarized the architecture above."
+    ));
+    assert!(!text_describes_pending_action(
+        "\u{6211}\u{5df2}\u{7ecf}\u{8bfb}\u{53d6}\u{4e86} README \u{5e76}\u{7ed9}\u{51fa}\u{4e86}\u{7ed3}\u{8bba}\u{3002}"
+    ));
 }
 
 // --- Story-001: tool_call_reliability tests ---
@@ -944,7 +970,7 @@ fn test_unreliable_provider_gets_fallback_instructions() {
         "Unreliable provider should get fallback tool_call format instructions"
     );
     assert!(
-        prompt.contains("请使用以下格式调用工具"),
+        prompt.contains("\u{8bf7}\u{4f7f}\u{7528}\u{4ee5}\u{4e0b}\u{683c}\u{5f0f}\u{8c03}\u{7528}\u{5de5}\u{5177}"),
         "Unreliable provider should get Chinese tool call instructions"
     );
 }
@@ -974,7 +1000,7 @@ fn test_user_override_disables_fallback_for_unreliable() {
     let tools = crate::services::tools::get_tool_definitions();
     let opts = LlmRequestOptions::default();
     let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
-    // User explicitly set Off → no fallback instructions even for unreliable provider
+    // User explicitly set Off 鈫?no fallback instructions even for unreliable provider
     assert!(
         !prompt.contains("```tool_call"),
         "User override Off should suppress fallback instructions"
@@ -2255,18 +2281,18 @@ fn test_compact_messages_prefix_stable_clears_read_cache_flag() {
 fn test_tool_call_loop_detector_no_loop_on_different_calls() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // Different tool calls should not trigger loop
-    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
-    assert!(detector.record_call("Grep", r#"{"pattern":"foo"}"#).is_none());
-    assert!(detector.record_call("Read", r#"{"file_path":"b.rs"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
+    assert!(detector.record_call("Grep", r#"{"pattern":"foo"}"#, false).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"b.rs"}"#, false).is_none());
 }
 
 #[test]
 fn test_tool_call_loop_detector_detects_consecutive_identical() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // 3 consecutive identical calls should trigger
-    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
-    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
-    let detection = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
+    let detection = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(detection.is_some(), "Should detect loop after 3 identical calls");
     match detection.unwrap() {
         LoopDetection::Warning(msg) => {
@@ -2280,15 +2306,15 @@ fn test_tool_call_loop_detector_detects_consecutive_identical() {
 fn test_tool_call_loop_detector_resets_on_different_call() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // Two identical, then a different one, then the same two again
-    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
-    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
     // Different call resets the counter
-    assert!(detector.record_call("Grep", r#"{"pattern":"foo"}"#).is_none());
+    assert!(detector.record_call("Grep", r#"{"pattern":"foo"}"#, false).is_none());
     // Start the same call again - counter should be 1 now
-    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
-    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
     // This is the 3rd consecutive identical call
-    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(msg.is_some(), "Should detect loop after 3 consecutive identical calls");
 }
 
@@ -2296,17 +2322,17 @@ fn test_tool_call_loop_detector_resets_on_different_call() {
 fn test_tool_call_loop_detector_same_tool_different_args_no_loop() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // Same tool but different arguments should not trigger
-    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
-    assert!(detector.record_call("Read", r#"{"file_path":"b.rs"}"#).is_none());
-    assert!(detector.record_call("Read", r#"{"file_path":"c.rs"}"#).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"b.rs"}"#, false).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"c.rs"}"#, false).is_none());
 }
 
 #[test]
 fn test_tool_call_loop_detector_threshold_customizable() {
     let mut detector = ToolCallLoopDetector::new(2, 20);
     // With threshold 2, should trigger after 2 identical calls
-    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#).is_none());
-    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
+    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(msg.is_some(), "Should detect loop after 2 identical calls with threshold=2");
 }
 
@@ -2314,13 +2340,33 @@ fn test_tool_call_loop_detector_threshold_customizable() {
 fn test_tool_call_loop_detector_continues_after_detection() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // Trigger loop detection
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let msg = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(msg.is_some());
 
     // After detection, a different call should reset
-    assert!(detector.record_call("Grep", r#"{"pattern":"bar"}"#).is_none());
+    assert!(detector.record_call("Grep", r#"{"pattern":"bar"}"#, false).is_none());
+}
+
+#[test]
+fn test_tool_call_loop_detector_dedup_threshold() {
+    let mut detector = ToolCallLoopDetector::new(3, 20);
+    // With is_dedup=true, threshold should be lowered to 2 (min of threshold and 2)
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, true).is_none());
+    let detection = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, true);
+    assert!(detection.is_some(), "Should detect dedup loop after only 2 identical calls");
+}
+
+#[test]
+fn test_tool_call_loop_detector_dedup_false_uses_normal_threshold() {
+    let mut detector = ToolCallLoopDetector::new(3, 20);
+    // With is_dedup=false, threshold remains at 3
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none());
+    assert!(detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false).is_none(),
+        "Should NOT detect loop after 2 calls with is_dedup=false and threshold=3");
+    let detection = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    assert!(detection.is_some(), "Should detect loop after 3 calls with is_dedup=false");
 }
 
 #[test]
@@ -2433,6 +2479,15 @@ fn test_is_complete_answer_ends_with_i_will_returns_false() {
 #[test]
 fn test_is_complete_answer_ends_with_let_me_returns_false() {
     let text = format!("{} Let me", "a".repeat(200));
+    assert!(!is_complete_answer(&text));
+}
+
+#[test]
+fn test_is_complete_answer_pending_step_sentence_returns_false() {
+    let text = format!(
+        "{} I checked the root folders. Let me read README.md next.",
+        "a".repeat(200)
+    );
     assert!(!is_complete_answer(&text));
 }
 
@@ -2636,7 +2691,7 @@ fn test_complete_answer_exits_loop_when_fallback_tools_present() {
 #[test]
 fn test_incomplete_text_proceeds_with_tool_calls() {
     // Simulate: response has short/incomplete text + tool calls.
-    // The loop should NOT exit early — it should execute the tool calls.
+    // The loop should NOT exit early 鈥?it should execute the tool calls.
     let short_text = "Let me check the file.";
     assert!(!is_complete_answer(short_text));
 
@@ -2657,7 +2712,7 @@ fn test_complete_answer_native_tool_calls_not_affected() {
         tool context. The design ensures that sub-agents cannot spawn further sub-agents.";
 
     // Even though text is complete, native providers handle this correctly
-    // on their own — we only intervene in the fallback path.
+    // on their own 鈥?we only intervene in the fallback path.
     assert!(is_complete_answer(response_text));
     // (The actual native path logic is tested via integration tests)
 }
@@ -2699,23 +2754,23 @@ fn test_extract_text_without_tool_calls_then_complete_check() {
 fn test_total_detections_increments_and_never_resets() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // Trigger first detection (3 consecutive identical calls)
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(result.is_some(), "Should detect on 3rd consecutive call");
     assert_eq!(detector.total_detections(), 1);
 
     // Break the streak and start a new one
-    detector.record_call("Grep", r#"{"pattern":"foo"}"#);
-    detector.record_call("Grep", r#"{"pattern":"foo"}"#);
-    let result2 = detector.record_call("Grep", r#"{"pattern":"foo"}"#);
+    detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
+    detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
+    let result2 = detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
     assert!(result2.is_some(), "Should detect second loop");
     assert_eq!(detector.total_detections(), 2, "total_detections should accumulate and never reset");
 
     // Third detection
-    detector.record_call("Ls", r#"{"path":"/"}"#);
-    detector.record_call("Ls", r#"{"path":"/"}"#);
-    let result3 = detector.record_call("Ls", r#"{"path":"/"}"#);
+    detector.record_call("Ls", r#"{"path":"/"}"#, false);
+    detector.record_call("Ls", r#"{"path":"/"}"#, false);
+    let result3 = detector.record_call("Ls", r#"{"path":"/"}"#, false);
     assert!(result3.is_some());
     assert_eq!(detector.total_detections(), 3, "total_detections should keep accumulating");
 }
@@ -2726,7 +2781,7 @@ fn test_recent_calls_sliding_window_respects_window_size() {
     let mut detector = ToolCallLoopDetector::new(10, window_size); // high threshold to avoid detection
     // Push more calls than window_size
     for i in 0..8 {
-        detector.record_call(&format!("Tool{}", i), r#"{"arg":"val"}"#);
+        detector.record_call(&format!("Tool{}", i), r#"{"arg":"val"}"#, false);
     }
     // The recent_calls VecDeque should never exceed window_size
     assert!(
@@ -2742,23 +2797,23 @@ fn test_recent_calls_sliding_window_respects_window_size() {
 fn test_consecutive_count_not_reset_after_detection() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // Trigger detection at count=3
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(result.is_some());
 
     // After detection, consecutive_count should still be 3, NOT reset to 0.
     // A 4th identical call should increment to 4.
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert_eq!(detector.consecutive_count, 4, "consecutive_count should continue counting, not reset after detection");
 
     // 5th call: no detection (5 % 3 != 0)
-    let result2 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    let result2 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(result2.is_none(), "Should not detect at count=5 (not a multiple of threshold)");
     assert_eq!(detector.consecutive_count, 5);
 
     // 6th call: fires again (6 % 3 == 0) - this is the second detection
-    let result3 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    let result3 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(result3.is_some(), "Should detect again at count=6 (2*threshold)");
     assert_eq!(detector.consecutive_count, 6);
     assert_eq!(detector.total_detections(), 2, "total_detections should be 2 after two firings");
@@ -2780,10 +2835,10 @@ fn test_constructor_accepts_threshold_and_window_size() {
 fn test_macro_loop_detects_ab_ab_pattern() {
     let mut detector = ToolCallLoopDetector::new(10, 20); // high threshold to avoid consecutive detection
     // Create ABAB pattern
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Grep", r#"{"pattern":"foo"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let result = detector.record_call("Grep", r#"{"pattern":"foo"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let result = detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
     assert!(result.is_some(), "Should detect AB-AB macro loop");
     match result.unwrap() {
         LoopDetection::Warning(msg) => {
@@ -2799,12 +2854,12 @@ fn test_macro_loop_detects_ab_ab_pattern() {
 fn test_macro_loop_detects_abc_abc_pattern() {
     let mut detector = ToolCallLoopDetector::new(10, 20);
     // Create ABCABC pattern
-    detector.record_call("Cwd", r#"{}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Task", r#"{"prompt":"do something"}"#);
-    detector.record_call("Cwd", r#"{}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let result = detector.record_call("Task", r#"{"prompt":"do something"}"#);
+    detector.record_call("Cwd", r#"{}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Task", r#"{"prompt":"do something"}"#, false);
+    detector.record_call("Cwd", r#"{}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let result = detector.record_call("Task", r#"{"prompt":"do something"}"#, false);
     assert!(result.is_some(), "Should detect ABC-ABC macro loop");
     match result.unwrap() {
         LoopDetection::Warning(msg) => {
@@ -2818,12 +2873,12 @@ fn test_macro_loop_detects_abc_abc_pattern() {
 fn test_macro_loop_no_false_positive_on_varied_calls() {
     let mut detector = ToolCallLoopDetector::new(10, 20);
     // Non-repeating sequence should NOT trigger macro detection
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Grep", r#"{"pattern":"foo"}"#);
-    detector.record_call("Ls", r#"{"path":"/"}"#);
-    detector.record_call("Cwd", r#"{}"#);
-    detector.record_call("Read", r#"{"file_path":"b.rs"}"#);
-    let result = detector.record_call("Grep", r#"{"pattern":"bar"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
+    detector.record_call("Ls", r#"{"path":"/"}"#, false);
+    detector.record_call("Cwd", r#"{}"#, false);
+    detector.record_call("Read", r#"{"file_path":"b.rs"}"#, false);
+    let result = detector.record_call("Grep", r#"{"pattern":"bar"}"#, false);
     assert!(result.is_none(), "Should NOT detect macro loop on varied non-repeating calls");
 }
 
@@ -2831,8 +2886,8 @@ fn test_macro_loop_no_false_positive_on_varied_calls() {
 fn test_macro_loop_requires_minimum_window_entries() {
     let mut detector = ToolCallLoopDetector::new(10, 20);
     // Only 2 calls - not enough for even the shortest (length-2) macro pattern
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let result = detector.record_call("Grep", r#"{"pattern":"foo"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let result = detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
     assert!(result.is_none(), "Should NOT detect with insufficient window entries");
 }
 
@@ -2840,12 +2895,12 @@ fn test_macro_loop_requires_minimum_window_entries() {
 fn test_macro_loop_real_world_cwd_read_task_cycle() {
     let mut detector = ToolCallLoopDetector::new(10, 20);
     // Simulate the actual Cwd->Read->Task pattern from bug reports (repeated 2x)
-    detector.record_call("Cwd", r#"{}"#);
-    detector.record_call("Read", r#"{"file_path":"src/main.rs"}"#);
-    detector.record_call("Task", r#"{"prompt":"analyze the codebase"}"#);
-    detector.record_call("Cwd", r#"{}"#);
-    detector.record_call("Read", r#"{"file_path":"src/main.rs"}"#);
-    let result = detector.record_call("Task", r#"{"prompt":"analyze the codebase"}"#);
+    detector.record_call("Cwd", r#"{}"#, false);
+    detector.record_call("Read", r#"{"file_path":"src/main.rs"}"#, false);
+    detector.record_call("Task", r#"{"prompt":"analyze the codebase"}"#, false);
+    detector.record_call("Cwd", r#"{}"#, false);
+    detector.record_call("Read", r#"{"file_path":"src/main.rs"}"#, false);
+    let result = detector.record_call("Task", r#"{"prompt":"analyze the codebase"}"#, false);
     assert!(result.is_some(), "Should detect the Cwd->Read->Task->Cwd->Read->Task macro loop");
     assert_eq!(detector.total_detections(), 1);
 }
@@ -2854,12 +2909,12 @@ fn test_macro_loop_real_world_cwd_read_task_cycle() {
 fn test_macro_loop_partial_match_no_detection() {
     let mut detector = ToolCallLoopDetector::new(10, 20);
     // ABCABD - almost a cycle but last element differs
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Grep", r#"{"pattern":"foo"}"#);
-    detector.record_call("Ls", r#"{"path":"/"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Grep", r#"{"pattern":"foo"}"#);
-    let result = detector.record_call("Cwd", r#"{}"#); // Different from Ls
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
+    detector.record_call("Ls", r#"{"path":"/"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
+    let result = detector.record_call("Cwd", r#"{}"#, false); // Different from Ls
     assert!(result.is_none(), "Should NOT detect macro loop when pattern partially matches (ABCABD)");
 }
 
@@ -2868,9 +2923,9 @@ fn test_macro_loop_partial_match_no_detection() {
 #[test]
 fn test_escalation_level1_warning_on_first_detection() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     match result {
         Some(LoopDetection::Warning(msg)) => {
             assert!(msg.contains("LOOP DETECTED"), "Warning should contain LOOP DETECTED: {}", msg);
@@ -2884,15 +2939,15 @@ fn test_escalation_level1_warning_on_first_detection() {
 fn test_escalation_level2_strip_tools_on_second_detection() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // First detection (Level 1): consecutive identical calls
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let r1 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let r1 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(matches!(r1, Some(LoopDetection::Warning(_))));
 
     // Second detection (Level 2): keep going with the same call
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let r2 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let r2 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     match r2 {
         Some(LoopDetection::StripTools(msg, tools)) => {
             assert!(msg.contains("LOOP DETECTED"), "StripTools should contain warning: {}", msg);
@@ -2908,19 +2963,19 @@ fn test_escalation_level2_strip_tools_on_second_detection() {
 fn test_escalation_level3_force_terminate_on_third_detection() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // First detection
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
 
     // Second detection
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
 
     // Third detection (Level 3): force terminate
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let r3 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let r3 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     match r3 {
         Some(LoopDetection::ForceTerminate(msg)) => {
             assert!(msg.contains("LOOP DETECTED") || msg.contains("FORCE TERMINATE"),
@@ -2935,18 +2990,18 @@ fn test_escalation_level3_force_terminate_on_third_detection() {
 fn test_escalation_accumulates_across_mixed_detection_types() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // First detection via consecutive identical (Level 1)
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let r1 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let r1 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(matches!(r1, Some(LoopDetection::Warning(_))), "First detection should be Warning");
 
     // Second detection via macro-loop (Level 2) - break the consecutive streak first
-    detector.record_call("Cwd", r#"{}"#);
-    detector.record_call("Read", r#"{"file_path":"b.rs"}"#);
-    detector.record_call("Task", r#"{"prompt":"analyze"}"#);
-    detector.record_call("Cwd", r#"{}"#);
-    detector.record_call("Read", r#"{"file_path":"b.rs"}"#);
-    let r2 = detector.record_call("Task", r#"{"prompt":"analyze"}"#);
+    detector.record_call("Cwd", r#"{}"#, false);
+    detector.record_call("Read", r#"{"file_path":"b.rs"}"#, false);
+    detector.record_call("Task", r#"{"prompt":"analyze"}"#, false);
+    detector.record_call("Cwd", r#"{}"#, false);
+    detector.record_call("Read", r#"{"file_path":"b.rs"}"#, false);
+    let r2 = detector.record_call("Task", r#"{"prompt":"analyze"}"#, false);
     match r2 {
         Some(LoopDetection::StripTools(_, tools)) => {
             assert!(!tools.is_empty(), "StripTools should list tool names");
@@ -2960,21 +3015,21 @@ fn test_escalation_accumulates_across_mixed_detection_types() {
 fn test_stripped_tools_persist_across_detections() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // First detection: Warning only, no stripped tools
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(detector.stripped_tools().is_empty(), "No tools stripped at Level 1");
 
     // Second detection: StripTools - "Read" gets stripped
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(detector.stripped_tools().contains("Read"), "Read should be stripped after Level 2");
 
     // Break the streak, trigger another loop with a different tool
-    detector.record_call("Grep", r#"{"pattern":"foo"}"#);
-    detector.record_call("Grep", r#"{"pattern":"foo"}"#);
-    let r3 = detector.record_call("Grep", r#"{"pattern":"foo"}"#);
+    detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
+    detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
+    let r3 = detector.record_call("Grep", r#"{"pattern":"foo"}"#, false);
     assert!(matches!(r3, Some(LoopDetection::ForceTerminate(_))), "Third detection should be ForceTerminate");
 
     // Both Read and Grep should be in stripped_tools
@@ -2988,16 +3043,16 @@ fn test_stripped_tools_persist_across_detections() {
 fn test_macro_and_consecutive_interleaved() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // First detection: consecutive identical (Level 1 = Warning)
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let r1 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let r1 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(matches!(r1, Some(LoopDetection::Warning(_))), "First: consecutive -> Warning");
 
     // Break streak, then trigger macro-loop (Level 2 = StripTools)
-    detector.record_call("Cwd", r#"{}"#);
-    detector.record_call("Read", r#"{"file_path":"b.rs"}"#);
-    detector.record_call("Cwd", r#"{}"#);
-    let r2 = detector.record_call("Read", r#"{"file_path":"b.rs"}"#);
+    detector.record_call("Cwd", r#"{}"#, false);
+    detector.record_call("Read", r#"{"file_path":"b.rs"}"#, false);
+    detector.record_call("Cwd", r#"{}"#, false);
+    let r2 = detector.record_call("Read", r#"{"file_path":"b.rs"}"#, false);
     assert!(matches!(r2, Some(LoopDetection::StripTools(_, _))), "Second: macro-loop -> StripTools");
     assert_eq!(detector.total_detections(), 2);
 }
@@ -3007,14 +3062,14 @@ fn test_window_boundary_exact() {
     let window_size = 4;
     let mut detector = ToolCallLoopDetector::new(100, window_size); // very high threshold
     // Fill window to exactly window_size
-    detector.record_call("A", "1");
-    detector.record_call("B", "2");
-    detector.record_call("C", "3");
-    detector.record_call("D", "4");
+    detector.record_call("A", "1", false);
+    detector.record_call("B", "2", false);
+    detector.record_call("C", "3", false);
+    detector.record_call("D", "4", false);
     assert_eq!(detector.recent_calls.len(), window_size);
 
     // Push one more - oldest should be evicted
-    detector.record_call("E", "5");
+    detector.record_call("E", "5", false);
     assert_eq!(detector.recent_calls.len(), window_size, "Should stay at window_size after eviction");
     // First entry should now be B (A was evicted)
     assert_eq!(detector.recent_calls[0].0, "B", "Oldest entry (A) should have been evicted");
@@ -3025,16 +3080,16 @@ fn test_window_boundary_exact() {
 fn test_hash_collision_safety() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // Two different args that are clearly different should not cause false positives
-    detector.record_call("Read", r#"{"file_path":"src/main.rs","offset":0}"#);
-    detector.record_call("Read", r#"{"file_path":"src/lib.rs","offset":100}"#);
-    let result = detector.record_call("Read", r#"{"file_path":"tests/test.rs","offset":200}"#);
+    detector.record_call("Read", r#"{"file_path":"src/main.rs","offset":0}"#, false);
+    detector.record_call("Read", r#"{"file_path":"src/lib.rs","offset":100}"#, false);
+    let result = detector.record_call("Read", r#"{"file_path":"tests/test.rs","offset":200}"#, false);
     assert!(result.is_none(), "Different args should not trigger, even for same tool name");
 }
 
 #[test]
 fn test_single_call_no_detection() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
-    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(result.is_none(), "A single call should never trigger any detection");
     assert_eq!(detector.total_detections(), 0);
 }
@@ -3043,12 +3098,12 @@ fn test_single_call_no_detection() {
 fn test_threshold_1_immediate_detection() {
     let mut detector = ToolCallLoopDetector::new(1, 20);
     // With threshold=1, the very first call should trigger detection
-    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(result.is_some(), "threshold=1 should trigger on every call");
     assert_eq!(detector.total_detections(), 1);
 
     // Second call to same tool should also trigger (count=2, 2 % 1 == 0)
-    let result2 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    let result2 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     assert!(result2.is_some(), "threshold=1 should trigger on second call too");
     assert_eq!(detector.total_detections(), 2);
 }
@@ -3057,18 +3112,18 @@ fn test_threshold_1_immediate_detection() {
 fn test_macro_loop_length_6_max() {
     let mut detector = ToolCallLoopDetector::new(100, 20); // high threshold
     // Create a length-6 cycle: ABCDEF ABCDEF
-    detector.record_call("A", "1");
-    detector.record_call("B", "2");
-    detector.record_call("C", "3");
-    detector.record_call("D", "4");
-    detector.record_call("E", "5");
-    detector.record_call("F", "6");
-    detector.record_call("A", "1");
-    detector.record_call("B", "2");
-    detector.record_call("C", "3");
-    detector.record_call("D", "4");
-    detector.record_call("E", "5");
-    let result = detector.record_call("F", "6");
+    detector.record_call("A", "1", false);
+    detector.record_call("B", "2", false);
+    detector.record_call("C", "3", false);
+    detector.record_call("D", "4", false);
+    detector.record_call("E", "5", false);
+    detector.record_call("F", "6", false);
+    detector.record_call("A", "1", false);
+    detector.record_call("B", "2", false);
+    detector.record_call("C", "3", false);
+    detector.record_call("D", "4", false);
+    detector.record_call("E", "5", false);
+    let result = detector.record_call("F", "6", false);
     assert!(result.is_some(), "Should detect length-6 macro loop");
     match result.unwrap() {
         LoopDetection::Warning(msg) => {
@@ -3083,20 +3138,20 @@ fn test_macro_loop_length_7_not_detected() {
     let mut detector = ToolCallLoopDetector::new(100, 20); // high threshold
     // Create a length-7 cycle: ABCDEFG ABCDEFG
     // Only cycles up to length 6 are detected by design
-    detector.record_call("A", "1");
-    detector.record_call("B", "2");
-    detector.record_call("C", "3");
-    detector.record_call("D", "4");
-    detector.record_call("E", "5");
-    detector.record_call("F", "6");
-    detector.record_call("G", "7");
-    detector.record_call("A", "1");
-    detector.record_call("B", "2");
-    detector.record_call("C", "3");
-    detector.record_call("D", "4");
-    detector.record_call("E", "5");
-    detector.record_call("F", "6");
-    let result = detector.record_call("G", "7");
+    detector.record_call("A", "1", false);
+    detector.record_call("B", "2", false);
+    detector.record_call("C", "3", false);
+    detector.record_call("D", "4", false);
+    detector.record_call("E", "5", false);
+    detector.record_call("F", "6", false);
+    detector.record_call("G", "7", false);
+    detector.record_call("A", "1", false);
+    detector.record_call("B", "2", false);
+    detector.record_call("C", "3", false);
+    detector.record_call("D", "4", false);
+    detector.record_call("E", "5", false);
+    detector.record_call("F", "6", false);
+    let result = detector.record_call("G", "7", false);
     assert!(result.is_none(), "Length-7 cycles should NOT be detected (design limit is 6)");
 }
 
@@ -3112,17 +3167,17 @@ fn test_force_terminate_includes_useful_message() {
     let mut detector = ToolCallLoopDetector::new(3, 20);
     // Drive to Level 3
     // Detection 1
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     // Detection 2
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     // Detection 3 - force terminate
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
-    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
+    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
     match result {
         Some(LoopDetection::ForceTerminate(msg)) => {
             assert!(msg.contains("FORCE TERMINATE"), "Should mention force termination: {}", msg);

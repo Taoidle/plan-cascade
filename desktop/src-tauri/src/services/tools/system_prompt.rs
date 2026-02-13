@@ -437,8 +437,7 @@ mod tests {
     fn test_build_system_prompt_with_summary() {
         let tools = get_tool_definitions();
         let summary = make_test_summary();
-        let prompt =
-            build_system_prompt(&PathBuf::from("/test/project"), &tools, Some(&summary));
+        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, Some(&summary));
 
         // Summary should be present
         assert!(prompt.contains("## Project Structure"));
@@ -498,8 +497,11 @@ mod tests {
     fn test_build_system_prompt_with_empty_summary_no_injection() {
         let tools = get_tool_definitions();
         let empty_summary = ProjectIndexSummary::default();
-        let prompt =
-            build_system_prompt(&PathBuf::from("/test/project"), &tools, Some(&empty_summary));
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test/project"),
+            &tools,
+            Some(&empty_summary),
+        );
 
         // Empty summary (0 files) should not inject a section
         assert!(!prompt.contains("## Project Structure"));
