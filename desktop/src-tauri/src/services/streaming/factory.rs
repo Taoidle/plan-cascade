@@ -4,8 +4,8 @@
 
 use super::adapter::StreamAdapter;
 use super::adapters::{
-    ClaudeApiAdapter, ClaudeCodeAdapter, DeepSeekAdapter, GlmAdapter, OllamaAdapter, OpenAIAdapter,
-    QwenAdapter,
+    ClaudeApiAdapter, ClaudeCodeAdapter, DeepSeekAdapter, GlmAdapter, MinimaxAdapter,
+    OllamaAdapter, OpenAIAdapter, QwenAdapter,
 };
 
 /// Factory for creating stream adapters based on provider and model.
@@ -38,6 +38,8 @@ impl AdapterFactory {
                 Box::new(QwenAdapter::new(model))
             }
 
+            "minimax" | "minimax-api" => Box::new(MinimaxAdapter::new(model)),
+
             "ollama" | "ollama-api" => Box::new(OllamaAdapter::new(model)),
 
             // Default to OpenAI adapter as it's the most compatible format
@@ -60,6 +62,7 @@ impl AdapterFactory {
             "deepseek",
             "glm",
             "qwen",
+            "minimax",
             "ollama",
         ]
     }
@@ -89,6 +92,8 @@ impl AdapterFactory {
                 | "dashscope"
                 | "alibaba"
                 | "aliyun"
+                | "minimax"
+                | "minimax-api"
                 | "ollama"
                 | "ollama-api"
         )

@@ -81,6 +81,10 @@
         "name": "Qwen (DashScope)",
         "description": "\u963f\u91cc\u4e91\u901a\u4e49\u5343\u95ee Qwen models."
       },
+      "minimax": {
+        "name": "MiniMax",
+        "description": "MiniMax M2 series models with reasoning support."
+      },
       "ollama": {
         "name": "Ollama (Local)",
         "description": "Run models locally with Ollama."
@@ -135,6 +139,7 @@
         "deepseek": "e.g., deepseek-coder",
         "glm": "e.g., glm-4-flash-250414",
         "qwen": "e.g., qwen-plus",
+        "minimax": "e.g., MiniMax-M2.5",
         "ollama": "e.g., codellama:13b",
         "default": "Model name"
       }

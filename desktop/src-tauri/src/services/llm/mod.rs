@@ -9,6 +9,7 @@
 pub mod anthropic;
 pub mod deepseek;
 pub mod glm;
+pub mod minimax;
 pub mod ollama;
 pub mod openai;
 pub mod provider;
@@ -19,6 +20,7 @@ pub mod types;
 pub use anthropic::AnthropicProvider;
 pub use deepseek::DeepSeekProvider;
 pub use glm::GlmProvider;
+pub use minimax::MinimaxProvider;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
 pub use provider::LlmProvider;

@@ -15,6 +15,7 @@ pub enum ProviderType {
     Glm,
     Qwen,
     Ollama,
+    Minimax,
 }
 
 impl std::fmt::Display for ProviderType {
@@ -26,6 +27,7 @@ impl std::fmt::Display for ProviderType {
             ProviderType::Glm => write!(f, "glm"),
             ProviderType::Qwen => write!(f, "qwen"),
             ProviderType::Ollama => write!(f, "ollama"),
+            ProviderType::Minimax => write!(f, "minimax"),
         }
     }
 }

@@ -56,6 +56,12 @@ const backendOptions: BackendOption[] = [
     provider: 'qwen',
   },
   {
+    id: 'minimax',
+    i18nKey: 'minimax',
+    requiresApiKey: true,
+    provider: 'minimax',
+  },
+  {
     id: 'ollama',
     i18nKey: 'ollama',
     requiresApiKey: false,
@@ -99,6 +105,8 @@ const PROVIDER_ALIASES: Record<string, string> = {
   dashscope: 'qwen',
   alibaba: 'qwen',
   aliyun: 'qwen',
+  minimax: 'minimax',
+  'minimax-api': 'minimax',
   ollama: 'ollama',
 };
 
@@ -135,6 +143,7 @@ const FALLBACK_MODELS_BY_PROVIDER: Record<string, string[]> = {
     'glm-4v-flash',
   ],
   qwen: ['qwen3-plus', 'qwq-plus', 'qwen-plus', 'qwen-turbo'],
+  minimax: ['MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
   ollama: ['llama3.2', 'deepseek-r1:14b', 'qwq:32b'],
 };
 const API_KEY_REQUIRED_PROVIDERS = dedupeModels(

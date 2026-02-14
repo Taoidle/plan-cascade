@@ -125,6 +125,7 @@ fn normalize_provider_name(provider: &str) -> Option<&'static str> {
         "deepseek" => Some("deepseek"),
         "glm" | "glm-api" | "zhipu" | "zhipuai" => Some("glm"),
         "qwen" | "qwen-api" | "dashscope" | "alibaba" | "aliyun" => Some("qwen"),
+        "minimax" | "minimax-api" => Some("minimax"),
         "ollama" => Some("ollama"),
         _ => None,
     }
@@ -137,6 +138,7 @@ fn provider_type_from_name(provider: &str) -> Option<ProviderType> {
         "deepseek" => Some(ProviderType::DeepSeek),
         "glm" => Some(ProviderType::Glm),
         "qwen" => Some(ProviderType::Qwen),
+        "minimax" => Some(ProviderType::Minimax),
         "ollama" => Some(ProviderType::Ollama),
         _ => None,
     }
@@ -149,13 +151,14 @@ fn provider_key_candidates(provider: &str) -> &'static [&'static str] {
         "deepseek" => &["deepseek"],
         "glm" => &["glm", "glm-api", "zhipu", "zhipuai"],
         "qwen" => &["qwen", "qwen-api", "dashscope", "alibaba", "aliyun"],
+        "minimax" => &["minimax", "minimax-api"],
         "ollama" => &["ollama"],
         _ => &[],
     }
 }
 
 fn canonical_providers() -> &'static [&'static str] {
-    &["anthropic", "openai", "deepseek", "glm", "qwen", "ollama"]
+    &["anthropic", "openai", "deepseek", "glm", "qwen", "minimax", "ollama"]
 }
 
 fn get_api_key_with_aliases(
@@ -346,6 +349,56 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
             requires_api_key: true,
             default_base_url: Some(
                 "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions".to_string(),
+            ),
+        },
+        ProviderInfo {
+            provider_type: "minimax".to_string(),
+            name: "MiniMax".to_string(),
+            models: vec![
+                ModelInfo {
+                    id: "MiniMax-M2.5".to_string(),
+                    name: "MiniMax M2.5".to_string(),
+                    supports_thinking: true,
+                    supports_tools: true,
+                    context_window: 245_760,
+                    pricing: None,
+                },
+                ModelInfo {
+                    id: "MiniMax-M2.5-highspeed".to_string(),
+                    name: "MiniMax M2.5 Highspeed".to_string(),
+                    supports_thinking: true,
+                    supports_tools: true,
+                    context_window: 245_760,
+                    pricing: None,
+                },
+                ModelInfo {
+                    id: "MiniMax-M2.1".to_string(),
+                    name: "MiniMax M2.1".to_string(),
+                    supports_thinking: true,
+                    supports_tools: true,
+                    context_window: 245_760,
+                    pricing: None,
+                },
+                ModelInfo {
+                    id: "MiniMax-M2.1-highspeed".to_string(),
+                    name: "MiniMax M2.1 Highspeed".to_string(),
+                    supports_thinking: true,
+                    supports_tools: true,
+                    context_window: 245_760,
+                    pricing: None,
+                },
+                ModelInfo {
+                    id: "MiniMax-M2".to_string(),
+                    name: "MiniMax M2".to_string(),
+                    supports_thinking: true,
+                    supports_tools: true,
+                    context_window: 200_000,
+                    pricing: None,
+                },
+            ],
+            requires_api_key: true,
+            default_base_url: Some(
+                "https://api.minimax.io/v1/chat/completions".to_string(),
             ),
         },
         ProviderInfo {

@@ -648,6 +648,7 @@ impl OrchestratorService {
             ProviderType::DeepSeek => Arc::new(DeepSeekProvider::new(config.provider.clone())),
             ProviderType::Glm => Arc::new(GlmProvider::new(config.provider.clone())),
             ProviderType::Qwen => Arc::new(QwenProvider::new(config.provider.clone())),
+            ProviderType::Minimax => Arc::new(MinimaxProvider::new(config.provider.clone())),
             ProviderType::Ollama => Arc::new(OllamaProvider::new(config.provider.clone())),
         };
 
@@ -674,6 +675,7 @@ impl OrchestratorService {
             ProviderType::DeepSeek => Arc::new(DeepSeekProvider::new(config.provider.clone())),
             ProviderType::Glm => Arc::new(GlmProvider::new(config.provider.clone())),
             ProviderType::Qwen => Arc::new(QwenProvider::new(config.provider.clone())),
+            ProviderType::Minimax => Arc::new(MinimaxProvider::new(config.provider.clone())),
             ProviderType::Ollama => Arc::new(OllamaProvider::new(config.provider.clone())),
         };
 
@@ -715,6 +717,7 @@ impl OrchestratorService {
             ProviderType::DeepSeek => Arc::new(DeepSeekProvider::new(config.provider.clone())),
             ProviderType::Glm => Arc::new(GlmProvider::new(config.provider.clone())),
             ProviderType::Qwen => Arc::new(QwenProvider::new(config.provider.clone())),
+            ProviderType::Minimax => Arc::new(MinimaxProvider::new(config.provider.clone())),
             ProviderType::Ollama => Arc::new(OllamaProvider::new(config.provider.clone())),
         };
 

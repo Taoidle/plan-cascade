@@ -81,6 +81,10 @@
         "name": "Qwen (DashScope)",
         "description": "阿里云通义千问 Qwen系列模型。"
       },
+      "minimax": {
+        "name": "MiniMax",
+        "description": "MiniMax M2系列模型，支持推理能力。"
+      },
       "ollama": {
         "name": "Ollama (本地)",
         "description": "使用Ollama在本地运行模型。"
@@ -135,6 +139,7 @@
         "deepseek": "例如 deepseek-coder",
         "glm": "例如 glm-4-flash-250414",
         "qwen": "例如 qwen-plus",
+        "minimax": "例如 MiniMax-M2.5",
         "ollama": "例如 codellama:13b",
         "default": "模型名称"
       }
