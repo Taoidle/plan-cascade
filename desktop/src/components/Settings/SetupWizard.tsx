@@ -56,7 +56,7 @@ const steps: StepDef[] = [
 ];
 
 /** Backends that require an API key */
-const BACKENDS_REQUIRING_KEY: Backend[] = ['claude-api', 'openai', 'deepseek', 'glm', 'qwen'];
+const BACKENDS_REQUIRING_KEY: Backend[] = ['claude-api', 'openai', 'deepseek', 'glm', 'qwen', 'minimax'];
 
 /** API key format patterns for basic client-side validation */
 const API_KEY_PATTERNS: Partial<Record<Backend, RegExp>> = {
@@ -130,6 +130,14 @@ const providerOptions: ProviderOption[] = [
     fallbackDescription: 'Use Alibaba Qwen models.',
   },
   {
+    id: 'minimax',
+    i18nKey: 'minimax',
+    icon: <ProviderIcon color="var(--color-info, #6366f1)" letter="M" />,
+    needsKey: true,
+    fallbackName: 'MiniMax',
+    fallbackDescription: 'MiniMax M2 series models with reasoning support.',
+  },
+  {
     id: 'ollama',
     i18nKey: 'ollama',
     icon: <ProviderIcon color="var(--color-warning)" letter="L" />,
@@ -156,7 +164,7 @@ function ProviderIcon({ color, letter }: { color: string; letter: string }) {
 // ============================================================================
 
 export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps) {
-  const { t } = useTranslation('wizard');
+  const { t } = useTranslation(['wizard', 'common', 'settings']);
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState<WizardStep>('welcome');
   const [apiKey, setApiKey] = useState('');
@@ -349,16 +357,16 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
         <Dialog.Content
           className={clsx(
             'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
-            'w-full max-w-2xl',
+            'w-full max-w-2xl max-h-[85vh]',
             'bg-[var(--surface)] rounded-xl shadow-xl',
-            'overflow-hidden',
+            'overflow-hidden flex flex-col',
             'focus:outline-none'
           )}
           onEscapeKeyDown={(e) => e.preventDefault()}
           aria-describedby={undefined}
         >
           <VisuallyHidden.Root asChild>
-            <Dialog.Title>Setup Wizard</Dialog.Title>
+            <Dialog.Title>{t('dialogTitle')}</Dialog.Title>
           </VisuallyHidden.Root>
 
           {/* Progress Bar */}
@@ -403,7 +411,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
           </div>
 
           {/* Content */}
-          <div className="p-8 min-h-[340px]">
+          <div className="px-8 py-6 min-h-0 flex-1 overflow-y-auto">
             {currentStep === 'welcome' && (
               <WelcomeStep />
             )}
@@ -421,7 +429,22 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
                 showApiKey={showApiKey}
                 status={apiKeyStatus}
                 onApiKeyChange={handleApiKeyChange}
-                onToggleShow={() => setShowApiKey(!showApiKey)}
+                onToggleShow={async () => {
+                  const nextShow = !showApiKey;
+                  setShowApiKey(nextShow);
+                  if (nextShow && !apiKey) {
+                    try {
+                      const provider = getProviderFromBackend(backend);
+                      const result = await invoke<{ success: boolean; data?: string | null }>('get_provider_api_key', { provider });
+                      if (result.success && typeof result.data === 'string' && result.data.trim()) {
+                        setApiKey(result.data);
+                        setApiKeyStatus('valid');
+                      }
+                    } catch {
+                      // Keyring may not be available
+                    }
+                  }
+                }}
               />
             )}
             {currentStep === 'workspace' && (
@@ -521,7 +544,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
               'hover:bg-[var(--bg-subtle)]',
               'transition-colors'
             )}
-            aria-label="Close"
+            aria-label={t('common:buttons.close')}
           >
             <Cross2Icon className="w-4 h-4 text-[var(--text-muted)]" />
           </button>
@@ -581,7 +604,7 @@ interface ProviderStepProps {
 }
 
 function ProviderStep({ value, onChange }: ProviderStepProps) {
-  const { t } = useTranslation('wizard');
+  const { t } = useTranslation(['wizard', 'settings']);
 
   return (
     <div>
@@ -595,7 +618,7 @@ function ProviderStep({ value, onChange }: ProviderStepProps) {
       <div className="space-y-2">
         {providerOptions.map((option) => {
           const isSelected = value === option.id;
-          const name = t(`provider.options.${option.i18nKey}.name`, {
+          const name = t(`settings:llm.providers.${option.id}.name`, {
             defaultValue: option.fallbackName,
           });
           const desc = t(`provider.options.${option.i18nKey}.description`, {
@@ -682,9 +705,9 @@ function ApiKeyStep({
   onApiKeyChange,
   onToggleShow,
 }: ApiKeyStepProps) {
-  const { t } = useTranslation('wizard');
+  const { t } = useTranslation(['wizard', 'settings']);
   const inputRef = useRef<HTMLInputElement>(null);
-  const providerName = getProviderDisplayName(backend);
+  const providerName = getProviderDisplayName(backend, t);
 
   useEffect(() => {
     if (needsKey && inputRef.current) {
@@ -906,9 +929,9 @@ function CompleteStep({
   wantsTour,
   onTourToggle,
 }: CompleteStepProps) {
-  const { t } = useTranslation('wizard');
+  const { t } = useTranslation(['wizard', 'settings']);
 
-  const providerName = getProviderDisplayName(backend);
+  const providerName = getProviderDisplayName(backend, t);
   const apiKeyDisplay = needsKey
     ? apiKey
       ? t('complete.summary.apiKeyConfigured')
@@ -1015,6 +1038,8 @@ function getProviderFromBackend(backend: Backend): string {
       return 'glm';
     case 'qwen':
       return 'qwen';
+    case 'minimax':
+      return 'minimax';
     case 'ollama':
       return 'ollama';
     default:
@@ -1022,25 +1047,8 @@ function getProviderFromBackend(backend: Backend): string {
   }
 }
 
-function getProviderDisplayName(backend: Backend): string {
-  switch (backend) {
-    case 'claude-code':
-      return 'Claude Code';
-    case 'claude-api':
-      return 'Anthropic API';
-    case 'openai':
-      return 'OpenAI';
-    case 'deepseek':
-      return 'DeepSeek';
-    case 'glm':
-      return 'GLM (ZhipuAI)';
-    case 'qwen':
-      return 'Qwen (DashScope)';
-    case 'ollama':
-      return 'Ollama';
-    default:
-      return 'Unknown';
-  }
+function getProviderDisplayName(backend: Backend, t: (key: string, options?: Record<string, string>) => string): string {
+  return t(`settings:llm.providers.${backend}.name`, { defaultValue: backend });
 }
 
 async function saveSettings() {

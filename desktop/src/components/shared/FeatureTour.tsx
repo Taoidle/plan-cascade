@@ -156,7 +156,7 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
     setCutout(newCutout);
 
     // Calculate tooltip position
-    const tooltipHeight = tooltipRef.current?.offsetHeight || 180;
+    const tooltipHeight = tooltipRef.current?.offsetHeight || 240;
     let top = 0;
     let left = 0;
     let arrowSide: 'top' | 'bottom' | 'left' | 'right' = 'top';
@@ -215,6 +215,17 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
 
     return () => clearTimeout(timer);
   }, [active, currentIndex, currentStop, setMode, positionTooltip]);
+
+  // Re-measure after tooltip renders (initial estimate may be inaccurate)
+  useEffect(() => {
+    if (!active || !isVisible) return;
+    const frame = requestAnimationFrame(() => {
+      if (tooltipRef.current) {
+        positionTooltip();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active, isVisible, currentIndex]);
 
   // Reposition on window resize
   useEffect(() => {
@@ -352,7 +363,8 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
         <div
           className={clsx(
             'rounded-xl shadow-xl border border-[var(--border-default)]',
-            'bg-[var(--surface)] overflow-hidden'
+            'bg-[var(--surface)] overflow-hidden',
+            'max-h-[calc(100vh-32px)]'
           )}
         >
           {/* Header with step counter */}

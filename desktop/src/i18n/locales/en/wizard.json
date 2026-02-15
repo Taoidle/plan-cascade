@@ -1,4 +1,6 @@
 {
+  "dialogTitle": "Setup Wizard",
+
   "steps": {
     "welcome": "Welcome",
     "provider": "LLM Provider",
@@ -18,12 +20,12 @@
     "description": "Select the AI provider that will power your code generation and orchestration.",
     "options": {
       "claudeCode": {
-        "name": "Claude Code",
+        "name": "Claude Code (Claude Max)",
         "description": "Uses your existing Claude Code subscription. No additional API key needed.",
         "tag": "Recommended"
       },
       "claudeApi": {
-        "name": "Anthropic API",
+        "name": "Claude API",
         "description": "Direct Anthropic API access with Claude models. Requires an API key."
       },
       "openai": {
@@ -33,6 +35,15 @@
       "deepseek": {
         "name": "DeepSeek",
         "description": "DeepSeek specialized coding models. Requires an API key."
+      },
+      "glm": {
+        "description": "Use ZhipuAI GLM models for code generation. Requires an API key."
+      },
+      "qwen": {
+        "description": "Use Alibaba Qwen models for code generation. Requires an API key."
+      },
+      "minimax": {
+        "description": "MiniMax M2 series models with reasoning support. Requires an API key."
       },
       "ollama": {
         "name": "Ollama (Local)",

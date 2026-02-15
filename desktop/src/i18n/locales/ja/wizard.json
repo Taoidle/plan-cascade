@@ -1,4 +1,6 @@
 {
+  "dialogTitle": "セットアップウィザード",
+
   "steps": {
     "welcome": "ようこそ",
     "provider": "LLMプロバイダー",
@@ -18,12 +20,12 @@
     "description": "コード生成とオーケストレーションを支えるAIプロバイダーを選択してください。",
     "options": {
       "claudeCode": {
-        "name": "Claude Code",
+        "name": "Claude Code (Claude Max)",
         "description": "既存の Claude Code サブスクリプションを使用。追加のAPIキーは不要です。",
         "tag": "推奨"
       },
       "claudeApi": {
-        "name": "Anthropic API",
+        "name": "Claude API",
         "description": "Anthropic APIに直接アクセスし、Claudeモデルを使用。APIキーが必要です。"
       },
       "openai": {
@@ -33,6 +35,15 @@
       "deepseek": {
         "name": "DeepSeek",
         "description": "DeepSeek専用コーディングモデル。APIキーが必要です。"
+      },
+      "glm": {
+        "description": "ZhipuAI GLMモデルでコード生成。APIキーが必要です。"
+      },
+      "qwen": {
+        "description": "阿里雲通義千問Qwenモデルでコード生成。APIキーが必要です。"
+      },
+      "minimax": {
+        "description": "MiniMax M2シリーズモデル、推論機能対応。APIキーが必要です。"
       },
       "ollama": {
         "name": "Ollama（ローカル）",

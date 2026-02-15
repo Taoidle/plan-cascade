@@ -1,4 +1,6 @@
 {
+  "dialogTitle": "设置向导",
+
   "steps": {
     "welcome": "欢迎",
     "provider": "LLM提供商",
@@ -18,12 +20,12 @@
     "description": "选择为代码生成和编排提供支持的AI提供商。",
     "options": {
       "claudeCode": {
-        "name": "Claude Code",
+        "name": "Claude Code (Claude Max)",
         "description": "使用你现有的 Claude Code 订阅。无需额外的API密钥。",
         "tag": "推荐"
       },
       "claudeApi": {
-        "name": "Anthropic API",
+        "name": "Claude API",
         "description": "直接访问 Anthropic API，使用 Claude 模型。需要API密钥。"
       },
       "openai": {
@@ -33,6 +35,15 @@
       "deepseek": {
         "name": "DeepSeek",
         "description": "DeepSeek 专业编程模型。需要API密钥。"
+      },
+      "glm": {
+        "description": "使用智谱AI GLM模型进行代码生成。需要API密钥。"
+      },
+      "qwen": {
+        "description": "使用阿里云通义千问Qwen模型进行代码生成。需要API密钥。"
+      },
+      "minimax": {
+        "description": "MiniMax M2系列模型，支持推理能力。需要API密钥。"
       },
       "ollama": {
         "name": "Ollama（本地）",
