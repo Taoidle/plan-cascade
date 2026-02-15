@@ -45,5 +45,34 @@
     "auto": "Auto",
     "hybrid": "Hybrid",
     "mega": "Mega"
+  },
+
+  "messageActions": {
+    "edit": "Edit",
+    "regenerate": "Regenerate",
+    "rollback": "Rollback",
+    "copy": "Copy",
+    "copied": "Copied",
+    "editPlaceholder": "Edit your message...",
+    "save": "Save",
+    "cancel": "Cancel",
+    "contextWarning": "Session will restart. Previous context will be lost."
+  },
+
+  "attachment": {
+    "dropHere": "Drop files here",
+    "pickFile": "Pick a file",
+    "tooLarge": "File is too large",
+    "unsupportedType": "Unsupported file type",
+    "removeFile": "Remove file"
+  },
+
+  "modelSwitcher": {
+    "current": "Current model",
+    "switchTo": "Switch to",
+    "noApiKey": "No API key configured",
+    "contextLost": "Context will be lost",
+    "contextPreserved": "Context preserved",
+    "sessionRestart": "Session will restart with the new model"
   }
 }

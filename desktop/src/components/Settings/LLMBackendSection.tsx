@@ -9,71 +9,25 @@ import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import { CheckCircledIcon, CrossCircledIcon, EyeOpenIcon, EyeNoneIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
-import { useSettingsStore, Backend, StandaloneContextTurns, GlmEndpoint, MinimaxEndpoint } from '../../store/settings';
+import { useSettingsStore, type Backend, type StandaloneContextTurns, type GlmEndpoint, type MinimaxEndpoint } from '../../store/settings';
+import {
+  BACKEND_OPTIONS,
+  FALLBACK_MODELS_BY_PROVIDER,
+  CUSTOM_MODELS_STORAGE_KEY,
+  MODEL_DEFAULT_VALUE,
+  MODEL_CUSTOM_VALUE,
+  normalizeProvider,
+  dedupeModels,
+  getApiKeyRequiredProviders,
+  getLocalProviderApiKey,
+  setLocalProviderApiKey,
+  getLocalProviderApiKeyStatuses,
+  type ApiKeyStatus,
+} from '../../lib/providers';
 
-interface BackendOption {
-  id: Backend;
-  i18nKey: string;
-  requiresApiKey: boolean;
-  provider?: string;
-}
-
-const backendOptions: BackendOption[] = [
-  {
-    id: 'claude-code',
-    i18nKey: 'claude-code',
-    requiresApiKey: false,
-    provider: 'anthropic',
-  },
-  {
-    id: 'claude-api',
-    i18nKey: 'claude-api',
-    requiresApiKey: true,
-    provider: 'anthropic',
-  },
-  {
-    id: 'openai',
-    i18nKey: 'openai',
-    requiresApiKey: true,
-    provider: 'openai',
-  },
-  {
-    id: 'deepseek',
-    i18nKey: 'deepseek',
-    requiresApiKey: true,
-    provider: 'deepseek',
-  },
-  {
-    id: 'glm',
-    i18nKey: 'glm',
-    requiresApiKey: true,
-    provider: 'glm',
-  },
-  {
-    id: 'qwen',
-    i18nKey: 'qwen',
-    requiresApiKey: true,
-    provider: 'qwen',
-  },
-  {
-    id: 'minimax',
-    i18nKey: 'minimax',
-    requiresApiKey: true,
-    provider: 'minimax',
-  },
-  {
-    id: 'ollama',
-    i18nKey: 'ollama',
-    requiresApiKey: false,
-    provider: 'ollama',
-  },
-];
+const backendOptions = BACKEND_OPTIONS;
 
 const standaloneContextTurnValues: StandaloneContextTurns[] = [2, 4, 6, 8, 10, 20, 50, 100, 200, 500, -1];
-
-interface ApiKeyStatus {
-  [provider: string]: boolean;
-}
 
 interface CommandResponse<T> {
   success: boolean;
@@ -90,126 +44,7 @@ interface ProviderCatalog {
   models: ProviderCatalogModel[];
 }
 
-const PROVIDER_ALIASES: Record<string, string> = {
-  anthropic: 'anthropic',
-  claude: 'anthropic',
-  'claude-api': 'anthropic',
-  openai: 'openai',
-  deepseek: 'deepseek',
-  glm: 'glm',
-  'glm-api': 'glm',
-  zhipu: 'glm',
-  zhipuai: 'glm',
-  qwen: 'qwen',
-  'qwen-api': 'qwen',
-  dashscope: 'qwen',
-  alibaba: 'qwen',
-  aliyun: 'qwen',
-  minimax: 'minimax',
-  'minimax-api': 'minimax',
-  ollama: 'ollama',
-};
-
-const CUSTOM_MODELS_STORAGE_KEY = 'plan-cascade-custom-models';
-const LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY = 'plan-cascade-provider-api-key-cache';
-const MODEL_DEFAULT_VALUE = '__provider_default__';
-const MODEL_CUSTOM_VALUE = '__custom__';
-
-const FALLBACK_MODELS_BY_PROVIDER: Record<string, string[]> = {
-  anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
-  openai: ['gpt-4o', 'o1-preview', 'o3-mini'],
-  deepseek: ['deepseek-chat', 'deepseek-r1'],
-  glm: [
-    'glm-4.7',
-    'glm-4.6',
-    'glm-4.6v',
-    'glm-4.6v-flash',
-    'glm-4.6v-flashx',
-    'glm-4.5',
-    'glm-4.5-air',
-    'glm-4.5-x',
-    'glm-4.5-flash',
-    'glm-4.5v',
-    'glm-4.1v-thinking-flashx',
-    'glm-4.1v-thinking-flash',
-    'glm-4-air-250414',
-    'glm-4-flash-250414',
-    'glm-4-plus',
-    'glm-4-air',
-    'glm-4-airx',
-    'glm-4-flash',
-    'glm-4-flashx',
-    'glm-4v-plus-0111',
-    'glm-4v-flash',
-  ],
-  qwen: ['qwen3-plus', 'qwq-plus', 'qwen-plus', 'qwen-turbo'],
-  minimax: ['MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
-  ollama: ['llama3.2', 'deepseek-r1:14b', 'qwq:32b'],
-};
-const API_KEY_REQUIRED_PROVIDERS = dedupeModels(
-  backendOptions
-    .filter((option) => option.requiresApiKey)
-    .map((option) => normalizeProvider(option.provider || option.id))
-);
-
-function normalizeProvider(provider: string): string {
-  const normalized = provider.trim().toLowerCase();
-  return PROVIDER_ALIASES[normalized] || normalized;
-}
-
-function dedupeModels(models: string[]): string[] {
-  return Array.from(new Set(models.map((m) => m.trim()).filter(Boolean)));
-}
-
-function readLocalProviderApiKeyCache(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const normalized: Record<string, string> = {};
-    Object.entries(parsed).forEach(([provider, value]) => {
-      if (typeof value !== 'string') return;
-      const trimmed = value.trim();
-      if (!trimmed) return;
-      normalized[normalizeProvider(provider)] = trimmed;
-    });
-    return normalized;
-  } catch {
-    return {};
-  }
-}
-
-function writeLocalProviderApiKeyCache(nextValue: Record<string, string>): void {
-  localStorage.setItem(LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY, JSON.stringify(nextValue));
-}
-
-function getLocalProviderApiKey(provider: string): string {
-  const cache = readLocalProviderApiKeyCache();
-  return cache[normalizeProvider(provider)] || '';
-}
-
-function setLocalProviderApiKey(provider: string, apiKey: string): void {
-  const normalizedProvider = normalizeProvider(provider);
-  const cache = readLocalProviderApiKeyCache();
-  const trimmed = apiKey.trim();
-  if (trimmed) {
-    cache[normalizedProvider] = trimmed;
-  } else {
-    delete cache[normalizedProvider];
-  }
-  writeLocalProviderApiKeyCache(cache);
-}
-
-function getLocalProviderApiKeyStatuses(): ApiKeyStatus {
-  const cache = readLocalProviderApiKeyCache();
-  const statuses: ApiKeyStatus = {};
-  Object.entries(cache).forEach(([provider, value]) => {
-    if (value.trim()) {
-      statuses[provider] = true;
-    }
-  });
-  return statuses;
-}
+const API_KEY_REQUIRED_PROVIDERS = getApiKeyRequiredProviders();
 
 export function LLMBackendSection() {
   const { t } = useTranslation('settings');

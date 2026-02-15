@@ -45,5 +45,34 @@
     "auto": "自动",
     "hybrid": "混合",
     "mega": "大型"
+  },
+
+  "messageActions": {
+    "edit": "编辑",
+    "regenerate": "重新生成",
+    "rollback": "回滚",
+    "copy": "复制",
+    "copied": "已复制",
+    "editPlaceholder": "编辑你的消息...",
+    "save": "保存",
+    "cancel": "取消",
+    "contextWarning": "会话将重新开始。之前的上下文将会丢失。"
+  },
+
+  "attachment": {
+    "dropHere": "将文件拖放到此处",
+    "pickFile": "选择文件",
+    "tooLarge": "文件过大",
+    "unsupportedType": "不支持的文件类型",
+    "removeFile": "移除文件"
+  },
+
+  "modelSwitcher": {
+    "current": "当前模型",
+    "switchTo": "切换到",
+    "noApiKey": "未配置 API 密钥",
+    "contextLost": "上下文将丢失",
+    "contextPreserved": "上下文已保留",
+    "sessionRestart": "会话将使用新模型重新开始"
   }
 }

@@ -45,5 +45,34 @@
     "auto": "自動",
     "hybrid": "ハイブリッド",
     "mega": "メガ"
+  },
+
+  "messageActions": {
+    "edit": "編集",
+    "regenerate": "再生成",
+    "rollback": "ロールバック",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "editPlaceholder": "メッセージを編集...",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "contextWarning": "セッションが再開されます。以前のコンテキストは失われます。"
+  },
+
+  "attachment": {
+    "dropHere": "ファイルをここにドロップ",
+    "pickFile": "ファイルを選択",
+    "tooLarge": "ファイルが大きすぎます",
+    "unsupportedType": "サポートされていないファイル形式",
+    "removeFile": "ファイルを削除"
+  },
+
+  "modelSwitcher": {
+    "current": "現在のモデル",
+    "switchTo": "切り替え",
+    "noApiKey": "APIキーが未設定です",
+    "contextLost": "コンテキストが失われます",
+    "contextPreserved": "コンテキストは保持されます",
+    "sessionRestart": "新しいモデルでセッションが再開されます"
   }
 }
