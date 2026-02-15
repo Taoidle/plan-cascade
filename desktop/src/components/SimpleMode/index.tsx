@@ -58,6 +58,9 @@ export function SimpleMode() {
     restoreFromHistory,
     sessionUsageTotals,
     latestUsage,
+    attachments,
+    addAttachment,
+    removeAttachment,
   } = useExecutionStore();
   const workspacePath = useSettingsStore((s) => s.workspacePath);
 
@@ -234,6 +237,10 @@ export function SimpleMode() {
                         })
                 }
                 isLoading={isRunning}
+                attachments={attachments}
+                onAttach={addAttachment}
+                onRemoveAttachment={removeAttachment}
+                workspacePath={workspacePath}
               />
               {apiError && (
                 <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">

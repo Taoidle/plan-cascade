@@ -12,6 +12,8 @@ import { useSettingsStore } from './settings';
 import { useModeStore } from './mode';
 import type { StreamEventPayload } from '../lib/claudeCodeClient';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
+import type { FileAttachmentData } from '../types/attachment';
+import { buildPromptWithAttachments } from '../lib/conversationUtils';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
@@ -318,7 +320,18 @@ interface ExecutionState {
   /** Filter for stripping tool_call code blocks from streaming text */
   toolCallFilter: ToolCallStreamFilter;
 
+  /** File attachments pending to be sent with the next message */
+  attachments: FileAttachmentData[];
+
   // Actions
+  /** Add a file attachment */
+  addAttachment: (file: FileAttachmentData) => void;
+
+  /** Remove a file attachment by ID */
+  removeAttachment: (id: string) => void;
+
+  /** Clear all file attachments */
+  clearAttachments: () => void;
   /** Initialize Tauri event listeners */
   initialize: () => void;
 
@@ -706,6 +719,7 @@ const initialState = {
   latestUsage: null as BackendUsageStats | null,
   sessionUsageTotals: null as BackendUsageStats | null,
   toolCallFilter: new ToolCallStreamFilter(),
+  attachments: [] as FileAttachmentData[],
 };
 
 export const useExecutionStore = create<ExecutionState>()((set, get) => ({
@@ -813,9 +827,16 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         // Show user's message in the conversation
         get().appendStreamLine(description, 'info');
 
+        // Enrich prompt with file attachments if any
+        const claudeAttachments = get().attachments;
+        const claudePrompt = claudeAttachments.length > 0
+          ? buildPromptWithAttachments(description, claudeAttachments)
+          : description;
+        get().clearAttachments();
+
         // Send the message to the session
         await invoke('send_message', {
-          request: { session_id: sessionId, prompt: description },
+          request: { session_id: sessionId, prompt: claudePrompt },
         });
       } else {
         // Use standalone LLM execution
@@ -841,11 +862,18 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           get().addLog(`Using standalone conversation context (${recentStandaloneTurns.length}/${contextLabel} turns)`);
         }
 
+        // Enrich prompt with file attachments if any
+        const standaloneAttachments = get().attachments;
+        const enrichedMessage = standaloneAttachments.length > 0
+          ? buildPromptWithAttachments(messageToSend, standaloneAttachments)
+          : messageToSend;
+        get().clearAttachments();
+
         // Resolve provider-specific base URL override (e.g. GLM Coding endpoint)
         const baseUrl = resolveProviderBaseUrl(provider, settings);
 
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
-          message: messageToSend,
+          message: enrichedMessage,
           provider,
           model,
           projectPath: settings.workspacePath || '.',
@@ -1074,11 +1102,18 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       result: null,
     });
 
+    // Enrich prompt with file attachments if any
+    const followUpAttachments = get().attachments;
+    const enrichedPrompt = followUpAttachments.length > 0
+      ? buildPromptWithAttachments(prompt, followUpAttachments)
+      : prompt;
+    get().clearAttachments();
+
     get().addLog(`Follow-up: ${prompt}`);
 
     try {
       await invoke('send_message', {
-        request: { session_id: sessionId, prompt },
+        request: { session_id: sessionId, prompt: enrichedPrompt },
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -1578,6 +1613,24 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
   clearExecutionErrors: () => {
     set({ executionErrors: [] });
+  },
+
+  addAttachment: (file) => {
+    set((state) => {
+      // Avoid duplicates by id
+      if (state.attachments.some((a) => a.id === file.id)) return state;
+      return { attachments: [...state.attachments, file] };
+    });
+  },
+
+  removeAttachment: (id) => {
+    set((state) => ({
+      attachments: state.attachments.filter((a) => a.id !== id),
+    }));
+  },
+
+  clearAttachments: () => {
+    set({ attachments: [] });
   },
 
   retryStory: async (storyId) => {
