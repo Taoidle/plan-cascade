@@ -14,6 +14,7 @@ import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
 import { InputBox } from './InputBox';
 import { ProgressView } from './ProgressView';
 import { ConnectionStatus } from './ConnectionStatus';
+import { ModelSwitcher } from './ModelSwitcher';
 import { useExecutionStore, type ExecutionHistoryItem, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { StreamingOutput, GlobalProgressBar, ErrorState, ProjectSelector, IndexStatus } from '../shared';
@@ -136,6 +137,7 @@ export function SimpleMode() {
         <div className="flex items-center gap-2">
           <ConnectionStatus status={connectionStatus} />
           <ProjectSelector compact />
+          <ModelSwitcher />
           {workspacePath && <IndexStatus compact />}
           <TokenUsageInline latestUsage={latestUsage} totals={sessionUsageTotals} />
         </div>
