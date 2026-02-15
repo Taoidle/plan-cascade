@@ -14,8 +14,10 @@ import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
 import { InputBox } from './InputBox';
 import { ProgressView } from './ProgressView';
 import { ConnectionStatus } from './ConnectionStatus';
+import { MessageActions, EditMode } from './MessageActions';
 import { useExecutionStore, type ExecutionHistoryItem, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
+import { deriveConversationTurns } from '../../lib/conversationUtils';
 import { StreamingOutput, GlobalProgressBar, ErrorState, ProjectSelector, IndexStatus } from '../shared';
 
 type WorkflowMode = 'chat' | 'task';
@@ -477,6 +479,8 @@ function ChatTranscript({
   status: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [editingLineId, setEditingLineId] = useState<number | null>(null);
+
   const visibleLines = useMemo(
     () =>
       lines.filter((line) =>
@@ -488,6 +492,76 @@ function ChatTranscript({
       ),
     [lines]
   );
+
+  // Derive conversation turns for MessageActions
+  const turns = useMemo(() => deriveConversationTurns(visibleLines), [visibleLines]);
+
+  // Determine backend type and disabled state
+  const backend = useSettingsStore((s) => s.backend);
+  const isClaudeCodeBackendValue = backend === 'claude-code';
+  const isActionsDisabled = status === 'running' || status === 'paused';
+
+  // Build a map from line.id to the turn's userLineId (for assistant lines to find their parent turn)
+  const lineToUserLineId = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const turn of turns) {
+      // Map the user info line
+      map.set(turn.userLineId, turn.userLineId);
+      // Map all visible lines in the assistant range to this turn's userLineId
+      for (const vl of visibleLines) {
+        if (vl.id > turn.userLineId) {
+          const nextTurn = turns.find((t) => t.turnIndex === turn.turnIndex + 1);
+          if (!nextTurn || vl.id < nextTurn.userLineId) {
+            map.set(vl.id, turn.userLineId);
+          }
+        }
+      }
+    }
+    return map;
+  }, [turns, visibleLines]);
+
+  // Determine the last turn's userLineId
+  const lastTurnUserLineId = turns.length > 0 ? turns[turns.length - 1].userLineId : -1;
+
+  // Clear editing state when lines change (e.g., after edit submission)
+  useEffect(() => {
+    if (editingLineId !== null) {
+      const lineStillExists = visibleLines.some((l) => l.id === editingLineId);
+      if (!lineStillExists) {
+        setEditingLineId(null);
+      }
+    }
+  }, [visibleLines, editingLineId]);
+
+  // Action handlers
+  const handleEdit = useCallback((lineId: number, newContent: string) => {
+    setEditingLineId(null);
+    useExecutionStore.getState().editAndResend(lineId, newContent);
+  }, []);
+
+  const handleEditStart = useCallback((lineId: number) => {
+    setEditingLineId(lineId);
+  }, []);
+
+  const handleEditCancel = useCallback(() => {
+    setEditingLineId(null);
+  }, []);
+
+  const handleRegenerate = useCallback((lineId: number) => {
+    // For assistant messages, find the parent turn's userLineId
+    const userLineId = lineToUserLineId.get(lineId) ?? lineId;
+    useExecutionStore.getState().regenerateResponse(userLineId);
+  }, [lineToUserLineId]);
+
+  const handleRollback = useCallback((lineId: number) => {
+    useExecutionStore.getState().rollbackToTurn(lineId);
+  }, []);
+
+  const handleCopy = useCallback((content: string) => {
+    navigator.clipboard.writeText(content).catch(() => {
+      // Fallback: silently fail
+    });
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -505,21 +579,61 @@ function ChatTranscript({
   return (
     <div ref={containerRef} className="h-full overflow-y-auto px-4 py-4 space-y-4">
       {visibleLines.map((line) => {
+        const userLineId = lineToUserLineId.get(line.id);
+        const isLastTurn = userLineId === lastTurnUserLineId;
+
         if (line.type === 'info') {
+          // User message: show edit mode or normal message bubble
+          if (editingLineId === line.id) {
+            return (
+              <div key={line.id} className="flex justify-end">
+                <EditMode
+                  content={line.content}
+                  onSave={(newContent) => handleEdit(line.id, newContent)}
+                  onCancel={handleEditCancel}
+                  isClaudeCodeBackend={isClaudeCodeBackendValue}
+                />
+              </div>
+            );
+          }
           return (
-            <div key={line.id} className="flex justify-end">
+            <div key={line.id} className="group relative flex justify-end">
               <div className="max-w-[82%] px-4 py-2 rounded-2xl rounded-br-sm bg-primary-600 text-white text-sm whitespace-pre-wrap">
                 {line.content}
               </div>
+              <MessageActions
+                line={line}
+                isUserMessage={true}
+                isLastTurn={isLastTurn}
+                isClaudeCodeBackend={isClaudeCodeBackendValue}
+                disabled={isActionsDisabled}
+                onEdit={handleEdit}
+                onRegenerate={handleRegenerate}
+                onRollback={handleRollback}
+                onCopy={handleCopy}
+                onEditStart={handleEditStart}
+                onEditCancel={handleEditCancel}
+              />
             </div>
           );
         }
         if (line.type === 'text') {
           return (
-            <div key={line.id} className="flex justify-start">
+            <div key={line.id} className="group relative flex justify-start">
               <div className="max-w-[88%] px-4 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100">
                 <MarkdownRenderer content={line.content} className="text-sm" />
               </div>
+              <MessageActions
+                line={line}
+                isUserMessage={false}
+                isLastTurn={isLastTurn}
+                isClaudeCodeBackend={isClaudeCodeBackendValue}
+                disabled={isActionsDisabled}
+                onEdit={handleEdit}
+                onRegenerate={handleRegenerate}
+                onRollback={handleRollback}
+                onCopy={handleCopy}
+              />
             </div>
           );
         }
