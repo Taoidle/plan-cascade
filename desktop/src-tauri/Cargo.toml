@@ -61,6 +61,9 @@ async-trait = "0.1"
 # DashScope SDK for Qwen LLM provider
 async-dashscope = "0.12"
 
+# Anthropic SDK (used by MiniMax provider via Anthropic-compatible endpoint)
+async-anthropic = "0.6"
+
 # UUID generation
 uuid = { version = "1", features = ["v4"] }
 
