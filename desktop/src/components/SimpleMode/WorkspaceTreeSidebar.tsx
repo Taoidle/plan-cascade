@@ -15,7 +15,7 @@ import {
   PlusIcon,
   Cross2Icon,
 } from '@radix-ui/react-icons';
-import { type ExecutionHistoryItem } from '../../store/execution';
+import { type ExecutionHistoryItem, type SessionSnapshot } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +30,12 @@ export interface WorkspaceTreeSidebarProps {
   onClear: () => void;
   onNewTask: () => void;
   currentTask: string | null;
+  /** Background session snapshots keyed by session ID */
+  backgroundSessions?: Record<string, SessionSnapshot>;
+  /** Called when user clicks a background session to switch to it */
+  onSwitchSession?: (id: string) => void;
+  /** Called when user clicks the remove button on a background session */
+  onRemoveSession?: (id: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +482,151 @@ function OtherSessionsGroup({
 }
 
 // ---------------------------------------------------------------------------
+// BackgroundSessionItem
+// ---------------------------------------------------------------------------
+
+function getStatusDotClasses(status: string): string {
+  switch (status) {
+    case 'running':
+    case 'streaming':
+      return 'bg-blue-500 dark:bg-blue-400 animate-pulse';
+    case 'completed':
+      return 'bg-green-500 dark:bg-green-400';
+    case 'failed':
+      return 'bg-red-500 dark:bg-red-400';
+    case 'paused':
+      return 'bg-yellow-500 dark:bg-yellow-400';
+    default:
+      return 'bg-gray-400 dark:bg-gray-500';
+  }
+}
+
+function truncateLabel(text: string, maxLen = 50): string {
+  if (!text) return '';
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + '...';
+}
+
+function BackgroundSessionItem({
+  sessionId,
+  snapshot,
+  onSwitch,
+  onRemove,
+}: {
+  sessionId: string;
+  snapshot: SessionSnapshot;
+  onSwitch: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const { t } = useTranslation('simpleMode');
+
+  const label = snapshot.taskDescription
+    ? truncateLabel(snapshot.taskDescription)
+    : 'Untitled Session';
+
+  const handleRemove = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onRemove(sessionId);
+    },
+    [sessionId, onRemove]
+  );
+
+  return (
+    <div
+      data-testid={`bg-session-item-${sessionId}`}
+      className={clsx(
+        'group flex items-start gap-2 py-1.5 px-2 rounded-md cursor-pointer transition-colors',
+        'hover:bg-gray-50 dark:hover:bg-gray-800'
+      )}
+      onClick={() => onSwitch(sessionId)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onSwitch(sessionId);
+      }}
+      title={t('sidebar.switchSession')}
+    >
+      {/* Status dot */}
+      <span
+        data-testid={`bg-status-dot-${sessionId}`}
+        className={clsx(
+          'mt-1.5 w-2 h-2 rounded-full shrink-0',
+          getStatusDotClasses(snapshot.status)
+        )}
+      />
+
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-gray-900 dark:text-white line-clamp-1">
+          {label}
+        </p>
+      </div>
+
+      {/* Remove button */}
+      <button
+        data-testid={`bg-remove-btn-${sessionId}`}
+        className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+        onClick={handleRemove}
+        title={t('sidebar.removeSession')}
+      >
+        <Cross2Icon className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BackgroundSessionsSection
+// ---------------------------------------------------------------------------
+
+function BackgroundSessionsSection({
+  backgroundSessions,
+  onSwitch,
+  onRemove,
+}: {
+  backgroundSessions: Record<string, SessionSnapshot>;
+  onSwitch: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const { t } = useTranslation('simpleMode');
+
+  const entries = useMemo(
+    () => Object.entries(backgroundSessions),
+    [backgroundSessions]
+  );
+
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="mb-2">
+      {/* Section header */}
+      <div className="flex items-center gap-1 px-2 py-1.5">
+        <span className="flex-1 min-w-0 text-xs font-medium text-gray-500 dark:text-gray-400">
+          {t('sidebar.activeSessions')}
+        </span>
+        <span className="text-2xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 shrink-0">
+          {entries.length}
+        </span>
+      </div>
+
+      {/* Session items */}
+      <div className="space-y-0.5">
+        {entries.map(([id, snapshot]) => (
+          <BackgroundSessionItem
+            key={id}
+            sessionId={id}
+            snapshot={snapshot}
+            onSwitch={onSwitch}
+            onRemove={onRemove}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // WorkspaceTreeSidebar (main component)
 // ---------------------------------------------------------------------------
 
@@ -487,6 +638,9 @@ export function WorkspaceTreeSidebar({
   onClear,
   onNewTask,
   currentTask,
+  backgroundSessions = {},
+  onSwitchSession,
+  onRemoveSession,
 }: WorkspaceTreeSidebarProps) {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
@@ -614,6 +768,15 @@ export function WorkspaceTreeSidebar({
 
       {/* Scrollable tree content */}
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+        {/* Background sessions section */}
+        {onSwitchSession && onRemoveSession && (
+          <BackgroundSessionsSection
+            backgroundSessions={backgroundSessions}
+            onSwitch={onSwitchSession}
+            onRemove={onRemoveSession}
+          />
+        )}
+
         {isEmpty ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-4 py-8">
             <svg

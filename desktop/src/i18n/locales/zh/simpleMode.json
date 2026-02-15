@@ -3,7 +3,9 @@
 
   "input": {
     "placeholder": "描述你想要构建的内容...",
-    "submitTitle": "提交 (Cmd+Enter)"
+    "submitTitle": "提交 (Cmd+Enter)",
+    "previewMarkdown": "预览 Markdown",
+    "switchToEdit": "切换到编辑"
   },
 
   "history": {
@@ -76,6 +78,10 @@
     "sessionRestart": "会话将使用新模型重新开始"
   },
 
+  "projectSelector": {
+    "openInFileManager": "在文件管理器中打开"
+  },
+
   "sidebar": {
     "newTask": "新建任务",
     "addDirectory": "添加目录",
@@ -91,6 +97,19 @@
     "toggleSidebar": "切换侧边栏",
     "sessions": "会话",
     "rename": "重命名",
-    "deleteSession": "删除会话"
+    "deleteSession": "删除会话",
+    "activeSessions": "活跃会话",
+    "switchSession": "切换到此会话",
+    "removeSession": "移除会话"
+  },
+
+  "diffPanel": {
+    "title": "变更",
+    "gitChanges": "Git 变更",
+    "toolChanges": "工具变更",
+    "noChanges": "未检测到变更",
+    "notGitRepo": "不是 Git 仓库",
+    "refresh": "刷新",
+    "filesChanged": "{{count}} 个文件已变更"
   }
 }

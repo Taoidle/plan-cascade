@@ -3,7 +3,9 @@
 
   "input": {
     "placeholder": "Describe what you want to build...",
-    "submitTitle": "Submit (Cmd+Enter)"
+    "submitTitle": "Submit (Cmd+Enter)",
+    "previewMarkdown": "Preview markdown",
+    "switchToEdit": "Switch to edit"
   },
 
   "history": {
@@ -76,6 +78,10 @@
     "sessionRestart": "Session will restart with the new model"
   },
 
+  "projectSelector": {
+    "openInFileManager": "Open in file manager"
+  },
+
   "sidebar": {
     "newTask": "New Task",
     "addDirectory": "Add Directory",
@@ -91,6 +97,19 @@
     "toggleSidebar": "Toggle sidebar",
     "sessions": "Sessions",
     "rename": "rename",
-    "deleteSession": "Delete session"
+    "deleteSession": "Delete session",
+    "activeSessions": "Active Sessions",
+    "switchSession": "Switch to this session",
+    "removeSession": "Remove session"
+  },
+
+  "diffPanel": {
+    "title": "Changes",
+    "gitChanges": "Git Changes",
+    "toolChanges": "Tool Changes",
+    "noChanges": "No changes detected",
+    "notGitRepo": "Not a git repository",
+    "refresh": "Refresh",
+    "filesChanged": "{{count}} file(s) changed"
   }
 }

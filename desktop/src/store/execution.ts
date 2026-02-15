@@ -197,7 +197,7 @@ interface CommandResponse<T> {
   error: string | null;
 }
 
-interface StandaloneTurn {
+export interface StandaloneTurn {
   user: string;
   assistant: string;
   createdAt: number;
@@ -207,12 +207,30 @@ interface LegacyTaskStartData {
   task_id: string;
 }
 
-interface BackendUsageStats {
+export interface BackendUsageStats {
   input_tokens: number;
   output_tokens: number;
   thinking_tokens?: number | null;
   cache_read_tokens?: number | null;
   cache_creation_tokens?: number | null;
+}
+
+/** Snapshot of per-session state for background session storage */
+export interface SessionSnapshot {
+  id: string;
+  taskDescription: string;
+  status: ExecutionStatus;
+  streamingOutput: StreamLine[];
+  streamLineCounter: number;
+  currentTurnStartLineId: number;
+  taskId: string | null;
+  isChatSession: boolean;
+  standaloneTurns: StandaloneTurn[];
+  standaloneSessionId: string | null;
+  latestUsage: BackendUsageStats | null;
+  sessionUsageTotals: BackendUsageStats | null;
+  startedAt: number | null;
+  toolCallFilter: ToolCallStreamFilter;
 }
 
 interface BackendStandaloneExecutionResult {
@@ -323,6 +341,12 @@ interface ExecutionState {
   /** File attachments pending to be sent with the next message */
   attachments: FileAttachmentData[];
 
+  /** Background session snapshots keyed by session ID */
+  backgroundSessions: Record<string, SessionSnapshot>;
+
+  /** Currently active foreground session ID (for tracking which bg session was swapped in) */
+  activeSessionId: string | null;
+
   // Actions
   /** Add a file attachment */
   addAttachment: (file: FileAttachmentData) => void;
@@ -332,6 +356,16 @@ interface ExecutionState {
 
   /** Clear all file attachments */
   clearAttachments: () => void;
+
+  /** Snapshot the current foreground session into backgroundSessions and reset foreground */
+  backgroundCurrentSession: () => void;
+
+  /** Swap the foreground session with a background session by ID */
+  switchToSession: (id: string) => void;
+
+  /** Remove a background session by ID */
+  removeBackgroundSession: (id: string) => void;
+
   /** Initialize Tauri event listeners */
   initialize: () => void;
 
@@ -729,6 +763,8 @@ const initialState = {
   sessionUsageTotals: null as BackendUsageStats | null,
   toolCallFilter: new ToolCallStreamFilter(),
   attachments: [] as FileAttachmentData[],
+  backgroundSessions: {} as Record<string, SessionSnapshot>,
+  activeSessionId: null as string | null,
 };
 
 export const useExecutionStore = create<ExecutionState>()((set, get) => ({
@@ -759,6 +795,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   start: async (description, mode) => {
+    // Auto-background current session if running
+    if (get().status === 'running') {
+      get().backgroundCurrentSession();
+    }
+
     const settingsSnapshot = useSettingsStore.getState();
     const backendSnapshot = String((settingsSnapshot as { backend?: unknown }).backend || '');
     const isClaudeBackend = isClaudeCodeBackend(backendSnapshot);
@@ -1203,6 +1244,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       ...initialState,
       connectionStatus: state.connectionStatus,
       history: get().history,
+      backgroundSessions: state.backgroundSessions,
+      activeSessionId: state.activeSessionId,
       toolCallFilter: new ToolCallStreamFilter(),
     });
   },
@@ -1640,6 +1683,120 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
   clearAttachments: () => {
     set({ attachments: [] });
+  },
+
+  backgroundCurrentSession: () => {
+    const state = get();
+
+    // Create a unique ID for this background session
+    const sessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `bg-${crypto.randomUUID()}`
+      : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+
+    // Snapshot the current foreground session state
+    const snapshot: SessionSnapshot = {
+      id: sessionId,
+      taskDescription: state.taskDescription,
+      status: state.status,
+      streamingOutput: [...state.streamingOutput],
+      streamLineCounter: state.streamLineCounter,
+      currentTurnStartLineId: state.currentTurnStartLineId,
+      taskId: state.taskId,
+      isChatSession: state.isChatSession,
+      standaloneTurns: [...state.standaloneTurns],
+      standaloneSessionId: state.standaloneSessionId,
+      latestUsage: state.latestUsage ? { ...state.latestUsage } : null,
+      sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
+      startedAt: state.startedAt,
+      toolCallFilter: state.toolCallFilter,
+    };
+
+    // Add snapshot to backgroundSessions and reset foreground to idle
+    set({
+      backgroundSessions: { ...state.backgroundSessions, [sessionId]: snapshot },
+      activeSessionId: sessionId,
+      // Reset foreground state
+      taskDescription: '',
+      status: 'idle' as ExecutionStatus,
+      streamingOutput: [],
+      streamLineCounter: 0,
+      currentTurnStartLineId: 0,
+      taskId: null,
+      isChatSession: false,
+      standaloneTurns: [],
+      standaloneSessionId: null,
+      latestUsage: null,
+      sessionUsageTotals: null,
+      startedAt: null,
+      result: null,
+      apiError: null,
+      isSubmitting: false,
+      toolCallFilter: new ToolCallStreamFilter(),
+      attachments: [],
+    });
+  },
+
+  switchToSession: (id: string) => {
+    const state = get();
+    const targetSnapshot = state.backgroundSessions[id];
+
+    // No-op if session does not exist
+    if (!targetSnapshot) return;
+
+    // Snapshot the current foreground into a new background entry
+    const newBgId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `bg-${crypto.randomUUID()}`
+      : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+
+    const currentSnapshot: SessionSnapshot = {
+      id: newBgId,
+      taskDescription: state.taskDescription,
+      status: state.status,
+      streamingOutput: [...state.streamingOutput],
+      streamLineCounter: state.streamLineCounter,
+      currentTurnStartLineId: state.currentTurnStartLineId,
+      taskId: state.taskId,
+      isChatSession: state.isChatSession,
+      standaloneTurns: [...state.standaloneTurns],
+      standaloneSessionId: state.standaloneSessionId,
+      latestUsage: state.latestUsage ? { ...state.latestUsage } : null,
+      sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
+      startedAt: state.startedAt,
+      toolCallFilter: state.toolCallFilter,
+    };
+
+    // Build new backgroundSessions: remove the target, add the current foreground
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { [id]: _removed, ...remainingBg } = state.backgroundSessions;
+    const newBackgroundSessions = { ...remainingBg, [newBgId]: currentSnapshot };
+
+    // Restore the target snapshot into the foreground
+    set({
+      backgroundSessions: newBackgroundSessions,
+      activeSessionId: newBgId,
+      taskDescription: targetSnapshot.taskDescription,
+      status: targetSnapshot.status,
+      streamingOutput: [...targetSnapshot.streamingOutput],
+      streamLineCounter: targetSnapshot.streamLineCounter,
+      currentTurnStartLineId: targetSnapshot.currentTurnStartLineId,
+      taskId: targetSnapshot.taskId,
+      isChatSession: targetSnapshot.isChatSession,
+      standaloneTurns: [...targetSnapshot.standaloneTurns],
+      standaloneSessionId: targetSnapshot.standaloneSessionId,
+      latestUsage: targetSnapshot.latestUsage ? { ...targetSnapshot.latestUsage } : null,
+      sessionUsageTotals: targetSnapshot.sessionUsageTotals ? { ...targetSnapshot.sessionUsageTotals } : null,
+      startedAt: targetSnapshot.startedAt,
+      toolCallFilter: targetSnapshot.toolCallFilter,
+    });
+  },
+
+  removeBackgroundSession: (id: string) => {
+    set((state) => {
+      if (!state.backgroundSessions[id]) return state;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [id]: _removed, ...remaining } = state.backgroundSessions;
+      return { backgroundSessions: remaining };
+    });
   },
 
   retryStory: async (storyId) => {
@@ -2984,6 +3141,91 @@ function handleUnifiedExecutionEvent(
   }
 }
 
+// ============================================================================
+// Background Session Event Routing Helpers
+// ============================================================================
+
+/**
+ * Find a background session by its taskId (which corresponds to the
+ * session_id emitted by the Rust backend).  Returns the snapshot key
+ * and snapshot if found, or undefined otherwise.
+ */
+function findBackgroundSessionByTaskId(
+  state: ExecutionState,
+  sessionId: string
+): { key: string; snapshot: SessionSnapshot } | undefined {
+  for (const [key, snapshot] of Object.entries(state.backgroundSessions)) {
+    if (snapshot.taskId === sessionId) {
+      return { key, snapshot };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Apply a lightweight update to a background session identified by its
+ * taskId.  Returns the partial state update to merge via `set()`, or an
+ * empty object when the session is not found in backgroundSessions.
+ *
+ * The `updater` callback receives the current snapshot and must return
+ * the fields to merge onto it.  Only streamingOutput, status, usage,
+ * and error-related fields should be updated for background sessions.
+ */
+function updateBackgroundSessionByTaskId(
+  state: ExecutionState,
+  sessionId: string,
+  updater: (snapshot: SessionSnapshot) => Partial<SessionSnapshot>
+): Partial<ExecutionState> {
+  const found = findBackgroundSessionByTaskId(state, sessionId);
+  if (!found) return {};
+  const { key, snapshot } = found;
+  const updates = updater(snapshot);
+  return {
+    backgroundSessions: {
+      ...state.backgroundSessions,
+      [key]: { ...snapshot, ...updates },
+    },
+  };
+}
+
+/**
+ * Append a StreamLine to a background session's streamingOutput.
+ * Each background session maintains its own streamLineCounter so IDs
+ * stay unique within that snapshot.
+ */
+function appendToBackgroundSession(
+  state: ExecutionState,
+  sessionId: string,
+  content: string,
+  type: StreamLineType
+): Partial<ExecutionState> {
+  return updateBackgroundSessionByTaskId(state, sessionId, (snapshot) => {
+    const nextId = snapshot.streamLineCounter + 1;
+    const newLine: StreamLine = {
+      id: nextId,
+      content,
+      type,
+      timestamp: Date.now(),
+    };
+    return {
+      streamingOutput: [...snapshot.streamingOutput, newLine],
+      streamLineCounter: nextId,
+    };
+  });
+}
+
+/**
+ * Check whether a session_id from an incoming event belongs to the
+ * foreground session.  Returns true when the event should be handled
+ * by the normal foreground code path.
+ */
+function isForegroundSession(state: ExecutionState, sessionId: string | undefined): boolean {
+  if (!sessionId) return true;           // no session_id → treat as foreground
+  const fg = state.taskId;
+  if (!fg) return true;                  // no foreground task → treat as foreground
+  return fg === sessionId;
+}
+
 async function setupTauriEventListeners(
   get: () => ExecutionState,
   set: (partial: Partial<ExecutionState>) => void
@@ -3010,13 +3252,74 @@ async function setupTauriEventListeners(
     // UnifiedStreamEvent uses serde tagged enum: { type: "text_delta", content: "..." }
     const unlistenStream = await listen<StreamEventPayload>('claude_code:stream', (event) => {
       const { event: streamEvent, session_id } = event.payload;
+      const state = get();
 
-      // Only process events for current session
-      const currentTaskId = get().taskId;
-      if (currentTaskId && currentTaskId !== session_id) {
+      // ---- Route to background session if not foreground ----
+      if (!isForegroundSession(state, session_id)) {
+        switch (streamEvent.type) {
+          case 'text_delta': {
+            // Use the background snapshot's own ToolCallStreamFilter to keep
+            // filtering isolated per session.
+            const found = findBackgroundSessionByTaskId(state, session_id);
+            if (!found) return;
+            const filterResult = found.snapshot.toolCallFilter.processChunk(streamEvent.content);
+            let bgUpdate: Partial<ExecutionState> = {};
+            if (filterResult.output) {
+              bgUpdate = appendToBackgroundSession(get(), session_id, filterResult.output, 'text');
+              if (Object.keys(bgUpdate).length > 0) set(bgUpdate);
+            }
+            if (filterResult.toolIndicator) {
+              bgUpdate = appendToBackgroundSession(get(), session_id, filterResult.toolIndicator, 'tool');
+              if (Object.keys(bgUpdate).length > 0) set(bgUpdate);
+            }
+            break;
+          }
+          case 'tool_start':
+            set(appendToBackgroundSession(state, session_id, `[tool] ${streamEvent.tool_name} started`, 'tool'));
+            break;
+          case 'tool_result': {
+            const bgIsError = !!streamEvent.error;
+            set(appendToBackgroundSession(
+              get(), session_id,
+              `[tool] ${streamEvent.tool_id} ${bgIsError ? 'failed' : 'completed'}`,
+              bgIsError ? 'error' : 'success'
+            ));
+            break;
+          }
+          case 'error':
+            set(appendToBackgroundSession(get(), session_id, streamEvent.message, 'error'));
+            set(updateBackgroundSessionByTaskId(get(), session_id, () => ({
+              status: 'failed' as ExecutionStatus,
+            })));
+            break;
+          case 'complete': {
+            // Flush the per-session tool-call filter
+            const bgFound = findBackgroundSessionByTaskId(get(), session_id);
+            if (bgFound) {
+              const bgFlushed = bgFound.snapshot.toolCallFilter.flush();
+              if (bgFlushed) {
+                set(appendToBackgroundSession(get(), session_id, bgFlushed, 'text'));
+              }
+            }
+            // Mark session as idle (chat) or completed
+            const bgFoundAfter = findBackgroundSessionByTaskId(get(), session_id);
+            if (bgFoundAfter) {
+              const nextStatus: ExecutionStatus = bgFoundAfter.snapshot.isChatSession ? 'idle' : 'completed';
+              set(updateBackgroundSessionByTaskId(get(), session_id, () => ({
+                status: nextStatus,
+              })));
+            }
+            break;
+          }
+          // thinking_start, thinking_delta: skip for background sessions
+          // (not needed for background display)
+          default:
+            break;
+        }
         return;
       }
 
+      // ---- Foreground session processing (existing logic, unchanged) ----
       switch (streamEvent.type) {
         case 'text_delta': {
           const filterResult = get().toolCallFilter.processChunk(streamEvent.content);
@@ -3129,8 +3432,25 @@ async function setupTauriEventListeners(
       update_type: string;
       session_id: string;
     }>('claude_code:tool', (event) => {
-      const { execution, update_type } = event.payload;
+      const { execution, update_type, session_id } = event.payload;
+      const state = get();
 
+      // ---- Route to background session if not foreground ----
+      if (!isForegroundSession(state, session_id)) {
+        if (update_type === 'started') {
+          set(appendToBackgroundSession(get(), session_id, `[tool] ${execution.tool_name} started`, 'tool'));
+        } else if (update_type === 'completed') {
+          const bgStatus = execution.success ? 'success' : 'failed';
+          set(appendToBackgroundSession(
+            get(), session_id,
+            `[tool] ${execution.tool_name} ${bgStatus}`,
+            execution.success ? 'success' : 'error'
+          ));
+        }
+        return;
+      }
+
+      // ---- Foreground processing (existing logic) ----
       if (update_type === 'started') {
         get().addLog(`Tool started: ${execution.tool_name}`);
         get().appendStreamLine(`[tool] ${execution.tool_name} started`, 'tool');
@@ -3148,7 +3468,28 @@ async function setupTauriEventListeners(
       update_type: string;
     }>('claude_code:session', (event) => {
       const { session, update_type } = event.payload;
+      const state = get();
 
+      // ---- Route to background session if not foreground ----
+      if (!isForegroundSession(state, session.id)) {
+        if (update_type === 'state_changed') {
+          if (session.state === 'error') {
+            const errorMsg = session.error_message || 'Unknown error';
+            set(appendToBackgroundSession(get(), session.id, `Session error: ${errorMsg}`, 'error'));
+            set(updateBackgroundSessionByTaskId(get(), session.id, () => ({
+              status: 'failed' as ExecutionStatus,
+            })));
+          } else if (session.state === 'cancelled') {
+            set(appendToBackgroundSession(get(), session.id, 'Session cancelled.', 'warning'));
+            set(updateBackgroundSessionByTaskId(get(), session.id, () => ({
+              status: 'idle' as ExecutionStatus,
+            })));
+          }
+        }
+        return;
+      }
+
+      // ---- Foreground processing (existing logic) ----
       if (update_type === 'state_changed') {
         if (session.state === 'error') {
           get().appendStreamLine(`Session error: ${session.error_message || 'Unknown error'}`, 'error');

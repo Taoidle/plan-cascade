@@ -17,6 +17,7 @@ import { ConnectionStatus } from './ConnectionStatus';
 import { MessageActions, EditMode } from './MessageActions';
 import { ModelSwitcher } from './ModelSwitcher';
 import { WorkspaceTreeSidebar } from './WorkspaceTreeSidebar';
+import { DiffPanel } from './DiffPanel';
 import { useExecutionStore, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { deriveConversationTurns } from '../../lib/conversationUtils';
@@ -59,6 +60,9 @@ export function SimpleMode() {
     attachments,
     addAttachment,
     removeAttachment,
+    backgroundSessions,
+    switchToSession,
+    removeBackgroundSession,
   } = useExecutionStore();
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
@@ -66,6 +70,7 @@ export function SimpleMode() {
 
   const [description, setDescription] = useState('');
   const [showOutputPanel, setShowOutputPanel] = useState(false);
+  const [showDiffPanel, setShowDiffPanel] = useState(false);
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
 
   useEffect(() => {
@@ -120,6 +125,7 @@ export function SimpleMode() {
     (historyId: string) => {
       restoreFromHistory(historyId);
       setShowOutputPanel(false);
+      setShowDiffPanel(false);
       setWorkflowMode('chat');
     },
     [restoreFromHistory]
@@ -132,6 +138,9 @@ export function SimpleMode() {
     () => streamingOutput.filter((line) => line.type !== 'text' && line.type !== 'info').length,
     [streamingOutput]
   );
+
+  // Whether any right panel is visible (for grid layout calculation)
+  const showRightPanel = showOutputPanel || showDiffPanel;
 
   return (
     <div className="h-full flex flex-col">
@@ -186,7 +195,13 @@ export function SimpleMode() {
           </div>
 
           <button
-            onClick={() => setShowOutputPanel((v) => !v)}
+            onClick={() => {
+              setShowOutputPanel((v) => {
+                const next = !v;
+                if (next) setShowDiffPanel(false);
+                return next;
+              });
+            }}
             className={clsx(
               'text-sm px-3 py-1.5 rounded-lg transition-colors',
               'text-gray-600 dark:text-gray-400',
@@ -197,6 +212,25 @@ export function SimpleMode() {
           >
             Output{detailLineCount > 0 ? ` (${detailLineCount})` : ''}
           </button>
+
+          <button
+            onClick={() => {
+              setShowDiffPanel((v) => {
+                const next = !v;
+                if (next) setShowOutputPanel(false);
+                return next;
+              });
+            }}
+            className={clsx(
+              'text-sm px-3 py-1.5 rounded-lg transition-colors',
+              'text-gray-600 dark:text-gray-400',
+              'hover:bg-gray-100 dark:hover:bg-gray-800',
+              showDiffPanel && 'bg-gray-100 dark:bg-gray-800'
+            )}
+            title={t('diffPanel.title', { defaultValue: 'Changes' })}
+          >
+            {t('diffPanel.title', { defaultValue: 'Diffs' })}
+          </button>
         </div>
       </div>
 
@@ -205,10 +239,10 @@ export function SimpleMode() {
           className={clsx(
             'h-full max-w-[2200px] mx-auto w-full grid gap-4',
             sidebarCollapsed
-              ? (showOutputPanel
+              ? (showRightPanel
                   ? 'grid-cols-1 xl:grid-cols-[minmax(480px,1fr)_minmax(520px,0.95fr)]'
                   : 'grid-cols-1 xl:grid-cols-[minmax(640px,1fr)]')
-              : (showOutputPanel
+              : (showRightPanel
                   ? 'grid-cols-1 xl:grid-cols-[280px_minmax(480px,1fr)_minmax(520px,0.95fr)]'
                   : 'grid-cols-1 xl:grid-cols-[280px_minmax(640px,1fr)]')
           )}
@@ -222,6 +256,9 @@ export function SimpleMode() {
               onClear={clearHistory}
               onNewTask={handleNewTask}
               currentTask={isChatSession ? (streamingOutput[0]?.content || null) : null}
+              backgroundSessions={backgroundSessions}
+              onSwitchSession={switchToSession}
+              onRemoveSession={removeBackgroundSession}
             />
           )}
 
@@ -285,6 +322,13 @@ export function SimpleMode() {
               </div>
               <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0" />
             </div>
+          )}
+
+          {showDiffPanel && (
+            <DiffPanel
+              streamingOutput={streamingOutput}
+              workspacePath={workspacePath}
+            />
           )}
         </div>
       </div>

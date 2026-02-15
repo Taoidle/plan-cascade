@@ -26,7 +26,10 @@ import {
   ImageIcon,
   FileIcon,
   UploadIcon,
+  EyeOpenIcon,
+  Pencil1Icon,
 } from '@radix-ui/react-icons';
+import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
 import type { FileAttachmentData } from '../../types/attachment';
 
 // ============================================================================
@@ -125,6 +128,12 @@ export function InputBox({
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const defaultPlaceholder = placeholder || t('input.placeholder');
+
+  // Focus state for compact-first layout
+  const [isFocused, setIsFocused] = useState(false);
+
+  // Preview mode state
+  const [isPreview, setIsPreview] = useState(false);
 
   // Drag & drop state
   const [isDragging, setIsDragging] = useState(false);
@@ -469,7 +478,7 @@ export function InputBox({
     const textarea = textareaRef.current;
     if (textarea) {
       textarea.style.height = 'auto';
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 400)}px`;
     }
   };
 
@@ -516,6 +525,17 @@ export function InputBox({
     }
   };
 
+  // Toggle between preview and edit mode
+  const handlePreviewToggle = useCallback(() => {
+    setIsPreview((prev) => {
+      if (prev) {
+        // Switching back to edit: restore focus after render
+        setTimeout(() => textareaRef.current?.focus(), 0);
+      }
+      return !prev;
+    });
+  }, []);
+
   const canSubmit = !disabled && !isLoading && (value.trim() || attachments.length > 0);
 
   return (
@@ -526,12 +546,14 @@ export function InputBox({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       className={clsx(
-        'relative rounded-xl transition-all',
+        'relative rounded-lg transition-all',
         'bg-white dark:bg-gray-800',
-        'border-2',
+        'border',
         isDragging
           ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-          : 'border-gray-200 dark:border-gray-700',
+          : isFocused || value
+            ? 'border-gray-300 dark:border-gray-600'
+            : 'border-gray-200 dark:border-gray-700',
         'focus-within:border-primary-500 dark:focus-within:border-primary-500',
         'shadow-sm',
         disabled && 'opacity-60 cursor-not-allowed'
@@ -539,7 +561,7 @@ export function InputBox({
     >
       {/* Drag overlay */}
       {isDragging && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl bg-primary-100/90 dark:bg-primary-900/90 border-2 border-dashed border-primary-500">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-primary-100/90 dark:bg-primary-900/90 border-2 border-dashed border-primary-500">
           <UploadIcon className="w-8 h-8 text-primary-600 dark:text-primary-400 mb-2" />
           <p className="text-sm font-medium text-primary-700 dark:text-primary-300">
             {t('attachment.dropHere', { defaultValue: 'Drop files here' })}
@@ -549,7 +571,7 @@ export function InputBox({
 
       {/* File chips */}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-4 pt-3 pb-1">
+        <div className="flex flex-wrap gap-1.5 px-3 pt-2 pb-1">
           {attachments.map((file) => (
             <FileChip
               key={file.id}
@@ -576,81 +598,124 @@ export function InputBox({
       )}
 
       {/* Input area */}
-      <div className="relative flex items-end gap-2 p-4">
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => {
-            handleTextChange(e.target.value);
-            handleInput();
-          }}
-          onKeyDown={handleKeyDown}
-          disabled={disabled}
-          placeholder={defaultPlaceholder}
-          rows={1}
-          className={clsx(
-            'flex-1 resize-none bg-transparent',
-            'text-gray-900 dark:text-white',
-            'placeholder-gray-400 dark:placeholder-gray-500',
-            'focus:outline-none',
-            'text-base leading-relaxed',
-            disabled && 'cursor-not-allowed'
-          )}
-        />
-
-        {/* @ Autocomplete dropdown */}
-        {isAutocompleteOpen && autocompleteFiles.length > 0 && (
+      <div className="relative flex items-end gap-2 px-3 py-2">
+        {isPreview ? (
+          /* Markdown preview */
           <div
-            ref={autocompleteRef}
+            data-testid="markdown-preview"
             className={clsx(
-              'absolute z-50 left-4 right-16 max-h-56 overflow-auto',
-              'bg-white dark:bg-gray-800',
-              'border border-gray-200 dark:border-gray-700',
-              'rounded-lg shadow-lg',
-              'bottom-full mb-2'
+              'flex-1 overflow-auto',
+              'text-base leading-relaxed',
+              'min-h-[1.5em] max-h-[400px]'
             )}
           >
-            <div className="sticky top-0 px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                {autocompleteQuery
-                  ? `Files matching "${autocompleteQuery}"`
-                  : 'Workspace files'}
-              </span>
-            </div>
-            <div className="py-1">
-              {autocompleteFiles.map((file, index) => (
-                <button
-                  key={file.path}
-                  onClick={() => handleAutocompleteSelect(file)}
-                  className={clsx(
-                    'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
-                    index === autocompleteIndex
-                      ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-900 dark:text-primary-100'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                  )}
-                >
-                  {file.is_dir ? (
-                    <FileIcon className="w-3.5 h-3.5 flex-shrink-0 text-amber-500" />
-                  ) : (
-                    <FileTextIcon className="w-3.5 h-3.5 flex-shrink-0 text-gray-400" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">
-                      {file.name}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {file.path}
-                      {!file.is_dir && file.size > 0 && (
-                        <span className="ml-1">
-                          ({formatFileSize(file.size)})
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
+            <MarkdownRenderer content={value} />
           </div>
+        ) : (
+          <>
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => {
+                handleTextChange(e.target.value);
+                handleInput();
+              }}
+              onInput={handleInput}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+              onKeyDown={handleKeyDown}
+              disabled={disabled}
+              placeholder={defaultPlaceholder}
+              rows={1}
+              className={clsx(
+                'flex-1 resize-none bg-transparent',
+                'text-gray-900 dark:text-white',
+                'placeholder-gray-400 dark:placeholder-gray-500',
+                'focus:outline-none',
+                'text-base leading-relaxed',
+                disabled && 'cursor-not-allowed'
+              )}
+            />
+
+            {/* @ Autocomplete dropdown */}
+            {isAutocompleteOpen && autocompleteFiles.length > 0 && (
+              <div
+                ref={autocompleteRef}
+                className={clsx(
+                  'absolute z-50 left-4 right-16 max-h-56 overflow-auto',
+                  'bg-white dark:bg-gray-800',
+                  'border border-gray-200 dark:border-gray-700',
+                  'rounded-lg shadow-lg',
+                  'bottom-full mb-2'
+                )}
+              >
+                <div className="sticky top-0 px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {autocompleteQuery
+                      ? `Files matching "${autocompleteQuery}"`
+                      : 'Workspace files'}
+                  </span>
+                </div>
+                <div className="py-1">
+                  {autocompleteFiles.map((file, index) => (
+                    <button
+                      key={file.path}
+                      onClick={() => handleAutocompleteSelect(file)}
+                      className={clsx(
+                        'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
+                        index === autocompleteIndex
+                          ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-900 dark:text-primary-100'
+                          : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                      )}
+                    >
+                      {file.is_dir ? (
+                        <FileIcon className="w-3.5 h-3.5 flex-shrink-0 text-amber-500" />
+                      ) : (
+                        <FileTextIcon className="w-3.5 h-3.5 flex-shrink-0 text-gray-400" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">
+                          {file.name}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                          {file.path}
+                          {!file.is_dir && file.size > 0 && (
+                            <span className="ml-1">
+                              ({formatFileSize(file.size)})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Preview toggle button — shown only when there is text */}
+        {value.trim() && (
+          <button
+            onClick={handlePreviewToggle}
+            className={clsx(
+              'flex items-center justify-center',
+              'w-10 h-10 rounded-lg',
+              'text-gray-500 dark:text-gray-400',
+              'hover:bg-gray-100 dark:hover:bg-gray-700',
+              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              'dark:focus:ring-offset-gray-800',
+              'transition-colors'
+            )}
+            title={isPreview ? t('input.switchToEdit') : t('input.previewMarkdown')}
+            data-testid="preview-toggle"
+          >
+            {isPreview ? (
+              <Pencil1Icon className="w-5 h-5" />
+            ) : (
+              <EyeOpenIcon className="w-5 h-5" />
+            )}
+          </button>
         )}
 
         {/* Attach button */}

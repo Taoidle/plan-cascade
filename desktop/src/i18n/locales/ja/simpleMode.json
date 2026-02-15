@@ -3,7 +3,9 @@
 
   "input": {
     "placeholder": "作りたいものを説明してください...",
-    "submitTitle": "送信 (Cmd+Enter)"
+    "submitTitle": "送信 (Cmd+Enter)",
+    "previewMarkdown": "Markdownプレビュー",
+    "switchToEdit": "編集に切替"
   },
 
   "history": {
@@ -76,6 +78,10 @@
     "sessionRestart": "新しいモデルでセッションが再開されます"
   },
 
+  "projectSelector": {
+    "openInFileManager": "ファイルマネージャーで開く"
+  },
+
   "sidebar": {
     "newTask": "新規タスク",
     "addDirectory": "ディレクトリ追加",
@@ -91,6 +97,19 @@
     "toggleSidebar": "サイドバー切替",
     "sessions": "セッション",
     "rename": "名前変更",
-    "deleteSession": "セッション削除"
+    "deleteSession": "セッション削除",
+    "activeSessions": "アクティブセッション",
+    "switchSession": "このセッションに切替",
+    "removeSession": "セッションを削除"
+  },
+
+  "diffPanel": {
+    "title": "変更",
+    "gitChanges": "Git 変更",
+    "toolChanges": "ツール変更",
+    "noChanges": "変更が検出されませんでした",
+    "notGitRepo": "Git リポジトリではありません",
+    "refresh": "更新",
+    "filesChanged": "{{count}} ファイルが変更されました"
   }
 }

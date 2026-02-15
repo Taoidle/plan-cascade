@@ -54,6 +54,21 @@ let mockStoreState = {
   isChatSession: false,
   streamingOutput: [] as Array<Record<string, unknown>>,
   standaloneTurns: [] as Array<Record<string, unknown>>,
+  history: [] as Array<Record<string, unknown>>,
+  clearHistory: vi.fn(),
+  deleteHistory: vi.fn(),
+  renameHistory: vi.fn(),
+  restoreFromHistory: vi.fn(),
+  sessionUsageTotals: null,
+  latestUsage: null,
+  analysisCoverage: null,
+  logs: [] as string[],
+  attachments: [] as Array<Record<string, unknown>>,
+  addAttachment: vi.fn(),
+  removeAttachment: vi.fn(),
+  backgroundSessions: {} as Record<string, unknown>,
+  switchToSession: vi.fn(),
+  removeBackgroundSession: vi.fn(),
 };
 
 vi.mock('../../store/execution', () => ({
@@ -138,6 +153,21 @@ describe('SimpleMode', () => {
       isChatSession: false,
       streamingOutput: [],
       standaloneTurns: [],
+      history: [],
+      clearHistory: vi.fn(),
+      deleteHistory: vi.fn(),
+      renameHistory: vi.fn(),
+      restoreFromHistory: vi.fn(),
+      sessionUsageTotals: null,
+      latestUsage: null,
+      analysisCoverage: null,
+      logs: [],
+      attachments: [],
+      addAttachment: vi.fn(),
+      removeAttachment: vi.fn(),
+      backgroundSessions: {},
+      switchToSession: vi.fn(),
+      removeBackgroundSession: vi.fn(),
     };
   });
 
