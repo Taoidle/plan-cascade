@@ -1,19 +1,26 @@
 //! Ollama Provider
 //!
-//! Implementation of the LlmProvider trait for Ollama local inference.
-//! Supports local model inference without API keys.
+//! Implementation of the LlmProvider trait for Ollama local inference
+//! using the ollama-rs native SDK. Supports local model inference without
+//! API keys, native tool calling (Unreliable reliability), and streaming.
 
 use async_trait::async_trait;
-use serde::Deserialize;
+use ollama_rs::generation::chat::request::ChatMessageRequest;
+use ollama_rs::generation::chat::{ChatMessage, ChatMessageResponse, MessageRole as OllamaRole};
+use ollama_rs::generation::parameters::ThinkType;
+use ollama_rs::generation::tools::{ToolCallFunction, ToolFunctionInfo, ToolInfo, ToolType};
+use ollama_rs::models::ModelOptions;
+use ollama_rs::Ollama;
 use tokio::sync::mpsc;
+use tokio_stream::StreamExt;
 
 use super::provider::LlmProvider;
 use super::types::{
-    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolCallReliability, ToolDefinition, UsageStats,
+    FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
+    MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallReliability,
+    ToolDefinition, UsageStats,
 };
-use crate::services::streaming::adapters::OllamaAdapter;
-use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
+use crate::services::streaming::UnifiedStreamEvent;
 
 /// Default Ollama API endpoint
 const OLLAMA_DEFAULT_URL: &str = "http://localhost:11434";
@@ -21,22 +28,44 @@ const OLLAMA_DEFAULT_URL: &str = "http://localhost:11434";
 /// Models known to support thinking via <think> tags
 const THINKING_MODELS: &[&str] = &["deepseek-r1", "qwq", "qwen-qwq"];
 
-/// Ollama provider for local inference
+/// Ollama provider for local inference using the native ollama-rs SDK
 pub struct OllamaProvider {
     config: ProviderConfig,
-    client: reqwest::Client,
+    client: Ollama,
 }
 
 impl OllamaProvider {
     /// Create a new Ollama provider with the given configuration
     pub fn new(config: ProviderConfig) -> Self {
-        Self {
-            config,
-            client: reqwest::Client::new(),
+        let base_url = config
+            .base_url
+            .as_deref()
+            .unwrap_or(OLLAMA_DEFAULT_URL);
+
+        let client = Self::create_client(base_url);
+
+        Self { config, client }
+    }
+
+    /// Create an Ollama SDK client from a base URL string.
+    ///
+    /// Parses the URL to extract host and port for `Ollama::new()`.
+    /// Falls back to `Ollama::default()` if parsing fails.
+    fn create_client(base_url: &str) -> Ollama {
+        // Try to parse the URL to extract host and port
+        if let Ok(parsed) = url::Url::parse(base_url) {
+            let scheme = parsed.scheme();
+            let host = parsed.host_str().unwrap_or("localhost");
+            let port = parsed.port().unwrap_or(11434);
+            // Reconstruct the host URL without port (Ollama::new takes them separately)
+            let host_url = format!("{}://{}", scheme, host);
+            Ollama::new(host_url, port)
+        } else {
+            Ollama::default()
         }
     }
 
-    /// Get the base URL for the Ollama server
+    /// Get the base URL for the Ollama server (used in error messages)
     fn base_url(&self) -> &str {
         self.config
             .base_url
@@ -58,115 +87,396 @@ impl OllamaProvider {
         model_lower.contains("r1") || model_lower.contains("qwq")
     }
 
-    /// Build the request body for the chat API
-    fn build_request_body(
+    /// Build a ChatMessageRequest from our unified types
+    fn build_chat_request(
         &self,
         messages: &[Message],
         system: Option<&str>,
-        _tools: &[ToolDefinition],
-        stream: bool,
+        tools: &[ToolDefinition],
         request_options: &LlmRequestOptions,
-    ) -> serde_json::Value {
-        let mut body = serde_json::json!({
-            "model": self.config.model,
-            "stream": stream,
-        });
-
-        // Add options
-        let mut options = serde_json::json!({});
-        options["temperature"] = serde_json::json!(request_options
-            .temperature_override
-            .unwrap_or(self.config.temperature));
-        if self.config.max_tokens > 0 {
-            options["num_predict"] = serde_json::json!(self.config.max_tokens);
-        }
-        body["options"] = options;
-
-        // Convert messages to Ollama format
-        let mut ollama_messages: Vec<serde_json::Value> = Vec::new();
+    ) -> ChatMessageRequest {
+        // Convert messages to ollama-rs ChatMessage format
+        let mut chat_messages: Vec<ChatMessage> = Vec::new();
 
         // Add system message if provided
         if let Some(sys) = system {
-            ollama_messages.push(serde_json::json!({
-                "role": "system",
-                "content": sys
-            }));
+            chat_messages.push(ChatMessage::system(sys.to_string()));
         }
 
         // Add conversation messages
         for msg in messages {
-            ollama_messages.push(self.message_to_ollama(msg));
+            chat_messages.extend(self.convert_message(msg));
         }
 
-        body["messages"] = serde_json::json!(ollama_messages);
+        // Create the base request
+        let mut request = ChatMessageRequest::new(self.config.model.clone(), chat_messages);
 
-        // Note: Ollama tool support is model-dependent and limited
-        // We skip tool definitions for now as not all models support it
+        // Set model options
+        let temperature = request_options
+            .temperature_override
+            .unwrap_or(self.config.temperature);
+        let mut opts = ModelOptions::default().temperature(temperature);
+        if self.config.max_tokens > 0 {
+            opts = opts.num_predict(self.config.max_tokens as i32);
+        }
+        request = request.options(opts);
 
-        body
-    }
+        // Enable thinking for models that support it
+        if self.model_supports_thinking() && self.config.enable_thinking {
+            request = request.think(ThinkType::True);
+        }
 
-    /// Convert a Message to Ollama API format
-    fn message_to_ollama(&self, message: &Message) -> serde_json::Value {
-        let role = match message.role {
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::System => "system",
-        };
-
-        // Collect text content
-        let text_content: String = message
-            .content
-            .iter()
-            .filter_map(|c| match c {
-                MessageContent::Text { text } => Some(text.as_str()),
-                MessageContent::ToolResult { content, .. } => Some(content.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        serde_json::json!({
-            "role": role,
-            "content": text_content
-        })
-    }
-
-    /// Parse a response from Ollama API
-    fn parse_response(&self, response: &OllamaResponse) -> LlmResponse {
-        let mut content = None;
-        let mut thinking = None;
-
-        if let Some(msg) = &response.message {
-            if let Some(raw_content) = &msg.content {
-                let (think, text) = self.extract_thinking(raw_content);
-                thinking = think;
-                content = text;
+        // Convert and set tools if provided
+        if !tools.is_empty() {
+            let ollama_tools: Vec<ToolInfo> = tools
+                .iter()
+                .filter_map(|t| self.convert_tool_definition(t))
+                .collect();
+            if !ollama_tools.is_empty() {
+                request = request.tools(ollama_tools);
             }
         }
 
-        let usage = UsageStats {
-            input_tokens: response.prompt_eval_count.unwrap_or(0),
-            output_tokens: response.eval_count.unwrap_or(0),
-            thinking_tokens: None,
-            cache_read_tokens: None,
-            cache_creation_tokens: None,
+        request
+    }
+
+    /// Convert a unified Message to ollama-rs ChatMessage(s).
+    ///
+    /// A single unified Message may contain multiple content blocks (text, tool_use,
+    /// tool_result, thinking), so this can return multiple ChatMessages.
+    fn convert_message(&self, message: &Message) -> Vec<ChatMessage> {
+        let mut result = Vec::new();
+
+        // Collect text content from the message
+        let mut text_parts: Vec<String> = Vec::new();
+
+        for content in &message.content {
+            match content {
+                MessageContent::Text { text } => {
+                    text_parts.push(text.clone());
+                }
+                MessageContent::ToolResult { content, .. } => {
+                    // Tool results go as tool-role messages
+                    result.push(ChatMessage::tool(content.clone()));
+                }
+                MessageContent::ToolUse {
+                    id: _,
+                    name,
+                    input,
+                } => {
+                    // Tool use from assistant - create an assistant message with tool_calls
+                    let mut msg = ChatMessage::assistant(String::new());
+                    msg.tool_calls = vec![ollama_rs::generation::tools::ToolCall {
+                        function: ToolCallFunction {
+                            name: name.clone(),
+                            arguments: input.clone(),
+                        },
+                    }];
+                    result.push(msg);
+                }
+                MessageContent::Thinking { thinking, .. } => {
+                    // Include thinking content in text for models that support it
+                    text_parts.push(thinking.clone());
+                }
+                MessageContent::Image { .. }
+                | MessageContent::ToolResultMultimodal { .. } => {
+                    // Images/multimodal not fully supported by Ollama SDK in text mode
+                    // Skip or convert to text placeholder
+                }
+            }
+        }
+
+        // If we have text content, push a single message with the combined text
+        if !text_parts.is_empty() {
+            let combined_text = text_parts.join("\n");
+            let role = match message.role {
+                MessageRole::User => OllamaRole::User,
+                MessageRole::Assistant => OllamaRole::Assistant,
+                MessageRole::System => OllamaRole::System,
+            };
+            result.insert(0, ChatMessage::new(role, combined_text));
+        }
+
+        // If no content was generated, push at least a minimal message
+        if result.is_empty() {
+            let role = match message.role {
+                MessageRole::User => OllamaRole::User,
+                MessageRole::Assistant => OllamaRole::Assistant,
+                MessageRole::System => OllamaRole::System,
+            };
+            result.push(ChatMessage::new(role, String::new()));
+        }
+
+        result
+    }
+
+    /// Convert a unified ToolDefinition to ollama-rs ToolInfo.
+    ///
+    /// Uses schemars Schema to represent the parameter schema.
+    fn convert_tool_definition(&self, tool: &ToolDefinition) -> Option<ToolInfo> {
+        // Convert our ParameterSchema to a schemars Schema via JSON round-trip.
+        // Our ParameterSchema is already a JSON Schema-like structure, so we serialize
+        // it to JSON and then deserialize it as a schemars Schema.
+        let schema_json = match serde_json::to_value(&tool.input_schema) {
+            Ok(v) => v,
+            Err(_) => return None,
+        };
+
+        let schema: schemars::Schema = match serde_json::from_value(schema_json) {
+            Ok(s) => s,
+            Err(_) => return None,
+        };
+
+        Some(ToolInfo {
+            tool_type: ToolType::Function,
+            function: ToolFunctionInfo {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
+                parameters: schema,
+            },
+        })
+    }
+
+    /// Convert an ollama-rs ChatMessageResponse to our unified LlmResponse (non-streaming).
+    fn convert_response(&self, response: &ChatMessageResponse) -> LlmResponse {
+        let msg = &response.message;
+
+        // Extract thinking and text from content
+        let (thinking, content) = self.extract_thinking(&msg.content);
+
+        // Convert tool calls
+        let tool_calls: Vec<ToolCall> = msg
+            .tool_calls
+            .iter()
+            .enumerate()
+            .map(|(i, tc)| ToolCall {
+                id: format!("call_{}", i),
+                name: tc.function.name.clone(),
+                arguments: tc.function.arguments.clone(),
+            })
+            .collect();
+
+        // Determine stop reason
+        let stop_reason = if !tool_calls.is_empty() {
+            StopReason::ToolUse
+        } else {
+            StopReason::EndTurn
+        };
+
+        // Extract usage from final_data
+        let usage = if let Some(final_data) = &response.final_data {
+            UsageStats {
+                input_tokens: final_data.prompt_eval_count as u32,
+                output_tokens: final_data.eval_count as u32,
+                thinking_tokens: None,
+                cache_read_tokens: None,
+                cache_creation_tokens: None,
+            }
+        } else {
+            UsageStats::default()
         };
 
         LlmResponse {
             content,
             thinking,
-            tool_calls: Vec::new(), // Ollama tool support is limited
-            stop_reason: StopReason::EndTurn,
+            tool_calls,
+            stop_reason,
             usage,
-            model: response
-                .model
-                .clone()
-                .unwrap_or_else(|| self.config.model.clone()),
+            model: response.model.clone(),
         }
     }
 
-    /// Extract thinking content from <think> tags
+    /// Process a single streaming ChatMessageResponse chunk and emit UnifiedStreamEvents.
+    ///
+    /// Returns any text or thinking content accumulated in this chunk for the final response.
+    async fn process_stream_chunk(
+        &self,
+        response: &ChatMessageResponse,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+        in_thinking: &mut bool,
+        thinking_started: &mut bool,
+    ) -> (Option<String>, Option<String>, Vec<ToolCall>) {
+        let msg = &response.message;
+        let mut text_content = None;
+        let mut thinking_content = None;
+        let mut tool_calls = Vec::new();
+
+        // Handle thinking field from SDK (if present)
+        if let Some(ref thinking_text) = msg.thinking {
+            if !thinking_text.is_empty() {
+                if !*thinking_started {
+                    *thinking_started = true;
+                    *in_thinking = true;
+                    let _ = tx
+                        .send(UnifiedStreamEvent::ThinkingStart { thinking_id: None })
+                        .await;
+                }
+                thinking_content = Some(thinking_text.clone());
+                let _ = tx
+                    .send(UnifiedStreamEvent::ThinkingDelta {
+                        content: thinking_text.clone(),
+                        thinking_id: None,
+                    })
+                    .await;
+            }
+        }
+
+        // Handle text content
+        if !msg.content.is_empty() {
+            // If we were in thinking mode and now getting text, end thinking
+            if *in_thinking {
+                *in_thinking = false;
+                let _ = tx
+                    .send(UnifiedStreamEvent::ThinkingEnd { thinking_id: None })
+                    .await;
+            }
+
+            // For models that use <think> tags in content (when SDK doesn't extract them),
+            // we need to handle it at the content level
+            if self.model_supports_thinking() && !*thinking_started {
+                // Check for <think> tags inline
+                let (think, text) = self.extract_thinking_streaming_chunk(
+                    &msg.content,
+                    in_thinking,
+                    thinking_started,
+                    tx,
+                )
+                .await;
+                thinking_content = think;
+                text_content = text;
+            } else {
+                text_content = Some(msg.content.clone());
+                let _ = tx
+                    .send(UnifiedStreamEvent::TextDelta {
+                        content: msg.content.clone(),
+                    })
+                    .await;
+            }
+        }
+
+        // Handle tool calls
+        for (i, tc) in msg.tool_calls.iter().enumerate() {
+            let tool_call = ToolCall {
+                id: format!("call_{}", i),
+                name: tc.function.name.clone(),
+                arguments: tc.function.arguments.clone(),
+            };
+            tool_calls.push(tool_call);
+        }
+
+        // Handle completion
+        if response.done {
+            // End thinking if still in progress
+            if *in_thinking {
+                *in_thinking = false;
+                let _ = tx
+                    .send(UnifiedStreamEvent::ThinkingEnd { thinking_id: None })
+                    .await;
+            }
+
+            // Emit usage if final_data available
+            if let Some(final_data) = &response.final_data {
+                let _ = tx
+                    .send(UnifiedStreamEvent::Usage {
+                        input_tokens: final_data.prompt_eval_count as u32,
+                        output_tokens: final_data.eval_count as u32,
+                        thinking_tokens: None,
+                        cache_read_tokens: None,
+                        cache_creation_tokens: None,
+                    })
+                    .await;
+            }
+        }
+
+        (text_content, thinking_content, tool_calls)
+    }
+
+    /// Handle <think> tag extraction during streaming for models that embed
+    /// thinking in the content field (rather than the SDK's thinking field).
+    async fn extract_thinking_streaming_chunk(
+        &self,
+        content: &str,
+        in_thinking: &mut bool,
+        thinking_started: &mut bool,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+    ) -> (Option<String>, Option<String>) {
+        let mut thinking_result = None;
+        let mut text_result = None;
+
+        // Simple chunk-level processing:
+        // The content may contain partial <think> or </think> tags.
+        // Since we process chunk-by-chunk, we handle full tags here.
+        let mut remaining = content.to_string();
+
+        while !remaining.is_empty() {
+            if *in_thinking {
+                // Look for </think> end tag
+                if let Some(end_pos) = remaining.find("</think>") {
+                    let thinking_part = &remaining[..end_pos];
+                    if !thinking_part.is_empty() {
+                        thinking_result = Some(thinking_part.to_string());
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ThinkingDelta {
+                                content: thinking_part.to_string(),
+                                thinking_id: None,
+                            })
+                            .await;
+                    }
+                    *in_thinking = false;
+                    let _ = tx
+                        .send(UnifiedStreamEvent::ThinkingEnd { thinking_id: None })
+                        .await;
+                    remaining = remaining[end_pos + 8..].to_string();
+                } else {
+                    // All of remaining is thinking content
+                    thinking_result = Some(remaining.clone());
+                    let _ = tx
+                        .send(UnifiedStreamEvent::ThinkingDelta {
+                            content: remaining.clone(),
+                            thinking_id: None,
+                        })
+                        .await;
+                    remaining.clear();
+                }
+            } else {
+                // Look for <think> start tag
+                if let Some(start_pos) = remaining.find("<think>") {
+                    let text_part = &remaining[..start_pos];
+                    if !text_part.is_empty() {
+                        text_result = Some(text_part.to_string());
+                        let _ = tx
+                            .send(UnifiedStreamEvent::TextDelta {
+                                content: text_part.to_string(),
+                            })
+                            .await;
+                    }
+                    *in_thinking = true;
+                    if !*thinking_started {
+                        *thinking_started = true;
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ThinkingStart { thinking_id: None })
+                            .await;
+                    }
+                    remaining = remaining[start_pos + 7..].to_string();
+                } else {
+                    // All of remaining is text content
+                    text_result = Some(remaining.clone());
+                    let _ = tx
+                        .send(UnifiedStreamEvent::TextDelta {
+                            content: remaining.clone(),
+                        })
+                        .await;
+                    remaining.clear();
+                }
+            }
+        }
+
+        (thinking_result, text_result)
+    }
+
+    /// Extract thinking content from <think> tags (non-streaming version).
+    ///
+    /// Preserved from the original implementation for the non-streaming `send_message` path.
     fn extract_thinking(&self, content: &str) -> (Option<String>, Option<String>) {
         if !self.model_supports_thinking() {
             return (
@@ -245,12 +555,18 @@ impl LlmProvider for OllamaProvider {
     }
 
     fn supports_tools(&self) -> bool {
-        // Ollama tool support is model-dependent and generally limited
-        false
+        // With ollama-rs SDK, native tool calling is available
+        true
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
-        ToolCallReliability::None
+        // ADR-002: Upgrade from None to Unreliable - enables dual-channel tool calling
+        ToolCallReliability::Unreliable
+    }
+
+    fn default_fallback_mode(&self) -> FallbackToolFormatMode {
+        // Dual-channel: native tools + soft prompt fallback for reliability
+        FallbackToolFormatMode::Soft
     }
 
     fn context_window(&self) -> u32 {
@@ -267,57 +583,37 @@ impl LlmProvider for OllamaProvider {
         tools: Vec<ToolDefinition>,
         request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let url = format!("{}/api/chat", self.base_url());
-        let body = self.build_request_body(
+        let request = self.build_chat_request(
             &messages,
             system.as_deref(),
             &tools,
-            false,
             &request_options,
         );
 
         let response = self
             .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
+            .send_chat_messages(request)
             .await
             .map_err(|e| {
-                if e.is_connect() {
+                let msg = e.to_string();
+                if msg.contains("connect") || msg.contains("Connection refused") {
                     LlmError::ProviderUnavailable {
-                        message: format!("Cannot connect to Ollama at {}: {}", self.base_url(), e),
+                        message: format!(
+                            "Cannot connect to Ollama at {}: {}",
+                            self.base_url(),
+                            msg
+                        ),
+                    }
+                } else if msg.contains("not found") || msg.contains("404") {
+                    LlmError::ModelNotFound {
+                        model: self.config.model.clone(),
                     }
                 } else {
-                    LlmError::NetworkError {
-                        message: e.to_string(),
-                    }
+                    LlmError::NetworkError { message: msg }
                 }
             })?;
 
-        let status = response.status().as_u16();
-        let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
-            message: e.to_string(),
-        })?;
-
-        if status != 200 {
-            if status == 404 {
-                return Err(LlmError::ModelNotFound {
-                    model: self.config.model.clone(),
-                });
-            }
-            return Err(LlmError::ServerError {
-                message: body_text,
-                status: Some(status),
-            });
-        }
-
-        let ollama_response: OllamaResponse =
-            serde_json::from_str(&body_text).map_err(|e| LlmError::ParseError {
-                message: format!("Failed to parse response: {}", e),
-            })?;
-
-        Ok(self.parse_response(&ollama_response))
+        Ok(self.convert_response(&response))
     }
 
     async fn stream_message(
@@ -328,171 +624,91 @@ impl LlmProvider for OllamaProvider {
         tx: mpsc::Sender<UnifiedStreamEvent>,
         request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let url = format!("{}/api/chat", self.base_url());
-        let body =
-            self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
+        let request = self.build_chat_request(
+            &messages,
+            system.as_deref(),
+            &tools,
+            &request_options,
+        );
 
-        let response = self
+        let mut stream = self
             .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
+            .send_chat_messages_stream(request)
             .await
             .map_err(|e| {
-                if e.is_connect() {
+                let msg = e.to_string();
+                if msg.contains("connect") || msg.contains("Connection refused") {
                     LlmError::ProviderUnavailable {
-                        message: format!("Cannot connect to Ollama at {}: {}", self.base_url(), e),
+                        message: format!(
+                            "Cannot connect to Ollama at {}: {}",
+                            self.base_url(),
+                            msg
+                        ),
+                    }
+                } else if msg.contains("not found") || msg.contains("404") {
+                    LlmError::ModelNotFound {
+                        model: self.config.model.clone(),
                     }
                 } else {
-                    LlmError::NetworkError {
-                        message: e.to_string(),
-                    }
+                    LlmError::NetworkError { message: msg }
                 }
             })?;
 
-        let status = response.status().as_u16();
-        if status != 200 {
-            let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-            if status == 404 {
-                return Err(LlmError::ModelNotFound {
-                    model: self.config.model.clone(),
-                });
-            }
-            return Err(LlmError::ServerError {
-                message: body_text,
-                status: Some(status),
-            });
-        }
-
-        // Process stream
-        let mut adapter = OllamaAdapter::new(&self.config.model);
         let mut accumulated_content = String::new();
         let mut accumulated_thinking = String::new();
-        let mut tool_calls = Vec::new();
+        let mut all_tool_calls: Vec<ToolCall> = Vec::new();
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
+        let mut in_thinking = false;
+        let mut thinking_started = false;
+        let mut response_model = self.config.model.clone();
 
-        let mut stream = response.bytes_stream();
-        use futures_util::StreamExt;
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(response) => {
+                    response_model = response.model.clone();
 
-        let mut buffer = String::new();
+                    let (text, thinking, tool_calls) = self
+                        .process_stream_chunk(
+                            &response,
+                            &tx,
+                            &mut in_thinking,
+                            &mut thinking_started,
+                        )
+                        .await;
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
-
-            // Process complete JSON objects (each line is a JSON object)
-            while let Some(line_end) = buffer.find('\n') {
-                let line = buffer[..line_end].to_string();
-                buffer = buffer[line_end + 1..].to_string();
-
-                if line.trim().is_empty() {
-                    continue;
-                }
-
-                match adapter.adapt(&line) {
-                    Ok(events) => {
-                        for event in events {
-                            match &event {
-                                UnifiedStreamEvent::TextDelta { content } => {
-                                    accumulated_content.push_str(content);
-                                }
-                                UnifiedStreamEvent::ThinkingDelta { content, .. } => {
-                                    accumulated_thinking.push_str(content);
-                                }
-                                UnifiedStreamEvent::ToolComplete {
-                                    tool_id,
-                                    tool_name,
-                                    arguments,
-                                } => {
-                                    if let Ok(input) = serde_json::from_str(arguments) {
-                                        tool_calls.push(ToolCall {
-                                            id: tool_id.clone(),
-                                            name: tool_name.clone(),
-                                            arguments: input,
-                                        });
-                                    }
-                                }
-                                UnifiedStreamEvent::Usage {
-                                    input_tokens,
-                                    output_tokens,
-                                    ..
-                                } => {
-                                    usage.input_tokens = *input_tokens;
-                                    usage.output_tokens = *output_tokens;
-                                }
-                                UnifiedStreamEvent::Complete {
-                                    stop_reason: Some(reason),
-                                } => {
-                                    stop_reason = StopReason::from(reason.as_str());
-                                }
-                                _ => {}
-                            }
-
-                            // Forward streaming events but suppress internal signals —
-                            // the orchestrator emits its own Complete, Usage, and
-                            // tool lifecycle events after executing tools.
-                            if !matches!(
-                                &event,
-                                UnifiedStreamEvent::Complete { .. }
-                                    | UnifiedStreamEvent::Usage { .. }
-                                    | UnifiedStreamEvent::ToolStart { .. }
-                                    | UnifiedStreamEvent::ToolComplete { .. }
-                            ) {
-                                let _ = tx.send(event).await;
-                            }
-                        }
+                    if let Some(t) = text {
+                        accumulated_content.push_str(&t);
                     }
-                    Err(e) => {
-                        let _ = tx
-                            .send(UnifiedStreamEvent::Error {
-                                message: e.to_string(),
-                                code: None,
-                            })
-                            .await;
+                    if let Some(th) = thinking {
+                        accumulated_thinking.push_str(&th);
+                    }
+                    if !tool_calls.is_empty() {
+                        stop_reason = StopReason::ToolUse;
+                        all_tool_calls.extend(tool_calls);
+                    }
+
+                    // Capture usage from final response
+                    if response.done {
+                        if let Some(final_data) = &response.final_data {
+                            usage = UsageStats {
+                                input_tokens: final_data.prompt_eval_count as u32,
+                                output_tokens: final_data.eval_count as u32,
+                                thinking_tokens: None,
+                                cache_read_tokens: None,
+                                cache_creation_tokens: None,
+                            };
+                        }
                     }
                 }
-            }
-        }
-
-        // Process any remaining data in buffer
-        if !buffer.trim().is_empty() {
-            if let Ok(events) = adapter.adapt(&buffer) {
-                for event in events {
-                    match &event {
-                        UnifiedStreamEvent::TextDelta { content } => {
-                            accumulated_content.push_str(content);
-                        }
-                        UnifiedStreamEvent::ThinkingDelta { content, .. } => {
-                            accumulated_thinking.push_str(content);
-                        }
-                        UnifiedStreamEvent::ToolComplete {
-                            tool_id,
-                            tool_name,
-                            arguments,
-                        } => {
-                            if let Ok(input) = serde_json::from_str(arguments) {
-                                tool_calls.push(ToolCall {
-                                    id: tool_id.clone(),
-                                    name: tool_name.clone(),
-                                    arguments: input,
-                                });
-                            }
-                        }
-                        _ => {}
-                    }
-                    if !matches!(
-                        &event,
-                        UnifiedStreamEvent::Complete { .. } | UnifiedStreamEvent::Usage { .. }
-                    ) {
-                        let _ = tx.send(event).await;
-                    }
+                Err(_) => {
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Error {
+                            message: "Stream error from Ollama".to_string(),
+                            code: None,
+                        })
+                        .await;
+                    break;
                 }
             }
         }
@@ -508,35 +724,30 @@ impl LlmProvider for OllamaProvider {
             } else {
                 Some(accumulated_thinking)
             },
-            tool_calls,
+            tool_calls: all_tool_calls,
             stop_reason,
             usage,
-            model: self.config.model.clone(),
+            model: response_model,
         })
     }
 
     async fn health_check(&self) -> LlmResult<()> {
-        let url = format!("{}/api/tags", self.base_url());
-
-        let response = self.client.get(&url).send().await.map_err(|e| {
-            if e.is_connect() {
-                LlmError::ProviderUnavailable {
-                    message: format!("Cannot connect to Ollama at {}", self.base_url()),
+        // Use the SDK's list_local_models as a health check
+        self.client
+            .list_local_models()
+            .await
+            .map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("connect") || msg.contains("Connection refused") {
+                    LlmError::ProviderUnavailable {
+                        message: format!("Cannot connect to Ollama at {}", self.base_url()),
+                    }
+                } else {
+                    LlmError::NetworkError { message: msg }
                 }
-            } else {
-                LlmError::NetworkError {
-                    message: e.to_string(),
-                }
-            }
-        })?;
+            })?;
 
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            Err(LlmError::ProviderUnavailable {
-                message: "Ollama server returned error".to_string(),
-            })
-        }
+        Ok(())
     }
 
     fn config(&self) -> &ProviderConfig {
@@ -544,60 +755,25 @@ impl LlmProvider for OllamaProvider {
     }
 
     async fn list_models(&self) -> LlmResult<Option<Vec<String>>> {
-        let url = format!("{}/api/tags", self.base_url());
-
-        let response = self.client.get(&url).send().await.map_err(|e| {
-            if e.is_connect() {
-                LlmError::ProviderUnavailable {
-                    message: format!("Cannot connect to Ollama at {}", self.base_url()),
+        let models = self
+            .client
+            .list_local_models()
+            .await
+            .map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("connect") || msg.contains("Connection refused") {
+                    LlmError::ProviderUnavailable {
+                        message: format!("Cannot connect to Ollama at {}", self.base_url()),
+                    }
+                } else {
+                    LlmError::NetworkError { message: msg }
                 }
-            } else {
-                LlmError::NetworkError {
-                    message: e.to_string(),
-                }
-            }
-        })?;
+            })?;
 
-        let status = response.status().as_u16();
-        if status != 200 {
-            return Err(LlmError::ServerError {
-                message: "Failed to list models".to_string(),
-                status: Some(status),
-            });
-        }
+        let model_names: Vec<String> = models.into_iter().map(|m| m.name).collect();
 
-        let body: serde_json::Value = response.json().await.map_err(|e| LlmError::ParseError {
-            message: e.to_string(),
-        })?;
-
-        let models = body["models"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        Ok(Some(models))
+        Ok(Some(model_names))
     }
-}
-
-/// Ollama API response format
-#[derive(Debug, Deserialize)]
-struct OllamaResponse {
-    model: Option<String>,
-    message: Option<ResponseMessage>,
-    done: bool,
-    #[serde(default)]
-    prompt_eval_count: Option<u32>,
-    #[serde(default)]
-    eval_count: Option<u32>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseMessage {
-    content: Option<String>,
 }
 
 #[cfg(test)]
@@ -620,7 +796,11 @@ mod tests {
         assert_eq!(provider.name(), "ollama");
         assert_eq!(provider.model(), "llama3.2");
         assert!(!provider.supports_thinking());
-        assert!(!provider.supports_tools()); // Limited tool support
+        assert!(provider.supports_tools()); // Now true with SDK
+        assert_eq!(
+            provider.tool_call_reliability(),
+            ToolCallReliability::Unreliable
+        );
     }
 
     #[test]
@@ -657,16 +837,6 @@ mod tests {
     }
 
     #[test]
-    fn test_message_conversion() {
-        let provider = OllamaProvider::new(test_config());
-        let message = Message::user("Hello!");
-
-        let api_msg = provider.message_to_ollama(&message);
-        assert_eq!(api_msg["role"], "user");
-        assert_eq!(api_msg["content"], "Hello!");
-    }
-
-    #[test]
     fn test_base_url() {
         let provider = OllamaProvider::new(test_config());
         assert_eq!(provider.base_url(), "http://localhost:11434");
@@ -677,5 +847,66 @@ mod tests {
         };
         let provider = OllamaProvider::new(config);
         assert_eq!(provider.base_url(), "http://192.168.1.100:11434");
+    }
+
+    #[test]
+    fn test_tool_call_reliability() {
+        let provider = OllamaProvider::new(test_config());
+        assert_eq!(
+            provider.tool_call_reliability(),
+            ToolCallReliability::Unreliable
+        );
+    }
+
+    #[test]
+    fn test_default_fallback_mode() {
+        let provider = OllamaProvider::new(test_config());
+        assert_eq!(
+            provider.default_fallback_mode(),
+            FallbackToolFormatMode::Soft
+        );
+    }
+
+    #[test]
+    fn test_convert_tool_definition() {
+        let provider = OllamaProvider::new(test_config());
+        let tool = ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read a file".to_string(),
+            input_schema: super::super::types::ParameterSchema {
+                schema_type: "object".to_string(),
+                description: Some("Read file params".to_string()),
+                properties: Some(
+                    [("path".to_string(), super::super::types::ParameterSchema::string(Some("File path")))]
+                        .into_iter()
+                        .collect(),
+                ),
+                required: Some(vec!["path".to_string()]),
+                items: None,
+                enum_values: None,
+                default: None,
+            },
+        };
+
+        let result = provider.convert_tool_definition(&tool);
+        assert!(result.is_some());
+        let tool_info = result.unwrap();
+        assert_eq!(tool_info.function.name, "read_file");
+        assert_eq!(tool_info.function.description, "Read a file");
+    }
+
+    #[test]
+    fn test_convert_message_user() {
+        let provider = OllamaProvider::new(test_config());
+        let message = Message::user("Hello!");
+        let converted = provider.convert_message(&message);
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0].content, "Hello!");
+    }
+
+    #[test]
+    fn test_context_window() {
+        let provider = OllamaProvider::new(test_config());
+        assert_eq!(provider.context_window(), 8_192);
     }
 }

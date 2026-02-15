@@ -1,6 +1,8 @@
 //! Ollama API Adapter
 //!
-//! Handles Ollama JSON stream format with model-dependent thinking detection.
+//! Handles Ollama JSON stream format with model-dependent thinking detection
+//! and native tool call support. Supports both the generate API (`response` field)
+//! and the chat API (`message` field) formats.
 
 use crate::services::streaming::adapter::StreamAdapter;
 use crate::services::streaming::unified::{AdapterError, UnifiedStreamEvent};
@@ -9,11 +11,15 @@ use serde::Deserialize;
 /// Known models that support thinking via <think> tags
 const THINKING_MODELS: &[&str] = &["deepseek-r1", "deepseek-reasoner", "qwq", "qwen-qwq"];
 
-/// Ollama response format
+/// Ollama generate API response format
 #[derive(Debug, Deserialize)]
 struct OllamaResponse {
+    /// Content from generate API
     #[serde(default)]
     response: Option<String>,
+    /// Message from chat API
+    #[serde(default)]
+    message: Option<OllamaMessage>,
     #[serde(default)]
     done: bool,
     #[serde(default)]
@@ -24,6 +30,31 @@ struct OllamaResponse {
     prompt_eval_count: Option<u32>,
 }
 
+/// Message structure from Ollama chat API
+#[derive(Debug, Deserialize)]
+struct OllamaMessage {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    thinking: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<OllamaToolCall>,
+}
+
+/// Tool call from Ollama chat API
+#[derive(Debug, Deserialize)]
+struct OllamaToolCall {
+    function: OllamaToolCallFunction,
+}
+
+/// Tool call function from Ollama chat API
+#[derive(Debug, Deserialize)]
+struct OllamaToolCallFunction {
+    name: String,
+    #[serde(default)]
+    arguments: serde_json::Value,
+}
+
 /// State for think tag parsing
 #[derive(Debug, Clone, PartialEq)]
 enum ThinkState {
@@ -31,7 +62,11 @@ enum ThinkState {
     InThinking,
 }
 
-/// Adapter for Ollama JSON stream format
+/// Adapter for Ollama JSON stream format.
+///
+/// Handles both the generate API (response field) and chat API (message field)
+/// formats, with support for thinking tags, native tool calls, and thinking
+/// content extracted by the SDK.
 pub struct OllamaAdapter {
     model: String,
     /// Whether this model supports thinking
@@ -40,6 +75,8 @@ pub struct OllamaAdapter {
     state: ThinkState,
     /// Buffer for tag detection
     buffer: String,
+    /// Counter for generating tool call IDs
+    tool_call_counter: usize,
 }
 
 impl OllamaAdapter {
@@ -51,6 +88,7 @@ impl OllamaAdapter {
             thinking_enabled,
             state: ThinkState::Normal,
             buffer: String::new(),
+            tool_call_counter: 0,
         }
     }
 
@@ -162,7 +200,7 @@ impl StreamAdapter for OllamaAdapter {
     }
 
     fn supports_tools(&self) -> bool {
-        // Ollama tool support depends on model, assume true for now
+        // Native tool calling is now supported through ollama-rs SDK
         true
     }
 
@@ -177,7 +215,43 @@ impl StreamAdapter for OllamaAdapter {
 
         let mut events = vec![];
 
-        // Handle response content
+        // Handle chat API message format
+        if let Some(ref message) = response.message {
+            // Handle thinking content from SDK (separate thinking field)
+            if let Some(ref thinking) = message.thinking {
+                if !thinking.is_empty() {
+                    events.push(UnifiedStreamEvent::ThinkingStart { thinking_id: None });
+                    events.push(UnifiedStreamEvent::ThinkingDelta {
+                        content: thinking.clone(),
+                        thinking_id: None,
+                    });
+                    events.push(UnifiedStreamEvent::ThinkingEnd { thinking_id: None });
+                }
+            }
+
+            // Handle text content (may contain <think> tags for inline thinking)
+            if let Some(ref content) = message.content {
+                if !content.is_empty() {
+                    self.buffer.push_str(content);
+                    events.extend(self.process_buffer());
+                }
+            }
+
+            // Handle tool calls
+            for tc in &message.tool_calls {
+                let tool_id = format!("call_{}", self.tool_call_counter);
+                self.tool_call_counter += 1;
+                let arguments = serde_json::to_string(&tc.function.arguments)
+                    .unwrap_or_else(|_| "{}".to_string());
+                events.push(UnifiedStreamEvent::ToolComplete {
+                    tool_id,
+                    tool_name: tc.function.name.clone(),
+                    arguments,
+                });
+            }
+        }
+
+        // Handle generate API response format (backward compatibility)
         if let Some(content) = response.response {
             if !content.is_empty() {
                 self.buffer.push_str(&content);
@@ -218,6 +292,7 @@ impl StreamAdapter for OllamaAdapter {
     fn reset(&mut self) {
         self.state = ThinkState::Normal;
         self.buffer.clear();
+        self.tool_call_counter = 0;
     }
 }
 
@@ -229,6 +304,7 @@ mod tests {
     fn test_regular_model() {
         let mut adapter = OllamaAdapter::new("llama3.2");
         assert!(!adapter.supports_thinking());
+        assert!(adapter.supports_tools()); // Now true with SDK support
 
         let events = adapter
             .adapt(r#"{"response": "Hello", "done": false}"#)
@@ -290,5 +366,75 @@ mod tests {
         assert!(events.iter().any(
             |e| matches!(e, UnifiedStreamEvent::TextDelta { content } if content == "result")
         ));
+    }
+
+    #[test]
+    fn test_chat_api_message_format() {
+        let mut adapter = OllamaAdapter::new("llama3.2");
+
+        let events = adapter
+            .adapt(r#"{"message": {"content": "Hello world"}, "done": false}"#)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            UnifiedStreamEvent::TextDelta { content } => {
+                assert_eq!(content, "Hello world");
+            }
+            _ => panic!("Expected TextDelta"),
+        }
+    }
+
+    #[test]
+    fn test_chat_api_tool_calls() {
+        let mut adapter = OllamaAdapter::new("llama3.2");
+
+        let events = adapter
+            .adapt(r#"{"message": {"content": "", "tool_calls": [{"function": {"name": "read_file", "arguments": {"path": "/test"}}}]}, "done": false}"#)
+            .unwrap();
+
+        assert!(events.iter().any(|e| matches!(
+            e,
+            UnifiedStreamEvent::ToolComplete {
+                tool_name,
+                ..
+            } if tool_name == "read_file"
+        )));
+    }
+
+    #[test]
+    fn test_chat_api_thinking_field() {
+        let mut adapter = OllamaAdapter::new("deepseek-r1");
+
+        let events = adapter
+            .adapt(r#"{"message": {"content": "answer", "thinking": "reasoning here"}, "done": false}"#)
+            .unwrap();
+
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, UnifiedStreamEvent::ThinkingStart { .. })));
+        assert!(events.iter().any(
+            |e| matches!(e, UnifiedStreamEvent::ThinkingDelta { content, .. } if content == "reasoning here")
+        ));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, UnifiedStreamEvent::ThinkingEnd { .. })));
+        assert!(events.iter().any(
+            |e| matches!(e, UnifiedStreamEvent::TextDelta { content } if content == "answer")
+        ));
+    }
+
+    #[test]
+    fn test_reset() {
+        let mut adapter = OllamaAdapter::new("deepseek-r1");
+
+        // Start some thinking
+        let _ = adapter.adapt(r#"{"response": "<think>analyzing", "done": false}"#);
+        assert_eq!(adapter.state, ThinkState::InThinking);
+
+        // Reset
+        adapter.reset();
+        assert_eq!(adapter.state, ThinkState::Normal);
+        assert!(adapter.buffer.is_empty());
+        assert_eq!(adapter.tool_call_counter, 0);
     }
 }

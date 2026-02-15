@@ -888,23 +888,24 @@ fn test_glm_provider_unreliable() {
 }
 
 #[test]
-fn test_ollama_provider_none() {
+fn test_ollama_provider_unreliable() {
     let config = ProviderConfig {
         provider: ProviderType::Ollama,
         model: "llama3".to_string(),
         ..Default::default()
     };
     let provider = OllamaProvider::new(config);
+    // ADR-002: Ollama upgraded from None to Unreliable with ollama-rs SDK migration
     assert_eq!(
         provider.tool_call_reliability(),
-        ToolCallReliability::None
+        ToolCallReliability::Unreliable
     );
     assert_eq!(
         provider.default_fallback_mode(),
         FallbackToolFormatMode::Soft
     );
-    // Does not claim API tool support
-    assert!(!provider.supports_tools());
+    // Now supports native tool calling via ollama-rs SDK
+    assert!(provider.supports_tools());
 }
 
 // --- Story-002: effective_system_prompt adaptive fallback tests ---
