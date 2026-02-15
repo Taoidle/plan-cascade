@@ -1,7 +1,12 @@
-//! Qwen (Alibaba Cloud DashScope) API Adapter
+//! Qwen (Alibaba Cloud DashScope) SSE Stream Adapter
 //!
 //! Handles DashScope SSE format with reasoning_content support for Qwen3/QwQ models.
 //! DashScope uses the same OpenAI-compatible format with reasoning_content field.
+//!
+//! Note: Since the migration to the async-dashscope SDK (v0.12), the QwenProvider
+//! in `services::llm::qwen` processes structured `GenerationOutput` stream chunks
+//! directly from the SDK, bypassing this SSE adapter. This adapter remains available
+//! for the `AdapterFactory` and any external SSE-based streaming scenarios.
 
 use crate::services::streaming::adapter::StreamAdapter;
 use crate::services::streaming::unified::{AdapterError, UnifiedStreamEvent};

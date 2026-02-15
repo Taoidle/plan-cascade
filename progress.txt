@@ -1,0 +1,8 @@
+[PRD_COMPLETE] feature-002
+[STORY_COMPLETE] step-1: Research async-dashscope SDK API surface and capabilities
+[STORY_COMPLETE] step-2: Read existing qwen.rs (672 lines) and streaming adapter (509 lines)
+[STORY_COMPLETE] step-3: Add async-dashscope = "0.12" dependency to Cargo.toml
+[STORY_COMPLETE] step-4: Rewrite qwen.rs to use async-dashscope SDK (client, generation, streaming, tools, thinking)
+[STORY_COMPLETE] step-5: Update streaming adapter with SDK integration documentation
+[STORY_COMPLETE] step-6: Verify compilation (cargo check --lib passes, all 13 unit tests pass)
+[FEATURE_COMPLETE] feature-002
