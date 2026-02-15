@@ -35,6 +35,9 @@ tokio-util = "0.7"
 # HTTP client (kept for future external API calls, not for sidecar)
 reqwest = { version = "0.12", features = ["json", "stream"] }
 
+# ZhipuAI (GLM) official SDK - types for response parsing and tool definitions
+zai-rs = "0.1"
+
 # WebSocket (for future use)
 futures-util = "0.3"
 tokio-tungstenite = "0.24"
