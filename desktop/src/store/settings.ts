@@ -258,9 +258,17 @@ export const useSettingsStore = create<SettingsState>()(
         if (state?.theme) {
           applyTheme(state.theme);
         }
-        // Apply language on rehydration
-        if (state?.language) {
-          i18n.changeLanguage(state.language);
+        // Sync language: i18n LanguageDetector already picked the correct
+        // language (from localStorage on return visits, or navigator.language
+        // on first launch). Sync that result back to the store so the UI
+        // language selector stays in sync.
+        const detected = i18n.resolvedLanguage || i18n.language || 'en';
+        const supportedLangs: Language[] = ['en', 'zh', 'ja'];
+        const lang: Language = supportedLangs.includes(detected as Language)
+          ? (detected as Language)
+          : 'en';
+        if (state && state.language !== lang) {
+          useSettingsStore.setState({ language: lang });
         }
       },
     }
