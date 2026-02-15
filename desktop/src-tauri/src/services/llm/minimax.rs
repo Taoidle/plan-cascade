@@ -1,42 +1,60 @@
 //! MiniMax Provider
 //!
 //! Implementation of the LlmProvider trait for MiniMax API.
-//! Uses OpenAI-compatible format with reasoning_content for thinking models.
+//! Uses the async-anthropic SDK via MiniMax's Anthropic-compatible endpoint
+//! (api.minimax.io/anthropic/v1).
+//!
+//! ADR-003: SDK migration from raw reqwest/OpenAI-compat to async-anthropic.
+//! ADR-004: Extended thinking temporarily degraded - async-anthropic v0.6
+//!          doesn't expose extended thinking fields. MiniMax M2's reasoning_split
+//!          cannot be passed through the SDK initially.
 
+use async_anthropic::types::{
+    ContentBlockDelta, CreateMessagesRequestBuilder, CreateMessagesResponse,
+    MessageBuilder, MessageContent as AnthropicMessageContent,
+    MessageContentList, MessageRole as AnthropicMessageRole,
+    MessagesStreamEvent, Text as AnthropicText,
+    ToolChoice as AnthropicToolChoice, ToolResult as AnthropicToolResult,
+    ToolUse as AnthropicToolUse,
+};
+use async_anthropic::Client as AnthropicClient;
 use async_trait::async_trait;
-use serde::Deserialize;
+use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
-use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
+use super::provider::{missing_api_key_error, LlmProvider};
 use super::types::{
     FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
     MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
     ToolCallReliability, ToolDefinition, UsageStats,
 };
-use crate::services::streaming::adapters::MinimaxAdapter;
-use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
+use crate::services::streaming::UnifiedStreamEvent;
 
-/// Default MiniMax OpenAI-compatible API endpoint
-const MINIMAX_API_URL: &str = "https://api.minimax.io/v1/chat/completions";
+/// Default MiniMax Anthropic-compatible API base URL
+const MINIMAX_ANTHROPIC_BASE_URL: &str = "https://api.minimax.io/anthropic/v1";
 
-/// MiniMax provider
+/// MiniMax provider using async-anthropic SDK
 pub struct MinimaxProvider {
     config: ProviderConfig,
-    client: reqwest::Client,
+    client: AnthropicClient,
 }
 
 impl MinimaxProvider {
     /// Create a new MiniMax provider with the given configuration
     pub fn new(config: ProviderConfig) -> Self {
-        Self {
-            config,
-            client: reqwest::Client::new(),
-        }
-    }
+        let api_key = config.api_key.clone().unwrap_or_default();
+        let base_url = config
+            .base_url
+            .as_deref()
+            .unwrap_or(MINIMAX_ANTHROPIC_BASE_URL);
 
-    /// Get the API base URL
-    fn base_url(&self) -> &str {
-        self.config.base_url.as_deref().unwrap_or(MINIMAX_API_URL)
+        let client = AnthropicClient::builder()
+            .api_key(api_key)
+            .base_url(base_url)
+            .build()
+            .expect("Failed to build MiniMax Anthropic client: invalid configuration");
+
+        Self { config, client }
     }
 
     /// Check if model supports reasoning (M2 series)
@@ -45,203 +63,232 @@ impl MinimaxProvider {
         model.contains("minimax-m2")
     }
 
-    /// Build the request body for the API
-    fn build_request_body(
+    /// Build a CreateMessagesRequest from unified types
+    fn build_request(
         &self,
         messages: &[Message],
         system: Option<&str>,
         tools: &[ToolDefinition],
-        stream: bool,
         request_options: &LlmRequestOptions,
-    ) -> serde_json::Value {
-        let mut body = serde_json::json!({
-            "model": self.config.model,
-            "max_completion_tokens": self.config.max_tokens,
-            "stream": stream,
-            "temperature": request_options.temperature_override.unwrap_or(self.config.temperature),
-        });
+    ) -> Result<async_anthropic::types::CreateMessagesRequest, LlmError> {
+        // Convert messages to Anthropic SDK format
+        let sdk_messages = self.convert_messages(messages)?;
 
-        // Enable thinking for M2 models if configured
-        if self.config.enable_thinking && self.model_supports_reasoning() {
-            body["reasoning_split"] = serde_json::json!(true);
-        }
+        let mut builder = CreateMessagesRequestBuilder::default();
+        builder
+            .model(self.config.model.clone())
+            .max_tokens(self.config.max_tokens as i32)
+            .messages(sdk_messages);
 
-        // Convert messages to OpenAI-compatible format
-        let mut api_messages: Vec<serde_json::Value> = Vec::new();
-
+        // Set system prompt
         if let Some(sys) = system {
-            api_messages.push(serde_json::json!({
-                "role": "system",
-                "content": sys
-            }));
+            builder.system(sys.to_string());
         }
+
+        // Set temperature (not supported when thinking is active in Anthropic protocol)
+        let temperature = request_options
+            .temperature_override
+            .unwrap_or(self.config.temperature);
+        builder.temperature(temperature);
+
+        // Convert tools to SDK format (serde_json::Map<String, Value>)
+        if !tools.is_empty() {
+            let sdk_tools: Vec<serde_json::Map<String, serde_json::Value>> = tools
+                .iter()
+                .map(|t| {
+                    let mut map = serde_json::Map::new();
+                    map.insert("name".to_string(), serde_json::json!(t.name));
+                    map.insert(
+                        "description".to_string(),
+                        serde_json::json!(t.description),
+                    );
+                    map.insert(
+                        "input_schema".to_string(),
+                        serde_json::to_value(&t.input_schema).unwrap_or_default(),
+                    );
+                    map
+                })
+                .collect();
+            builder.tools(sdk_tools);
+
+            // Set tool_choice based on request options
+            let thinking_active =
+                self.config.enable_thinking && self.model_supports_reasoning();
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) && !thinking_active
+            {
+                builder.tool_choice(AnthropicToolChoice::Any);
+            }
+        }
+
+        // ADR-004: Extended thinking not supported via async-anthropic v0.6.
+        // Log a warning if thinking is requested but cannot be passed through.
+        if self.config.enable_thinking && self.model_supports_reasoning() {
+            tracing::warn!(
+                "MiniMax: Extended thinking requested for model '{}' but async-anthropic v0.6 \
+                 does not support extended thinking fields. Thinking is temporarily degraded. \
+                 (ADR-004)",
+                self.config.model
+            );
+        }
+
+        builder.build().map_err(|e| LlmError::InvalidRequest {
+            message: format!("Failed to build request: {}", e),
+        })
+    }
+
+    /// Convert unified Message slice to Anthropic SDK Message vec
+    fn convert_messages(
+        &self,
+        messages: &[Message],
+    ) -> Result<Vec<async_anthropic::types::Message>, LlmError> {
+        let mut sdk_messages = Vec::new();
 
         for msg in messages {
+            // System messages are handled via the system parameter, skip here
             if msg.role == MessageRole::System {
-                for content in &msg.content {
-                    if let MessageContent::Text { text } = content {
-                        api_messages.push(serde_json::json!({
-                            "role": "system",
-                            "content": text
+                continue;
+            }
+
+            let role = match msg.role {
+                MessageRole::User => AnthropicMessageRole::User,
+                MessageRole::Assistant => AnthropicMessageRole::Assistant,
+                MessageRole::System => continue, // Already filtered
+            };
+
+            let content_list = self.convert_content(&msg.content)?;
+
+            let sdk_msg = MessageBuilder::default()
+                .role(role)
+                .content(content_list)
+                .build()
+                .map_err(|e| LlmError::InvalidRequest {
+                    message: format!("Failed to build message: {}", e),
+                })?;
+
+            sdk_messages.push(sdk_msg);
+        }
+
+        Ok(sdk_messages)
+    }
+
+    /// Convert unified MessageContent vec to Anthropic SDK MessageContentList
+    fn convert_content(
+        &self,
+        content: &[MessageContent],
+    ) -> Result<MessageContentList, LlmError> {
+        let mut blocks: Vec<AnthropicMessageContent> = Vec::new();
+
+        for c in content {
+            match c {
+                MessageContent::Text { text } => {
+                    blocks.push(AnthropicMessageContent::Text(AnthropicText {
+                        text: text.clone(),
+                    }));
+                }
+                MessageContent::ToolUse { id, name, input } => {
+                    blocks.push(AnthropicMessageContent::ToolUse(AnthropicToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                    }));
+                }
+                MessageContent::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error,
+                } => {
+                    blocks.push(AnthropicMessageContent::ToolResult(AnthropicToolResult {
+                        tool_use_id: tool_use_id.clone(),
+                        content: Some(content.clone()),
+                        is_error: is_error.unwrap_or(false),
+                    }));
+                }
+                MessageContent::Thinking { thinking, .. } => {
+                    // ADR-004: Thinking blocks cannot be round-tripped via async-anthropic v0.6.
+                    // Include as text content for context preservation.
+                    if !thinking.is_empty() {
+                        blocks.push(AnthropicMessageContent::Text(AnthropicText {
+                            text: thinking.clone(),
                         }));
                     }
                 }
-            } else {
-                api_messages.push(self.message_to_api(msg));
-            }
-        }
-
-        body["messages"] = serde_json::json!(api_messages);
-
-        if !tools.is_empty() {
-            let api_tools: Vec<serde_json::Value> = tools
-                .iter()
-                .map(|t| {
-                    serde_json::json!({
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.input_schema
-                        }
-                    })
-                })
-                .collect();
-            body["tools"] = serde_json::json!(api_tools);
-
-            let thinking_active =
-                self.config.enable_thinking && self.model_supports_reasoning();
-            if matches!(request_options.tool_call_mode, ToolCallMode::Required)
-                && !thinking_active
-            {
-                body["tool_choice"] = serde_json::json!("required");
-            }
-        }
-
-        if stream {
-            body["stream_options"] = serde_json::json!({
-                "include_usage": true
-            });
-        }
-
-        body
-    }
-
-    /// Convert a Message to OpenAI-compatible format
-    fn message_to_api(&self, message: &Message) -> serde_json::Value {
-        let role = match message.role {
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::System => "system",
-        };
-
-        let has_tool_results = message
-            .content
-            .iter()
-            .any(|c| matches!(c, MessageContent::ToolResult { .. }));
-        if has_tool_results {
-            let mut result_msg = serde_json::json!({"role": "tool"});
-            for content in &message.content {
-                if let MessageContent::ToolResult {
+                MessageContent::Image { .. } => {
+                    // async-anthropic v0.6 doesn't have an Image variant in MessageContent.
+                    // Skip image content (MiniMax image support is limited anyway).
+                    tracing::warn!("MiniMax: Skipping image content - not supported via async-anthropic SDK");
+                }
+                MessageContent::ToolResultMultimodal {
                     tool_use_id,
                     content,
-                    ..
-                } = content
-                {
-                    result_msg["tool_call_id"] = serde_json::json!(tool_use_id);
-                    result_msg["content"] = serde_json::json!(content);
-                    break;
+                    is_error,
+                } => {
+                    // Flatten multimodal tool result to text-only since SDK doesn't support images
+                    let text_content: String = content
+                        .iter()
+                        .filter_map(|block| {
+                            if let super::types::ContentBlock::Text { text } = block {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    blocks.push(AnthropicMessageContent::ToolResult(AnthropicToolResult {
+                        tool_use_id: tool_use_id.clone(),
+                        content: if text_content.is_empty() {
+                            None
+                        } else {
+                            Some(text_content)
+                        },
+                        is_error: is_error.unwrap_or(false),
+                    }));
                 }
             }
-            return result_msg;
         }
 
-        let has_tool_calls = message
-            .content
-            .iter()
-            .any(|c| matches!(c, MessageContent::ToolUse { .. }));
-        if has_tool_calls {
-            let tool_calls: Vec<serde_json::Value> = message.content.iter().filter_map(|c| {
-                if let MessageContent::ToolUse { id, name, input } = c {
-                    Some(serde_json::json!({"id": id, "type": "function", "function": {"name": name, "arguments": input.to_string()}}))
-                } else { None }
-            }).collect();
-
-            let text_content: String = message
-                .content
-                .iter()
-                .filter_map(|c| {
-                    if let MessageContent::Text { text } = c {
-                        Some(text.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let mut msg = serde_json::json!({"role": role, "tool_calls": tool_calls});
-            if text_content.is_empty() {
-                msg["content"] = serde_json::Value::Null;
-            } else {
-                msg["content"] = serde_json::json!(text_content);
-            }
-            return msg;
-        }
-
-        let text_content: String = message
-            .content
-            .iter()
-            .filter_map(|c| {
-                if let MessageContent::Text { text } = c {
-                    Some(text.as_str())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        serde_json::json!({"role": role, "content": text_content})
+        Ok(MessageContentList(blocks))
     }
 
-    /// Parse a non-streaming response
-    fn parse_response(&self, response: &MinimaxResponse) -> LlmResponse {
-        let choice = response.choices.first();
+    /// Parse a non-streaming CreateMessagesResponse into LlmResponse
+    fn parse_response(&self, response: &CreateMessagesResponse) -> LlmResponse {
         let mut content = None;
-        let mut thinking = None;
         let mut tool_calls = Vec::new();
 
-        if let Some(choice) = choice {
-            if let Some(msg) = &choice.message {
-                content = msg.content.clone();
-                thinking = msg.reasoning_content.clone();
-                if let Some(tcs) = &msg.tool_calls {
-                    for tc in tcs {
-                        let arguments: serde_json::Value =
-                            serde_json::from_str(&tc.function.arguments)
-                                .unwrap_or(serde_json::Value::Null);
+        if let Some(content_blocks) = &response.content {
+            for block in content_blocks {
+                match block {
+                    AnthropicMessageContent::Text(text) => {
+                        content = Some(text.text.clone());
+                    }
+                    AnthropicMessageContent::ToolUse(tu) => {
                         tool_calls.push(ToolCall {
-                            id: tc.id.clone(),
-                            name: tc.function.name.clone(),
-                            arguments,
+                            id: tu.id.clone(),
+                            name: tu.name.clone(),
+                            arguments: tu.input.clone(),
                         });
+                    }
+                    AnthropicMessageContent::ToolResult(_) => {
+                        // Shouldn't appear in response content
                     }
                 }
             }
         }
 
-        let stop_reason = choice
-            .and_then(|c| c.finish_reason.as_ref())
+        let stop_reason = response
+            .stop_reason
+            .as_ref()
             .map(|r| StopReason::from(r.as_str()))
             .unwrap_or(StopReason::EndTurn);
+
         let usage = response
             .usage
             .as_ref()
             .map(|u| UsageStats {
-                input_tokens: u.prompt_tokens,
-                output_tokens: u.completion_tokens,
-                thinking_tokens: u.reasoning_tokens,
+                input_tokens: u.input_tokens.unwrap_or(0),
+                output_tokens: u.output_tokens.unwrap_or(0),
+                thinking_tokens: None, // ADR-004: Not available via SDK
                 cache_read_tokens: None,
                 cache_creation_tokens: None,
             })
@@ -249,11 +296,14 @@ impl MinimaxProvider {
 
         LlmResponse {
             content,
-            thinking,
+            thinking: None, // ADR-004: Thinking not available via async-anthropic v0.6
             tool_calls,
             stop_reason,
             usage,
-            model: response.model.clone(),
+            model: response
+                .model
+                .clone()
+                .unwrap_or_else(|| self.config.model.clone()),
         }
     }
 }
@@ -267,6 +317,9 @@ impl LlmProvider for MinimaxProvider {
         &self.config.model
     }
     fn supports_thinking(&self) -> bool {
+        // ADR-004: Still report true for M2 models so the orchestrator knows
+        // the model has reasoning capability, even though it's temporarily
+        // degraded at the SDK level.
         self.model_supports_reasoning()
     }
     fn supports_tools(&self) -> bool {
@@ -312,44 +365,54 @@ impl LlmProvider for MinimaxProvider {
         tools: Vec<ToolDefinition>,
         request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("minimax"))?;
-        let body = self.build_request_body(
+        if self.config.api_key.is_none() {
+            return Err(missing_api_key_error("minimax"));
+        }
+
+        let request = self.build_request(
             &messages,
             system.as_deref(),
             &tools,
-            false,
             &request_options,
-        );
+        )?;
 
         let response = self
             .client
-            .post(self.base_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
+            .messages()
+            .create(request)
             .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
+            .map_err(|e| {
+                let err_str = e.to_string();
+                // Map common Anthropic SDK errors to our error types
+                if err_str.contains("401") || err_str.contains("authentication") {
+                    LlmError::AuthenticationFailed {
+                        message: format!("minimax: {}", err_str),
+                    }
+                } else if err_str.contains("429") || err_str.contains("rate") {
+                    LlmError::RateLimited {
+                        message: err_str,
+                        retry_after: None,
+                    }
+                } else if err_str.contains("404") || err_str.contains("not found") {
+                    LlmError::ModelNotFound {
+                        model: self.config.model.clone(),
+                    }
+                } else if err_str.contains("400") || err_str.contains("invalid") {
+                    LlmError::InvalidRequest { message: err_str }
+                } else if err_str.contains("500")
+                    || err_str.contains("502")
+                    || err_str.contains("503")
+                {
+                    LlmError::ServerError {
+                        message: err_str,
+                        status: None,
+                    }
+                } else {
+                    LlmError::NetworkError { message: err_str }
+                }
             })?;
 
-        let status = response.status().as_u16();
-        let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
-            message: e.to_string(),
-        })?;
-        if status != 200 {
-            return Err(parse_http_error(status, &body_text, "minimax"));
-        }
-
-        let minimax_response: MinimaxResponse =
-            serde_json::from_str(&body_text).map_err(|e| LlmError::ParseError {
-                message: format!("Failed to parse response: {}", e),
-            })?;
-        Ok(self.parse_response(&minimax_response))
+        Ok(self.parse_response(&response))
     }
 
     async fn stream_message(
@@ -360,117 +423,110 @@ impl LlmProvider for MinimaxProvider {
         tx: mpsc::Sender<UnifiedStreamEvent>,
         request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("minimax"))?;
-        let body =
-            self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
-
-        let response = self
-            .client
-            .post(self.base_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-
-        let status = response.status().as_u16();
-        if status != 200 {
-            let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-            return Err(parse_http_error(status, &body_text, "minimax"));
+        if self.config.api_key.is_none() {
+            return Err(missing_api_key_error("minimax"));
         }
 
-        let mut adapter = MinimaxAdapter::new(&self.config.model);
+        let request = self.build_request(
+            &messages,
+            system.as_deref(),
+            &tools,
+            &request_options,
+        )?;
+
+        let mut stream = self
+            .client
+            .messages()
+            .create_stream(request)
+            .await;
+
         let mut accumulated_content = String::new();
-        let mut accumulated_thinking = String::new();
         let mut tool_calls = Vec::new();
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
 
-        let mut stream = response.bytes_stream();
-        use futures_util::StreamExt;
-        let mut buffer = String::new();
+        // State for tracking tool input accumulation
+        let mut current_tool_id: Option<String> = None;
+        let mut current_tool_name: Option<String> = None;
+        let mut tool_input_buffer = String::new();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
-
-            while let Some(line_end) = buffer.find('\n') {
-                let line = buffer[..line_end].to_string();
-                buffer = buffer[line_end + 1..].to_string();
-                if line.trim().is_empty() {
-                    continue;
-                }
-
-                match adapter.adapt(&line) {
-                    Ok(events) => {
-                        for event in events {
-                            match &event {
-                                UnifiedStreamEvent::TextDelta { content } => {
-                                    accumulated_content.push_str(content);
-                                }
-                                UnifiedStreamEvent::ThinkingDelta { content, .. } => {
-                                    accumulated_thinking.push_str(content);
-                                }
-                                UnifiedStreamEvent::ToolComplete {
-                                    tool_id,
-                                    tool_name,
-                                    arguments,
-                                } => {
-                                    if let Ok(input) = serde_json::from_str(arguments) {
-                                        tool_calls.push(ToolCall {
-                                            id: tool_id.clone(),
-                                            name: tool_name.clone(),
-                                            arguments: input,
-                                        });
-                                    }
-                                }
-                                UnifiedStreamEvent::Usage {
-                                    input_tokens,
-                                    output_tokens,
-                                    thinking_tokens,
-                                    ..
-                                } => {
-                                    usage.input_tokens = *input_tokens;
-                                    usage.output_tokens = *output_tokens;
-                                    usage.thinking_tokens = *thinking_tokens;
-                                }
-                                UnifiedStreamEvent::Complete {
-                                    stop_reason: Some(reason),
-                                } => {
-                                    stop_reason = StopReason::from(reason.as_str());
+        while let Some(event_result) = stream.next().await {
+            match event_result {
+                Ok(event) => {
+                    match event {
+                        MessagesStreamEvent::MessageStart { message, usage: msg_usage } => {
+                            // Capture initial usage from message_start
+                            if let Some(u) = msg_usage.or(message.usage) {
+                                usage.input_tokens = u.input_tokens.unwrap_or(0);
+                                usage.output_tokens = u.output_tokens.unwrap_or(0);
+                            }
+                        }
+                        MessagesStreamEvent::ContentBlockStart {
+                            content_block,
+                            ..
+                        } => {
+                            match &content_block {
+                                AnthropicMessageContent::ToolUse(tu) => {
+                                    current_tool_id = Some(tu.id.clone());
+                                    current_tool_name = Some(tu.name.clone());
+                                    tool_input_buffer.clear();
+                                    // Don't forward ToolStart to tx; the orchestrator
+                                    // handles tool lifecycle events internally.
                                 }
                                 _ => {}
                             }
-                            if !matches!(
-                                &event,
-                                UnifiedStreamEvent::Complete { .. }
-                                    | UnifiedStreamEvent::Usage { .. }
-                                    | UnifiedStreamEvent::ToolStart { .. }
-                                    | UnifiedStreamEvent::ToolComplete { .. }
-                            ) {
-                                let _ = tx.send(event).await;
+                        }
+                        MessagesStreamEvent::ContentBlockDelta { delta, .. } => match delta {
+                            ContentBlockDelta::TextDelta { text } => {
+                                accumulated_content.push_str(&text);
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::TextDelta { content: text })
+                                    .await;
+                            }
+                            ContentBlockDelta::InputJsonDelta { partial_json } => {
+                                tool_input_buffer.push_str(&partial_json);
+                            }
+                        },
+                        MessagesStreamEvent::ContentBlockStop { .. } => {
+                            // If we were accumulating a tool call, finalize it
+                            if let (Some(id), Some(name)) =
+                                (current_tool_id.take(), current_tool_name.take())
+                            {
+                                let args = std::mem::take(&mut tool_input_buffer);
+                                if let Ok(input) = serde_json::from_str(&args) {
+                                    tool_calls.push(ToolCall {
+                                        id: id.clone(),
+                                        name: name.clone(),
+                                        arguments: input,
+                                    });
+                                }
+                                // ToolComplete is consumed internally by the orchestrator,
+                                // not forwarded to the frontend.
                             }
                         }
+                        MessagesStreamEvent::MessageDelta {
+                            delta,
+                            usage: delta_usage,
+                        } => {
+                            if let Some(u) = delta_usage {
+                                usage.output_tokens += u.output_tokens.unwrap_or(0);
+                            }
+                            if let Some(reason) = delta.stop_reason {
+                                stop_reason = StopReason::from(reason.as_str());
+                            }
+                        }
+                        MessagesStreamEvent::MessageStop => {
+                            // Stream complete; stop_reason already captured from MessageDelta
+                        }
                     }
-                    Err(e) => {
-                        let _ = tx
-                            .send(UnifiedStreamEvent::Error {
-                                message: e.to_string(),
-                                code: None,
-                            })
-                            .await;
-                    }
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Error {
+                            message: e.to_string(),
+                            code: None,
+                        })
+                        .await;
                 }
             }
         }
@@ -481,11 +537,7 @@ impl LlmProvider for MinimaxProvider {
             } else {
                 Some(accumulated_content)
             },
-            thinking: if accumulated_thinking.is_empty() {
-                None
-            } else {
-                Some(accumulated_thinking)
-            },
+            thinking: None, // ADR-004: Thinking not available via async-anthropic v0.6
             tool_calls,
             stop_reason,
             usage,
@@ -494,83 +546,51 @@ impl LlmProvider for MinimaxProvider {
     }
 
     async fn health_check(&self) -> LlmResult<()> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("minimax"))?;
-        let body = serde_json::json!({"model": self.config.model, "max_completion_tokens": 1, "messages": [{"role": "user", "content": "Hi"}]});
+        if self.config.api_key.is_none() {
+            return Err(missing_api_key_error("minimax"));
+        }
 
-        let response = self
-            .client
-            .post(self.base_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
+        // Make a minimal request to verify connectivity and API key
+        let request = CreateMessagesRequestBuilder::default()
+            .model(self.config.model.clone())
+            .max_tokens(1_i32)
+            .messages(vec![MessageBuilder::default()
+                .role(AnthropicMessageRole::User)
+                .content(MessageContentList(vec![
+                    AnthropicMessageContent::Text(AnthropicText {
+                        text: "Hi".to_string(),
+                    }),
+                ]))
+                .build()
+                .map_err(|e| LlmError::InvalidRequest {
+                    message: format!("Failed to build health check message: {}", e),
+                })?])
+            .build()
+            .map_err(|e| LlmError::InvalidRequest {
+                message: format!("Failed to build health check request: {}", e),
             })?;
 
-        let status = response.status().as_u16();
-        if status == 200 {
-            Ok(())
-        } else if status == 401 {
-            Err(LlmError::AuthenticationFailed {
-                message: "Invalid API key".to_string(),
-            })
-        } else {
-            let body = response.text().await.unwrap_or_default();
-            Err(parse_http_error(status, &body, "minimax"))
-        }
+        self.client
+            .messages()
+            .create(request)
+            .await
+            .map_err(|e| {
+                let err_str = e.to_string();
+                if err_str.contains("401") || err_str.contains("authentication") {
+                    LlmError::AuthenticationFailed {
+                        message: "Invalid API key".to_string(),
+                    }
+                } else {
+                    LlmError::NetworkError { message: err_str }
+                }
+            })?;
+
+        Ok(())
     }
 
     fn config(&self) -> &ProviderConfig {
         &self.config
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct MinimaxResponse {
-    model: String,
-    choices: Vec<Choice>,
-    usage: Option<ResponseUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Choice {
-    message: Option<ResponseMessage>,
-    finish_reason: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseMessage {
-    content: Option<String>,
-    reasoning_content: Option<String>,
-    tool_calls: Option<Vec<ResponseToolCall>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseToolCall {
-    id: String,
-    function: ResponseFunction,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseFunction {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseUsage {
-    #[serde(default)]
-    prompt_tokens: u32,
-    #[serde(default)]
-    completion_tokens: u32,
-    #[serde(default)]
-    reasoning_tokens: Option<u32>,
 }
 
 #[cfg(test)]
@@ -623,6 +643,16 @@ mod tests {
         };
         let provider = MinimaxProvider::new(config);
         assert!(provider.supports_thinking());
+    }
+
+    #[test]
+    fn test_text_01_no_reasoning() {
+        let config = ProviderConfig {
+            model: "MiniMax-Text-01".to_string(),
+            ..test_config()
+        };
+        let provider = MinimaxProvider::new(config);
+        assert!(!provider.supports_thinking());
     }
 
     #[test]
@@ -681,59 +711,198 @@ mod tests {
     }
 
     #[test]
-    fn test_message_conversion() {
+    fn test_convert_text_content() {
         let provider = MinimaxProvider::new(test_config());
-        let message = Message::user("Hello!");
-        let api_msg = provider.message_to_api(&message);
-        assert_eq!(api_msg["role"], "user");
-        assert_eq!(api_msg["content"], "Hello!");
+        let content = vec![MessageContent::Text {
+            text: "Hello!".to_string(),
+        }];
+        let result = provider.convert_content(&content).unwrap();
+        assert_eq!(result.0.len(), 1);
+        match &result.0[0] {
+            AnthropicMessageContent::Text(t) => assert_eq!(t.text, "Hello!"),
+            _ => panic!("Expected Text content"),
+        }
     }
 
     #[test]
-    fn test_build_request_body_uses_max_completion_tokens() {
+    fn test_convert_tool_use_content() {
         let provider = MinimaxProvider::new(test_config());
-        let body = provider.build_request_body(
-            &[Message::user("test")],
-            None,
-            &[],
-            false,
-            &LlmRequestOptions::default(),
-        );
-        assert!(body.get("max_completion_tokens").is_some());
-        assert!(body.get("max_tokens").is_none());
+        let content = vec![MessageContent::ToolUse {
+            id: "tool_123".to_string(),
+            name: "read_file".to_string(),
+            input: serde_json::json!({"path": "/test"}),
+        }];
+        let result = provider.convert_content(&content).unwrap();
+        assert_eq!(result.0.len(), 1);
+        match &result.0[0] {
+            AnthropicMessageContent::ToolUse(tu) => {
+                assert_eq!(tu.id, "tool_123");
+                assert_eq!(tu.name, "read_file");
+            }
+            _ => panic!("Expected ToolUse content"),
+        }
     }
 
     #[test]
-    fn test_build_request_body_reasoning_split() {
-        let config = ProviderConfig {
-            enable_thinking: true,
-            ..test_config()
-        };
-        let provider = MinimaxProvider::new(config);
-        let body = provider.build_request_body(
-            &[Message::user("test")],
-            None,
-            &[],
-            false,
-            &LlmRequestOptions::default(),
-        );
-        assert_eq!(body["reasoning_split"], true);
+    fn test_convert_tool_result_content() {
+        let provider = MinimaxProvider::new(test_config());
+        let content = vec![MessageContent::ToolResult {
+            tool_use_id: "tool_123".to_string(),
+            content: "file contents".to_string(),
+            is_error: None,
+        }];
+        let result = provider.convert_content(&content).unwrap();
+        assert_eq!(result.0.len(), 1);
+        match &result.0[0] {
+            AnthropicMessageContent::ToolResult(tr) => {
+                assert_eq!(tr.tool_use_id, "tool_123");
+                assert_eq!(tr.content, Some("file contents".to_string()));
+                assert!(!tr.is_error);
+            }
+            _ => panic!("Expected ToolResult content"),
+        }
     }
 
     #[test]
-    fn test_build_request_body_no_reasoning_split_when_thinking_disabled() {
-        let config = ProviderConfig {
-            enable_thinking: false,
-            ..test_config()
+    fn test_convert_tool_result_with_error() {
+        let provider = MinimaxProvider::new(test_config());
+        let content = vec![MessageContent::ToolResult {
+            tool_use_id: "tool_456".to_string(),
+            content: "error occurred".to_string(),
+            is_error: Some(true),
+        }];
+        let result = provider.convert_content(&content).unwrap();
+        assert_eq!(result.0.len(), 1);
+        match &result.0[0] {
+            AnthropicMessageContent::ToolResult(tr) => {
+                assert!(tr.is_error);
+            }
+            _ => panic!("Expected ToolResult content"),
+        }
+    }
+
+    #[test]
+    fn test_convert_messages_skips_system() {
+        let provider = MinimaxProvider::new(test_config());
+        let messages = vec![
+            Message::system("Be helpful"),
+            Message::user("Hello"),
+            Message::assistant("Hi there"),
+        ];
+        let result = provider.convert_messages(&messages).unwrap();
+        assert_eq!(result.len(), 2); // System message filtered out
+    }
+
+    #[test]
+    fn test_build_request_basic() {
+        let provider = MinimaxProvider::new(test_config());
+        let messages = vec![Message::user("test")];
+        let request = provider
+            .build_request(&messages, None, &[], &LlmRequestOptions::default())
+            .unwrap();
+        assert_eq!(request.model, "MiniMax-M2.5");
+    }
+
+    #[test]
+    fn test_build_request_with_system() {
+        let provider = MinimaxProvider::new(test_config());
+        let messages = vec![Message::user("test")];
+        let request = provider
+            .build_request(
+                &messages,
+                Some("Be helpful"),
+                &[],
+                &LlmRequestOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(request.system, Some("Be helpful".to_string()));
+    }
+
+    #[test]
+    fn test_build_request_with_tools() {
+        let provider = MinimaxProvider::new(test_config());
+        let messages = vec![Message::user("test")];
+        let tools = vec![ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read a file".to_string(),
+            input_schema: super::super::types::ParameterSchema::object(
+                None,
+                std::collections::HashMap::new(),
+                vec![],
+            ),
+        }];
+        let request = provider
+            .build_request(&messages, None, &tools, &LlmRequestOptions::default())
+            .unwrap();
+        assert!(request.tools.is_some());
+        assert_eq!(request.tools.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_parse_response_text_only() {
+        let provider = MinimaxProvider::new(test_config());
+        let response = CreateMessagesResponse {
+            id: Some("msg_123".to_string()),
+            content: Some(vec![AnthropicMessageContent::Text(AnthropicText {
+                text: "Hello world".to_string(),
+            })]),
+            model: Some("MiniMax-M2.5".to_string()),
+            stop_reason: Some("end_turn".to_string()),
+            stop_sequence: None,
+            usage: Some(async_anthropic::types::Usage {
+                input_tokens: Some(10),
+                output_tokens: Some(20),
+            }),
         };
-        let provider = MinimaxProvider::new(config);
-        let body = provider.build_request_body(
-            &[Message::user("test")],
-            None,
-            &[],
-            false,
-            &LlmRequestOptions::default(),
-        );
-        assert!(body.get("reasoning_split").is_none());
+        let result = provider.parse_response(&response);
+        assert_eq!(result.content, Some("Hello world".to_string()));
+        assert!(result.tool_calls.is_empty());
+        assert_eq!(result.stop_reason, StopReason::EndTurn);
+        assert_eq!(result.usage.input_tokens, 10);
+        assert_eq!(result.usage.output_tokens, 20);
+    }
+
+    #[test]
+    fn test_parse_response_with_tool_use() {
+        let provider = MinimaxProvider::new(test_config());
+        let response = CreateMessagesResponse {
+            id: Some("msg_456".to_string()),
+            content: Some(vec![AnthropicMessageContent::ToolUse(AnthropicToolUse {
+                id: "tool_call_1".to_string(),
+                name: "read_file".to_string(),
+                input: serde_json::json!({"path": "/test.rs"}),
+            })]),
+            model: Some("MiniMax-M2.5".to_string()),
+            stop_reason: Some("tool_use".to_string()),
+            stop_sequence: None,
+            usage: Some(async_anthropic::types::Usage {
+                input_tokens: Some(15),
+                output_tokens: Some(25),
+            }),
+        };
+        let result = provider.parse_response(&response);
+        assert!(result.content.is_none());
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].name, "read_file");
+        assert_eq!(result.stop_reason, StopReason::ToolUse);
+    }
+
+    #[test]
+    fn test_parse_response_no_usage() {
+        let provider = MinimaxProvider::new(test_config());
+        let response = CreateMessagesResponse {
+            id: None,
+            content: Some(vec![AnthropicMessageContent::Text(AnthropicText {
+                text: "Hi".to_string(),
+            })]),
+            model: None,
+            stop_reason: None,
+            stop_sequence: None,
+            usage: None,
+        };
+        let result = provider.parse_response(&response);
+        assert_eq!(result.usage.input_tokens, 0);
+        assert_eq!(result.usage.output_tokens, 0);
+        assert_eq!(result.model, "MiniMax-M2.5"); // Falls back to config model
     }
 }
