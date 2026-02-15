@@ -180,6 +180,9 @@ fn main() {
             plan_cascade_desktop::commands::design::generate_design_doc,
             plan_cascade_desktop::commands::design::import_design_doc,
             plan_cascade_desktop::commands::design::get_design_doc,
+            // File attachment commands
+            plan_cascade_desktop::commands::files::read_file_for_attachment,
+            plan_cascade_desktop::commands::files::list_workspace_files,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
