@@ -74,5 +74,23 @@
     "contextLost": "上下文将丢失",
     "contextPreserved": "上下文已保留",
     "sessionRestart": "会话将使用新模型重新开始"
+  },
+
+  "sidebar": {
+    "newTask": "新建任务",
+    "addDirectory": "添加目录",
+    "skills": "技能",
+    "plugins": "插件",
+    "removeDirectory": "从侧边栏移除",
+    "newTaskInDir": "在此目录下新建任务",
+    "otherSessions": "其他",
+    "noDirectories": "没有固定的目录",
+    "noDirectoriesHint": "点击\"目录\"来添加工作目录",
+    "clearAll": "清除所有会话",
+    "current": "当前",
+    "toggleSidebar": "切换侧边栏",
+    "sessions": "会话",
+    "rename": "重命名",
+    "deleteSession": "删除会话"
   }
 }

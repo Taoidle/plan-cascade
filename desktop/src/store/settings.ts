@@ -69,6 +69,10 @@ interface SettingsState {
   tourCompleted: boolean;
   workspacePath: string;
 
+  // Sidebar settings
+  pinnedDirectories: string[];
+  sidebarCollapsed: boolean;
+
   // Context compaction
   enableContextCompaction: boolean;
   showReasoningOutput: boolean;
@@ -115,6 +119,11 @@ interface SettingsState {
   setOnboardingCompleted: (completed: boolean) => void;
   setTourCompleted: (completed: boolean) => void;
   setWorkspacePath: (path: string) => void;
+
+  // Sidebar actions
+  addPinnedDirectory: (path: string) => void;
+  removePinnedDirectory: (path: string) => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
 }
 
 const defaultSettings = {
@@ -165,6 +174,10 @@ const defaultSettings = {
   onboardingCompleted: false,
   tourCompleted: false,
   workspacePath: '',
+
+  // Sidebar
+  pinnedDirectories: [] as string[],
+  sidebarCollapsed: false,
 
   // Context compaction
   enableContextCompaction: true,
@@ -245,11 +258,44 @@ export const useSettingsStore = create<SettingsState>()(
       setTourCompleted: (tourCompleted) => set({ tourCompleted }),
       setWorkspacePath: (workspacePath) => {
         set({ workspacePath });
+        // Auto-add non-empty workspace path to pinned directories
+        if (workspacePath) {
+          const normalized = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '');
+          set((state) => {
+            const alreadyExists = state.pinnedDirectories.some(
+              (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === normalized.toLowerCase()
+            );
+            if (alreadyExists) return state;
+            return { pinnedDirectories: [...state.pinnedDirectories, normalized] };
+          });
+        }
         // Sync to backend StandaloneState for tool executor working directory
         import('@tauri-apps/api/core').then(({ invoke }) => {
           invoke('set_working_directory', { path: workspacePath }).catch(() => {});
         });
       },
+
+      addPinnedDirectory: (path) =>
+        set((state) => {
+          const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+          const alreadyExists = state.pinnedDirectories.some(
+            (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === normalized.toLowerCase()
+          );
+          if (alreadyExists) return state;
+          return { pinnedDirectories: [...state.pinnedDirectories, normalized] };
+        }),
+
+      removePinnedDirectory: (path) =>
+        set((state) => {
+          const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+          return {
+            pinnedDirectories: state.pinnedDirectories.filter(
+              (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() !== normalized
+            ),
+          };
+        }),
+
+      setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
     }),
     {
       name: 'plan-cascade-settings',

@@ -74,5 +74,23 @@
     "contextLost": "コンテキストが失われます",
     "contextPreserved": "コンテキストは保持されます",
     "sessionRestart": "新しいモデルでセッションが再開されます"
+  },
+
+  "sidebar": {
+    "newTask": "新規タスク",
+    "addDirectory": "ディレクトリ追加",
+    "skills": "スキル",
+    "plugins": "プラグイン",
+    "removeDirectory": "サイドバーから削除",
+    "newTaskInDir": "このディレクトリで新規タスク",
+    "otherSessions": "その他",
+    "noDirectories": "ディレクトリが固定されていません",
+    "noDirectoriesHint": "「ディレクトリ」をクリックしてワークスペースを追加",
+    "clearAll": "全セッション削除",
+    "current": "現在",
+    "toggleSidebar": "サイドバー切替",
+    "sessions": "セッション",
+    "rename": "名前変更",
+    "deleteSession": "セッション削除"
   }
 }

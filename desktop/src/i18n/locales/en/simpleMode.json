@@ -74,5 +74,23 @@
     "contextLost": "Context will be lost",
     "contextPreserved": "Context preserved",
     "sessionRestart": "Session will restart with the new model"
+  },
+
+  "sidebar": {
+    "newTask": "New Task",
+    "addDirectory": "Add Directory",
+    "skills": "Skills",
+    "plugins": "Plugins",
+    "removeDirectory": "Remove from sidebar",
+    "newTaskInDir": "New task in this directory",
+    "otherSessions": "Other",
+    "noDirectories": "No directories pinned",
+    "noDirectoriesHint": "Click \"Directory\" to add a workspace",
+    "clearAll": "Clear All Sessions",
+    "current": "Current",
+    "toggleSidebar": "Toggle sidebar",
+    "sessions": "Sessions",
+    "rename": "rename",
+    "deleteSession": "Delete session"
   }
 }

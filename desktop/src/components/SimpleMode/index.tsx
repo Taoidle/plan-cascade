@@ -16,7 +16,8 @@ import { ProgressView } from './ProgressView';
 import { ConnectionStatus } from './ConnectionStatus';
 import { MessageActions, EditMode } from './MessageActions';
 import { ModelSwitcher } from './ModelSwitcher';
-import { useExecutionStore, type ExecutionHistoryItem, type StreamLine } from '../../store/execution';
+import { WorkspaceTreeSidebar } from './WorkspaceTreeSidebar';
+import { useExecutionStore, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { deriveConversationTurns } from '../../lib/conversationUtils';
 import { StreamingOutput, GlobalProgressBar, ErrorState, ProjectSelector, IndexStatus } from '../shared';
@@ -26,12 +27,6 @@ type WorkflowMode = 'chat' | 'task';
 function formatNumber(value: number | null | undefined): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '0';
   return value.toLocaleString();
-}
-
-function normalizeWorkspacePath(path: string | null | undefined): string | null {
-  const value = (path || '').trim();
-  if (!value) return null;
-  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
 export function SimpleMode() {
@@ -66,6 +61,8 @@ export function SimpleMode() {
     removeAttachment,
   } = useExecutionStore();
   const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
 
   const [description, setDescription] = useState('');
   const [showOutputPanel, setShowOutputPanel] = useState(false);
@@ -148,6 +145,21 @@ export function SimpleMode() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className={clsx(
+              'text-sm px-3 py-1.5 rounded-lg transition-colors',
+              'text-gray-600 dark:text-gray-400',
+              'hover:bg-gray-100 dark:hover:bg-gray-800',
+              !sidebarCollapsed && 'bg-gray-100 dark:bg-gray-800'
+            )}
+            title={t('sidebar.toggleSidebar', { defaultValue: 'Toggle sidebar' })}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+            </svg>
+          </button>
+
           <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-700 overflow-hidden">
             <button
               onClick={() => setWorkflowMode('chat')}
@@ -185,17 +197,6 @@ export function SimpleMode() {
           >
             Output{detailLineCount > 0 ? ` (${detailLineCount})` : ''}
           </button>
-
-          <button
-            onClick={handleNewTask}
-            className={clsx(
-              'text-sm px-3 py-1.5 rounded-lg transition-colors',
-              'text-gray-600 dark:text-gray-400',
-              'hover:bg-gray-100 dark:hover:bg-gray-800'
-            )}
-          >
-            {t('buttons.startNewTask', { ns: 'common', defaultValue: 'New Chat' })}
-          </button>
         </div>
       </div>
 
@@ -203,20 +204,26 @@ export function SimpleMode() {
         <div
           className={clsx(
             'h-full max-w-[2200px] mx-auto w-full grid gap-4',
-            showOutputPanel
-              ? 'grid-cols-1 xl:grid-cols-[280px_minmax(480px,1fr)_minmax(520px,0.95fr)]'
-              : 'grid-cols-1 xl:grid-cols-[280px_minmax(640px,1fr)]'
+            sidebarCollapsed
+              ? (showOutputPanel
+                  ? 'grid-cols-1 xl:grid-cols-[minmax(480px,1fr)_minmax(520px,0.95fr)]'
+                  : 'grid-cols-1 xl:grid-cols-[minmax(640px,1fr)]')
+              : (showOutputPanel
+                  ? 'grid-cols-1 xl:grid-cols-[280px_minmax(480px,1fr)_minmax(520px,0.95fr)]'
+                  : 'grid-cols-1 xl:grid-cols-[280px_minmax(640px,1fr)]')
           )}
         >
-          <SessionSidebar
-            history={history}
-            workspacePath={workspacePath}
-            onClear={clearHistory}
-            onDelete={deleteHistory}
-            onRename={renameHistory}
-            onRestore={handleRestoreHistory}
-            currentTask={isChatSession ? (streamingOutput[0]?.content || null) : null}
-          />
+          {!sidebarCollapsed && (
+            <WorkspaceTreeSidebar
+              history={history}
+              onRestore={handleRestoreHistory}
+              onDelete={deleteHistory}
+              onRename={renameHistory}
+              onClear={clearHistory}
+              onNewTask={handleNewTask}
+              currentTask={isChatSession ? (streamingOutput[0]?.content || null) : null}
+            />
+          )}
 
           <div className="min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
             <div className="flex-1 min-h-0">
@@ -280,201 +287,6 @@ export function SimpleMode() {
             </div>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function SessionSidebar({
-  history,
-  workspacePath,
-  onClear,
-  onDelete,
-  onRename,
-  onRestore,
-  currentTask,
-}: {
-  history: ExecutionHistoryItem[];
-  workspacePath?: string | null;
-  onClear: () => void;
-  onDelete: (id: string) => void;
-  onRename: (id: string, title: string) => void;
-  onRestore: (id: string) => void;
-  currentTask: string | null;
-}) {
-  const activeWorkspace = normalizeWorkspacePath(workspacePath);
-  const visibleHistory = useMemo(() => {
-    if (!activeWorkspace) return history;
-    return history.filter((item) => {
-      const scope = normalizeWorkspacePath(item.workspacePath);
-      return !scope || scope === activeWorkspace;
-    });
-  }, [activeWorkspace, history]);
-
-  const grouped = useMemo(() => {
-    const withScope: ExecutionHistoryItem[] = [];
-    const noScope: ExecutionHistoryItem[] = [];
-    for (const item of visibleHistory) {
-      const scope = normalizeWorkspacePath(item.workspacePath);
-      if (scope) {
-        withScope.push(item);
-      } else {
-        noScope.push(item);
-      }
-    }
-    return { withScope, noScope };
-  }, [visibleHistory]);
-
-  const handleRename = useCallback(
-    (item: ExecutionHistoryItem) => {
-      const current = item.title || item.taskDescription;
-      const next = window.prompt('Rename session', current);
-      if (next === null) return;
-      onRename(item.id, next);
-    },
-    [onRename]
-  );
-
-  return (
-    <div className="min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Sessions</h3>
-        <button
-          onClick={onClear}
-          className="text-xs px-2 py-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
-        >
-          Clear
-        </button>
-      </div>
-
-      {currentTask && (
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 text-xs">
-          <p className="text-gray-500 dark:text-gray-400">Current</p>
-          <p className="text-gray-700 dark:text-gray-200 line-clamp-2">{currentTask}</p>
-        </div>
-      )}
-
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
-        {visibleHistory.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-xs text-gray-500 dark:text-gray-400">
-            No saved sessions
-          </div>
-        ) : (
-          <>
-            {grouped.withScope.length > 0 && (
-              <div className="space-y-2">
-                <p className="px-1 text-2xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {activeWorkspace ? 'Current Workspace' : 'Scoped Sessions'}
-                </p>
-                {grouped.withScope.map((item) => (
-                  <div
-                    key={item.id}
-                    onClick={() => onRestore(item.id)}
-                    className={clsx(
-                      'w-full text-left p-2 rounded border transition-colors cursor-pointer',
-                      'border-gray-200 dark:border-gray-700',
-                      'hover:bg-gray-50 dark:hover:bg-gray-800'
-                    )}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') onRestore(item.id);
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-xs font-medium text-gray-900 dark:text-white line-clamp-2">
-                        {item.title || item.taskDescription}
-                      </p>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRename(item);
-                          }}
-                          title="Rename session"
-                        >
-                          rename
-                        </button>
-                        <button
-                          className="text-2xs px-1 py-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(item.id);
-                          }}
-                          title="Delete session"
-                        >
-                          &times;
-                        </button>
-                      </div>
-                    </div>
-                    <p className="text-2xs mt-1 text-gray-500 dark:text-gray-400 line-clamp-1">
-                      {item.workspacePath}
-                    </p>
-                    <p className="text-2xs mt-1 text-gray-500 dark:text-gray-400">
-                      {new Date(item.startedAt).toLocaleString()} | {item.success ? 'success' : 'failed'}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {grouped.noScope.length > 0 && (
-              <div className="space-y-2 pt-1">
-                <p className="px-1 text-2xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  No Workspace
-                </p>
-                {grouped.noScope.map((item) => (
-                  <div
-                    key={item.id}
-                    onClick={() => onRestore(item.id)}
-                    className={clsx(
-                      'w-full text-left p-2 rounded border transition-colors cursor-pointer',
-                      'border-gray-200 dark:border-gray-700',
-                      'hover:bg-gray-50 dark:hover:bg-gray-800'
-                    )}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') onRestore(item.id);
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-xs font-medium text-gray-900 dark:text-white line-clamp-2">
-                        {item.title || item.taskDescription}
-                      </p>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRename(item);
-                          }}
-                          title="Rename session"
-                        >
-                          rename
-                        </button>
-                        <button
-                          className="text-2xs px-1 py-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(item.id);
-                          }}
-                          title="Delete session"
-                        >
-                          &times;
-                        </button>
-                      </div>
-                    </div>
-                    <p className="text-2xs mt-1 text-gray-500 dark:text-gray-400">
-                      {new Date(item.startedAt).toLocaleString()} | {item.success ? 'success' : 'failed'}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
       </div>
     </div>
   );
