@@ -40,6 +40,9 @@ ollama-rs = { version = "0.3", features = ["stream"] }
 tokio-stream = "0.1"
 schemars = "1"
 
+# ZhipuAI (GLM) official SDK - types for response parsing and tool definitions
+zai-rs = "0.1"
+
 # WebSocket (for future use)
 futures-util = "0.3"
 tokio-tungstenite = "0.24"

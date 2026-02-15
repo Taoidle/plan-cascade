@@ -2,12 +2,21 @@
 //!
 //! Handles GLM SSE format with reasoning_content support for GLM-4.5+ models.
 //! GLM uses the same reasoning_content field as OpenAI o1/o3 (not <think> tags like DeepSeek).
+//!
+//! Note: This adapter uses custom deserialization types rather than the zai-rs SDK's
+//! `ChatStreamResponse` because the SDK's `Usage` type does not expose the
+//! `reasoning_tokens` field needed for thinking token tracking. The main provider
+//! in `services/llm/glm.rs` uses zai-rs `ChatCompletionResponse` for non-streaming
+//! response parsing.
 
 use crate::services::streaming::adapter::StreamAdapter;
 use crate::services::streaming::unified::{AdapterError, UnifiedStreamEvent};
 use serde::Deserialize;
 
-/// Internal event types from GLM API SSE format
+/// Internal event types from GLM API SSE format.
+///
+/// Uses custom types instead of `zai_rs::model::ChatStreamResponse` to support
+/// `reasoning_tokens` in usage tracking which the SDK does not expose.
 #[derive(Debug, Deserialize)]
 struct GlmEvent {
     #[serde(default)]

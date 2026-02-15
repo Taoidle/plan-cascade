@@ -1,11 +1,18 @@
 //! GLM (ZhipuAI) Provider
 //!
 //! Implementation of the LlmProvider trait for ZhipuAI's GLM API.
-//! Uses OpenAI-compatible format with reasoning_content for thinking models.
+//! Uses zai-rs SDK types for response parsing and tool definitions,
+//! with reqwest HTTP transport for dynamic model names and custom retry logic.
+//!
+//! Retry strategy (ADR-005):
+//!   1. First attempt: full parameters (tools + stream_options + tool_stream)
+//!   2. If 1210 error: stripped body retry (remove tools/stream_options/tool_stream)
+//!   3. If GLM-4.7 still fails: switch to coding endpoint retry
 
 use async_trait::async_trait;
-use serde::Deserialize;
 use tokio::sync::mpsc;
+use zai_rs::model::chat_base_response::{ChatCompletionResponse as ZaiResponse, Usage as ZaiUsage};
+use zai_rs::model::tools::{Function as ZaiFunction, Tools as ZaiTools};
 
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
@@ -21,7 +28,11 @@ const GLM_API_URL: &str = "https://open.bigmodel.cn/api/paas/v4/chat/completions
 /// Coding plan endpoint (required for some GLM-4.7 key/plan combinations)
 const GLM_CODING_API_URL: &str = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions";
 
-/// GLM provider
+/// GLM provider backed by zai-rs SDK types for serialization/deserialization.
+///
+/// Uses reqwest for HTTP transport to support dynamic model names at runtime,
+/// since the zai-rs SDK's `ChatCompletion` type requires compile-time model
+/// type parameters (e.g. `GLM4_5_flash`, `GLM4_7`).
 pub struct GlmProvider {
     config: ProviderConfig,
     client: reqwest::Client,
@@ -64,7 +75,15 @@ impl GlmProvider {
         model.contains("4.6") || model.contains("4.7")
     }
 
-    /// Build the request body for the API
+    /// Convert our ToolDefinition to zai-rs Tools::Function.
+    fn tool_to_zai(tool: &ToolDefinition) -> ZaiTools {
+        let params = serde_json::to_value(&tool.input_schema).unwrap_or_default();
+        ZaiTools::Function {
+            function: ZaiFunction::new(&tool.name, &tool.description, params),
+        }
+    }
+
+    /// Build the request body for the API using zai-rs types where possible.
     fn build_request_body(
         &self,
         messages: &[Message],
@@ -108,17 +127,12 @@ impl GlmProvider {
         body["messages"] = serde_json::json!(api_messages);
 
         if !tools.is_empty() {
+            // Serialize tools using zai-rs Function type for type-safe tool definitions
             let api_tools: Vec<serde_json::Value> = tools
                 .iter()
                 .map(|t| {
-                    serde_json::json!({
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.input_schema
-                        }
-                    })
+                    let zai_tool = Self::tool_to_zai(t);
+                    serde_json::to_value(&zai_tool).unwrap_or_default()
                 })
                 .collect();
             body["tools"] = serde_json::json!(api_tools);
@@ -127,7 +141,7 @@ impl GlmProvider {
             if matches!(request_options.tool_call_mode, ToolCallMode::Required)
                 && !thinking_active
             {
-                // GLM thinking models may not support tool_choice "required" —
+                // GLM thinking models may not support tool_choice "required" --
                 // skip it and let the model default to "auto".
                 body["tool_choice"] = serde_json::json!("required");
             }
@@ -165,13 +179,18 @@ impl GlmProvider {
         body
     }
 
+    /// Detect the GLM 1210 "invalid parameter" error from response status and body.
+    ///
+    /// The zai-rs SDK classifies this as `ZaiError::ApiError { code: 1210, .. }`.
+    /// We check the raw response text for the same code pattern since we handle
+    /// HTTP transport ourselves for dynamic model name support.
     fn is_invalid_param_error(status: u16, body_text: &str) -> bool {
         if status != 400 {
             return false;
         }
         body_text.contains("\"code\":\"1210\"")
             || body_text.contains("\"code\":1210")
-            || body_text.contains("API 调用参数有误")
+            || body_text.contains("API \u{8c03}\u{7528}\u{53c2}\u{6570}\u{6709}\u{8bef}")
     }
 
     async fn post_chat_completion(
@@ -261,7 +280,7 @@ impl GlmProvider {
                 .join("\n");
 
             let mut msg = serde_json::json!({"role": role, "tool_calls": tool_calls});
-            // Always include content field — some OpenAI-compatible APIs
+            // Always include content field -- some OpenAI-compatible APIs
             // require it even when the assistant only emits tool calls.
             if text_content.is_empty() {
                 msg["content"] = serde_json::Value::Null;
@@ -287,25 +306,47 @@ impl GlmProvider {
         serde_json::json!({"role": role, "content": text_content})
     }
 
-    /// Parse a non-streaming response
-    fn parse_response(&self, response: &GlmResponse) -> LlmResponse {
-        let choice = response.choices.first();
+    /// Parse a non-streaming response using zai-rs ChatCompletionResponse type.
+    fn parse_zai_response(&self, response: &ZaiResponse) -> LlmResponse {
+        let choices = response.choices().unwrap_or(&[]);
+        let choice = choices.first();
         let mut content = None;
         let mut thinking = None;
         let mut tool_calls = Vec::new();
 
         if let Some(choice) = choice {
-            if let Some(msg) = &choice.message {
-                content = msg.content.clone();
-                thinking = msg.reasoning_content.clone();
-                if let Some(tcs) = &msg.tool_calls {
-                    for tc in tcs {
-                        let arguments: serde_json::Value =
-                            serde_json::from_str(&tc.function.arguments)
-                                .unwrap_or(serde_json::Value::Null);
+            let msg = &choice.message;
+            // Extract text content -- zai-rs stores content as Option<serde_json::Value>
+            if let Some(c) = msg.content() {
+                match c {
+                    serde_json::Value::String(s) => {
+                        if !s.is_empty() {
+                            content = Some(s.clone());
+                        }
+                    }
+                    serde_json::Value::Null => {}
+                    other => {
+                        // Handle non-string content by converting to string
+                        let s = other.to_string();
+                        if !s.is_empty() {
+                            content = Some(s);
+                        }
+                    }
+                }
+            }
+            thinking = msg.reasoning_content().map(|s| s.to_string());
+            if let Some(tcs) = msg.tool_calls() {
+                for tc in tcs {
+                    if let Some(func) = tc.function() {
+                        let name = func.name().unwrap_or("").to_string();
+                        let id = tc.id().unwrap_or("").to_string();
+                        let arguments: serde_json::Value = func
+                            .arguments()
+                            .and_then(|a| serde_json::from_str(a).ok())
+                            .unwrap_or(serde_json::Value::Null);
                         tool_calls.push(ToolCall {
-                            id: tc.id.clone(),
-                            name: tc.function.name.clone(),
+                            id,
+                            name,
                             arguments,
                         });
                     }
@@ -317,17 +358,7 @@ impl GlmProvider {
             .and_then(|c| c.finish_reason.as_ref())
             .map(|r| StopReason::from(r.as_str()))
             .unwrap_or(StopReason::EndTurn);
-        let usage = response
-            .usage
-            .as_ref()
-            .map(|u| UsageStats {
-                input_tokens: u.prompt_tokens,
-                output_tokens: u.completion_tokens,
-                thinking_tokens: u.reasoning_tokens,
-                cache_read_tokens: None,
-                cache_creation_tokens: None,
-            })
-            .unwrap_or_default();
+        let usage = Self::convert_zai_usage(response.usage());
 
         LlmResponse {
             content,
@@ -335,8 +366,23 @@ impl GlmProvider {
             tool_calls,
             stop_reason,
             usage,
-            model: response.model.clone(),
+            model: response.model().unwrap_or(&self.config.model).to_string(),
         }
+    }
+
+    /// Convert zai-rs Usage to our UsageStats.
+    fn convert_zai_usage(usage: Option<&ZaiUsage>) -> UsageStats {
+        usage
+            .map(|u| UsageStats {
+                input_tokens: u.prompt_tokens().unwrap_or(0),
+                output_tokens: u.completion_tokens().unwrap_or(0),
+                thinking_tokens: None, // zai-rs Usage does not expose reasoning_tokens
+                cache_read_tokens: u
+                    .prompt_tokens_details()
+                    .and_then(|d| d.cached_tokens()),
+                cache_creation_tokens: None,
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -375,7 +421,7 @@ impl LlmProvider for GlmProvider {
 
     fn context_window(&self) -> u32 {
         let model = self.config.model.to_lowercase();
-        // Vision models have smaller context windows — check these first
+        // Vision models have smaller context windows -- check these first
         // since "4.6v" contains "4.6" and "4.5v" contains "4.5".
         if model.contains("4v") || model.contains("4.5v") {
             // glm-4v-plus: 8k, glm-4v-flash: 8k, glm-4.5v: 16k
@@ -420,6 +466,8 @@ impl LlmProvider for GlmProvider {
             &request_options,
         );
 
+        // --- ADR-005 retry logic ---
+        // Step 1: Full parameters
         let mut response = self
             .post_chat_completion(self.base_url(), api_key, &body)
             .await?;
@@ -430,6 +478,7 @@ impl LlmProvider for GlmProvider {
         })?;
         if status != 200 {
             if Self::is_invalid_param_error(status, &body_text) {
+                // Step 2: Stripped body retry (remove tools/stream_options/tool_stream)
                 let compat_body = self.build_compat_request_body(
                     &messages,
                     system.as_deref(),
@@ -445,7 +494,7 @@ impl LlmProvider for GlmProvider {
                     message: e.to_string(),
                 })?;
 
-                // Some keys/plans only allow GLM-4.7 on coding endpoint.
+                // Step 3: GLM-4.7 coding endpoint fallback
                 if status != 200
                     && Self::is_invalid_param_error(status, &body_text)
                     && self.model_is_glm47_family()
@@ -472,11 +521,12 @@ impl LlmProvider for GlmProvider {
             }
         }
 
-        let glm_response: GlmResponse =
+        // Parse response using zai-rs ChatCompletionResponse type
+        let zai_response: ZaiResponse =
             serde_json::from_str(&body_text).map_err(|e| LlmError::ParseError {
                 message: format!("Failed to parse response: {}", e),
             })?;
-        Ok(self.parse_response(&glm_response))
+        Ok(self.parse_zai_response(&zai_response))
     }
 
     async fn stream_message(
@@ -495,6 +545,8 @@ impl LlmProvider for GlmProvider {
         let body =
             self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
 
+        // --- ADR-005 retry logic ---
+        // Step 1: Full parameters
         let mut response = self
             .post_chat_completion(self.base_url(), api_key, &body)
             .await?;
@@ -506,6 +558,7 @@ impl LlmProvider for GlmProvider {
             })?;
 
             if Self::is_invalid_param_error(status, &body_text) {
+                // Step 2: Stripped body retry
                 let compat_body = self.build_compat_request_body(
                     &messages,
                     system.as_deref(),
@@ -523,6 +576,7 @@ impl LlmProvider for GlmProvider {
                     })?;
 
                     if Self::is_invalid_param_error(status, &retry_text) {
+                        // Step 3: GLM-4.7 coding endpoint fallback
                         response = self
                             .post_chat_completion(GLM_CODING_API_URL, api_key, &compat_body)
                             .await?;
@@ -611,8 +665,8 @@ impl LlmProvider for GlmProvider {
                                 _ => {}
                             }
                             // Forward streaming events to the frontend, but suppress
-                            // Suppress internal signals — the orchestrator emits its
-                            // own Complete, Usage, and tool lifecycle events after
+                            // internal signals -- the orchestrator emits its own
+                            // Complete, Usage, and tool lifecycle events after
                             // executing tools.
                             if !matches!(
                                 &event,
@@ -693,46 +747,6 @@ impl LlmProvider for GlmProvider {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct GlmResponse {
-    model: String,
-    choices: Vec<Choice>,
-    usage: Option<ResponseUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Choice {
-    message: Option<ResponseMessage>,
-    finish_reason: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseMessage {
-    content: Option<String>,
-    reasoning_content: Option<String>,
-    tool_calls: Option<Vec<ResponseToolCall>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseToolCall {
-    id: String,
-    function: ResponseFunction,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseFunction {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseUsage {
-    prompt_tokens: u32,
-    completion_tokens: u32,
-    #[serde(default)]
-    reasoning_tokens: Option<u32>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -782,5 +796,196 @@ mod tests {
         let api_msg = provider.message_to_api(&message);
         assert_eq!(api_msg["role"], "user");
         assert_eq!(api_msg["content"], "Hello!");
+    }
+
+    #[test]
+    fn test_tool_to_zai_conversion() {
+        use std::collections::HashMap;
+        let tool = ToolDefinition {
+            name: "get_weather".to_string(),
+            description: "Get weather for a city".to_string(),
+            input_schema: super::super::types::ParameterSchema::object(
+                Some("Weather parameters"),
+                {
+                    let mut props = HashMap::new();
+                    props.insert(
+                        "city".to_string(),
+                        super::super::types::ParameterSchema::string(Some("City name")),
+                    );
+                    props
+                },
+                vec!["city".to_string()],
+            ),
+        };
+        let zai_tool = GlmProvider::tool_to_zai(&tool);
+        let serialized = serde_json::to_value(&zai_tool).unwrap();
+        assert_eq!(serialized["type"], "function");
+        assert_eq!(serialized["function"]["name"], "get_weather");
+        assert_eq!(
+            serialized["function"]["description"],
+            "Get weather for a city"
+        );
+    }
+
+    #[test]
+    fn test_zai_response_parsing() {
+        let provider = GlmProvider::new(test_config());
+        let json_str = r#"{
+            "id": "test-123",
+            "model": "glm-4-flash-250414",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Hello! How can I help you?"
+                    },
+                    "finish_reason": "stop"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 8,
+                "total_tokens": 18
+            }
+        }"#;
+        let zai_resp: ZaiResponse = serde_json::from_str(json_str).unwrap();
+        let response = provider.parse_zai_response(&zai_resp);
+        assert_eq!(response.content, Some("Hello! How can I help you?".to_string()));
+        assert_eq!(response.stop_reason, StopReason::EndTurn);
+        assert_eq!(response.usage.input_tokens, 10);
+        assert_eq!(response.usage.output_tokens, 8);
+        assert_eq!(response.model, "glm-4-flash-250414");
+    }
+
+    #[test]
+    fn test_zai_response_with_tool_calls() {
+        let provider = GlmProvider::new(test_config());
+        let json_str = r#"{
+            "id": "test-456",
+            "model": "glm-4-flash-250414",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "call_001",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": "{\"city\":\"Beijing\"}"
+                                }
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 15,
+                "completion_tokens": 12,
+                "total_tokens": 27
+            }
+        }"#;
+        let zai_resp: ZaiResponse = serde_json::from_str(json_str).unwrap();
+        let response = provider.parse_zai_response(&zai_resp);
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].id, "call_001");
+        assert_eq!(response.tool_calls[0].name, "get_weather");
+        assert_eq!(response.tool_calls[0].arguments["city"], "Beijing");
+        assert_eq!(response.stop_reason, StopReason::ToolUse);
+    }
+
+    #[test]
+    fn test_zai_response_with_reasoning() {
+        let provider = GlmProvider::new(ProviderConfig {
+            model: "glm-4.5-flash".to_string(),
+            ..test_config()
+        });
+        let json_str = r#"{
+            "id": "test-789",
+            "model": "glm-4.5-flash",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "The answer is 42.",
+                        "reasoning_content": "Let me think about this step by step..."
+                    },
+                    "finish_reason": "stop"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 20,
+                "completion_tokens": 30,
+                "total_tokens": 50
+            }
+        }"#;
+        let zai_resp: ZaiResponse = serde_json::from_str(json_str).unwrap();
+        let response = provider.parse_zai_response(&zai_resp);
+        assert_eq!(response.content, Some("The answer is 42.".to_string()));
+        assert_eq!(
+            response.thinking,
+            Some("Let me think about this step by step...".to_string())
+        );
+    }
+
+    #[test]
+    fn test_is_invalid_param_error() {
+        assert!(GlmProvider::is_invalid_param_error(
+            400,
+            r#"{"code":"1210","message":"API param error"}"#
+        ));
+        assert!(GlmProvider::is_invalid_param_error(
+            400,
+            r#"{"code":1210,"message":"error"}"#
+        ));
+        assert!(!GlmProvider::is_invalid_param_error(
+            200,
+            r#"{"code":"1210"}"#
+        ));
+        assert!(!GlmProvider::is_invalid_param_error(
+            400,
+            r#"{"code":"1234"}"#
+        ));
+    }
+
+    #[test]
+    fn test_glm47_family_detection() {
+        let provider = GlmProvider::new(ProviderConfig {
+            model: "glm-4.7".to_string(),
+            ..test_config()
+        });
+        assert!(provider.model_is_glm47_family());
+
+        let provider2 = GlmProvider::new(ProviderConfig {
+            model: "glm-4.5-flash".to_string(),
+            ..test_config()
+        });
+        assert!(!provider2.model_is_glm47_family());
+    }
+
+    #[test]
+    fn test_tool_stream_support() {
+        let provider46 = GlmProvider::new(ProviderConfig {
+            model: "glm-4.6".to_string(),
+            ..test_config()
+        });
+        assert!(provider46.model_supports_tool_stream());
+
+        let provider47 = GlmProvider::new(ProviderConfig {
+            model: "glm-4.7".to_string(),
+            ..test_config()
+        });
+        assert!(provider47.model_supports_tool_stream());
+
+        let provider45 = GlmProvider::new(ProviderConfig {
+            model: "glm-4.5-flash".to_string(),
+            ..test_config()
+        });
+        assert!(!provider45.model_supports_tool_stream());
     }
 }
