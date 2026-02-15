@@ -53,6 +53,9 @@ thiserror = "2"
 # Async trait support
 async-trait = "0.1"
 
+# DashScope SDK for Qwen LLM provider
+async-dashscope = "0.12"
+
 # UUID generation
 uuid = { version = "1", features = ["v4"] }
 

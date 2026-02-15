@@ -1,42 +1,62 @@
 //! Qwen (Alibaba Cloud DashScope) Provider
 //!
 //! Implementation of the LlmProvider trait for DashScope's Qwen API.
-//! Uses OpenAI-compatible format with reasoning_content for thinking models.
+//! Uses the async-dashscope SDK for API communication.
+//!
+//! ## SDK Limitations
+//! The async-dashscope SDK (v0.12) does not expose `temperature`, `max_tokens`,
+//! or `tool_choice` parameters in its `Parameters` builder. These are omitted
+//! from SDK-based requests, meaning DashScope will use its server-side defaults.
+//! If precise control over temperature/max_tokens is required, consider using
+//! the OpenAI-compatible endpoint with raw reqwest instead. See findings.md.
 
+use async_dashscope::operation::common::{
+    FunctionBuilder, FunctionCallBuilder, ParametersBuilder,
+};
+use async_dashscope::operation::generation::{GenerationOutput, GenerationParamBuilder};
+use async_dashscope::Client as DashScopeClient;
 use async_trait::async_trait;
-use serde::Deserialize;
+use futures_util::StreamExt;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
-use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
+use super::provider::{missing_api_key_error, LlmProvider};
 use super::types::{
     FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
-    MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
-    ToolCallReliability, ToolDefinition, UsageStats,
+    MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallReliability,
+    ToolDefinition, UsageStats,
 };
-use crate::services::streaming::adapters::QwenAdapter;
-use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
+use crate::services::streaming::UnifiedStreamEvent;
 
-/// Default DashScope OpenAI-compatible API endpoint
-const QWEN_API_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
-
-/// Qwen provider
+/// Qwen provider using the async-dashscope SDK
 pub struct QwenProvider {
     config: ProviderConfig,
-    client: reqwest::Client,
+    client: DashScopeClient,
 }
 
 impl QwenProvider {
     /// Create a new Qwen provider with the given configuration
     pub fn new(config: ProviderConfig) -> Self {
-        Self {
-            config,
-            client: reqwest::Client::new(),
-        }
+        let client = Self::build_client(&config);
+        Self { config, client }
     }
 
-    /// Get the API base URL
-    fn base_url(&self) -> &str {
-        self.config.base_url.as_deref().unwrap_or(QWEN_API_URL)
+    /// Build a DashScope SDK client from provider configuration
+    fn build_client(config: &ProviderConfig) -> DashScopeClient {
+        let api_key = config.api_key.as_deref().unwrap_or("");
+
+        // If a custom base_url is configured, use ConfigBuilder for full control.
+        if let Some(base_url) = &config.base_url {
+            if let Ok(sdk_config) = async_dashscope::config::ConfigBuilder::default()
+                .api_base(base_url.as_str())
+                .api_key(api_key)
+                .build()
+            {
+                return DashScopeClient::with_config(sdk_config);
+            }
+        }
+
+        DashScopeClient::new().with_api_key(api_key.to_string())
     }
 
     /// Check if model supports reasoning (Qwen3 series, QwQ models)
@@ -45,33 +65,21 @@ impl QwenProvider {
         model.contains("qwen3") || model.contains("qwq") || model.contains("thinking")
     }
 
-    /// Build the request body for the API
-    fn build_request_body(
+    /// Build the SDK Input from unified messages.
+    ///
+    /// The SDK's param-level Message enum and ToolCall struct are not publicly
+    /// exported. To construct assistant messages with tool_calls (and the Input
+    /// type itself), we build a JSON representation and deserialize it via serde.
+    /// This works because both Input and the param::Message enum implement
+    /// Deserialize.
+    fn build_sdk_input_json(
         &self,
         messages: &[Message],
         system: Option<&str>,
-        tools: &[ToolDefinition],
-        stream: bool,
-        request_options: &LlmRequestOptions,
     ) -> serde_json::Value {
-        let mut body = serde_json::json!({
-            "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
-            "stream": stream,
-            "temperature": request_options.temperature_override.unwrap_or(self.config.temperature),
-        });
-
-        // Enable thinking for Qwen3 models if configured
-        if self.config.enable_thinking && self.model_supports_reasoning() {
-            body["enable_thinking"] = serde_json::json!(true);
-            if let Some(budget) = self.config.thinking_budget {
-                body["thinking_budget"] = serde_json::json!(budget);
-            }
-        }
-
-        // Convert messages to OpenAI-compatible format
         let mut api_messages: Vec<serde_json::Value> = Vec::new();
 
+        // Add system prompt if provided
         if let Some(sys) = system {
             api_messages.push(serde_json::json!({
                 "role": "system",
@@ -80,128 +88,90 @@ impl QwenProvider {
         }
 
         for msg in messages {
-            if msg.role == MessageRole::System {
-                for content in &msg.content {
-                    if let MessageContent::Text { text } = content {
+            match msg.role {
+                MessageRole::System => {
+                    for content in &msg.content {
+                        if let MessageContent::Text { text } = content {
+                            api_messages.push(serde_json::json!({
+                                "role": "system",
+                                "content": text
+                            }));
+                        }
+                    }
+                }
+                MessageRole::User => {
+                    let has_tool_results = msg
+                        .content
+                        .iter()
+                        .any(|c| matches!(c, MessageContent::ToolResult { .. }));
+
+                    if has_tool_results {
+                        for content in &msg.content {
+                            if let MessageContent::ToolResult {
+                                tool_use_id,
+                                content,
+                                ..
+                            } = content
+                            {
+                                api_messages.push(serde_json::json!({
+                                    "role": "tool",
+                                    "content": content,
+                                    "tool_call_id": tool_use_id
+                                }));
+                                break;
+                            }
+                        }
+                    } else {
+                        let text_content = Self::extract_text_content(&msg.content);
                         api_messages.push(serde_json::json!({
-                            "role": "system",
-                            "content": text
+                            "role": "user",
+                            "content": text_content
                         }));
                     }
                 }
-            } else {
-                api_messages.push(self.message_to_api(msg));
-            }
-        }
+                MessageRole::Assistant => {
+                    let text_content = Self::extract_text_content(&msg.content);
 
-        body["messages"] = serde_json::json!(api_messages);
+                    let tool_calls_json: Vec<serde_json::Value> = msg
+                        .content
+                        .iter()
+                        .filter_map(|c| {
+                            if let MessageContent::ToolUse { id, name, input } = c {
+                                Some(serde_json::json!({
+                                    "id": id,
+                                    "type": "function",
+                                    "index": 0,
+                                    "function": {
+                                        "name": name,
+                                        "arguments": input.to_string()
+                                    }
+                                }))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
 
-        if !tools.is_empty() {
-            let api_tools: Vec<serde_json::Value> = tools
-                .iter()
-                .map(|t| {
-                    serde_json::json!({
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.input_schema
-                        }
-                    })
-                })
-                .collect();
-            body["tools"] = serde_json::json!(api_tools);
-            // DashScope documentation recommends parallel_tool_calls for all
-            // function-calling requests.
-            body["parallel_tool_calls"] = serde_json::json!(true);
+                    let mut msg_json = serde_json::json!({
+                        "role": "assistant",
+                        "content": text_content
+                    });
 
-            let thinking_active =
-                self.config.enable_thinking && self.model_supports_reasoning();
-            if matches!(request_options.tool_call_mode, ToolCallMode::Required)
-                && !thinking_active
-            {
-                // tool_choice "required" is NOT supported when enable_thinking
-                // is active — DashScope only allows "auto" or "none" for thinking
-                // models. Skip it; the model defaults to "auto".
-                body["tool_choice"] = serde_json::json!("required");
-            }
-        }
+                    if !tool_calls_json.is_empty() {
+                        msg_json["tool_calls"] = serde_json::json!(tool_calls_json);
+                    }
 
-        if stream {
-            body["stream_options"] = serde_json::json!({
-                "include_usage": true
-            });
-        }
-
-        body
-    }
-
-    /// Convert a Message to OpenAI-compatible format
-    fn message_to_api(&self, message: &Message) -> serde_json::Value {
-        let role = match message.role {
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::System => "system",
-        };
-
-        let has_tool_results = message
-            .content
-            .iter()
-            .any(|c| matches!(c, MessageContent::ToolResult { .. }));
-        if has_tool_results {
-            let mut result_msg = serde_json::json!({"role": "tool"});
-            for content in &message.content {
-                if let MessageContent::ToolResult {
-                    tool_use_id,
-                    content,
-                    ..
-                } = content
-                {
-                    result_msg["tool_call_id"] = serde_json::json!(tool_use_id);
-                    result_msg["content"] = serde_json::json!(content);
-                    break;
+                    api_messages.push(msg_json);
                 }
             }
-            return result_msg;
         }
 
-        let has_tool_calls = message
-            .content
-            .iter()
-            .any(|c| matches!(c, MessageContent::ToolUse { .. }));
-        if has_tool_calls {
-            let tool_calls: Vec<serde_json::Value> = message.content.iter().filter_map(|c| {
-                if let MessageContent::ToolUse { id, name, input } = c {
-                    Some(serde_json::json!({"id": id, "type": "function", "function": {"name": name, "arguments": input.to_string()}}))
-                } else { None }
-            }).collect();
+        serde_json::json!({ "messages": api_messages })
+    }
 
-            let text_content: String = message
-                .content
-                .iter()
-                .filter_map(|c| {
-                    if let MessageContent::Text { text } = c {
-                        Some(text.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let mut msg = serde_json::json!({"role": role, "tool_calls": tool_calls});
-            // Always include content field for OpenAI-compatible APIs —
-            // DashScope and others require it even when empty.
-            if text_content.is_empty() {
-                msg["content"] = serde_json::Value::Null;
-            } else {
-                msg["content"] = serde_json::json!(text_content);
-            }
-            return msg;
-        }
-
-        let text_content: String = message
-            .content
+    /// Extract text content from message content blocks
+    fn extract_text_content(content: &[MessageContent]) -> String {
+        content
             .iter()
             .filter_map(|c| {
                 if let MessageContent::Text { text } = c {
@@ -211,27 +181,159 @@ impl QwenProvider {
                 }
             })
             .collect::<Vec<_>>()
-            .join("\n");
-
-        serde_json::json!({"role": role, "content": text_content})
+            .join("\n")
     }
 
-    /// Parse a non-streaming response
-    fn parse_response(&self, response: &QwenResponse) -> LlmResponse {
-        let choice = response.choices.first();
+    /// Convert unified tool definitions to SDK FunctionCall format
+    fn convert_tools(
+        tools: &[ToolDefinition],
+    ) -> Vec<async_dashscope::operation::common::FunctionCall> {
+        tools
+            .iter()
+            .filter_map(|t| {
+                let parameters = Self::convert_parameter_schema(&t.input_schema);
+
+                let function = FunctionBuilder::default()
+                    .name(t.name.as_str())
+                    .description(t.description.as_str())
+                    .parameters(parameters)
+                    .build()
+                    .ok()?;
+
+                FunctionCallBuilder::default()
+                    .typ("function")
+                    .function(function)
+                    .build()
+                    .ok()
+            })
+            .collect()
+    }
+
+    /// Convert a ParameterSchema to SDK FunctionParameters via serde.
+    fn convert_parameter_schema(
+        schema: &super::types::ParameterSchema,
+    ) -> async_dashscope::operation::common::FunctionParameters {
+        let properties: HashMap<String, serde_json::Value> = schema
+            .properties
+            .as_ref()
+            .map(|props| {
+                props
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            k.clone(),
+                            serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let json = serde_json::json!({
+            "type": schema.schema_type,
+            "properties": properties,
+            "required": schema.required,
+        });
+
+        serde_json::from_value(json).unwrap_or_else(|_| {
+            serde_json::from_value(serde_json::json!({
+                "type": "object",
+                "properties": {},
+            }))
+            .expect("fallback FunctionParameters should always deserialize")
+        })
+    }
+
+    /// Build SDK parameters for a request
+    fn build_sdk_parameters(
+        &self,
+        tools: &[ToolDefinition],
+    ) -> Option<async_dashscope::operation::common::Parameters> {
+        let mut builder = ParametersBuilder::default();
+        builder.result_format("message");
+
+        if self.config.enable_thinking && self.model_supports_reasoning() {
+            builder.enable_thinking(true);
+            if let Some(budget) = self.config.thinking_budget {
+                builder.thinking_budget(budget as usize);
+            }
+        }
+
+        if !tools.is_empty() {
+            let sdk_tools = Self::convert_tools(tools);
+            builder.tools(sdk_tools);
+            builder.parallel_tool_calls(true);
+        }
+
+        builder.build().ok()
+    }
+
+    /// Build a GenerationParam from messages, tools, and streaming flag.
+    ///
+    /// Uses serde to construct the Input (since the SDK doesn't publicly export
+    /// the param::Message enum or param::ToolCall struct), then uses the SDK
+    /// builders for GenerationParam and Parameters.
+    fn build_generation_param(
+        &self,
+        messages: &[Message],
+        system: Option<&str>,
+        tools: &[ToolDefinition],
+        stream: bool,
+    ) -> LlmResult<async_dashscope::operation::generation::GenerationParam> {
+        // Build Input via serde (handles assistant messages with tool_calls)
+        let input_json = self.build_sdk_input_json(messages, system);
+        let input = serde_json::from_value(input_json).map_err(|e| LlmError::InvalidRequest {
+            message: format!("Failed to build SDK input: {}", e),
+        })?;
+
+        let parameters = self.build_sdk_parameters(tools);
+
+        let mut param_builder = GenerationParamBuilder::default();
+        param_builder
+            .model(self.config.model.clone())
+            .input(input)
+            .stream(stream);
+
+        if stream {
+            param_builder.stream_options(async_dashscope::operation::common::StreamOptions {
+                include_usage: true,
+            });
+        }
+
+        if let Some(params) = parameters {
+            param_builder.parameters(params);
+        }
+
+        param_builder.build().map_err(|e| LlmError::InvalidRequest {
+            message: format!("Failed to build generation params: {}", e),
+        })
+    }
+
+    /// Convert SDK GenerationOutput to unified LlmResponse
+    fn convert_output_to_response(&self, output: &GenerationOutput) -> LlmResponse {
         let mut content = None;
         let mut thinking = None;
         let mut tool_calls = Vec::new();
+        let mut stop_reason = StopReason::EndTurn;
 
-        if let Some(choice) = choice {
-            if let Some(msg) = &choice.message {
-                content = msg.content.clone();
+        if let Some(choices) = &output.output.choices {
+            if let Some(choice) = choices.first() {
+                let msg = &choice.message;
+
+                if !msg.content.is_empty() {
+                    content = Some(msg.content.clone());
+                }
+
                 thinking = msg.reasoning_content.clone();
+
                 if let Some(tcs) = &msg.tool_calls {
                     for tc in tcs {
-                        let arguments: serde_json::Value =
-                            serde_json::from_str(&tc.function.arguments)
-                                .unwrap_or(serde_json::Value::Null);
+                        let arguments: serde_json::Value = tc
+                            .function
+                            .arguments
+                            .as_ref()
+                            .and_then(|a| serde_json::from_str(a).ok())
+                            .unwrap_or(serde_json::Value::Null);
                         tool_calls.push(ToolCall {
                             id: tc.id.clone(),
                             name: tc.function.name.clone(),
@@ -239,20 +341,24 @@ impl QwenProvider {
                         });
                     }
                 }
+
+                if let Some(reason) = &choice.finish_reason {
+                    stop_reason = StopReason::from(reason.as_str());
+                }
             }
         }
 
-        let stop_reason = choice
-            .and_then(|c| c.finish_reason.as_ref())
-            .map(|r| StopReason::from(r.as_str()))
-            .unwrap_or(StopReason::EndTurn);
-        let usage = response
+        if let Some(reason) = &output.output.finish_reason {
+            stop_reason = StopReason::from(reason.as_str());
+        }
+
+        let usage = output
             .usage
             .as_ref()
             .map(|u| UsageStats {
-                input_tokens: u.prompt_tokens,
-                output_tokens: u.completion_tokens,
-                thinking_tokens: u.reasoning_tokens,
+                input_tokens: u.input_tokens.unwrap_or(0) as u32,
+                output_tokens: u.output_tokens.unwrap_or(0) as u32,
+                thinking_tokens: None,
                 cache_read_tokens: None,
                 cache_creation_tokens: None,
             })
@@ -264,7 +370,34 @@ impl QwenProvider {
             tool_calls,
             stop_reason,
             usage,
-            model: response.model.clone(),
+            model: self.config.model.clone(),
+        }
+    }
+
+    /// Convert a DashScope SDK error to unified LlmError
+    fn convert_sdk_error(err: async_dashscope::error::DashScopeError) -> LlmError {
+        let msg = err.to_string();
+        let msg_lower = msg.to_lowercase();
+        if msg.contains("401") || msg_lower.contains("unauthorized") || msg_lower.contains("invalid api") {
+            LlmError::AuthenticationFailed {
+                message: format!("qwen: {}", msg),
+            }
+        } else if msg.contains("429") || msg_lower.contains("rate limit") {
+            LlmError::RateLimited {
+                message: msg,
+                retry_after: None,
+            }
+        } else if msg.contains("404") || msg_lower.contains("not found") {
+            LlmError::ModelNotFound { model: msg }
+        } else if msg.contains("400") || msg_lower.contains("invalid") {
+            LlmError::InvalidRequest { message: msg }
+        } else if msg.contains("500") || msg.contains("502") || msg.contains("503") {
+            LlmError::ServerError {
+                message: msg,
+                status: None,
+            }
+        } else {
+            LlmError::NetworkError { message: msg }
         }
     }
 }
@@ -285,67 +418,45 @@ impl LlmProvider for QwenProvider {
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
-        // Qwen documentation shows native function calling support, but in practice
-        // models with enable_thinking may not emit native tool_calls reliably.
-        // Keep Unreliable to use prompt-based fallback which works consistently.
         ToolCallReliability::Unreliable
     }
 
     fn default_fallback_mode(&self) -> FallbackToolFormatMode {
         if self.config.enable_thinking && self.model_supports_reasoning() {
-            // When thinking is enabled, Qwen models support native tool calling
-            // via the tools API. Injecting Soft fallback instructions (```tool_call
-            // markdown format) into the system prompt confuses the model, causing it
-            // to emit tool calls as text instead of native tool_calls. Disable the
-            // prompt-based fallback entirely — rely only on native tools API.
             FallbackToolFormatMode::Off
         } else {
-            // Non-thinking Qwen models are Unreliable — use Soft fallback
             FallbackToolFormatMode::Soft
         }
     }
 
     fn context_window(&self) -> u32 {
         let model = self.config.model.to_lowercase();
-        // Qwen model context windows vary significantly by model variant.
-        // Source: https://help.aliyun.com/zh/model-studio/what-is-qwen-llm
         if model.contains("qwen3-max") {
-            // qwen3-max, qwen3-max-2025-09-23, qwen3-max-2026-01-23: 262k
             262_144
         } else if model.contains("qwen-max-latest")
             || model.contains("qwen-max-2025")
             || model.contains("qwen-max-2026")
         {
-            // qwen-max-latest, qwen-max-2025-01-25: 131k
             131_072
         } else if model.contains("qwen-max") {
-            // qwen-max (stable, older): 32k
             32_768
         } else if model.contains("qwen-plus")
             || model.contains("qwen-turbo")
             || model.contains("qwen-flash")
             || model.contains("qwen-long")
         {
-            // qwen-plus, qwen-turbo, qwen-flash, qwen-long: 1M context
             1_000_000
         } else if model.contains("qwen3-coder") {
-            // qwen3-coder-plus, qwen3-coder-flash: 1M context
             1_000_000
         } else if model.contains("qwq") {
-            // QwQ-Plus, QwQ series: 131k
             131_072
         } else if model.contains("qwen2.5-turbo") {
-            // qwen2.5-turbo: 1M context
             1_000_000
         } else if model.contains("qwen2.5") {
-            // qwen2.5 open-source models: 128k for 7B+, 32k for smaller
             131_072
         } else if model.contains("qwen3") {
-            // qwen3 open-source (8B+: 128k, 0.6B-4B: 32k)
-            // Most users on DashScope API use the larger models
             128_000
         } else {
-            // Conservative default for unrecognized Qwen models
             32_768
         }
     }
@@ -355,46 +466,22 @@ impl LlmProvider for QwenProvider {
         messages: Vec<Message>,
         system: Option<String>,
         tools: Vec<ToolDefinition>,
-        request_options: LlmRequestOptions,
+        _request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("qwen"))?;
-        let body = self.build_request_body(
-            &messages,
-            system.as_deref(),
-            &tools,
-            false,
-            &request_options,
-        );
-
-        let response = self
-            .client
-            .post(self.base_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-
-        let status = response.status().as_u16();
-        let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
-            message: e.to_string(),
-        })?;
-        if status != 200 {
-            return Err(parse_http_error(status, &body_text, "qwen"));
+        if self.config.api_key.is_none() || self.config.api_key.as_deref() == Some("") {
+            return Err(missing_api_key_error("qwen"));
         }
 
-        let qwen_response: QwenResponse =
-            serde_json::from_str(&body_text).map_err(|e| LlmError::ParseError {
-                message: format!("Failed to parse response: {}", e),
-            })?;
-        Ok(self.parse_response(&qwen_response))
+        let param = self.build_generation_param(&messages, system.as_deref(), &tools, false)?;
+
+        let output = self
+            .client
+            .generation()
+            .call(param)
+            .await
+            .map_err(Self::convert_sdk_error)?;
+
+        Ok(self.convert_output_to_response(&output))
     }
 
     async fn stream_message(
@@ -403,124 +490,181 @@ impl LlmProvider for QwenProvider {
         system: Option<String>,
         tools: Vec<ToolDefinition>,
         tx: mpsc::Sender<UnifiedStreamEvent>,
-        request_options: LlmRequestOptions,
+        _request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("qwen"))?;
-        let body =
-            self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
-
-        let response = self
-            .client
-            .post(self.base_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-
-        let status = response.status().as_u16();
-        if status != 200 {
-            let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-            return Err(parse_http_error(status, &body_text, "qwen"));
+        if self.config.api_key.is_none() || self.config.api_key.as_deref() == Some("") {
+            return Err(missing_api_key_error("qwen"));
         }
 
-        let mut adapter = QwenAdapter::new(&self.config.model);
+        let param = self.build_generation_param(&messages, system.as_deref(), &tools, true)?;
+
+        let mut stream = self
+            .client
+            .generation()
+            .call_stream(param)
+            .await
+            .map_err(Self::convert_sdk_error)?;
+
         let mut accumulated_content = String::new();
         let mut accumulated_thinking = String::new();
         let mut tool_calls = Vec::new();
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
+        let mut in_reasoning = false;
 
-        let mut stream = response.bytes_stream();
-        use futures_util::StreamExt;
-        let mut buffer = String::new();
+        let mut pending_tool_id: Option<String> = None;
+        let mut pending_tool_name: Option<String> = None;
+        let mut pending_tool_args = String::new();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(output) => {
+                    if let Some(u) = &output.usage {
+                        usage.input_tokens = u.input_tokens.unwrap_or(0) as u32;
+                        usage.output_tokens = u.output_tokens.unwrap_or(0) as u32;
+                    }
 
-            while let Some(line_end) = buffer.find('\n') {
-                let line = buffer[..line_end].to_string();
-                buffer = buffer[line_end + 1..].to_string();
-                if line.trim().is_empty() {
-                    continue;
-                }
-
-                match adapter.adapt(&line) {
-                    Ok(events) => {
-                        for event in events {
-                            match &event {
-                                UnifiedStreamEvent::TextDelta { content } => {
-                                    accumulated_content.push_str(content);
-                                }
-                                UnifiedStreamEvent::ThinkingDelta { content, .. } => {
-                                    accumulated_thinking.push_str(content);
-                                }
-                                UnifiedStreamEvent::ToolComplete {
-                                    tool_id,
-                                    tool_name,
-                                    arguments,
-                                } => {
-                                    if let Ok(input) = serde_json::from_str(arguments) {
+                    if let Some(choices) = &output.output.choices {
+                        for choice in choices {
+                            if let Some(reason) = &choice.finish_reason {
+                                if let (Some(id), Some(name)) =
+                                    (pending_tool_id.take(), pending_tool_name.take())
+                                {
+                                    let args = std::mem::take(&mut pending_tool_args);
+                                    if let Ok(parsed) = serde_json::from_str(&args) {
                                         tool_calls.push(ToolCall {
-                                            id: tool_id.clone(),
-                                            name: tool_name.clone(),
-                                            arguments: input,
+                                            id,
+                                            name,
+                                            arguments: parsed,
                                         });
                                     }
                                 }
-                                UnifiedStreamEvent::Usage {
-                                    input_tokens,
-                                    output_tokens,
-                                    thinking_tokens,
-                                    ..
-                                } => {
-                                    usage.input_tokens = *input_tokens;
-                                    usage.output_tokens = *output_tokens;
-                                    usage.thinking_tokens = *thinking_tokens;
+
+                                if in_reasoning {
+                                    in_reasoning = false;
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::ThinkingEnd {
+                                            thinking_id: None,
+                                        })
+                                        .await;
                                 }
-                                UnifiedStreamEvent::Complete {
-                                    stop_reason: Some(reason),
-                                } => {
-                                    stop_reason = StopReason::from(reason.as_str());
-                                }
-                                _ => {}
+
+                                stop_reason = StopReason::from(reason.as_str());
+                                continue;
                             }
-                            // Forward streaming events but suppress internal signals —
-                            // the orchestrator emits its own Complete, Usage, and
-                            // tool lifecycle events after executing tools.
-                            if !matches!(
-                                &event,
-                                UnifiedStreamEvent::Complete { .. }
-                                    | UnifiedStreamEvent::Usage { .. }
-                                    | UnifiedStreamEvent::ToolStart { .. }
-                                    | UnifiedStreamEvent::ToolComplete { .. }
-                            ) {
-                                let _ = tx.send(event).await;
+
+                            let msg = &choice.message;
+
+                            if let Some(reasoning) = &msg.reasoning_content {
+                                if !reasoning.is_empty() {
+                                    if !in_reasoning {
+                                        in_reasoning = true;
+                                        let _ = tx
+                                            .send(UnifiedStreamEvent::ThinkingStart {
+                                                thinking_id: None,
+                                            })
+                                            .await;
+                                    }
+                                    accumulated_thinking.push_str(reasoning);
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::ThinkingDelta {
+                                            content: reasoning.clone(),
+                                            thinking_id: None,
+                                        })
+                                        .await;
+                                }
+                            }
+
+                            if !msg.content.is_empty() {
+                                if in_reasoning {
+                                    in_reasoning = false;
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::ThinkingEnd {
+                                            thinking_id: None,
+                                        })
+                                        .await;
+                                }
+                                accumulated_content.push_str(&msg.content);
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::TextDelta {
+                                        content: msg.content.clone(),
+                                    })
+                                    .await;
+                            }
+
+                            if let Some(tcs) = &msg.tool_calls {
+                                for tc in tcs {
+                                    let is_new_tool = !tc.id.is_empty()
+                                        && pending_tool_id.as_deref() != Some(&tc.id);
+
+                                    if is_new_tool {
+                                        if let (Some(id), Some(name)) =
+                                            (pending_tool_id.take(), pending_tool_name.take())
+                                        {
+                                            let args = std::mem::take(&mut pending_tool_args);
+                                            if let Ok(parsed) = serde_json::from_str(&args) {
+                                                tool_calls.push(ToolCall {
+                                                    id,
+                                                    name,
+                                                    arguments: parsed,
+                                                });
+                                            }
+                                        }
+
+                                        pending_tool_id = Some(tc.id.clone());
+                                        if !tc.function.name.is_empty() {
+                                            pending_tool_name =
+                                                Some(tc.function.name.clone());
+                                        }
+                                        pending_tool_args.clear();
+                                    }
+
+                                    if pending_tool_name.is_none()
+                                        && !tc.function.name.is_empty()
+                                    {
+                                        pending_tool_name = Some(tc.function.name.clone());
+                                    }
+
+                                    if let Some(args) = &tc.function.arguments {
+                                        pending_tool_args.push_str(args);
+                                    }
+                                }
                             }
                         }
                     }
-                    Err(e) => {
-                        let _ = tx
-                            .send(UnifiedStreamEvent::Error {
-                                message: e.to_string(),
-                                code: None,
-                            })
-                            .await;
+
+                    if let Some(reason) = &output.output.finish_reason {
+                        stop_reason = StopReason::from(reason.as_str());
                     }
                 }
+                Err(e) => {
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Error {
+                            message: e.to_string(),
+                            code: None,
+                        })
+                        .await;
+                }
             }
+        }
+
+        if let (Some(id), Some(name)) = (pending_tool_id.take(), pending_tool_name.take()) {
+            let args = std::mem::take(&mut pending_tool_args);
+            if let Ok(parsed) = serde_json::from_str(&args) {
+                tool_calls.push(ToolCall {
+                    id,
+                    name,
+                    arguments: parsed,
+                });
+            }
+        }
+
+        if in_reasoning {
+            let _ = tx
+                .send(UnifiedStreamEvent::ThinkingEnd {
+                    thinking_id: None,
+                })
+                .await;
         }
 
         Ok(LlmResponse {
@@ -542,81 +686,24 @@ impl LlmProvider for QwenProvider {
     }
 
     async fn health_check(&self) -> LlmResult<()> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("qwen"))?;
-        let body = serde_json::json!({"model": self.config.model, "max_tokens": 1, "messages": [{"role": "user", "content": "Hi"}]});
-
-        let response = self
-            .client
-            .post(self.base_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-
-        let status = response.status().as_u16();
-        if status == 200 {
-            Ok(())
-        } else if status == 401 {
-            Err(LlmError::AuthenticationFailed {
-                message: "Invalid API key".to_string(),
-            })
-        } else {
-            let body = response.text().await.unwrap_or_default();
-            Err(parse_http_error(status, &body, "qwen"))
+        if self.config.api_key.is_none() || self.config.api_key.as_deref() == Some("") {
+            return Err(missing_api_key_error("qwen"));
         }
+
+        let param = self.build_generation_param(&[Message::user("Hi")], None, &[], false)?;
+
+        self.client
+            .generation()
+            .call(param)
+            .await
+            .map_err(Self::convert_sdk_error)?;
+
+        Ok(())
     }
 
     fn config(&self) -> &ProviderConfig {
         &self.config
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct QwenResponse {
-    model: String,
-    choices: Vec<Choice>,
-    usage: Option<ResponseUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Choice {
-    message: Option<ResponseMessage>,
-    finish_reason: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseMessage {
-    content: Option<String>,
-    reasoning_content: Option<String>,
-    tool_calls: Option<Vec<ResponseToolCall>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseToolCall {
-    id: String,
-    function: ResponseFunction,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseFunction {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseUsage {
-    prompt_tokens: u32,
-    completion_tokens: u32,
-    #[serde(default)]
-    reasoning_tokens: Option<u32>,
 }
 
 #[cfg(test)]
@@ -662,11 +749,149 @@ mod tests {
     }
 
     #[test]
-    fn test_message_conversion() {
+    fn test_context_window_matrix() {
+        let config = ProviderConfig {
+            model: "qwen3-max".to_string(),
+            ..test_config()
+        };
+        assert_eq!(QwenProvider::new(config).context_window(), 262_144);
+
+        let config = ProviderConfig {
+            model: "qwen-plus".to_string(),
+            ..test_config()
+        };
+        assert_eq!(QwenProvider::new(config).context_window(), 1_000_000);
+
+        let config = ProviderConfig {
+            model: "qwq-plus".to_string(),
+            ..test_config()
+        };
+        assert_eq!(QwenProvider::new(config).context_window(), 131_072);
+
+        let config = ProviderConfig {
+            model: "unknown-model".to_string(),
+            ..test_config()
+        };
+        assert_eq!(QwenProvider::new(config).context_window(), 32_768);
+    }
+
+    #[test]
+    fn test_tool_call_reliability() {
         let provider = QwenProvider::new(test_config());
-        let message = Message::user("Hello!");
-        let api_msg = provider.message_to_api(&message);
-        assert_eq!(api_msg["role"], "user");
-        assert_eq!(api_msg["content"], "Hello!");
+        assert_eq!(
+            provider.tool_call_reliability(),
+            ToolCallReliability::Unreliable
+        );
+    }
+
+    #[test]
+    fn test_default_fallback_mode_thinking() {
+        let config = ProviderConfig {
+            model: "qwen3-plus".to_string(),
+            enable_thinking: true,
+            ..test_config()
+        };
+        let provider = QwenProvider::new(config);
+        assert_eq!(provider.default_fallback_mode(), FallbackToolFormatMode::Off);
+    }
+
+    #[test]
+    fn test_default_fallback_mode_non_thinking() {
+        let provider = QwenProvider::new(test_config());
+        assert_eq!(
+            provider.default_fallback_mode(),
+            FallbackToolFormatMode::Soft
+        );
+    }
+
+    #[test]
+    fn test_input_json_user() {
+        let provider = QwenProvider::new(test_config());
+        let messages = vec![Message::user("Hello!")];
+        let json = provider.build_sdk_input_json(&messages, None);
+        let msgs = json["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], "Hello!");
+    }
+
+    #[test]
+    fn test_input_json_with_system() {
+        let provider = QwenProvider::new(test_config());
+        let messages = vec![Message::user("Hello!")];
+        let json = provider.build_sdk_input_json(&messages, Some("You are a helper."));
+        let msgs = json["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[0]["content"], "You are a helper.");
+        assert_eq!(msgs[1]["role"], "user");
+    }
+
+    #[test]
+    fn test_input_json_tool_result() {
+        let provider = QwenProvider::new(test_config());
+        let messages = vec![Message::tool_result("call_123", "file contents here", false)];
+        let json = provider.build_sdk_input_json(&messages, None);
+        let msgs = json["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "tool");
+        assert_eq!(msgs[0]["tool_call_id"], "call_123");
+        assert_eq!(msgs[0]["content"], "file contents here");
+    }
+
+    #[test]
+    fn test_input_json_assistant_with_tool_calls() {
+        let provider = QwenProvider::new(test_config());
+        let messages = vec![Message {
+            role: MessageRole::Assistant,
+            content: vec![
+                MessageContent::Text {
+                    text: "Let me read that file.".to_string(),
+                },
+                MessageContent::ToolUse {
+                    id: "call_abc".to_string(),
+                    name: "read_file".to_string(),
+                    input: serde_json::json!({"path": "/tmp/test.rs"}),
+                },
+            ],
+        }];
+        let json = provider.build_sdk_input_json(&messages, None);
+        let msgs = json["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "assistant");
+        let tcs = msgs[0]["tool_calls"].as_array().unwrap();
+        assert_eq!(tcs.len(), 1);
+        assert_eq!(tcs[0]["id"], "call_abc");
+        assert_eq!(tcs[0]["function"]["name"], "read_file");
+    }
+
+    #[test]
+    fn test_tool_conversion() {
+        let tools = vec![ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read a file".to_string(),
+            input_schema: super::super::types::ParameterSchema::object(
+                Some("Parameters"),
+                {
+                    let mut props = std::collections::HashMap::new();
+                    props.insert(
+                        "path".to_string(),
+                        super::super::types::ParameterSchema::string(Some("File path")),
+                    );
+                    props
+                },
+                vec!["path".to_string()],
+            ),
+        }];
+        let sdk_tools = QwenProvider::convert_tools(&tools);
+        assert_eq!(sdk_tools.len(), 1);
+    }
+
+    #[test]
+    fn test_build_generation_param() {
+        let provider = QwenProvider::new(test_config());
+        let messages = vec![Message::user("Test")];
+        let result = provider.build_generation_param(&messages, None, &[], false);
+        assert!(result.is_ok());
     }
 }
