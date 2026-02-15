@@ -19,6 +19,7 @@ from ..state.state_manager import StateManager
 
 if TYPE_CHECKING:
     from ..backends.agent_executor import AgentExecutor
+    from ..backends.phase_config import AgentOverrides, ExecutionPhase
     from ..state.path_resolver import PathResolver
     from .stage_state import StageStateMachine, ExecutionStage
 
@@ -81,6 +82,7 @@ class Orchestrator:
         legacy_mode: bool | None = None,
         stage_machine: "StageStateMachine | None" = None,
         agent_executor: "AgentExecutor | None" = None,
+        agent_override: "AgentOverrides | None" = None,
     ):
         """
         Initialize the orchestrator.
@@ -100,11 +102,13 @@ class Orchestrator:
             agent_executor: Optional AgentExecutor for actual story execution.
                 When provided, execute_story will use this to actually run stories.
                 When None (default), stories are only marked as started (legacy behavior).
+            agent_override: Optional phase-based agent overrides applied to all stories.
         """
         self.project_root = Path(project_root)
         self.agents = agents or self.DEFAULT_AGENTS
         self._stage_machine = stage_machine
         self._agent_executor = agent_executor
+        self._agent_override = agent_override
 
         # Set up PathResolver
         if path_resolver is not None:
@@ -161,6 +165,20 @@ class Orchestrator:
             executor: AgentExecutor instance to use for story execution
         """
         self._agent_executor = executor
+
+    @property
+    def agent_override(self) -> "AgentOverrides | None":
+        """Get global agent overrides used for execution."""
+        return self._agent_override
+
+    def set_agent_override(self, override: "AgentOverrides | None") -> None:
+        """
+        Set or clear global agent overrides.
+
+        Args:
+            override: AgentOverrides instance, or None to clear overrides.
+        """
+        self._agent_override = override
 
     def get_stage_status(self) -> dict[str, Any] | None:
         """
@@ -359,6 +377,7 @@ class Orchestrator:
         agent: StoryAgent | None = None,
         dry_run: bool = False,
         task_callback: Callable | None = None,
+        phase: "ExecutionPhase | None" = None,
     ) -> tuple[bool, str]:
         """
         Execute a single story.
@@ -368,6 +387,7 @@ class Orchestrator:
             agent: Agent to use (auto-selected if not provided)
             dry_run: If True, don't actually execute
             task_callback: Optional callback for Task tool execution (for claude-code)
+            phase: Optional execution phase for phase-based agent routing.
 
         Returns:
             Tuple of (success, message)
@@ -389,13 +409,14 @@ class Orchestrator:
                 prd_metadata = prd.get("metadata", {}) if isinstance(prd, dict) else {}
 
                 # Default to implementation phase for backend agent selection
-                phase = None
-                try:
-                    from ..backends.phase_config import ExecutionPhase
+                resolved_phase = phase
+                if resolved_phase is None:
+                    try:
+                        from ..backends.phase_config import ExecutionPhase
 
-                    phase = ExecutionPhase.IMPLEMENTATION
-                except Exception:
-                    phase = None
+                        resolved_phase = ExecutionPhase.IMPLEMENTATION
+                    except Exception:
+                        resolved_phase = None
 
                 # Execute via the backend (let it resolve the agent unless explicitly provided)
                 requested_agent = agent.name if agent else None
@@ -405,7 +426,8 @@ class Orchestrator:
                     agent_name=requested_agent,
                     prd_metadata=prd_metadata,
                     task_callback=task_callback,
-                    phase=phase,
+                    phase=resolved_phase,
+                    override=self._agent_override,
                 )
 
                 success = result.get("success", False)

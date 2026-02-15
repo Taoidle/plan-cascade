@@ -1241,10 +1241,36 @@ if HAS_TYPER:
             fallback_enabled=fallback_enabled,
         )
 
+        # Create deterministic agent execution layer (hard routing)
+        agent_executor = None
+        agent_override = None
+        try:
+            from ..backends.agent_executor import AgentExecutor
+            from ..backends.phase_config import AgentOverrides
+
+            agent_override = AgentOverrides(
+                global_agent=agent,
+                impl_agent=impl_agent,
+                retry_agent=retry_agent,
+                no_fallback=not fallback_enabled,
+            )
+            agent_executor = AgentExecutor(
+                project_root=project,
+                path_resolver=path_resolver,
+                legacy_mode=path_resolver.is_legacy_mode(),
+            )
+        except Exception as e:
+            output.print_warning(
+                f"Agent executor unavailable, using legacy orchestration only: {e}"
+            )
+
         # Create orchestrator
         orchestrator = Orchestrator(
             project_root=project,
             state_manager=state_manager,
+            path_resolver=path_resolver,
+            agent_executor=agent_executor,
+            agent_override=agent_override,
         )
 
         # Analyze dependencies and get batches

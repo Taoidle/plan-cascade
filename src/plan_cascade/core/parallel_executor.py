@@ -663,7 +663,17 @@ class ParallelExecutor:
 
                     # Retry execution
                     if self.orchestrator:
-                        success, message = self.orchestrator.execute_story(story)
+                        retry_phase = None
+                        try:
+                            from ..backends.phase_config import ExecutionPhase
+                            retry_phase = ExecutionPhase.RETRY
+                        except Exception:
+                            retry_phase = None
+
+                        success, message = self.orchestrator.execute_story(
+                            story,
+                            phase=retry_phase,
+                        )
                     else:
                         await asyncio.sleep(0.1)
                         success = True

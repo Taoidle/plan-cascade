@@ -799,6 +799,20 @@ AUTO_EXEC_CMD="$AUTO_EXEC_CMD --flow ${FLOW_LEVEL:-standard}"
 AUTO_EXEC_CMD="$AUTO_EXEC_CMD --tdd ${TDD_MODE:-auto}"
 AUTO_EXEC_CMD="$AUTO_EXEC_CMD --gate-mode ${GATE_MODE:-soft}"
 
+# Propagate agent routing parameters (hard-routing path)
+if [ -n "$GLOBAL_AGENT" ]; then
+    AUTO_EXEC_CMD="$AUTO_EXEC_CMD --agent ${GLOBAL_AGENT}"
+fi
+if [ -n "$IMPL_AGENT" ]; then
+    AUTO_EXEC_CMD="$AUTO_EXEC_CMD --impl-agent ${IMPL_AGENT}"
+fi
+if [ -n "$RETRY_AGENT" ]; then
+    AUTO_EXEC_CMD="$AUTO_EXEC_CMD --retry-agent ${RETRY_AGENT}"
+fi
+if [ "$NO_FALLBACK" = "true" ]; then
+    AUTO_EXEC_CMD="$AUTO_EXEC_CMD --no-fallback"
+fi
+
 # Add retry configuration
 if [ "$NO_RETRY" = "true" ]; then
     AUTO_EXEC_CMD="$AUTO_EXEC_CMD --no-retry"

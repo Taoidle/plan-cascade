@@ -5,6 +5,7 @@ import pytest
 from pathlib import Path
 
 from plan_cascade.core.orchestrator import Orchestrator, StoryAgent
+from plan_cascade.backends.phase_config import AgentOverrides, ExecutionPhase
 from plan_cascade.core.prd_generator import create_sample_prd
 from plan_cascade.core.stage_state import (
     ExecutionStage,
@@ -138,6 +139,67 @@ class TestOrchestrator:
         batches = orchestrator.analyze_dependencies()
 
         assert batches == []
+
+    def test_execute_story_forwards_agent_override(self, tmp_path: Path):
+        """Test execute_story forwards agent override to AgentExecutor."""
+        prd = create_sample_prd()
+        story = prd["stories"][0]
+
+        class DummyAgentExecutor:
+            def __init__(self):
+                self.called_kwargs = None
+
+            def execute_story(self, **kwargs):
+                self.called_kwargs = kwargs
+                return {
+                    "success": True,
+                    "story_id": kwargs["story"].get("id"),
+                    "agent": "codex",
+                }
+
+        dummy_executor = DummyAgentExecutor()
+        override = AgentOverrides(global_agent="codex")
+        orchestrator = Orchestrator(
+            tmp_path,
+            agent_executor=dummy_executor,
+            agent_override=override,
+        )
+
+        success, _ = orchestrator.execute_story(story)
+
+        assert success is True
+        assert dummy_executor.called_kwargs is not None
+        assert dummy_executor.called_kwargs["override"] is override
+        assert dummy_executor.called_kwargs["phase"] == ExecutionPhase.IMPLEMENTATION
+
+    def test_execute_story_explicit_phase(self, tmp_path: Path):
+        """Test execute_story forwards explicit phase to AgentExecutor."""
+        prd = create_sample_prd()
+        story = prd["stories"][0]
+
+        class DummyAgentExecutor:
+            def __init__(self):
+                self.called_kwargs = None
+
+            def execute_story(self, **kwargs):
+                self.called_kwargs = kwargs
+                return {
+                    "success": True,
+                    "story_id": kwargs["story"].get("id"),
+                    "agent": "aider",
+                }
+
+        dummy_executor = DummyAgentExecutor()
+        orchestrator = Orchestrator(
+            tmp_path,
+            agent_executor=dummy_executor,
+        )
+
+        success, _ = orchestrator.execute_story(story, phase=ExecutionPhase.RETRY)
+
+        assert success is True
+        assert dummy_executor.called_kwargs is not None
+        assert dummy_executor.called_kwargs["phase"] == ExecutionPhase.RETRY
 
 
 class TestOrchestratorWithStageMachine:

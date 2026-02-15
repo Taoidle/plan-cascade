@@ -21,6 +21,10 @@ Options:
     --dry-run               Show what would be executed without running
     --output-format FMT     Output format: text, json (default: text)
     --state-file PATH       Path to state file (default: .iteration-state.json)
+    --agent NAME            Global agent override
+    --impl-agent NAME       Implementation agent override
+    --retry-agent NAME      Retry agent override
+    --no-fallback           Disable fallback when selected agent is unavailable
 """
 
 from __future__ import annotations
@@ -122,6 +126,26 @@ def parse_args() -> argparse.Namespace:
         default=Path.cwd(),
         help="Project root directory",
     )
+    parser.add_argument(
+        "--agent",
+        type=str,
+        help="Global agent override for all phases",
+    )
+    parser.add_argument(
+        "--impl-agent",
+        type=str,
+        help="Agent override for implementation phase",
+    )
+    parser.add_argument(
+        "--retry-agent",
+        type=str,
+        help="Agent override for retry phase",
+    )
+    parser.add_argument(
+        "--no-fallback",
+        action="store_true",
+        help="Disable fallback to alternate agents when selected agent is unavailable",
+    )
 
     return parser.parse_args()
 
@@ -203,6 +227,14 @@ def print_execution_plan(
     print(f"  Parallel: {args.parallel}")
     if args.parallel and args.max_concurrency:
         print(f"  Max Concurrency: {args.max_concurrency}")
+    if args.agent:
+        print(f"  Agent Override: {args.agent}")
+    if args.impl_agent:
+        print(f"  Impl Agent Override: {args.impl_agent}")
+    if args.retry_agent:
+        print(f"  Retry Agent Override: {args.retry_agent}")
+    if args.no_fallback:
+        print("  Fallback: disabled")
     print()
     print(f"Total Stories: {sum(len(b) for b in batches)}")
     print(f"Total Batches: {len(batches)}")
@@ -222,9 +254,11 @@ def print_execution_plan(
 def create_orchestrator(project_root: Path, prd: dict, args: argparse.Namespace):
     """Create orchestrator for story execution."""
     try:
+        from plan_cascade.backends.agent_executor import AgentExecutor
+        from plan_cascade.backends.phase_config import AgentOverrides
         from plan_cascade.core.orchestrator import Orchestrator
-        from plan_cascade.state.state_manager import StateManager
         from plan_cascade.state.path_resolver import PathResolver
+        from plan_cascade.state.state_manager import StateManager
 
         # Create path resolver (legacy mode for plugin compatibility)
         path_resolver = PathResolver(project_root, legacy_mode=True)
@@ -233,12 +267,26 @@ def create_orchestrator(project_root: Path, prd: dict, args: argparse.Namespace)
         state_manager = StateManager(project_root, path_resolver=path_resolver)
         state_manager.write_prd(prd)
 
+        agent_override = AgentOverrides(
+            global_agent=args.agent,
+            impl_agent=args.impl_agent,
+            retry_agent=args.retry_agent,
+            no_fallback=args.no_fallback,
+        )
+        agent_executor = AgentExecutor(
+            project_root=project_root,
+            path_resolver=path_resolver,
+            legacy_mode=True,
+        )
+
         # Create orchestrator with correct signature
         orchestrator = Orchestrator(
             project_root=project_root,
             state_manager=state_manager,
             path_resolver=path_resolver,
             legacy_mode=True,
+            agent_executor=agent_executor,
+            agent_override=agent_override,
         )
 
         return orchestrator
@@ -401,8 +449,8 @@ def run_sequential(
             "total_stories": final_state.total_stories,
             "completed_stories": final_state.completed_stories,
             "failed_stories": final_state.failed_stories,
-            "batches_completed": final_state.batches_completed,
-            "iterations": final_state.iterations,
+            "batches_completed": len(final_state.batch_results),
+            "iterations": final_state.current_iteration,
         }
     except KeyboardInterrupt:
         print("\nInterrupted by user")
