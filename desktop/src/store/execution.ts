@@ -12,6 +12,7 @@ import { useSettingsStore } from './settings';
 import { useModeStore } from './mode';
 import type { StreamEventPayload } from '../lib/claudeCodeClient';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
+import { deriveConversationTurns, rebuildStandaloneTurns } from '../lib/conversationUtils';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
@@ -402,6 +403,15 @@ interface ExecutionState {
 
   /** Retry a failed story */
   retryStory: (storyId: string) => Promise<void>;
+
+  /** Rollback conversation to a specific user turn, removing all subsequent turns */
+  rollbackToTurn: (userLineId: number) => void;
+
+  /** Regenerate the assistant response for a given user turn */
+  regenerateResponse: (userLineId: number) => Promise<void>;
+
+  /** Edit a user message and resend it */
+  editAndResend: (userLineId: number, newContent: string) => Promise<void>;
 }
 
 const HISTORY_KEY = 'plan-cascade-execution-history';
@@ -1618,6 +1628,409 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         suggestedFix: 'Check the error output and try again, or skip this story.',
       });
     }
+  },
+
+  rollbackToTurn: (userLineId: number) => {
+    const lines = get().streamingOutput;
+    const turns = deriveConversationTurns(lines);
+    const targetTurn = turns.find((t) => t.userLineId === userLineId);
+    if (!targetTurn) return;
+
+    // Truncate to keep everything up to and including the target turn's assistant response
+    const keepUpToIndex = targetTurn.assistantEndIndex;
+    const truncatedLines = lines.slice(0, keepUpToIndex + 1);
+
+    // Rebuild standalone turns from the truncated lines
+    const rebuiltTurns = rebuildStandaloneTurns(truncatedLines);
+
+    // Cancel active Claude Code session if needed
+    const settingsSnapshot = useSettingsStore.getState();
+    const backendValue = String((settingsSnapshot as { backend?: unknown }).backend || '');
+    if (isClaudeCodeBackend(backendValue)) {
+      const taskId = get().taskId;
+      if (taskId) {
+        void invoke('cancel_execution', { session_id: taskId }).catch(() => {});
+      }
+    }
+
+    set({
+      streamingOutput: truncatedLines,
+      streamLineCounter: truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0,
+      standaloneTurns: rebuiltTurns,
+      status: 'idle',
+      isSubmitting: false,
+      apiError: null,
+      result: null,
+    });
+
+    get().addLog(`Rolled back to turn with userLineId=${userLineId}`);
+  },
+
+  regenerateResponse: async (userLineId: number) => {
+    const lines = get().streamingOutput;
+    const turns = deriveConversationTurns(lines);
+    const targetTurn = turns.find((t) => t.userLineId === userLineId);
+    if (!targetTurn) return;
+
+    // Find the index of the user 'info' line in the lines array
+    const userLineIndex = lines.findIndex((l) => l.id === userLineId);
+    if (userLineIndex < 0) return;
+
+    const userContent = targetTurn.userContent;
+
+    // Truncate to keep only up to (but not including) the assistant response
+    // Keep the user 'info' line but remove everything after it from this turn
+    const truncatedLines = lines.slice(0, userLineIndex + 1);
+
+    // Rebuild standalone turns from lines BEFORE the current user message
+    // (excluding the current user message, as it will be re-sent)
+    const linesForContext = lines.slice(0, userLineIndex);
+    const rebuiltTurns = rebuildStandaloneTurns(linesForContext);
+
+    const settingsSnapshot = useSettingsStore.getState();
+    const backendValue = String((settingsSnapshot as { backend?: unknown }).backend || '');
+
+    if (isClaudeCodeBackend(backendValue)) {
+      // Cancel existing Claude Code session
+      const taskId = get().taskId;
+      if (taskId) {
+        try {
+          await invoke('cancel_execution', { session_id: taskId });
+        } catch {
+          // Session may already be ended
+        }
+      }
+
+      // Show warning about context loss
+      set({
+        streamingOutput: [
+          ...truncatedLines,
+          {
+            id: (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1,
+            content: 'Regenerating response. Previous context will be lost.',
+            type: 'warning' as StreamLineType,
+            timestamp: Date.now(),
+          },
+        ],
+        streamLineCounter: (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1,
+        standaloneTurns: [],
+        status: 'running',
+        isSubmitting: false,
+        apiError: null,
+        result: null,
+      });
+
+      // Reset the tool-call filter for the new turn
+      get().toolCallFilter.reset();
+
+      try {
+        // Start a new Claude Code chat session
+        const projectPath = settingsSnapshot.workspacePath || '.';
+        const startResult = await invoke<CommandResponse<{ session_id: string }>>('start_chat', {
+          request: { project_path: projectPath },
+        });
+
+        if (!startResult.success || !startResult.data) {
+          throw new Error(startResult.error || 'Failed to start Claude Code session');
+        }
+
+        const sessionId = startResult.data.session_id;
+        set({ taskId: sessionId, isChatSession: true });
+
+        // Send the user message
+        await invoke('send_message', {
+          request: { session_id: sessionId, prompt: userContent },
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        set({ status: 'failed', apiError: errorMessage });
+        get().addLog(`Regenerate error: ${errorMessage}`);
+      }
+    } else {
+      // Standalone backend
+      set({
+        streamingOutput: truncatedLines,
+        streamLineCounter: truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0,
+        standaloneTurns: rebuiltTurns,
+        status: 'running',
+        isSubmitting: false,
+        apiError: null,
+        result: null,
+      });
+
+      // Reset the tool-call filter for the new turn
+      get().toolCallFilter.reset();
+
+      const turnStartLineId = get().streamLineCounter;
+      set({ currentTurnStartLineId: turnStartLineId });
+
+      const providerValue = String((settingsSnapshot as { provider?: unknown }).provider || '');
+      const modelValue = String((settingsSnapshot as { model?: unknown }).model || '');
+      const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
+      const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
+      const providerApiKey = getLocalProviderApiKey(provider);
+      const contextTurnsLimit = getStandaloneContextTurnsLimit();
+      const recentTurns = trimStandaloneTurns(rebuiltTurns, contextTurnsLimit);
+      const messageToSend =
+        recentTurns.length > 0
+          ? buildStandaloneConversationMessage(rebuiltTurns, userContent, contextTurnsLimit)
+          : userContent;
+      const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
+      const standaloneSessionId = get().standaloneSessionId;
+
+      try {
+        const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
+          message: messageToSend,
+          provider,
+          model,
+          projectPath: settingsSnapshot.workspacePath || '.',
+          enableTools: true,
+          apiKey: providerApiKey,
+          baseUrl,
+          analysisSessionId: standaloneSessionId,
+          enableCompaction: settingsSnapshot.enableContextCompaction ?? true,
+          enableThinking: settingsSnapshot.enableThinking ?? false,
+          maxTotalTokens: settingsSnapshot.maxTotalTokens ?? undefined,
+          maxIterations: settingsSnapshot.maxIterations ?? undefined,
+        });
+
+        if (!result.success || !result.data) {
+          throw new Error(result.error || 'Failed to regenerate');
+        }
+
+        if (isBackendStandaloneExecutionResult(result.data)) {
+          const execution = result.data;
+          const assistantResponse = execution.response?.trim() || '';
+          const streamedAssistantText = collectAssistantTextSince(get().streamingOutput, turnStartLineId);
+          const assistantTurnText = assistantResponse || streamedAssistantText;
+
+          if (assistantTurnText) {
+            const retentionLimit = getStandaloneContextTurnsLimit();
+            set((state) => ({
+              standaloneTurns: trimStandaloneTurns(
+                [
+                  ...state.standaloneTurns,
+                  {
+                    user: userContent,
+                    assistant: assistantTurnText,
+                    createdAt: Date.now(),
+                  },
+                ],
+                retentionLimit
+              ),
+            }));
+          }
+
+          // Ensure assistant response is visible
+          const hasStreamedText = hasAssistantTextLineSince(get().streamingOutput, turnStartLineId);
+          if (!hasStreamedText && assistantTurnText) {
+            await appendTextWithTypewriter(
+              (chunk, type) => get().appendStreamLine(chunk, type),
+              assistantTurnText
+            );
+          }
+
+          if (get().status === 'running') {
+            set({
+              status: execution.success ? 'completed' : 'failed',
+              apiError: execution.success ? null : (execution.error || 'Regeneration failed'),
+            });
+          }
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        set({ status: 'failed', apiError: errorMessage });
+        get().addLog(`Regenerate error: ${errorMessage}`);
+      }
+    }
+
+    get().addLog(`Regenerated response for userLineId=${userLineId}`);
+  },
+
+  editAndResend: async (userLineId: number, newContent: string) => {
+    const lines = get().streamingOutput;
+    const turns = deriveConversationTurns(lines);
+    const targetTurn = turns.find((t) => t.userLineId === userLineId);
+    if (!targetTurn) return;
+
+    // Find the index of the user 'info' line
+    const userLineIndex = lines.findIndex((l) => l.id === userLineId);
+    if (userLineIndex < 0) return;
+
+    // Truncate to BEFORE the target user message (remove this turn entirely)
+    const truncatedLines = lines.slice(0, userLineIndex);
+
+    // Append a new 'info' StreamLine with the edited content
+    const newInfoId = (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1;
+    const linesWithEditedMessage: StreamLine[] = [
+      ...truncatedLines,
+      {
+        id: newInfoId,
+        content: newContent,
+        type: 'info' as StreamLineType,
+        timestamp: Date.now(),
+      },
+    ];
+
+    // Rebuild standalone turns from the truncated lines (before the new message)
+    const rebuiltTurns = rebuildStandaloneTurns(truncatedLines);
+
+    const settingsSnapshot = useSettingsStore.getState();
+    const backendValue = String((settingsSnapshot as { backend?: unknown }).backend || '');
+
+    if (isClaudeCodeBackend(backendValue)) {
+      // Cancel existing session
+      const taskId = get().taskId;
+      if (taskId) {
+        try {
+          await invoke('cancel_execution', { session_id: taskId });
+        } catch {
+          // Session may already be ended
+        }
+      }
+
+      // Show warning about context loss
+      set({
+        streamingOutput: [
+          ...linesWithEditedMessage,
+          {
+            id: newInfoId + 1,
+            content: 'Regenerating response. Previous context will be lost.',
+            type: 'warning' as StreamLineType,
+            timestamp: Date.now(),
+          },
+        ],
+        streamLineCounter: newInfoId + 1,
+        standaloneTurns: [],
+        status: 'running',
+        isSubmitting: false,
+        apiError: null,
+        result: null,
+      });
+
+      // Reset the tool-call filter
+      get().toolCallFilter.reset();
+
+      try {
+        const projectPath = settingsSnapshot.workspacePath || '.';
+        const startResult = await invoke<CommandResponse<{ session_id: string }>>('start_chat', {
+          request: { project_path: projectPath },
+        });
+
+        if (!startResult.success || !startResult.data) {
+          throw new Error(startResult.error || 'Failed to start Claude Code session');
+        }
+
+        const sessionId = startResult.data.session_id;
+        set({ taskId: sessionId, isChatSession: true });
+
+        await invoke('send_message', {
+          request: { session_id: sessionId, prompt: newContent },
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        set({ status: 'failed', apiError: errorMessage });
+        get().addLog(`Edit and resend error: ${errorMessage}`);
+      }
+    } else {
+      // Standalone backend
+      set({
+        streamingOutput: linesWithEditedMessage,
+        streamLineCounter: newInfoId,
+        standaloneTurns: rebuiltTurns,
+        status: 'running',
+        isSubmitting: false,
+        apiError: null,
+        result: null,
+      });
+
+      // Reset the tool-call filter
+      get().toolCallFilter.reset();
+
+      const turnStartLineId = get().streamLineCounter;
+      set({ currentTurnStartLineId: turnStartLineId });
+
+      const providerValue = String((settingsSnapshot as { provider?: unknown }).provider || '');
+      const modelValue = String((settingsSnapshot as { model?: unknown }).model || '');
+      const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
+      const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
+      const providerApiKey = getLocalProviderApiKey(provider);
+      const contextTurnsLimit = getStandaloneContextTurnsLimit();
+      const recentTurns = trimStandaloneTurns(rebuiltTurns, contextTurnsLimit);
+      const messageToSend =
+        recentTurns.length > 0
+          ? buildStandaloneConversationMessage(rebuiltTurns, newContent, contextTurnsLimit)
+          : newContent;
+      const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
+      const standaloneSessionId = get().standaloneSessionId;
+
+      try {
+        const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
+          message: messageToSend,
+          provider,
+          model,
+          projectPath: settingsSnapshot.workspacePath || '.',
+          enableTools: true,
+          apiKey: providerApiKey,
+          baseUrl,
+          analysisSessionId: standaloneSessionId,
+          enableCompaction: settingsSnapshot.enableContextCompaction ?? true,
+          enableThinking: settingsSnapshot.enableThinking ?? false,
+          maxTotalTokens: settingsSnapshot.maxTotalTokens ?? undefined,
+          maxIterations: settingsSnapshot.maxIterations ?? undefined,
+        });
+
+        if (!result.success || !result.data) {
+          throw new Error(result.error || 'Failed to execute edit');
+        }
+
+        if (isBackendStandaloneExecutionResult(result.data)) {
+          const execution = result.data;
+          const assistantResponse = execution.response?.trim() || '';
+          const streamedAssistantText = collectAssistantTextSince(get().streamingOutput, turnStartLineId);
+          const assistantTurnText = assistantResponse || streamedAssistantText;
+
+          if (assistantTurnText) {
+            const retentionLimit = getStandaloneContextTurnsLimit();
+            set((state) => ({
+              standaloneTurns: trimStandaloneTurns(
+                [
+                  ...state.standaloneTurns,
+                  {
+                    user: newContent,
+                    assistant: assistantTurnText,
+                    createdAt: Date.now(),
+                  },
+                ],
+                retentionLimit
+              ),
+            }));
+          }
+
+          // Ensure assistant response is visible
+          const hasStreamedText = hasAssistantTextLineSince(get().streamingOutput, turnStartLineId);
+          if (!hasStreamedText && assistantTurnText) {
+            await appendTextWithTypewriter(
+              (chunk, type) => get().appendStreamLine(chunk, type),
+              assistantTurnText
+            );
+          }
+
+          if (get().status === 'running') {
+            set({
+              status: execution.success ? 'completed' : 'failed',
+              apiError: execution.success ? null : (execution.error || 'Edit and resend failed'),
+            });
+          }
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        set({ status: 'failed', apiError: errorMessage });
+        get().addLog(`Edit and resend error: ${errorMessage}`);
+      }
+    }
+
+    get().addLog(`Edited and resent userLineId=${userLineId}`);
   },
 }));
 
