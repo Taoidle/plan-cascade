@@ -425,6 +425,8 @@ const PROVIDER_ALIASES: Record<string, string> = {
   dashscope: 'qwen',
   alibaba: 'qwen',
   aliyun: 'qwen',
+  minimax: 'minimax',
+  'minimax-api': 'minimax',
   ollama: 'ollama',
 };
 
@@ -448,6 +450,7 @@ function inferProviderFromModel(model: string | null | undefined): string | null
   if (normalized.includes('glm')) return 'glm';
   if (normalized.includes('qwen') || normalized.includes('qwq')) return 'qwen';
   if (normalized.includes('deepseek')) return 'deepseek';
+  if (normalized.includes('minimax')) return 'minimax';
   if (normalized.includes('claude')) return 'anthropic';
   if (normalized.startsWith('gpt') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'openai';
   return null;
@@ -473,18 +476,33 @@ function resolveStandaloneProvider(
 }
 
 const GLM_CODING_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions';
+const MINIMAX_CHINA_BASE_URL = 'https://api.minimaxi.com/v1/chat/completions';
+
+/** Default model per provider, used when user selects "Provider default". */
+const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {
+  anthropic: 'claude-sonnet-4-20250514',
+  openai: 'gpt-4o',
+  deepseek: 'deepseek-chat',
+  glm: 'glm-4-flash-250414',
+  qwen: 'qwen-plus',
+  minimax: 'MiniMax-M2.5',
+  ollama: 'llama3.2',
+};
 
 /**
  * Resolve provider-specific base URL override from user settings.
- * Currently only GLM has an alternate endpoint (Coding plan).
+ * GLM has standard/coding endpoints; MiniMax has international/china endpoints.
  */
 function resolveProviderBaseUrl(
   provider: string,
-  settings: { glmEndpoint?: string },
+  settings: { glmEndpoint?: string; minimaxEndpoint?: string },
 ): string | undefined {
   const normalized = normalizeProviderName(provider);
   if (normalized === 'glm' && settings.glmEndpoint === 'coding') {
     return GLM_CODING_BASE_URL;
+  }
+  if (normalized === 'minimax' && settings.minimaxEndpoint === 'china') {
+    return MINIMAX_CHINA_BASE_URL;
   }
   return undefined;
 }
@@ -802,7 +820,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       } else {
         // Use standalone LLM execution
         const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
-        const model = settings.model || 'claude-sonnet-4-20250514';
+        const model = settings.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
         const providerApiKey = getLocalProviderApiKey(provider);
         const isSimpleStandalone = mode === 'simple';
         const turnStartLineId = get().streamLineCounter;

@@ -125,6 +125,23 @@
       }
     },
 
+    "minimaxEndpoint": {
+      "label": "APIリージョン",
+      "help": "MiniMax APIキーのリージョンに合ったエンドポイントを選択してください。中国キーは中国エンドポイントのみ、国際キーは国際エンドポイントのみ使用可能です。",
+      "options": {
+        "international": {
+          "name": "国際版",
+          "description": "国際プラットフォーム (minimax.io) で登録したAPIキー用。",
+          "url": "https://api.minimax.io/v1/chat/completions"
+        },
+        "china": {
+          "name": "中国版",
+          "description": "中国プラットフォーム (minimaxi.com) で登録したAPIキー用。",
+          "url": "https://api.minimaxi.com/v1/chat/completions"
+        }
+      }
+    },
+
     "model": {
       "label": "モデル",
       "providerDefault": "プロバイダーのデフォルトを使用",

@@ -125,6 +125,23 @@
       }
     },
 
+    "minimaxEndpoint": {
+      "label": "API 区域",
+      "help": "请选择与您的 MiniMax API 密钥区域匹配的端点。中国区密钥只能使用中国端点，反之亦然。",
+      "options": {
+        "international": {
+          "name": "国际版",
+          "description": "适用于在国际平台 (minimax.io) 注册的 API 密钥。",
+          "url": "https://api.minimax.io/v1/chat/completions"
+        },
+        "china": {
+          "name": "中国版",
+          "description": "适用于在中国平台 (minimaxi.com) 注册的 API 密钥。",
+          "url": "https://api.minimaxi.com/v1/chat/completions"
+        }
+      }
+    },
+
     "model": {
       "label": "模型",
       "providerDefault": "使用提供商默认模型",

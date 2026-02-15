@@ -57,8 +57,10 @@ struct FunctionCall {
 
 #[derive(Debug, Deserialize)]
 struct Usage {
-    prompt_tokens: u32,
-    completion_tokens: u32,
+    #[serde(default)]
+    prompt_tokens: Option<u32>,
+    #[serde(default)]
+    completion_tokens: Option<u32>,
     #[serde(default)]
     reasoning_tokens: Option<u32>,
 }
@@ -148,15 +150,17 @@ impl StreamAdapter for MinimaxAdapter {
 
         let mut events = vec![];
 
-        // Handle usage info
+        // Handle usage info (fields may be absent in intermediate chunks)
         if let Some(usage) = event.usage {
-            events.push(UnifiedStreamEvent::Usage {
-                input_tokens: usage.prompt_tokens,
-                output_tokens: usage.completion_tokens,
-                thinking_tokens: usage.reasoning_tokens,
-                cache_read_tokens: None,
-                cache_creation_tokens: None,
-            });
+            if usage.prompt_tokens.is_some() || usage.completion_tokens.is_some() {
+                events.push(UnifiedStreamEvent::Usage {
+                    input_tokens: usage.prompt_tokens.unwrap_or(0),
+                    output_tokens: usage.completion_tokens.unwrap_or(0),
+                    thinking_tokens: usage.reasoning_tokens,
+                    cache_read_tokens: None,
+                    cache_creation_tokens: None,
+                });
+            }
         }
 
         for choice in event.choices {
@@ -383,5 +387,16 @@ mod tests {
             }
             _ => panic!("Expected Usage"),
         }
+    }
+
+    #[test]
+    fn test_partial_usage_no_crash() {
+        let mut adapter = MinimaxAdapter::new("MiniMax-M2.5");
+
+        // MiniMax may send usage without prompt_tokens in intermediate chunks
+        let events = adapter
+            .adapt(r#"data: {"choices": [], "usage": {}}"#)
+            .unwrap();
+        assert!(events.is_empty(), "Empty usage should not emit event");
     }
 }

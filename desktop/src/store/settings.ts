@@ -13,6 +13,7 @@ export type Theme = 'system' | 'light' | 'dark';
 export type Language = 'en' | 'zh' | 'ja';
 export type StandaloneContextTurns = 2 | 4 | 6 | 8 | 10 | 20 | 50 | 100 | 200 | 500 | -1;
 export type GlmEndpoint = 'standard' | 'coding';
+export type MinimaxEndpoint = 'international' | 'china';
 
 interface Agent {
   name: string;
@@ -77,6 +78,9 @@ interface SettingsState {
   // GLM endpoint
   glmEndpoint: GlmEndpoint;
 
+  // MiniMax endpoint
+  minimaxEndpoint: MinimaxEndpoint;
+
   // Search provider settings
   searchProvider: 'tavily' | 'brave' | 'duckduckgo';
 
@@ -98,6 +102,7 @@ interface SettingsState {
   setShowSubAgentEvents: (show: boolean) => void;
   setMaxTotalTokens: (tokens: number) => void;
   setGlmEndpoint: (endpoint: GlmEndpoint) => void;
+  setMinimaxEndpoint: (endpoint: MinimaxEndpoint) => void;
   setSearchProvider: (provider: 'tavily' | 'brave' | 'duckduckgo') => void;
 
   // Chat UI actions
@@ -170,6 +175,9 @@ const defaultSettings = {
   // GLM endpoint
   glmEndpoint: 'standard' as GlmEndpoint,
 
+  // MiniMax endpoint
+  minimaxEndpoint: 'international' as MinimaxEndpoint,
+
   // Search provider
   searchProvider: 'duckduckgo' as const,
 };
@@ -230,6 +238,7 @@ export const useSettingsStore = create<SettingsState>()(
       setMaxTotalTokens: (maxTotalTokens) => set({ maxTotalTokens }),
 
       setGlmEndpoint: (glmEndpoint) => set({ glmEndpoint }),
+      setMinimaxEndpoint: (minimaxEndpoint) => set({ minimaxEndpoint }),
       setSearchProvider: (searchProvider) => set({ searchProvider }),
 
       setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),

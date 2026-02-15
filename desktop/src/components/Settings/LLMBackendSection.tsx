@@ -9,7 +9,7 @@ import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import { CheckCircledIcon, CrossCircledIcon, EyeOpenIcon, EyeNoneIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
-import { useSettingsStore, Backend, StandaloneContextTurns, GlmEndpoint } from '../../store/settings';
+import { useSettingsStore, Backend, StandaloneContextTurns, GlmEndpoint, MinimaxEndpoint } from '../../store/settings';
 
 interface BackendOption {
   id: Backend;
@@ -233,6 +233,8 @@ export function LLMBackendSection() {
     setSearchProvider,
     glmEndpoint,
     setGlmEndpoint,
+    minimaxEndpoint,
+    setMinimaxEndpoint,
   } = useSettingsStore();
   const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyStatus>(() => getLocalProviderApiKeyStatuses());
   const [apiKeyInputs, setApiKeyInputs] = useState<{ [provider: string]: string }>({});
@@ -773,6 +775,52 @@ export function LLMBackendSection() {
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {t('llm.glmEndpoint.help')}
+          </p>
+        </section>
+      )}
+
+      {/* MiniMax Endpoint Selection (only when MiniMax is selected) */}
+      {selectedProvider === 'minimax' && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+            {t('llm.minimaxEndpoint.label')}
+          </h3>
+          <div className="space-y-2">
+            {(['international', 'china'] as MinimaxEndpoint[]).map((ep) => (
+              <label
+                key={ep}
+                className={clsx(
+                  'flex items-start gap-3 p-3 rounded-lg border cursor-pointer',
+                  'transition-colors',
+                  minimaxEndpoint === ep
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                )}
+              >
+                <input
+                  type="radio"
+                  name="minimaxEndpoint"
+                  value={ep}
+                  checked={minimaxEndpoint === ep}
+                  onChange={() => setMinimaxEndpoint(ep)}
+                  className="mt-0.5 text-primary-600"
+                />
+                <div>
+                  <span className="font-medium text-gray-900 dark:text-white text-sm">
+                    {t(`llm.minimaxEndpoint.options.${ep}.name`)}
+                  </span>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {t(`llm.minimaxEndpoint.options.${ep}.description`)}
+                  </p>
+                  <code className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 block">
+                    {t(`llm.minimaxEndpoint.options.${ep}.url`)}
+                  </code>
+                </div>
+              </label>
+            ))}
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {t('llm.minimaxEndpoint.help')}
           </p>
         </section>
       )}

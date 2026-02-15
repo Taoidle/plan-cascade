@@ -565,7 +565,9 @@ struct ResponseFunction {
 
 #[derive(Debug, Deserialize)]
 struct ResponseUsage {
+    #[serde(default)]
     prompt_tokens: u32,
+    #[serde(default)]
     completion_tokens: u32,
     #[serde(default)]
     reasoning_tokens: Option<u32>,

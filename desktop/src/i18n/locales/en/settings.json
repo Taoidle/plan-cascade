@@ -125,6 +125,23 @@
       }
     },
 
+    "minimaxEndpoint": {
+      "label": "API Region",
+      "help": "Select the endpoint matching your MiniMax API key region. China keys only work with the China endpoint, and vice versa.",
+      "options": {
+        "international": {
+          "name": "International",
+          "description": "For API keys registered on the international platform (minimax.io).",
+          "url": "https://api.minimax.io/v1/chat/completions"
+        },
+        "china": {
+          "name": "China",
+          "description": "For API keys registered on the China platform (minimaxi.com).",
+          "url": "https://api.minimaxi.com/v1/chat/completions"
+        }
+      }
+    },
+
     "model": {
       "label": "Model",
       "providerDefault": "Use provider default",
