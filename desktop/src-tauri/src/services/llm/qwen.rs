@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
+use tracing::{debug, warn};
 
 use super::provider::{missing_api_key_error, LlmProvider};
 use super::types::{
@@ -244,13 +245,25 @@ impl QwenProvider {
         })
     }
 
-    /// Build SDK parameters for a request
+    /// Build SDK parameters for a request.
+    ///
+    /// When `stream` is true, sets `incremental_output(true)` so that the
+    /// DashScope API returns incremental SSE events (each event contains only
+    /// the new delta, not the full accumulated text). All official SDK examples
+    /// use this flag for streaming. Although the field is marked `#[deprecated]`
+    /// in the SDK (since v0.5.0), the API still requires it.
     fn build_sdk_parameters(
         &self,
         tools: &[ToolDefinition],
+        stream: bool,
     ) -> Option<async_dashscope::operation::common::Parameters> {
         let mut builder = ParametersBuilder::default();
         builder.result_format("message");
+
+        #[allow(deprecated)]
+        if stream {
+            builder.incremental_output(true);
+        }
 
         if self.config.enable_thinking && self.model_supports_reasoning() {
             builder.enable_thinking(true);
@@ -286,19 +299,13 @@ impl QwenProvider {
             message: format!("Failed to build SDK input: {}", e),
         })?;
 
-        let parameters = self.build_sdk_parameters(tools);
+        let parameters = self.build_sdk_parameters(tools, stream);
 
         let mut param_builder = GenerationParamBuilder::default();
         param_builder
             .model(self.config.model.clone())
             .input(input)
             .stream(stream);
-
-        if stream {
-            param_builder.stream_options(async_dashscope::operation::common::StreamOptions {
-                include_usage: true,
-            });
-        }
 
         if let Some(params) = parameters {
             param_builder.parameters(params);
@@ -309,7 +316,13 @@ impl QwenProvider {
         })
     }
 
-    /// Convert SDK GenerationOutput to unified LlmResponse
+    /// Convert SDK GenerationOutput to unified LlmResponse.
+    ///
+    /// Handles both `result_format: "message"` (choices array) and the default
+    /// `result_format: "text"` (output.text) formats. The SDK's Parameters
+    /// struct serializes all Option fields (including `None` as `null`), which
+    /// can cause some DashScope endpoints to fall back to text format even when
+    /// `result_format: "message"` is requested.
     fn convert_output_to_response(&self, output: &GenerationOutput) -> LlmResponse {
         let mut content = None;
         let mut thinking = None;
@@ -317,6 +330,7 @@ impl QwenProvider {
         let mut stop_reason = StopReason::EndTurn;
 
         if let Some(choices) = &output.output.choices {
+            // result_format: "message" — content in choices[].message
             if let Some(choice) = choices.first() {
                 let msg = &choice.message;
 
@@ -345,6 +359,11 @@ impl QwenProvider {
                 if let Some(reason) = &choice.finish_reason {
                     stop_reason = StopReason::from(reason.as_str());
                 }
+            }
+        } else if let Some(text) = &output.output.text {
+            // Fallback: result_format: "text" (default) — content in output.text
+            if !text.is_empty() {
+                content = Some(text.clone());
             }
         }
 
@@ -498,6 +517,13 @@ impl LlmProvider for QwenProvider {
 
         let param = self.build_generation_param(&messages, system.as_deref(), &tools, true)?;
 
+        debug!(
+            model = %self.config.model,
+            message_count = messages.len(),
+            tool_count = tools.len(),
+            "qwen: starting stream_message"
+        );
+
         let mut stream = self
             .client
             .generation()
@@ -505,6 +531,7 @@ impl LlmProvider for QwenProvider {
             .await
             .map_err(Self::convert_sdk_error)?;
 
+        let mut event_count: u32 = 0;
         let mut accumulated_content = String::new();
         let mut accumulated_thinking = String::new();
         let mut tool_calls = Vec::new();
@@ -519,6 +546,7 @@ impl LlmProvider for QwenProvider {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(output) => {
+                    event_count += 1;
                     if let Some(u) = &output.usage {
                         usage.input_tokens = u.input_tokens.unwrap_or(0) as u32;
                         usage.output_tokens = u.output_tokens.unwrap_or(0) as u32;
@@ -526,33 +554,10 @@ impl LlmProvider for QwenProvider {
 
                     if let Some(choices) = &output.output.choices {
                         for choice in choices {
-                            if let Some(reason) = &choice.finish_reason {
-                                if let (Some(id), Some(name)) =
-                                    (pending_tool_id.take(), pending_tool_name.take())
-                                {
-                                    let args = std::mem::take(&mut pending_tool_args);
-                                    if let Ok(parsed) = serde_json::from_str(&args) {
-                                        tool_calls.push(ToolCall {
-                                            id,
-                                            name,
-                                            arguments: parsed,
-                                        });
-                                    }
-                                }
-
-                                if in_reasoning {
-                                    in_reasoning = false;
-                                    let _ = tx
-                                        .send(UnifiedStreamEvent::ThinkingEnd {
-                                            thinking_id: None,
-                                        })
-                                        .await;
-                                }
-
-                                stop_reason = StopReason::from(reason.as_str());
-                                continue;
-                            }
-
+                            // Process content FIRST, then check finish_reason.
+                            // DashScope sends finish_reason="" on intermediate events
+                            // and the SDK yields the final "stop" event too, so we
+                            // must extract content before deciding to stop.
                             let msg = &choice.message;
 
                             if let Some(reasoning) = &msg.reasoning_content {
@@ -630,6 +635,59 @@ impl LlmProvider for QwenProvider {
                                     }
                                 }
                             }
+
+                            // Handle finish_reason AFTER processing content.
+                            // Only act on non-empty values ("stop", "length", "tool_calls").
+                            // DashScope sends "" or null for intermediate events.
+                            if let Some(reason) = &choice.finish_reason {
+                                if !reason.is_empty() {
+                                    // Flush any pending tool call
+                                    if let (Some(id), Some(name)) =
+                                        (pending_tool_id.take(), pending_tool_name.take())
+                                    {
+                                        let args =
+                                            std::mem::take(&mut pending_tool_args);
+                                        if let Ok(parsed) =
+                                            serde_json::from_str(&args)
+                                        {
+                                            tool_calls.push(ToolCall {
+                                                id,
+                                                name,
+                                                arguments: parsed,
+                                            });
+                                        }
+                                    }
+
+                                    if in_reasoning {
+                                        in_reasoning = false;
+                                        let _ = tx
+                                            .send(UnifiedStreamEvent::ThinkingEnd {
+                                                thinking_id: None,
+                                            })
+                                            .await;
+                                    }
+
+                                    stop_reason = StopReason::from(reason.as_str());
+                                }
+                            }
+                        }
+                    } else if let Some(text) = &output.output.text {
+                        // Fallback: result_format "text" — content in output.text
+                        if !text.is_empty() {
+                            if in_reasoning {
+                                in_reasoning = false;
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::ThinkingEnd {
+                                        thinking_id: None,
+                                    })
+                                    .await;
+                            }
+                            accumulated_content.push_str(text);
+                            let _ = tx
+                                .send(UnifiedStreamEvent::TextDelta {
+                                    content: text.clone(),
+                                })
+                                .await;
                         }
                     }
 
@@ -638,12 +696,19 @@ impl LlmProvider for QwenProvider {
                     }
                 }
                 Err(e) => {
+                    warn!(
+                        error = %e,
+                        event_count,
+                        "qwen: stream error after {} events",
+                        event_count
+                    );
                     let _ = tx
                         .send(UnifiedStreamEvent::Error {
                             message: e.to_string(),
                             code: None,
                         })
                         .await;
+                    break;
                 }
             }
         }
@@ -665,6 +730,22 @@ impl LlmProvider for QwenProvider {
                     thinking_id: None,
                 })
                 .await;
+        }
+
+        debug!(
+            event_count,
+            content_len = accumulated_content.len(),
+            thinking_len = accumulated_thinking.len(),
+            tool_call_count = tool_calls.len(),
+            ?stop_reason,
+            "qwen: stream_message finished"
+        );
+
+        if accumulated_content.is_empty() && tool_calls.is_empty() {
+            warn!(
+                event_count,
+                "qwen: stream produced empty response (no content and no tool calls)"
+            );
         }
 
         Ok(LlmResponse {
