@@ -151,12 +151,15 @@ impl StreamAdapter for ClaudeApiAdapter {
         let trimmed = input.trim();
 
         // Handle SSE format: "data: {...}"
-        let json_str = if trimmed.starts_with("data: ") {
-            &trimmed[6..]
-        } else if trimmed.is_empty() || trimmed == "event: " {
-            return Ok(vec![]);
-        } else {
+        // SSE streams may include event:, id:, retry:, and comment lines.
+        let json_str = if let Some(rest) = trimmed.strip_prefix("data: ") {
+            rest
+        } else if trimmed.starts_with('{') {
+            // Raw JSON without SSE prefix
             trimmed
+        } else {
+            // Skip non-data SSE lines (event:, id:, retry:, comments, empty)
+            return Ok(vec![]);
         };
 
         if json_str.is_empty() || json_str == "[DONE]" {

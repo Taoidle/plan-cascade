@@ -398,7 +398,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
             ],
             requires_api_key: true,
             default_base_url: Some(
-                "https://api.minimax.io/v1/chat/completions".to_string(),
+                "https://api.minimax.io/anthropic".to_string(),
             ),
         },
         ProviderInfo {

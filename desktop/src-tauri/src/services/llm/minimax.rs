@@ -1,60 +1,105 @@
 //! MiniMax Provider
 //!
 //! Implementation of the LlmProvider trait for MiniMax API.
-//! Uses the async-anthropic SDK via MiniMax's Anthropic-compatible endpoint
-//! (api.minimax.io/anthropic/v1).
+//! Uses a hybrid approach: reqwest for HTTP transport with serde_json::Value
+//! request bodies, and anthropic-async SDK for response types and SSE streaming.
 //!
-//! ADR-003: SDK migration from raw reqwest/OpenAI-compat to async-anthropic.
-//! ADR-004: Extended thinking temporarily degraded - async-anthropic v0.6
-//!          doesn't expose extended thinking fields. MiniMax M2's reasoning_split
-//!          cannot be passed through the SDK initially.
+//! MiniMax exposes an Anthropic-compatible endpoint at:
+//!   - Global: api.minimax.io/anthropic/v1/messages
+//!   - China:  api.minimaxi.com/anthropic/v1/messages
+//!
+//! ADR-003: SDK migration from async-anthropic to anthropic-async (hybrid approach).
+//! ADR-004: Extended thinking resolved — ClaudeApiAdapter handles ThinkingDelta
+//!          in streaming, enabling thinking content forwarding for M2 models.
 
-use async_anthropic::types::{
-    ContentBlockDelta, CreateMessagesRequestBuilder, CreateMessagesResponse,
-    MessageBuilder, MessageContent as AnthropicMessageContent,
-    MessageContentList, MessageRole as AnthropicMessageRole,
-    MessagesStreamEvent, Text as AnthropicText,
-    ToolChoice as AnthropicToolChoice, ToolResult as AnthropicToolResult,
-    ToolUse as AnthropicToolUse,
-};
-use async_anthropic::Client as AnthropicClient;
+use anthropic_async::config::Config as _; // trait: .headers(), .url()
+use anthropic_async::AnthropicConfig;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
-use super::provider::{missing_api_key_error, LlmProvider};
+use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
     FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
     MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
     ToolCallReliability, ToolDefinition, UsageStats,
 };
-use crate::services::streaming::UnifiedStreamEvent;
+use crate::services::streaming::adapters::ClaudeApiAdapter;
+use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
 
-/// Default MiniMax Anthropic-compatible API base URL
-const MINIMAX_ANTHROPIC_BASE_URL: &str = "https://api.minimax.io/anthropic/v1";
+/// Default MiniMax Anthropic-compatible API base URL (global).
+const MINIMAX_ANTHROPIC_BASE_URL: &str = "https://api.minimax.io/anthropic";
 
-/// MiniMax provider using async-anthropic SDK
+/// China mainland base URL.
+#[allow(dead_code)]
+const MINIMAX_ANTHROPIC_BASE_URL_CN: &str = "https://api.minimaxi.com/anthropic";
+
+/// MiniMax provider using hybrid reqwest + anthropic-async SDK
 pub struct MinimaxProvider {
     config: ProviderConfig,
-    client: AnthropicClient,
+    http_client: reqwest::Client,
+    anthropic_config: AnthropicConfig,
+    /// Full messages API URL (base + /v1/messages), computed once at construction.
+    messages_url: String,
 }
 
 impl MinimaxProvider {
     /// Create a new MiniMax provider with the given configuration
     pub fn new(config: ProviderConfig) -> Self {
         let api_key = config.api_key.clone().unwrap_or_default();
-        let base_url = config
+        let raw_base = config
             .base_url
             .as_deref()
             .unwrap_or(MINIMAX_ANTHROPIC_BASE_URL);
 
-        let client = AnthropicClient::builder()
-            .api_key(api_key)
-            .base_url(base_url)
-            .build()
-            .expect("Failed to build MiniMax Anthropic client: invalid configuration");
+        let base_url = Self::normalize_base_url(raw_base);
+        let messages_url = format!("{}/v1/messages", base_url);
 
-        Self { config, client }
+        let anthropic_config = AnthropicConfig::new()
+            .with_api_base(&base_url)
+            .with_api_key(api_key);
+
+        tracing::info!("MiniMax provider initialized: url={}", messages_url);
+
+        Self {
+            config,
+            http_client: reqwest::Client::new(),
+            anthropic_config,
+            messages_url,
+        }
+    }
+
+    /// Normalize base URL to the Anthropic-compatible endpoint.
+    ///
+    /// Handles several user configuration patterns:
+    ///   - OpenAI-style URL (`/v1/chat/completions`) → converted to `/anthropic`
+    ///   - Full Anthropic URL (`/anthropic/v1/messages`) → stripped to `/anthropic`
+    ///   - Just the base (`/anthropic`) → used as-is
+    ///   - Host only (`https://api.minimax.io`) → `/anthropic` appended
+    fn normalize_base_url(raw: &str) -> String {
+        let url = raw.trim_end_matches('/');
+
+        // If the URL contains /v1 but NOT /anthropic, the user configured an
+        // OpenAI-compatible endpoint.  Extract the host and switch to /anthropic.
+        if url.contains("/v1") && !url.contains("/anthropic") {
+            if let Some(pos) = url.find("/v1") {
+                let host = url[..pos].trim_end_matches('/');
+                return format!("{}/anthropic", host);
+            }
+        }
+
+        // Strip known Anthropic endpoint suffixes to get the base.
+        let base = url
+            .trim_end_matches("/messages")
+            .trim_end_matches("/v1")
+            .trim_end_matches('/');
+
+        // If base is just a host (no /anthropic path), append /anthropic.
+        if !base.contains("/anthropic") {
+            return format!("{}/anthropic", base);
+        }
+
+        base.to_string()
     }
 
     /// Check if model supports reasoning (M2 series)
@@ -63,166 +108,130 @@ impl MinimaxProvider {
         model.contains("minimax-m2")
     }
 
-    /// Build a CreateMessagesRequest from unified types
-    fn build_request(
+    /// Build the JSON request body for the MiniMax Anthropic-compatible API.
+    ///
+    /// Uses serde_json::Value to support ToolUse blocks in assistant messages,
+    /// which ContentBlockParam in anthropic-async lacks.
+    fn build_request_body(
         &self,
         messages: &[Message],
         system: Option<&str>,
         tools: &[ToolDefinition],
+        stream: bool,
         request_options: &LlmRequestOptions,
-    ) -> Result<async_anthropic::types::CreateMessagesRequest, LlmError> {
-        // Convert messages to Anthropic SDK format
-        let sdk_messages = self.convert_messages(messages)?;
+    ) -> serde_json::Value {
+        let mut body = serde_json::json!({
+            "model": self.config.model,
+            "max_tokens": self.config.max_tokens,
+            "stream": stream,
+        });
 
-        let mut builder = CreateMessagesRequestBuilder::default();
-        builder
-            .model(self.config.model.clone())
-            .max_tokens(self.config.max_tokens as i32)
-            .messages(sdk_messages);
-
-        // Set system prompt
+        // System prompt as simple string (MiniMax doesn't support cache_control)
         if let Some(sys) = system {
-            builder.system(sys.to_string());
+            body["system"] = serde_json::json!(sys);
         }
 
-        // Set temperature (not supported when thinking is active in Anthropic protocol)
-        let temperature = request_options
-            .temperature_override
-            .unwrap_or(self.config.temperature);
-        builder.temperature(temperature);
+        // Temperature (not supported when thinking is active in Anthropic protocol)
+        let thinking_active = self.config.enable_thinking && self.model_supports_reasoning();
+        if !thinking_active {
+            let temperature = request_options
+                .temperature_override
+                .unwrap_or(self.config.temperature);
+            body["temperature"] = serde_json::json!(temperature);
+        }
 
-        // Convert tools to SDK format (serde_json::Map<String, Value>)
+        // Convert messages to Anthropic JSON format
+        let api_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .filter(|m| m.role != MessageRole::System)
+            .map(|m| self.message_to_json(m))
+            .collect();
+        body["messages"] = serde_json::json!(api_messages);
+
+        // Tools
         if !tools.is_empty() {
-            let sdk_tools: Vec<serde_json::Map<String, serde_json::Value>> = tools
+            let api_tools: Vec<serde_json::Value> = tools
                 .iter()
                 .map(|t| {
-                    let mut map = serde_json::Map::new();
-                    map.insert("name".to_string(), serde_json::json!(t.name));
-                    map.insert(
-                        "description".to_string(),
-                        serde_json::json!(t.description),
-                    );
-                    map.insert(
-                        "input_schema".to_string(),
-                        serde_json::to_value(&t.input_schema).unwrap_or_default(),
-                    );
-                    map
+                    serde_json::json!({
+                        "name": t.name,
+                        "description": t.description,
+                        "input_schema": t.input_schema,
+                    })
                 })
                 .collect();
-            builder.tools(sdk_tools);
+            body["tools"] = serde_json::json!(api_tools);
 
-            // Set tool_choice based on request options
-            let thinking_active =
-                self.config.enable_thinking && self.model_supports_reasoning();
-            if matches!(request_options.tool_call_mode, ToolCallMode::Required) && !thinking_active
-            {
-                builder.tool_choice(AnthropicToolChoice::Any);
+            // tool_choice (not allowed with thinking active)
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) && !thinking_active {
+                body["tool_choice"] = serde_json::json!({"type": "any"});
             }
         }
 
-        // ADR-004: Extended thinking not supported via async-anthropic v0.6.
-        // Log a warning if thinking is requested but cannot be passed through.
-        if self.config.enable_thinking && self.model_supports_reasoning() {
-            tracing::warn!(
-                "MiniMax: Extended thinking requested for model '{}' but async-anthropic v0.6 \
-                 does not support extended thinking fields. Thinking is temporarily degraded. \
-                 (ADR-004)",
-                self.config.model
-            );
-        }
-
-        builder.build().map_err(|e| LlmError::InvalidRequest {
-            message: format!("Failed to build request: {}", e),
-        })
+        body
     }
 
-    /// Convert unified Message slice to Anthropic SDK Message vec
-    fn convert_messages(
-        &self,
-        messages: &[Message],
-    ) -> Result<Vec<async_anthropic::types::Message>, LlmError> {
-        let mut sdk_messages = Vec::new();
+    /// Convert a unified Message to Anthropic-compatible JSON.
+    fn message_to_json(&self, message: &Message) -> serde_json::Value {
+        let role = match message.role {
+            MessageRole::User => "user",
+            MessageRole::Assistant => "assistant",
+            MessageRole::System => "user", // Shouldn't happen, filtered out
+        };
 
-        for msg in messages {
-            // System messages are handled via the system parameter, skip here
-            if msg.role == MessageRole::System {
-                continue;
-            }
-
-            let role = match msg.role {
-                MessageRole::User => AnthropicMessageRole::User,
-                MessageRole::Assistant => AnthropicMessageRole::Assistant,
-                MessageRole::System => continue, // Already filtered
-            };
-
-            let content_list = self.convert_content(&msg.content)?;
-
-            let sdk_msg = MessageBuilder::default()
-                .role(role)
-                .content(content_list)
-                .build()
-                .map_err(|e| LlmError::InvalidRequest {
-                    message: format!("Failed to build message: {}", e),
-                })?;
-
-            sdk_messages.push(sdk_msg);
-        }
-
-        Ok(sdk_messages)
-    }
-
-    /// Convert unified MessageContent vec to Anthropic SDK MessageContentList
-    fn convert_content(
-        &self,
-        content: &[MessageContent],
-    ) -> Result<MessageContentList, LlmError> {
-        let mut blocks: Vec<AnthropicMessageContent> = Vec::new();
-
-        for c in content {
-            match c {
-                MessageContent::Text { text } => {
-                    blocks.push(AnthropicMessageContent::Text(AnthropicText {
-                        text: text.clone(),
-                    }));
-                }
-                MessageContent::ToolUse { id, name, input } => {
-                    blocks.push(AnthropicMessageContent::ToolUse(AnthropicToolUse {
-                        id: id.clone(),
-                        name: name.clone(),
-                        input: input.clone(),
-                    }));
-                }
+        let content: Vec<serde_json::Value> = message
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                MessageContent::Text { text } => Some(serde_json::json!({
+                    "type": "text",
+                    "text": text
+                })),
+                MessageContent::ToolUse { id, name, input } => Some(serde_json::json!({
+                    "type": "tool_use",
+                    "id": id,
+                    "name": name,
+                    "input": input
+                })),
                 MessageContent::ToolResult {
                     tool_use_id,
                     content,
                     is_error,
                 } => {
-                    blocks.push(AnthropicMessageContent::ToolResult(AnthropicToolResult {
-                        tool_use_id: tool_use_id.clone(),
-                        content: Some(content.clone()),
-                        is_error: is_error.unwrap_or(false),
-                    }));
+                    let mut result = serde_json::json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": content
+                    });
+                    if let Some(true) = is_error {
+                        result["is_error"] = serde_json::json!(true);
+                    }
+                    Some(result)
                 }
                 MessageContent::Thinking { thinking, .. } => {
-                    // ADR-004: Thinking blocks cannot be round-tripped via async-anthropic v0.6.
-                    // Include as text content for context preservation.
-                    if !thinking.is_empty() {
-                        blocks.push(AnthropicMessageContent::Text(AnthropicText {
-                            text: thinking.clone(),
-                        }));
+                    // ADR-004: Thinking blocks included as text for context preservation.
+                    // MiniMax may not support round-tripping thinking blocks.
+                    if thinking.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::json!({
+                            "type": "text",
+                            "text": thinking
+                        }))
                     }
                 }
                 MessageContent::Image { .. } => {
-                    // async-anthropic v0.6 doesn't have an Image variant in MessageContent.
-                    // Skip image content (MiniMax image support is limited anyway).
-                    tracing::warn!("MiniMax: Skipping image content - not supported via async-anthropic SDK");
+                    tracing::warn!(
+                        "MiniMax: Skipping image content - not supported"
+                    );
+                    None
                 }
                 MessageContent::ToolResultMultimodal {
                     tool_use_id,
                     content,
                     is_error,
                 } => {
-                    // Flatten multimodal tool result to text-only since SDK doesn't support images
+                    // Flatten multimodal tool result to text-only
                     let text_content: String = content
                         .iter()
                         .filter_map(|block| {
@@ -235,43 +244,46 @@ impl MinimaxProvider {
                         .collect::<Vec<_>>()
                         .join("\n");
 
-                    blocks.push(AnthropicMessageContent::ToolResult(AnthropicToolResult {
-                        tool_use_id: tool_use_id.clone(),
-                        content: if text_content.is_empty() {
-                            None
-                        } else {
-                            Some(text_content)
-                        },
-                        is_error: is_error.unwrap_or(false),
-                    }));
+                    let mut result = serde_json::json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                    });
+                    if !text_content.is_empty() {
+                        result["content"] = serde_json::json!(text_content);
+                    }
+                    if let Some(true) = is_error {
+                        result["is_error"] = serde_json::json!(true);
+                    }
+                    Some(result)
                 }
-            }
-        }
+            })
+            .collect();
 
-        Ok(MessageContentList(blocks))
+        serde_json::json!({
+            "role": role,
+            "content": content
+        })
     }
 
-    /// Parse a non-streaming CreateMessagesResponse into LlmResponse
-    fn parse_response(&self, response: &CreateMessagesResponse) -> LlmResponse {
+    /// Parse a non-streaming MessagesCreateResponse into LlmResponse.
+    fn parse_response(
+        &self,
+        response: &anthropic_async::types::MessagesCreateResponse,
+    ) -> LlmResponse {
         let mut content = None;
         let mut tool_calls = Vec::new();
 
-        if let Some(content_blocks) = &response.content {
-            for block in content_blocks {
-                match block {
-                    AnthropicMessageContent::Text(text) => {
-                        content = Some(text.text.clone());
-                    }
-                    AnthropicMessageContent::ToolUse(tu) => {
-                        tool_calls.push(ToolCall {
-                            id: tu.id.clone(),
-                            name: tu.name.clone(),
-                            arguments: tu.input.clone(),
-                        });
-                    }
-                    AnthropicMessageContent::ToolResult(_) => {
-                        // Shouldn't appear in response content
-                    }
+        for block in &response.content {
+            match block {
+                anthropic_async::types::ContentBlock::Text { text } => {
+                    content = Some(text.clone());
+                }
+                anthropic_async::types::ContentBlock::ToolUse { id, name, input } => {
+                    tool_calls.push(ToolCall {
+                        id: id.clone(),
+                        name: name.clone(),
+                        arguments: input.clone(),
+                    });
                 }
             }
         }
@@ -286,24 +298,21 @@ impl MinimaxProvider {
             .usage
             .as_ref()
             .map(|u| UsageStats {
-                input_tokens: u.input_tokens.unwrap_or(0),
-                output_tokens: u.output_tokens.unwrap_or(0),
-                thinking_tokens: None, // ADR-004: Not available via SDK
-                cache_read_tokens: None,
-                cache_creation_tokens: None,
+                input_tokens: u.input_tokens.unwrap_or(0) as u32,
+                output_tokens: u.output_tokens.unwrap_or(0) as u32,
+                thinking_tokens: None,
+                cache_read_tokens: u.cache_read_input_tokens.map(|v| v as u32),
+                cache_creation_tokens: u.cache_creation_input_tokens.map(|v| v as u32),
             })
             .unwrap_or_default();
 
         LlmResponse {
             content,
-            thinking: None, // ADR-004: Thinking not available via async-anthropic v0.6
+            thinking: None,
             tool_calls,
             stop_reason,
             usage,
-            model: response
-                .model
-                .clone()
-                .unwrap_or_else(|| self.config.model.clone()),
+            model: response.model.clone(),
         }
     }
 }
@@ -317,9 +326,8 @@ impl LlmProvider for MinimaxProvider {
         &self.config.model
     }
     fn supports_thinking(&self) -> bool {
-        // ADR-004: Still report true for M2 models so the orchestrator knows
-        // the model has reasoning capability, even though it's temporarily
-        // degraded at the SDK level.
+        // ADR-004: Report true for M2 models — the model has reasoning capability,
+        // and ClaudeApiAdapter now handles ThinkingDelta events in streaming.
         self.model_supports_reasoning()
     }
     fn supports_tools(&self) -> bool {
@@ -340,20 +348,14 @@ impl LlmProvider for MinimaxProvider {
 
     fn context_window(&self) -> u32 {
         let model = self.config.model.to_lowercase();
-        if model.contains("m2.5") {
-            // MiniMax-M2.5, MiniMax-M2.5-highspeed
-            245_760
-        } else if model.contains("m2.1") {
-            // MiniMax-M2.1, MiniMax-M2.1-highspeed
+        if model.contains("m2.5") || model.contains("m2.1") {
+            // MiniMax-M2.5, M2.5-highspeed, M2.1, M2.1-highspeed
             245_760
         } else if model.contains("m2") {
-            // MiniMax-M2
             200_000
         } else if model.contains("text-01") {
-            // MiniMax-Text-01
             4_000_000
         } else {
-            // Conservative default for unrecognized MiniMax models
             200_000
         }
     }
@@ -369,50 +371,55 @@ impl LlmProvider for MinimaxProvider {
             return Err(missing_api_key_error("minimax"));
         }
 
-        let request = self.build_request(
+        let body = self.build_request_body(
             &messages,
             system.as_deref(),
             &tools,
+            false,
             &request_options,
-        )?;
+        );
 
-        let response = self
-            .client
-            .messages()
-            .create(request)
-            .await
-            .map_err(|e| {
-                let err_str = e.to_string();
-                // Map common Anthropic SDK errors to our error types
-                if err_str.contains("401") || err_str.contains("authentication") {
-                    LlmError::AuthenticationFailed {
-                        message: format!("minimax: {}", err_str),
-                    }
-                } else if err_str.contains("429") || err_str.contains("rate") {
-                    LlmError::RateLimited {
-                        message: err_str,
-                        retry_after: None,
-                    }
-                } else if err_str.contains("404") || err_str.contains("not found") {
-                    LlmError::ModelNotFound {
-                        model: self.config.model.clone(),
-                    }
-                } else if err_str.contains("400") || err_str.contains("invalid") {
-                    LlmError::InvalidRequest { message: err_str }
-                } else if err_str.contains("500")
-                    || err_str.contains("502")
-                    || err_str.contains("503")
-                {
-                    LlmError::ServerError {
-                        message: err_str,
-                        status: None,
-                    }
-                } else {
-                    LlmError::NetworkError { message: err_str }
-                }
+        let headers = self
+            .anthropic_config
+            .headers()
+            .map_err(|e| LlmError::InvalidRequest {
+                message: format!("Failed to build headers: {}", e),
             })?;
 
-        Ok(self.parse_response(&response))
+        let url = &self.messages_url;
+        tracing::debug!("MiniMax send_message POST {}", url);
+
+        let response = self
+            .http_client
+            .post(url.as_str())
+            .headers(headers)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| LlmError::NetworkError {
+                message: e.to_string(),
+            })?;
+
+        let status = response.status().as_u16();
+        let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
+            message: e.to_string(),
+        })?;
+
+        if status != 200 {
+            tracing::warn!(
+                "MiniMax API error: HTTP {} from {} — {}",
+                status, url, body_text
+            );
+            return Err(parse_http_error(status, &body_text, "minimax"));
+        }
+
+        let api_response: anthropic_async::types::MessagesCreateResponse =
+            serde_json::from_str(&body_text).map_err(|e| LlmError::ParseError {
+                message: format!("Failed to parse response: {}", e),
+            })?;
+
+        Ok(self.parse_response(&api_response))
     }
 
     async fn stream_message(
@@ -427,106 +434,148 @@ impl LlmProvider for MinimaxProvider {
             return Err(missing_api_key_error("minimax"));
         }
 
-        let request = self.build_request(
+        let body = self.build_request_body(
             &messages,
             system.as_deref(),
             &tools,
+            true,
             &request_options,
-        )?;
+        );
 
-        let mut stream = self
-            .client
-            .messages()
-            .create_stream(request)
-            .await;
+        let headers = self
+            .anthropic_config
+            .headers()
+            .map_err(|e| LlmError::InvalidRequest {
+                message: format!("Failed to build headers: {}", e),
+            })?;
 
+        let url = &self.messages_url;
+        tracing::debug!("MiniMax stream_message POST {}", url);
+
+        let response = self
+            .http_client
+            .post(url.as_str())
+            .headers(headers)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| LlmError::NetworkError {
+                message: e.to_string(),
+            })?;
+
+        let status = response.status().as_u16();
+        if status != 200 {
+            let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
+                message: e.to_string(),
+            })?;
+            tracing::warn!(
+                "MiniMax API error: HTTP {} from {} — {}",
+                status, url, body_text
+            );
+            return Err(parse_http_error(status, &body_text, "minimax"));
+        }
+
+        // Process SSE stream using ClaudeApiAdapter (Anthropic-compatible SSE format).
+        // ADR-004: ClaudeApiAdapter handles ThinkingDelta for M2 reasoning models.
+        let mut adapter = ClaudeApiAdapter::new();
         let mut accumulated_content = String::new();
+        let mut accumulated_thinking = String::new();
         let mut tool_calls = Vec::new();
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
 
-        // State for tracking tool input accumulation
-        let mut current_tool_id: Option<String> = None;
-        let mut current_tool_name: Option<String> = None;
-        let mut tool_input_buffer = String::new();
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
 
-        while let Some(event_result) = stream.next().await {
-            match event_result {
-                Ok(event) => {
-                    match event {
-                        MessagesStreamEvent::MessageStart { message, usage: msg_usage } => {
-                            // Capture initial usage from message_start
-                            if let Some(u) = msg_usage.or(message.usage) {
-                                usage.input_tokens = u.input_tokens.unwrap_or(0);
-                                usage.output_tokens = u.output_tokens.unwrap_or(0);
-                            }
-                        }
-                        MessagesStreamEvent::ContentBlockStart {
-                            content_block,
-                            ..
-                        } => {
-                            match &content_block {
-                                AnthropicMessageContent::ToolUse(tu) => {
-                                    current_tool_id = Some(tu.id.clone());
-                                    current_tool_name = Some(tu.name.clone());
-                                    tool_input_buffer.clear();
-                                    // Don't forward ToolStart to tx; the orchestrator
-                                    // handles tool lifecycle events internally.
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| LlmError::NetworkError {
+                message: e.to_string(),
+            })?;
+
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete lines
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].to_string();
+                buffer = buffer[line_end + 1..].to_string();
+
+                if line.trim().is_empty() {
+                    continue;
+                }
+
+                match adapter.adapt(&line) {
+                    Ok(events) => {
+                        for event in events {
+                            match &event {
+                                UnifiedStreamEvent::TextDelta { content } => {
+                                    accumulated_content.push_str(content);
+                                }
+                                UnifiedStreamEvent::ThinkingDelta { content, .. } => {
+                                    accumulated_thinking.push_str(content);
+                                }
+                                UnifiedStreamEvent::ToolComplete {
+                                    tool_id,
+                                    tool_name,
+                                    arguments,
+                                } => {
+                                    if let Ok(input) = serde_json::from_str(arguments) {
+                                        tool_calls.push(ToolCall {
+                                            id: tool_id.clone(),
+                                            name: tool_name.clone(),
+                                            arguments: input,
+                                        });
+                                    }
+                                }
+                                UnifiedStreamEvent::Usage {
+                                    input_tokens,
+                                    output_tokens,
+                                    thinking_tokens,
+                                    cache_read_tokens,
+                                    cache_creation_tokens,
+                                } => {
+                                    if *input_tokens > 0 {
+                                        usage.input_tokens = *input_tokens;
+                                    }
+                                    usage.output_tokens += *output_tokens;
+                                    if thinking_tokens.is_some() {
+                                        usage.thinking_tokens = *thinking_tokens;
+                                    }
+                                    if cache_read_tokens.is_some() {
+                                        usage.cache_read_tokens = *cache_read_tokens;
+                                    }
+                                    if cache_creation_tokens.is_some() {
+                                        usage.cache_creation_tokens = *cache_creation_tokens;
+                                    }
+                                }
+                                UnifiedStreamEvent::Complete {
+                                    stop_reason: Some(reason),
+                                } => {
+                                    stop_reason = StopReason::from(reason.as_str());
                                 }
                                 _ => {}
                             }
-                        }
-                        MessagesStreamEvent::ContentBlockDelta { delta, .. } => match delta {
-                            ContentBlockDelta::TextDelta { text } => {
-                                accumulated_content.push_str(&text);
-                                let _ = tx
-                                    .send(UnifiedStreamEvent::TextDelta { content: text })
-                                    .await;
+
+                            // Forward streaming events but suppress internal signals
+                            if !matches!(
+                                &event,
+                                UnifiedStreamEvent::Complete { .. }
+                                    | UnifiedStreamEvent::Usage { .. }
+                                    | UnifiedStreamEvent::ToolStart { .. }
+                                    | UnifiedStreamEvent::ToolComplete { .. }
+                            ) {
+                                let _ = tx.send(event).await;
                             }
-                            ContentBlockDelta::InputJsonDelta { partial_json } => {
-                                tool_input_buffer.push_str(&partial_json);
-                            }
-                        },
-                        MessagesStreamEvent::ContentBlockStop { .. } => {
-                            // If we were accumulating a tool call, finalize it
-                            if let (Some(id), Some(name)) =
-                                (current_tool_id.take(), current_tool_name.take())
-                            {
-                                let args = std::mem::take(&mut tool_input_buffer);
-                                if let Ok(input) = serde_json::from_str(&args) {
-                                    tool_calls.push(ToolCall {
-                                        id: id.clone(),
-                                        name: name.clone(),
-                                        arguments: input,
-                                    });
-                                }
-                                // ToolComplete is consumed internally by the orchestrator,
-                                // not forwarded to the frontend.
-                            }
-                        }
-                        MessagesStreamEvent::MessageDelta {
-                            delta,
-                            usage: delta_usage,
-                        } => {
-                            if let Some(u) = delta_usage {
-                                usage.output_tokens += u.output_tokens.unwrap_or(0);
-                            }
-                            if let Some(reason) = delta.stop_reason {
-                                stop_reason = StopReason::from(reason.as_str());
-                            }
-                        }
-                        MessagesStreamEvent::MessageStop => {
-                            // Stream complete; stop_reason already captured from MessageDelta
                         }
                     }
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(UnifiedStreamEvent::Error {
-                            message: e.to_string(),
-                            code: None,
-                        })
-                        .await;
+                    Err(e) => {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::Error {
+                                message: e.to_string(),
+                                code: None,
+                            })
+                            .await;
+                    }
                 }
             }
         }
@@ -537,7 +586,11 @@ impl LlmProvider for MinimaxProvider {
             } else {
                 Some(accumulated_content)
             },
-            thinking: None, // ADR-004: Thinking not available via async-anthropic v0.6
+            thinking: if accumulated_thinking.is_empty() {
+                None
+            } else {
+                Some(accumulated_thinking)
+            },
             tool_calls,
             stop_reason,
             usage,
@@ -550,42 +603,44 @@ impl LlmProvider for MinimaxProvider {
             return Err(missing_api_key_error("minimax"));
         }
 
-        // Make a minimal request to verify connectivity and API key
-        let request = CreateMessagesRequestBuilder::default()
-            .model(self.config.model.clone())
-            .max_tokens(1_i32)
-            .messages(vec![MessageBuilder::default()
-                .role(AnthropicMessageRole::User)
-                .content(MessageContentList(vec![
-                    AnthropicMessageContent::Text(AnthropicText {
-                        text: "Hi".to_string(),
-                    }),
-                ]))
-                .build()
-                .map_err(|e| LlmError::InvalidRequest {
-                    message: format!("Failed to build health check message: {}", e),
-                })?])
-            .build()
+        let body = serde_json::json!({
+            "model": self.config.model,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "Hi"}]
+        });
+
+        let headers = self
+            .anthropic_config
+            .headers()
             .map_err(|e| LlmError::InvalidRequest {
-                message: format!("Failed to build health check request: {}", e),
+                message: format!("Failed to build headers: {}", e),
             })?;
 
-        self.client
-            .messages()
-            .create(request)
+        let url = &self.messages_url;
+
+        let response = self
+            .http_client
+            .post(url.as_str())
+            .headers(headers)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
             .await
-            .map_err(|e| {
-                let err_str = e.to_string();
-                if err_str.contains("401") || err_str.contains("authentication") {
-                    LlmError::AuthenticationFailed {
-                        message: "Invalid API key".to_string(),
-                    }
-                } else {
-                    LlmError::NetworkError { message: err_str }
-                }
+            .map_err(|e| LlmError::NetworkError {
+                message: e.to_string(),
             })?;
 
-        Ok(())
+        let status = response.status().as_u16();
+        if status == 200 {
+            Ok(())
+        } else if status == 401 {
+            Err(LlmError::AuthenticationFailed {
+                message: "Invalid API key".to_string(),
+            })
+        } else {
+            let body_text = response.text().await.unwrap_or_default();
+            Err(parse_http_error(status, &body_text, "minimax"))
+        }
     }
 
     fn config(&self) -> &ProviderConfig {
@@ -596,6 +651,9 @@ impl LlmProvider for MinimaxProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anthropic_async::types::{
+        ContentBlock as ApiContentBlock, MessagesCreateResponse, Usage as ApiUsage,
+    };
 
     fn test_config() -> ProviderConfig {
         ProviderConfig {
@@ -711,115 +769,115 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_text_content() {
-        let provider = MinimaxProvider::new(test_config());
-        let content = vec![MessageContent::Text {
-            text: "Hello!".to_string(),
-        }];
-        let result = provider.convert_content(&content).unwrap();
-        assert_eq!(result.0.len(), 1);
-        match &result.0[0] {
-            AnthropicMessageContent::Text(t) => assert_eq!(t.text, "Hello!"),
-            _ => panic!("Expected Text content"),
-        }
+    fn test_base_url_constants() {
+        assert_eq!(
+            MINIMAX_ANTHROPIC_BASE_URL,
+            "https://api.minimax.io/anthropic"
+        );
+        assert_eq!(
+            MINIMAX_ANTHROPIC_BASE_URL_CN,
+            "https://api.minimaxi.com/anthropic"
+        );
     }
 
     #[test]
-    fn test_convert_tool_use_content() {
+    fn test_message_to_json_text() {
         let provider = MinimaxProvider::new(test_config());
-        let content = vec![MessageContent::ToolUse {
-            id: "tool_123".to_string(),
-            name: "read_file".to_string(),
-            input: serde_json::json!({"path": "/test"}),
-        }];
-        let result = provider.convert_content(&content).unwrap();
-        assert_eq!(result.0.len(), 1);
-        match &result.0[0] {
-            AnthropicMessageContent::ToolUse(tu) => {
-                assert_eq!(tu.id, "tool_123");
-                assert_eq!(tu.name, "read_file");
-            }
-            _ => panic!("Expected ToolUse content"),
-        }
+        let msg = Message::user("Hello!");
+        let json = provider.message_to_json(&msg);
+        assert_eq!(json["role"], "user");
+        let content = json["content"].as_array().unwrap();
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "Hello!");
     }
 
     #[test]
-    fn test_convert_tool_result_content() {
+    fn test_message_to_json_tool_use() {
         let provider = MinimaxProvider::new(test_config());
-        let content = vec![MessageContent::ToolResult {
-            tool_use_id: "tool_123".to_string(),
-            content: "file contents".to_string(),
-            is_error: None,
-        }];
-        let result = provider.convert_content(&content).unwrap();
-        assert_eq!(result.0.len(), 1);
-        match &result.0[0] {
-            AnthropicMessageContent::ToolResult(tr) => {
-                assert_eq!(tr.tool_use_id, "tool_123");
-                assert_eq!(tr.content, Some("file contents".to_string()));
-                assert!(!tr.is_error);
-            }
-            _ => panic!("Expected ToolResult content"),
-        }
+        let msg = Message {
+            role: MessageRole::Assistant,
+            content: vec![MessageContent::ToolUse {
+                id: "tool_123".to_string(),
+                name: "read_file".to_string(),
+                input: serde_json::json!({"path": "/test"}),
+            }],
+        };
+        let json = provider.message_to_json(&msg);
+        assert_eq!(json["role"], "assistant");
+        let content = json["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "tool_use");
+        assert_eq!(content[0]["id"], "tool_123");
+        assert_eq!(content[0]["name"], "read_file");
     }
 
     #[test]
-    fn test_convert_tool_result_with_error() {
+    fn test_message_to_json_tool_result() {
         let provider = MinimaxProvider::new(test_config());
-        let content = vec![MessageContent::ToolResult {
-            tool_use_id: "tool_456".to_string(),
-            content: "error occurred".to_string(),
-            is_error: Some(true),
-        }];
-        let result = provider.convert_content(&content).unwrap();
-        assert_eq!(result.0.len(), 1);
-        match &result.0[0] {
-            AnthropicMessageContent::ToolResult(tr) => {
-                assert!(tr.is_error);
-            }
-            _ => panic!("Expected ToolResult content"),
-        }
+        let msg = Message {
+            role: MessageRole::User,
+            content: vec![MessageContent::ToolResult {
+                tool_use_id: "tool_123".to_string(),
+                content: "file contents".to_string(),
+                is_error: None,
+            }],
+        };
+        let json = provider.message_to_json(&msg);
+        let content = json["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "tool_result");
+        assert_eq!(content[0]["tool_use_id"], "tool_123");
+        assert_eq!(content[0]["content"], "file contents");
+        assert!(content[0].get("is_error").is_none());
     }
 
     #[test]
-    fn test_convert_messages_skips_system() {
+    fn test_message_to_json_tool_result_with_error() {
         let provider = MinimaxProvider::new(test_config());
-        let messages = vec![
-            Message::system("Be helpful"),
-            Message::user("Hello"),
-            Message::assistant("Hi there"),
-        ];
-        let result = provider.convert_messages(&messages).unwrap();
-        assert_eq!(result.len(), 2); // System message filtered out
+        let msg = Message {
+            role: MessageRole::User,
+            content: vec![MessageContent::ToolResult {
+                tool_use_id: "tool_456".to_string(),
+                content: "error occurred".to_string(),
+                is_error: Some(true),
+            }],
+        };
+        let json = provider.message_to_json(&msg);
+        let content = json["content"].as_array().unwrap();
+        assert_eq!(content[0]["is_error"], true);
     }
 
     #[test]
-    fn test_build_request_basic() {
+    fn test_build_request_body_basic() {
         let provider = MinimaxProvider::new(test_config());
         let messages = vec![Message::user("test")];
-        let request = provider
-            .build_request(&messages, None, &[], &LlmRequestOptions::default())
-            .unwrap();
-        assert_eq!(request.model, "MiniMax-M2.5");
+        let body = provider.build_request_body(
+            &messages,
+            None,
+            &[],
+            false,
+            &LlmRequestOptions::default(),
+        );
+        assert_eq!(body["model"], "MiniMax-M2.5");
+        assert_eq!(body["stream"], false);
+        assert!(body.get("system").is_none());
     }
 
     #[test]
-    fn test_build_request_with_system() {
+    fn test_build_request_body_with_system() {
         let provider = MinimaxProvider::new(test_config());
         let messages = vec![Message::user("test")];
-        let request = provider
-            .build_request(
-                &messages,
-                Some("Be helpful"),
-                &[],
-                &LlmRequestOptions::default(),
-            )
-            .unwrap();
-        assert_eq!(request.system, Some("Be helpful".to_string()));
+        let body = provider.build_request_body(
+            &messages,
+            Some("Be helpful"),
+            &[],
+            false,
+            &LlmRequestOptions::default(),
+        );
+        assert_eq!(body["system"], "Be helpful");
     }
 
     #[test]
-    fn test_build_request_with_tools() {
+    fn test_build_request_body_with_tools() {
         let provider = MinimaxProvider::new(test_config());
         let messages = vec![Message::user("test")];
         let tools = vec![ToolDefinition {
@@ -831,27 +889,54 @@ mod tests {
                 vec![],
             ),
         }];
-        let request = provider
-            .build_request(&messages, None, &tools, &LlmRequestOptions::default())
-            .unwrap();
-        assert!(request.tools.is_some());
-        assert_eq!(request.tools.as_ref().unwrap().len(), 1);
+        let body = provider.build_request_body(
+            &messages,
+            None,
+            &tools,
+            false,
+            &LlmRequestOptions::default(),
+        );
+        let tools_arr = body["tools"].as_array().unwrap();
+        assert_eq!(tools_arr.len(), 1);
+        assert_eq!(tools_arr[0]["name"], "read_file");
+    }
+
+    #[test]
+    fn test_build_request_body_filters_system_messages() {
+        let provider = MinimaxProvider::new(test_config());
+        let messages = vec![
+            Message::system("Be helpful"),
+            Message::user("Hello"),
+            Message::assistant("Hi there"),
+        ];
+        let body = provider.build_request_body(
+            &messages,
+            None,
+            &[],
+            false,
+            &LlmRequestOptions::default(),
+        );
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 2); // System message filtered out
     }
 
     #[test]
     fn test_parse_response_text_only() {
         let provider = MinimaxProvider::new(test_config());
-        let response = CreateMessagesResponse {
-            id: Some("msg_123".to_string()),
-            content: Some(vec![AnthropicMessageContent::Text(AnthropicText {
+        let response = MessagesCreateResponse {
+            id: "msg_123".to_string(),
+            kind: "message".to_string(),
+            role: anthropic_async::types::MessageRole::Assistant,
+            content: vec![ApiContentBlock::Text {
                 text: "Hello world".to_string(),
-            })]),
-            model: Some("MiniMax-M2.5".to_string()),
+            }],
+            model: "MiniMax-M2.5".to_string(),
             stop_reason: Some("end_turn".to_string()),
-            stop_sequence: None,
-            usage: Some(async_anthropic::types::Usage {
+            usage: Some(ApiUsage {
                 input_tokens: Some(10),
                 output_tokens: Some(20),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             }),
         };
         let result = provider.parse_response(&response);
@@ -865,19 +950,22 @@ mod tests {
     #[test]
     fn test_parse_response_with_tool_use() {
         let provider = MinimaxProvider::new(test_config());
-        let response = CreateMessagesResponse {
-            id: Some("msg_456".to_string()),
-            content: Some(vec![AnthropicMessageContent::ToolUse(AnthropicToolUse {
+        let response = MessagesCreateResponse {
+            id: "msg_456".to_string(),
+            kind: "message".to_string(),
+            role: anthropic_async::types::MessageRole::Assistant,
+            content: vec![ApiContentBlock::ToolUse {
                 id: "tool_call_1".to_string(),
                 name: "read_file".to_string(),
                 input: serde_json::json!({"path": "/test.rs"}),
-            })]),
-            model: Some("MiniMax-M2.5".to_string()),
+            }],
+            model: "MiniMax-M2.5".to_string(),
             stop_reason: Some("tool_use".to_string()),
-            stop_sequence: None,
-            usage: Some(async_anthropic::types::Usage {
+            usage: Some(ApiUsage {
                 input_tokens: Some(15),
                 output_tokens: Some(25),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             }),
         };
         let result = provider.parse_response(&response);
@@ -890,19 +978,163 @@ mod tests {
     #[test]
     fn test_parse_response_no_usage() {
         let provider = MinimaxProvider::new(test_config());
-        let response = CreateMessagesResponse {
-            id: None,
-            content: Some(vec![AnthropicMessageContent::Text(AnthropicText {
+        let response = MessagesCreateResponse {
+            id: "msg_789".to_string(),
+            kind: "message".to_string(),
+            role: anthropic_async::types::MessageRole::Assistant,
+            content: vec![ApiContentBlock::Text {
                 text: "Hi".to_string(),
-            })]),
-            model: None,
+            }],
+            model: "MiniMax-M2.5".to_string(),
             stop_reason: None,
-            stop_sequence: None,
             usage: None,
         };
         let result = provider.parse_response(&response);
         assert_eq!(result.usage.input_tokens, 0);
         assert_eq!(result.usage.output_tokens, 0);
-        assert_eq!(result.model, "MiniMax-M2.5"); // Falls back to config model
+        assert_eq!(result.model, "MiniMax-M2.5");
+    }
+
+    #[test]
+    fn test_parse_response_with_cache_tokens() {
+        let provider = MinimaxProvider::new(test_config());
+        let response = MessagesCreateResponse {
+            id: "msg_cache".to_string(),
+            kind: "message".to_string(),
+            role: anthropic_async::types::MessageRole::Assistant,
+            content: vec![ApiContentBlock::Text {
+                text: "cached".to_string(),
+            }],
+            model: "MiniMax-M2.5".to_string(),
+            stop_reason: Some("end_turn".to_string()),
+            usage: Some(ApiUsage {
+                input_tokens: Some(100),
+                output_tokens: Some(50),
+                cache_creation_input_tokens: Some(80),
+                cache_read_input_tokens: Some(60),
+            }),
+        };
+        let result = provider.parse_response(&response);
+        assert_eq!(result.usage.cache_creation_tokens, Some(80));
+        assert_eq!(result.usage.cache_read_tokens, Some(60));
+    }
+
+    #[test]
+    fn test_custom_base_url_cn() {
+        let config = ProviderConfig {
+            base_url: Some(MINIMAX_ANTHROPIC_BASE_URL_CN.to_string()),
+            ..test_config()
+        };
+        let provider = MinimaxProvider::new(config);
+        assert_eq!(
+            provider.messages_url,
+            "https://api.minimaxi.com/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_default_messages_url() {
+        let provider = MinimaxProvider::new(test_config());
+        assert_eq!(
+            provider.messages_url,
+            "https://api.minimax.io/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_base_url_with_v1_suffix_normalized() {
+        // User may configure base_url with /v1 already included
+        let config = ProviderConfig {
+            base_url: Some("https://api.minimaxi.com/anthropic/v1".to_string()),
+            ..test_config()
+        };
+        let provider = MinimaxProvider::new(config);
+        assert_eq!(
+            provider.messages_url,
+            "https://api.minimaxi.com/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_base_url_with_full_path_normalized() {
+        // User may configure full URL (like OpenAI/DeepSeek providers)
+        let config = ProviderConfig {
+            base_url: Some("https://api.minimaxi.com/anthropic/v1/messages".to_string()),
+            ..test_config()
+        };
+        let provider = MinimaxProvider::new(config);
+        assert_eq!(
+            provider.messages_url,
+            "https://api.minimaxi.com/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_base_url_with_trailing_slash_normalized() {
+        let config = ProviderConfig {
+            base_url: Some("https://api.minimax.io/anthropic/".to_string()),
+            ..test_config()
+        };
+        let provider = MinimaxProvider::new(config);
+        assert_eq!(
+            provider.messages_url,
+            "https://api.minimax.io/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_openai_url_converted_to_anthropic() {
+        // User configured the OpenAI-compatible URL (from old default_base_url)
+        let config = ProviderConfig {
+            base_url: Some("https://api.minimax.io/v1/chat/completions".to_string()),
+            ..test_config()
+        };
+        let provider = MinimaxProvider::new(config);
+        assert_eq!(
+            provider.messages_url,
+            "https://api.minimax.io/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_openai_base_url_converted_to_anthropic() {
+        // User configured the OpenAI base URL without /chat/completions
+        let config = ProviderConfig {
+            base_url: Some("https://api.minimax.io/v1".to_string()),
+            ..test_config()
+        };
+        let provider = MinimaxProvider::new(config);
+        assert_eq!(
+            provider.messages_url,
+            "https://api.minimax.io/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_openai_url_cn_converted_to_anthropic() {
+        // China user with OpenAI-compatible URL
+        let config = ProviderConfig {
+            base_url: Some("https://api.minimaxi.com/v1/chat/completions".to_string()),
+            ..test_config()
+        };
+        let provider = MinimaxProvider::new(config);
+        assert_eq!(
+            provider.messages_url,
+            "https://api.minimaxi.com/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_host_only_url_gets_anthropic_path() {
+        // User configured just the host
+        let config = ProviderConfig {
+            base_url: Some("https://api.minimax.io".to_string()),
+            ..test_config()
+        };
+        let provider = MinimaxProvider::new(config);
+        assert_eq!(
+            provider.messages_url,
+            "https://api.minimax.io/anthropic/v1/messages"
+        );
     }
 }
