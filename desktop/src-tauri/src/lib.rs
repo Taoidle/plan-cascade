@@ -116,6 +116,14 @@ pub use commands::{
     // MCP commands
     list_mcp_servers,
     list_model_pricing,
+    // Memory commands
+    add_project_memory,
+    clear_project_memories,
+    delete_project_memory,
+    get_memory_stats,
+    list_project_memories,
+    search_project_memories,
+    update_project_memory,
     // Project commands
     list_projects,
     // Standalone LLM commands

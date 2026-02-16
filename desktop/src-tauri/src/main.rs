@@ -183,6 +183,14 @@ fn main() {
             // File attachment commands
             plan_cascade_desktop::commands::files::read_file_for_attachment,
             plan_cascade_desktop::commands::files::list_workspace_files,
+            // Memory commands
+            plan_cascade_desktop::commands::memory::search_project_memories,
+            plan_cascade_desktop::commands::memory::list_project_memories,
+            plan_cascade_desktop::commands::memory::add_project_memory,
+            plan_cascade_desktop::commands::memory::update_project_memory,
+            plan_cascade_desktop::commands::memory::delete_project_memory,
+            plan_cascade_desktop::commands::memory::clear_project_memories,
+            plan_cascade_desktop::commands::memory::get_memory_stats,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
