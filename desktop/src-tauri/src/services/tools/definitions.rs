@@ -1,11 +1,40 @@
 //! Tool Definitions
 //!
 //! Provides tool definitions for the executor.
+//!
+//! **Migration note (feature-006):** The canonical source of tool definitions
+//! is now the `Tool` trait implementations in `impls/`. The functions in this
+//! module are kept for backward compatibility but can be replaced with
+//! `ToolExecutor::registry_definitions()` and `ToolExecutor::registry_basic_definitions()`.
 
 use crate::services::llm::types::{ParameterSchema, ToolDefinition};
 use std::collections::HashMap;
 
+/// Get all available tool definitions from the trait-based registry.
+///
+/// This is the recommended way to get tool definitions, as they are
+/// auto-generated from the `Tool` trait implementations and always in sync.
+pub fn get_tool_definitions_from_registry() -> Vec<ToolDefinition> {
+    let registry = super::executor::ToolExecutor::build_registry_static();
+    registry.definitions()
+}
+
+/// Get basic tool definitions (without Task/Analyze) from the trait-based registry.
+///
+/// Used for sub-agents to prevent recursion.
+pub fn get_basic_tool_definitions_from_registry() -> Vec<ToolDefinition> {
+    let registry = super::executor::ToolExecutor::build_registry_static();
+    registry
+        .definitions()
+        .into_iter()
+        .filter(|d| d.name != "Task" && d.name != "Analyze")
+        .collect()
+}
+
 /// Get all available tool definitions (including Task tool for parent agents)
+///
+/// **Deprecated**: Prefer `get_tool_definitions_from_registry()` or
+/// `ToolExecutor::registry_definitions()` for auto-generated definitions.
 pub fn get_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         read_tool(),
@@ -533,6 +562,52 @@ mod tests {
             mode_desc.contains("quick") && mode_desc.contains("deep"),
             "Mode parameter should describe quick and deep modes"
         );
+    }
+
+    #[test]
+    fn test_registry_definitions_have_same_tool_count() {
+        let legacy = get_tool_definitions();
+        let registry = get_tool_definitions_from_registry();
+        assert_eq!(
+            legacy.len(),
+            registry.len(),
+            "Registry should have same number of tools as legacy definitions"
+        );
+    }
+
+    #[test]
+    fn test_registry_definitions_have_same_tool_names() {
+        let legacy = get_tool_definitions();
+        let registry = get_tool_definitions_from_registry();
+
+        let legacy_names: std::collections::HashSet<String> =
+            legacy.iter().map(|t| t.name.clone()).collect();
+        let registry_names: std::collections::HashSet<String> =
+            registry.iter().map(|t| t.name.clone()).collect();
+
+        assert_eq!(
+            legacy_names, registry_names,
+            "Registry should have same tool names as legacy definitions"
+        );
+    }
+
+    #[test]
+    fn test_registry_basic_definitions_exclude_task_and_analyze() {
+        let basic = get_basic_tool_definitions_from_registry();
+        let names: Vec<&str> = basic.iter().map(|t| t.name.as_str()).collect();
+        assert!(!names.contains(&"Task"), "Basic should not include Task");
+        assert!(!names.contains(&"Analyze"), "Basic should not include Analyze");
+        assert!(names.contains(&"Read"), "Basic should include Read");
+        assert!(names.contains(&"CodebaseSearch"), "Basic should include CodebaseSearch");
+    }
+
+    #[test]
+    fn test_registry_definitions_serializable() {
+        let tools = get_tool_definitions_from_registry();
+        for tool in tools {
+            let json = serde_json::to_string(&tool).unwrap();
+            assert!(!json.is_empty());
+        }
     }
 
     #[test]
