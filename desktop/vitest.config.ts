@@ -29,6 +29,7 @@ export default defineConfig({
         'src/components/Analytics/**/*.{ts,tsx}',
         'src/components/Settings/**/*.{ts,tsx}',
         'src/components/ModeSwitch.tsx',
+        'src/components/SkillMemory/**/*.{ts,tsx}',
         'src/components/shared/**/*.{ts,tsx}',
         'src/store/**/*.{ts,tsx}',
         'src/lib/**/*.{ts,tsx}',

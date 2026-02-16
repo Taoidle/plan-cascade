@@ -107,3 +107,10 @@ export type {
   GenerationInfo,
   GenerateOptions,
 } from './designDoc';
+
+export { useSkillMemoryStore } from './skillMemory';
+export type {
+  SkillSourceFilter,
+  MemoryCategoryFilter,
+  SkillMemoryTab,
+} from './skillMemory';
