@@ -22,6 +22,7 @@ pub mod project;
 pub mod quality_gates;
 pub mod recovery;
 pub mod session;
+pub mod skills;
 pub mod spec_interview;
 pub mod strategy;
 pub mod streaming;

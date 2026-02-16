@@ -183,6 +183,17 @@ fn main() {
             // File attachment commands
             plan_cascade_desktop::commands::files::read_file_for_attachment,
             plan_cascade_desktop::commands::files::list_workspace_files,
+            // Skill commands
+            plan_cascade_desktop::commands::skills::list_skills,
+            plan_cascade_desktop::commands::skills::get_skill,
+            plan_cascade_desktop::commands::skills::search_skills,
+            plan_cascade_desktop::commands::skills::detect_applicable_skills,
+            plan_cascade_desktop::commands::skills::toggle_skill,
+            plan_cascade_desktop::commands::skills::create_skill_file,
+            plan_cascade_desktop::commands::skills::delete_skill,
+            plan_cascade_desktop::commands::skills::toggle_generated_skill,
+            plan_cascade_desktop::commands::skills::refresh_skill_index,
+            plan_cascade_desktop::commands::skills::get_skills_overview,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
