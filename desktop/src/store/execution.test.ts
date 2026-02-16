@@ -29,6 +29,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 // Import after mocks are set up
 import { useExecutionStore } from './execution';
 import type { SessionSnapshot } from './execution';
+import { useSettingsStore } from './settings';
 
 /** Emit a synthetic event to a captured listener. */
 function emitEvent(eventName: string, payload: unknown) {
@@ -577,6 +578,9 @@ describe('Execution Store - Background Session State', () => {
   // ===========================================================================
   describe('SessionSnapshot completeness', () => {
     it('should capture all required fields in the snapshot', () => {
+      // Set up LLM settings before backgrounding
+      useSettingsStore.setState({ backend: 'openai', provider: 'openai', model: 'gpt-4o' });
+
       useExecutionStore.setState({
         taskDescription: 'Full snapshot test',
         status: 'running',
@@ -616,6 +620,186 @@ describe('Execution Store - Background Session State', () => {
       expect(snapshot.startedAt).toBe(999);
       // toolCallFilter should be a new instance in the snapshot
       expect(snapshot.toolCallFilter).toBeDefined();
+      // LLM settings should be captured
+      expect(snapshot.llmBackend).toBe('openai');
+      expect(snapshot.llmProvider).toBe('openai');
+      expect(snapshot.llmModel).toBe('gpt-4o');
+    });
+  });
+
+  // ===========================================================================
+  // 7. Per-session LLM provider persistence
+  // ===========================================================================
+  describe('Per-session LLM provider persistence', () => {
+    it('should restore LLM settings when switching sessions', () => {
+      // Session A uses OpenAI
+      useSettingsStore.setState({ backend: 'openai', provider: 'openai', model: 'gpt-4o' });
+      useExecutionStore.setState({
+        taskDescription: 'Session A',
+        status: 'running',
+        taskId: 'task-a',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+
+      const bgKeys = Object.keys(useExecutionStore.getState().backgroundSessions);
+      const sessionAId = bgKeys[0];
+
+      // Session B uses DeepSeek
+      useSettingsStore.setState({ backend: 'deepseek', provider: 'deepseek', model: 'deepseek-chat' });
+      useExecutionStore.setState({
+        taskDescription: 'Session B',
+        status: 'running',
+        taskId: 'task-b',
+      });
+
+      // Switch back to Session A
+      useExecutionStore.getState().switchToSession(sessionAId);
+
+      // LLM settings should be restored to Session A's values
+      const settings = useSettingsStore.getState();
+      expect(settings.backend).toBe('openai');
+      expect(settings.provider).toBe('openai');
+      expect(settings.model).toBe('gpt-4o');
+
+      // Foreground should be Session A's data
+      expect(useExecutionStore.getState().taskDescription).toBe('Session A');
+    });
+
+    it('should preserve LLM settings in snapshot when auto-backgrounding on start()', async () => {
+      useSettingsStore.setState({ backend: 'ollama', provider: 'ollama', model: 'llama3' });
+      useExecutionStore.setState({
+        taskDescription: 'Running task',
+        status: 'running',
+        taskId: 'running-task',
+      });
+
+      useExecutionStore.getState().backgroundCurrentSession();
+
+      const bgKeys = Object.keys(useExecutionStore.getState().backgroundSessions);
+      const snapshot = useExecutionStore.getState().backgroundSessions[bgKeys[0]];
+
+      expect(snapshot.llmBackend).toBe('ollama');
+      expect(snapshot.llmProvider).toBe('ollama');
+      expect(snapshot.llmModel).toBe('llama3');
+    });
+
+    it('should capture current LLM settings for the backgrounded foreground in switchToSession', () => {
+      // Background session A with OpenAI
+      useSettingsStore.setState({ backend: 'openai', provider: 'openai', model: 'gpt-4o' });
+      useExecutionStore.setState({
+        taskDescription: 'Session A',
+        status: 'running',
+        taskId: 'task-a',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const sessionAId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      // Now foreground is idle, switch to DeepSeek and create Session B content
+      useSettingsStore.setState({ backend: 'deepseek', provider: 'deepseek', model: 'deepseek-chat' });
+      useExecutionStore.setState({
+        taskDescription: 'Session B',
+        status: 'running',
+        taskId: 'task-b',
+      });
+
+      // Switch to Session A — foreground (Session B) gets backgrounded with DeepSeek settings
+      useExecutionStore.getState().switchToSession(sessionAId);
+
+      // Find the newly backgrounded Session B
+      const bgSessions = useExecutionStore.getState().backgroundSessions;
+      const sessionBSnapshot = Object.values(bgSessions).find(s => s.taskId === 'task-b');
+
+      expect(sessionBSnapshot).toBeDefined();
+      expect(sessionBSnapshot!.llmBackend).toBe('deepseek');
+      expect(sessionBSnapshot!.llmProvider).toBe('deepseek');
+      expect(sessionBSnapshot!.llmModel).toBe('deepseek-chat');
+    });
+
+    it('should persist LLM settings when saving history entries', () => {
+      useSettingsStore.setState({ backend: 'openai', provider: 'openai', model: 'gpt-4o-mini' });
+      useExecutionStore.setState({
+        taskDescription: 'History with model',
+        status: 'completed',
+        startedAt: Date.now() - 5000,
+        streamingOutput: [
+          { id: 1, content: 'hello', type: 'info', timestamp: Date.now() - 4500 },
+          { id: 2, content: 'hi', type: 'text', timestamp: Date.now() - 4400 },
+        ],
+        streamLineCounter: 2,
+      });
+
+      useExecutionStore.getState().saveToHistory();
+
+      const [saved] = useExecutionStore.getState().history;
+      expect(saved).toBeDefined();
+      expect(saved.llmBackend).toBe('openai');
+      expect(saved.llmProvider).toBe('openai');
+      expect(saved.llmModel).toBe('gpt-4o-mini');
+    });
+
+    it('should restore LLM settings from history when restoring a session', () => {
+      const itemId = 'history-llm-1';
+      useExecutionStore.setState({
+        history: [
+          {
+            id: itemId,
+            taskDescription: 'Restored with model',
+            strategy: null,
+            status: 'completed',
+            startedAt: Date.now() - 10_000,
+            duration: 8000,
+            completedStories: 1,
+            totalStories: 1,
+            success: true,
+            conversationLines: [
+              { type: 'info', content: 'question' },
+              { type: 'text', content: 'answer' },
+            ],
+            llmBackend: 'deepseek',
+            llmProvider: 'deepseek',
+            llmModel: 'deepseek-chat',
+          },
+        ],
+      });
+      useSettingsStore.setState({ backend: 'openai', provider: 'openai', model: 'gpt-4o' });
+
+      useExecutionStore.getState().restoreFromHistory(itemId);
+
+      const settings = useSettingsStore.getState();
+      expect(settings.backend).toBe('deepseek');
+      expect(settings.provider).toBe('deepseek');
+      expect(settings.model).toBe('deepseek-chat');
+    });
+
+    it('should keep current LLM settings when restoring legacy history without model metadata', () => {
+      const itemId = 'history-legacy-1';
+      useExecutionStore.setState({
+        history: [
+          {
+            id: itemId,
+            taskDescription: 'Legacy history',
+            strategy: null,
+            status: 'completed',
+            startedAt: Date.now() - 10_000,
+            duration: 6000,
+            completedStories: 1,
+            totalStories: 1,
+            success: true,
+            conversationLines: [
+              { type: 'info', content: 'hello' },
+              { type: 'text', content: 'world' },
+            ],
+          },
+        ],
+      });
+      useSettingsStore.setState({ backend: 'glm', provider: 'glm', model: 'glm-4.5' });
+
+      useExecutionStore.getState().restoreFromHistory(itemId);
+
+      const settings = useSettingsStore.getState();
+      expect(settings.backend).toBe('glm');
+      expect(settings.provider).toBe('glm');
+      expect(settings.model).toBe('glm-4.5');
     });
   });
 });

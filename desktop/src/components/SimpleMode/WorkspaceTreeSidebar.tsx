@@ -561,6 +561,11 @@ function BackgroundSessionItem({
         <p className="text-xs text-gray-900 dark:text-white line-clamp-1">
           {label}
         </p>
+        {(snapshot.llmModel || snapshot.llmBackend) && (
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 line-clamp-1">
+            {snapshot.llmModel || snapshot.llmBackend}
+          </p>
+        )}
       </div>
 
       {/* Remove button */}

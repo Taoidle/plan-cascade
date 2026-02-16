@@ -8,7 +8,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { useSettingsStore } from './settings';
+import { useSettingsStore, type Backend } from './settings';
 import { useModeStore } from './mode';
 import type { StreamEventPayload } from '../lib/claudeCodeClient';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
@@ -189,6 +189,12 @@ export interface ExecutionHistoryItem {
   conversationLines?: HistoryConversationLine[];
   /** Session ID for potential reconnection */
   sessionId?: string;
+  /** LLM backend used by this conversation session */
+  llmBackend?: string;
+  /** LLM provider used by this conversation session */
+  llmProvider?: string;
+  /** LLM model used by this conversation session */
+  llmModel?: string;
 }
 
 interface CommandResponse<T> {
@@ -231,6 +237,12 @@ export interface SessionSnapshot {
   sessionUsageTotals: BackendUsageStats | null;
   startedAt: number | null;
   toolCallFilter: ToolCallStreamFilter;
+  /** LLM backend active when this session was backgrounded */
+  llmBackend: string;
+  /** LLM provider active when this session was backgrounded */
+  llmProvider: string;
+  /** LLM model active when this session was backgrounded */
+  llmModel: string;
 }
 
 interface BackendStandaloneExecutionResult {
@@ -239,6 +251,12 @@ interface BackendStandaloneExecutionResult {
   iterations: number;
   success: boolean;
   error?: string | null;
+}
+
+interface SessionLlmSettings {
+  llmBackend?: string;
+  llmProvider?: string;
+  llmModel?: string;
 }
 
 interface ExecutionState {
@@ -725,6 +743,15 @@ function isBackendStandaloneExecutionResult(data: unknown): data is BackendStand
   return typeof value.iterations === 'number' && typeof value.success === 'boolean' && typeof value.usage === 'object' && value.usage !== null;
 }
 
+function restoreSessionLlmSettings(settings: SessionLlmSettings): void {
+  if (!settings.llmBackend) return;
+  useSettingsStore.setState({
+    backend: settings.llmBackend as Backend,
+    provider: settings.llmProvider || '',
+    model: settings.llmModel || '',
+  });
+}
+
 // Track event unlisteners
 let unlisteners: UnlistenFn[] = [];
 let listenerSetupVersion = 0;
@@ -1070,7 +1097,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
                 'error'
               );
             }
-
             if (!succeeded && execution.error) {
               get().addExecutionError({
                 severity: 'error',
@@ -1344,6 +1370,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       conversationContent,
       conversationLines,
       sessionId,
+      llmBackend: settings.backend,
+      llmProvider: settings.provider,
+      llmModel: settings.model,
     };
 
     set((prevState) => {
@@ -1539,6 +1568,12 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         : [],
       taskDescription: item.title || item.taskDescription,
     });
+
+    restoreSessionLlmSettings({
+      llmBackend: item.llmBackend,
+      llmProvider: item.llmProvider,
+      llmModel: item.llmModel,
+    });
   },
 
   analyzeStrategy: async (description: string) => {
@@ -1693,7 +1728,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       ? `bg-${crypto.randomUUID()}`
       : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
 
-    // Snapshot the current foreground session state
+    // Snapshot the current foreground session state (including LLM settings)
+    const settingsState = useSettingsStore.getState();
     const snapshot: SessionSnapshot = {
       id: sessionId,
       taskDescription: state.taskDescription,
@@ -1709,6 +1745,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
       startedAt: state.startedAt,
       toolCallFilter: state.toolCallFilter,
+      llmBackend: settingsState.backend,
+      llmProvider: settingsState.provider,
+      llmModel: settingsState.model,
     };
 
     // Add snapshot to backgroundSessions and reset foreground to idle
@@ -1748,6 +1787,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       ? `bg-${crypto.randomUUID()}`
       : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
 
+    // Capture current LLM settings before switching
+    const currentSettings = useSettingsStore.getState();
     const currentSnapshot: SessionSnapshot = {
       id: newBgId,
       taskDescription: state.taskDescription,
@@ -1763,6 +1804,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
       startedAt: state.startedAt,
       toolCallFilter: state.toolCallFilter,
+      llmBackend: currentSettings.backend,
+      llmProvider: currentSettings.provider,
+      llmModel: currentSettings.model,
     };
 
     // Build new backgroundSessions: remove the target, add the current foreground
@@ -1787,6 +1831,13 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       sessionUsageTotals: targetSnapshot.sessionUsageTotals ? { ...targetSnapshot.sessionUsageTotals } : null,
       startedAt: targetSnapshot.startedAt,
       toolCallFilter: targetSnapshot.toolCallFilter,
+    });
+
+    // Restore LLM settings from the target snapshot (guard for backward compat)
+    restoreSessionLlmSettings({
+      llmBackend: targetSnapshot.llmBackend,
+      llmProvider: targetSnapshot.llmProvider,
+      llmModel: targetSnapshot.llmModel,
     });
   },
 

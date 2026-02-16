@@ -72,6 +72,9 @@ function createMockSnapshot(overrides: Partial<SessionSnapshot> = {}): SessionSn
     sessionUsageTotals: null,
     startedAt: Date.now(),
     toolCallFilter: { reset: vi.fn(), feed: vi.fn() } as unknown as SessionSnapshot['toolCallFilter'],
+    llmBackend: 'claude-code',
+    llmProvider: 'anthropic',
+    llmModel: '',
     ...overrides,
   };
 }
