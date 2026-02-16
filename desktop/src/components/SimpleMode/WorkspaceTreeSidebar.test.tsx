@@ -31,6 +31,12 @@ vi.mock('react-i18next', () => ({
         'sidebar.newTaskInDir': 'New task in this directory',
         'sidebar.toggleSidebar': 'Toggle sidebar',
         'sidebar.sessions': 'Sessions',
+        'skillPanel.title': 'Skills & Memory',
+        'skillPanel.manageAll': 'Manage All...',
+        'skillPanel.loading': 'Loading...',
+        'skillPanel.detectedSkills': 'Auto-Detected Skills',
+        'skillPanel.projectSkills': 'Project Skills',
+        'skillPanel.memories': 'Memories',
       };
       return translations[key] || key;
     },
@@ -50,6 +56,46 @@ vi.mock('../../store/settings', () => ({
     };
     return typeof selector === 'function' ? selector(state) : state;
   }),
+}));
+
+// Mock skillMemory store
+vi.mock('../../store/skillMemory', () => ({
+  useSkillMemoryStore: vi.fn((selector) => {
+    const state = {
+      skills: [],
+      skillsLoading: false,
+      memories: [],
+      memoriesLoading: false,
+      panelOpen: false,
+      dialogOpen: false,
+      activeTab: 'skills',
+      toastMessage: null,
+      toastType: 'info',
+      loadSkills: vi.fn(),
+      loadMemories: vi.fn(),
+      loadMemoryStats: vi.fn(),
+      toggleSkill: vi.fn(),
+      togglePanel: vi.fn(),
+      openDialog: vi.fn(),
+      closeDialog: vi.fn(),
+      setActiveTab: vi.fn(),
+      clearToast: vi.fn(),
+    };
+    return typeof selector === 'function' ? selector(state) : state;
+  }),
+}));
+
+// Mock child components that depend on the store
+vi.mock('./SkillMemoryPanel', () => ({
+  SkillMemoryPanel: () => null,
+}));
+
+vi.mock('../SkillMemory/SkillMemoryDialog', () => ({
+  SkillMemoryDialog: () => null,
+}));
+
+vi.mock('../SkillMemory/SkillMemoryToast', () => ({
+  SkillMemoryToast: () => null,
 }));
 
 import { WorkspaceTreeSidebar, type WorkspaceTreeSidebarProps } from './WorkspaceTreeSidebar';
