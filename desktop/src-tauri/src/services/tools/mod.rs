@@ -29,5 +29,7 @@ pub use prompt_fallback::{
     build_tool_call_instructions, extract_text_without_tool_calls, format_tool_result,
     parse_tool_calls, ParsedToolCall,
 };
-pub use system_prompt::{build_project_summary, build_system_prompt, merge_system_prompts};
+pub use system_prompt::{
+    build_project_summary, build_system_prompt, detect_language, merge_system_prompts,
+};
 pub use task_spawner::{TaskContext, TaskExecutionResult, TaskSpawner};

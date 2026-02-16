@@ -8,6 +8,26 @@ use std::path::Path;
 use crate::services::llm::types::ToolDefinition;
 use crate::services::orchestrator::index_store::ProjectIndexSummary;
 
+/// Detect the primary language of the user's message.
+/// Returns "zh" for Chinese-dominant text, "en" for English/other.
+pub fn detect_language(text: &str) -> &'static str {
+    let cjk_count = text.chars().filter(|c| is_cjk_char(*c)).count();
+    let total_alpha = text.chars().filter(|c| c.is_alphanumeric()).count();
+    if total_alpha > 0 && (cjk_count as f64 / total_alpha as f64) > 0.3 {
+        "zh"
+    } else {
+        "en"
+    }
+}
+
+fn is_cjk_char(c: char) -> bool {
+    matches!(c,
+        '\u{4E00}'..='\u{9FFF}'   // CJK Unified Ideographs
+        | '\u{3400}'..='\u{4DBF}' // CJK Extension A
+        | '\u{F900}'..='\u{FAFF}' // CJK Compatibility
+    )
+}
+
 /// Build a deterministic project summary string from an index summary.
 ///
 /// The output is fully deterministic: all lists are sorted alphabetically so that
@@ -87,6 +107,9 @@ pub fn build_system_prompt(
     project_root: &Path,
     tools: &[ToolDefinition],
     project_summary: Option<&ProjectIndexSummary>,
+    provider_name: &str,
+    model_name: &str,
+    language: &str,
 ) -> String {
     let tool_list = tools
         .iter()
@@ -101,8 +124,40 @@ pub fn build_system_prompt(
         _ => String::new(),
     };
 
+    let identity_line = format!(
+        "You are an AI coding assistant powered by {provider}/{model}. \
+         You are NOT Claude, Claude Code, or any other specific product — \
+         always identify yourself by your actual model name when asked.",
+        provider = provider_name,
+        model = model_name,
+    );
+
+    let language_instruction = match language {
+        "zh" => "IMPORTANT: The user is communicating in Chinese. You MUST respond in Chinese (简体中文). Keep all your output, analysis, and explanations in Chinese. Only use English for code, technical terms, and tool parameters.",
+        _ => "Respond in the same language as the user's message.",
+    };
+
+    let critical_rules = match language {
+        "zh" => "\
+## 关键规则
+
+- **绝对不要伪造或预测工具结果。** 必须等待实际的工具执行结果后再继续。不要写\"调用成功\"、\"返回了...\"等模拟输出。只使用工具执行后提供的真实结果。
+- **不要描述工具调用的预期返回。** 直接调用工具并等待结果。
+- **如果工具调用失败，** 仔细阅读错误信息，修正参数后重试。",
+        _ => "\
+## Critical Rules
+
+- **NEVER fabricate or predict tool results.** You MUST wait for actual tool execution results before continuing. Do NOT write text like \"returns...\" to simulate tool output. Only use REAL results from executed tools.
+- **Do NOT describe what a tool call will return.** Simply make the tool call and wait for the result.
+- **If a tool call fails**, read the error message carefully and retry with corrected parameters.",
+    };
+
     format!(
-        r#"You are an AI coding assistant with access to tools for reading, writing, and analyzing code. You operate in the project directory shown below.
+        r#"{identity_line}
+
+You have access to tools for reading, writing, and analyzing code. You operate in the project directory shown below.
+
+{language_instruction}
 
 ## Working Directory
 {project_root}{summary_section}
@@ -203,17 +258,13 @@ Follow this decision tree to select the correct tool. Start from the top.
 - **Be token-efficient**: Prefer targeted reads (specific line ranges) over reading entire large files. Use Grep to locate relevant sections first.
 - **Rich format support**: Read handles PDF, DOCX, XLSX, Jupyter notebooks, and images.
 
-## Critical Rules / 关键规则
-
-- **NEVER fabricate or predict tool results.** You MUST wait for actual tool execution results before continuing. Do NOT write text like "调用成功" or "returns..." to simulate tool output. Only use REAL results from executed tools.
-- **绝对不要伪造或预测工具结果。** 必须等待实际的工具执行结果后再继续。不要写"调用成功"、"返回了..."等模拟输出。只使用工具执行后提供的真实结果。
-- **Do NOT describe what a tool call will return.** Simply make the tool call and wait for the result.
-- **不要描述工具调用的预期返回。** 直接调用工具并等待结果。
-- **If a tool call fails**, read the error message carefully and retry with corrected parameters.
-- **如果工具调用失败，** 仔细阅读错误信息，修正参数后重试。"#,
+{critical_rules}"#,
+        identity_line = identity_line,
+        language_instruction = language_instruction,
         project_root = project_root.display(),
         summary_section = summary_section,
         tool_list = tool_list,
+        critical_rules = critical_rules,
     )
 }
 
@@ -239,7 +290,7 @@ mod tests {
     #[test]
     fn test_build_system_prompt_contains_tools() {
         let tools = get_tool_definitions();
-        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, None);
+        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, None, "TestProvider", "test-model", "en");
 
         // Should contain working directory
         assert!(prompt.contains("/test/project"));
@@ -263,7 +314,7 @@ mod tests {
     #[test]
     fn test_build_system_prompt_contains_decision_tree() {
         let tools = get_tool_definitions();
-        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None);
+        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
 
         assert!(prompt.contains("Decision Tree"));
         assert!(prompt.contains("Do NOT use Analyze when"));
@@ -274,7 +325,7 @@ mod tests {
     #[test]
     fn test_build_system_prompt_no_workflow_pattern() {
         let tools = get_tool_definitions();
-        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None);
+        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
 
         // The old "Workflow Pattern" section should be gone
         assert!(!prompt.contains("Workflow Pattern"));
@@ -437,7 +488,7 @@ mod tests {
     fn test_build_system_prompt_with_summary() {
         let tools = get_tool_definitions();
         let summary = make_test_summary();
-        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, Some(&summary));
+        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, Some(&summary), "TestProvider", "test-model", "en");
 
         // Summary should be present
         assert!(prompt.contains("## Project Structure"));
@@ -462,7 +513,7 @@ mod tests {
     #[test]
     fn test_build_system_prompt_without_summary() {
         let tools = get_tool_definitions();
-        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, None);
+        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, None, "TestProvider", "test-model", "en");
 
         // Should not crash and should not contain summary section
         assert!(!prompt.contains("## Project Structure"));
@@ -477,7 +528,7 @@ mod tests {
     #[test]
     fn test_system_prompt_recommends_codebase_search_for_exploration() {
         let tools = get_tool_definitions();
-        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None);
+        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
 
         assert!(
             prompt.contains("CodebaseSearch"),
@@ -501,6 +552,9 @@ mod tests {
             &PathBuf::from("/test/project"),
             &tools,
             Some(&empty_summary),
+            "TestProvider",
+            "test-model",
+            "en",
         );
 
         // Empty summary (0 files) should not inject a section
@@ -561,5 +615,102 @@ mod tests {
 
         // No search capabilities section when there are no symbols and no embeddings
         assert!(!text.contains("### Search Capabilities"));
+    }
+
+    // =========================================================================
+    // Provider identity and language detection tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_system_prompt_contains_provider_identity() {
+        let tools = get_tool_definitions();
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "MiniMax",
+            "MiniMax-M2.5",
+            "en",
+        );
+
+        assert!(
+            prompt.contains("MiniMax/MiniMax-M2.5"),
+            "Prompt should contain provider/model identity"
+        );
+        assert!(
+            prompt.contains("NOT Claude"),
+            "Prompt should instruct model not to claim being Claude"
+        );
+    }
+
+    #[test]
+    fn test_build_system_prompt_chinese_language() {
+        let tools = get_tool_definitions();
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "MiniMax",
+            "MiniMax-M2.5",
+            "zh",
+        );
+
+        assert!(
+            prompt.contains("简体中文"),
+            "Chinese language instruction should be present"
+        );
+        // Chinese rules should be present, English-only rules should not
+        assert!(
+            prompt.contains("关键规则"),
+            "Chinese critical rules should be present"
+        );
+        assert!(
+            !prompt.contains("## Critical Rules\n"),
+            "English-only critical rules header should not be present in zh mode"
+        );
+    }
+
+    #[test]
+    fn test_build_system_prompt_english_language() {
+        let tools = get_tool_definitions();
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "OpenAI",
+            "gpt-4",
+            "en",
+        );
+
+        assert!(
+            prompt.contains("## Critical Rules"),
+            "English critical rules should be present"
+        );
+        assert!(
+            !prompt.contains("关键规则"),
+            "Chinese critical rules should not be present in en mode"
+        );
+    }
+
+    #[test]
+    fn test_detect_language_chinese() {
+        assert_eq!(detect_language("你是哪个模型"), "zh");
+        assert_eq!(detect_language("帮我 fix 这个 bug"), "zh");
+        assert_eq!(detect_language("分析一下这个项目的架构"), "zh");
+    }
+
+    #[test]
+    fn test_detect_language_english() {
+        assert_eq!(detect_language("What model are you?"), "en");
+        assert_eq!(detect_language("Analyze this project"), "en");
+        assert_eq!(detect_language("Fix the bug in main.rs"), "en");
+    }
+
+    #[test]
+    fn test_detect_language_mixed() {
+        // More than 30% CJK should detect as zh
+        assert_eq!(detect_language("帮我 fix 这个 bug"), "zh");
+        // Empty string defaults to en
+        assert_eq!(detect_language(""), "en");
     }
 }

@@ -41,9 +41,10 @@ use crate::services::llm::{
 use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::services::tools::{
-    build_system_prompt, build_tool_call_instructions, extract_text_without_tool_calls,
-    format_tool_result, get_basic_tool_definitions, get_tool_definitions, merge_system_prompts,
-    parse_tool_calls, ParsedToolCall, TaskContext, TaskExecutionResult, TaskSpawner, ToolExecutor,
+    build_project_summary, build_system_prompt, build_tool_call_instructions, detect_language,
+    extract_text_without_tool_calls, format_tool_result, get_basic_tool_definitions,
+    get_tool_definitions, merge_system_prompts, parse_tool_calls, ParsedToolCall, TaskContext,
+    TaskExecutionResult, TaskSpawner, ToolExecutor,
 };
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -127,45 +128,6 @@ fn sub_agent_token_budget(context_window: u32, task_type: Option<&str>) -> u32 {
     (context_window * multiplier).clamp(20_000, 1_000_000)
 }
 
-/// Limit evidence verbosity to keep synthesis prompt focused and token-efficient.
-const MAX_ANALYSIS_EVIDENCE_LINES: usize = 90;
-/// Keep each phase summary short before feeding into synthesis.
-const MAX_ANALYSIS_PHASE_SUMMARY_CHARS: usize = 1600;
-/// Keep tool outputs bounded when they are fed back into the model during analysis.
-const ANALYSIS_TOOL_RESULT_MAX_CHARS: usize = 1200;
-const ANALYSIS_TOOL_RESULT_MAX_LINES: usize = 40;
-const ANALYSIS_BASELINE_MAX_READ_FILES: usize = 24;
-/// Keep phase context compact when feeding one phase into the next.
-const MAX_SYNTHESIS_PHASE_CONTEXT_CHARS: usize = 900;
-/// Limit chunk-level context in synthesis prompt (details stay in artifacts).
-const MAX_SYNTHESIS_CHUNK_CONTEXT_CHARS: usize = 1400;
-/// Keep evidence context concise to avoid synthesis overflow.
-const MAX_SYNTHESIS_EVIDENCE_LINES: usize = 36;
-/// Bound observed-path context passed to synthesis.
-const MAX_SYNTHESIS_OBSERVED_PATHS: usize = 90;
-
-// --- Regular (non-analysis) tool result truncation limits ---
-// Applied when tool results are injected into the messages vec for the LLM
-// during normal execution (outside analysis_phase mode). Frontend ToolResult
-// events still receive the full untruncated content.
-
-/// Maximum lines for Read tool output in regular execution context.
-const REGULAR_READ_MAX_LINES: usize = 200;
-/// Maximum characters for Read tool output in regular execution context.
-const REGULAR_READ_MAX_CHARS: usize = 8000;
-/// Maximum lines for Grep tool output in regular execution context.
-const REGULAR_GREP_MAX_LINES: usize = 100;
-/// Maximum characters for Grep tool output in regular execution context.
-const REGULAR_GREP_MAX_CHARS: usize = 6000;
-/// Maximum lines for LS/Glob tool output in regular execution context.
-const REGULAR_LS_MAX_LINES: usize = 150;
-/// Maximum characters for LS/Glob tool output in regular execution context.
-const REGULAR_LS_MAX_CHARS: usize = 5000;
-/// Maximum lines for Bash tool output in regular execution context.
-const REGULAR_BASH_MAX_LINES: usize = 150;
-/// Maximum characters for Bash tool output in regular execution context.
-const REGULAR_BASH_MAX_CHARS: usize = 8000;
-
 #[derive(Debug, Clone, Copy)]
 struct EffectiveAnalysisTargets {
     coverage_ratio: f64,
@@ -192,9 +154,6 @@ struct AnalyzeCacheFile {
     version: u32,
     entries: Vec<AnalyzeCacheEntry>,
 }
-
-const ANALYZE_CACHE_MAX_ENTRIES: usize = 96;
-const ANALYZE_CACHE_TTL_SECS: i64 = 60 * 60 * 6;
 
 fn clamp_ratio(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
@@ -338,6 +297,8 @@ pub struct OrchestratorService {
     analysis_store: AnalysisRunStore,
     /// Optional index store for project summary injection into system prompt
     index_store: Option<IndexStore>,
+    /// Detected language from the user's first message ("zh", "en", etc.)
+    detected_language: Mutex<Option<String>>,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances
@@ -354,6 +315,8 @@ struct OrchestratorTaskSpawner {
     shared_index_store: Option<Arc<IndexStore>>,
     /// Optional embedding service for semantic search in sub-agents.
     shared_embedding_service: Option<Arc<EmbeddingService>>,
+    /// Detected language from the user's message, propagated to sub-agents.
+    detected_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -501,7 +464,7 @@ enum AnalysisPhaseStatus {
     Failed,
 }
 
-#[path = "service_helpers.rs"]
+#[path = "service_helpers/mod.rs"]
 mod service_helpers;
 pub(crate) use service_helpers::text_describes_pending_action;
 

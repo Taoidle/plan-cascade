@@ -788,6 +788,70 @@ fn test_text_describes_pending_action_rejects_completed_summary() {
     ));
 }
 
+// --- Rhetorical offer / pending action false positive tests ---
+
+#[test]
+fn test_text_describes_pending_action_rejects_rhetorical_chinese_question() {
+    // These are rhetorical questions, should return false
+    assert!(!text_describes_pending_action(
+        "\u{9700}\u{8981}\u{6211}\u{8FDB}\u{4E00}\u{6B65}\u{5206}\u{6790}\u{67D0}\u{4E2A}\u{5177}\u{4F53}\u{6A21}\u{5757}\u{7684}\u{5B9E}\u{73B0}\u{7EC6}\u{8282}\u{5417}\u{FF1F}"
+    )); // 需要我进一步分析某个具体模块的实现细节吗？
+    assert!(!text_describes_pending_action(
+        "\u{5982}\u{679C}\u{4F60}\u{60F3}\u{4E86}\u{89E3}\u{66F4}\u{591A}\u{FF0C}\u{6211}\u{53EF}\u{4EE5}\u{8FDB}\u{4E00}\u{6B65}\u{5206}\u{6790}"
+    )); // 如果你想了解更多，我可以进一步分析 (no question mark but has conditional)
+    assert!(!text_describes_pending_action(
+        "\u{4F60}\u{9700}\u{8981}\u{6211}\u{67E5}\u{770B}\u{5176}\u{4ED6}\u{6587}\u{4EF6}\u{5417}\u{FF1F}"
+    )); // 你需要我查看其他文件吗？
+    assert!(!text_describes_pending_action(
+        "\u{662F}\u{5426}\u{9700}\u{8981}\u{6211}\u{8BFB}\u{53D6}\u{66F4}\u{591A}\u{6E90}\u{7801}\u{FF1F}"
+    )); // 是否需要我读取更多源码？
+}
+
+#[test]
+fn test_text_describes_pending_action_still_catches_real_intent() {
+    // These are real pending actions, should return true
+    assert!(text_describes_pending_action(
+        "\u{8BA9}\u{6211}\u{5148}\u{67E5}\u{770B} README.md \u{6587}\u{4EF6}\u{3002}"
+    )); // 让我先查看 README.md 文件。
+    assert!(text_describes_pending_action(
+        "\u{63A5}\u{4E0B}\u{6765}\u{6211}\u{6765}\u{5206}\u{6790}\u{8FD9}\u{4E2A}\u{6A21}\u{5757}\u{3002}"
+    )); // 接下来我来分析这个模块。
+    assert!(text_describes_pending_action(
+        "\u{6211}\u{5148}\u{8BFB}\u{53D6}\u{914D}\u{7F6E}\u{6587}\u{4EF6}\u{3002}"
+    )); // 我先读取配置文件。
+}
+
+#[test]
+fn test_text_describes_tool_intent_rejects_rhetorical() {
+    assert!(!text_describes_tool_intent(
+        "\u{9700}\u{8981}\u{6211}\u{4F7F}\u{7528} Read \u{5DE5}\u{5177}\u{8BFB}\u{53D6}\u{66F4}\u{591A}\u{6587}\u{4EF6}\u{5417}\u{FF1F}"
+    )); // 需要我使用 Read 工具读取更多文件吗？
+}
+
+#[test]
+fn test_is_rhetorical_offer() {
+    assert!(is_rhetorical_offer(
+        "\u{9700}\u{8981}\u{6211}\u{8FDB}\u{4E00}\u{6B65}\u{5206}\u{6790}\u{5417}\u{FF1F}"
+    )); // 需要我进一步分析吗？
+    assert!(is_rhetorical_offer(
+        "\u{5982}\u{679C}\u{4F60}\u{60F3}\u{4E86}\u{89E3}\u{66F4}\u{591A}\u{7EC6}\u{8282}\u{FF0C}\u{53EF}\u{4EE5}\u{544A}\u{8BC9}\u{6211}?"
+    )); // 如果你想了解更多细节，可以告诉我?
+    assert!(!is_rhetorical_offer(
+        "\u{8BA9}\u{6211}\u{5148}\u{67E5}\u{770B}\u{8FD9}\u{4E2A}\u{6587}\u{4EF6}\u{3002}"
+    )); // 让我先查看这个文件。
+    assert!(!is_rhetorical_offer(
+        "\u{63A5}\u{4E0B}\u{6765}\u{5206}\u{6790}\u{6A21}\u{5757} A\u{3002}"
+    )); // 接下来分析模块 A。
+}
+
+#[test]
+fn test_detect_language_in_service() {
+    assert_eq!(detect_language("\u{4F60}\u{662F}\u{54EA}\u{4E2A}\u{6A21}\u{578B}"), "zh"); // 你是哪个模型
+    assert_eq!(detect_language("What model are you?"), "en");
+    assert_eq!(detect_language("\u{5E2E}\u{6211} fix \u{8FD9}\u{4E2A} bug"), "zh"); // 帮我 fix 这个 bug
+    assert_eq!(detect_language(""), "en");
+}
+
 // --- Story-001: tool_call_reliability tests ---
 
 #[test]
