@@ -4,6 +4,7 @@
 
 use plan_cascade_desktop::commands::analytics::AnalyticsState;
 use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
+use plan_cascade_desktop::commands::mcp::McpRuntimeState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
 use plan_cascade_desktop::commands::standalone::StandaloneState;
@@ -23,6 +24,7 @@ fn main() {
         .manage(WorktreeState::new())
         .manage(StandaloneState::new())
         .manage(SpecInterviewState::new())
+        .manage(McpRuntimeState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -49,6 +51,10 @@ fn main() {
             plan_cascade_desktop::commands::mcp::test_mcp_server,
             plan_cascade_desktop::commands::mcp::toggle_mcp_server,
             plan_cascade_desktop::commands::mcp::import_from_claude_desktop,
+            plan_cascade_desktop::commands::mcp::connect_mcp_server,
+            plan_cascade_desktop::commands::mcp::disconnect_mcp_server,
+            plan_cascade_desktop::commands::mcp::list_connected_mcp_servers,
+            plan_cascade_desktop::commands::mcp::list_mcp_tools,
             // Claude Code commands
             plan_cascade_desktop::commands::claude_code::start_chat,
             plan_cascade_desktop::commands::claude_code::send_message,
