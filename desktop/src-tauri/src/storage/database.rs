@@ -511,6 +511,45 @@ impl Database {
             [],
         )?;
 
+        // ====================================================================
+        // Feature-002: Skill System tables
+        // ====================================================================
+
+        // Create skill_library table for auto-generated skills from successful sessions
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS skill_library (
+                id TEXT PRIMARY KEY,
+                project_path TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                tags TEXT NOT NULL DEFAULT '[]',
+                body TEXT NOT NULL,
+                source_type TEXT NOT NULL CHECK(source_type IN ('generated', 'refined')),
+                source_session_ids TEXT NOT NULL DEFAULT '[]',
+                usage_count INTEGER NOT NULL DEFAULT 0,
+                success_rate REAL NOT NULL DEFAULT 1.0,
+                keywords TEXT NOT NULL DEFAULT '[]',
+                embedding BLOB,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+
+        // Indexes for skill_library queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skill_library_project
+             ON skill_library(project_path)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skill_library_enabled
+             ON skill_library(project_path, enabled)",
+            [],
+        )?;
+
         Ok(())
     }
 

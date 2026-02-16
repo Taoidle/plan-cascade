@@ -191,6 +191,17 @@ fn main() {
             plan_cascade_desktop::commands::memory::delete_project_memory,
             plan_cascade_desktop::commands::memory::clear_project_memories,
             plan_cascade_desktop::commands::memory::get_memory_stats,
+            // Skill commands
+            plan_cascade_desktop::commands::skills::list_skills,
+            plan_cascade_desktop::commands::skills::get_skill,
+            plan_cascade_desktop::commands::skills::search_skills,
+            plan_cascade_desktop::commands::skills::detect_applicable_skills,
+            plan_cascade_desktop::commands::skills::toggle_skill,
+            plan_cascade_desktop::commands::skills::create_skill_file,
+            plan_cascade_desktop::commands::skills::delete_skill,
+            plan_cascade_desktop::commands::skills::toggle_generated_skill,
+            plan_cascade_desktop::commands::skills::refresh_skill_index,
+            plan_cascade_desktop::commands::skills::get_skills_overview,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
