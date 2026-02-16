@@ -10,11 +10,13 @@ mod analysis_scheduler;
 mod analysis_store;
 pub mod background_indexer;
 pub mod embedding_service;
+pub mod hooks;
 pub mod index_manager;
 pub mod index_store;
 mod service;
 pub mod tree_sitter_parser;
 
+pub use hooks::{AgenticHooks, BeforeToolResult, HookContext, SessionSummary, build_default_hooks};
 pub use service::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, ProviderInfo, SessionExecutionResult,
 };

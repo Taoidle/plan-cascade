@@ -299,6 +299,8 @@ pub struct OrchestratorService {
     index_store: Option<IndexStore>,
     /// Detected language from the user's first message ("zh", "en", etc.)
     detected_language: Mutex<Option<String>>,
+    /// Lifecycle hooks for cross-cutting concerns (memory, skills, etc.)
+    hooks: crate::services::orchestrator::hooks::AgenticHooks,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances

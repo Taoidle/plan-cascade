@@ -1253,6 +1253,30 @@ impl OrchestratorService {
         // Session memory manager for Layer 2 context (placed at index 1, after system prompt)
         let session_memory_manager = SessionMemoryManager::new(1);
 
+        // Build hook context for lifecycle hooks
+        let hook_ctx = crate::services::orchestrator::hooks::HookContext {
+            session_id: uuid::Uuid::new_v4().to_string(),
+            project_path: self.config.project_root.clone(),
+            provider_name: self.provider.name().to_string(),
+            model_name: self.config.provider.model.clone(),
+        };
+
+        // Hook: on_session_start
+        self.hooks.fire_on_session_start(&hook_ctx).await;
+
+        // Hook: on_user_message - allow hooks to modify the initial user message
+        if let Some(first_msg) = messages.first_mut() {
+            for content in first_msg.content.iter_mut() {
+                if let MessageContent::Text { text } = content {
+                    let modified = self.hooks.fire_on_user_message(&hook_ctx, text.clone()).await;
+                    if modified != *text {
+                        *text = modified;
+                    }
+                    break;
+                }
+            }
+        }
+
         loop {
             // Check for cancellation
             if self.cancellation_token.is_cancelled() {
@@ -1389,6 +1413,9 @@ impl OrchestratorService {
                 &filtered_tools
             };
 
+            // Hook: on_before_llm
+            self.hooks.fire_on_before_llm(&hook_ctx, iterations).await;
+
             // Call LLM - main agent has all tools (including Task)
             let response = if self.config.streaming {
                 self.call_llm_streaming(
@@ -1429,12 +1456,31 @@ impl OrchestratorService {
             let last_input_tokens = response.usage.input_tokens;
             merge_usage(&mut total_usage, &response.usage);
 
+            // Hook: on_after_llm
+            self.hooks.fire_on_after_llm(&hook_ctx, response.content.clone()).await;
+
             // Check for context compaction before processing tool calls.
             // Strategy selection: Reliable providers (Anthropic, OpenAI) use
             // LLM-summary compaction; Unreliable/None providers (Ollama, Qwen,
             // DeepSeek, GLM) use prefix-stable sliding-window deletion to avoid
             // an extra LLM call and preserve KV-cache prefix stability.
             if self.should_compact(last_input_tokens, false) {
+                // Hook: on_compaction - notify hooks before compaction
+                {
+                    let compaction_snippets: Vec<String> = messages
+                        .iter()
+                        .filter_map(|msg| {
+                            msg.content.iter().find_map(|c| {
+                                if let MessageContent::Text { text } = c {
+                                    Some(truncate_for_log(text, 200))
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                        .collect();
+                    self.hooks.fire_on_compaction(&hook_ctx, compaction_snippets).await;
+                }
                 match self.provider.tool_call_reliability() {
                     ToolCallReliability::Reliable => {
                         self.compact_messages(&mut messages, &tx).await;
@@ -1527,6 +1573,24 @@ impl OrchestratorService {
                         })
                         .await;
 
+                    // Hook: on_before_tool - can skip tool execution
+                    if let Some(skip_result) = self.hooks.fire_on_before_tool(
+                        &hook_ctx,
+                        &effective_tool_name,
+                        &effective_args.to_string(),
+                    ).await {
+                        let skip_msg = skip_result.skip_reason.unwrap_or_else(|| "Skipped by hook".to_string());
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolResult {
+                                tool_id: tc.id.clone(),
+                                result: None,
+                                error: Some(skip_msg.clone()),
+                            })
+                            .await;
+                        messages.push(Message::tool_result(&tc.id, skip_msg, true));
+                        continue;
+                    }
+
                     let (result, nested_usage, nested_iterations) = if effective_tool_name == "Analyze" {
                         self.execute_analyze_tool_result(&effective_args, &tx).await
                     } else {
@@ -1557,6 +1621,14 @@ impl OrchestratorService {
                             },
                         })
                         .await;
+
+                    // Hook: on_after_tool
+                    self.hooks.fire_on_after_tool(
+                        &hook_ctx,
+                        &effective_tool_name,
+                        result.success,
+                        result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                    ).await;
 
                     // If the result is a dedup hit, push a short informative
                     // tool_result so the LLM knows the file was already read
@@ -1694,6 +1766,22 @@ impl OrchestratorService {
                         })
                         .await;
 
+                    // Hook: on_before_tool (fallback path)
+                    if let Some(skip_result) = self.hooks.fire_on_before_tool(
+                        &hook_ctx,
+                        &ptc.tool_name,
+                        &ptc.arguments.to_string(),
+                    ).await {
+                        let skip_msg = skip_result.skip_reason.unwrap_or_else(|| "Skipped by hook".to_string());
+                        tool_results.push(format_tool_result(
+                            &ptc.tool_name,
+                            &tool_id,
+                            &skip_msg,
+                            true,
+                        ));
+                        continue;
+                    }
+
                     let (result, nested_usage, nested_iterations) = if ptc.tool_name == "Analyze" {
                         self.execute_analyze_tool_result(&ptc.arguments, &tx).await
                     } else {
@@ -1712,7 +1800,7 @@ impl OrchestratorService {
                     merge_usage(&mut total_usage, &nested_usage);
                     iterations += nested_iterations;
 
-                    // Emit tool result event (always 閳?for frontend display)
+                    // Emit tool result event (always for frontend display)
                     let _ = tx
                         .send(UnifiedStreamEvent::ToolResult {
                             tool_id: tool_id.clone(),
@@ -1728,6 +1816,14 @@ impl OrchestratorService {
                             },
                         })
                         .await;
+
+                    // Hook: on_after_tool (fallback path)
+                    self.hooks.fire_on_after_tool(
+                        &hook_ctx,
+                        &ptc.tool_name,
+                        result.success,
+                        result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                    ).await;
 
                     // For dedup results, push the dedup message so the LLM
                     // knows the file was already read. For normal results,
@@ -1916,6 +2012,42 @@ impl OrchestratorService {
                         }
                     })
                     .or(last_assistant_text);
+
+                // Hook: on_session_end
+                {
+                    let files_read = self.tool_executor.get_read_file_summary()
+                        .iter()
+                        .map(|(path, _, _)| path.clone())
+                        .collect::<Vec<_>>();
+                    let recent_snippets: Vec<String> = messages
+                        .iter()
+                        .rev()
+                        .take(6)
+                        .filter_map(|msg| {
+                            msg.content.iter().find_map(|c| {
+                                if let MessageContent::Text { text } = c {
+                                    Some(text.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                        .collect();
+                    let key_findings = extract_key_findings(&recent_snippets);
+                    let task_desc = messages.first()
+                        .and_then(|m| m.content.first())
+                        .and_then(|c| if let MessageContent::Text { text } = c { Some(truncate_for_log(text, 200)) } else { None })
+                        .unwrap_or_default();
+                    let summary = crate::services::orchestrator::hooks::SessionSummary {
+                        task_description: task_desc,
+                        files_read,
+                        key_findings,
+                        tool_usage: std::collections::HashMap::new(),
+                        total_turns: iterations,
+                        success: true,
+                    };
+                    self.hooks.fire_on_session_end(&hook_ctx, summary).await;
+                }
 
                 // Emit completion event
                 let _ = tx
