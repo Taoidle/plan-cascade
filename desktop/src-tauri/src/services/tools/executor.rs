@@ -296,14 +296,25 @@ fn decode_read_text(bytes: &[u8], ext: &str) -> Option<(String, bool)> {
     }
 }
 
-/// Tool executor for running tools locally
+/// Tool executor for running tools locally.
+///
+/// The executor holds a `ToolRegistry` that contains trait-based implementations
+/// of all 14 tools. The registry is used for:
+/// - Generating tool definitions for LLM providers
+/// - Dynamic tool enable/disable
+/// - Foundation for MCP tool integration
+///
+/// Execution is delegated to the registry for self-contained tools (Read, Write,
+/// Edit, Glob, LS, Cwd, NotebookEdit) and handled internally for tools that
+/// require access to executor-owned state (Bash, WebFetch, WebSearch,
+/// CodebaseSearch, Analyze, Task).
 pub struct ToolExecutor {
     /// Project root for path validation
     project_root: PathBuf,
     /// Default timeout for bash commands (in milliseconds)
     default_timeout: u64,
     /// Track files that have been read (for read-before-write enforcement)
-    read_files: Mutex<HashSet<PathBuf>>,
+    read_files: Arc<Mutex<HashSet<PathBuf>>>,
     /// Content-aware deduplication cache for file reads.
     /// Key: (canonical path, offset, limit) -> cache entry.
     /// If the same file is read with the same offset/limit and the mtime
@@ -325,9 +336,40 @@ pub struct ToolExecutor {
     index_store: Option<Arc<IndexStore>>,
     /// Optional embedding service for semantic search in CodebaseSearch
     embedding_service: Option<Arc<EmbeddingService>>,
+    /// Registry of all available tools (trait-based).
+    /// Used for definition generation and dynamic tool management.
+    registry: super::trait_def::ToolRegistry,
 }
 
 impl ToolExecutor {
+    /// Build a ToolRegistry populated with all 14 tool implementations.
+    ///
+    /// Public static version for use by definitions.rs without needing a ToolExecutor instance.
+    pub fn build_registry_static() -> super::trait_def::ToolRegistry {
+        Self::build_registry()
+    }
+
+    /// Build a ToolRegistry populated with all 14 tool implementations.
+    fn build_registry() -> super::trait_def::ToolRegistry {
+        use super::impls::*;
+        let mut registry = super::trait_def::ToolRegistry::new();
+        registry.register(Arc::new(ReadTool::new()));
+        registry.register(Arc::new(WriteTool::new()));
+        registry.register(Arc::new(EditTool::new()));
+        registry.register(Arc::new(BashTool::new()));
+        registry.register(Arc::new(GlobTool::new()));
+        registry.register(Arc::new(GrepTool::new()));
+        registry.register(Arc::new(LsTool::new()));
+        registry.register(Arc::new(CwdTool::new()));
+        registry.register(Arc::new(AnalyzeTool::new()));
+        registry.register(Arc::new(TaskTool::new()));
+        registry.register(Arc::new(WebFetchTool::new()));
+        registry.register(Arc::new(WebSearchTool::new()));
+        registry.register(Arc::new(NotebookEditTool::new()));
+        registry.register(Arc::new(CodebaseSearchTool::new()));
+        registry
+    }
+
     /// Create a new tool executor
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         let root: PathBuf = project_root.into();
@@ -335,13 +377,14 @@ impl ToolExecutor {
             current_working_dir: Mutex::new(root.clone()),
             project_root: root,
             default_timeout: 120_000, // 2 minutes
-            read_files: Mutex::new(HashSet::new()),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
             read_cache: Arc::new(Mutex::new(HashMap::new())),
             task_dedup_cache: Mutex::new(HashMap::new()),
             web_fetch: super::web_fetch::WebFetchService::new(),
             web_search: None,
             index_store: None,
             embedding_service: None,
+            registry: Self::build_registry(),
         }
     }
 
@@ -358,13 +401,14 @@ impl ToolExecutor {
             current_working_dir: Mutex::new(root.clone()),
             project_root: root,
             default_timeout: 120_000,
-            read_files: Mutex::new(HashSet::new()),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
             read_cache: shared_cache,
             task_dedup_cache: Mutex::new(HashMap::new()),
             web_fetch: super::web_fetch::WebFetchService::new(),
             web_search: None,
             index_store: None,
             embedding_service: None,
+            registry: Self::build_registry(),
         }
     }
 
@@ -411,6 +455,61 @@ impl ToolExecutor {
     /// Get the embedding service Arc (if set), for sharing with sub-agents.
     pub fn get_embedding_service(&self) -> Option<Arc<EmbeddingService>> {
         self.embedding_service.clone()
+    }
+
+    /// Get a reference to the tool registry.
+    ///
+    /// Use this to inspect available tools, generate definitions, or
+    /// dynamically enable/disable tools.
+    pub fn registry(&self) -> &super::trait_def::ToolRegistry {
+        &self.registry
+    }
+
+    /// Get a mutable reference to the tool registry.
+    ///
+    /// Use this to register/unregister tools dynamically.
+    pub fn registry_mut(&mut self) -> &mut super::trait_def::ToolRegistry {
+        &mut self.registry
+    }
+
+    /// Get tool definitions from the registry.
+    ///
+    /// This is the preferred way to get tool definitions, as they are
+    /// auto-generated from the trait implementations and always in sync
+    /// with the actual tool behavior.
+    pub fn registry_definitions(&self) -> Vec<crate::services::llm::types::ToolDefinition> {
+        self.registry.definitions()
+    }
+
+    /// Get basic tool definitions (without Task tool) from the registry.
+    ///
+    /// Used for sub-agents to prevent recursion.
+    pub fn registry_basic_definitions(&self) -> Vec<crate::services::llm::types::ToolDefinition> {
+        self.registry
+            .definitions()
+            .into_iter()
+            .filter(|d| d.name != "Task" && d.name != "Analyze")
+            .collect()
+    }
+
+    /// Build a ToolExecutionContext from this executor's current state.
+    ///
+    /// Used to pass shared state to trait-based tool implementations.
+    fn build_tool_context(&self) -> super::trait_def::ToolExecutionContext {
+        let working_dir = self
+            .current_working_dir
+            .lock()
+            .map(|cwd| cwd.clone())
+            .unwrap_or_else(|_| self.project_root.clone());
+
+        super::trait_def::ToolExecutionContext {
+            session_id: String::new(),
+            project_root: self.project_root.clone(),
+            working_directory: working_dir,
+            read_cache: Arc::clone(&self.read_cache),
+            read_files: Arc::clone(&self.read_files),
+            cancellation_token: tokio_util::sync::CancellationToken::new(),
+        }
     }
 
     /// Execute a tool by name with given arguments

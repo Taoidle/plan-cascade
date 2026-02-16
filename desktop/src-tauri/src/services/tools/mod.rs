@@ -16,14 +16,19 @@
 pub mod definitions;
 pub mod executor;
 pub mod file_parsers;
+pub mod impls;
 pub mod notebook_edit;
 pub mod prompt_fallback;
 pub mod system_prompt;
 pub mod task_spawner;
+pub mod trait_def;
 pub mod web_fetch;
 pub mod web_search;
 
-pub use definitions::{get_basic_tool_definitions, get_tool_definitions};
+pub use definitions::{
+    get_basic_tool_definitions, get_basic_tool_definitions_from_registry, get_tool_definitions,
+    get_tool_definitions_from_registry,
+};
 pub use executor::{ReadCacheEntry, ToolExecutor, ToolResult};
 pub use prompt_fallback::{
     build_tool_call_instructions, extract_text_without_tool_calls, format_tool_result,
@@ -33,3 +38,4 @@ pub use system_prompt::{
     build_project_summary, build_system_prompt, detect_language, merge_system_prompts,
 };
 pub use task_spawner::{TaskContext, TaskExecutionResult, TaskSpawner};
+pub use trait_def::{Tool, ToolExecutionContext, ToolRegistry};
