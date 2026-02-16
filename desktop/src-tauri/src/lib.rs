@@ -114,7 +114,11 @@ pub use commands::{
     list_checkpoints,
     list_configured_api_key_providers,
     // MCP commands
+    connect_mcp_server,
+    disconnect_mcp_server,
+    list_connected_mcp_servers,
     list_mcp_servers,
+    list_mcp_tools,
     list_model_pricing,
     // Memory commands
     add_project_memory,
@@ -184,6 +188,8 @@ pub use commands::{
     AnalyticsState,
     ClaudeCodeState,
     InitResult,
+    // MCP runtime state
+    McpRuntimeState,
     // Quality Gates commands
     QualityGatesState,
     // Spec Interview commands
