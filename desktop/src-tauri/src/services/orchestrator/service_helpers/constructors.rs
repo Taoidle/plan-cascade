@@ -110,6 +110,7 @@ impl OrchestratorService {
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
             index_store: None,
             detected_language: Mutex::new(None),
+            hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
         }
     }
 
@@ -138,6 +139,7 @@ impl OrchestratorService {
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
             index_store: None,
             detected_language: Mutex::new(None),
+            hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
         }
     }
 
@@ -190,6 +192,7 @@ impl OrchestratorService {
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
             index_store: None,
             detected_language: Mutex::new(None),
+            hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
         }
     }
 
@@ -202,6 +205,12 @@ impl OrchestratorService {
     /// Wire an embedding service to the tool executor for semantic CodebaseSearch.
     pub fn with_embedding_service(mut self, svc: Arc<EmbeddingService>) -> Self {
         self.tool_executor.set_embedding_service(svc);
+        self
+    }
+
+    /// Set lifecycle hooks for cross-cutting concerns (memory, skills, etc.).
+    pub fn with_hooks(mut self, hooks: crate::services::orchestrator::hooks::AgenticHooks) -> Self {
+        self.hooks = hooks;
         self
     }
 
