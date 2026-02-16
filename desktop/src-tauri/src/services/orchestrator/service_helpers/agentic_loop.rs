@@ -1251,7 +1251,7 @@ impl OrchestratorService {
         };
 
         // Session memory manager for Layer 2 context (placed at index 1, after system prompt)
-        let session_memory_manager = SessionMemoryManager::new(1);
+        let mut session_memory_manager = SessionMemoryManager::new(1);
 
         loop {
             // Check for cancellation
@@ -1647,6 +1647,11 @@ impl OrchestratorService {
                     }
                 }
 
+                // Clear temp: scoped state after native tool execution round.
+                // Temp state is ephemeral scratch data that should not persist
+                // across tool rounds.
+                session_memory_manager.clear_temp_state();
+
                 // Story-003: When ALL native tool calls failed validation (e.g. empty
                 // tool names, malformed arguments from Qwen thinking mode), inject a
                 // repair hint so the model retries with correct tool call format.
@@ -1793,6 +1798,9 @@ impl OrchestratorService {
                         }
                     }
                 }
+
+                // Clear temp: scoped state after fallback tool execution round.
+                session_memory_manager.clear_temp_state();
 
                 // Feed all tool results back as a user message
                 let combined_results = tool_results.join("\n\n");

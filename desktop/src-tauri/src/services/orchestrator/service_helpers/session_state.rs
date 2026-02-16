@@ -1,4 +1,16 @@
 use super::*;
+use serde_json::Value;
+
+/// Semantic state scope prefixes for scoped state keys.
+///
+/// State keys are prefixed with one of these scope identifiers to control
+/// their lifecycle:
+/// - `temp:` — Cleared after each tool execution round (ephemeral scratch data)
+/// - `session:` — Persists for the entire session (default, existing behavior)
+/// - `project:` — Persists across sessions via ProjectMemoryStore
+pub(super) const SCOPE_TEMP: &str = "temp:";
+pub(super) const SCOPE_SESSION: &str = "session:";
+pub(super) const SCOPE_PROJECT: &str = "project:";
 
 /// Session memory injected into compacted conversations to prevent post-compaction re-reads.
 ///
@@ -352,18 +364,29 @@ pub(super) const SESSION_MEMORY_V1_MARKER: &str = "[SESSION_MEMORY_V1]";
 ///
 /// # Three-Layer Context Architecture
 /// - **Layer 1 (Stable):** System prompt + index summary + tools (message index 0)
-/// - **Layer 2 (Semi-stable):** Session memory 閳?files read, key findings (fixed index)
+/// - **Layer 2 (Semi-stable):** Session memory — files read, key findings (fixed index)
 /// - **Layer 3 (Volatile):** Conversation messages (tool calls, responses, etc.)
 ///
 /// `SessionMemoryManager` maintains the session memory at a fixed message index,
 /// accumulates file reads and findings, and updates the memory in-place before
 /// each LLM call. The `[SESSION_MEMORY_V1]` marker enables compaction strategies
 /// to identify and preserve this layer.
+///
+/// # State Scope Layering
+///
+/// Supports three semantic state scopes via prefixed keys:
+/// - **`temp:`** — Cleared after each tool execution round (ephemeral scratch data)
+/// - **`session:`** — Persists within the session (default/existing behavior)
+/// - **`project:`** — Persists across sessions via ProjectMemoryStore
+///
+/// Keys without a recognized prefix are treated as `session:` scope.
 pub(super) struct SessionMemoryManager {
     /// Fixed position in the messages vec (after system prompt at index 0)
     memory_index: usize,
     /// Marker string prepended to session memory content
     marker: &'static str,
+    /// Scoped state: keys are prefixed with `temp:`, `session:`, or `project:`
+    scoped_state: HashMap<String, Value>,
 }
 
 impl SessionMemoryManager {
@@ -374,6 +397,75 @@ impl SessionMemoryManager {
         Self {
             memory_index,
             marker: SESSION_MEMORY_V1_MARKER,
+            scoped_state: HashMap::new(),
+        }
+    }
+
+    /// Set a scoped state value.
+    ///
+    /// The key should be prefixed with `temp:`, `session:`, or `project:`.
+    /// Keys without a recognized prefix are treated as `session:` scope
+    /// (the prefix `session:` is prepended automatically).
+    ///
+    /// Returns `true` if the key uses the `project:` scope, indicating the
+    /// caller should persist this value to the ProjectMemoryStore.
+    pub(super) fn set_state(&mut self, key: &str, value: Value) -> bool {
+        let canonical_key = Self::canonicalize_key(key);
+        let is_project = canonical_key.starts_with(SCOPE_PROJECT);
+        self.scoped_state.insert(canonical_key, value);
+        is_project
+    }
+
+    /// Get a scoped state value by key.
+    ///
+    /// Returns `None` if the key does not exist. Keys without a recognized
+    /// prefix are looked up under `session:` scope.
+    pub(super) fn get_state(&self, key: &str) -> Option<&Value> {
+        let canonical_key = Self::canonicalize_key(key);
+        self.scoped_state.get(&canonical_key)
+    }
+
+    /// Clear all `temp:` scoped state entries.
+    ///
+    /// Called after each tool execution round to discard ephemeral scratch data.
+    pub(super) fn clear_temp_state(&mut self) {
+        self.scoped_state.retain(|k, _| !k.starts_with(SCOPE_TEMP));
+    }
+
+    /// Extract all `project:` scoped state entries.
+    ///
+    /// Returns a HashMap of key-value pairs (with the `project:` prefix stripped)
+    /// suitable for persisting to ProjectMemoryStore at session end.
+    pub(super) fn extract_project_state(&self) -> HashMap<String, Value> {
+        self.scoped_state
+            .iter()
+            .filter(|(k, _)| k.starts_with(SCOPE_PROJECT))
+            .map(|(k, v)| {
+                let stripped = k.strip_prefix(SCOPE_PROJECT).unwrap_or(k);
+                (stripped.to_string(), v.clone())
+            })
+            .collect()
+    }
+
+    /// Get a snapshot of all scoped state entries (for context string rendering).
+    ///
+    /// Returns entries grouped by scope for display in the session memory context.
+    pub(super) fn scoped_state_snapshot(&self) -> &HashMap<String, Value> {
+        &self.scoped_state
+    }
+
+    /// Canonicalize a key by ensuring it has a valid scope prefix.
+    ///
+    /// If the key already starts with `temp:`, `session:`, or `project:`,
+    /// it is returned as-is. Otherwise, `session:` is prepended.
+    fn canonicalize_key(key: &str) -> String {
+        if key.starts_with(SCOPE_TEMP)
+            || key.starts_with(SCOPE_SESSION)
+            || key.starts_with(SCOPE_PROJECT)
+        {
+            key.to_string()
+        } else {
+            format!("{}{}", SCOPE_SESSION, key)
         }
     }
 
@@ -382,6 +474,7 @@ impl SessionMemoryManager {
     /// The message is an assistant-role message containing:
     /// 1. The `[SESSION_MEMORY_V1]` marker (for compaction identification)
     /// 2. The full session memory context string (files read, findings, etc.)
+    /// 3. Scoped state entries (session: and project: scopes, temp: excluded)
     pub(super) fn build_memory_message(
         &self,
         files_read: Vec<(String, usize, u64)>,
@@ -394,7 +487,25 @@ impl SessionMemoryManager {
             tool_usage_counts: HashMap::new(),
         };
 
-        let content = format!("{}\n{}", self.marker, memory.to_context_string());
+        let mut content = format!("{}\n{}", self.marker, memory.to_context_string());
+
+        // Append non-temp scoped state to the context string
+        let persistent_state: BTreeMap<&String, &Value> = self
+            .scoped_state
+            .iter()
+            .filter(|(k, _)| !k.starts_with(SCOPE_TEMP))
+            .collect();
+        if !persistent_state.is_empty() {
+            content.push_str("\n\n## Scoped State");
+            for (key, value) in &persistent_state {
+                let display_val = match value {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                content.push_str(&format!("\n- {}: {}", key, display_val));
+            }
+        }
+
         Message::assistant(content)
     }
 

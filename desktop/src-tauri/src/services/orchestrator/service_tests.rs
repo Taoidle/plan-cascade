@@ -3357,3 +3357,279 @@ fn test_dedup_minimal_tool_result_preserves_api_compat() {
         _ => panic!("Expected ToolResult content block"),
     }
 }
+
+// =========================================================================
+// Feature-005: State Scope Layering tests
+// =========================================================================
+
+#[test]
+fn test_scoped_state_set_and_get_session_prefix() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("session:user_name", serde_json::json!("Alice"));
+    let val = mgr.get_state("session:user_name");
+    assert_eq!(val, Some(&serde_json::json!("Alice")));
+}
+
+#[test]
+fn test_scoped_state_set_and_get_temp_prefix() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("temp:scratch", serde_json::json!(42));
+    let val = mgr.get_state("temp:scratch");
+    assert_eq!(val, Some(&serde_json::json!(42)));
+}
+
+#[test]
+fn test_scoped_state_set_and_get_project_prefix() {
+    let mut mgr = SessionMemoryManager::new(1);
+    let is_project = mgr.set_state("project:convention", serde_json::json!("use_tabs"));
+    assert!(is_project, "project: scoped set_state should return true");
+    let val = mgr.get_state("project:convention");
+    assert_eq!(val, Some(&serde_json::json!("use_tabs")));
+}
+
+#[test]
+fn test_scoped_state_unprefixed_key_defaults_to_session() {
+    let mut mgr = SessionMemoryManager::new(1);
+    let is_project = mgr.set_state("my_key", serde_json::json!("my_value"));
+    assert!(!is_project, "unprefixed key should not be project scope");
+    // Should be accessible with explicit session: prefix
+    let val = mgr.get_state("session:my_key");
+    assert_eq!(val, Some(&serde_json::json!("my_value")));
+    // Also accessible with the unprefixed key (canonicalized to session:)
+    let val2 = mgr.get_state("my_key");
+    assert_eq!(val2, Some(&serde_json::json!("my_value")));
+}
+
+#[test]
+fn test_scoped_state_set_returns_false_for_non_project() {
+    let mut mgr = SessionMemoryManager::new(1);
+    assert!(!mgr.set_state("temp:x", serde_json::json!(1)));
+    assert!(!mgr.set_state("session:x", serde_json::json!(2)));
+    assert!(!mgr.set_state("plain_key", serde_json::json!(3)));
+}
+
+#[test]
+fn test_scoped_state_set_returns_true_for_project() {
+    let mut mgr = SessionMemoryManager::new(1);
+    assert!(mgr.set_state("project:pref", serde_json::json!("val")));
+}
+
+#[test]
+fn test_clear_temp_state_removes_only_temp_keys() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("temp:scratch1", serde_json::json!("a"));
+    mgr.set_state("temp:scratch2", serde_json::json!("b"));
+    mgr.set_state("session:keep_me", serde_json::json!("c"));
+    mgr.set_state("project:persist_me", serde_json::json!("d"));
+
+    mgr.clear_temp_state();
+
+    assert!(mgr.get_state("temp:scratch1").is_none(), "temp:scratch1 should be cleared");
+    assert!(mgr.get_state("temp:scratch2").is_none(), "temp:scratch2 should be cleared");
+    assert_eq!(
+        mgr.get_state("session:keep_me"),
+        Some(&serde_json::json!("c")),
+        "session: state should be preserved"
+    );
+    assert_eq!(
+        mgr.get_state("project:persist_me"),
+        Some(&serde_json::json!("d")),
+        "project: state should be preserved"
+    );
+}
+
+#[test]
+fn test_clear_temp_state_no_op_when_no_temp_keys() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("session:x", serde_json::json!(1));
+    mgr.set_state("project:y", serde_json::json!(2));
+
+    mgr.clear_temp_state();
+
+    assert_eq!(mgr.get_state("session:x"), Some(&serde_json::json!(1)));
+    assert_eq!(mgr.get_state("project:y"), Some(&serde_json::json!(2)));
+}
+
+#[test]
+fn test_clear_temp_state_idempotent() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("temp:data", serde_json::json!("val"));
+    mgr.clear_temp_state();
+    mgr.clear_temp_state(); // Second call should be a no-op
+    assert!(mgr.get_state("temp:data").is_none());
+}
+
+#[test]
+fn test_extract_project_state_returns_only_project_keys() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("temp:scratch", serde_json::json!("tmp"));
+    mgr.set_state("session:sess_data", serde_json::json!("sess"));
+    mgr.set_state("project:convention", serde_json::json!("tabs"));
+    mgr.set_state("project:preference", serde_json::json!("dark_mode"));
+
+    let project_state = mgr.extract_project_state();
+
+    assert_eq!(project_state.len(), 2);
+    assert_eq!(project_state.get("convention"), Some(&serde_json::json!("tabs")));
+    assert_eq!(project_state.get("preference"), Some(&serde_json::json!("dark_mode")));
+    // Should NOT contain temp or session keys
+    assert!(project_state.get("scratch").is_none());
+    assert!(project_state.get("sess_data").is_none());
+}
+
+#[test]
+fn test_extract_project_state_strips_prefix() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("project:my_key", serde_json::json!("val"));
+
+    let project_state = mgr.extract_project_state();
+    // Key should be "my_key", not "project:my_key"
+    assert!(project_state.contains_key("my_key"), "prefix should be stripped");
+    assert!(!project_state.contains_key("project:my_key"), "should not have prefixed key");
+}
+
+#[test]
+fn test_extract_project_state_empty_when_no_project_keys() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("temp:x", serde_json::json!(1));
+    mgr.set_state("session:y", serde_json::json!(2));
+
+    let project_state = mgr.extract_project_state();
+    assert!(project_state.is_empty());
+}
+
+#[test]
+fn test_scoped_state_overwrite_value() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("session:key", serde_json::json!("old"));
+    mgr.set_state("session:key", serde_json::json!("new"));
+    assert_eq!(mgr.get_state("session:key"), Some(&serde_json::json!("new")));
+}
+
+#[test]
+fn test_scoped_state_complex_json_values() {
+    let mut mgr = SessionMemoryManager::new(1);
+    let complex_val = serde_json::json!({
+        "nested": {
+            "array": [1, 2, 3],
+            "flag": true
+        }
+    });
+    mgr.set_state("session:complex", complex_val.clone());
+    assert_eq!(mgr.get_state("session:complex"), Some(&complex_val));
+}
+
+#[test]
+fn test_scoped_state_get_nonexistent_returns_none() {
+    let mgr = SessionMemoryManager::new(1);
+    assert!(mgr.get_state("session:nonexistent").is_none());
+    assert!(mgr.get_state("temp:nonexistent").is_none());
+    assert!(mgr.get_state("project:nonexistent").is_none());
+    assert!(mgr.get_state("nonexistent").is_none());
+}
+
+#[test]
+fn test_build_memory_message_includes_scoped_state() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("session:editor", serde_json::json!("vim"));
+    mgr.set_state("project:lang", serde_json::json!("rust"));
+
+    let msg = mgr.build_memory_message(vec![], vec![]);
+    let text = msg.content.iter().find_map(|c| {
+        if let MessageContent::Text { text } = c {
+            Some(text.clone())
+        } else {
+            None
+        }
+    }).unwrap();
+
+    assert!(text.contains("Scoped State"), "Should contain Scoped State section, got: {}", text);
+    assert!(text.contains("session:editor"), "Should list session:editor");
+    assert!(text.contains("vim"), "Should show vim value");
+    assert!(text.contains("project:lang"), "Should list project:lang");
+    assert!(text.contains("rust"), "Should show rust value");
+}
+
+#[test]
+fn test_build_memory_message_excludes_temp_state_from_context() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("temp:scratch", serde_json::json!("ephemeral"));
+    mgr.set_state("session:keep", serde_json::json!("persistent"));
+
+    let msg = mgr.build_memory_message(vec![], vec![]);
+    let text = msg.content.iter().find_map(|c| {
+        if let MessageContent::Text { text } = c {
+            Some(text.clone())
+        } else {
+            None
+        }
+    }).unwrap();
+
+    assert!(!text.contains("temp:scratch"), "temp: state should be excluded from context");
+    assert!(text.contains("session:keep"), "session: state should be included");
+}
+
+#[test]
+fn test_build_memory_message_no_scoped_state_section_when_empty() {
+    let mgr = SessionMemoryManager::new(1);
+    let msg = mgr.build_memory_message(vec![], vec![]);
+    let text = msg.content.iter().find_map(|c| {
+        if let MessageContent::Text { text } = c {
+            Some(text.clone())
+        } else {
+            None
+        }
+    }).unwrap();
+
+    assert!(!text.contains("Scoped State"), "Should not have Scoped State section when empty");
+}
+
+#[test]
+fn test_build_memory_message_no_scoped_state_section_with_only_temp() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("temp:only_temp", serde_json::json!("val"));
+
+    let msg = mgr.build_memory_message(vec![], vec![]);
+    let text = msg.content.iter().find_map(|c| {
+        if let MessageContent::Text { text } = c {
+            Some(text.clone())
+        } else {
+            None
+        }
+    }).unwrap();
+
+    assert!(!text.contains("Scoped State"), "Should not have Scoped State when only temp keys exist");
+}
+
+#[test]
+fn test_scope_constants_have_colon_suffix() {
+    assert!(SCOPE_TEMP.ends_with(':'), "SCOPE_TEMP should end with ':'");
+    assert!(SCOPE_SESSION.ends_with(':'), "SCOPE_SESSION should end with ':'");
+    assert!(SCOPE_PROJECT.ends_with(':'), "SCOPE_PROJECT should end with ':'");
+}
+
+#[test]
+fn test_clear_temp_then_set_new_temp() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("temp:round1", serde_json::json!("data1"));
+    mgr.clear_temp_state();
+    assert!(mgr.get_state("temp:round1").is_none());
+
+    // Set new temp data for next round
+    mgr.set_state("temp:round2", serde_json::json!("data2"));
+    assert_eq!(mgr.get_state("temp:round2"), Some(&serde_json::json!("data2")));
+}
+
+#[test]
+fn test_scoped_state_snapshot_returns_all_entries() {
+    let mut mgr = SessionMemoryManager::new(1);
+    mgr.set_state("temp:a", serde_json::json!(1));
+    mgr.set_state("session:b", serde_json::json!(2));
+    mgr.set_state("project:c", serde_json::json!(3));
+
+    let snapshot = mgr.scoped_state_snapshot();
+    assert_eq!(snapshot.len(), 3);
+    assert!(snapshot.contains_key("temp:a"));
+    assert!(snapshot.contains_key("session:b"));
+    assert!(snapshot.contains_key("project:c"));
+}
