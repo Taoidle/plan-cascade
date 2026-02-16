@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use crate::services::llm::types::ToolDefinition;
+use crate::services::memory::store::{MemoryCategory, MemoryEntry};
 use crate::services::orchestrator::index_store::ProjectIndexSummary;
 
 /// Detect the primary language of the user's message.
@@ -94,6 +95,10 @@ pub fn build_project_summary(summary: &ProjectIndexSummary) -> String {
     lines.join("\n")
 }
 
+/// Maximum character budget for the project memory section in the system prompt.
+/// Prevents excessive token usage from too many memories.
+const MEMORY_SECTION_BUDGET: usize = 2000;
+
 /// Build a comprehensive system prompt for agentic tool usage.
 ///
 /// This prompt instructs the LLM to use the available tools proactively for code tasks.
@@ -102,11 +107,40 @@ pub fn build_project_summary(summary: &ProjectIndexSummary) -> String {
 /// When `project_summary` is provided, the project structure summary is inserted
 /// between the working directory section and the available tools section.
 ///
+/// When `project_memories` is provided, a "Project Memory" section is injected
+/// after the project summary and before the available tools section. Each memory
+/// is formatted with a category badge ([PREF], [CONV], [PATN], [WARN], [FACT]).
+/// The section is capped at 2000 characters to control token usage.
+///
 /// The returned prompt should be prepended to any user-provided system prompt.
 pub fn build_system_prompt(
     project_root: &Path,
     tools: &[ToolDefinition],
     project_summary: Option<&ProjectIndexSummary>,
+    provider_name: &str,
+    model_name: &str,
+    language: &str,
+) -> String {
+    build_system_prompt_with_memories(
+        project_root,
+        tools,
+        project_summary,
+        None,
+        provider_name,
+        model_name,
+        language,
+    )
+}
+
+/// Build system prompt with optional project memories injection.
+///
+/// This is the full-featured version that accepts project memories.
+/// `build_system_prompt` delegates to this with `None` memories for backward compatibility.
+pub fn build_system_prompt_with_memories(
+    project_root: &Path,
+    tools: &[ToolDefinition],
+    project_summary: Option<&ProjectIndexSummary>,
+    project_memories: Option<&[MemoryEntry]>,
     provider_name: &str,
     model_name: &str,
     language: &str,
@@ -123,6 +157,8 @@ pub fn build_system_prompt(
         }
         _ => String::new(),
     };
+
+    let memory_section = build_memory_section(project_memories);
 
     let identity_line = format!(
         "You are an AI coding assistant powered by {provider}/{model}. \
@@ -160,7 +196,7 @@ You have access to tools for reading, writing, and analyzing code. You operate i
 {language_instruction}
 
 ## Working Directory
-{project_root}{summary_section}
+{project_root}{summary_section}{memory_section}
 
 ## Available Tools
 {tool_list}
@@ -263,9 +299,51 @@ Follow this decision tree to select the correct tool. Start from the top.
         language_instruction = language_instruction,
         project_root = project_root.display(),
         summary_section = summary_section,
+        memory_section = memory_section,
         tool_list = tool_list,
         critical_rules = critical_rules,
     )
+}
+
+/// Build the project memory section for system prompt injection.
+///
+/// Each memory is formatted with a category badge:
+/// - [PREF] for preferences
+/// - [CONV] for conventions
+/// - [PATN] for patterns
+/// - [WARN] for corrections
+/// - [FACT] for facts
+///
+/// The section is capped at MEMORY_SECTION_BUDGET characters.
+/// Returns an empty string if no memories are provided.
+fn build_memory_section(memories: Option<&[MemoryEntry]>) -> String {
+    match memories {
+        Some(mems) if !mems.is_empty() => {
+            let header = "\n\n## Project Memory\nThe following facts were learned from previous sessions:\n\n";
+            let mut section = header.to_string();
+            let budget = MEMORY_SECTION_BUDGET;
+
+            for memory in mems {
+                let badge = match memory.category {
+                    MemoryCategory::Preference => "[PREF]",
+                    MemoryCategory::Convention => "[CONV]",
+                    MemoryCategory::Pattern => "[PATN]",
+                    MemoryCategory::Correction => "[WARN]",
+                    MemoryCategory::Fact => "[FACT]",
+                };
+                let line = format!("- {} {}\n", badge, memory.content);
+
+                // Check if adding this line would exceed the budget
+                if section.len() + line.len() > budget {
+                    break;
+                }
+                section.push_str(&line);
+            }
+
+            section
+        }
+        _ => String::new(),
+    }
 }
 
 /// Merge the tool system prompt with a user-provided system prompt.
@@ -712,5 +790,232 @@ mod tests {
         assert_eq!(detect_language("帮我 fix 这个 bug"), "zh");
         // Empty string defaults to en
         assert_eq!(detect_language(""), "en");
+    }
+
+    // =========================================================================
+    // Feature-001: Project Memory injection tests
+    // =========================================================================
+
+    fn make_test_memories() -> Vec<MemoryEntry> {
+        vec![
+            MemoryEntry {
+                id: "mem-1".into(),
+                project_path: "/test".into(),
+                category: MemoryCategory::Preference,
+                content: "Always use pnpm not npm".into(),
+                keywords: vec!["pnpm".into()],
+                importance: 0.9,
+                access_count: 5,
+                source_session_id: None,
+                source_context: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+                last_accessed_at: String::new(),
+            },
+            MemoryEntry {
+                id: "mem-2".into(),
+                project_path: "/test".into(),
+                category: MemoryCategory::Convention,
+                content: "Tests in __tests__/ directories".into(),
+                keywords: vec!["tests".into()],
+                importance: 0.7,
+                access_count: 2,
+                source_session_id: None,
+                source_context: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+                last_accessed_at: String::new(),
+            },
+            MemoryEntry {
+                id: "mem-3".into(),
+                project_path: "/test".into(),
+                category: MemoryCategory::Pattern,
+                content: "API routes return CommandResponse<T>".into(),
+                keywords: vec!["api".into()],
+                importance: 0.6,
+                access_count: 1,
+                source_session_id: None,
+                source_context: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+                last_accessed_at: String::new(),
+            },
+            MemoryEntry {
+                id: "mem-4".into(),
+                project_path: "/test".into(),
+                category: MemoryCategory::Correction,
+                content: "Do not edit executor.rs without cargo check".into(),
+                keywords: vec!["executor".into()],
+                importance: 0.8,
+                access_count: 3,
+                source_session_id: None,
+                source_context: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+                last_accessed_at: String::new(),
+            },
+            MemoryEntry {
+                id: "mem-5".into(),
+                project_path: "/test".into(),
+                category: MemoryCategory::Fact,
+                content: "Frontend uses Zustand for state management".into(),
+                keywords: vec!["zustand".into()],
+                importance: 0.5,
+                access_count: 0,
+                source_session_id: None,
+                source_context: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+                last_accessed_at: String::new(),
+            },
+        ]
+    }
+
+    #[test]
+    fn test_build_system_prompt_with_memories() {
+        let tools = get_tool_definitions();
+        let memories = make_test_memories();
+        let prompt = build_system_prompt_with_memories(
+            &PathBuf::from("/test/project"),
+            &tools,
+            None,
+            Some(&memories),
+            "TestProvider",
+            "test-model",
+            "en",
+        );
+
+        // Memory section should be present
+        assert!(prompt.contains("## Project Memory"));
+        assert!(prompt.contains("learned from previous sessions"));
+
+        // All category badges should appear
+        assert!(prompt.contains("[PREF]"));
+        assert!(prompt.contains("[CONV]"));
+        assert!(prompt.contains("[PATN]"));
+        assert!(prompt.contains("[WARN]"));
+        assert!(prompt.contains("[FACT]"));
+
+        // Memory content should be present
+        assert!(prompt.contains("Always use pnpm not npm"));
+        assert!(prompt.contains("Tests in __tests__/ directories"));
+        assert!(prompt.contains("API routes return CommandResponse<T>"));
+    }
+
+    #[test]
+    fn test_build_system_prompt_memory_section_position() {
+        let tools = get_tool_definitions();
+        let summary = make_test_summary();
+        let memories = make_test_memories();
+        let prompt = build_system_prompt_with_memories(
+            &PathBuf::from("/test/project"),
+            &tools,
+            Some(&summary),
+            Some(&memories),
+            "TestProvider",
+            "test-model",
+            "en",
+        );
+
+        // Memory section should appear after project summary and before Available Tools
+        let summary_pos = prompt.find("## Project Structure").unwrap();
+        let memory_pos = prompt.find("## Project Memory").unwrap();
+        let tools_pos = prompt.find("## Available Tools").unwrap();
+
+        assert!(
+            summary_pos < memory_pos,
+            "Memory section must appear after Project Structure"
+        );
+        assert!(
+            memory_pos < tools_pos,
+            "Memory section must appear before Available Tools"
+        );
+    }
+
+    #[test]
+    fn test_build_system_prompt_no_memories() {
+        let tools = get_tool_definitions();
+        let prompt = build_system_prompt_with_memories(
+            &PathBuf::from("/test/project"),
+            &tools,
+            None,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
+
+        assert!(!prompt.contains("## Project Memory"));
+    }
+
+    #[test]
+    fn test_build_system_prompt_empty_memories() {
+        let tools = get_tool_definitions();
+        let empty: Vec<MemoryEntry> = vec![];
+        let prompt = build_system_prompt_with_memories(
+            &PathBuf::from("/test/project"),
+            &tools,
+            None,
+            Some(&empty),
+            "TestProvider",
+            "test-model",
+            "en",
+        );
+
+        assert!(!prompt.contains("## Project Memory"));
+    }
+
+    #[test]
+    fn test_build_system_prompt_backward_compatible() {
+        // build_system_prompt (without memories) should still work
+        let tools = get_tool_definitions();
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test/project"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
+
+        assert!(!prompt.contains("## Project Memory"));
+        assert!(prompt.contains("## Available Tools"));
+    }
+
+    #[test]
+    fn test_memory_section_budget_respected() {
+        // Create many memories that exceed the budget
+        let mut big_memories = Vec::new();
+        for i in 0..100 {
+            big_memories.push(MemoryEntry {
+                id: format!("mem-{}", i),
+                project_path: "/test".into(),
+                category: MemoryCategory::Fact,
+                content: format!("This is a moderately long memory entry number {} that contributes to the total character count of the section", i),
+                keywords: vec![],
+                importance: 0.5,
+                access_count: 0,
+                source_session_id: None,
+                source_context: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+                last_accessed_at: String::new(),
+            });
+        }
+
+        let section = build_memory_section(Some(&big_memories));
+        assert!(
+            section.len() <= MEMORY_SECTION_BUDGET + 200, // small buffer for header
+            "Memory section should respect budget (got {} chars)",
+            section.len()
+        );
+
+        // Not all memories should be included
+        let line_count = section.lines().count();
+        assert!(
+            line_count < 100,
+            "Should have truncated memories, got {} lines",
+            line_count
+        );
     }
 }

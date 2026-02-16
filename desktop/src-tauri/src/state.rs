@@ -6,6 +6,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::models::settings::{AppConfig, SettingsUpdate};
+use crate::services::memory::ProjectMemoryStore;
+use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::storage::{ConfigService, Database, KeyringService};
 use crate::utils::error::{AppError, AppResult};
 
@@ -17,6 +19,8 @@ pub struct AppState {
     keyring: Arc<RwLock<Option<KeyringService>>>,
     /// Configuration service for app settings
     config: Arc<RwLock<Option<ConfigService>>>,
+    /// Project memory store for cross-session persistent memory
+    memory_store: Arc<RwLock<Option<ProjectMemoryStore>>>,
     /// Whether the state has been initialized
     initialized: Arc<RwLock<bool>>,
 }
@@ -28,6 +32,7 @@ impl AppState {
             database: Arc::new(RwLock::new(None)),
             keyring: Arc::new(RwLock::new(None)),
             config: Arc::new(RwLock::new(None)),
+            memory_store: Arc::new(RwLock::new(None)),
             initialized: Arc::new(RwLock::new(false)),
         }
     }
@@ -58,6 +63,17 @@ impl AppState {
             let config = ConfigService::new()?;
             let mut config_lock = self.config.write().await;
             *config_lock = Some(config);
+        }
+
+        // Initialize memory store using the database pool
+        {
+            let db_guard = self.database.read().await;
+            if let Some(ref db) = *db_guard {
+                let embedding_service = Arc::new(EmbeddingService::new());
+                let store = ProjectMemoryStore::from_database(db, embedding_service);
+                let mut store_lock = self.memory_store.write().await;
+                *store_lock = Some(store);
+            }
         }
 
         *initialized = true;
@@ -158,6 +174,20 @@ impl AppState {
         match &*guard {
             Some(db) => f(db),
             None => Err(AppError::database("Database not initialized")),
+        }
+    }
+
+    /// Get memory store access for memory operations
+    pub async fn with_memory_store<F, T>(&self, f: F) -> AppResult<T>
+    where
+        F: FnOnce(&ProjectMemoryStore) -> AppResult<T>,
+    {
+        let guard = self.memory_store.read().await;
+        match &*guard {
+            Some(store) => f(store),
+            None => Err(AppError::Internal(
+                "Memory store not initialized".to_string(),
+            )),
         }
     }
 }

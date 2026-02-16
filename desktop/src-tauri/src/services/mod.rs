@@ -16,6 +16,7 @@ pub mod llm;
 pub mod markdown;
 pub mod mcp;
 pub mod mega;
+pub mod memory;
 pub mod orchestrator;
 pub mod phase;
 pub mod project;

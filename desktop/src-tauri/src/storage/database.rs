@@ -434,6 +434,83 @@ impl Database {
             [],
         )?;
 
+        // ====================================================================
+        // Feature-001: Project Memory System tables
+        // ====================================================================
+
+        // Cross-session project memory
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS project_memories (
+                id TEXT PRIMARY KEY,
+                project_path TEXT NOT NULL,
+                category TEXT NOT NULL CHECK(category IN (
+                    'preference',
+                    'convention',
+                    'pattern',
+                    'correction',
+                    'fact'
+                )),
+                content TEXT NOT NULL,
+                keywords TEXT NOT NULL DEFAULT '[]',
+                embedding BLOB,
+                importance REAL NOT NULL DEFAULT 0.5,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                source_session_id TEXT,
+                source_context TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(project_path, content)
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_project_memories_project
+             ON project_memories(project_path)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_project_memories_category
+             ON project_memories(project_path, category)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_project_memories_importance
+             ON project_memories(project_path, importance DESC)",
+            [],
+        )?;
+
+        // Episodic records for learning from past interactions
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS episodic_records (
+                id TEXT PRIMARY KEY,
+                project_path TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                record_type TEXT NOT NULL CHECK(record_type IN (
+                    'success',
+                    'failure',
+                    'discovery'
+                )),
+                task_summary TEXT NOT NULL,
+                approach_summary TEXT NOT NULL,
+                outcome_summary TEXT NOT NULL,
+                tools_used TEXT NOT NULL DEFAULT '[]',
+                keywords TEXT NOT NULL DEFAULT '[]',
+                embedding BLOB,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_episodic_records_project
+             ON episodic_records(project_path)",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -962,5 +1039,164 @@ mod tests {
         db.delete_setting("test_key").unwrap();
         let value = db.get_setting("test_key").unwrap();
         assert!(value.is_none());
+    }
+
+    // =========================================================================
+    // Feature-001: Project Memory System schema tests
+    // =========================================================================
+
+    #[test]
+    fn test_project_memories_table_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert a memory entry
+        conn.execute(
+            "INSERT INTO project_memories (id, project_path, category, content, keywords, importance)
+             VALUES ('mem-001', '/test/project', 'preference', 'Use pnpm not npm', '[\"pnpm\",\"npm\"]', 0.9)",
+            [],
+        ).unwrap();
+
+        // Query it back
+        let content: String = conn.query_row(
+            "SELECT content FROM project_memories WHERE id = 'mem-001'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(content, "Use pnpm not npm");
+
+        // Verify category constraint
+        let result = conn.execute(
+            "INSERT INTO project_memories (id, project_path, category, content)
+             VALUES ('mem-002', '/test/project', 'invalid_category', 'test')",
+            [],
+        );
+        assert!(result.is_err(), "Invalid category should be rejected");
+    }
+
+    #[test]
+    fn test_project_memories_unique_constraint() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        conn.execute(
+            "INSERT INTO project_memories (id, project_path, category, content)
+             VALUES ('mem-001', '/test/project', 'fact', 'This is a Tauri app')",
+            [],
+        ).unwrap();
+
+        // Same project_path + content should fail with UNIQUE constraint
+        let result = conn.execute(
+            "INSERT INTO project_memories (id, project_path, category, content)
+             VALUES ('mem-002', '/test/project', 'fact', 'This is a Tauri app')",
+            [],
+        );
+        assert!(result.is_err(), "Duplicate project_path+content should be rejected");
+    }
+
+    #[test]
+    fn test_project_memories_all_categories() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let categories = ["preference", "convention", "pattern", "correction", "fact"];
+        for (i, cat) in categories.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO project_memories (id, project_path, category, content)
+                 VALUES (?1, '/test', ?2, ?3)",
+                params![format!("mem-{}", i), *cat, format!("test content {}", i)],
+            ).unwrap();
+        }
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM project_memories WHERE project_path = '/test'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 5);
+    }
+
+    #[test]
+    fn test_episodic_records_table_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        conn.execute(
+            "INSERT INTO episodic_records (id, project_path, session_id, record_type, task_summary, approach_summary, outcome_summary)
+             VALUES ('ep-001', '/test/project', 'session-1', 'success', 'Fix bug', 'Used grep to find issue', 'Bug fixed')",
+            [],
+        ).unwrap();
+
+        let task: String = conn.query_row(
+            "SELECT task_summary FROM episodic_records WHERE id = 'ep-001'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(task, "Fix bug");
+
+        // Verify record_type constraint
+        let result = conn.execute(
+            "INSERT INTO episodic_records (id, project_path, session_id, record_type, task_summary, approach_summary, outcome_summary)
+             VALUES ('ep-002', '/test/project', 'session-1', 'invalid_type', 'Test', 'Test', 'Test')",
+            [],
+        );
+        assert!(result.is_err(), "Invalid record_type should be rejected");
+    }
+
+    #[test]
+    fn test_episodic_records_all_types() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let types = ["success", "failure", "discovery"];
+        for (i, rt) in types.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO episodic_records (id, project_path, session_id, record_type, task_summary, approach_summary, outcome_summary)
+                 VALUES (?1, '/test', 'sess-1', ?2, 'task', 'approach', 'outcome')",
+                params![format!("ep-{}", i), *rt],
+            ).unwrap();
+        }
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM episodic_records WHERE project_path = '/test'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_project_memories_indexes_exist() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Check indexes via pragma
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='project_memories'"
+        ).unwrap();
+        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(indexes.contains(&"idx_project_memories_project".to_string()));
+        assert!(indexes.contains(&"idx_project_memories_category".to_string()));
+        assert!(indexes.contains(&"idx_project_memories_importance".to_string()));
+    }
+
+    #[test]
+    fn test_episodic_records_indexes_exist() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='episodic_records'"
+        ).unwrap();
+        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(indexes.contains(&"idx_episodic_records_project".to_string()));
     }
 }
