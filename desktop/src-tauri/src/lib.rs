@@ -198,6 +198,13 @@ pub use commands::{
     search_skills,
     set_embedding_api_key,
     set_embedding_config,
+    // Plugin commands
+    get_plugin_detail,
+    install_plugin,
+    list_plugins,
+    refresh_plugins,
+    toggle_plugin,
+    PluginState,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,

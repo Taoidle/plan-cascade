@@ -9,7 +9,8 @@
     "quality": "Quality Gates",
     "phases": "Phase Agents",
     "importExport": "Import/Export",
-    "lsp": "LSP Servers"
+    "lsp": "LSP Servers",
+    "plugins": "Plugins"
   },
 
   "general": {

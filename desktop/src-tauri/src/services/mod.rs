@@ -18,6 +18,7 @@ pub mod mcp;
 pub mod mega;
 pub mod memory;
 pub mod orchestrator;
+pub mod plugins;
 pub mod phase;
 pub mod project;
 pub mod quality_gates;
