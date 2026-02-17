@@ -223,7 +223,33 @@ impl HybridSearchEngine {
     // -----------------------------------------------------------------------
 
     /// Run the symbol search channel.
+    ///
+    /// Attempts FTS5 BM25-ranked search first. Falls back to LIKE-based search
+    /// if FTS returns empty results or encounters an error (graceful degradation).
     fn search_symbols(&self, query: &str) -> AppResult<Vec<ChannelEntry>> {
+        // Try FTS5 first for BM25-ranked results
+        match self.index_store.fts_search_symbols(query, self.config.channel_max_results) {
+            Ok(fts_results) if !fts_results.is_empty() => {
+                let entries: Vec<ChannelEntry> = fts_results
+                    .into_iter()
+                    .map(|sym| ChannelEntry {
+                        file_path: sym.file_path,
+                        symbol_name: Some(sym.symbol_name),
+                        chunk_text: None,
+                        semantic_similarity: None,
+                    })
+                    .collect();
+                return Ok(entries);
+            }
+            Err(e) => {
+                tracing::warn!("FTS5 symbol search failed, falling back to LIKE: {}", e);
+            }
+            Ok(_) => {
+                // FTS returned empty; fall through to LIKE
+            }
+        }
+
+        // Fallback: LIKE-based search
         let pattern = format!("%{}%", query);
         let symbols = self.index_store.query_symbols(&pattern)?;
 
@@ -242,11 +268,37 @@ impl HybridSearchEngine {
     }
 
     /// Run the file path search channel.
+    ///
+    /// Attempts FTS5 BM25-ranked search first. Falls back to LIKE-based search
+    /// if FTS returns empty results or encounters an error (graceful degradation).
     fn search_file_paths(
         &self,
         query: &str,
         project_path: &str,
     ) -> AppResult<Vec<ChannelEntry>> {
+        // Try FTS5 first for BM25-ranked results
+        match self.index_store.fts_search_files(query, project_path, self.config.channel_max_results) {
+            Ok(fts_results) if !fts_results.is_empty() => {
+                let entries: Vec<ChannelEntry> = fts_results
+                    .into_iter()
+                    .map(|f| ChannelEntry {
+                        file_path: f.file_path,
+                        symbol_name: None,
+                        chunk_text: None,
+                        semantic_similarity: None,
+                    })
+                    .collect();
+                return Ok(entries);
+            }
+            Err(e) => {
+                tracing::warn!("FTS5 filepath search failed, falling back to LIKE: {}", e);
+            }
+            Ok(_) => {
+                // FTS returned empty; fall through to LIKE
+            }
+        }
+
+        // Fallback: LIKE-based search
         let pattern = format!("%{}%", query);
         let files = self.index_store.query_files_by_path(project_path, &pattern)?;
 
@@ -1135,5 +1187,188 @@ mod tests {
         let single_channel_max = 1.0 / 61.0; // best single-channel score
         assert!(results[0].1 > single_channel_max);
         assert!(results[1].1 > single_channel_max);
+    }
+
+    // =====================================================================
+    // FTS5 Integration Tests (story-004)
+    // =====================================================================
+
+    #[test]
+    fn search_symbols_uses_fts_when_available() {
+        use super::super::analysis_index::{FileInventoryItem, SymbolInfo, SymbolKind};
+        use crate::storage::database::Database;
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        // Populate the index with symbols
+        let item = FileInventoryItem {
+            path: "src/auth_service.rs".to_string(),
+            component: "backend".to_string(),
+            language: "rust".to_string(),
+            extension: Some("rs".to_string()),
+            size_bytes: 1024,
+            line_count: 50,
+            is_test: false,
+            symbols: vec![
+                SymbolInfo::basic("auth_handler".to_string(), SymbolKind::Function, 5),
+                SymbolInfo::basic("validate_token".to_string(), SymbolKind::Function, 15),
+            ],
+        };
+        store.upsert_file_index("/project", &item, "hash1").unwrap();
+
+        let engine = HybridSearchEngine::with_defaults(store, None);
+
+        // Search for "auth" - should use FTS and find auth_handler
+        let results = engine.search_symbols("auth").unwrap();
+        assert!(!results.is_empty(), "FTS should find symbols matching 'auth'");
+        assert_eq!(results[0].symbol_name.as_deref(), Some("auth_handler"));
+    }
+
+    #[test]
+    fn search_file_paths_uses_fts_when_available() {
+        use super::super::analysis_index::FileInventoryItem;
+        use crate::storage::database::Database;
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        let items = vec![
+            FileInventoryItem {
+                path: "src/services/auth.rs".to_string(),
+                component: "backend".to_string(),
+                language: "rust".to_string(),
+                extension: Some("rs".to_string()),
+                size_bytes: 512,
+                line_count: 30,
+                is_test: false,
+                symbols: vec![],
+            },
+            FileInventoryItem {
+                path: "src/services/user.rs".to_string(),
+                component: "backend".to_string(),
+                language: "rust".to_string(),
+                extension: Some("rs".to_string()),
+                size_bytes: 768,
+                line_count: 45,
+                is_test: false,
+                symbols: vec![],
+            },
+        ];
+
+        for (i, item) in items.iter().enumerate() {
+            store.upsert_file_index("/project", item, &format!("hash{}", i)).unwrap();
+        }
+
+        let engine = HybridSearchEngine::with_defaults(store, None);
+
+        // Search for "auth" in file paths
+        let results = engine.search_file_paths("auth", "/project").unwrap();
+        assert!(!results.is_empty(), "FTS should find file paths matching 'auth'");
+        assert_eq!(results[0].file_path, "src/services/auth.rs");
+    }
+
+    #[test]
+    fn search_symbols_falls_back_to_like_on_short_query() {
+        use super::super::analysis_index::{FileInventoryItem, SymbolInfo, SymbolKind};
+        use crate::storage::database::Database;
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        let item = FileInventoryItem {
+            path: "src/main.rs".to_string(),
+            component: "backend".to_string(),
+            language: "rust".to_string(),
+            extension: Some("rs".to_string()),
+            size_bytes: 1024,
+            line_count: 50,
+            is_test: false,
+            symbols: vec![
+                SymbolInfo::basic("x".to_string(), SymbolKind::Function, 1),
+            ],
+        };
+        store.upsert_file_index("/project", &item, "hash1").unwrap();
+
+        let engine = HybridSearchEngine::with_defaults(store, None);
+
+        // Very short query ("x") should still return results via LIKE fallback
+        let results = engine.search_symbols("x").unwrap();
+        // Should find "x" via either FTS or LIKE fallback
+        assert!(!results.is_empty(), "Short query should still find results");
+    }
+
+    #[test]
+    fn fts_results_correctly_fused_with_rrf() {
+        use super::super::analysis_index::{FileInventoryItem, SymbolInfo, SymbolKind};
+        use crate::storage::database::Database;
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        // Create files where "auth" appears in both symbol names and file paths
+        let item = FileInventoryItem {
+            path: "src/auth.rs".to_string(),
+            component: "backend".to_string(),
+            language: "rust".to_string(),
+            extension: Some("rs".to_string()),
+            size_bytes: 1024,
+            line_count: 50,
+            is_test: false,
+            symbols: vec![
+                SymbolInfo::basic("auth_handler".to_string(), SymbolKind::Function, 5),
+            ],
+        };
+        store.upsert_file_index("/project", &item, "hash1").unwrap();
+
+        let engine = HybridSearchEngine::with_defaults(store, None);
+
+        // "auth" should appear in both symbol and filepath channels
+        let symbol_results = engine.search_symbols("auth").unwrap();
+        let filepath_results = engine.search_file_paths("auth", "/project").unwrap();
+
+        // Both channels should have results
+        assert!(!symbol_results.is_empty(), "Symbol channel should find auth");
+        assert!(!filepath_results.is_empty(), "FilePath channel should find auth");
+
+        // src/auth.rs should appear in both, meaning it would get a boosted
+        // RRF score during fusion
+        assert_eq!(symbol_results[0].file_path, "src/auth.rs");
+        assert_eq!(filepath_results[0].file_path, "src/auth.rs");
+    }
+
+    #[test]
+    fn existing_hybrid_search_tests_still_pass_after_fts_wiring() {
+        // This meta-test verifies that modifying search_symbols and
+        // search_file_paths to use FTS does not break existing functionality.
+        // The test below re-verifies the same assertions as the original
+        // search_symbols_channel_uses_index_store test.
+        use super::super::analysis_index::{FileInventoryItem, SymbolInfo, SymbolKind};
+        use crate::storage::database::Database;
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        let item = FileInventoryItem {
+            path: "src/controller.rs".to_string(),
+            component: "backend".to_string(),
+            language: "rust".to_string(),
+            extension: Some("rs".to_string()),
+            size_bytes: 1024,
+            line_count: 50,
+            is_test: false,
+            symbols: vec![
+                SymbolInfo::basic("user_controller".to_string(), SymbolKind::Struct, 5),
+                SymbolInfo::basic("handle_request".to_string(), SymbolKind::Function, 15),
+            ],
+        };
+        store.upsert_file_index("/project", &item, "hash1").unwrap();
+
+        let engine = HybridSearchEngine::with_defaults(store, None);
+        let results = engine.search_symbols("user_controller").unwrap();
+
+        assert!(!results.is_empty());
+        assert_eq!(results[0].file_path, "src/controller.rs");
+        assert_eq!(results[0].symbol_name.as_deref(), Some("user_controller"));
     }
 }

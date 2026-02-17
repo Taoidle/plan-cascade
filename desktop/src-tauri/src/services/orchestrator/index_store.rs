@@ -130,6 +130,28 @@ impl IndexStore {
             |row| row.get(0),
         )?;
 
+        // Collect old symbol rowids before deleting (for FTS cleanup)
+        let old_symbol_ids: Vec<i64> = {
+            let mut id_stmt = conn.prepare(
+                "SELECT id FROM file_symbols WHERE file_index_id = ?1",
+            )?;
+            let mapped = id_stmt
+                .query_map(params![file_index_id], |row| row.get::<_, i64>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            mapped
+        };
+
+        // Delete old FTS entries for these symbols (contentless mode: DELETE by rowid)
+        if !old_symbol_ids.is_empty() {
+            let mut fts_del = conn.prepare(
+                "DELETE FROM symbol_fts WHERE rowid = ?1",
+            )?;
+            for id in &old_symbol_ids {
+                let _ = fts_del.execute(params![id]);
+            }
+        }
+
         // Delete existing symbols for this file (cascade would handle on delete,
         // but for update we need to clear manually)
         conn.execute(
@@ -157,6 +179,46 @@ impl IndexStore {
                 symbol.end_line as i64,
             ])?;
         }
+
+        // Insert new FTS entries for symbols
+        // Get the new symbol IDs (rowids) for FTS insertion
+        {
+            let mut sym_stmt = conn.prepare(
+                "SELECT id, name, kind, COALESCE(doc_comment, ''), COALESCE(signature, '')
+                 FROM file_symbols WHERE file_index_id = ?1",
+            )?;
+            let new_symbols: Vec<(i64, String, String, String, String)> = sym_stmt
+                .query_map(params![file_index_id], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            let mut fts_ins = conn.prepare(
+                "INSERT INTO symbol_fts (rowid, symbol_name, file_path, symbol_kind, doc_comment, signature)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+            for (id, name, kind, doc, sig) in &new_symbols {
+                fts_ins.execute(params![id, name, item.path, kind, doc, sig])?;
+            }
+        }
+
+        // Sync filepath_fts: delete old entry for this file_index row, insert new one
+        let _ = conn.execute(
+            "DELETE FROM filepath_fts WHERE rowid = ?1",
+            params![file_index_id],
+        );
+        conn.execute(
+            "INSERT INTO filepath_fts (rowid, file_path, component, language)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![file_index_id, item.path, item.component, item.language],
+        )?;
 
         Ok(())
     }
@@ -344,11 +406,51 @@ impl IndexStore {
         }
     }
 
-    /// Delete all index entries for a project.
+    /// Delete all index entries for a project, including FTS5 entries.
     pub fn delete_project_index(&self, project_path: &str) -> AppResult<usize> {
         let conn = self.get_connection()?;
         conn.execute_batch("PRAGMA foreign_keys = ON")?;
 
+        // Collect file_index IDs and symbol IDs for FTS cleanup before deletion
+        let file_ids: Vec<i64> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM file_index WHERE project_path = ?1",
+            )?;
+            let mapped = stmt
+                .query_map(params![project_path], |row| row.get::<_, i64>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            mapped
+        };
+
+        // Delete symbol_fts entries (by symbol rowids belonging to this project)
+        if !file_ids.is_empty() {
+            let mut sym_id_stmt = conn.prepare(
+                "SELECT id FROM file_symbols WHERE file_index_id = ?1",
+            )?;
+            let mut fts_del = conn.prepare(
+                "DELETE FROM symbol_fts WHERE rowid = ?1",
+            )?;
+            for file_id in &file_ids {
+                let sym_ids: Vec<i64> = sym_id_stmt
+                    .query_map(params![file_id], |row| row.get::<_, i64>(0))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                for sym_id in sym_ids {
+                    let _ = fts_del.execute(params![sym_id]);
+                }
+            }
+
+            // Delete filepath_fts entries (by file_index rowids)
+            let mut fp_del = conn.prepare(
+                "DELETE FROM filepath_fts WHERE rowid = ?1",
+            )?;
+            for file_id in &file_ids {
+                let _ = fp_del.execute(params![file_id]);
+            }
+        }
+
+        // Delete from file_index (cascades to file_symbols)
         let deleted = conn.execute(
             "DELETE FROM file_index WHERE project_path = ?1",
             params![project_path],
@@ -771,6 +873,124 @@ impl IndexStore {
         Ok(())
     }
 
+    // =========================================================================
+    // FTS5 query methods (feature-002, story-003)
+    // =========================================================================
+
+    /// Search symbols using FTS5 full-text search with BM25 ranking.
+    ///
+    /// The query is sanitized and wrapped for prefix matching. Results are
+    /// ranked by BM25 relevance (FTS5 `rank` column, lower = more relevant).
+    /// Returns up to `limit` results.
+    ///
+    /// Returns an empty Vec for empty queries without error.
+    pub fn fts_search_symbols(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> AppResult<Vec<SymbolMatch>> {
+        let sanitized = sanitize_fts_query(query);
+        if sanitized.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.get_connection()?;
+
+        // Restrict FTS MATCH to only the symbol_name column using FTS5
+        // column filter syntax: {symbol_name} : <query>
+        let fts_expr = format!("symbol_name : {}", sanitized);
+
+        // Join symbol_fts (by rowid) with file_symbols and file_index to get
+        // full result data. In contentless mode, FTS columns are NULL so we
+        // must join back to the source tables.
+        let mut stmt = conn.prepare(
+            "SELECT fi.file_path, fi.project_path, fs.name, fs.kind, fs.line_number,
+                    fs.parent_symbol, fs.signature, fs.doc_comment, fs.end_line
+             FROM symbol_fts
+             JOIN file_symbols fs ON fs.id = symbol_fts.rowid
+             JOIN file_index fi ON fi.id = fs.file_index_id
+             WHERE symbol_fts MATCH ?1
+             ORDER BY symbol_fts.rank
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt
+            .query_map(params![fts_expr, limit as i64], |row| {
+                Ok(SymbolMatch {
+                    file_path: row.get(0)?,
+                    project_path: row.get(1)?,
+                    symbol_name: row.get(2)?,
+                    symbol_kind: row.get(3)?,
+                    line_number: row.get::<_, i64>(4)? as usize,
+                    parent_symbol: row.get(5)?,
+                    signature: row.get(6)?,
+                    doc_comment: row.get(7)?,
+                    end_line: row.get::<_, i64>(8).unwrap_or(0) as usize,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Search file paths using FTS5 full-text search with BM25 ranking.
+    ///
+    /// Results are filtered by `project_path` and ranked by BM25 relevance.
+    /// Returns up to `limit` results.
+    ///
+    /// Returns an empty Vec for empty queries without error.
+    pub fn fts_search_files(
+        &self,
+        query: &str,
+        project_path: &str,
+        limit: usize,
+    ) -> AppResult<Vec<FileIndexRow>> {
+        let sanitized = sanitize_fts_query(query);
+        if sanitized.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.get_connection()?;
+
+        // Restrict FTS MATCH to only the file_path column
+        let fts_expr = format!("file_path : {}", sanitized);
+
+        // Join filepath_fts (by rowid) with file_index to get full data and
+        // filter by project_path.
+        let mut stmt = conn.prepare(
+            "SELECT fi.id, fi.project_path, fi.file_path, fi.component, fi.language,
+                    fi.extension, fi.size_bytes, fi.line_count, fi.is_test,
+                    fi.content_hash, fi.indexed_at
+             FROM filepath_fts
+             JOIN file_index fi ON fi.id = filepath_fts.rowid
+             WHERE filepath_fts MATCH ?1 AND fi.project_path = ?2
+             ORDER BY filepath_fts.rank
+             LIMIT ?3",
+        )?;
+
+        let rows = stmt
+            .query_map(params![fts_expr, project_path, limit as i64], |row| {
+                Ok(FileIndexRow {
+                    id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    file_path: row.get(2)?,
+                    component: row.get(3)?,
+                    language: row.get(4)?,
+                    extension: row.get(5)?,
+                    size_bytes: row.get::<_, i64>(6)? as u64,
+                    line_count: row.get::<_, i64>(7)? as usize,
+                    is_test: row.get::<_, i32>(8)? != 0,
+                    content_hash: row.get(9)?,
+                    indexed_at: row.get(10)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
     fn get_connection(
         &self,
     ) -> AppResult<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>> {
@@ -778,6 +998,27 @@ impl IndexStore {
             .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))
     }
+}
+
+/// Sanitize a user query string for safe use in FTS5 MATCH expressions.
+///
+/// Each whitespace-delimited token is:
+/// 1. Escaped (inner double-quotes are doubled)
+/// 2. Wrapped in double-quotes
+/// 3. Suffixed with `*` for prefix matching
+///
+/// Tokens are joined with spaces (implicit AND in FTS5).
+///
+/// Returns an empty string for empty/whitespace-only input.
+pub fn sanitize_fts_query(input: &str) -> String {
+    let tokens: Vec<String> = input
+        .split_whitespace()
+        .map(|token| {
+            let escaped = token.replace('"', "\"\"");
+            format!("\"{}\"*", escaped)
+        })
+        .collect();
+    tokens.join(" ")
 }
 
 /// A row from the file_index table.
@@ -2064,5 +2305,292 @@ mod tests {
         let meta = store.get_embedding_metadata("/project").unwrap();
         assert_eq!(meta[0].provider_type, "openai");
         assert_eq!(meta[0].embedding_dimension, 1536);
+    }
+
+    // =========================================================================
+    // FTS5 sync tests (story-002)
+    // =========================================================================
+
+    /// Helper to count FTS matches via direct SQL on the pool.
+    fn fts_symbol_count(store: &IndexStore, match_expr: &str) -> i64 {
+        let conn = store.get_connection().unwrap();
+        let query = format!(
+            "SELECT COUNT(*) FROM symbol_fts WHERE symbol_fts MATCH '{}'",
+            match_expr
+        );
+        conn.query_row(&query, [], |row| row.get(0)).unwrap_or(0)
+    }
+
+    fn fts_filepath_count(store: &IndexStore, match_expr: &str) -> i64 {
+        let conn = store.get_connection().unwrap();
+        let query = format!(
+            "SELECT COUNT(*) FROM filepath_fts WHERE filepath_fts MATCH '{}'",
+            match_expr
+        );
+        conn.query_row(&query, [], |row| row.get(0)).unwrap_or(0)
+    }
+
+    #[test]
+    fn upsert_populates_symbol_fts() {
+        let store = create_test_store();
+        let item = make_item(
+            "src/controller.rs",
+            "backend",
+            "rust",
+            vec![
+                SymbolInfo::basic("UserController".to_string(), SymbolKind::Struct, 5),
+                SymbolInfo::basic("handle_request".to_string(), SymbolKind::Function, 15),
+            ],
+        );
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        // Verify FTS has entries for these symbols
+        assert!(fts_symbol_count(&store, "\"UserController\"*") > 0,
+            "UserController should be in symbol_fts");
+        assert!(fts_symbol_count(&store, "\"handle_request\"*") > 0,
+            "handle_request should be in symbol_fts");
+    }
+
+    #[test]
+    fn upsert_populates_filepath_fts() {
+        let store = create_test_store();
+        let item = make_item("src/services/auth.rs", "backend", "rust", vec![]);
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        // Verify FTS has entry for this file path
+        assert!(fts_filepath_count(&store, "\"auth\"*") > 0,
+            "auth should be in filepath_fts");
+    }
+
+    #[test]
+    fn upsert_update_replaces_fts_entries() {
+        let store = create_test_store();
+
+        // Initial insert with one symbol
+        let item_v1 = make_item(
+            "src/service.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("old_function".to_string(), SymbolKind::Function, 1)],
+        );
+        store.upsert_file_index("/project", &item_v1, "h1").unwrap();
+        assert!(fts_symbol_count(&store, "\"old_function\"*") > 0);
+
+        // Update with different symbol
+        let item_v2 = make_item(
+            "src/service.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("new_function".to_string(), SymbolKind::Function, 1)],
+        );
+        store.upsert_file_index("/project", &item_v2, "h2").unwrap();
+
+        // Old symbol should be gone from FTS, new one present
+        assert_eq!(fts_symbol_count(&store, "\"old_function\"*"), 0,
+            "old_function should be removed from symbol_fts after update");
+        assert!(fts_symbol_count(&store, "\"new_function\"*") > 0,
+            "new_function should be in symbol_fts after update");
+    }
+
+    #[test]
+    fn delete_project_clears_fts_entries() {
+        let store = create_test_store();
+
+        let item = make_item(
+            "src/main.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1)],
+        );
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        // Verify FTS entries exist
+        assert!(fts_symbol_count(&store, "\"main\"*") > 0);
+        assert!(fts_filepath_count(&store, "\"main\"*") > 0);
+
+        // Delete the project index
+        store.delete_project_index("/project").unwrap();
+
+        // FTS entries should be cleared
+        assert_eq!(fts_symbol_count(&store, "\"main\"*"), 0,
+            "symbol_fts should be cleared after delete_project_index");
+        assert_eq!(fts_filepath_count(&store, "\"main\"*"), 0,
+            "filepath_fts should be cleared after delete_project_index");
+    }
+
+    #[test]
+    fn fts_entries_isolated_by_project() {
+        let store = create_test_store();
+
+        let item_a = make_item(
+            "src/main.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("main_a".to_string(), SymbolKind::Function, 1)],
+        );
+        let item_b = make_item(
+            "src/main.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("main_b".to_string(), SymbolKind::Function, 1)],
+        );
+
+        store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
+        store.upsert_file_index("/project-b", &item_b, "hb").unwrap();
+
+        // Delete project-a should only remove its FTS entries
+        store.delete_project_index("/project-a").unwrap();
+
+        assert_eq!(fts_symbol_count(&store, "\"main_a\"*"), 0,
+            "main_a should be removed from symbol_fts");
+        assert!(fts_symbol_count(&store, "\"main_b\"*") > 0,
+            "main_b should remain in symbol_fts");
+    }
+
+    // =========================================================================
+    // FTS5 query tests (story-003)
+    // =========================================================================
+
+    #[test]
+    fn test_sanitize_fts_query_basic() {
+        let result = sanitize_fts_query("hello world");
+        assert_eq!(result, "\"hello\"* \"world\"*");
+    }
+
+    #[test]
+    fn test_sanitize_fts_query_empty() {
+        let result = sanitize_fts_query("");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_sanitize_fts_query_special_chars() {
+        // Double quotes in input should be escaped
+        let result = sanitize_fts_query("test\"value");
+        assert_eq!(result, "\"test\"\"value\"*");
+    }
+
+    #[test]
+    fn test_sanitize_fts_query_single_token() {
+        let result = sanitize_fts_query("controller");
+        assert_eq!(result, "\"controller\"*");
+    }
+
+    #[test]
+    fn fts_search_symbols_returns_bm25_ranked_results() {
+        let store = create_test_store();
+
+        // Insert files with symbols. FTS5 tokenizes CamelCase as single tokens,
+        // and underscore_separated symbols use _ as a token char (part of token).
+        // So we use snake_case names that match how FTS5 tokenizes them.
+        let item1 = make_item(
+            "src/controller.rs",
+            "backend",
+            "rust",
+            vec![
+                SymbolInfo::basic("user_controller".to_string(), SymbolKind::Struct, 1),
+                SymbolInfo::basic("admin_controller".to_string(), SymbolKind::Function, 10),
+            ],
+        );
+        let item2 = make_item(
+            "src/handler.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("request_handler".to_string(), SymbolKind::Struct, 1)],
+        );
+
+        store.upsert_file_index("/project", &item1, "h1").unwrap();
+        store.upsert_file_index("/project", &item2, "h2").unwrap();
+
+        // With tokenchars='_', "user_controller" tokenizes as a single token.
+        // The query "user_controller" should match via prefix.
+        let results = store.fts_search_symbols("user_controller", 10).unwrap();
+        assert!(!results.is_empty(), "Should find user_controller symbol");
+        assert_eq!(results[0].symbol_name, "user_controller");
+
+        // Also test that the handler symbol is NOT returned for this query
+        assert!(
+            results.iter().all(|r| r.symbol_name != "request_handler"),
+            "request_handler should not match user_controller query"
+        );
+    }
+
+    #[test]
+    fn fts_search_symbols_prefix_matching() {
+        let store = create_test_store();
+
+        let item = make_item(
+            "src/service.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("user_controller".to_string(), SymbolKind::Struct, 1)],
+        );
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        // "user" should match "user_controller" via prefix matching
+        // (with tokenchars='_', user_controller is a single token; "user"* matches prefix)
+        let results = store.fts_search_symbols("user", 10).unwrap();
+        assert!(!results.is_empty(), "Prefix 'user' should match 'user_controller'");
+        assert_eq!(results[0].symbol_name, "user_controller");
+    }
+
+    #[test]
+    fn fts_search_symbols_empty_query() {
+        let store = create_test_store();
+
+        let item = make_item(
+            "src/main.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1)],
+        );
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        let results = store.fts_search_symbols("", 10).unwrap();
+        assert!(results.is_empty(), "Empty query should return empty results");
+    }
+
+    #[test]
+    fn fts_search_files_returns_results_filtered_by_project() {
+        let store = create_test_store();
+
+        let item_a = make_item("src/auth.rs", "backend", "rust", vec![]);
+        let item_b = make_item("src/auth.rs", "backend", "rust", vec![]);
+
+        store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
+        store.upsert_file_index("/project-b", &item_b, "hb").unwrap();
+
+        let results = store.fts_search_files("auth", "/project-a", 10).unwrap();
+        assert_eq!(results.len(), 1, "Should find exactly one match for project-a");
+        assert_eq!(results[0].project_path, "/project-a");
+    }
+
+    #[test]
+    fn fts_search_files_empty_query() {
+        let store = create_test_store();
+
+        let item = make_item("src/main.rs", "backend", "rust", vec![]);
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        let results = store.fts_search_files("", "/project", 10).unwrap();
+        assert!(results.is_empty(), "Empty query should return empty results");
+    }
+
+    #[test]
+    fn fts_search_symbols_special_chars_safe() {
+        let store = create_test_store();
+
+        let item = make_item(
+            "src/main.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1)],
+        );
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        // Queries with special characters should not cause SQL errors
+        let results = store.fts_search_symbols("test\"value OR DROP", 10).unwrap();
+        // Just verify it doesn't panic/error
+        let _ = results;
     }
 }

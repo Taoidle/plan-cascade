@@ -576,6 +576,76 @@ impl Database {
             [],
         )?;
 
+        // ====================================================================
+        // Feature-002: FTS5 Full-Text Search virtual tables
+        // ====================================================================
+
+        // Symbol FTS5 virtual table (contentless mode)
+        // Columns mirror file_symbols fields used for search.
+        // tokenize: unicode61 with diacritic removal and underscore as token char
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts USING fts5(
+                symbol_name,
+                file_path,
+                symbol_kind,
+                doc_comment,
+                signature,
+                content='',
+                contentless_delete=1,
+                tokenize=\"unicode61 remove_diacritics 2 tokenchars '_'\"
+            )"
+        )?;
+
+        // File path FTS5 virtual table (contentless mode)
+        // tokenize: unicode61 with underscore as token char (keeps snake_case terms together).
+        // Slashes and dots remain separators so "src/services/auth.rs" tokenizes as
+        // [src, services, auth, rs] — enabling prefix matching on path segments.
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS filepath_fts USING fts5(
+                file_path,
+                component,
+                language,
+                content='',
+                contentless_delete=1,
+                tokenize=\"unicode61 tokenchars '_'\"
+            )"
+        )?;
+
+        Ok(())
+    }
+
+    /// Populate FTS5 tables from existing file_symbols and file_index data.
+    ///
+    /// This is a migration helper for databases that were created before FTS5
+    /// was added. It reads all existing symbols and file index entries and
+    /// inserts them into the FTS5 virtual tables. Safe to call multiple times
+    /// (clears FTS tables before populating).
+    pub fn populate_fts_from_existing(&self) -> AppResult<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+        // Clear existing FTS data to avoid duplicates on re-run
+        conn.execute("DELETE FROM symbol_fts", [])?;
+        conn.execute("DELETE FROM filepath_fts", [])?;
+
+        // Populate symbol_fts from file_symbols + file_index
+        conn.execute_batch(
+            "INSERT INTO symbol_fts (rowid, symbol_name, file_path, symbol_kind, doc_comment, signature)
+             SELECT fs.id, fs.name, fi.file_path, fs.kind,
+                    COALESCE(fs.doc_comment, ''), COALESCE(fs.signature, '')
+             FROM file_symbols fs
+             JOIN file_index fi ON fi.id = fs.file_index_id"
+        )?;
+
+        // Populate filepath_fts from file_index
+        conn.execute_batch(
+            "INSERT INTO filepath_fts (rowid, file_path, component, language)
+             SELECT id, file_path, component, language
+             FROM file_index"
+        )?;
+
         Ok(())
     }
 
@@ -1263,5 +1333,145 @@ mod tests {
             .collect();
 
         assert!(indexes.contains(&"idx_episodic_records_project".to_string()));
+    }
+
+    // =========================================================================
+    // Feature-002: FTS5 Full-Text Search schema tests
+    // =========================================================================
+
+    #[test]
+    fn test_symbol_fts_table_created_on_fresh_db() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Verify symbol_fts exists by querying sqlite_master
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='symbol_fts'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "symbol_fts virtual table should exist");
+    }
+
+    #[test]
+    fn test_filepath_fts_table_created_on_fresh_db() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Verify filepath_fts exists by querying sqlite_master
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='filepath_fts'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "filepath_fts virtual table should exist");
+    }
+
+    #[test]
+    fn test_symbol_fts_accepts_inserts() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert into symbol_fts (contentless mode with manual rowid)
+        conn.execute(
+            "INSERT INTO symbol_fts (rowid, symbol_name, file_path, symbol_kind, doc_comment, signature)
+             VALUES (1, 'UserController', 'src/controller.rs', 'Struct', 'A user controller', 'pub struct UserController')",
+            [],
+        ).unwrap();
+
+        // Query via MATCH — in contentless mode, column values are NULL,
+        // so we verify by counting matches and checking rowid
+        let rowid: i64 = conn.query_row(
+            "SELECT rowid FROM symbol_fts WHERE symbol_fts MATCH '\"UserController\"*'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(rowid, 1);
+    }
+
+    #[test]
+    fn test_filepath_fts_accepts_inserts() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert into filepath_fts (contentless mode with manual rowid)
+        conn.execute(
+            "INSERT INTO filepath_fts (rowid, file_path, component, language)
+             VALUES (1, 'src/services/auth.rs', 'backend', 'rust')",
+            [],
+        ).unwrap();
+
+        // Query via MATCH — in contentless mode, column values are NULL,
+        // so we verify by counting matches and checking rowid
+        let rowid: i64 = conn.query_row(
+            "SELECT rowid FROM filepath_fts WHERE filepath_fts MATCH '\"auth\"*'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(rowid, 1);
+    }
+
+    #[test]
+    fn test_fts5_schema_idempotent() {
+        // Running init_schema twice should not fail
+        let db = create_test_db().unwrap();
+        // init_schema was already called in create_test_db; call it again
+        db.init_schema().unwrap();
+
+        let conn = db.get_connection().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='symbol_fts'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "symbol_fts should still exist after double init");
+    }
+
+    #[test]
+    fn test_fts5_migration_populates_from_existing_data() {
+        let db = create_test_db().unwrap();
+
+        // Insert test data into file_index and file_symbols
+        // Scope the connection so it's returned to pool before populate_fts
+        {
+            let conn = db.get_connection().unwrap();
+            conn.execute(
+                "INSERT INTO file_index (project_path, file_path, component, language, content_hash)
+                 VALUES ('/test', 'src/main.rs', 'backend', 'rust', 'hash1')",
+                [],
+            ).unwrap();
+
+            let file_id: i64 = conn.query_row(
+                "SELECT id FROM file_index WHERE file_path = 'src/main.rs'",
+                [],
+                |row| row.get(0),
+            ).unwrap();
+
+            conn.execute(
+                "INSERT INTO file_symbols (file_index_id, name, kind, line_number, signature, doc_comment, start_line, end_line)
+                 VALUES (?1, 'main', 'Function', 1, 'fn main()', 'Entry point', 1, 10)",
+                params![file_id],
+            ).unwrap();
+        }
+
+        // Run migration (populate_fts_from_existing)
+        db.populate_fts_from_existing().unwrap();
+
+        // Verify symbol_fts was populated
+        let conn = db.get_connection().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM symbol_fts WHERE symbol_fts MATCH '\"main\"*'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(count > 0, "symbol_fts should have been populated from existing data");
+
+        // Verify filepath_fts was populated
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM filepath_fts WHERE filepath_fts MATCH '\"main\"*'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(count > 0, "filepath_fts should have been populated from existing data");
     }
 }
