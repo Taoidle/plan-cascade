@@ -38,6 +38,8 @@ import {
   ErrorState,
 } from '../shared';
 import { AgentComposer } from '../AgentComposer';
+import { GraphWorkflowEditor } from '../GraphWorkflow';
+import { EvaluationDashboard } from '../Evaluation';
 import {
   PlayIcon,
   ResetIcon,
@@ -122,6 +124,12 @@ export function ExpertMode() {
             </TabTrigger>
             <TabTrigger value="composer">
               Agent Composer
+            </TabTrigger>
+            <TabTrigger value="graph-workflows">
+              Graph Workflows
+            </TabTrigger>
+            <TabTrigger value="model-evaluation">
+              Model Evaluation
             </TabTrigger>
           </Tabs.List>
 
@@ -240,6 +248,14 @@ export function ExpertMode() {
 
             <Tabs.Content value="composer" className="h-full">
               <AgentComposer />
+            </Tabs.Content>
+
+            <Tabs.Content value="graph-workflows" className="h-full">
+              <GraphWorkflowEditor />
+            </Tabs.Content>
+
+            <Tabs.Content value="model-evaluation" className="h-full">
+              <EvaluationDashboard />
             </Tabs.Content>
           </div>
 

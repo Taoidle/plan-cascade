@@ -163,6 +163,20 @@ pub enum AgentEvent {
         target: String,
         message: String,
     },
+    /// A graph node has started execution.
+    GraphNodeStarted {
+        node_id: String,
+    },
+    /// A graph node has completed execution.
+    GraphNodeCompleted {
+        node_id: String,
+        output: Option<String>,
+    },
+    /// A human review is required before continuing execution.
+    HumanReviewRequired {
+        node_id: String,
+        context: String,
+    },
     /// Agent execution completed successfully with optional output.
     Done {
         output: Option<String>,

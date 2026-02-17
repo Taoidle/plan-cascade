@@ -245,6 +245,20 @@ fn main() {
             plan_cascade_desktop::commands::agent_composer::create_agent_pipeline,
             plan_cascade_desktop::commands::agent_composer::update_agent_pipeline,
             plan_cascade_desktop::commands::agent_composer::delete_agent_pipeline,
+            // Graph Workflow commands
+            plan_cascade_desktop::commands::graph_workflow::list_graph_workflows,
+            plan_cascade_desktop::commands::graph_workflow::get_graph_workflow,
+            plan_cascade_desktop::commands::graph_workflow::create_graph_workflow,
+            plan_cascade_desktop::commands::graph_workflow::update_graph_workflow,
+            plan_cascade_desktop::commands::graph_workflow::delete_graph_workflow,
+            // Evaluation commands
+            plan_cascade_desktop::commands::evaluation::list_evaluators,
+            plan_cascade_desktop::commands::evaluation::create_evaluator,
+            plan_cascade_desktop::commands::evaluation::delete_evaluator,
+            plan_cascade_desktop::commands::evaluation::create_evaluation_run,
+            plan_cascade_desktop::commands::evaluation::list_evaluation_runs,
+            plan_cascade_desktop::commands::evaluation::get_evaluation_reports,
+            plan_cascade_desktop::commands::evaluation::delete_evaluation_run,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
