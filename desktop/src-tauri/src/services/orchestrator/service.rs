@@ -28,6 +28,7 @@ use super::analysis_store::{
 };
 use super::embedding_manager::EmbeddingManager;
 use super::embedding_service::EmbeddingService;
+use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
 use crate::models::orchestrator::{
     ExecutionProgress, ExecutionSession, ExecutionSessionSummary, ExecutionStatus,
@@ -296,8 +297,9 @@ pub struct OrchestratorService {
     active_sessions: Arc<RwLock<HashMap<String, ExecutionSession>>>,
     /// Persistent analysis artifacts store (run manifests, evidence, reports)
     analysis_store: AnalysisRunStore,
-    /// Optional index store for project summary injection into system prompt
-    index_store: Option<IndexStore>,
+    /// Optional index store for project summary injection into system prompt.
+    /// Wrapped in Arc to enable sharing with sub-agents without cloning.
+    index_store: Option<Arc<IndexStore>>,
     /// Detected language from the user's first message ("zh", "en", etc.)
     detected_language: Mutex<Option<String>>,
     /// Lifecycle hooks for cross-cutting concerns (memory, skills, etc.)
@@ -320,6 +322,8 @@ struct OrchestratorTaskSpawner {
     shared_embedding_service: Option<Arc<EmbeddingService>>,
     /// Optional EmbeddingManager for provider-aware semantic search in sub-agents (ADR-F002).
     shared_embedding_manager: Option<Arc<EmbeddingManager>>,
+    /// Optional HNSW index for O(log n) approximate nearest neighbor search in sub-agents.
+    shared_hnsw_index: Option<Arc<HnswIndex>>,
     /// Detected language from the user's message, propagated to sub-agents.
     detected_language: Option<String>,
 }

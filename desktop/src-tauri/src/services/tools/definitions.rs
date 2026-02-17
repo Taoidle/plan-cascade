@@ -301,7 +301,7 @@ fn task_tool() -> ToolDefinition {
 
     ToolDefinition {
         name: "Task".to_string(),
-        description: "Launch a sub-agent with its own independent context window to handle complex tasks. The sub-agent has access to all basic tools (Read, Write, Edit, Bash, Glob, Grep, LS, Cwd) but cannot spawn further sub-agents. Only the final summary is returned to you. Use this for codebase exploration, deep analysis, or focused implementations that benefit from a fresh context.".to_string(),
+        description: "Launch a sub-agent with its own independent context window to handle complex tasks. The sub-agent has access to basic tools (Read, Write, Edit, Bash, Glob, Grep, LS, Cwd), search tools (CodebaseSearch, WebFetch, WebSearch), and NotebookEdit, but cannot spawn further sub-agents. Only the final summary is returned to you. Use this for codebase exploration, deep analysis, or focused implementations that benefit from a fresh context.".to_string(),
         input_schema: ParameterSchema::object(
             Some("Task parameters"),
             properties,

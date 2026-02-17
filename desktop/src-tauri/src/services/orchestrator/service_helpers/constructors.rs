@@ -70,6 +70,7 @@ reports the index is unavailable.\n\n";
             self.shared_index_store.clone(),
             self.shared_embedding_service.clone(),
             self.shared_embedding_manager.clone(),
+            self.shared_hnsw_index.clone(),
         );
         let result = sub_agent
             .execute_story(&prompt, &get_basic_tool_definitions(), tx)
@@ -161,6 +162,7 @@ impl OrchestratorService {
         shared_index_store: Option<Arc<IndexStore>>,
         shared_embedding_service: Option<Arc<EmbeddingService>>,
         shared_embedding_manager: Option<Arc<EmbeddingManager>>,
+        shared_hnsw_index: Option<Arc<HnswIndex>>,
     ) -> Self {
         let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
@@ -186,6 +188,9 @@ impl OrchestratorService {
         if let Some(mgr) = &shared_embedding_manager {
             tool_executor.set_embedding_manager(Arc::clone(mgr));
         }
+        if let Some(hnsw) = &shared_hnsw_index {
+            tool_executor.set_hnsw_index(Arc::clone(hnsw));
+        }
 
         Self {
             config,
@@ -195,14 +200,14 @@ impl OrchestratorService {
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
-            index_store: None,
+            index_store: shared_index_store,
             detected_language: Mutex::new(None),
             hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
         }
     }
 
     /// Set the index store for project summary injection into the system prompt.
-    pub fn with_index_store(mut self, store: IndexStore) -> Self {
+    pub fn with_index_store(mut self, store: Arc<IndexStore>) -> Self {
         self.index_store = Some(store);
         self
     }
@@ -236,9 +241,9 @@ impl OrchestratorService {
         if let Err(e) = self.init_session_schema(&pool) {
             eprintln!("Failed to initialize session schema: {}", e);
         }
-        let store = IndexStore::new(pool.clone());
+        let store = Arc::new(IndexStore::new(pool.clone()));
         // Wire the index store to the tool executor so CodebaseSearch works
-        self.tool_executor.set_index_store(Arc::new(store.clone()));
+        self.tool_executor.set_index_store(Arc::clone(&store));
         self.index_store = Some(store);
         self.db_pool = Some(pool);
         self
