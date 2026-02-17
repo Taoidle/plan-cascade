@@ -23,6 +23,8 @@ interface IndexStatusEvent {
   total_symbols?: number;
   /** Number of embedding chunks stored. When > 0, semantic search is available. */
   embedding_chunks?: number;
+  /** LSP enrichment state: 'none' | 'enriching' | 'enriched' */
+  lsp_enrichment?: 'none' | 'enriching' | 'enriched' | null;
 }
 
 interface CommandResponse<T> {
@@ -47,6 +49,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [totalSymbols, setTotalSymbols] = useState(0);
   const [embeddingChunks, setEmbeddingChunks] = useState(0);
+  const [lspEnrichment, setLspEnrichment] = useState<'none' | 'enriching' | 'enriched'>('none');
 
   const applyEvent = useCallback((evt: IndexStatusEvent) => {
     setStatus(evt.status);
@@ -55,6 +58,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     setErrorMessage(evt.error_message ?? null);
     setTotalSymbols(evt.total_symbols ?? 0);
     setEmbeddingChunks(evt.embedding_chunks ?? 0);
+    setLspEnrichment(evt.lsp_enrichment ?? 'none');
   }, []);
 
   // Fetch initial status and listen for real-time updates
@@ -66,6 +70,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
       setErrorMessage(null);
       setTotalSymbols(0);
       setEmbeddingChunks(0);
+      setLspEnrichment('none');
       return;
     }
 
@@ -236,6 +241,37 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
               semanticReady
                 ? t('indexing.semanticSearchReady')
                 : t('indexing.semanticSearchUnavailable')
+            }
+          />
+        )}
+
+        {/* LSP enrichment badge */}
+        {!compact && lspEnrichment !== 'none' && (
+          <span
+            className={clsx(
+              'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium',
+              lspEnrichment === 'enriched'
+                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
+            )}
+          >
+            {lspEnrichment === 'enriched'
+              ? t('indexing.lspEnrichmentReady')
+              : t('indexing.lspEnrichmentInProgress')}
+          </span>
+        )}
+
+        {/* Compact LSP indicator (small dot) */}
+        {compact && lspEnrichment !== 'none' && (
+          <div
+            className={clsx(
+              'w-1.5 h-1.5 rounded-full flex-shrink-0',
+              lspEnrichment === 'enriched' ? 'bg-green-500' : 'bg-yellow-500'
+            )}
+            title={
+              lspEnrichment === 'enriched'
+                ? t('indexing.lspEnrichmentReady')
+                : t('indexing.lspEnrichmentInProgress')
             }
           />
         )}

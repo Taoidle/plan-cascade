@@ -1093,6 +1093,211 @@ impl IndexStore {
         Ok(rows)
     }
 
+    // =========================================================================
+    // LSP enrichment methods (feature-003, Phase 3)
+    // =========================================================================
+
+    /// Update the resolved type for a symbol by its rowid.
+    pub fn update_symbol_type(&self, rowid: i64, resolved_type: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE file_symbols SET resolved_type = ?2 WHERE id = ?1",
+            params![rowid, resolved_type],
+        )?;
+        Ok(())
+    }
+
+    /// Update the reference count for a symbol by its rowid.
+    pub fn update_reference_count(&self, rowid: i64, count: i64) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE file_symbols SET reference_count = ?2 WHERE id = ?1",
+            params![rowid, count],
+        )?;
+        Ok(())
+    }
+
+    /// Set whether a symbol is exported by its rowid.
+    pub fn set_symbol_exported(&self, rowid: i64, is_exported: bool) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE file_symbols SET is_exported = ?2 WHERE id = ?1",
+            params![rowid, is_exported as i32],
+        )?;
+        Ok(())
+    }
+
+    /// Insert a cross-reference record.
+    ///
+    /// Uses `INSERT OR IGNORE` to skip duplicates based on the unique constraint.
+    pub fn insert_cross_reference(
+        &self,
+        project_path: &str,
+        source_file: &str,
+        source_line: i64,
+        source_symbol: Option<&str>,
+        target_file: &str,
+        target_line: i64,
+        target_symbol: Option<&str>,
+        reference_kind: &str,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "INSERT OR IGNORE INTO cross_references
+             (project_path, source_file, source_line, source_symbol,
+              target_file, target_line, target_symbol, reference_kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                project_path,
+                source_file,
+                source_line,
+                source_symbol,
+                target_file,
+                target_line,
+                target_symbol,
+                reference_kind,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get symbols for LSP enrichment, grouped by language and file path.
+    ///
+    /// Returns `(symbol_rowid, file_path, symbol_name, line_number, language)` tuples.
+    pub fn get_symbols_for_enrichment(
+        &self,
+        project_path: &str,
+        language: &str,
+    ) -> AppResult<Vec<(i64, String, String, i64, String)>> {
+        let conn = self.get_connection()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT fs.id, fi.file_path, fs.name, fs.line_number, fi.language
+             FROM file_symbols fs
+             JOIN file_index fi ON fi.id = fs.file_index_id
+             WHERE fi.project_path = ?1 AND fi.language = ?2
+             ORDER BY fi.file_path, fs.line_number",
+        )?;
+
+        let rows = stmt
+            .query_map(params![project_path, language], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Clear all enrichment data for a project.
+    ///
+    /// Resets resolved_type, reference_count, is_exported columns and deletes
+    /// cross-references. Used before re-enrichment.
+    pub fn clear_enrichment_data(&self, project_path: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+
+        // Reset enrichment columns on file_symbols
+        conn.execute(
+            "UPDATE file_symbols SET resolved_type = NULL, reference_count = 0, is_exported = 0
+             WHERE file_index_id IN (
+                 SELECT id FROM file_index WHERE project_path = ?1
+             )",
+            params![project_path],
+        )?;
+
+        // Delete cross-references
+        conn.execute(
+            "DELETE FROM cross_references WHERE project_path = ?1",
+            params![project_path],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get cross-references for a specific file in a project.
+    pub fn get_cross_references(
+        &self,
+        project_path: &str,
+        file_path: &str,
+    ) -> AppResult<Vec<CrossReference>> {
+        let conn = self.get_connection()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, source_file, source_line, source_symbol,
+                    target_file, target_line, target_symbol, reference_kind
+             FROM cross_references
+             WHERE project_path = ?1 AND (source_file = ?2 OR target_file = ?2)
+             ORDER BY source_file, source_line",
+        )?;
+
+        let rows = stmt
+            .query_map(params![project_path, file_path], |row| {
+                Ok(CrossReference {
+                    id: row.get(0)?,
+                    source_file: row.get(1)?,
+                    source_line: row.get(2)?,
+                    source_symbol: row.get(3)?,
+                    target_file: row.get(4)?,
+                    target_line: row.get(5)?,
+                    target_symbol: row.get(6)?,
+                    reference_kind: row.get(7)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Insert or update an LSP server detection cache entry.
+    pub fn upsert_lsp_server(
+        &self,
+        language: &str,
+        binary_path: &str,
+        server_name: &str,
+        version: Option<&str>,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO lsp_servers (language, binary_path, server_name, version, detected_at)
+             VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP)",
+            params![language, binary_path, server_name, version],
+        )?;
+        Ok(())
+    }
+
+    /// Get all cached LSP server entries.
+    pub fn get_lsp_servers(&self) -> AppResult<Vec<LspServerInfo>> {
+        let conn = self.get_connection()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT language, binary_path, server_name, version, detected_at
+             FROM lsp_servers
+             ORDER BY language",
+        )?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(LspServerInfo {
+                    language: row.get(0)?,
+                    binary_path: row.get(1)?,
+                    server_name: row.get(2)?,
+                    version: row.get(3)?,
+                    detected_at: row.get(4)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
     fn get_connection(
         &self,
     ) -> AppResult<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>> {
@@ -1100,6 +1305,29 @@ impl IndexStore {
             .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))
     }
+}
+
+/// A cross-reference record from the database.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrossReference {
+    pub id: i64,
+    pub source_file: String,
+    pub source_line: i64,
+    pub source_symbol: Option<String>,
+    pub target_file: String,
+    pub target_line: i64,
+    pub target_symbol: Option<String>,
+    pub reference_kind: String,
+}
+
+/// An LSP server info record from the cache table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LspServerInfo {
+    pub language: String,
+    pub binary_path: String,
+    pub server_name: String,
+    pub version: Option<String>,
+    pub detected_at: Option<String>,
 }
 
 /// Sanitize a user query string for safe use in FTS5 MATCH expressions.
@@ -2694,5 +2922,251 @@ mod tests {
         let results = store.fts_search_symbols("test\"value OR DROP", 10).unwrap();
         // Just verify it doesn't panic/error
         let _ = results;
+    }
+
+    // =========================================================================
+    // LSP enrichment method tests (feature-003, Phase 3)
+    // =========================================================================
+
+    fn setup_lsp_test_data(store: &IndexStore) -> i64 {
+        let item = make_item(
+            "src/main.rs",
+            "backend",
+            "rust",
+            vec![
+                SymbolInfo::basic("my_func".to_string(), SymbolKind::Function, 10),
+                SymbolInfo::basic("MyStruct".to_string(), SymbolKind::Struct, 20),
+            ],
+        );
+        store.upsert_file_index("/test", &item, "h1").unwrap();
+
+        // Return the first symbol's rowid (scope connection to avoid pool exhaustion)
+        let rowid: i64 = {
+            let conn = store.get_connection().unwrap();
+            conn.query_row(
+                "SELECT id FROM file_symbols WHERE name = 'my_func'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        rowid
+    }
+
+    #[test]
+    fn test_update_symbol_type() {
+        let store = create_test_store();
+        let rowid = setup_lsp_test_data(&store);
+
+        store.update_symbol_type(rowid, "fn() -> i32").unwrap();
+
+        let conn = store.get_connection().unwrap();
+        let resolved: String = conn
+            .query_row(
+                "SELECT resolved_type FROM file_symbols WHERE id = ?1",
+                params![rowid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(resolved, "fn() -> i32");
+    }
+
+    #[test]
+    fn test_update_reference_count() {
+        let store = create_test_store();
+        let rowid = setup_lsp_test_data(&store);
+
+        store.update_reference_count(rowid, 42).unwrap();
+
+        let conn = store.get_connection().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT reference_count FROM file_symbols WHERE id = ?1",
+                params![rowid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 42);
+    }
+
+    #[test]
+    fn test_set_symbol_exported() {
+        let store = create_test_store();
+        let rowid = setup_lsp_test_data(&store);
+
+        store.set_symbol_exported(rowid, true).unwrap();
+
+        let conn = store.get_connection().unwrap();
+        let exported: i32 = conn
+            .query_row(
+                "SELECT is_exported FROM file_symbols WHERE id = ?1",
+                params![rowid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exported, 1);
+    }
+
+    #[test]
+    fn test_insert_cross_reference() {
+        let store = create_test_store();
+
+        store
+            .insert_cross_reference(
+                "/test",
+                "src/main.rs",
+                10,
+                Some("call_foo"),
+                "src/lib.rs",
+                5,
+                Some("foo"),
+                "call",
+            )
+            .unwrap();
+
+        let refs = store.get_cross_references("/test", "src/main.rs").unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].source_file, "src/main.rs");
+        assert_eq!(refs[0].target_file, "src/lib.rs");
+        assert_eq!(refs[0].reference_kind, "call");
+    }
+
+    #[test]
+    fn test_insert_cross_reference_ignores_duplicates() {
+        let store = create_test_store();
+
+        // Insert the same cross-reference twice
+        store
+            .insert_cross_reference("/test", "a.rs", 1, None, "b.rs", 5, None, "usage")
+            .unwrap();
+        store
+            .insert_cross_reference("/test", "a.rs", 1, None, "b.rs", 5, None, "usage")
+            .unwrap();
+
+        let refs = store.get_cross_references("/test", "a.rs").unwrap();
+        assert_eq!(refs.len(), 1, "Duplicate should be ignored");
+    }
+
+    #[test]
+    fn test_get_symbols_for_enrichment() {
+        let store = create_test_store();
+
+        let item = make_item(
+            "src/main.rs",
+            "backend",
+            "rust",
+            vec![
+                SymbolInfo::basic("fn1".to_string(), SymbolKind::Function, 1),
+                SymbolInfo::basic("fn2".to_string(), SymbolKind::Function, 10),
+            ],
+        );
+        store.upsert_file_index("/test", &item, "h1").unwrap();
+
+        let item2 = make_item(
+            "src/app.py",
+            "backend",
+            "python",
+            vec![SymbolInfo::basic("py_fn".to_string(), SymbolKind::Function, 1)],
+        );
+        store.upsert_file_index("/test", &item2, "h2").unwrap();
+
+        // Query Rust symbols only
+        let rust_symbols = store.get_symbols_for_enrichment("/test", "rust").unwrap();
+        assert_eq!(rust_symbols.len(), 2);
+        assert_eq!(rust_symbols[0].2, "fn1"); // symbol_name
+        assert_eq!(rust_symbols[1].2, "fn2");
+
+        // Query Python symbols only
+        let py_symbols = store.get_symbols_for_enrichment("/test", "python").unwrap();
+        assert_eq!(py_symbols.len(), 1);
+        assert_eq!(py_symbols[0].2, "py_fn");
+    }
+
+    #[test]
+    fn test_clear_enrichment_data() {
+        let store = create_test_store();
+        let rowid = setup_lsp_test_data(&store);
+
+        // Set some enrichment data
+        store.update_symbol_type(rowid, "fn() -> i32").unwrap();
+        store.update_reference_count(rowid, 5).unwrap();
+        store.set_symbol_exported(rowid, true).unwrap();
+        store
+            .insert_cross_reference("/test", "src/main.rs", 10, None, "b.rs", 5, None, "usage")
+            .unwrap();
+
+        // Clear enrichment data
+        store.clear_enrichment_data("/test").unwrap();
+
+        // Verify symbol fields are reset (use store methods instead of raw conn)
+        // Query the symbol through a fresh connection scope
+        {
+            let conn = store.get_connection().unwrap();
+            let (rt, rc, ex): (Option<String>, i64, i32) = conn
+                .query_row(
+                    "SELECT resolved_type, reference_count, is_exported FROM file_symbols WHERE id = ?1",
+                    params![rowid],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+
+            assert!(rt.is_none(), "resolved_type should be NULL after clear");
+            assert_eq!(rc, 0, "reference_count should be 0 after clear");
+            assert_eq!(ex, 0, "is_exported should be 0 after clear");
+        }
+
+        let refs = store.get_cross_references("/test", "src/main.rs").unwrap();
+        assert!(refs.is_empty(), "cross_references should be empty after clear");
+    }
+
+    #[test]
+    fn test_upsert_lsp_server() {
+        let store = create_test_store();
+
+        store
+            .upsert_lsp_server("rust", "/usr/bin/rust-analyzer", "rust-analyzer", Some("v1.0"))
+            .unwrap();
+
+        let servers = store.get_lsp_servers().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].language, "rust");
+        assert_eq!(servers[0].binary_path, "/usr/bin/rust-analyzer");
+        assert_eq!(servers[0].server_name, "rust-analyzer");
+        assert_eq!(servers[0].version, Some("v1.0".to_string()));
+    }
+
+    #[test]
+    fn test_upsert_lsp_server_replaces_existing() {
+        let store = create_test_store();
+
+        store
+            .upsert_lsp_server("rust", "/old/path", "rust-analyzer", Some("v1.0"))
+            .unwrap();
+        store
+            .upsert_lsp_server("rust", "/new/path", "rust-analyzer", Some("v2.0"))
+            .unwrap();
+
+        let servers = store.get_lsp_servers().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].binary_path, "/new/path");
+        assert_eq!(servers[0].version, Some("v2.0".to_string()));
+    }
+
+    #[test]
+    fn test_get_lsp_servers_multiple() {
+        let store = create_test_store();
+
+        store
+            .upsert_lsp_server("go", "/usr/bin/gopls", "gopls", None)
+            .unwrap();
+        store
+            .upsert_lsp_server("rust", "/usr/bin/rust-analyzer", "rust-analyzer", Some("v1"))
+            .unwrap();
+
+        let servers = store.get_lsp_servers().unwrap();
+        assert_eq!(servers.len(), 2);
+        // Ordered by language
+        assert_eq!(servers[0].language, "go");
+        assert_eq!(servers[1].language, "rust");
     }
 }

@@ -57,6 +57,7 @@ keyring = "3"
 
 # Error handling
 thiserror = "2"
+anyhow = "1"
 
 # Async trait support
 async-trait = "0.1"
@@ -123,6 +124,12 @@ mini-moka = "0.10"
 
 # HNSW approximate nearest neighbor search
 hnsw_rs = "0.3"
+
+# LSP type definitions for language server protocol enrichment
+lsp-types = "0.97"
+
+# Concurrent hash map for LSP request correlation
+dashmap = "6"
 
 # Tree-sitter parsing for accurate symbol extraction
 tree-sitter = "0.24"

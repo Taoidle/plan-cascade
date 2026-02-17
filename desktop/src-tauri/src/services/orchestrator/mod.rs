@@ -22,6 +22,9 @@ pub mod hybrid_search;
 pub mod index_manager;
 pub mod index_store;
 mod service;
+pub mod lsp_client;
+pub mod lsp_enricher;
+pub mod lsp_registry;
 pub mod tree_sitter_parser;
 
 pub use hooks::{AgenticHooks, BeforeToolResult, HookContext, SessionSummary, build_default_hooks};

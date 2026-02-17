@@ -12,4 +12,5 @@ export { QualityGatesSection } from './QualityGatesSection';
 export { PhaseAgentSection } from './PhaseAgentSection';
 export { ImportExportSection } from './ImportExportSection';
 export { EmbeddingSection } from './EmbeddingSection';
+export { LspSection } from './LspSection';
 export { SetupWizard } from './SetupWizard';

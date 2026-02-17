@@ -461,6 +461,67 @@ impl Database {
         )?;
 
         // ====================================================================
+        // Feature-003 (Phase 3): LSP Enhancement Layer
+        // ====================================================================
+
+        // Migration: add LSP enrichment columns to file_symbols table.
+        // These columns are populated asynchronously by the LspEnricher after
+        // Tree-sitter indexing completes. Defaults preserve backward compatibility.
+        {
+            let has_resolved_type =
+                Self::table_has_column(&conn, "file_symbols", "resolved_type");
+            if !has_resolved_type {
+                let _ = conn.execute_batch(
+                    "ALTER TABLE file_symbols ADD COLUMN resolved_type TEXT;
+                     ALTER TABLE file_symbols ADD COLUMN reference_count INTEGER DEFAULT 0;
+                     ALTER TABLE file_symbols ADD COLUMN is_exported BOOLEAN DEFAULT 0;",
+                );
+            }
+        }
+
+        // Cross-reference table: source -> target relationships from LSP
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cross_references (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_path TEXT NOT NULL,
+                source_file TEXT NOT NULL,
+                source_line INTEGER NOT NULL,
+                source_symbol TEXT,
+                target_file TEXT NOT NULL,
+                target_line INTEGER NOT NULL,
+                target_symbol TEXT,
+                reference_kind TEXT NOT NULL DEFAULT 'usage',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_path, source_file, source_line, target_file, target_line)
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cross_refs_source
+             ON cross_references(project_path, source_file)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cross_refs_target
+             ON cross_references(project_path, target_file, target_symbol)",
+            [],
+        )?;
+
+        // LSP server detection cache table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS lsp_servers (
+                language TEXT PRIMARY KEY,
+                binary_path TEXT NOT NULL,
+                server_name TEXT NOT NULL,
+                version TEXT,
+                detected_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        // ====================================================================
         // Feature-001: Project Memory System tables
         // ====================================================================
 
@@ -1333,6 +1394,204 @@ mod tests {
             .collect();
 
         assert!(indexes.contains(&"idx_episodic_records_project".to_string()));
+    }
+
+    // =========================================================================
+    // Feature-003 (Phase 3): LSP Enhancement Layer schema tests
+    // =========================================================================
+
+    #[test]
+    fn test_lsp_columns_added_to_file_symbols() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Verify the LSP columns exist
+        assert!(Database::table_has_column(&conn, "file_symbols", "resolved_type"));
+        assert!(Database::table_has_column(&conn, "file_symbols", "reference_count"));
+        assert!(Database::table_has_column(&conn, "file_symbols", "is_exported"));
+    }
+
+    #[test]
+    fn test_lsp_columns_have_correct_defaults() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert a file_index and file_symbol to verify defaults
+        conn.execute(
+            "INSERT INTO file_index (project_path, file_path, content_hash)
+             VALUES ('/test', 'src/main.rs', 'hash1')",
+            [],
+        ).unwrap();
+
+        let file_id: i64 = conn.query_row(
+            "SELECT id FROM file_index WHERE file_path = 'src/main.rs'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO file_symbols (file_index_id, name, kind, line_number, start_line, end_line)
+             VALUES (?1, 'test_fn', 'Function', 1, 1, 10)",
+            params![file_id],
+        ).unwrap();
+
+        // Check defaults
+        let (resolved_type, reference_count, is_exported): (Option<String>, i64, i64) = conn.query_row(
+            "SELECT resolved_type, reference_count, is_exported FROM file_symbols WHERE name = 'test_fn'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+
+        assert!(resolved_type.is_none(), "resolved_type should default to NULL");
+        assert_eq!(reference_count, 0, "reference_count should default to 0");
+        assert_eq!(is_exported, 0, "is_exported should default to 0");
+    }
+
+    #[test]
+    fn test_cross_references_table_created() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cross_references'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "cross_references table should exist");
+    }
+
+    #[test]
+    fn test_cross_references_crud() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert a cross-reference
+        conn.execute(
+            "INSERT INTO cross_references (project_path, source_file, source_line, source_symbol,
+             target_file, target_line, target_symbol, reference_kind)
+             VALUES ('/test', 'src/main.rs', 10, 'call_foo', 'src/lib.rs', 5, 'foo', 'call')",
+            [],
+        ).unwrap();
+
+        // Query it back
+        let (sf, sl, tf, tl, kind): (String, i64, String, i64, String) = conn.query_row(
+            "SELECT source_file, source_line, target_file, target_line, reference_kind
+             FROM cross_references WHERE project_path = '/test'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        ).unwrap();
+
+        assert_eq!(sf, "src/main.rs");
+        assert_eq!(sl, 10);
+        assert_eq!(tf, "src/lib.rs");
+        assert_eq!(tl, 5);
+        assert_eq!(kind, "call");
+    }
+
+    #[test]
+    fn test_cross_references_unique_constraint() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        conn.execute(
+            "INSERT INTO cross_references (project_path, source_file, source_line, target_file, target_line)
+             VALUES ('/test', 'a.rs', 1, 'b.rs', 5)",
+            [],
+        ).unwrap();
+
+        // Duplicate should fail
+        let result = conn.execute(
+            "INSERT INTO cross_references (project_path, source_file, source_line, target_file, target_line)
+             VALUES ('/test', 'a.rs', 1, 'b.rs', 5)",
+            [],
+        );
+        assert!(result.is_err(), "Duplicate cross-reference should be rejected");
+    }
+
+    #[test]
+    fn test_cross_references_indexes_exist() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='cross_references'"
+        ).unwrap();
+        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(indexes.contains(&"idx_cross_refs_source".to_string()));
+        assert!(indexes.contains(&"idx_cross_refs_target".to_string()));
+    }
+
+    #[test]
+    fn test_lsp_servers_table_created() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='lsp_servers'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "lsp_servers table should exist");
+    }
+
+    #[test]
+    fn test_lsp_servers_crud() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert
+        conn.execute(
+            "INSERT INTO lsp_servers (language, binary_path, server_name, version)
+             VALUES ('rust', '/usr/bin/rust-analyzer', 'rust-analyzer', '2024-01-01')",
+            [],
+        ).unwrap();
+
+        // Query
+        let (lang, path, name): (String, String, String) = conn.query_row(
+            "SELECT language, binary_path, server_name FROM lsp_servers WHERE language = 'rust'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+
+        assert_eq!(lang, "rust");
+        assert_eq!(path, "/usr/bin/rust-analyzer");
+        assert_eq!(name, "rust-analyzer");
+
+        // Upsert (replace)
+        conn.execute(
+            "INSERT OR REPLACE INTO lsp_servers (language, binary_path, server_name, version)
+             VALUES ('rust', '/new/path/rust-analyzer', 'rust-analyzer', '2024-02-01')",
+            [],
+        ).unwrap();
+
+        let new_path: String = conn.query_row(
+            "SELECT binary_path FROM lsp_servers WHERE language = 'rust'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(new_path, "/new/path/rust-analyzer");
+    }
+
+    #[test]
+    fn test_lsp_schema_migration_idempotent() {
+        // Running init_schema twice should not fail
+        let db = create_test_db().unwrap();
+        db.init_schema().unwrap();
+
+        let conn = db.get_connection().unwrap();
+        // Tables should still exist
+        assert!(Database::table_has_column(&conn, "file_symbols", "resolved_type"));
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cross_references'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
     }
 
     // =========================================================================

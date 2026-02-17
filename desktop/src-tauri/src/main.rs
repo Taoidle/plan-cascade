@@ -4,6 +4,7 @@
 
 use plan_cascade_desktop::commands::analytics::AnalyticsState;
 use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
+use plan_cascade_desktop::commands::lsp::LspState;
 use plan_cascade_desktop::commands::mcp::McpRuntimeState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
@@ -25,6 +26,7 @@ fn main() {
         .manage(StandaloneState::new())
         .manage(SpecInterviewState::new())
         .manage(McpRuntimeState::new())
+        .manage(LspState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -215,6 +217,11 @@ fn main() {
             plan_cascade_desktop::commands::embedding::check_embedding_provider_health,
             plan_cascade_desktop::commands::embedding::set_embedding_api_key,
             plan_cascade_desktop::commands::embedding::get_embedding_api_key,
+            // LSP enrichment commands
+            plan_cascade_desktop::commands::lsp::detect_lsp_servers,
+            plan_cascade_desktop::commands::lsp::get_lsp_status,
+            plan_cascade_desktop::commands::lsp::trigger_lsp_enrichment,
+            plan_cascade_desktop::commands::lsp::get_enrichment_report,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
