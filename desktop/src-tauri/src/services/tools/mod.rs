@@ -44,7 +44,8 @@ pub use prompt_fallback::{
     parse_tool_calls, ParsedToolCall,
 };
 pub use system_prompt::{
-    build_project_summary, build_system_prompt, detect_language, merge_system_prompts,
+    build_project_summary, build_skills_section, build_system_prompt,
+    build_system_prompt_with_memories, detect_language, merge_system_prompts,
 };
 pub use task_spawner::{TaskContext, TaskExecutionResult, TaskSpawner};
 pub use trait_def::{Tool, ToolExecutionContext, ToolRegistry};

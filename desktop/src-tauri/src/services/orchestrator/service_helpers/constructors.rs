@@ -112,11 +112,17 @@ impl OrchestratorService {
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
             index_store: None,
             detected_language: Mutex::new(None),
-            hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
+            hooks: crate::services::orchestrator::hooks::build_default_hooks(),
+            selected_skills: None,
+            loaded_memories: None,
         }
     }
 
-    /// Create a sub-agent orchestrator (no Task tool, no database, inherits cancellation)
+    /// Create a sub-agent orchestrator (no Task tool, no database, inherits cancellation).
+    ///
+    /// Sub-agents use empty hooks (`AgenticHooks::new()`) because they have
+    /// independent context windows and should not inherit the parent's
+    /// memory/skill lifecycle hooks.
     pub(super) fn new_sub_agent(config: OrchestratorConfig, cancellation_token: CancellationToken) -> Self {
         let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
@@ -142,6 +148,8 @@ impl OrchestratorService {
             index_store: None,
             detected_language: Mutex::new(None),
             hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
+            selected_skills: None,
+            loaded_memories: None,
         }
     }
 
@@ -203,6 +211,8 @@ impl OrchestratorService {
             index_store: shared_index_store,
             detected_language: Mutex::new(None),
             hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
+            selected_skills: None,
+            loaded_memories: None,
         }
     }
 
@@ -230,6 +240,53 @@ impl OrchestratorService {
     /// Set lifecycle hooks for cross-cutting concerns (memory, skills, etc.).
     pub fn with_hooks(mut self, hooks: crate::services::orchestrator::hooks::AgenticHooks) -> Self {
         self.hooks = hooks;
+        self
+    }
+
+    /// Register skill-related lifecycle hooks.
+    ///
+    /// Wires the SkillIndex into the agentic lifecycle so that:
+    /// - `on_session_start` auto-detects applicable skills for the project
+    /// - `on_user_message` refines skill selection based on message content
+    ///
+    /// The selected skills are stored in the provided `selected_skills` shared
+    /// state, which is also retained by the orchestrator for system prompt injection.
+    pub fn with_skill_hooks(
+        mut self,
+        skill_index: std::sync::Arc<tokio::sync::RwLock<crate::services::skills::model::SkillIndex>>,
+        policy: crate::services::skills::model::SelectionPolicy,
+        selected_skills: std::sync::Arc<tokio::sync::RwLock<Vec<crate::services::skills::model::SkillMatch>>>,
+    ) -> Self {
+        crate::services::orchestrator::hooks::register_skill_hooks(
+            &mut self.hooks,
+            skill_index,
+            policy,
+            selected_skills.clone(),
+        );
+        self.selected_skills = Some(selected_skills);
+        self
+    }
+
+    /// Register memory-related lifecycle hooks.
+    ///
+    /// Wires the ProjectMemoryStore into the agentic lifecycle so that:
+    /// - `on_session_start` loads relevant memories from the store
+    /// - `on_session_end` extracts new memories from the session summary
+    /// - `on_compaction` extracts key information from compacted content
+    ///
+    /// The loaded memories are stored in the provided `loaded_memories` shared
+    /// state, which is also retained by the orchestrator for system prompt injection.
+    pub fn with_memory_hooks(
+        mut self,
+        memory_store: std::sync::Arc<crate::services::memory::store::ProjectMemoryStore>,
+        loaded_memories: std::sync::Arc<tokio::sync::RwLock<Vec<crate::services::memory::store::MemoryEntry>>>,
+    ) -> Self {
+        crate::services::orchestrator::hooks::register_memory_hooks(
+            &mut self.hooks,
+            memory_store,
+            loaded_memories.clone(),
+        );
+        self.loaded_memories = Some(loaded_memories);
         self
     }
 

@@ -2524,14 +2524,34 @@ impl OrchestratorService {
         let detected_lang = self.detected_language.lock().unwrap();
         let language = detected_lang.as_deref().unwrap_or("en");
 
-        let mut prompt = build_system_prompt(
+        // Read loaded memories from shared state (populated by memory hooks)
+        let memories_snapshot: Option<Vec<crate::services::memory::store::MemoryEntry>> =
+            if let Some(ref mem_lock) = self.loaded_memories {
+                // Use try_read to avoid blocking; fall back to None if lock is held
+                mem_lock.try_read().ok().map(|guard| guard.clone())
+            } else {
+                None
+            };
+
+        let mut prompt = build_system_prompt_with_memories(
             &self.config.project_root,
             prompt_tools,
             project_summary.as_ref(),
+            memories_snapshot.as_deref(),
             provider_name,
             model_name,
             language,
         );
+
+        // Inject selected skills section (populated by skill hooks)
+        if let Some(ref skills_lock) = self.selected_skills {
+            if let Ok(guard) = skills_lock.try_read() {
+                if !guard.is_empty() {
+                    let skills_section = build_skills_section(&guard);
+                    prompt.push_str(&skills_section);
+                }
+            }
+        }
         drop(detected_lang);
 
         // Determine effective fallback mode:
