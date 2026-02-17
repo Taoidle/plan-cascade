@@ -239,6 +239,12 @@ fn main() {
             plan_cascade_desktop::commands::guardrails::remove_custom_rule,
             plan_cascade_desktop::commands::guardrails::get_trigger_log,
             plan_cascade_desktop::commands::guardrails::clear_trigger_log,
+            // Agent Composer commands
+            plan_cascade_desktop::commands::agent_composer::list_agent_pipelines,
+            plan_cascade_desktop::commands::agent_composer::get_agent_pipeline,
+            plan_cascade_desktop::commands::agent_composer::create_agent_pipeline,
+            plan_cascade_desktop::commands::agent_composer::update_agent_pipeline,
+            plan_cascade_desktop::commands::agent_composer::delete_agent_pipeline,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

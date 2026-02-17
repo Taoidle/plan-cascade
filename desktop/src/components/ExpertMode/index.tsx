@@ -37,6 +37,7 @@ import {
   QualityGateBadge,
   ErrorState,
 } from '../shared';
+import { AgentComposer } from '../AgentComposer';
 import {
   PlayIcon,
   ResetIcon,
@@ -118,6 +119,9 @@ export function ExpertMode() {
             </TabTrigger>
             <TabTrigger value="logs" disabled={logs.length === 0}>
               {t('tabs.logs')}
+            </TabTrigger>
+            <TabTrigger value="composer">
+              Agent Composer
             </TabTrigger>
           </Tabs.List>
 
@@ -232,6 +236,10 @@ export function ExpertMode() {
 
             <Tabs.Content value="logs" className="h-full p-6">
               <LogsView />
+            </Tabs.Content>
+
+            <Tabs.Content value="composer" className="h-full">
+              <AgentComposer />
             </Tabs.Content>
           </div>
 

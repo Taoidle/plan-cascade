@@ -4,6 +4,7 @@
 //! Services handle the core functionality and are called by commands.
 
 pub mod agent;
+pub mod agent_composer;
 pub mod agent_executor;
 pub mod analytics;
 pub mod claude_code;
