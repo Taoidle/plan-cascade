@@ -11,7 +11,8 @@
     "importExport": "Import/Export",
     "lsp": "LSP Servers",
     "plugins": "Plugins",
-    "security": "Security"
+    "security": "Security",
+    "network": "Network"
   },
 
   "general": {
@@ -585,6 +586,67 @@
       "colDirection": "Direction",
       "colResult": "Result",
       "colContent": "Content"
+    }
+  },
+
+  "network": {
+    "title": "Network Settings",
+    "description": "Configure HTTP proxy for LLM and embedding provider connections.",
+
+    "globalProxy": {
+      "title": "Global Proxy",
+      "enable": "Enable proxy",
+      "protocol": "Protocol",
+      "host": "Host",
+      "hostPlaceholder": "e.g., 127.0.0.1 or proxy.example.com",
+      "port": "Port",
+      "auth": "Authentication",
+      "username": "Username",
+      "usernamePlaceholder": "Proxy username",
+      "password": "Password",
+      "passwordPlaceholder": "Proxy password",
+      "testConnection": "Test Connection",
+      "testing": "Testing...",
+      "save": "Save Proxy",
+      "saving": "Saving...",
+      "saveSuccess": "Proxy configuration saved",
+      "saveError": "Failed to save proxy configuration",
+      "disable": "Disable Proxy",
+      "disabled": "No global proxy configured"
+    },
+
+    "testResult": {
+      "success": "Connection successful",
+      "failed": "Connection failed",
+      "latency": "Latency: {{ms}}ms"
+    },
+
+    "providerProxy": {
+      "title": "Provider Proxy Settings",
+      "llmProviders": "LLM Providers",
+      "embeddingProviders": "Embedding Providers",
+      "claudeCode": "Claude Code",
+      "useGlobal": "Use Global",
+      "noProxy": "No Proxy",
+      "custom": "Custom",
+      "localNote": "Local — no proxy needed",
+      "customConfig": "Custom Proxy for {{provider}}"
+    },
+
+    "providers": {
+      "anthropic": "Anthropic",
+      "openai": "OpenAI",
+      "deepseek": "DeepSeek",
+      "qwen": "Qwen",
+      "glm": "GLM",
+      "minimax": "MiniMax",
+      "ollama": "Ollama",
+      "claude_code": "Claude Code",
+      "embedding_openai": "OpenAI Embedding",
+      "embedding_qwen": "Qwen Embedding",
+      "embedding_glm": "GLM Embedding",
+      "embedding_ollama": "Ollama Embedding",
+      "embedding_tfidf": "TF-IDF"
     }
   }
 }

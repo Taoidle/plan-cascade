@@ -13,6 +13,7 @@ use super::types::{
     MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
     ToolCallReliability, ToolDefinition, UsageStats,
 };
+use crate::services::proxy::build_http_client;
 use crate::services::streaming::adapters::DeepSeekAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
 
@@ -28,10 +29,8 @@ pub struct DeepSeekProvider {
 impl DeepSeekProvider {
     /// Create a new DeepSeek provider with the given configuration
     pub fn new(config: ProviderConfig) -> Self {
-        Self {
-            config,
-            client: reqwest::Client::new(),
-        }
+        let client = build_http_client(config.proxy.as_ref());
+        Self { config, client }
     }
 
     /// Get the API base URL

@@ -251,6 +251,12 @@ fn main() {
             plan_cascade_desktop::commands::graph_workflow::create_graph_workflow,
             plan_cascade_desktop::commands::graph_workflow::update_graph_workflow,
             plan_cascade_desktop::commands::graph_workflow::delete_graph_workflow,
+            // Proxy commands
+            plan_cascade_desktop::commands::proxy::get_proxy_config,
+            plan_cascade_desktop::commands::proxy::set_proxy_config,
+            plan_cascade_desktop::commands::proxy::get_provider_proxy_strategy,
+            plan_cascade_desktop::commands::proxy::set_provider_proxy_strategy,
+            plan_cascade_desktop::commands::proxy::test_proxy,
             // Evaluation commands
             plan_cascade_desktop::commands::evaluation::list_evaluators,
             plan_cascade_desktop::commands::evaluation::create_evaluator,

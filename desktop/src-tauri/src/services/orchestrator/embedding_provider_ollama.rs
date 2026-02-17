@@ -19,6 +19,7 @@ use super::embedding_provider::{
     EmbeddingError, EmbeddingProvider, EmbeddingProviderConfig, EmbeddingProviderType,
     EmbeddingResult,
 };
+use crate::services::proxy::{build_http_client, ProxyConfig};
 
 /// Default Ollama API endpoint.
 const OLLAMA_DEFAULT_URL: &str = "http://localhost:11434";
@@ -75,7 +76,7 @@ impl OllamaEmbeddingProvider {
             .unwrap_or(OLLAMA_DEFAULT_URL)
             .to_string();
 
-        let client = Self::create_client(&base_url);
+        let client = Self::create_client(&base_url, config.proxy.as_ref());
 
         let initial_dimension = config.dimension.unwrap_or(DEFAULT_DIMENSION);
         let display_name = format!("Ollama ({})", model);
@@ -93,13 +94,18 @@ impl OllamaEmbeddingProvider {
     ///
     /// Parses the URL to extract host and port for `Ollama::new()`.
     /// Falls back to `Ollama::default()` if parsing fails.
-    fn create_client(base_url: &str) -> Ollama {
+    fn create_client(base_url: &str, proxy: Option<&ProxyConfig>) -> Ollama {
         if let Ok(parsed) = url::Url::parse(base_url) {
             let scheme = parsed.scheme();
             let host = parsed.host_str().unwrap_or("localhost");
             let port = parsed.port().unwrap_or(11434);
             let host_url = format!("{}://{}", scheme, host);
-            Ollama::new(host_url, port)
+            if proxy.is_some() {
+                let http_client = build_http_client(proxy);
+                Ollama::new_with_client(host_url, port, http_client)
+            } else {
+                Ollama::new(host_url, port)
+            }
         } else {
             Ollama::default()
         }

@@ -11,6 +11,7 @@ use super::types::{
     LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
     ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolDefinition, UsageStats,
 };
+use crate::services::proxy::build_http_client;
 use crate::services::streaming::adapters::ClaudeApiAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
 
@@ -29,10 +30,8 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     /// Create a new Anthropic provider with the given configuration
     pub fn new(config: ProviderConfig) -> Self {
-        Self {
-            config,
-            client: reqwest::Client::new(),
-        }
+        let client = build_http_client(config.proxy.as_ref());
+        Self { config, client }
     }
 
     /// Get the API base URL

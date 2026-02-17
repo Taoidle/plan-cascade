@@ -24,6 +24,7 @@ use super::types::{
     MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
     ToolCallReliability, ToolDefinition, UsageStats,
 };
+use crate::services::proxy::build_http_client;
 use crate::services::streaming::adapters::ClaudeApiAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
 
@@ -61,9 +62,11 @@ impl MinimaxProvider {
 
         tracing::info!("MiniMax provider initialized: url={}", messages_url);
 
+        let http_client = build_http_client(config.proxy.as_ref());
+
         Self {
             config,
-            http_client: reqwest::Client::new(),
+            http_client,
             anthropic_config,
             messages_url,
         }

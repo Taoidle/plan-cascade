@@ -11,7 +11,8 @@
     "importExport": "导入/导出",
     "lsp": "LSP 服务器",
     "plugins": "插件",
-    "security": "安全"
+    "security": "安全",
+    "network": "网络"
   },
 
   "general": {
@@ -585,6 +586,67 @@
       "colDirection": "方向",
       "colResult": "结果",
       "colContent": "内容"
+    }
+  },
+
+  "network": {
+    "title": "网络设置",
+    "description": "配置 LLM 和嵌入提供商连接的 HTTP 代理。",
+
+    "globalProxy": {
+      "title": "全局代理",
+      "enable": "启用代理",
+      "protocol": "协议",
+      "host": "主机",
+      "hostPlaceholder": "例如 127.0.0.1 或 proxy.example.com",
+      "port": "端口",
+      "auth": "身份验证",
+      "username": "用户名",
+      "usernamePlaceholder": "代理用户名",
+      "password": "密码",
+      "passwordPlaceholder": "代理密码",
+      "testConnection": "测试连接",
+      "testing": "测试中...",
+      "save": "保存代理",
+      "saving": "保存中...",
+      "saveSuccess": "代理配置已保存",
+      "saveError": "保存代理配置失败",
+      "disable": "禁用代理",
+      "disabled": "未配置全局代理"
+    },
+
+    "testResult": {
+      "success": "连接成功",
+      "failed": "连接失败",
+      "latency": "延迟: {{ms}}ms"
+    },
+
+    "providerProxy": {
+      "title": "提供商代理设置",
+      "llmProviders": "LLM 提供商",
+      "embeddingProviders": "嵌入提供商",
+      "claudeCode": "Claude Code",
+      "useGlobal": "使用全局",
+      "noProxy": "无代理",
+      "custom": "自定义",
+      "localNote": "本地 — 无需代理",
+      "customConfig": "{{provider}} 自定义代理"
+    },
+
+    "providers": {
+      "anthropic": "Anthropic",
+      "openai": "OpenAI",
+      "deepseek": "DeepSeek",
+      "qwen": "通义千问",
+      "glm": "智谱AI",
+      "minimax": "MiniMax",
+      "ollama": "Ollama",
+      "claude_code": "Claude Code",
+      "embedding_openai": "OpenAI 嵌入",
+      "embedding_qwen": "通义千问嵌入",
+      "embedding_glm": "智谱AI嵌入",
+      "embedding_ollama": "Ollama 嵌入",
+      "embedding_tfidf": "TF-IDF"
     }
   }
 }

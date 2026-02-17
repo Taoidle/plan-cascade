@@ -33,7 +33,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 
 # HTTP client (kept for future external API calls, not for sidecar)
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
 
 # Ollama native SDK
 ollama-rs = { version = "0.3", features = ["stream"] }
@@ -64,6 +64,9 @@ async-trait = "0.1"
 
 # DashScope SDK for Qwen LLM provider
 async-dashscope = "0.12"
+
+# Exponential backoff (used by DashScope SDK client builder)
+backoff = "0.4"
 
 # Anthropic SDK types (used by MiniMax provider via Anthropic-compatible endpoint)
 anthropic-async = "0.4"

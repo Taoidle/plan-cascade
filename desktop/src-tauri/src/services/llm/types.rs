@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::services::proxy::ProxyConfig;
+
 /// Supported LLM provider types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -142,6 +144,10 @@ pub struct ProviderConfig {
     /// Provider-specific options
     #[serde(default)]
     pub options: HashMap<String, serde_json::Value>,
+    /// Resolved proxy configuration for this provider.
+    /// None means no proxy (direct connection).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub proxy: Option<ProxyConfig>,
 }
 
 fn default_max_tokens() -> u32 {
@@ -166,6 +172,7 @@ impl Default for ProviderConfig {
             reasoning_effort: None,
             fallback_tool_format_mode: None,
             options: HashMap::new(),
+            proxy: None,
         }
     }
 }
@@ -617,6 +624,7 @@ mod tests {
             reasoning_effort: None,
             fallback_tool_format_mode: None,
             options: HashMap::new(),
+            proxy: None,
         };
 
         let json = serde_json::to_string(&config).unwrap();

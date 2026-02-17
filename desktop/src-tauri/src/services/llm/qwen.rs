@@ -27,6 +27,7 @@ use super::types::{
     MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallReliability,
     ToolDefinition, UsageStats,
 };
+use crate::services::proxy::build_http_client;
 use crate::services::streaming::UnifiedStreamEvent;
 
 /// Qwen provider using the async-dashscope SDK
@@ -45,19 +46,28 @@ impl QwenProvider {
     /// Build a DashScope SDK client from provider configuration
     fn build_client(config: &ProviderConfig) -> DashScopeClient {
         let api_key = config.api_key.as_deref().unwrap_or("");
+        let http_client = build_http_client(config.proxy.as_ref());
 
-        // If a custom base_url is configured, use ConfigBuilder for full control.
-        if let Some(base_url) = &config.base_url {
-            if let Ok(sdk_config) = async_dashscope::config::ConfigBuilder::default()
+        // Build SDK config — with custom base_url if configured, otherwise default.
+        let sdk_config = if let Some(base_url) = &config.base_url {
+            async_dashscope::config::ConfigBuilder::default()
                 .api_base(base_url.as_str())
                 .api_key(api_key)
                 .build()
-            {
-                return DashScopeClient::with_config(sdk_config);
-            }
-        }
+                .ok()
+        } else {
+            async_dashscope::config::ConfigBuilder::default()
+                .api_key(api_key)
+                .build()
+                .ok()
+        };
 
-        DashScopeClient::new().with_api_key(api_key.to_string())
+        if let Some(cfg) = sdk_config {
+            DashScopeClient::build(http_client, cfg, backoff::ExponentialBackoff::default())
+        } else {
+            // Fallback: create with defaults (no proxy injection possible)
+            DashScopeClient::new().with_api_key(api_key.to_string())
+        }
     }
 
     /// Check if model supports reasoning (Qwen3 series, QwQ models)

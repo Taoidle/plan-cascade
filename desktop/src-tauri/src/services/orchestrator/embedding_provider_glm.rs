@@ -24,6 +24,7 @@ use super::embedding_provider::{
     EmbeddingError, EmbeddingProvider, EmbeddingProviderConfig, EmbeddingProviderType,
     EmbeddingResult,
 };
+use crate::services::proxy::build_http_client;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -150,7 +151,7 @@ impl GlmEmbeddingProvider {
         let api_key = config.api_key.clone().unwrap_or_default();
 
         Self {
-            client: reqwest::Client::new(),
+            client: build_http_client(config.proxy.as_ref()),
             api_key,
             model,
             base_url,

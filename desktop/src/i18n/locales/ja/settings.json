@@ -11,7 +11,8 @@
     "importExport": "インポート/エクスポート",
     "lsp": "LSPサーバー",
     "plugins": "プラグイン",
-    "security": "セキュリティ"
+    "security": "セキュリティ",
+    "network": "ネットワーク"
   },
 
   "general": {
@@ -541,6 +542,67 @@
       "colDirection": "方向",
       "colResult": "結果",
       "colContent": "内容"
+    }
+  },
+
+  "network": {
+    "title": "ネットワーク設定",
+    "description": "LLMおよびエンベディングプロバイダー接続用のHTTPプロキシを設定します。",
+
+    "globalProxy": {
+      "title": "グローバルプロキシ",
+      "enable": "プロキシを有効にする",
+      "protocol": "プロトコル",
+      "host": "ホスト",
+      "hostPlaceholder": "例: 127.0.0.1 または proxy.example.com",
+      "port": "ポート",
+      "auth": "認証",
+      "username": "ユーザー名",
+      "usernamePlaceholder": "プロキシユーザー名",
+      "password": "パスワード",
+      "passwordPlaceholder": "プロキシパスワード",
+      "testConnection": "接続テスト",
+      "testing": "テスト中...",
+      "save": "プロキシを保存",
+      "saving": "保存中...",
+      "saveSuccess": "プロキシ設定が保存されました",
+      "saveError": "プロキシ設定の保存に失敗しました",
+      "disable": "プロキシを無効にする",
+      "disabled": "グローバルプロキシは設定されていません"
+    },
+
+    "testResult": {
+      "success": "接続成功",
+      "failed": "接続失敗",
+      "latency": "レイテンシ: {{ms}}ms"
+    },
+
+    "providerProxy": {
+      "title": "プロバイダープロキシ設定",
+      "llmProviders": "LLMプロバイダー",
+      "embeddingProviders": "エンベディングプロバイダー",
+      "claudeCode": "Claude Code",
+      "useGlobal": "グローバルを使用",
+      "noProxy": "プロキシなし",
+      "custom": "カスタム",
+      "localNote": "ローカル — プロキシ不要",
+      "customConfig": "{{provider}} カスタムプロキシ"
+    },
+
+    "providers": {
+      "anthropic": "Anthropic",
+      "openai": "OpenAI",
+      "deepseek": "DeepSeek",
+      "qwen": "Qwen",
+      "glm": "GLM",
+      "minimax": "MiniMax",
+      "ollama": "Ollama",
+      "claude_code": "Claude Code",
+      "embedding_openai": "OpenAI エンベディング",
+      "embedding_qwen": "Qwen エンベディング",
+      "embedding_glm": "GLM エンベディング",
+      "embedding_ollama": "Ollama エンベディング",
+      "embedding_tfidf": "TF-IDF"
     }
   }
 }

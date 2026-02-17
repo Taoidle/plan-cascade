@@ -23,6 +23,7 @@ pub mod orchestrator;
 pub mod plugins;
 pub mod phase;
 pub mod project;
+pub mod proxy;
 pub mod quality_gates;
 pub mod recovery;
 pub mod session;

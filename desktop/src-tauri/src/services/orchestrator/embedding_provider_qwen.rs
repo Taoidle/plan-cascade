@@ -28,6 +28,7 @@ use super::embedding_provider::{
     EmbeddingError, EmbeddingProvider, EmbeddingProviderConfig, EmbeddingProviderType,
     EmbeddingResult,
 };
+use crate::services::proxy::build_http_client;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -164,7 +165,7 @@ impl QwenEmbeddingProvider {
         let initial_dimension = config.dimension.unwrap_or(DEFAULT_DIMENSION);
         let display_name = format!("Qwen ({})", model);
 
-        let client = Client::new();
+        let client = build_http_client(config.proxy.as_ref());
 
         Self {
             client,

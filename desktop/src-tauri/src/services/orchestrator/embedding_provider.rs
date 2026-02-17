@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::fmt;
 
+use crate::services::proxy::ProxyConfig;
+
 // ---------------------------------------------------------------------------
 // Error types
 // ---------------------------------------------------------------------------
@@ -265,6 +267,11 @@ pub struct EmbeddingProviderConfig {
     /// Defaults to the provider's `max_batch_size` if not set.
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
+
+    /// Resolved proxy configuration for this embedding provider.
+    /// None means no proxy (direct connection).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub proxy: Option<ProxyConfig>,
 }
 
 fn default_batch_size() -> usize {
@@ -282,6 +289,7 @@ impl EmbeddingProviderConfig {
             base_url: None,
             dimension: None,
             batch_size: capability.max_batch_size.min(default_batch_size()),
+            proxy: None,
         }
     }
 

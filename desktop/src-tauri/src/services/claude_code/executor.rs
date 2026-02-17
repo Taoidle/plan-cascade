@@ -8,6 +8,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
+use crate::services::proxy::ProxyConfig;
 use crate::utils::error::{AppError, AppResult};
 
 /// Handle to a running Claude Code CLI process
@@ -84,6 +85,8 @@ pub struct SpawnConfig {
     pub resume_session_id: Option<String>,
     /// Model to use (optional, uses default if not set)
     pub model: Option<String>,
+    /// Proxy configuration for outbound requests (injected as env vars)
+    pub proxy: Option<ProxyConfig>,
 }
 
 impl SpawnConfig {
@@ -94,6 +97,7 @@ impl SpawnConfig {
             extra_args: Vec::new(),
             resume_session_id: None,
             model: None,
+            proxy: None,
         }
     }
 
@@ -158,6 +162,15 @@ impl ClaudeCodeExecutor {
         // Add any extra arguments
         for arg in &config.extra_args {
             cmd.arg(arg);
+        }
+
+        // Inject proxy environment variables if configured
+        if let Some(ref proxy) = config.proxy {
+            let proxy_url = proxy.url_with_auth();
+            cmd.env("HTTP_PROXY", &proxy_url);
+            cmd.env("HTTPS_PROXY", &proxy_url);
+            cmd.env("http_proxy", &proxy_url);
+            cmd.env("https_proxy", &proxy_url);
         }
 
         // Configure stdio

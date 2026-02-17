@@ -20,6 +20,7 @@ use super::types::{
     MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallReliability,
     ToolDefinition, UsageStats,
 };
+use crate::services::proxy::{build_http_client, ProxyConfig};
 use crate::services::streaming::UnifiedStreamEvent;
 
 /// Default Ollama API endpoint
@@ -42,7 +43,7 @@ impl OllamaProvider {
             .as_deref()
             .unwrap_or(OLLAMA_DEFAULT_URL);
 
-        let client = Self::create_client(base_url);
+        let client = Self::create_client(base_url, config.proxy.as_ref());
 
         Self { config, client }
     }
@@ -51,7 +52,8 @@ impl OllamaProvider {
     ///
     /// Parses the URL to extract host and port for `Ollama::new()`.
     /// Falls back to `Ollama::default()` if parsing fails.
-    fn create_client(base_url: &str) -> Ollama {
+    /// When a proxy config is provided, injects a custom reqwest client.
+    fn create_client(base_url: &str, proxy: Option<&ProxyConfig>) -> Ollama {
         // Try to parse the URL to extract host and port
         if let Ok(parsed) = url::Url::parse(base_url) {
             let scheme = parsed.scheme();
@@ -59,7 +61,12 @@ impl OllamaProvider {
             let port = parsed.port().unwrap_or(11434);
             // Reconstruct the host URL without port (Ollama::new takes them separately)
             let host_url = format!("{}://{}", scheme, host);
-            Ollama::new(host_url, port)
+            if proxy.is_some() {
+                let http_client = build_http_client(proxy);
+                Ollama::new_with_client(host_url, port, http_client)
+            } else {
+                Ollama::new(host_url, port)
+            }
         } else {
             Ollama::default()
         }

@@ -20,6 +20,7 @@ use crate::services::orchestrator::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, SessionExecutionResult,
 };
 use crate::services::streaming::UnifiedStreamEvent;
+use crate::commands::proxy::resolve_provider_proxy;
 use crate::state::AppState;
 use crate::storage::KeyringService;
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -551,43 +552,51 @@ pub async fn check_provider_health(
     provider: String,
     model: String,
     base_url: Option<String>,
-) -> CommandResponse<HealthCheckResult> {
+    app_state: State<'_, AppState>,
+) -> Result<CommandResponse<HealthCheckResult>, String> {
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&provider) {
         Some(p) => p,
-        None => return CommandResponse::err(format!("Unknown provider: {}", provider)),
+        None => return Ok(CommandResponse::err(format!("Unknown provider: {}", provider))),
     };
 
     // Get API key
     let api_key = match get_api_key_with_aliases(&keyring, canonical_provider) {
         Ok(key) => key,
         Err(e) => {
-            return CommandResponse::ok(HealthCheckResult {
+            return Ok(CommandResponse::ok(HealthCheckResult {
                 healthy: false,
                 error: Some(format!("Failed to get API key: {}", e)),
                 latency_ms: None,
-            });
+            }));
         }
     };
 
     let provider_type = match provider_type_from_name(canonical_provider) {
         Some(p) => p,
-        None => return CommandResponse::err(format!("Unknown provider: {}", provider)),
+        None => return Ok(CommandResponse::err(format!("Unknown provider: {}", provider))),
     };
 
     if provider_type != ProviderType::Ollama && api_key.is_none() {
-        return CommandResponse::ok(HealthCheckResult {
+        return Ok(CommandResponse::ok(HealthCheckResult {
             healthy: false,
             error: Some("API key not configured".to_string()),
             latency_ms: None,
-        });
+        }));
     }
+
+    // Resolve proxy for this provider
+    let proxy = app_state
+        .with_database(|db| Ok(resolve_provider_proxy(&keyring, db, &canonical_provider)))
+        .await
+        .unwrap_or(None);
 
     let config = ProviderConfig {
         provider: provider_type,
         api_key,
         base_url,
         model,
+        proxy,
         ..Default::default()
     };
 
@@ -609,16 +618,16 @@ pub async fn check_provider_health(
 
     let start = std::time::Instant::now();
     match orchestrator.health_check().await {
-        Ok(_) => CommandResponse::ok(HealthCheckResult {
+        Ok(_) => Ok(CommandResponse::ok(HealthCheckResult {
             healthy: true,
             error: None,
             latency_ms: Some(start.elapsed().as_millis() as u32),
-        }),
-        Err(e) => CommandResponse::ok(HealthCheckResult {
+        })),
+        Err(e) => Ok(CommandResponse::ok(HealthCheckResult {
             healthy: false,
             error: Some(e.to_string()),
             latency_ms: Some(start.elapsed().as_millis() as u32),
-        }),
+        })),
     }
 }
 
@@ -1047,12 +1056,19 @@ pub async fn execute_standalone(
         }
     }
 
+    // Resolve proxy for this provider
+    let proxy = app_state
+        .with_database(|db| Ok(resolve_provider_proxy(&keyring, db, &canonical_provider)))
+        .await
+        .unwrap_or(None);
+
     let config = ProviderConfig {
         provider: provider_type,
         api_key,
         base_url: resolved_base_url,
         model,
         enable_thinking: enable_thinking.unwrap_or(false),
+        proxy,
         ..Default::default()
     };
     let analysis_session_id = analysis_session_id
@@ -1264,12 +1280,19 @@ pub async fn execute_standalone_with_session(
         )));
     }
 
+    // Resolve proxy for this provider
+    let proxy = app_state
+        .with_database(|db| Ok(resolve_provider_proxy(&keyring, db, &canonical_provider)))
+        .await
+        .unwrap_or(None);
+
     let config = ProviderConfig {
         provider: provider_type,
         api_key,
         base_url: None,
         model: request.model.clone(),
         enable_thinking: request.enable_thinking.unwrap_or(false),
+        proxy,
         ..Default::default()
     };
     // Generate session ID first so analysis cache reuse is scoped to this execution session.
@@ -1649,12 +1672,19 @@ pub async fn resume_standalone_execution(
         }
     };
 
+    // Resolve proxy for this provider
+    let proxy = app_state
+        .with_database(|db| Ok(resolve_provider_proxy(&keyring, db, &canonical_provider)))
+        .await
+        .unwrap_or(None);
+
     // Create new orchestrator with the session's config
     let config = ProviderConfig {
         provider: provider_type,
         api_key,
         base_url: None,
         model: session.model.clone(),
+        proxy,
         ..Default::default()
     };
 
