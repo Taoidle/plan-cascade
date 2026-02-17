@@ -1,7 +1,7 @@
 //! Bash Tool Implementation
 //!
 //! Executes shell commands with timeout, blocked command checking,
-//! and persistent working directory tracking.
+//! and persistent working directory tracking via ToolExecutionContext.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -37,21 +37,19 @@ const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_TIMEOUT_MS: u64 = 600_000;
 
 /// Bash command tool — executes shell commands with safety checks.
-pub struct BashTool {
-    /// Persistent working directory for chained commands.
-    /// Updated when a simple `cd <path>` command succeeds.
-    current_working_dir: Mutex<Option<PathBuf>>,
-}
+///
+/// Uses `ctx.working_directory` (Arc<Mutex<PathBuf>>) for persistent
+/// working directory tracking. When a simple `cd <path>` command succeeds,
+/// the shared working directory is updated for all subsequent tool calls.
+pub struct BashTool;
 
 impl BashTool {
     pub fn new() -> Self {
-        Self {
-            current_working_dir: Mutex::new(None),
-        }
+        Self
     }
 
-    /// Detect simple `cd <path>` commands and update persistent working directory
-    fn detect_cd_command(&self, command: &str, working_dir: &Path) {
+    /// Detect simple `cd <path>` commands and update the shared working directory
+    fn detect_cd_command(command: &str, working_dir: &Path, shared_cwd: &Mutex<PathBuf>) {
         let trimmed = command.trim();
         if trimmed.contains("&&") || trimmed.contains(';') || trimmed.contains('|') {
             return;
@@ -68,21 +66,12 @@ impl BashTool {
             };
             if let Ok(canonical) = target_path.canonicalize() {
                 if canonical.is_dir() {
-                    if let Ok(mut cwd) = self.current_working_dir.lock() {
-                        *cwd = Some(canonical);
+                    if let Ok(mut cwd) = shared_cwd.lock() {
+                        *cwd = canonical;
                     }
                 }
             }
         }
-    }
-
-    /// Get the effective working directory, preferring the tracked cd path
-    fn effective_working_dir(&self, ctx: &ToolExecutionContext) -> PathBuf {
-        self.current_working_dir
-            .lock()
-            .ok()
-            .and_then(|cwd| cwd.clone())
-            .unwrap_or_else(|| ctx.working_directory.clone())
     }
 }
 
@@ -144,7 +133,7 @@ impl Tool for BashTool {
             .get("working_dir")
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.effective_working_dir(ctx));
+            .unwrap_or_else(|| ctx.working_directory_snapshot());
 
         // Check for blocked commands
         for blocked in BLOCKED_COMMANDS {
@@ -194,8 +183,9 @@ impl Tool for BashTool {
                     result_text.push_str("\n\n... (output truncated)");
                 }
 
+                // Detect simple `cd <path>` and update persistent working directory
                 if output.status.success() {
-                    self.detect_cd_command(command, &working_dir);
+                    Self::detect_cd_command(command, &working_dir, &ctx.working_directory);
                 }
 
                 if output.status.success() {
@@ -229,10 +219,18 @@ mod tests {
         ToolExecutionContext {
             session_id: "test".to_string(),
             project_root: dir.to_path_buf(),
-            working_directory: dir.to_path_buf(),
+            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
             read_cache: Arc::new(Mutex::new(HashMap::new())),
             read_files: Arc::new(Mutex::new(HashSet::new())),
             cancellation_token: tokio_util::sync::CancellationToken::new(),
+            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
+            web_search: None,
+            index_store: None,
+            embedding_service: None,
+            embedding_manager: None,
+            hnsw_index: None,
+            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
+            task_context: None,
         }
     }
 
@@ -281,5 +279,23 @@ mod tests {
     fn test_bash_tool_is_long_running() {
         let tool = BashTool::new();
         assert!(tool.is_long_running());
+    }
+
+    #[tokio::test]
+    async fn test_bash_tool_cd_updates_shared_working_dir() {
+        let dir = TempDir::new().unwrap();
+        let subdir = dir.path().join("sub");
+        std::fs::create_dir(&subdir).unwrap();
+        let tool = BashTool::new();
+        let ctx = make_ctx(dir.path());
+
+        // Execute cd command
+        let args = serde_json::json!({"command": "cd sub"});
+        let result = tool.execute(&ctx, args).await;
+        assert!(result.success, "cd failed: {:?}", result.error);
+
+        // Verify shared working directory was updated
+        let new_cwd = ctx.working_directory_snapshot();
+        assert_eq!(new_cwd, subdir.canonicalize().unwrap());
     }
 }

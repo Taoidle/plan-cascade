@@ -303,10 +303,18 @@ for line in sys.stdin:
         let ctx = ToolExecutionContext {
             session_id: "test".to_string(),
             project_root: std::path::PathBuf::from("/tmp"),
-            working_directory: std::path::PathBuf::from("/tmp"),
+            working_directory: Arc::new(std::sync::Mutex::new(std::path::PathBuf::from("/tmp"))),
             read_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
             read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             cancellation_token: tokio_util::sync::CancellationToken::new(),
+            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
+            web_search: None,
+            index_store: None,
+            embedding_service: None,
+            embedding_manager: None,
+            hnsw_index: None,
+            task_dedup_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            task_context: None,
         };
 
         let result = adapter

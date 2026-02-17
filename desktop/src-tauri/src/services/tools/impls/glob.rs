@@ -92,13 +92,14 @@ impl Tool for GlobTool {
         };
         let head_limit = args.get("head_limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
+        let working_dir = ctx.working_directory_snapshot();
         let explicit_base_path = args.get("path").and_then(|v| v.as_str());
         let base_path = match explicit_base_path {
-            Some(path) => match validate_path(path, &ctx.working_directory, &ctx.project_root) {
+            Some(path) => match validate_path(path, &working_dir, &ctx.project_root) {
                 Ok(resolved) => resolved,
                 Err(err) => return ToolResult::err(err),
             },
-            None => ctx.working_directory.clone(),
+            None => working_dir,
         };
         let apply_default_excludes = explicit_base_path
             .map(|p| {
@@ -160,10 +161,18 @@ mod tests {
         ToolExecutionContext {
             session_id: "test".to_string(),
             project_root: dir.to_path_buf(),
-            working_directory: dir.to_path_buf(),
+            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
             read_cache: Arc::new(Mutex::new(HashMap::new())),
             read_files: Arc::new(Mutex::new(HashSet::new())),
             cancellation_token: tokio_util::sync::CancellationToken::new(),
+            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
+            web_search: None,
+            index_store: None,
+            embedding_service: None,
+            embedding_manager: None,
+            hnsw_index: None,
+            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
+            task_context: None,
         }
     }
 
