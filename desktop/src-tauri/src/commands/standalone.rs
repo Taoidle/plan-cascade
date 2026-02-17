@@ -877,6 +877,39 @@ pub async fn semantic_search(
         // Use EmbeddingManager.embed_query
         match emb_mgr.embed_query(&query).await {
             Ok(query_embedding) if !query_embedding.is_empty() => {
+                // Try HNSW search first (O(log n)), fall back to brute-force (O(n))
+                if let Some(hnsw) = mgr.get_hnsw_index(&dir).await {
+                    if hnsw.is_ready().await {
+                        let hnsw_hits = hnsw.search(&query_embedding, k).await;
+                        if !hnsw_hits.is_empty() {
+                            let rowids: Vec<usize> = hnsw_hits.iter().map(|(id, _)| *id).collect();
+                            match index_store.get_embeddings_by_rowids(&rowids) {
+                                Ok(metadata) => {
+                                    let results: Vec<crate::services::orchestrator::embedding_service::SemanticSearchResult> = hnsw_hits
+                                        .into_iter()
+                                        .filter_map(|(id, distance)| {
+                                            metadata.get(&id).map(|(file_path, chunk_index, chunk_text)| {
+                                                crate::services::orchestrator::embedding_service::SemanticSearchResult {
+                                                    file_path: file_path.clone(),
+                                                    chunk_index: *chunk_index,
+                                                    chunk_text: chunk_text.clone(),
+                                                    similarity: 1.0 - distance,
+                                                }
+                                            })
+                                        })
+                                        .collect();
+                                    return Ok(CommandResponse::ok(results));
+                                }
+                                Err(e) => return Ok(CommandResponse::err(format!(
+                                    "HNSW semantic search failed to fetch metadata: {}", e
+                                ))),
+                            }
+                        }
+                        // HNSW returned empty, fall through to brute-force
+                    }
+                }
+
+                // Brute-force fallback
                 match index_store.semantic_search(&query_embedding, &dir, k) {
                     Ok(results) => return Ok(CommandResponse::ok(results)),
                     Err(e) => return Ok(CommandResponse::err(format!(

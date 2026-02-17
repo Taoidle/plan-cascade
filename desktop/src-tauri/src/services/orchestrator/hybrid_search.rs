@@ -32,6 +32,7 @@ use std::sync::Arc;
 use tracing;
 
 use super::embedding_manager::EmbeddingManager;
+use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
 use crate::utils::error::{AppError, AppResult};
 
@@ -121,9 +122,15 @@ impl Default for HybridSearchConfig {
 ///
 /// Holds references to the index store and (optionally) the embedding manager.
 /// When no embedding manager is configured, the semantic channel is skipped.
+///
+/// When an `HnswIndex` is provided and ready, the semantic channel uses O(log n)
+/// approximate nearest neighbor search instead of O(n) brute-force scan.
 pub struct HybridSearchEngine {
     index_store: Arc<IndexStore>,
     embedding_manager: Option<Arc<EmbeddingManager>>,
+    /// Optional HNSW index for fast approximate nearest neighbor search.
+    /// When present and ready, `search_semantic` uses HNSW instead of brute-force.
+    hnsw_index: Option<Arc<HnswIndex>>,
     config: HybridSearchConfig,
 }
 
@@ -143,6 +150,7 @@ impl HybridSearchEngine {
         Self {
             index_store,
             embedding_manager,
+            hnsw_index: None,
             config,
         }
     }
@@ -153,6 +161,20 @@ impl HybridSearchEngine {
         embedding_manager: Option<Arc<EmbeddingManager>>,
     ) -> Self {
         Self::new(index_store, embedding_manager, HybridSearchConfig::default())
+    }
+
+    /// Set the HNSW index for fast approximate nearest neighbor search.
+    ///
+    /// When set and ready, the semantic channel will use HNSW search (O(log n))
+    /// instead of brute-force cosine similarity scan (O(n)).
+    pub fn set_hnsw_index(&mut self, hnsw: Arc<HnswIndex>) {
+        self.hnsw_index = Some(hnsw);
+    }
+
+    /// Builder-style setter for the HNSW index.
+    pub fn with_hnsw_index(mut self, hnsw: Option<Arc<HnswIndex>>) -> Self {
+        self.hnsw_index = hnsw;
+        self
     }
 
     /// Returns a reference to the current configuration.
@@ -265,6 +287,10 @@ impl HybridSearchEngine {
     }
 
     /// Run the semantic search channel.
+    ///
+    /// When an HNSW index is available and ready, uses O(log n) approximate
+    /// nearest neighbor search.  Falls back to O(n) brute-force cosine
+    /// similarity scan when HNSW is absent or not ready.
     async fn search_semantic(
         &self,
         query: &str,
@@ -281,7 +307,23 @@ impl HybridSearchEngine {
             return Ok(Vec::new());
         }
 
-        // Run semantic search over the index
+        // Try HNSW search first (O(log n))
+        if let Some(ref hnsw) = self.hnsw_index {
+            if hnsw.is_ready().await {
+                tracing::debug!("Hybrid search: using HNSW for semantic channel");
+                return self
+                    .search_semantic_hnsw(
+                        &query_embedding,
+                        hnsw,
+                        self.config.channel_max_results,
+                    )
+                    .await;
+            } else {
+                tracing::debug!("Hybrid search: HNSW not ready, falling back to brute-force");
+            }
+        }
+
+        // Fallback: brute-force cosine similarity scan (O(n))
         let results = self.index_store.semantic_search(
             &query_embedding,
             project_path,
@@ -295,6 +337,48 @@ impl HybridSearchEngine {
                 symbol_name: None,
                 chunk_text: Some(r.chunk_text),
                 semantic_similarity: Some(r.similarity),
+            })
+            .collect();
+
+        Ok(entries)
+    }
+
+    /// Perform semantic search using the HNSW index.
+    ///
+    /// 1. Searches HNSW for nearest neighbor IDs (data_id = SQLite ROWID).
+    /// 2. Fetches chunk metadata (file_path, chunk_text) from SQLite by ROWID.
+    /// 3. Converts HNSW distance to similarity score.
+    async fn search_semantic_hnsw(
+        &self,
+        query_embedding: &[f32],
+        hnsw: &HnswIndex,
+        top_k: usize,
+    ) -> AppResult<Vec<ChannelEntry>> {
+        let hnsw_results = hnsw.search(query_embedding, top_k).await;
+
+        if hnsw_results.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Fetch chunk metadata from SQLite for the matched ROWID values
+        let rowids: Vec<usize> = hnsw_results.iter().map(|(id, _)| *id).collect();
+        let metadata = self.index_store.get_embeddings_by_rowids(&rowids)?;
+
+        let entries: Vec<ChannelEntry> = hnsw_results
+            .into_iter()
+            .filter_map(|(id, distance)| {
+                metadata.get(&id).map(|(file_path, _chunk_index, chunk_text)| {
+                    // Convert DistCosine distance to similarity:
+                    // DistCosine distance = 1 - cosine_similarity
+                    // so similarity = 1 - distance
+                    let similarity = 1.0 - distance;
+                    ChannelEntry {
+                        file_path: file_path.clone(),
+                        symbol_name: None,
+                        chunk_text: Some(chunk_text.clone()),
+                        semantic_similarity: Some(similarity),
+                    }
+                })
             })
             .collect();
 
@@ -1135,5 +1219,130 @@ mod tests {
         let single_channel_max = 1.0 / 61.0; // best single-channel score
         assert!(results[0].1 > single_channel_max);
         assert!(results[1].1 > single_channel_max);
+    }
+
+    // =====================================================================
+    // HNSW Integration Tests (feature-001 story-004)
+    // =====================================================================
+
+    #[test]
+    fn hybrid_engine_with_hnsw_builder() {
+        use crate::storage::database::Database;
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        // Engine without HNSW
+        let engine = HybridSearchEngine::with_defaults(store.clone(), None);
+        assert!(engine.hnsw_index.is_none());
+
+        // Engine with HNSW via builder
+        let hnsw = Arc::new(HnswIndex::new("/tmp/test_hnsw", 128));
+        let engine = HybridSearchEngine::with_defaults(store.clone(), None)
+            .with_hnsw_index(Some(hnsw));
+        assert!(engine.hnsw_index.is_some());
+
+        // Engine with None HNSW via builder
+        let engine = HybridSearchEngine::with_defaults(store, None)
+            .with_hnsw_index(None);
+        assert!(engine.hnsw_index.is_none());
+    }
+
+    #[test]
+    fn hybrid_engine_set_hnsw_index() {
+        use crate::storage::database::Database;
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        let mut engine = HybridSearchEngine::with_defaults(store, None);
+        assert!(engine.hnsw_index.is_none());
+
+        let hnsw = Arc::new(HnswIndex::new("/tmp/test_hnsw", 128));
+        engine.set_hnsw_index(hnsw);
+        assert!(engine.hnsw_index.is_some());
+    }
+
+    #[tokio::test]
+    async fn search_semantic_hnsw_returns_entries() {
+        use crate::storage::database::Database;
+        use super::super::embedding_service::embedding_to_bytes;
+        use tempfile::tempdir;
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        // Insert some embeddings into SQLite so we can look them up by ROWID
+        let dim = 8;
+        let embeddings: Vec<Vec<f32>> = (0..5).map(|i| {
+            let mut v = vec![0.0f32; dim];
+            v[i % dim] = 1.0;
+            v
+        }).collect();
+
+        for (i, emb) in embeddings.iter().enumerate() {
+            let emb_bytes = embedding_to_bytes(emb);
+            store.upsert_chunk_embedding(
+                "/test",
+                &format!("src/file_{}.rs", i),
+                i as i64,
+                &format!("chunk text {}", i),
+                &emb_bytes,
+            ).unwrap();
+        }
+
+        // Create HNSW index and insert the same embeddings
+        let dir = tempdir().expect("tempdir");
+        let hnsw = Arc::new(HnswIndex::new(dir.path().join("hnsw"), dim));
+        hnsw.initialize().await;
+
+        // We need to insert using the SQLite ROWIDs
+        // Get the ROWIDs from SQLite
+        let all_ids = store.get_all_embedding_ids_and_vectors("/test").unwrap();
+        for (rowid, vec) in &all_ids {
+            hnsw.insert(*rowid, vec).await;
+        }
+
+        // Build engine with HNSW
+        let engine = HybridSearchEngine::with_defaults(store, None)
+            .with_hnsw_index(Some(hnsw.clone()));
+
+        // Search for the first embedding
+        let results = engine
+            .search_semantic_hnsw(&embeddings[0], &hnsw, 3)
+            .await
+            .unwrap();
+
+        assert!(!results.is_empty(), "HNSW search should return results");
+        // First result should be the closest match
+        assert!(
+            results[0].semantic_similarity.unwrap() > 0.5,
+            "Top result should have high similarity"
+        );
+        assert!(results[0].chunk_text.is_some(), "Should have chunk text");
+    }
+
+    #[tokio::test]
+    async fn search_semantic_hnsw_empty_index_returns_empty() {
+        use crate::storage::database::Database;
+        use tempfile::tempdir;
+
+        let db = Database::new_in_memory().expect("in-memory db");
+        let store = Arc::new(IndexStore::new(db.pool().clone()));
+
+        let dir = tempdir().expect("tempdir");
+        let hnsw = Arc::new(HnswIndex::new(dir.path().join("hnsw"), 8));
+        hnsw.initialize().await;
+
+        let engine = HybridSearchEngine::with_defaults(store, None)
+            .with_hnsw_index(Some(hnsw.clone()));
+
+        let query = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let results = engine
+            .search_semantic_hnsw(&query, &hnsw, 5)
+            .await
+            .unwrap();
+
+        assert!(results.is_empty(), "Empty HNSW should return empty results");
     }
 }

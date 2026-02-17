@@ -121,6 +121,9 @@ base64 = "0.22"
 # Caching
 mini-moka = "0.10"
 
+# HNSW approximate nearest neighbor search
+hnsw_rs = "0.3"
+
 # Tree-sitter parsing for accurate symbol extraction
 tree-sitter = "0.24"
 tree-sitter-python = "0.23"

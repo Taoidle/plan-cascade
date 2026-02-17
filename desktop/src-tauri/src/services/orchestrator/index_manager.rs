@@ -21,6 +21,7 @@ use super::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
 use super::embedding_provider::{EmbeddingProviderConfig, EmbeddingProviderType};
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::EmbeddingService;
+use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
 use crate::storage::database::DbPool;
 
@@ -67,6 +68,9 @@ pub struct IndexManager {
     /// inside a `TfIdfEmbeddingProvider`, providing the dispatch-layer API
     /// (caching, fallback, batching) on top of the same underlying service.
     embedding_managers: RwLock<HashMap<String, Arc<EmbeddingManager>>>,
+    /// Per-project HNSW indexes for O(log n) approximate nearest neighbor search.
+    /// The HNSW index is a derived cache of the SQLite embeddings (ADR-004).
+    hnsw_indexes: RwLock<HashMap<String, Arc<HnswIndex>>>,
 }
 
 impl IndexManager {
@@ -79,6 +83,7 @@ impl IndexManager {
             app_handle: RwLock::new(None),
             embedding_services: RwLock::new(HashMap::new()),
             embedding_managers: RwLock::new(HashMap::new()),
+            hnsw_indexes: RwLock::new(HashMap::new()),
         }
     }
 
@@ -168,6 +173,13 @@ impl IndexManager {
                                 config,
                             ))
                         });
+                }
+
+                // Load or rebuild HNSW index for fast semantic search.
+                // Use a default dimension; the actual dimension is determined
+                // by the embedding provider.
+                if summary.embedding_chunks > 0 {
+                    let _ = self.get_or_create_hnsw(project_path, 0).await;
                 }
 
                 let event = IndexStatusEvent {
@@ -280,11 +292,16 @@ impl IndexManager {
                 .clone()
         };
 
+        // Get or create HNSW index for this project (will try disk load first,
+        // then rebuild from SQLite, or initialize empty).
+        let hnsw_idx = self.get_or_create_hnsw(project_path, 0).await;
+
         let handle = tokio::task::spawn(async move {
             let indexer = BackgroundIndexer::new(project_root, index_store.clone())
                 .with_progress_callback(progress_cb)
                 .with_embedding_service(embedding_svc)
-                .with_embedding_manager(embedding_mgr);
+                .with_embedding_manager(embedding_mgr)
+                .with_hnsw_index(hnsw_idx);
 
             let join = indexer.start().await;
             let result = join.await;
@@ -343,6 +360,24 @@ impl IndexManager {
                 project = %project_path,
                 "index manager: failed to delete project index before reindex"
             );
+        }
+        // Clear existing HNSW index and delete disk files so a fresh one is created.
+        // This prevents hnsw_rs from attempting to load potentially corrupt/stale
+        // HNSW files from a previous indexing run.
+        {
+            let mut indexes = self.hnsw_indexes.write().await;
+            indexes.remove(project_path);
+        }
+        // Delete HNSW disk files for this project
+        let hnsw_dir = Self::hnsw_index_dir(project_path);
+        if hnsw_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&hnsw_dir) {
+                warn!(
+                    error = %e,
+                    dir = %hnsw_dir.display(),
+                    "index manager: failed to delete HNSW disk files during reindex"
+                );
+            }
         }
         self.start_indexing(project_path).await;
     }
@@ -409,6 +444,12 @@ impl IndexManager {
         managers.get(project_path).cloned()
     }
 
+    /// Get the HNSW index for a project directory, if one has been created.
+    pub async fn get_hnsw_index(&self, project_path: &str) -> Option<Arc<HnswIndex>> {
+        let indexes = self.hnsw_indexes.read().await;
+        indexes.get(project_path).cloned()
+    }
+
     /// Remove a directory from the manager, aborting any active indexer
     /// and clearing its cached status.
     pub async fn remove_directory(&self, project_path: &str) {
@@ -431,6 +472,125 @@ impl IndexManager {
                 "index manager: aborted existing indexer"
             );
         }
+    }
+
+    /// Compute a project hash (SHA-256 truncated to 16 hex chars) for HNSW
+    /// index directory naming.
+    fn project_hash(project_path: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(project_path.as_bytes());
+        let result = format!("{:x}", hasher.finalize());
+        result[..16].to_string()
+    }
+
+    /// Get the HNSW index directory for a project.
+    fn hnsw_index_dir(project_path: &str) -> std::path::PathBuf {
+        let hash = Self::project_hash(project_path);
+        if let Some(data_dir) = dirs::data_local_dir() {
+            data_dir
+                .join("plan-cascade")
+                .join("hnsw_indexes")
+                .join(hash)
+        } else {
+            // Fallback to home dir
+            dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".plan-cascade")
+                .join("hnsw_indexes")
+                .join(hash)
+        }
+    }
+
+    /// Get or create an HNSW index for a project, attempting to load from disk first.
+    ///
+    /// If no disk files exist and embeddings are present in SQLite, rebuilds
+    /// the HNSW index from the stored embeddings.
+    async fn get_or_create_hnsw(
+        &self,
+        project_path: &str,
+        dimension: usize,
+    ) -> Arc<HnswIndex> {
+        // Check if we already have one
+        {
+            let indexes = self.hnsw_indexes.read().await;
+            if let Some(idx) = indexes.get(project_path) {
+                return Arc::clone(idx);
+            }
+        }
+
+        let index_dir = Self::hnsw_index_dir(project_path);
+        let hnsw = Arc::new(HnswIndex::new(&index_dir, dimension));
+
+        // Try loading from disk
+        if hnsw.load_from_disk().await {
+            info!(
+                project = %project_path,
+                "index manager: HNSW loaded from disk"
+            );
+        } else {
+            // Try rebuilding from SQLite embeddings
+            match self.rebuild_hnsw_from_store(project_path, &hnsw).await {
+                Ok(count) if count > 0 => {
+                    info!(
+                        project = %project_path,
+                        vectors = count,
+                        "index manager: HNSW rebuilt from SQLite"
+                    );
+                    // Save the rebuilt index to disk
+                    if let Err(e) = hnsw.save_to_disk().await {
+                        warn!(
+                            project = %project_path,
+                            error = %e,
+                            "index manager: failed to save rebuilt HNSW to disk"
+                        );
+                    }
+                }
+                Ok(_) => {
+                    // No embeddings yet — initialize empty
+                    hnsw.initialize().await;
+                    info!(
+                        project = %project_path,
+                        "index manager: HNSW initialized empty (no embeddings yet)"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        project = %project_path,
+                        error = %e,
+                        "index manager: HNSW rebuild from SQLite failed, initializing empty"
+                    );
+                    hnsw.initialize().await;
+                }
+            }
+        }
+
+        let mut indexes = self.hnsw_indexes.write().await;
+        indexes.insert(project_path.to_string(), Arc::clone(&hnsw));
+        hnsw
+    }
+
+    /// Rebuild HNSW index from all embeddings stored in SQLite.
+    ///
+    /// Returns the number of vectors inserted.
+    async fn rebuild_hnsw_from_store(
+        &self,
+        project_path: &str,
+        hnsw: &HnswIndex,
+    ) -> Result<usize, String> {
+        let vectors = self
+            .index_store
+            .get_all_embedding_ids_and_vectors(project_path)
+            .map_err(|e| format!("failed to get embeddings: {}", e))?;
+
+        if vectors.is_empty() {
+            return Ok(0);
+        }
+
+        hnsw.initialize().await;
+        hnsw.batch_insert(&vectors).await;
+
+        Ok(vectors.len())
     }
 
     /// Update the status map and emit a Tauri event.
@@ -472,7 +632,7 @@ mod tests {
         let mgr = IndexManager::new(test_pool());
         let status = mgr.get_status("/nonexistent").await;
         assert_eq!(status.project_path, "/nonexistent");
-        assert_eq!(status.status, "indexed");
+        assert_eq!(status.status, "idle");
         assert_eq!(status.indexed_files, 0);
         assert_eq!(status.total_files, 0);
         assert!(status.error_message.is_none());
