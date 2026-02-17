@@ -1,0 +1,104 @@
+/**
+ * Plugin API
+ *
+ * TypeScript wrapper for Tauri plugin commands.
+ * Provides type-safe access to the plugin system backend.
+ */
+
+import { invoke } from '@tauri-apps/api/core';
+import type { PluginInfo, PluginDetail } from '../types/plugin';
+
+interface CommandResponse<T> {
+  success: boolean;
+  data: T | null;
+  error: string | null;
+}
+
+/**
+ * List all discovered plugins.
+ */
+export async function listPlugins(): Promise<CommandResponse<PluginInfo[]>> {
+  try {
+    return await invoke<CommandResponse<PluginInfo[]>>('list_plugins');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Toggle a plugin's enabled/disabled state.
+ */
+export async function togglePlugin(
+  name: string,
+  enabled: boolean
+): Promise<CommandResponse<boolean>> {
+  try {
+    return await invoke<CommandResponse<boolean>>('toggle_plugin', {
+      name,
+      enabled,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Refresh plugin discovery (re-scan all sources).
+ */
+export async function refreshPlugins(): Promise<CommandResponse<PluginInfo[]>> {
+  try {
+    return await invoke<CommandResponse<PluginInfo[]>>('refresh_plugins');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Get detailed information about a specific plugin.
+ */
+export async function getPluginDetail(
+  name: string
+): Promise<CommandResponse<PluginDetail>> {
+  try {
+    return await invoke<CommandResponse<PluginDetail>>('get_plugin_detail', {
+      name,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Install a plugin from a source directory.
+ */
+export async function installPlugin(
+  sourcePath: string
+): Promise<CommandResponse<PluginInfo>> {
+  try {
+    return await invoke<CommandResponse<PluginInfo>>('install_plugin', {
+      sourcePath,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}

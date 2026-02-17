@@ -8,7 +8,9 @@
     "agents": "エージェント",
     "quality": "品質ゲート",
     "phases": "フェーズエージェント",
-    "importExport": "インポート/エクスポート"
+    "importExport": "インポート/エクスポート",
+    "lsp": "LSPサーバー",
+    "plugins": "プラグイン"
   },
 
   "general": {

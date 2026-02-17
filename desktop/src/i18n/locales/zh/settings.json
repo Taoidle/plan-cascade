@@ -9,7 +9,8 @@
     "quality": "质量门禁",
     "phases": "阶段代理",
     "importExport": "导入/导出",
-    "lsp": "LSP 服务器"
+    "lsp": "LSP 服务器",
+    "plugins": "插件"
   },
 
   "general": {
