@@ -4,6 +4,7 @@
   "tabs": {
     "general": "General",
     "llm": "LLM Backend",
+    "embedding": "Embedding",
     "agents": "Agents",
     "quality": "Quality Gates",
     "phases": "Phase Agents",
@@ -365,6 +366,100 @@
       "button": "Reset All Settings",
       "success": "Settings reset to defaults",
       "error": "Failed to reset settings. Please try again."
+    }
+  },
+
+  "embedding": {
+    "title": "Embedding Provider",
+    "description": "Configure the embedding provider used for codebase indexing and semantic search.",
+    "loading": "Loading embedding configuration...",
+    "dismiss": "Dismiss",
+
+    "provider": {
+      "label": "Provider",
+      "local": "Local",
+      "cloud": "Cloud",
+      "defaultModel": "Default model",
+      "dimension": "Dimension"
+    },
+
+    "providers": {
+      "tf_idf": {
+        "description": "Local TF-IDF vectorization. No external dependencies. Fast but less semantic."
+      },
+      "ollama": {
+        "description": "Local embedding via Ollama. Requires Ollama running with an embedding model pulled."
+      },
+      "qwen": {
+        "description": "Qwen embedding models via Alibaba DashScope API. Requires API key."
+      },
+      "glm": {
+        "description": "GLM embedding models via ZhipuAI API. Requires API key."
+      },
+      "open_ai": {
+        "description": "OpenAI embedding models (text-embedding-3-small, etc.). Requires API key."
+      }
+    },
+
+    "apiKey": {
+      "title": "API Key for {{name}}",
+      "placeholder": "Enter your embedding API key",
+      "save": "Save",
+      "saving": "Saving...",
+      "saveSuccess": "Embedding API key saved successfully",
+      "saveError": "Failed to save embedding API key",
+      "help": "Stored securely in OS keyring with alias \"{{alias}}\". Separate from LLM provider API keys."
+    },
+
+    "model": {
+      "label": "Model",
+      "help": "Enter the embedding model identifier. Leave blank to use the provider's default model."
+    },
+
+    "baseUrl": {
+      "label": "Base URL",
+      "placeholder": "Optional: custom API endpoint URL",
+      "help": "Override the default API endpoint. Required for custom Ollama hosts."
+    },
+
+    "advanced": {
+      "label": "Dimension & Batch Size"
+    },
+
+    "dimension": {
+      "label": "Embedding Dimension",
+      "default": "default",
+      "help": "The output vector dimension. Some providers support multiple dimensions."
+    },
+
+    "batchSize": {
+      "label": "Batch Size",
+      "help": "Number of texts per embedding request. Max: {{max}}."
+    },
+
+    "fallback": {
+      "label": "Fallback Provider",
+      "none": "No fallback",
+      "help": "If the primary provider fails, fall back to this provider."
+    },
+
+    "health": {
+      "label": "Provider Health Check",
+      "checkButton": "Check Health",
+      "checking": "Checking...",
+      "healthy": "Provider is healthy",
+      "unhealthy": "Provider is unhealthy",
+      "latency": "Latency: {{ms}}ms"
+    },
+
+    "save": {
+      "button": "Save Embedding Settings",
+      "saving": "Saving..."
+    },
+
+    "reindex": {
+      "title": "Reindex Required",
+      "message": "The embedding provider or model changed. A full reindex of the codebase is recommended to use the new embeddings."
     }
   }
 }

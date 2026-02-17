@@ -114,3 +114,6 @@ export type {
   MemoryCategoryFilter,
   SkillMemoryTab,
 } from './skillMemory';
+
+export { useEmbeddingStore } from './embedding';
+export type { EmbeddingState } from './embedding';

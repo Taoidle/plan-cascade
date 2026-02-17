@@ -17,6 +17,9 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use super::background_indexer::{BackgroundIndexer, IndexProgressCallback};
+use super::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
+use super::embedding_provider::{EmbeddingProviderConfig, EmbeddingProviderType};
+use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::EmbeddingService;
 use super::index_store::IndexStore;
 use crate::storage::database::DbPool;
@@ -60,6 +63,10 @@ pub struct IndexManager {
     /// Per-project embedding services, shared between BackgroundIndexer (which
     /// builds the vocabulary) and ToolExecutor (which queries with it).
     embedding_services: RwLock<HashMap<String, Arc<EmbeddingService>>>,
+    /// Per-project `EmbeddingManager` instances that wrap an `EmbeddingService`
+    /// inside a `TfIdfEmbeddingProvider`, providing the dispatch-layer API
+    /// (caching, fallback, batching) on top of the same underlying service.
+    embedding_managers: RwLock<HashMap<String, Arc<EmbeddingManager>>>,
 }
 
 impl IndexManager {
@@ -71,6 +78,7 @@ impl IndexManager {
             statuses: Arc::new(RwLock::new(HashMap::new())),
             app_handle: RwLock::new(None),
             embedding_services: RwLock::new(HashMap::new()),
+            embedding_managers: RwLock::new(HashMap::new()),
         }
     }
 
@@ -134,6 +142,32 @@ impl IndexManager {
                             );
                         }
                     }
+                }
+
+                // Create an EmbeddingManager wrapping the shared EmbeddingService
+                // via TfIdfEmbeddingProvider. This ensures the vocabulary restore
+                // above is visible through the manager (same Arc<EmbeddingService>).
+                {
+                    let mut managers = self.embedding_managers.write().await;
+                    managers
+                        .entry(project_path.to_string())
+                        .or_insert_with(|| {
+                            let provider =
+                                TfIdfEmbeddingProvider::new(Arc::clone(&embedding_svc));
+                            let config = EmbeddingManagerConfig {
+                                primary: EmbeddingProviderConfig::new(
+                                    EmbeddingProviderType::TfIdf,
+                                ),
+                                fallback: None,
+                                cache_enabled: true,
+                                cache_max_entries: 10_000,
+                            };
+                            Arc::new(EmbeddingManager::new(
+                                Box::new(provider),
+                                None,
+                                config,
+                            ))
+                        });
                 }
 
                 let event = IndexStatusEvent {
@@ -219,10 +253,38 @@ impl IndexManager {
                 .clone()
         };
 
+        // Get or create an EmbeddingManager wrapping the shared EmbeddingService.
+        // When the manager exists, BackgroundIndexer uses it for provider-aware
+        // embedding (with caching and fallback support).
+        let embedding_mgr = {
+            let mut managers = self.embedding_managers.write().await;
+            managers
+                .entry(project_path_owned.clone())
+                .or_insert_with(|| {
+                    let provider =
+                        TfIdfEmbeddingProvider::new(Arc::clone(&embedding_svc));
+                    let config = EmbeddingManagerConfig {
+                        primary: EmbeddingProviderConfig::new(
+                            EmbeddingProviderType::TfIdf,
+                        ),
+                        fallback: None,
+                        cache_enabled: true,
+                        cache_max_entries: 10_000,
+                    };
+                    Arc::new(EmbeddingManager::new(
+                        Box::new(provider),
+                        None,
+                        config,
+                    ))
+                })
+                .clone()
+        };
+
         let handle = tokio::task::spawn(async move {
             let indexer = BackgroundIndexer::new(project_root, index_store.clone())
                 .with_progress_callback(progress_cb)
-                .with_embedding_service(embedding_svc);
+                .with_embedding_service(embedding_svc)
+                .with_embedding_manager(embedding_mgr);
 
             let join = indexer.start().await;
             let result = join.await;
@@ -331,6 +393,20 @@ impl IndexManager {
     pub async fn get_embedding_service(&self, project_path: &str) -> Option<Arc<EmbeddingService>> {
         let embeds = self.embedding_services.read().await;
         embeds.get(project_path).cloned()
+    }
+
+    /// Get the `EmbeddingManager` for a project directory, if one has been
+    /// created by `ensure_indexed` or `start_indexing`.
+    ///
+    /// The returned manager wraps the same `EmbeddingService` (via
+    /// `TfIdfEmbeddingProvider`) and provides the dispatch-layer API with
+    /// caching, batching, and optional fallback support.
+    pub async fn get_embedding_manager(
+        &self,
+        project_path: &str,
+    ) -> Option<Arc<EmbeddingManager>> {
+        let managers = self.embedding_managers.read().await;
+        managers.get(project_path).cloned()
     }
 
     /// Remove a directory from the manager, aborting any active indexer
@@ -599,5 +675,136 @@ mod tests {
         assert_eq!(status.status, "indexing");
         assert_eq!(status.indexed_files, 5);
         assert_eq!(status.total_files, 10);
+    }
+
+    // -----------------------------------------------------------------------
+    // story-006: EmbeddingManager lifecycle integration
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn get_embedding_manager_returns_none_for_unknown_project() {
+        let mgr = IndexManager::new(test_pool());
+        let result = mgr.get_embedding_manager("/nonexistent").await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn ensure_indexed_creates_embedding_manager() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("main.py"), "x = 1\n").expect("write");
+
+        let mgr = IndexManager::new(test_pool());
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        mgr.ensure_indexed(&project_path).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // After indexing, both embedding service and embedding manager should exist.
+        let emb_svc = mgr.get_embedding_service(&project_path).await;
+        assert!(
+            emb_svc.is_some(),
+            "should have embedding service after indexing"
+        );
+
+        let emb_mgr = mgr.get_embedding_manager(&project_path).await;
+        assert!(
+            emb_mgr.is_some(),
+            "should have embedding manager after indexing"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_indexing_creates_embedding_manager() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("test.py"), "y = 2\n").expect("write");
+
+        let mgr = IndexManager::new(test_pool());
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        mgr.start_indexing(&project_path).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        let emb_mgr = mgr.get_embedding_manager(&project_path).await;
+        assert!(
+            emb_mgr.is_some(),
+            "should have embedding manager after start_indexing"
+        );
+
+        // Verify the manager's primary provider is TF-IDF.
+        let mgr_ref = emb_mgr.unwrap();
+        assert_eq!(
+            mgr_ref.provider_type(),
+            EmbeddingProviderType::TfIdf,
+            "manager primary provider should be TF-IDF"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_indexed_restores_vocabulary_visible_through_manager() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("app.py"), "def run():\n    pass\n").expect("write");
+
+        let pool = test_pool();
+        let mgr = IndexManager::new(pool.clone());
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // First: index the project
+        mgr.ensure_indexed(&project_path).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        // Save a vocab manually (simulating what the embedding pass does)
+        let vocab_json =
+            r#"{"token_to_idx":{"def":0,"run":1,"pass":2},"idf":[1.0,1.0,1.0],"num_docs":1}"#;
+        let store = IndexStore::new(pool.clone());
+        store.save_vocabulary(&project_path, vocab_json).unwrap();
+
+        // Create a fresh IndexManager (simulating app restart)
+        let mgr2 = IndexManager::new(pool);
+        mgr2.ensure_indexed(&project_path).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // The embedding manager should exist and its TF-IDF provider should
+        // be ready (since the vocabulary was restored through the shared
+        // EmbeddingService).
+        let emb_mgr = mgr2.get_embedding_manager(&project_path).await;
+        assert!(
+            emb_mgr.is_some(),
+            "should have embedding manager after restore"
+        );
+
+        // Also verify the raw embedding service is ready
+        let emb_svc = mgr2.get_embedding_service(&project_path).await;
+        assert!(
+            emb_svc.unwrap().is_ready(),
+            "embedding service should be ready after vocab restore"
+        );
+    }
+
+    #[tokio::test]
+    async fn trigger_reindex_preserves_embedding_manager() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("a.py"), "a = 1\n").expect("write");
+
+        let mgr = IndexManager::new(test_pool());
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // Index first.
+        mgr.ensure_indexed(&project_path).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        let mgr_before = mgr.get_embedding_manager(&project_path).await;
+        assert!(mgr_before.is_some(), "should have manager after indexing");
+
+        // Add a file and trigger reindex.
+        fs::write(dir.path().join("b.py"), "b = 2\n").expect("write");
+        mgr.trigger_reindex(&project_path).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // Manager should still exist after reindex (reused via or_insert_with).
+        let mgr_after = mgr.get_embedding_manager(&project_path).await;
+        assert!(
+            mgr_after.is_some(),
+            "should have manager after trigger_reindex"
+        );
     }
 }

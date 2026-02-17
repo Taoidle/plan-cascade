@@ -19,13 +19,14 @@ import { AgentConfigSection } from './AgentConfigSection';
 import { QualityGatesSection } from './QualityGatesSection';
 import { PhaseAgentSection } from './PhaseAgentSection';
 import { ImportExportSection } from './ImportExportSection';
+import { EmbeddingSection } from './EmbeddingSection';
 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-type SettingsTab = 'general' | 'llm' | 'agents' | 'quality' | 'phases' | 'import-export';
+type SettingsTab = 'general' | 'llm' | 'embedding' | 'agents' | 'quality' | 'phases' | 'import-export';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { t } = useTranslation('settings');
@@ -35,6 +36,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('tabs.general') },
     { id: 'llm', label: t('tabs.llm') },
+    { id: 'embedding', label: t('tabs.embedding') },
     { id: 'agents', label: t('tabs.agents') },
     { id: 'quality', label: t('tabs.quality') },
     { id: 'phases', label: t('tabs.phases') },
@@ -126,6 +128,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </Tabs.Content>
               <Tabs.Content value="llm" className="outline-none">
                 <LLMBackendSection />
+              </Tabs.Content>
+              <Tabs.Content value="embedding" className="outline-none">
+                <EmbeddingSection />
               </Tabs.Content>
               <Tabs.Content value="agents" className="outline-none">
                 <AgentConfigSection />

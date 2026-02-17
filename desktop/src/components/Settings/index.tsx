@@ -11,4 +11,5 @@ export { AgentConfigSection } from './AgentConfigSection';
 export { QualityGatesSection } from './QualityGatesSection';
 export { PhaseAgentSection } from './PhaseAgentSection';
 export { ImportExportSection } from './ImportExportSection';
+export { EmbeddingSection } from './EmbeddingSection';
 export { SetupWizard } from './SetupWizard';

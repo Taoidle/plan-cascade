@@ -1242,6 +1242,7 @@ impl OrchestratorService {
             shared_read_cache: self.tool_executor.shared_read_cache(),
             shared_index_store: self.tool_executor.get_index_store(),
             shared_embedding_service: self.tool_executor.get_embedding_service(),
+            shared_embedding_manager: self.tool_executor.get_embedding_manager(),
             detected_language: self.detected_language.lock().unwrap().clone(),
         });
         let task_ctx = TaskContext {

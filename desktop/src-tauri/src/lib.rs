@@ -23,6 +23,8 @@ pub use commands::{
     cancel_execution,
     cancel_standalone_execution,
     check_analytics_health,
+    // Embedding configuration commands
+    check_embedding_provider_health,
     check_provider_health,
     check_quality_gates_health,
     cleanup_gate_results,
@@ -71,6 +73,8 @@ pub use commands::{
     get_default_gates_for_type,
     get_design_doc,
     get_diff_from_current,
+    get_embedding_api_key,
+    get_embedding_config,
     get_gate_result,
     get_gate_results,
     // Health commands
@@ -113,6 +117,8 @@ pub use commands::{
     list_branches,
     list_checkpoints,
     list_configured_api_key_providers,
+    // Embedding configuration commands
+    list_embedding_providers,
     // MCP commands
     connect_mcp_server,
     disconnect_mcp_server,
@@ -184,6 +190,8 @@ pub use commands::{
     list_skills,
     refresh_skill_index,
     search_skills,
+    set_embedding_api_key,
+    set_embedding_config,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,

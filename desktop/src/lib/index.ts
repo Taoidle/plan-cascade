@@ -74,6 +74,15 @@ export type {
   SettingsUpdate,
 } from './settingsApi';
 
+// Embedding API (v5.0)
+export {
+  getEmbeddingConfig,
+  setEmbeddingConfig,
+  listEmbeddingProviders,
+  checkEmbeddingProviderHealth,
+  setEmbeddingApiKey,
+} from './embeddingApi';
+
 // Tauri utilities
 export {
   getHealth,

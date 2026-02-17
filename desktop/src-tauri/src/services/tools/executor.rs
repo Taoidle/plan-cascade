@@ -12,6 +12,7 @@ use std::time::{Duration, SystemTime};
 use tokio::process::Command;
 use tokio::time::timeout;
 
+use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::services::orchestrator::index_store::IndexStore;
 use crate::services::orchestrator::text_describes_pending_action;
@@ -336,6 +337,9 @@ pub struct ToolExecutor {
     index_store: Option<Arc<IndexStore>>,
     /// Optional embedding service for semantic search in CodebaseSearch
     embedding_service: Option<Arc<EmbeddingService>>,
+    /// Optional EmbeddingManager for provider-aware semantic search (ADR-F002).
+    /// When set, used in preference to `embedding_service` for query embedding.
+    embedding_manager: Option<Arc<EmbeddingManager>>,
     /// Registry of all available tools (trait-based).
     /// Used for definition generation and dynamic tool management.
     registry: super::trait_def::ToolRegistry,
@@ -384,6 +388,7 @@ impl ToolExecutor {
             web_search: None,
             index_store: None,
             embedding_service: None,
+            embedding_manager: None,
             registry: Self::build_registry(),
         }
     }
@@ -408,6 +413,7 @@ impl ToolExecutor {
             web_search: None,
             index_store: None,
             embedding_service: None,
+            embedding_manager: None,
             registry: Self::build_registry(),
         }
     }
@@ -447,6 +453,15 @@ impl ToolExecutor {
         self.embedding_service = Some(svc);
     }
 
+    /// Set the EmbeddingManager for provider-aware semantic search (ADR-F002).
+    ///
+    /// When set, `execute_codebase_search` uses `EmbeddingManager::embed_query`
+    /// instead of the raw `EmbeddingService::embed_text`, gaining caching,
+    /// fallback, and provider-agnostic query embedding.
+    pub fn set_embedding_manager(&mut self, mgr: Arc<EmbeddingManager>) {
+        self.embedding_manager = Some(mgr);
+    }
+
     /// Get the index store Arc (if set), for sharing with sub-agents.
     pub fn get_index_store(&self) -> Option<Arc<IndexStore>> {
         self.index_store.clone()
@@ -455,6 +470,11 @@ impl ToolExecutor {
     /// Get the embedding service Arc (if set), for sharing with sub-agents.
     pub fn get_embedding_service(&self) -> Option<Arc<EmbeddingService>> {
         self.embedding_service.clone()
+    }
+
+    /// Get the EmbeddingManager Arc (if set), for sharing with sub-agents.
+    pub fn get_embedding_manager(&self) -> Option<Arc<EmbeddingManager>> {
+        self.embedding_manager.clone()
     }
 
     /// Get a reference to the tool registry.
@@ -1744,8 +1764,106 @@ impl ToolExecutor {
         // --- Semantic search ---
         if scope == "semantic" || scope == "all" {
             let is_standalone_semantic = scope == "semantic";
-            match &self.embedding_service {
-                Some(emb_svc) if emb_svc.is_ready() => {
+
+            // Prefer EmbeddingManager (ADR-F002) over raw EmbeddingService.
+            // The manager provides caching, provider fallback, and health checks.
+            if let Some(ref emb_mgr) = self.embedding_manager {
+                // Check stored embedding dimension vs manager dimension to catch
+                // incompatible-dimension states (e.g., index built with TF-IDF
+                // but manager now uses an external provider with different dim).
+                let stored_dim = index_store
+                    .get_embedding_metadata(&project_path)
+                    .ok()
+                    .and_then(|meta| meta.first().map(|m| m.embedding_dimension));
+                let manager_dim = emb_mgr.dimension();
+                let dimension_compatible = stored_dim
+                    .map(|d| d == 0 || manager_dim == 0 || d == manager_dim)
+                    .unwrap_or(true); // no stored dim => assume compatible
+
+                if !dimension_compatible {
+                    let msg = format!(
+                        "Semantic search not available: embedding dimension mismatch. \
+                         Index was built with {}-dimensional embeddings, but the current \
+                         embedding provider produces {}-dimensional vectors. \
+                         Re-index the project to resolve this.",
+                        stored_dim.unwrap_or(0),
+                        manager_dim,
+                    );
+                    if is_standalone_semantic {
+                        output_sections.push(msg);
+                    } else {
+                        output_sections.push(format!("Semantic search: dimension mismatch (stored={}, provider={})",
+                            stored_dim.unwrap_or(0), manager_dim));
+                    }
+                } else {
+                    // Use EmbeddingManager.embed_query for the query vector
+                    match emb_mgr.embed_query(query).await {
+                        Ok(query_embedding) if !query_embedding.is_empty() => {
+                            match index_store.semantic_search(&query_embedding, &project_path, 10) {
+                                Ok(results) if !results.is_empty() => {
+                                    let mut section = format!(
+                                        "## Semantic search for '{}' ({} results)\n",
+                                        query,
+                                        results.len()
+                                    );
+                                    for result in &results {
+                                        let display_text = if result.chunk_text.len() > 200 {
+                                            let mut end = 200;
+                                            while end > 0 && !result.chunk_text.is_char_boundary(end) {
+                                                end -= 1;
+                                            }
+                                            format!("{}...", &result.chunk_text[..end])
+                                        } else {
+                                            result.chunk_text.clone()
+                                        };
+                                        let display_text = display_text.replace('\n', " ");
+                                        section.push_str(&format!(
+                                            "  {} (chunk {}, similarity: {:.3})\n    {}\n",
+                                            result.file_path,
+                                            result.chunk_index,
+                                            result.similarity,
+                                            display_text
+                                        ));
+                                    }
+                                    output_sections.push(section);
+                                }
+                                Ok(_) => {
+                                    output_sections
+                                        .push(format!("No semantic matches found for '{}'.", query));
+                                }
+                                Err(e) => {
+                                    output_sections.push(format!("Semantic search error: {}", e));
+                                }
+                            }
+                        }
+                        Ok(_) => {
+                            output_sections.push(
+                                "Semantic search: embedding provider produced empty vector. \
+                                 The vocabulary may not cover the query terms."
+                                    .to_string(),
+                            );
+                        }
+                        Err(e) => {
+                            // Distinguish provider-unhealthy from other errors
+                            let msg = format!(
+                                "Semantic search failed: embedding provider error — {}. \
+                                 The provider may be unhealthy or unreachable. \
+                                 Use 'symbols' or 'files' scope instead.",
+                                e
+                            );
+                            if is_standalone_semantic {
+                                output_sections.push(msg);
+                            } else {
+                                output_sections.push(format!(
+                                    "Semantic search: provider error ({})", e
+                                ));
+                            }
+                        }
+                    }
+                }
+            } else if let Some(ref emb_svc) = self.embedding_service {
+                // Legacy fallback: use raw EmbeddingService when no manager is set
+                if emb_svc.is_ready() {
                     let query_embedding = emb_svc.embed_text(query);
                     if !query_embedding.is_empty() {
                         match index_store.semantic_search(&query_embedding, &project_path, 10) {
@@ -1756,7 +1874,6 @@ impl ToolExecutor {
                                     results.len()
                                 );
                                 for result in &results {
-                                    // Truncate chunk text for display (char-boundary safe)
                                     let display_text = if result.chunk_text.len() > 200 {
                                         let mut end = 200;
                                         while end > 0 && !result.chunk_text.is_char_boundary(end) {
@@ -1792,31 +1909,29 @@ impl ToolExecutor {
                                 .to_string(),
                         );
                     }
+                } else if is_standalone_semantic {
+                    output_sections.push(
+                        "Semantic search not available: embedding vocabulary has not been built yet. \
+                         The project needs to be re-indexed with embedding generation enabled. \
+                         Use 'symbols' or 'files' scope instead."
+                            .to_string(),
+                    );
+                } else {
+                    output_sections.push(
+                        "Semantic search: not available (vocabulary not built)".to_string(),
+                    );
                 }
-                Some(_) => {
-                    if is_standalone_semantic {
-                        output_sections.push(
-                            "Semantic search not available: embedding vocabulary has not been built yet. \
-                             The project needs to be re-indexed with embedding generation enabled. \
-                             Use 'symbols' or 'files' scope instead."
-                                .to_string(),
-                        );
-                    } else {
-                        output_sections.push(
-                            "Semantic search: not available (vocabulary not built)".to_string(),
-                        );
-                    }
-                }
-                None => {
-                    if is_standalone_semantic {
-                        output_sections.push(
-                            "Semantic search not available: no embedding service configured. \
-                             Use 'symbols' or 'files' scope instead."
-                                .to_string(),
-                        );
-                    } else {
-                        output_sections.push("Semantic search: not configured".to_string());
-                    }
+            } else {
+                // Neither EmbeddingManager nor EmbeddingService configured
+                if is_standalone_semantic {
+                    output_sections.push(
+                        "Semantic search not available: no embedding provider configured. \
+                         The project has not been indexed with embedding support. \
+                         Use 'symbols' or 'files' scope instead."
+                            .to_string(),
+                    );
+                } else {
+                    output_sections.push("Semantic search: not configured".to_string());
                 }
             }
         }
@@ -3384,9 +3499,9 @@ mod tests {
         assert!(result.success);
         let output = result.output.unwrap();
 
-        // Should have full error message
+        // Should have full error message (no embedding provider configured)
         assert!(
-            output.contains("Semantic search not available: no embedding service configured"),
+            output.contains("Semantic search not available: no embedding provider configured"),
             "scope=semantic should show full error, got: {}",
             output
         );
@@ -3509,6 +3624,147 @@ mod tests {
             summary.len() >= 2,
             "shared cache should have entries from both executors, got: {:?}",
             summary
+        );
+    }
+
+    // =========================================================================
+    // EmbeddingManager integration tests (story-007)
+    // =========================================================================
+
+    #[test]
+    fn test_set_embedding_manager() {
+        use crate::services::orchestrator::embedding_manager::{
+            EmbeddingManager, EmbeddingManagerConfig,
+        };
+        use crate::services::orchestrator::embedding_provider::{
+            EmbeddingProviderConfig, EmbeddingProviderType,
+        };
+        use crate::services::orchestrator::embedding_provider_tfidf::TfIdfEmbeddingProvider;
+        use crate::services::orchestrator::embedding_service::EmbeddingService;
+
+        let dir = setup_test_dir();
+        let mut executor = ToolExecutor::new(dir.path());
+
+        assert!(
+            executor.get_embedding_manager().is_none(),
+            "manager should be None initially"
+        );
+
+        // Create a TF-IDF based EmbeddingManager
+        let emb_svc = Arc::new(EmbeddingService::new());
+        let provider = TfIdfEmbeddingProvider::new(Arc::clone(&emb_svc));
+        let config = EmbeddingManagerConfig {
+            primary: EmbeddingProviderConfig::new(EmbeddingProviderType::TfIdf),
+            fallback: None,
+            cache_enabled: false,
+            cache_max_entries: 0,
+        };
+        let mgr = Arc::new(EmbeddingManager::new(Box::new(provider), None, config));
+
+        executor.set_embedding_manager(Arc::clone(&mgr));
+        assert!(
+            executor.get_embedding_manager().is_some(),
+            "manager should be set after set_embedding_manager"
+        );
+    }
+
+    #[test]
+    fn test_embedding_manager_independent_of_service() {
+        use crate::services::orchestrator::embedding_manager::{
+            EmbeddingManager, EmbeddingManagerConfig,
+        };
+        use crate::services::orchestrator::embedding_provider::{
+            EmbeddingProviderConfig, EmbeddingProviderType,
+        };
+        use crate::services::orchestrator::embedding_provider_tfidf::TfIdfEmbeddingProvider;
+        use crate::services::orchestrator::embedding_service::EmbeddingService;
+
+        let dir = setup_test_dir();
+        let mut executor = ToolExecutor::new(dir.path());
+
+        // Set only the manager, not the service
+        let emb_svc = Arc::new(EmbeddingService::new());
+        let provider = TfIdfEmbeddingProvider::new(Arc::clone(&emb_svc));
+        let config = EmbeddingManagerConfig {
+            primary: EmbeddingProviderConfig::new(EmbeddingProviderType::TfIdf),
+            fallback: None,
+            cache_enabled: false,
+            cache_max_entries: 0,
+        };
+        let mgr = Arc::new(EmbeddingManager::new(Box::new(provider), None, config));
+        executor.set_embedding_manager(mgr);
+
+        assert!(
+            executor.get_embedding_manager().is_some(),
+            "manager should be set"
+        );
+        assert!(
+            executor.get_embedding_service().is_none(),
+            "service should still be None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_no_provider_message() {
+        // When neither EmbeddingManager nor EmbeddingService is configured,
+        // semantic scope should report "not configured".
+        let dir = setup_test_dir();
+        let executor = ToolExecutor::new(dir.path());
+
+        let args = serde_json::json!({
+            "query": "test query",
+            "scope": "semantic"
+        });
+
+        let result = executor.execute("CodebaseSearch", &args).await;
+        assert!(result.success);
+        let output = result.output.unwrap_or_default();
+        // Without an index store, it falls back to the "index not available" message
+        assert!(
+            output.contains("not available") || output.contains("not indexed") || output.contains("not configured"),
+            "should indicate semantic search is not available, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_embedding_manager_shared_with_sub_agent() {
+        use crate::services::orchestrator::embedding_manager::{
+            EmbeddingManager, EmbeddingManagerConfig,
+        };
+        use crate::services::orchestrator::embedding_provider::{
+            EmbeddingProviderConfig, EmbeddingProviderType,
+        };
+        use crate::services::orchestrator::embedding_provider_tfidf::TfIdfEmbeddingProvider;
+        use crate::services::orchestrator::embedding_service::EmbeddingService;
+
+        let dir = setup_test_dir();
+        let mut parent = ToolExecutor::new(dir.path());
+
+        // Set up manager on parent
+        let emb_svc = Arc::new(EmbeddingService::new());
+        let provider = TfIdfEmbeddingProvider::new(Arc::clone(&emb_svc));
+        let config = EmbeddingManagerConfig {
+            primary: EmbeddingProviderConfig::new(EmbeddingProviderType::TfIdf),
+            fallback: None,
+            cache_enabled: true,
+            cache_max_entries: 100,
+        };
+        let mgr = Arc::new(EmbeddingManager::new(Box::new(provider), None, config));
+        parent.set_embedding_manager(Arc::clone(&mgr));
+
+        // Get the manager for sharing with sub-agent
+        let shared_mgr = parent.get_embedding_manager();
+        assert!(shared_mgr.is_some(), "should be able to get manager for sharing");
+
+        // Create sub-agent executor and wire the shared manager
+        let shared_cache = parent.shared_read_cache();
+        let mut child = ToolExecutor::new_with_shared_cache(dir.path(), shared_cache);
+        child.set_embedding_manager(shared_mgr.unwrap());
+
+        assert!(
+            child.get_embedding_manager().is_some(),
+            "child should have the shared manager"
         );
     }
 }

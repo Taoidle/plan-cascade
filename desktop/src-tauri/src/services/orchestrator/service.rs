@@ -26,6 +26,7 @@ use super::analysis_store::{
     AnalysisPhaseResultRecord, AnalysisRunHandle, AnalysisRunStore, CoverageMetrics,
     EvidenceRecord, SubAgentResultRecord,
 };
+use super::embedding_manager::EmbeddingManager;
 use super::embedding_service::EmbeddingService;
 use super::index_store::IndexStore;
 use crate::models::orchestrator::{
@@ -317,6 +318,8 @@ struct OrchestratorTaskSpawner {
     shared_index_store: Option<Arc<IndexStore>>,
     /// Optional embedding service for semantic search in sub-agents.
     shared_embedding_service: Option<Arc<EmbeddingService>>,
+    /// Optional EmbeddingManager for provider-aware semantic search in sub-agents (ADR-F002).
+    shared_embedding_manager: Option<Arc<EmbeddingManager>>,
     /// Detected language from the user's message, propagated to sub-agents.
     detected_language: Option<String>,
 }

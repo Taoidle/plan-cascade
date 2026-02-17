@@ -4,6 +4,7 @@
   "tabs": {
     "general": "通用",
     "llm": "LLM后端",
+    "embedding": "嵌入",
     "agents": "代理",
     "quality": "质量门禁",
     "phases": "阶段代理",
@@ -365,6 +366,100 @@
       "button": "重置所有设置",
       "success": "设置已重置为默认值",
       "error": "重置设置失败。请重试。"
+    }
+  },
+
+  "embedding": {
+    "title": "嵌入提供商",
+    "description": "配置用于代码库索引和语义搜索的嵌入提供商。",
+    "loading": "正在加载嵌入配置...",
+    "dismiss": "关闭",
+
+    "provider": {
+      "label": "提供商",
+      "local": "本地",
+      "cloud": "云端",
+      "defaultModel": "默认模型",
+      "dimension": "维度"
+    },
+
+    "providers": {
+      "tf_idf": {
+        "description": "本地TF-IDF向量化。无外部依赖。速度快但语义能力较弱。"
+      },
+      "ollama": {
+        "description": "通过Ollama进行本地嵌入。需要Ollama运行并拉取嵌入模型。"
+      },
+      "qwen": {
+        "description": "通过阿里云DashScope API使用通义千问嵌入模型。需要API密钥。"
+      },
+      "glm": {
+        "description": "通过智谱AI API使用GLM嵌入模型。需要API密钥。"
+      },
+      "open_ai": {
+        "description": "OpenAI嵌入模型（text-embedding-3-small等）。需要API密钥。"
+      }
+    },
+
+    "apiKey": {
+      "title": "{{name}} 的API密钥",
+      "placeholder": "输入嵌入API密钥",
+      "save": "保存",
+      "saving": "保存中...",
+      "saveSuccess": "嵌入API密钥保存成功",
+      "saveError": "保存嵌入API密钥失败",
+      "help": "安全存储在操作系统密钥环中，别名为\"{{alias}}\"。与LLM提供商API密钥分开管理。"
+    },
+
+    "model": {
+      "label": "模型",
+      "help": "输入嵌入模型标识符。留空将使用提供商的默认模型。"
+    },
+
+    "baseUrl": {
+      "label": "基础URL",
+      "placeholder": "可选：自定义API端点URL",
+      "help": "覆盖默认API端点。自定义Ollama主机时必填。"
+    },
+
+    "advanced": {
+      "label": "维度和批量大小"
+    },
+
+    "dimension": {
+      "label": "嵌入维度",
+      "default": "默认",
+      "help": "输出向量维度。部分提供商支持多种维度。"
+    },
+
+    "batchSize": {
+      "label": "批量大小",
+      "help": "每次嵌入请求的文本数量。最大值：{{max}}。"
+    },
+
+    "fallback": {
+      "label": "备选提供商",
+      "none": "无备选",
+      "help": "如果主提供商失败，将回退到此提供商。"
+    },
+
+    "health": {
+      "label": "提供商健康检查",
+      "checkButton": "检查健康状态",
+      "checking": "检查中...",
+      "healthy": "提供商健康",
+      "unhealthy": "提供商不健康",
+      "latency": "延迟：{{ms}}ms"
+    },
+
+    "save": {
+      "button": "保存嵌入设置",
+      "saving": "保存中..."
+    },
+
+    "reindex": {
+      "title": "需要重新索引",
+      "message": "嵌入提供商或模型已更改。建议对代码库进行完整重新索引以使用新的嵌入。"
     }
   }
 }

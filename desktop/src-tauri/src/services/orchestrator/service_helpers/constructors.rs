@@ -69,6 +69,7 @@ reports the index is unavailable.\n\n";
             isolated_read_cache,
             self.shared_index_store.clone(),
             self.shared_embedding_service.clone(),
+            self.shared_embedding_manager.clone(),
         );
         let result = sub_agent
             .execute_story(&prompt, &get_basic_tool_definitions(), tx)
@@ -144,8 +145,8 @@ impl OrchestratorService {
     }
 
     /// Create a sub-agent orchestrator that shares the parent's read cache, index store,
-    /// and embedding service. This avoids redundant file reads and enables CodebaseSearch
-    /// in sub-agents.
+    /// embedding service, and embedding manager. This avoids redundant file reads and
+    /// enables CodebaseSearch in sub-agents.
     fn new_sub_agent_with_shared_state(
         config: OrchestratorConfig,
         cancellation_token: CancellationToken,
@@ -159,6 +160,7 @@ impl OrchestratorService {
         >,
         shared_index_store: Option<Arc<IndexStore>>,
         shared_embedding_service: Option<Arc<EmbeddingService>>,
+        shared_embedding_manager: Option<Arc<EmbeddingManager>>,
     ) -> Self {
         let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
@@ -180,6 +182,9 @@ impl OrchestratorService {
         }
         if let Some(svc) = &shared_embedding_service {
             tool_executor.set_embedding_service(Arc::clone(svc));
+        }
+        if let Some(mgr) = &shared_embedding_manager {
+            tool_executor.set_embedding_manager(Arc::clone(mgr));
         }
 
         Self {
@@ -205,6 +210,15 @@ impl OrchestratorService {
     /// Wire an embedding service to the tool executor for semantic CodebaseSearch.
     pub fn with_embedding_service(mut self, svc: Arc<EmbeddingService>) -> Self {
         self.tool_executor.set_embedding_service(svc);
+        self
+    }
+
+    /// Wire an EmbeddingManager to the tool executor for provider-aware semantic
+    /// CodebaseSearch (ADR-F002). When set, the manager's `embed_query` is used
+    /// instead of the raw `EmbeddingService::embed_text`, gaining caching,
+    /// fallback, and provider-agnostic query embedding.
+    pub fn with_embedding_manager(mut self, mgr: Arc<EmbeddingManager>) -> Self {
+        self.tool_executor.set_embedding_manager(mgr);
         self
     }
 

@@ -397,6 +397,7 @@ impl Database {
         )?;
 
         // Create file_embeddings table for vector embedding storage (feature-003)
+        // provider_type, provider_model, embedding_dimension added in story-012
         conn.execute(
             "CREATE TABLE IF NOT EXISTS file_embeddings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -405,6 +406,9 @@ impl Database {
                 chunk_index INTEGER NOT NULL,
                 chunk_text TEXT NOT NULL,
                 embedding BLOB NOT NULL,
+                provider_type TEXT NOT NULL DEFAULT 'tfidf',
+                provider_model TEXT NOT NULL DEFAULT 'tfidf-v1',
+                embedding_dimension INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(project_path, file_path, chunk_index)
             )",
@@ -421,6 +425,28 @@ impl Database {
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file
              ON file_embeddings(project_path, file_path)",
+            [],
+        )?;
+
+        // Migration: add provider and dimension columns to file_embeddings (story-012).
+        // Existing rows get default values: provider_type='tfidf', provider_model='tfidf-v1',
+        // embedding_dimension=0 — preserving full backward compatibility.
+        {
+            let has_provider_type =
+                Self::table_has_column(&conn, "file_embeddings", "provider_type");
+            if !has_provider_type {
+                let _ = conn.execute_batch(
+                    "ALTER TABLE file_embeddings ADD COLUMN provider_type TEXT NOT NULL DEFAULT 'tfidf';
+                     ALTER TABLE file_embeddings ADD COLUMN provider_model TEXT NOT NULL DEFAULT 'tfidf-v1';
+                     ALTER TABLE file_embeddings ADD COLUMN embedding_dimension INTEGER NOT NULL DEFAULT 0;",
+                );
+            }
+        }
+
+        // Index for provider-filtered queries on file_embeddings
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_embeddings_provider
+             ON file_embeddings(project_path, provider_type)",
             [],
         )?;
 

@@ -4,6 +4,7 @@
   "tabs": {
     "general": "一般",
     "llm": "LLMバックエンド",
+    "embedding": "エンベディング",
     "agents": "エージェント",
     "quality": "品質ゲート",
     "phases": "フェーズエージェント",
@@ -365,6 +366,100 @@
       "button": "すべての設定をリセット",
       "success": "設定をデフォルトにリセットしました",
       "error": "設定のリセットに失敗しました。もう一度お試しください。"
+    }
+  },
+
+  "embedding": {
+    "title": "エンベディングプロバイダー",
+    "description": "コードベースのインデックス作成とセマンティック検索に使用するエンベディングプロバイダーを設定します。",
+    "loading": "エンベディング設定を読み込み中...",
+    "dismiss": "閉じる",
+
+    "provider": {
+      "label": "プロバイダー",
+      "local": "ローカル",
+      "cloud": "クラウド",
+      "defaultModel": "デフォルトモデル",
+      "dimension": "次元数"
+    },
+
+    "providers": {
+      "tf_idf": {
+        "description": "ローカルTF-IDFベクトル化。外部依存なし。高速ですがセマンティック性は低い。"
+      },
+      "ollama": {
+        "description": "Ollamaによるローカルエンベディング。エンベディングモデルがプルされたOllamaが必要です。"
+      },
+      "qwen": {
+        "description": "Alibaba DashScope API経由のQwenエンベディングモデル。APIキーが必要です。"
+      },
+      "glm": {
+        "description": "ZhipuAI API経由のGLMエンベディングモデル。APIキーが必要です。"
+      },
+      "open_ai": {
+        "description": "OpenAIエンベディングモデル（text-embedding-3-smallなど）。APIキーが必要です。"
+      }
+    },
+
+    "apiKey": {
+      "title": "{{name}}のAPIキー",
+      "placeholder": "エンベディングAPIキーを入力",
+      "save": "保存",
+      "saving": "保存中...",
+      "saveSuccess": "エンベディングAPIキーの保存に成功しました",
+      "saveError": "エンベディングAPIキーの保存に失敗しました",
+      "help": "OSキーリングにエイリアス\"{{alias}}\"で安全に保存されます。LLMプロバイダーのAPIキーとは別に管理されます。"
+    },
+
+    "model": {
+      "label": "モデル",
+      "help": "エンベディングモデル識別子を入力してください。空欄の場合はプロバイダーのデフォルトモデルが使用されます。"
+    },
+
+    "baseUrl": {
+      "label": "ベースURL",
+      "placeholder": "オプション：カスタムAPIエンドポイントURL",
+      "help": "デフォルトのAPIエンドポイントを上書きします。カスタムOllamaホストの場合に必要です。"
+    },
+
+    "advanced": {
+      "label": "次元数とバッチサイズ"
+    },
+
+    "dimension": {
+      "label": "エンベディング次元数",
+      "default": "デフォルト",
+      "help": "出力ベクトルの次元数。一部のプロバイダーは複数の次元をサポートしています。"
+    },
+
+    "batchSize": {
+      "label": "バッチサイズ",
+      "help": "エンベディングリクエストあたりのテキスト数。最大値：{{max}}。"
+    },
+
+    "fallback": {
+      "label": "フォールバックプロバイダー",
+      "none": "フォールバックなし",
+      "help": "プライマリプロバイダーが失敗した場合、このプロバイダーにフォールバックします。"
+    },
+
+    "health": {
+      "label": "プロバイダーヘルスチェック",
+      "checkButton": "ヘルスチェック",
+      "checking": "チェック中...",
+      "healthy": "プロバイダーは正常です",
+      "unhealthy": "プロバイダーは異常です",
+      "latency": "レイテンシ：{{ms}}ms"
+    },
+
+    "save": {
+      "button": "エンベディング設定を保存",
+      "saving": "保存中..."
+    },
+
+    "reindex": {
+      "title": "再インデックスが必要です",
+      "message": "エンベディングプロバイダーまたはモデルが変更されました。新しいエンベディングを使用するには、コードベースの完全な再インデックスをお勧めします。"
     }
   }
 }

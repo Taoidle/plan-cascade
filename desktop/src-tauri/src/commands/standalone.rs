@@ -793,6 +793,10 @@ pub async fn trigger_reindex(
 ///
 /// Returns the top-k most similar code chunks to the query string.
 /// Falls back to the current working directory if no project_path is provided.
+///
+/// Prefers the project's `EmbeddingManager` (ADR-F002) for query embedding.
+/// Falls back to rebuilding a temporary TF-IDF vocabulary when no manager
+/// is available (e.g., IndexManager not initialized or project not yet indexed).
 #[tauri::command]
 pub async fn semantic_search(
     query: String,
@@ -821,7 +825,10 @@ pub async fn semantic_search(
     let mgr_lock = standalone_state.index_manager.read().await;
     let mgr = match &*mgr_lock {
         Some(mgr) => mgr,
-        None => return Ok(CommandResponse::err("IndexManager not initialized")),
+        None => return Ok(CommandResponse::err(
+            "Semantic search not available: IndexManager not initialized. \
+             No embedding provider is configured for this project."
+        )),
     };
 
     let index_store = mgr.index_store();
@@ -841,11 +848,60 @@ pub async fn semantic_search(
         return Ok(CommandResponse::ok(vec![]));
     }
 
-    // Create a temporary embedding service and build vocabulary from stored chunks
+    let k = top_k.unwrap_or(10);
+
+    // Prefer the project's EmbeddingManager (ADR-F002) for query embedding.
+    // This avoids rebuilding a temporary TF-IDF vocabulary from scratch.
+    if let Some(emb_mgr) = mgr.get_embedding_manager(&dir).await {
+        // Dimension compatibility check: stored embeddings vs manager dimension
+        let stored_dim = index_store
+            .get_embedding_metadata(&dir)
+            .ok()
+            .and_then(|meta| meta.first().map(|m| m.embedding_dimension));
+        let manager_dim = emb_mgr.dimension();
+        let dimension_compatible = stored_dim
+            .map(|d| d == 0 || manager_dim == 0 || d == manager_dim)
+            .unwrap_or(true);
+
+        if !dimension_compatible {
+            return Ok(CommandResponse::err(format!(
+                "Semantic search not available: embedding dimension mismatch. \
+                 Index was built with {}-dimensional embeddings, but the current \
+                 embedding provider produces {}-dimensional vectors. \
+                 Re-index the project to resolve this.",
+                stored_dim.unwrap_or(0),
+                manager_dim,
+            )));
+        }
+
+        // Use EmbeddingManager.embed_query
+        match emb_mgr.embed_query(&query).await {
+            Ok(query_embedding) if !query_embedding.is_empty() => {
+                match index_store.semantic_search(&query_embedding, &dir, k) {
+                    Ok(results) => return Ok(CommandResponse::ok(results)),
+                    Err(e) => return Ok(CommandResponse::err(format!(
+                        "Semantic search failed: {}", e
+                    ))),
+                }
+            }
+            Ok(_) => {
+                return Ok(CommandResponse::ok(vec![]));
+            }
+            Err(e) => {
+                return Ok(CommandResponse::err(format!(
+                    "Semantic search failed: embedding provider error — {}. \
+                     The provider may be unhealthy or unreachable.",
+                    e
+                )));
+            }
+        }
+    }
+
+    // Fallback: rebuild a temporary TF-IDF vocabulary when no EmbeddingManager
+    // is available. This path is retained for backwards compatibility.
     let embedding_service =
         crate::services::orchestrator::embedding_service::EmbeddingService::new();
 
-    // Get all embeddings for the project to build vocabulary
     let all_chunks = match index_store.get_embeddings_for_project(&dir) {
         Ok(chunks) => chunks,
         Err(e) => {
@@ -856,21 +912,17 @@ pub async fn semantic_search(
         }
     };
 
-    // Build vocabulary from stored chunk texts
     let chunk_texts: Vec<&str> = all_chunks
         .iter()
         .map(|(_, _, text, _)| text.as_str())
         .collect();
     embedding_service.build_vocabulary(&chunk_texts);
 
-    // Embed the query
     let query_embedding = embedding_service.embed_text(&query);
     if query_embedding.is_empty() {
         return Ok(CommandResponse::ok(vec![]));
     }
 
-    // Perform semantic search
-    let k = top_k.unwrap_or(10);
     match index_store.semantic_search(&query_embedding, &dir, k) {
         Ok(results) => Ok(CommandResponse::ok(results)),
         Err(e) => Ok(CommandResponse::err(format!(
@@ -1213,10 +1265,13 @@ pub async fn execute_standalone_with_session(
     // Create orchestrator with database (IndexStore is auto-wired to ToolExecutor)
     let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
 
-    // Wire embedding service from IndexManager for semantic CodebaseSearch
+    // Wire embedding service and EmbeddingManager from IndexManager for semantic CodebaseSearch
     if let Some(ref manager) = *standalone_state.index_manager.read().await {
         if let Some(emb_svc) = manager.get_embedding_service(&request.project_path).await {
             orchestrator = orchestrator.with_embedding_service(emb_svc);
+        }
+        if let Some(emb_mgr) = manager.get_embedding_manager(&request.project_path).await {
+            orchestrator = orchestrator.with_embedding_manager(emb_mgr);
         }
     }
 
@@ -1586,10 +1641,13 @@ pub async fn resume_standalone_execution(
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
 
-    // Wire embedding service from IndexManager for semantic CodebaseSearch
+    // Wire embedding service and EmbeddingManager from IndexManager for semantic CodebaseSearch
     if let Some(ref manager) = *standalone_state.index_manager.read().await {
         if let Some(emb_svc) = manager.get_embedding_service(&session.project_path).await {
             orchestrator = orchestrator.with_embedding_service(emb_svc);
+        }
+        if let Some(emb_mgr) = manager.get_embedding_manager(&session.project_path).await {
+            orchestrator = orchestrator.with_embedding_manager(emb_mgr);
         }
     }
 

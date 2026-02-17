@@ -58,6 +58,17 @@ pub struct ProjectIndexSummary {
     pub embedding_chunks: usize,
 }
 
+/// Metadata about stored embeddings: which provider and dimension were used.
+///
+/// Returned by `IndexStore::get_embedding_metadata` to help callers decide
+/// whether existing embeddings are compatible with the current provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingMetadata {
+    pub provider_type: String,
+    pub provider_model: String,
+    pub embedding_dimension: usize,
+}
+
 /// Persistent index store backed by SQLite.
 #[derive(Debug, Clone)]
 pub struct IndexStore {
@@ -346,6 +357,47 @@ impl IndexStore {
         Ok(deleted)
     }
 
+    /// Query files whose path matches a SQL LIKE pattern.
+    ///
+    /// The `path_pattern` should use `%` as wildcard, e.g. `"%controller%"`.
+    /// Results are ordered by file_path for deterministic output.
+    pub fn query_files_by_path(
+        &self,
+        project_path: &str,
+        path_pattern: &str,
+    ) -> AppResult<Vec<FileIndexRow>> {
+        let conn = self.get_connection()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, project_path, file_path, component, language, extension,
+                    size_bytes, line_count, is_test, content_hash, indexed_at
+             FROM file_index
+             WHERE project_path = ?1 AND file_path LIKE ?2
+             ORDER BY file_path",
+        )?;
+
+        let rows = stmt
+            .query_map(params![project_path, path_pattern], |row| {
+                Ok(FileIndexRow {
+                    id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    file_path: row.get(2)?,
+                    component: row.get(3)?,
+                    language: row.get(4)?,
+                    extension: row.get(5)?,
+                    size_bytes: row.get::<_, i64>(6)? as u64,
+                    line_count: row.get::<_, i64>(7)? as usize,
+                    is_test: row.get::<_, i32>(8)? != 0,
+                    content_hash: row.get(9)?,
+                    indexed_at: row.get(10)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
     /// Get symbols for a specific file.
     pub fn get_file_symbols(
         &self,
@@ -397,13 +449,17 @@ impl IndexStore {
     }
 
     // =========================================================================
-    // Embedding storage methods (feature-003)
+    // Embedding storage methods (feature-003, story-012)
     // =========================================================================
 
     /// Insert or update a chunk embedding for a file.
     ///
     /// Uses `INSERT ... ON CONFLICT` to upsert on the
     /// `(project_path, file_path, chunk_index)` unique constraint.
+    ///
+    /// The `provider_type`, `provider_model`, and `embedding_dimension` parameters
+    /// are optional for backward compatibility. When `None`, they default to
+    /// `"tfidf"`, `"tfidf-v1"`, and `0` respectively.
     pub fn upsert_chunk_embedding(
         &self,
         project_path: &str,
@@ -412,15 +468,50 @@ impl IndexStore {
         chunk_text: &str,
         embedding: &[u8],
     ) -> AppResult<()> {
+        self.upsert_chunk_embedding_with_provider(
+            project_path,
+            file_path,
+            chunk_index,
+            chunk_text,
+            embedding,
+            None,
+            None,
+            None,
+        )
+    }
+
+    /// Insert or update a chunk embedding with explicit provider metadata.
+    ///
+    /// Extended version of `upsert_chunk_embedding` that records which embedding
+    /// provider generated the vector, enabling multi-provider storage and filtering.
+    pub fn upsert_chunk_embedding_with_provider(
+        &self,
+        project_path: &str,
+        file_path: &str,
+        chunk_index: i64,
+        chunk_text: &str,
+        embedding: &[u8],
+        provider_type: Option<&str>,
+        provider_model: Option<&str>,
+        embedding_dimension: Option<i64>,
+    ) -> AppResult<()> {
+        let pt = provider_type.unwrap_or("tfidf");
+        let pm = provider_model.unwrap_or("tfidf-v1");
+        let ed = embedding_dimension.unwrap_or(0);
+
         let conn = self.get_connection()?;
         conn.execute(
-            "INSERT INTO file_embeddings (project_path, file_path, chunk_index, chunk_text, embedding, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+            "INSERT INTO file_embeddings (project_path, file_path, chunk_index, chunk_text, embedding,
+                                          provider_type, provider_model, embedding_dimension, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, CURRENT_TIMESTAMP)
              ON CONFLICT(project_path, file_path, chunk_index) DO UPDATE SET
                  chunk_text = excluded.chunk_text,
                  embedding = excluded.embedding,
+                 provider_type = excluded.provider_type,
+                 provider_model = excluded.provider_model,
+                 embedding_dimension = excluded.embedding_dimension,
                  created_at = CURRENT_TIMESTAMP",
-            params![project_path, file_path, chunk_index, chunk_text, embedding],
+            params![project_path, file_path, chunk_index, chunk_text, embedding, pt, pm, ed],
         )?;
         Ok(())
     }
@@ -428,29 +519,63 @@ impl IndexStore {
     /// Retrieve all embeddings for a project.
     ///
     /// Returns a vector of `(file_path, chunk_index, chunk_text, embedding_bytes)`.
+    ///
+    /// When `provider_filter` is `None`, returns all embeddings regardless of
+    /// provider. When `Some`, only returns embeddings matching that provider_type.
     pub fn get_embeddings_for_project(
         &self,
         project_path: &str,
     ) -> AppResult<Vec<(String, i64, String, Vec<u8>)>> {
-        let conn = self.get_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT file_path, chunk_index, chunk_text, embedding
-             FROM file_embeddings
-             WHERE project_path = ?1
-             ORDER BY file_path, chunk_index",
-        )?;
+        self.get_embeddings_for_project_filtered(project_path, None)
+    }
 
-        let rows = stmt
-            .query_map(params![project_path], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Vec<u8>>(3)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
+    /// Retrieve embeddings for a project, optionally filtered by provider_type.
+    pub fn get_embeddings_for_project_filtered(
+        &self,
+        project_path: &str,
+        provider_filter: Option<&str>,
+    ) -> AppResult<Vec<(String, i64, String, Vec<u8>)>> {
+        let conn = self.get_connection()?;
+
+        let rows = if let Some(provider) = provider_filter {
+            let mut stmt = conn.prepare(
+                "SELECT file_path, chunk_index, chunk_text, embedding
+                 FROM file_embeddings
+                 WHERE project_path = ?1 AND provider_type = ?2
+                 ORDER BY file_path, chunk_index",
+            )?;
+            let result: Vec<_> = stmt
+                .query_map(params![project_path, provider], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Vec<u8>>(3)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            result
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT file_path, chunk_index, chunk_text, embedding
+                 FROM file_embeddings
+                 WHERE project_path = ?1
+                 ORDER BY file_path, chunk_index",
+            )?;
+            let result: Vec<_> = stmt
+                .query_map(params![project_path], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Vec<u8>>(3)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            result
+        };
 
         Ok(rows)
     }
@@ -479,18 +604,80 @@ impl IndexStore {
         Ok(deleted)
     }
 
+    /// Delete all embeddings for a project that match a specific provider_type.
+    ///
+    /// Useful for clearing stale embeddings when switching to a different
+    /// embedding provider.
+    pub fn delete_embeddings_by_provider(
+        &self,
+        project_path: &str,
+        provider_type: &str,
+    ) -> AppResult<usize> {
+        let conn = self.get_connection()?;
+        let deleted = conn.execute(
+            "DELETE FROM file_embeddings WHERE project_path = ?1 AND provider_type = ?2",
+            params![project_path, provider_type],
+        )?;
+        Ok(deleted)
+    }
+
+    /// Get metadata about stored embeddings for a project.
+    ///
+    /// Returns a list of distinct `(provider_type, provider_model, embedding_dimension)`
+    /// combinations found in the stored embeddings. Useful for checking compatibility
+    /// when deciding whether to re-embed or reuse existing vectors.
+    pub fn get_embedding_metadata(
+        &self,
+        project_path: &str,
+    ) -> AppResult<Vec<EmbeddingMetadata>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT provider_type, provider_model, embedding_dimension
+             FROM file_embeddings
+             WHERE project_path = ?1
+             ORDER BY provider_type, provider_model",
+        )?;
+
+        let rows = stmt
+            .query_map(params![project_path], |row| {
+                Ok(EmbeddingMetadata {
+                    provider_type: row.get(0)?,
+                    provider_model: row.get(1)?,
+                    embedding_dimension: row.get::<_, i64>(2)? as usize,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
     /// Perform a semantic search over stored embeddings.
     ///
     /// Computes cosine similarity between `query_embedding` and every stored
     /// embedding for the given project, returning the top-k results ranked by
     /// descending similarity.
+    ///
+    /// When `provider_filter` is `None`, searches all embeddings. When `Some`,
+    /// only searches embeddings matching the given provider_type.
     pub fn semantic_search(
         &self,
         query_embedding: &[f32],
         project_path: &str,
         top_k: usize,
     ) -> AppResult<Vec<SemanticSearchResult>> {
-        let rows = self.get_embeddings_for_project(project_path)?;
+        self.semantic_search_filtered(query_embedding, project_path, top_k, None)
+    }
+
+    /// Perform a semantic search with an optional provider filter.
+    pub fn semantic_search_filtered(
+        &self,
+        query_embedding: &[f32],
+        project_path: &str,
+        top_k: usize,
+        provider_filter: Option<&str>,
+    ) -> AppResult<Vec<SemanticSearchResult>> {
+        let rows = self.get_embeddings_for_project_filtered(project_path, provider_filter)?;
 
         if rows.is_empty() || query_embedding.is_empty() {
             return Ok(Vec::new());
@@ -1538,5 +1725,344 @@ mod tests {
             Some("Process incoming data")
         );
         assert_eq!(results[0].end_line, 30);
+    }
+
+    // =========================================================================
+    // Provider-aware embedding tests (story-012)
+    // =========================================================================
+
+    #[test]
+    fn upsert_with_provider_metadata() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        store
+            .upsert_chunk_embedding_with_provider(
+                "/project",
+                "src/main.rs",
+                0,
+                "fn main() {}",
+                &emb,
+                Some("ollama"),
+                Some("nomic-embed-text"),
+                Some(768),
+            )
+            .unwrap();
+
+        // Verify it's stored and retrievable
+        let results = store.get_embeddings_for_project("/project").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].2, "fn main() {}");
+
+        // Verify metadata
+        let meta = store.get_embedding_metadata("/project").unwrap();
+        assert_eq!(meta.len(), 1);
+        assert_eq!(meta[0].provider_type, "ollama");
+        assert_eq!(meta[0].provider_model, "nomic-embed-text");
+        assert_eq!(meta[0].embedding_dimension, 768);
+    }
+
+    #[test]
+    fn upsert_without_provider_uses_defaults() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        store
+            .upsert_chunk_embedding("/project", "src/main.rs", 0, "fn main() {}", &emb)
+            .unwrap();
+
+        let meta = store.get_embedding_metadata("/project").unwrap();
+        assert_eq!(meta.len(), 1);
+        assert_eq!(meta[0].provider_type, "tfidf");
+        assert_eq!(meta[0].provider_model, "tfidf-v1");
+        assert_eq!(meta[0].embedding_dimension, 0);
+    }
+
+    #[test]
+    fn get_embeddings_filtered_by_provider() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        // Insert one with default provider (tfidf)
+        store
+            .upsert_chunk_embedding("/project", "src/a.rs", 0, "chunk a", &emb)
+            .unwrap();
+
+        // Insert another with a different provider (overwrite is per file+chunk,
+        // so use a different file)
+        store
+            .upsert_chunk_embedding_with_provider(
+                "/project",
+                "src/b.rs",
+                0,
+                "chunk b",
+                &emb,
+                Some("ollama"),
+                Some("nomic-embed-text"),
+                Some(768),
+            )
+            .unwrap();
+
+        // Unfiltered should return both
+        let all = store.get_embeddings_for_project("/project").unwrap();
+        assert_eq!(all.len(), 2);
+
+        // Filter by tfidf should return only a.rs
+        let tfidf = store
+            .get_embeddings_for_project_filtered("/project", Some("tfidf"))
+            .unwrap();
+        assert_eq!(tfidf.len(), 1);
+        assert_eq!(tfidf[0].0, "src/a.rs");
+
+        // Filter by ollama should return only b.rs
+        let ollama = store
+            .get_embeddings_for_project_filtered("/project", Some("ollama"))
+            .unwrap();
+        assert_eq!(ollama.len(), 1);
+        assert_eq!(ollama[0].0, "src/b.rs");
+
+        // Filter by nonexistent provider returns empty
+        let none = store
+            .get_embeddings_for_project_filtered("/project", Some("openai"))
+            .unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn semantic_search_filtered_by_provider() {
+        use super::super::embedding_service::embedding_to_bytes;
+
+        let store = create_test_store();
+
+        let query = vec![1.0f32, 0.0, 0.0];
+        let vec1 = embedding_to_bytes(&vec![0.9f32, 0.1, 0.0]);
+        let vec2 = embedding_to_bytes(&vec![0.5f32, 0.5, 0.0]);
+
+        // Store vec1 as tfidf
+        store
+            .upsert_chunk_embedding("/project", "a.rs", 0, "tfidf chunk", &vec1)
+            .unwrap();
+
+        // Store vec2 as ollama
+        store
+            .upsert_chunk_embedding_with_provider(
+                "/project",
+                "b.rs",
+                0,
+                "ollama chunk",
+                &vec2,
+                Some("ollama"),
+                Some("nomic-embed-text"),
+                Some(768),
+            )
+            .unwrap();
+
+        // Unfiltered search returns both
+        let all_results = store.semantic_search(&query, "/project", 10).unwrap();
+        assert_eq!(all_results.len(), 2);
+
+        // Filtered by tfidf returns only tfidf chunk
+        let tfidf_results = store
+            .semantic_search_filtered(&query, "/project", 10, Some("tfidf"))
+            .unwrap();
+        assert_eq!(tfidf_results.len(), 1);
+        assert_eq!(tfidf_results[0].chunk_text, "tfidf chunk");
+
+        // Filtered by ollama returns only ollama chunk
+        let ollama_results = store
+            .semantic_search_filtered(&query, "/project", 10, Some("ollama"))
+            .unwrap();
+        assert_eq!(ollama_results.len(), 1);
+        assert_eq!(ollama_results[0].chunk_text, "ollama chunk");
+    }
+
+    #[test]
+    fn delete_embeddings_by_provider() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        // Insert tfidf embeddings
+        store
+            .upsert_chunk_embedding("/project", "src/a.rs", 0, "chunk a", &emb)
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "src/b.rs", 0, "chunk b", &emb)
+            .unwrap();
+
+        // Insert an ollama embedding (different file)
+        store
+            .upsert_chunk_embedding_with_provider(
+                "/project",
+                "src/c.rs",
+                0,
+                "chunk c",
+                &emb,
+                Some("ollama"),
+                Some("nomic-embed-text"),
+                Some(768),
+            )
+            .unwrap();
+
+        assert_eq!(store.count_embeddings("/project").unwrap(), 3);
+
+        // Delete only tfidf embeddings
+        let deleted = store
+            .delete_embeddings_by_provider("/project", "tfidf")
+            .unwrap();
+        assert_eq!(deleted, 2);
+
+        // Only ollama embedding remains
+        let remaining = store.get_embeddings_for_project("/project").unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].0, "src/c.rs");
+
+        // Metadata should only show ollama
+        let meta = store.get_embedding_metadata("/project").unwrap();
+        assert_eq!(meta.len(), 1);
+        assert_eq!(meta[0].provider_type, "ollama");
+    }
+
+    #[test]
+    fn get_embedding_metadata_empty_project() {
+        let store = create_test_store();
+        let meta = store.get_embedding_metadata("/nonexistent").unwrap();
+        assert!(meta.is_empty());
+    }
+
+    #[test]
+    fn get_embedding_metadata_multiple_providers() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        store
+            .upsert_chunk_embedding("/project", "src/a.rs", 0, "chunk a", &emb)
+            .unwrap();
+
+        store
+            .upsert_chunk_embedding_with_provider(
+                "/project",
+                "src/b.rs",
+                0,
+                "chunk b",
+                &emb,
+                Some("ollama"),
+                Some("nomic-embed-text"),
+                Some(768),
+            )
+            .unwrap();
+
+        store
+            .upsert_chunk_embedding_with_provider(
+                "/project",
+                "src/c.rs",
+                0,
+                "chunk c",
+                &emb,
+                Some("ollama"),
+                Some("mxbai-embed-large"),
+                Some(1024),
+            )
+            .unwrap();
+
+        let meta = store.get_embedding_metadata("/project").unwrap();
+        // Should return 3 distinct combinations
+        assert_eq!(meta.len(), 3);
+
+        // Check that all are present
+        let types: Vec<&str> = meta.iter().map(|m| m.provider_type.as_str()).collect();
+        assert!(types.contains(&"tfidf"));
+        assert!(types.contains(&"ollama"));
+
+        let models: Vec<&str> = meta.iter().map(|m| m.provider_model.as_str()).collect();
+        assert!(models.contains(&"tfidf-v1"));
+        assert!(models.contains(&"nomic-embed-text"));
+        assert!(models.contains(&"mxbai-embed-large"));
+    }
+
+    #[test]
+    fn upsert_with_provider_updates_provider_on_conflict() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        // First insert as tfidf
+        store
+            .upsert_chunk_embedding("/project", "src/main.rs", 0, "original", &emb)
+            .unwrap();
+
+        let meta = store.get_embedding_metadata("/project").unwrap();
+        assert_eq!(meta[0].provider_type, "tfidf");
+
+        // Update same file+chunk with ollama provider
+        store
+            .upsert_chunk_embedding_with_provider(
+                "/project",
+                "src/main.rs",
+                0,
+                "updated",
+                &emb,
+                Some("ollama"),
+                Some("nomic-embed-text"),
+                Some(768),
+            )
+            .unwrap();
+
+        // Should still be 1 row (upserted), now with ollama metadata
+        let results = store.get_embeddings_for_project("/project").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].2, "updated");
+
+        let meta = store.get_embedding_metadata("/project").unwrap();
+        assert_eq!(meta.len(), 1);
+        assert_eq!(meta[0].provider_type, "ollama");
+        assert_eq!(meta[0].provider_model, "nomic-embed-text");
+        assert_eq!(meta[0].embedding_dimension, 768);
+    }
+
+    #[test]
+    fn delete_embeddings_for_file_removes_all_providers() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        // Insert with default provider
+        store
+            .upsert_chunk_embedding("/project", "src/main.rs", 0, "chunk 0", &emb)
+            .unwrap();
+
+        // Delete should remove regardless of provider
+        let deleted = store
+            .delete_embeddings_for_file("/project", "src/main.rs")
+            .unwrap();
+        assert_eq!(deleted, 1);
+
+        let remaining = store.get_embeddings_for_project("/project").unwrap();
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn migration_idempotent_schema_has_provider_columns() {
+        // Creating a new test store runs init_schema which includes the migration.
+        // Creating another store against the same DB would re-run it (simulated by
+        // the fact that create_test_store always runs init_schema on a fresh DB).
+        // This test verifies that provider columns exist after init.
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        // If columns didn't exist, this would fail
+        store
+            .upsert_chunk_embedding_with_provider(
+                "/project",
+                "src/main.rs",
+                0,
+                "test",
+                &emb,
+                Some("openai"),
+                Some("text-embedding-3-small"),
+                Some(1536),
+            )
+            .unwrap();
+
+        let meta = store.get_embedding_metadata("/project").unwrap();
+        assert_eq!(meta[0].provider_type, "openai");
+        assert_eq!(meta[0].embedding_dimension, 1536);
     }
 }

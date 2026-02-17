@@ -208,6 +208,13 @@ fn main() {
             plan_cascade_desktop::commands::skills::toggle_generated_skill,
             plan_cascade_desktop::commands::skills::refresh_skill_index,
             plan_cascade_desktop::commands::skills::get_skills_overview,
+            // Embedding configuration commands
+            plan_cascade_desktop::commands::embedding::get_embedding_config,
+            plan_cascade_desktop::commands::embedding::set_embedding_config,
+            plan_cascade_desktop::commands::embedding::list_embedding_providers,
+            plan_cascade_desktop::commands::embedding::check_embedding_provider_health,
+            plan_cascade_desktop::commands::embedding::set_embedding_api_key,
+            plan_cascade_desktop::commands::embedding::get_embedding_api_key,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

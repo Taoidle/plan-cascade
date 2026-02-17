@@ -11,6 +11,9 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use super::analysis_index::{build_file_inventory, extract_symbols, AnalysisLimits};
+use super::embedding_manager::EmbeddingManager;
+use super::embedding_provider::EmbeddingProviderType;
+use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::{embedding_to_bytes, EmbeddingService};
 use super::index_store::IndexStore;
 use super::tree_sitter_parser;
@@ -33,6 +36,7 @@ pub struct BackgroundIndexer {
     project_root: PathBuf,
     index_store: Arc<IndexStore>,
     embedding_service: Option<Arc<EmbeddingService>>,
+    embedding_manager: Option<Arc<EmbeddingManager>>,
     change_rx: Option<tokio::sync::mpsc::Receiver<PathBuf>>,
     progress_callback: Option<IndexProgressCallback>,
 }
@@ -44,6 +48,7 @@ impl BackgroundIndexer {
             project_root,
             index_store,
             embedding_service: None,
+            embedding_manager: None,
             change_rx: None,
             progress_callback: None,
         }
@@ -55,6 +60,18 @@ impl BackgroundIndexer {
     /// embeddings stored in the `file_embeddings` table.
     pub fn with_embedding_service(mut self, svc: Arc<EmbeddingService>) -> Self {
         self.embedding_service = Some(svc);
+        self
+    }
+
+    /// Attach an `EmbeddingManager` for provider-aware embedding with
+    /// automatic fallback and caching.
+    ///
+    /// When set, the indexer will use the manager instead of the direct
+    /// `EmbeddingService` for both full and incremental embedding passes.
+    /// If both `embedding_manager` and `embedding_service` are set, the
+    /// manager takes precedence.
+    pub fn with_embedding_manager(mut self, mgr: Arc<EmbeddingManager>) -> Self {
+        self.embedding_manager = Some(mgr);
         self
     }
 
@@ -90,6 +107,7 @@ impl BackgroundIndexer {
         let project_root = self.project_root;
         let index_store = self.index_store;
         let embedding_service = self.embedding_service;
+        let embedding_manager = self.embedding_manager;
         let change_rx = self.change_rx;
         let progress_callback = self.progress_callback;
 
@@ -110,7 +128,20 @@ impl BackgroundIndexer {
             }
 
             // --- Phase 1b: Generate embeddings ---
-            if let Some(ref emb_svc) = embedding_service {
+            // Prefer EmbeddingManager over direct EmbeddingService when both are set.
+            if let Some(ref emb_mgr) = embedding_manager {
+                info!("background indexer: starting embedding generation (via EmbeddingManager)");
+                if let Err(e) =
+                    run_embedding_pass_managed(&project_root, &index_store, emb_mgr).await
+                {
+                    warn!(
+                        error = %e,
+                        "background indexer: embedding generation (managed) failed"
+                    );
+                } else {
+                    info!("background indexer: embedding generation (managed) complete");
+                }
+            } else if let Some(ref emb_svc) = embedding_service {
                 info!("background indexer: starting embedding generation");
                 if let Err(e) = run_embedding_pass(&project_root, &index_store, emb_svc) {
                     warn!(
@@ -135,8 +166,23 @@ impl BackgroundIndexer {
                             "background indexer: incremental index failed"
                         );
                     }
-                    // Re-embed the changed file if embedding service is available
-                    if let Some(ref emb_svc) = embedding_service {
+                    // Re-embed the changed file — prefer manager over direct service
+                    if let Some(ref emb_mgr) = embedding_manager {
+                        if let Err(e) = run_incremental_embedding_managed(
+                            &project_root,
+                            &index_store,
+                            emb_mgr,
+                            &changed_path,
+                        )
+                        .await
+                        {
+                            warn!(
+                                path = %changed_path.display(),
+                                error = %e,
+                                "background indexer: incremental embedding (managed) failed"
+                            );
+                        }
+                    } else if let Some(ref emb_svc) = embedding_service {
                         if let Err(e) = run_incremental_embedding(
                             &project_root,
                             &index_store,
@@ -635,6 +681,219 @@ fn run_incremental_embedding(
         path = %rel_str,
         chunks = chunks.len(),
         "background indexer: incremental embedding updated"
+    );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// EmbeddingManager-based embedding pass (story-005)
+// ---------------------------------------------------------------------------
+
+/// Run an embedding pass using the `EmbeddingManager` dispatch layer.
+///
+/// This is the provider-aware replacement for `run_embedding_pass`. It:
+/// 1. Collects file chunks the same way as the legacy path
+/// 2. If the primary provider is TF-IDF, builds vocabulary before embedding
+/// 3. Uses `EmbeddingManager::embed_documents()` for batch embedding
+/// 4. Stores embeddings in IndexStore
+/// 5. Persists TF-IDF vocabulary if applicable
+async fn run_embedding_pass_managed(
+    project_root: &Path,
+    index_store: &IndexStore,
+    manager: &EmbeddingManager,
+) -> Result<(), String> {
+    let project_path = project_root.to_string_lossy().to_string();
+
+    // Collect all chunks first (to build vocabulary from the full corpus)
+    let inventory = build_file_inventory(project_root, &[]).map_err(|e| e.to_string())?;
+
+    let mut all_chunks: Vec<(String, FileChunk)> = Vec::new(); // (relative_path, chunk)
+
+    for item in &inventory.items {
+        if item.size_bytes > MAX_EMBEDDABLE_FILE_SIZE {
+            continue;
+        }
+        let abs_path = project_root.join(&item.path);
+        let content = match std::fs::read_to_string(&abs_path) {
+            Ok(c) => c,
+            Err(_) => continue, // skip unreadable files
+        };
+        let chunks = chunk_file_content(&content, &item.language);
+        for chunk in chunks {
+            all_chunks.push((item.path.clone(), chunk));
+        }
+    }
+
+    if all_chunks.is_empty() {
+        info!("background indexer: no chunks to embed (managed)");
+        return Ok(());
+    }
+
+    let texts: Vec<&str> = all_chunks.iter().map(|(_, c)| c.text.as_str()).collect();
+
+    // If primary provider is TF-IDF, build vocabulary before embedding
+    if manager.provider_type() == EmbeddingProviderType::TfIdf {
+        let primary = manager.primary_provider();
+        if let Some(tfidf) = primary.as_any().downcast_ref::<TfIdfEmbeddingProvider>() {
+            tfidf.build_vocabulary(&texts);
+            debug!(
+                chunks = texts.len(),
+                "background indexer: TF-IDF vocabulary built via manager"
+            );
+        }
+    }
+
+    // Generate embeddings via manager (async, with caching and fallback)
+    let embeddings = manager
+        .embed_documents(&texts)
+        .await
+        .map_err(|e| format!("embedding manager embed_documents failed: {}", e))?;
+
+    let mut stored = 0usize;
+
+    for ((rel_path, chunk), embedding) in all_chunks.iter().zip(embeddings.iter()) {
+        let bytes = embedding_to_bytes(embedding);
+        if let Err(e) = index_store.upsert_chunk_embedding(
+            &project_path,
+            rel_path,
+            chunk.index as i64,
+            &chunk.text,
+            &bytes,
+        ) {
+            warn!(
+                file = %rel_path,
+                chunk = chunk.index,
+                error = %e,
+                "background indexer: failed to store embedding (managed)"
+            );
+        } else {
+            stored += 1;
+        }
+    }
+
+    info!(
+        chunks = stored,
+        total = all_chunks.len(),
+        "background indexer: embeddings stored (managed)"
+    );
+
+    // Persist TF-IDF vocabulary to SQLite if applicable
+    if manager.provider_type() == EmbeddingProviderType::TfIdf {
+        let primary = manager.primary_provider();
+        if let Some(tfidf) = primary.as_any().downcast_ref::<TfIdfEmbeddingProvider>() {
+            if let Some(vocab_json) = tfidf.export_vocabulary() {
+                if let Err(e) = index_store.save_vocabulary(&project_path, &vocab_json) {
+                    warn!(
+                        error = %e,
+                        "background indexer: failed to save vocabulary to SQLite (managed)"
+                    );
+                } else {
+                    info!("background indexer: vocabulary saved to SQLite (managed)");
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Re-embed a single changed file using the `EmbeddingManager`.
+///
+/// Provider-aware replacement for `run_incremental_embedding`. Handles
+/// TF-IDF vocabulary restoration from SQLite when the provider is not ready.
+async fn run_incremental_embedding_managed(
+    project_root: &Path,
+    index_store: &IndexStore,
+    manager: &EmbeddingManager,
+    changed_path: &Path,
+) -> Result<(), String> {
+    if !changed_path.is_file() {
+        return Ok(());
+    }
+
+    let rel = changed_path
+        .strip_prefix(project_root)
+        .map_err(|_| format!("path {:?} is not under project root", changed_path))?;
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+    let project_path = project_root.to_string_lossy().to_string();
+
+    let metadata = std::fs::metadata(changed_path).map_err(|e| e.to_string())?;
+    if metadata.len() > MAX_EMBEDDABLE_FILE_SIZE {
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(changed_path).map_err(|e| e.to_string())?;
+    let ext = changed_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    let language = detect_language_simple(ext.as_deref());
+
+    // Delete old embeddings for this file
+    let _ = index_store.delete_embeddings_for_file(&project_path, &rel_str);
+
+    // If primary provider is TF-IDF, ensure vocabulary is loaded
+    if manager.provider_type() == EmbeddingProviderType::TfIdf {
+        let primary = manager.primary_provider();
+        if let Some(tfidf) = primary.as_any().downcast_ref::<TfIdfEmbeddingProvider>() {
+            if !tfidf.is_ready() {
+                // Try to restore vocabulary from SQLite
+                match index_store.load_vocabulary(&project_path) {
+                    Ok(Some(json)) => {
+                        if let Err(e) = tfidf.import_vocabulary(&json) {
+                            warn!(
+                                error = %e,
+                                "background indexer: failed to import vocabulary for incremental embedding (managed)"
+                            );
+                            return Ok(());
+                        }
+                        info!(
+                            "background indexer: restored vocabulary from SQLite for incremental embedding (managed)"
+                        );
+                    }
+                    _ => {
+                        // No vocabulary in DB — skip. It will be built on the next full pass.
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
+    let chunks = chunk_file_content(&content, &language);
+    if chunks.is_empty() {
+        return Ok(());
+    }
+
+    let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
+
+    let embeddings = manager
+        .embed_documents(&texts)
+        .await
+        .map_err(|e| format!("embedding manager incremental embed failed: {}", e))?;
+
+    for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
+        let bytes = embedding_to_bytes(embedding);
+        if let Err(e) = index_store.upsert_chunk_embedding(
+            &project_path,
+            &rel_str,
+            chunk.index as i64,
+            &chunk.text,
+            &bytes,
+        ) {
+            warn!(
+                file = %rel_str,
+                chunk = chunk.index,
+                error = %e,
+                "background indexer: incremental embedding failed (managed)"
+            );
+        }
+    }
+
+    debug!(
+        path = %rel_str,
+        chunks = chunks.len(),
+        "background indexer: incremental embedding updated (managed)"
     );
     Ok(())
 }
@@ -1209,5 +1468,264 @@ pub fn process_config(config: &Config) -> String {
             .expect("symbols");
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "serve_v2");
+    }
+
+    // -----------------------------------------------------------------------
+    // EmbeddingManager integration tests (story-005)
+    // -----------------------------------------------------------------------
+
+    /// Helper: create an EmbeddingManager with TF-IDF as primary provider.
+    fn test_tfidf_manager() -> Arc<EmbeddingManager> {
+        use crate::services::orchestrator::embedding_manager::EmbeddingManagerConfig;
+        use crate::services::orchestrator::embedding_provider::{
+            EmbeddingProviderConfig, EmbeddingProviderType,
+        };
+
+        let config = EmbeddingManagerConfig {
+            primary: EmbeddingProviderConfig::new(EmbeddingProviderType::TfIdf),
+            fallback: None,
+            cache_enabled: false,
+            cache_max_entries: 0,
+        };
+        Arc::new(EmbeddingManager::from_config(config).expect("create manager"))
+    }
+
+    #[tokio::test]
+    async fn managed_embedding_pass_stores_embeddings() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main() {\n    println!(\"hello\");\n}\n\npub fn helper() {\n    // do stuff\n}\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub struct Config {\n    name: String,\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        run_full_index(dir.path(), &store, None).expect("full index");
+
+        let manager = test_tfidf_manager();
+        run_embedding_pass_managed(dir.path(), &store, &manager)
+            .await
+            .expect("managed embedding pass");
+
+        let project_path = dir.path().to_string_lossy().to_string();
+        let count = store.count_embeddings(&project_path).expect("count");
+        assert!(
+            count > 0,
+            "should have stored at least one embedding via manager, got {}",
+            count
+        );
+
+        let embeddings = store
+            .get_embeddings_for_project(&project_path)
+            .expect("get");
+        assert!(!embeddings.is_empty());
+        for (_, _, _, bytes) in &embeddings {
+            assert!(!bytes.is_empty(), "embedding bytes should not be empty");
+        }
+    }
+
+    #[tokio::test]
+    async fn managed_embedding_pass_saves_vocabulary_to_sqlite() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main() {\n    println!(\"hello\");\n}\n\npub fn helper() {\n    // stuff\n}\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub struct Config {\n    name: String,\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        run_full_index(dir.path(), &store, None).expect("full index");
+
+        let manager = test_tfidf_manager();
+        run_embedding_pass_managed(dir.path(), &store, &manager)
+            .await
+            .expect("managed embedding pass");
+
+        let project_path = dir.path().to_string_lossy().to_string();
+        let vocab_json = store.load_vocabulary(&project_path).expect("load vocab");
+        assert!(
+            vocab_json.is_some(),
+            "vocabulary should be saved after managed embedding pass"
+        );
+    }
+
+    #[tokio::test]
+    async fn managed_incremental_embedding_works() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main() {\n    println!(\"hello\");\n}\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub struct Config {\n    name: String,\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // Full index + managed embedding pass to build and save vocabulary
+        run_full_index(dir.path(), &store, None).expect("full index");
+        let manager = test_tfidf_manager();
+        run_embedding_pass_managed(dir.path(), &store, &manager)
+            .await
+            .expect("managed embedding pass");
+
+        // Verify vocab was saved
+        assert!(
+            store.load_vocabulary(&project_path).unwrap().is_some(),
+            "vocabulary should be saved"
+        );
+
+        // Create a FRESH manager (simulating app restart)
+        let manager2 = test_tfidf_manager();
+
+        // Verify the fresh manager's TF-IDF provider is not ready
+        let primary = manager2.primary_provider();
+        let tfidf = primary
+            .as_any()
+            .downcast_ref::<TfIdfEmbeddingProvider>()
+            .expect("should be TfIdfEmbeddingProvider");
+        assert!(!tfidf.is_ready(), "fresh manager should not be ready");
+
+        // Modify a file
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main_v2() {\n    println!(\"updated\");\n}\n",
+        )
+        .expect("write");
+
+        // Incremental embedding should restore vocab from DB and proceed
+        let changed_path = dir.path().join("src/main.rs");
+        run_incremental_embedding_managed(dir.path(), &store, &manager2, &changed_path)
+            .await
+            .expect("managed incremental embedding");
+
+        // Verify the provider is now ready (vocab was restored)
+        assert!(
+            tfidf.is_ready(),
+            "TF-IDF provider should be ready after incremental restores vocab"
+        );
+
+        // Verify embeddings were stored for the changed file
+        let embeddings = store.get_embeddings_for_project(&project_path).unwrap();
+        let main_embeddings: Vec<_> = embeddings
+            .iter()
+            .filter(|(path, _, _, _)| path.contains("main.rs"))
+            .collect();
+        assert!(
+            !main_embeddings.is_empty(),
+            "should have embeddings for main.rs after managed incremental"
+        );
+    }
+
+    #[tokio::test]
+    async fn managed_incremental_embedding_skips_when_no_vocab_in_db() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("test.py"), "x = 1\n").expect("write");
+
+        let store = test_store();
+
+        // Full index but NO embedding pass — so no vocab in DB
+        run_full_index(dir.path(), &store, None).expect("full index");
+
+        let manager = test_tfidf_manager();
+        let primary = manager.primary_provider();
+        let tfidf = primary
+            .as_any()
+            .downcast_ref::<TfIdfEmbeddingProvider>()
+            .expect("TfIdfEmbeddingProvider");
+        assert!(!tfidf.is_ready());
+
+        // Incremental embedding should skip gracefully (no panic, no error)
+        let changed_path = dir.path().join("test.py");
+        let result =
+            run_incremental_embedding_managed(dir.path(), &store, &manager, &changed_path).await;
+        assert!(result.is_ok(), "should succeed even without vocab in DB");
+        assert!(
+            !tfidf.is_ready(),
+            "TF-IDF provider should remain not-ready"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_with_embedding_manager_generates_embeddings() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main() {\n    println!(\"hello\");\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        let manager = test_tfidf_manager();
+
+        let indexer = BackgroundIndexer::new(dir.path().to_path_buf(), store.clone())
+            .with_embedding_manager(manager);
+
+        let handle = indexer.start().await;
+        handle.await.expect("task should complete");
+
+        let project_path = dir.path().to_string_lossy().to_string();
+        let count = store.count_embeddings(&project_path).expect("count");
+        assert!(
+            count > 0,
+            "should have stored embeddings via manager, got {}",
+            count
+        );
+    }
+
+    #[tokio::test]
+    async fn embedding_manager_takes_precedence_over_service() {
+        // When both embedding_service and embedding_manager are set,
+        // the manager should be used (and produce embeddings).
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main() {\n    println!(\"hello\");\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        let emb_svc = Arc::new(EmbeddingService::new());
+        let manager = test_tfidf_manager();
+
+        let indexer = BackgroundIndexer::new(dir.path().to_path_buf(), store.clone())
+            .with_embedding_service(emb_svc.clone())
+            .with_embedding_manager(manager);
+
+        let handle = indexer.start().await;
+        handle.await.expect("task should complete");
+
+        let project_path = dir.path().to_string_lossy().to_string();
+        let count = store.count_embeddings(&project_path).expect("count");
+        assert!(
+            count > 0,
+            "should have stored embeddings via manager, got {}",
+            count
+        );
+
+        // The direct EmbeddingService should NOT have been used (vocab not built)
+        assert!(
+            !emb_svc.is_ready(),
+            "direct EmbeddingService should not have been used when manager is set"
+        );
     }
 }
