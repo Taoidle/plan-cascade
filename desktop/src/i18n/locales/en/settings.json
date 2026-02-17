@@ -8,7 +8,8 @@
     "agents": "Agents",
     "quality": "Quality Gates",
     "phases": "Phase Agents",
-    "importExport": "Import/Export"
+    "importExport": "Import/Export",
+    "lsp": "LSP Servers"
   },
 
   "general": {
@@ -460,6 +461,50 @@
     "reindex": {
       "title": "Reindex Required",
       "message": "The embedding provider or model changed. A full reindex of the codebase is recommended to use the new embeddings."
+    }
+  },
+
+  "lsp": {
+    "title": "LSP Language Servers",
+    "description": "Configure language server detection and semantic enrichment for enhanced code intelligence.",
+    "dismiss": "Dismiss",
+
+    "servers": {
+      "title": "Detected Servers",
+      "detectButton": "Detect Servers",
+      "detecting": "Detecting...",
+      "summary": "{{detected}} of {{total}} servers detected",
+      "colLanguage": "Language",
+      "colServer": "Server",
+      "colStatus": "Status",
+      "colInfo": "Info",
+      "detected": "Detected",
+      "notFound": "Not Found",
+      "version": "v{{version}}"
+    },
+
+    "enrichment": {
+      "title": "Enrichment Settings",
+      "autoEnrich": "Auto-enrich after indexing",
+      "autoEnrichHelp": "Automatically run LSP enrichment after Tree-sitter indexing completes. Adds type information, cross-references, and call graphs.",
+      "manualTitle": "Manual Enrichment",
+      "enrichButton": "Run Enrichment",
+      "enriching": "Enriching...",
+      "noWorkspace": "Open a workspace first",
+      "noServers": "No servers detected — run detection first"
+    },
+
+    "report": {
+      "title": "Last Enrichment Report",
+      "languages": "Languages",
+      "symbols": "Symbols Enriched",
+      "references": "References Found",
+      "duration": "Duration"
+    },
+
+    "info": {
+      "title": "About LSP Enrichment",
+      "description": "LSP enrichment is optional and enhances the Tree-sitter index with type information, cross-references, and call graphs from detected language servers. It runs as a post-processing pass after indexing."
     }
   }
 }

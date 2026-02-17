@@ -23,6 +23,12 @@ pub use commands::{
     cancel_execution,
     cancel_standalone_execution,
     check_analytics_health,
+    // LSP commands
+    detect_lsp_servers,
+    get_enrichment_report,
+    get_lsp_status,
+    trigger_lsp_enrichment,
+    LspState,
     // Embedding configuration commands
     check_embedding_provider_health,
     check_provider_health,

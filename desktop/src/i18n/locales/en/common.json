@@ -88,7 +88,10 @@
     "semanticSearchUnavailable": "Semantic search unavailable",
     "searchCapabilities": "Search capabilities",
     "embeddingProgress": "Building embeddings... ({{current}}/{{total}})",
-    "embeddingComplete": "{{count}} embeddings"
+    "embeddingComplete": "{{count}} embeddings",
+    "lspEnrichmentReady": "LSP enriched",
+    "lspEnrichmentInProgress": "LSP enriching...",
+    "lspEnrichmentUnavailable": "LSP unavailable"
   },
 
   "time": {

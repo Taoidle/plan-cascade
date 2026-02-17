@@ -88,7 +88,10 @@
     "semanticSearchUnavailable": "语义搜索不可用",
     "searchCapabilities": "搜索能力",
     "embeddingProgress": "构建嵌入向量中... ({{current}}/{{total}})",
-    "embeddingComplete": "{{count}} 个嵌入"
+    "embeddingComplete": "{{count}} 个嵌入",
+    "lspEnrichmentReady": "LSP 已增强",
+    "lspEnrichmentInProgress": "LSP 增强中...",
+    "lspEnrichmentUnavailable": "LSP 不可用"
   },
 
   "time": {

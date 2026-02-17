@@ -8,7 +8,8 @@
     "agents": "代理",
     "quality": "质量门禁",
     "phases": "阶段代理",
-    "importExport": "导入/导出"
+    "importExport": "导入/导出",
+    "lsp": "LSP 服务器"
   },
 
   "general": {
@@ -460,6 +461,50 @@
     "reindex": {
       "title": "需要重新索引",
       "message": "嵌入提供商或模型已更改。建议对代码库进行完整重新索引以使用新的嵌入。"
+    }
+  },
+
+  "lsp": {
+    "title": "LSP 语言服务器",
+    "description": "配置语言服务器检测和语义增强，以获得更强的代码智能。",
+    "dismiss": "关闭",
+
+    "servers": {
+      "title": "已检测的服务器",
+      "detectButton": "检测服务器",
+      "detecting": "检测中...",
+      "summary": "已检测到 {{detected}}/{{total}} 个服务器",
+      "colLanguage": "语言",
+      "colServer": "服务器",
+      "colStatus": "状态",
+      "colInfo": "信息",
+      "detected": "已检测到",
+      "notFound": "未找到",
+      "version": "v{{version}}"
+    },
+
+    "enrichment": {
+      "title": "增强设置",
+      "autoEnrich": "索引后自动增强",
+      "autoEnrichHelp": "Tree-sitter 索引完成后自动运行 LSP 增强。添加类型信息、交叉引用和调用图。",
+      "manualTitle": "手动增强",
+      "enrichButton": "运行增强",
+      "enriching": "增强中...",
+      "noWorkspace": "请先打开工作区",
+      "noServers": "未检测到服务器 — 请先运行检测"
+    },
+
+    "report": {
+      "title": "上次增强报告",
+      "languages": "语言",
+      "symbols": "已增强符号",
+      "references": "已发现引用",
+      "duration": "耗时"
+    },
+
+    "info": {
+      "title": "关于 LSP 增强",
+      "description": "LSP 增强是可选功能，通过检测到的语言服务器为 Tree-sitter 索引添加类型信息、交叉引用和调用图。它在索引完成后作为后处理步骤运行。"
     }
   }
 }
