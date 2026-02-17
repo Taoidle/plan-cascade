@@ -8,6 +8,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   ReloadIcon,
   ChevronRightIcon,
@@ -31,6 +32,8 @@ function PluginListItem({
   onToggle: (name: string, enabled: boolean) => void;
   onSelect: (name: string) => void;
 }) {
+  const { t } = useTranslation('settings');
+
   return (
     <div
       className={clsx(
@@ -59,19 +62,19 @@ function PluginListItem({
           </span>
         </div>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-          {plugin.description || 'No description'}
+          {plugin.description || t('plugins.noDescription')}
         </p>
         <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 dark:text-gray-500">
           {plugin.skill_count > 0 && (
-            <span>{plugin.skill_count} skill{plugin.skill_count !== 1 ? 's' : ''}</span>
+            <span>{t('plugins.skillCount', { count: plugin.skill_count })}</span>
           )}
           {plugin.command_count > 0 && (
-            <span>{plugin.command_count} command{plugin.command_count !== 1 ? 's' : ''}</span>
+            <span>{t('plugins.commandCount', { count: plugin.command_count })}</span>
           )}
           {plugin.hook_count > 0 && (
-            <span>{plugin.hook_count} hook{plugin.hook_count !== 1 ? 's' : ''}</span>
+            <span>{t('plugins.hookCount', { count: plugin.hook_count })}</span>
           )}
-          {plugin.has_instructions && <span>instructions</span>}
+          {plugin.has_instructions && <span>{t('plugins.instructions')}</span>}
         </div>
       </div>
 
@@ -91,7 +94,7 @@ function PluginListItem({
           )}
           role="switch"
           aria-checked={plugin.enabled}
-          aria-label={`Toggle ${plugin.name}`}
+          aria-label={t('plugins.toggle', { name: plugin.name })}
         >
           <span
             className={clsx(
@@ -111,7 +114,7 @@ function PluginListItem({
             'text-gray-500 dark:text-gray-400',
             'focus:outline-none focus:ring-2 focus:ring-primary-500'
           )}
-          aria-label={`View details for ${plugin.name}`}
+          aria-label={t('plugins.viewDetails', { name: plugin.name })}
         >
           <ChevronRightIcon className="w-4 h-4" />
         </button>
@@ -131,6 +134,7 @@ function PluginDetailView({
   detail: PluginDetail;
   onBack: () => void;
 }) {
+  const { t } = useTranslation('settings');
   const { plugin } = detail;
 
   return (
@@ -186,7 +190,7 @@ function PluginDetailView({
 
       {/* Skills */}
       {plugin.skills.length > 0 && (
-        <DetailSection title={`Skills (${plugin.skills.length})`}>
+        <DetailSection title={`${t('plugins.skills')} (${plugin.skills.length})`}>
           {plugin.skills.map((skill) => (
             <div
               key={skill.name}
@@ -198,7 +202,7 @@ function PluginDetailView({
                 </span>
                 {skill.user_invocable && (
                   <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
-                    invocable
+                    {t('plugins.invocable')}
                   </span>
                 )}
               </div>
@@ -207,7 +211,7 @@ function PluginDetailView({
               </p>
               {skill.allowed_tools.length > 0 && (
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Tools: {skill.allowed_tools.join(', ')}
+                  {t('plugins.tools')} {skill.allowed_tools.join(', ')}
                 </p>
               )}
             </div>
@@ -217,7 +221,7 @@ function PluginDetailView({
 
       {/* Commands */}
       {plugin.commands.length > 0 && (
-        <DetailSection title={`Commands (${plugin.commands.length})`}>
+        <DetailSection title={`${t('plugins.commands')} (${plugin.commands.length})`}>
           {plugin.commands.map((cmd) => (
             <div
               key={cmd.name}
@@ -236,7 +240,7 @@ function PluginDetailView({
 
       {/* Hooks */}
       {plugin.hooks.length > 0 && (
-        <DetailSection title={`Hooks (${plugin.hooks.length})`}>
+        <DetailSection title={`${t('plugins.hooks')} (${plugin.hooks.length})`}>
           {plugin.hooks.map((hook, i) => (
             <div
               key={`${hook.event}-${i}`}
@@ -258,13 +262,13 @@ function PluginDetailView({
                 </span>
                 {hook.async_hook && (
                   <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300">
-                    async
+                    {t('plugins.async')}
                   </span>
                 )}
               </div>
               {hook.matcher && (
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Matcher: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{hook.matcher}</code>
+                  {t('plugins.matcher')} <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{hook.matcher}</code>
                 </p>
               )}
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-mono truncate">
@@ -277,7 +281,7 @@ function PluginDetailView({
 
       {/* Instructions preview */}
       {plugin.instructions && (
-        <DetailSection title="Instructions">
+        <DetailSection title={t('plugins.instructions')}>
           <pre
             className={clsx(
               'text-xs text-gray-600 dark:text-gray-300',
@@ -296,16 +300,16 @@ function PluginDetailView({
       {/* Permissions */}
       {(plugin.permissions.allow.length > 0 ||
         plugin.permissions.deny.length > 0) && (
-        <DetailSection title="Permissions">
+        <DetailSection title={t('plugins.permissions')}>
           {plugin.permissions.allow.length > 0 && (
             <p className="text-xs text-gray-500">
-              <span className="text-green-600 dark:text-green-400">Allow:</span>{' '}
+              <span className="text-green-600 dark:text-green-400">{t('plugins.allow')}</span>{' '}
               {plugin.permissions.allow.join(', ')}
             </p>
           )}
           {plugin.permissions.deny.length > 0 && (
             <p className="text-xs text-gray-500">
-              <span className="text-red-600 dark:text-red-400">Deny:</span>{' '}
+              <span className="text-red-600 dark:text-red-400">{t('plugins.deny')}</span>{' '}
               {plugin.permissions.deny.join(', ')}
             </p>
           )}
@@ -314,7 +318,7 @@ function PluginDetailView({
 
       {/* Root path */}
       <p className="text-xs text-gray-400 dark:text-gray-500">
-        Location: {detail.root_path}
+        {t('plugins.location')} {detail.root_path}
       </p>
     </div>
   );
@@ -342,6 +346,7 @@ function DetailSection({
 // ---------------------------------------------------------------------------
 
 export function PluginSection() {
+  const { t } = useTranslation('settings');
   const {
     plugins,
     selectedPlugin,
@@ -409,10 +414,10 @@ export function PluginSection() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Plugins
+            {t('plugins.title')}
           </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Claude Code-compatible plugins with skills, commands, and hooks.
+            {t('plugins.description')}
           </p>
         </div>
         <button
@@ -428,7 +433,7 @@ export function PluginSection() {
           )}
         >
           <ReloadIcon className={clsx('w-3.5 h-3.5', refreshing && 'animate-spin')} />
-          Refresh
+          {t('plugins.refresh')}
         </button>
       </div>
 
@@ -465,11 +470,10 @@ export function PluginSection() {
         <div className="text-center py-8">
           <InfoCircledIcon className="w-8 h-8 mx-auto text-gray-300 dark:text-gray-600 mb-2" />
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            No plugins discovered.
+            {t('plugins.empty.title')}
           </p>
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-            Place plugins in your project&apos;s .claude-plugin/ directory,<br />
-            ~/.claude/plugins/cache/, or ~/.plan-cascade/plugins/.
+            {t('plugins.empty.description')}
           </p>
         </div>
       )}
@@ -491,8 +495,7 @@ export function PluginSection() {
       {/* Summary */}
       {!loading && plugins.length > 0 && (
         <p className="text-xs text-gray-400 dark:text-gray-500">
-          {plugins.length} plugin{plugins.length !== 1 ? 's' : ''} discovered,{' '}
-          {plugins.filter((p) => p.enabled).length} enabled
+          {t('plugins.summary', { count: plugins.length, enabled: plugins.filter((p) => p.enabled).length })}
         </p>
       )}
     </div>

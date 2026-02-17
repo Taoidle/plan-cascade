@@ -7,11 +7,13 @@
 
 import { useState } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useEvaluationStore } from '../../store/evaluation';
 import type { ModelConfig, EvaluationCase } from '../../types/evaluation';
 import { createDefaultCase } from '../../types/evaluation';
 
 export function EvaluationRunList() {
+  const { t } = useTranslation('expertMode');
   const {
     evaluators,
     runs,
@@ -49,7 +51,7 @@ export function EvaluationRunList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          Evaluation Runs
+          {t('evaluation.runs.title')}
         </h2>
         <button
           onClick={() => setShowNewRun(!showNewRun)}
@@ -60,13 +62,13 @@ export function EvaluationRunList() {
             'disabled:opacity-50 disabled:cursor-not-allowed'
           )}
         >
-          {showNewRun ? 'Cancel' : '+ New Run'}
+          {showNewRun ? t('evaluation.runs.cancel') : t('evaluation.runs.newRun')}
         </button>
       </div>
 
       {evaluators.length === 0 && (
         <div className="text-sm text-gray-500 dark:text-gray-400 italic">
-          Create an evaluator first in the Setup tab.
+          {t('evaluation.runs.noEvaluator')}
         </div>
       )}
 
@@ -80,20 +82,20 @@ export function EvaluationRunList() {
           )}
         >
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
-            Configure New Run
+            {t('evaluation.runs.configTitle')}
           </h3>
 
           {/* Evaluator selection */}
           <div className="mb-4">
             <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-              Evaluator
+              {t('evaluation.runs.evaluator')}
             </label>
             <select
               value={selectedEvaluatorId}
               onChange={(e) => setSelectedEvaluatorId(e.target.value)}
               className="w-full text-sm px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
             >
-              <option value="">Select an evaluator...</option>
+              <option value="">{t('evaluation.runs.evaluatorPlaceholder')}</option>
               {evaluators.map((ev) => (
                 <option key={ev.id} value={ev.id}>
                   {ev.name}
@@ -105,7 +107,7 @@ export function EvaluationRunList() {
           {/* Models */}
           <div className="mb-4">
             <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-              Models to Compare
+              {t('evaluation.runs.modelsToCompare')}
             </label>
             <ModelSelector
               models={selectedModels}
@@ -117,7 +119,7 @@ export function EvaluationRunList() {
           {/* Test Cases */}
           <div className="mb-4">
             <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-              Test Cases
+              {t('evaluation.runs.testCases')}
             </label>
             <TestCaseEditor
               cases={testCases}
@@ -142,18 +144,18 @@ export function EvaluationRunList() {
               'disabled:opacity-50 disabled:cursor-not-allowed'
             )}
           >
-            {isRunning ? 'Creating Run...' : 'Create Evaluation Run'}
+            {isRunning ? t('evaluation.runs.creating') : t('evaluation.runs.createButton')}
           </button>
         </div>
       )}
 
       {/* Run History */}
       {loading.runs ? (
-        <div className="text-sm text-gray-500 dark:text-gray-400">Loading runs...</div>
+        <div className="text-sm text-gray-500 dark:text-gray-400">{t('evaluation.runs.loading')}</div>
       ) : runs.length === 0 ? (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-          <p className="text-sm">No evaluation runs yet</p>
-          <p className="text-xs mt-1">Create a new run to compare models</p>
+          <p className="text-sm">{t('evaluation.runs.empty')}</p>
+          <p className="text-xs mt-1">{t('evaluation.runs.emptyHint')}</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -174,7 +176,7 @@ export function EvaluationRunList() {
                   <StatusBadge status={run.status} />
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {run.model_count} model{run.model_count !== 1 ? 's' : ''} | {run.case_count} case{run.case_count !== 1 ? 's' : ''} | {new Date(run.created_at).toLocaleDateString()}
+                  {t('evaluation.runs.modelCount', { count: run.model_count })} | {t('evaluation.runs.caseCount', { count: run.case_count })} | {new Date(run.created_at).toLocaleDateString()}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -183,14 +185,14 @@ export function EvaluationRunList() {
                     onClick={() => handleViewReports(run.id)}
                     className="px-3 py-1 text-xs font-medium rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
                   >
-                    View Reports
+                    {t('evaluation.runs.viewReports')}
                   </button>
                 )}
                 <button
                   onClick={() => removeRun(run.id)}
                   className="px-2 py-1 text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors"
                 >
-                  Delete
+                  {t('evaluation.runs.delete')}
                 </button>
               </div>
             </div>
@@ -234,6 +236,7 @@ function ModelSelector({
   onAdd: (model: ModelConfig) => void;
   onRemove: (index: number) => void;
 }) {
+  const { t } = useTranslation('expertMode');
   const [provider, setProvider] = useState('anthropic');
   const [model, setModel] = useState('');
 
@@ -265,10 +268,10 @@ function ModelSelector({
           onChange={(e) => setProvider(e.target.value)}
           className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
         >
-          <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="ollama">Ollama</option>
+          <option value="anthropic">{t('evaluation.runs.providerAnthropic')}</option>
+          <option value="openai">{t('evaluation.runs.providerOpenAI')}</option>
+          <option value="deepseek">{t('evaluation.runs.providerDeepSeek')}</option>
+          <option value="ollama">{t('evaluation.runs.providerOllama')}</option>
         </select>
         <input
           type="text"
@@ -276,7 +279,7 @@ function ModelSelector({
           onChange={(e) => setModel(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
           className="flex-1 text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-          placeholder="Model name (e.g., claude-sonnet-4-20250514)"
+          placeholder={t('evaluation.runs.modelNamePlaceholder')}
         />
         <button
           onClick={handleAdd}
@@ -301,6 +304,8 @@ function TestCaseEditor({
   onUpdate: (id: string, updates: Partial<EvaluationCase>) => void;
   onRemove: (id: string) => void;
 }) {
+  const { t } = useTranslation('expertMode');
+
   const handleAddCase = () => {
     const id = `case-${Date.now()}`;
     onAdd(createDefaultCase(id));
@@ -319,27 +324,27 @@ function TestCaseEditor({
               value={tc.name}
               onChange={(e) => onUpdate(tc.id, { name: e.target.value })}
               className="text-xs font-medium bg-transparent border-none outline-none text-gray-900 dark:text-white flex-1"
-              placeholder="Case name"
+              placeholder={t('evaluation.runs.caseName')}
             />
             <button
               onClick={() => onRemove(tc.id)}
               className="text-xs text-red-400 hover:text-red-600"
             >
-              Remove
+              {t('evaluation.runs.remove')}
             </button>
           </div>
           <textarea
             value={typeof tc.input === 'object' ? (tc.input as Record<string, unknown>).prompt as string ?? '' : ''}
             onChange={(e) => onUpdate(tc.id, { input: { prompt: e.target.value } })}
             className="w-full text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 h-12 resize-y"
-            placeholder="Input prompt..."
+            placeholder={t('evaluation.runs.inputPlaceholder')}
           />
           <input
             type="text"
             value={tc.expected_output ?? ''}
             onChange={(e) => onUpdate(tc.id, { expected_output: e.target.value || null })}
             className="w-full text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900"
-            placeholder="Expected output (optional)"
+            placeholder={t('evaluation.runs.expectedOutput')}
           />
         </div>
       ))}
@@ -347,7 +352,7 @@ function TestCaseEditor({
         onClick={handleAddCase}
         className="w-full py-1.5 text-xs font-medium rounded border border-dashed border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-primary-400 hover:text-primary-500 transition-colors"
       >
-        + Add Test Case
+        {t('evaluation.runs.addTestCase')}
       </button>
     </div>
   );

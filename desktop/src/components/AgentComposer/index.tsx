@@ -10,14 +10,17 @@
 
 import { useState } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useAgentComposerStore } from '../../store/agentComposer';
 import { AgentNode } from './AgentNode';
 import { AgentPipelineList } from './AgentPipelineList';
 import { AgentPipelineRunner } from './AgentPipelineRunner';
-import { createLlmStep, DEFAULT_AGENT_CONFIG } from '../../types/agentComposer';
+import { createLlmStep } from '../../types/agentComposer';
 import type { AgentStep } from '../../types/agentComposer';
 
 export function AgentComposer() {
+  const { t } = useTranslation('expertMode');
+
   const {
     currentPipeline,
     isCreating,
@@ -104,11 +107,11 @@ export function AgentComposer() {
                     'text-gray-900 dark:text-white',
                     'focus:ring-1 focus:ring-primary-500 rounded px-1'
                   )}
-                  placeholder="Pipeline name"
+                  placeholder={t('agentComposer.pipelineName')}
                 />
                 {isCreating && (
                   <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
-                    NEW
+                    {t('agentComposer.new')}
                   </span>
                 )}
               </div>
@@ -123,13 +126,13 @@ export function AgentComposer() {
                       : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
                   )}
                 >
-                  Runner
+                  {t('agentComposer.runner')}
                 </button>
                 <button
                   onClick={clearSelection}
                   className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 >
-                  Close
+                  {t('agentComposer.close')}
                 </button>
                 <button
                   onClick={savePipeline}
@@ -140,7 +143,7 @@ export function AgentComposer() {
                     'disabled:opacity-50 disabled:cursor-not-allowed'
                   )}
                 >
-                  {loading.save ? 'Saving...' : 'Save'}
+                  {loading.save ? t('agentComposer.saving') : t('agentComposer.save')}
                 </button>
               </div>
             </div>
@@ -156,7 +159,7 @@ export function AgentComposer() {
                   })
                 }
                 className="w-full text-sm text-gray-600 dark:text-gray-400 bg-transparent border-none outline-none focus:ring-1 focus:ring-primary-500 rounded px-1"
-                placeholder="Add a description..."
+                placeholder={t('agentComposer.descriptionPlaceholder')}
               />
             </div>
 
@@ -174,22 +177,22 @@ export function AgentComposer() {
                 {/* Add step buttons */}
                 <div className="flex gap-2 mb-4">
                   <AddStepButton
-                    label="+ LLM Agent"
+                    label={t('agentComposer.addLlmAgent')}
                     color="blue"
                     onClick={() => handleAddStep('llm')}
                   />
                   <AddStepButton
-                    label="+ Sequential"
+                    label={t('agentComposer.addSequential')}
                     color="green"
                     onClick={() => handleAddStep('sequential')}
                   />
                   <AddStepButton
-                    label="+ Parallel"
+                    label={t('agentComposer.addParallel')}
                     color="purple"
                     onClick={() => handleAddStep('parallel')}
                   />
                   <AddStepButton
-                    label="+ Conditional"
+                    label={t('agentComposer.addConditional')}
                     color="amber"
                     onClick={() => handleAddStep('conditional')}
                   />
@@ -198,7 +201,7 @@ export function AgentComposer() {
                 {/* Agent nodes */}
                 {currentPipeline.steps.length === 0 ? (
                   <div className="flex items-center justify-center h-48 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 text-sm text-gray-500 dark:text-gray-400">
-                    Add agent steps above to build your pipeline
+                    {t('agentComposer.emptyPipeline')}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -241,11 +244,10 @@ export function AgentComposer() {
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                Agent Composer
+                {t('agentComposer.title')}
               </h2>
               <p className="text-gray-500 dark:text-gray-400 mb-4 max-w-md">
-                Build composable agent pipelines by combining LLM agents with
-                sequential, parallel, and conditional control flow.
+                {t('agentComposer.description')}
               </p>
               <button
                 onClick={() => useAgentComposerStore.getState().startNewPipeline()}
@@ -255,7 +257,7 @@ export function AgentComposer() {
                   'transition-colors'
                 )}
               >
-                Create Your First Pipeline
+                {t('agentComposer.createFirst')}
               </button>
             </div>
           </div>

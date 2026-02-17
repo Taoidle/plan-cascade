@@ -6,6 +6,7 @@
  */
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { Edge } from '../../types/graphWorkflow';
 
@@ -16,19 +17,20 @@ interface GraphEdgeConfigProps {
 }
 
 export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigProps) {
+  const { t } = useTranslation('expertMode');
   const [newBranchKey, setNewBranchKey] = useState('');
   const [newBranchTarget, setNewBranchTarget] = useState('');
 
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-        Edge Configuration
+        {t('graphWorkflow.edgeConfig.title')}
       </h3>
 
       {/* Edge type */}
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-          Type
+          {t('graphWorkflow.edgeConfig.type')}
         </label>
         <div className="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded">
           {edge.edge_type}
@@ -38,7 +40,7 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
       {/* From node */}
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-          From
+          {t('graphWorkflow.edgeConfig.from')}
         </label>
         <div className="text-xs text-gray-700 dark:text-gray-300 font-mono bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded">
           {edge.from}
@@ -49,7 +51,7 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
       {edge.edge_type === 'direct' && (
         <div>
           <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-            To
+            {t('graphWorkflow.edgeConfig.to')}
           </label>
           <div className="text-xs text-gray-700 dark:text-gray-300 font-mono bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded">
             {edge.to}
@@ -63,7 +65,7 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
           {/* Condition key */}
           <div>
             <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-              Condition Key
+              {t('graphWorkflow.edgeConfig.conditionKey')}
             </label>
             <input
               type="text"
@@ -75,14 +77,14 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
                 });
               }}
               className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-              placeholder="shared_state key"
+              placeholder={t('graphWorkflow.edgeConfig.conditionKeyPlaceholder')}
             />
           </div>
 
           {/* Default branch */}
           <div>
             <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-              Default Branch (node ID)
+              {t('graphWorkflow.edgeConfig.defaultBranch')}
             </label>
             <input
               type="text"
@@ -94,17 +96,17 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
                 });
               }}
               className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-              placeholder="Optional default target node"
+              placeholder={t('graphWorkflow.edgeConfig.defaultBranchPlaceholder')}
             />
           </div>
 
           {/* Branches */}
           <div>
             <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-              Branches
+              {t('graphWorkflow.edgeConfig.branches')}
             </label>
             {Object.entries(edge.branches).length === 0 ? (
-              <div className="text-xs text-gray-400 italic">No branches defined</div>
+              <div className="text-xs text-gray-400 italic">{t('graphWorkflow.edgeConfig.noBranches')}</div>
             ) : (
               <div className="space-y-1">
                 {Object.entries(edge.branches).map(([key, target]) => (
@@ -138,14 +140,14 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
                 value={newBranchKey}
                 onChange={(e) => setNewBranchKey(e.target.value)}
                 className="flex-1 text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-                placeholder="Value"
+                placeholder={t('graphWorkflow.edgeConfig.value')}
               />
               <input
                 type="text"
                 value={newBranchTarget}
                 onChange={(e) => setNewBranchTarget(e.target.value)}
                 className="flex-1 text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-                placeholder="Node ID"
+                placeholder={t('graphWorkflow.edgeConfig.nodeIdLabel')}
               />
               <button
                 onClick={() => {
@@ -176,7 +178,7 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
           'hover:bg-red-50 dark:hover:bg-red-900/20'
         )}
       >
-        Delete Edge
+        {t('graphWorkflow.edgeConfig.deleteEdge')}
       </button>
     </div>
   );

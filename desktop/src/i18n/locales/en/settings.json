@@ -10,7 +10,8 @@
     "phases": "Phase Agents",
     "importExport": "Import/Export",
     "lsp": "LSP Servers",
-    "plugins": "Plugins"
+    "plugins": "Plugins",
+    "security": "Security"
   },
 
   "general": {
@@ -506,6 +507,84 @@
     "info": {
       "title": "About LSP Enrichment",
       "description": "LSP enrichment is optional and enhances the Tree-sitter index with type information, cross-references, and call graphs from detected language servers. It runs as a post-processing pass after indexing."
+    }
+  },
+
+  "plugins": {
+    "title": "Plugins",
+    "description": "Claude Code-compatible plugins with skills, commands, and hooks.",
+    "refresh": "Refresh",
+    "noDescription": "No description",
+    "skills": "Skills",
+    "commands": "Commands",
+    "hooks": "Hooks",
+    "instructions": "Instructions",
+    "permissions": "Permissions",
+    "invocable": "invocable",
+    "async": "async",
+    "allow": "Allow:",
+    "deny": "Deny:",
+    "location": "Location:",
+    "tools": "Tools:",
+    "matcher": "Matcher:",
+    "toggle": "Toggle {{name}}",
+    "viewDetails": "View details for {{name}}",
+    "skillCount": "{{count}} skill",
+    "skillCount_plural": "{{count}} skills",
+    "commandCount": "{{count}} command",
+    "commandCount_plural": "{{count}} commands",
+    "hookCount": "{{count}} hook",
+    "hookCount_plural": "{{count}} hooks",
+    "empty": {
+      "title": "No plugins discovered.",
+      "description": "Place plugins in your project's .claude-plugin/ directory, ~/.claude/plugins/cache/, or ~/.plan-cascade/plugins/."
+    },
+    "summary": "{{count}} plugin discovered, {{enabled}} enabled",
+    "summary_plural": "{{count}} plugins discovered, {{enabled}} enabled"
+  },
+
+  "security": {
+    "title": "Security Guardrails",
+    "description": "Configure content validation rules that protect against sensitive data leaks and code security issues.",
+    "dismiss": "Dismiss",
+    "loading": "Loading guardrails...",
+    "removeRule": "Remove rule",
+
+    "builtin": {
+      "title": "Built-in Guardrails",
+      "empty": "No built-in guardrails available."
+    },
+
+    "custom": {
+      "title": "Custom Rules",
+      "empty": "No custom rules defined.",
+      "addTitle": "Add Custom Rule",
+      "ruleName": "Rule Name",
+      "ruleNamePlaceholder": "e.g., No TODOs",
+      "regexPattern": "Regex Pattern",
+      "regexPatternPlaceholder": "e.g., TODO|FIXME",
+      "action": "Action",
+      "actionWarn": "Warn",
+      "actionBlock": "Block",
+      "actionRedact": "Redact",
+      "addButton": "Add Rule",
+      "adding": "Adding...",
+      "nameRequired": "Name and pattern are required",
+      "addFailed": "Failed to add rule. Check the regex pattern."
+    },
+
+    "triggerLog": {
+      "title": "Trigger Log",
+      "loading": "Loading trigger log...",
+      "empty": "No trigger events recorded yet.",
+      "eventCount": "{{count}} event",
+      "eventCount_plural": "{{count}} events",
+      "clearLog": "Clear Log",
+      "colTime": "Time",
+      "colGuardrail": "Guardrail",
+      "colDirection": "Direction",
+      "colResult": "Result",
+      "colContent": "Content"
     }
   }
 }

@@ -3,10 +3,15 @@
 
   "tabs": {
     "generate": "生成",
+    "interview": "需求访谈",
+    "designDoc": "设计文档",
     "prdEditor": "PRD编辑器",
     "preview": "预览",
     "execution": "执行",
-    "logs": "日志"
+    "logs": "日志",
+    "composer": "代理编排器",
+    "graphWorkflows": "图工作流",
+    "modelEvaluation": "模型评估"
   },
 
   "generate": {
@@ -187,5 +192,345 @@
     "title": "编辑依赖",
     "blockedBy": "被阻塞",
     "blocks": "阻塞"
+  },
+
+  "specInterview": {
+    "title": "需求访谈",
+    "description": "通过一系列问题构建完整的项目规格说明。访谈将引导你完成概述、范围、需求和故事。",
+    "projectDescription": "项目描述",
+    "projectDescriptionPlaceholder": "描述你想要构建的内容...",
+    "flowLevel": "流程级别",
+    "flowQuick": "快速",
+    "flowStandard": "标准",
+    "flowFull": "完整",
+    "flowQuickHint": "更少的问题，更快完成",
+    "flowStandardHint": "均衡覆盖所有规格领域",
+    "flowFullHint": "全面覆盖，含必填字段",
+    "firstPrinciples": "第一性原理模式",
+    "maxQuestions": "最大问题数：",
+    "startButton": "开始访谈",
+    "starting": "正在开始访谈...",
+    "cancelInterview": "取消访谈",
+    "flowInfo": "{{flow}} 流程 | {{cursor}}/{{max}} 个问题",
+    "dismiss": "关闭",
+    "conversationEmpty": "访谈对话将显示在这里...",
+    "required": "必填",
+    "submit": "提交",
+    "skip": "跳过",
+    "listPlaceholder": "输入项目，用逗号或换行分隔",
+    "textPlaceholder": "输入你的回答...",
+    "skipped": "（已跳过）",
+    "phase": "阶段：{{phase}}",
+    "progress": "{{cursor}}/{{max}} 个问题 | {{progress}}% 完成",
+    "complete": {
+      "title": "访谈完成",
+      "description": "所有问题已回答。将访谈编译为规格说明。",
+      "compileButton": "编译规格说明",
+      "compiling": "正在编译规格说明..."
+    },
+    "results": {
+      "title": "已编译的规格说明",
+      "description": "已生成 spec.json、spec.md 和 prd.json",
+      "newInterview": "新建访谈"
+    }
+  },
+
+  "designDoc": {
+    "title": "设计文档",
+    "description": "从 PRD 生成设计文档、导入已有文档，或从项目中加载。",
+    "dismiss": "关闭",
+    "newDocument": "新建文档",
+    "generateTab": "从 PRD 生成",
+    "importTab": "导入",
+    "loadTab": "加载已有",
+    "generate": {
+      "prdPath": "PRD 文件路径",
+      "prdPathPlaceholder": "/path/to/prd.json",
+      "prdPathHint": "通过需求访谈或 PRD 生成器生成的 prd.json 文件路径。",
+      "button": "生成设计文档",
+      "generating": "正在生成..."
+    },
+    "import": {
+      "filePath": "文件路径",
+      "filePathPlaceholder": "/path/to/design.md 或 /path/to/design.json",
+      "format": "格式（可选）",
+      "autoDetect": "自动检测",
+      "button": "导入设计文档",
+      "importing": "正在导入..."
+    },
+    "load": {
+      "projectPath": "项目路径（可选）",
+      "projectPathPlaceholder": "留空使用当前目录",
+      "projectPathHint": "从项目根目录加载 design_doc.json。",
+      "button": "加载设计文档",
+      "loading": "正在加载..."
+    },
+    "header": {
+      "source": "来源：{{source}}",
+      "stats": "{{components}} 个组件、{{decisions}} 个 ADR、{{mappings}} 个映射"
+    },
+    "warnings": {
+      "count": "{{count}} 个导入警告",
+      "count_plural": "{{count}} 个导入警告",
+      "high": "{{count}} 个高危",
+      "medium": "{{count}} 个中危",
+      "show": "显示",
+      "hide": "隐藏"
+    },
+    "sections": {
+      "overview": "概述",
+      "goals": "目标",
+      "nonGoals": "非目标",
+      "architecture": "架构",
+      "systemOverview": "系统概述",
+      "dataFlow": "数据流",
+      "infrastructure": "基础设施",
+      "components": "组件",
+      "designPatterns": "设计模式",
+      "rationale": "理由：{{text}}",
+      "apiInterfaces": "API / 接口",
+      "style": "风格",
+      "errorHandling": "错误处理",
+      "asyncPattern": "异步模式",
+      "adr": "架构决策记录 (ADR)",
+      "storyMappings": "故事到组件映射",
+      "deps": "依赖：",
+      "appliesTo": "适用于：",
+      "mappingComponents": "组件",
+      "mappingPatterns": "模式",
+      "mappingDecisions": "ADR"
+    }
+  },
+
+  "agentComposer": {
+    "title": "代理编排器",
+    "description": "通过组合 LLM 代理与顺序、并行和条件控制流来构建可组合的代理流水线。",
+    "createFirst": "创建你的第一个流水线",
+    "pipelineName": "流水线名称",
+    "new": "新建",
+    "runner": "运行器",
+    "close": "关闭",
+    "saving": "保存中...",
+    "save": "保存",
+    "descriptionPlaceholder": "添加描述...",
+    "addLlmAgent": "+ LLM 代理",
+    "addSequential": "+ 顺序",
+    "addParallel": "+ 并行",
+    "addConditional": "+ 条件",
+    "emptyPipeline": "在上方添加代理步骤来构建流水线",
+    "list": {
+      "title": "已保存的流水线",
+      "newPipeline": "+ 新建流水线",
+      "loading": "正在加载流水线...",
+      "empty": "暂无流水线。创建一个开始使用。",
+      "deletePipeline": "删除流水线",
+      "steps": "个步骤"
+    },
+    "node": {
+      "collapse": "折叠",
+      "expand": "展开",
+      "edit": "编辑",
+      "removeStep": "移除步骤",
+      "remove": "移除",
+      "name": "名称",
+      "instruction": "指令",
+      "instructionPlaceholder": "此代理的系统提示...",
+      "model": "模型（可选）",
+      "modelPlaceholder": "留空使用默认模型",
+      "tools": "工具（逗号分隔，可选）",
+      "toolsPlaceholder": "read_file, grep, bash（空 = 所有工具）",
+      "maxIterations": "最大迭代次数",
+      "temperature": "温度",
+      "default": "默认",
+      "typeLlm": "LLM",
+      "typeSequential": "顺序",
+      "typeParallel": "并行",
+      "typeConditional": "条件",
+      "subSteps": "个子步骤",
+      "conditionKey": "条件键：",
+      "branches": "个分支"
+    },
+    "runner": {
+      "empty": "没有正在执行的任务。运行流水线查看事件。",
+      "title": "执行事件",
+      "clear": "清除",
+      "toolCall": "[工具调用]",
+      "toolResult": "[工具结果]",
+      "state": "[状态]",
+      "transfer": "[转移]",
+      "done": "[完成]",
+      "completed": "已完成"
+    }
+  },
+
+  "graphWorkflow": {
+    "title": "图工作流",
+    "description": "构建基于图的代理工作流，支持条件分支、状态通道和可视化节点编辑。",
+    "createFirst": "创建你的第一个工作流",
+    "workflowName": "工作流名称",
+    "new": "新建",
+    "edgeMode": "点击两个节点创建边",
+    "cancelEdge": "取消连线",
+    "close": "关闭",
+    "saving": "保存中...",
+    "save": "保存",
+    "emptyCanvas": "使用上方工具栏添加节点",
+    "emptyCanvasHint": "然后用边连接它们",
+    "list": {
+      "title": "工作流",
+      "newWorkflow": "+ 新建",
+      "loading": "加载中...",
+      "empty": "暂无工作流",
+      "nodeCount": "{{nodes}} 个节点，",
+      "edgeCount": "{{edges}} 条边",
+      "deleteWorkflow": "删除工作流"
+    },
+    "toolbar": {
+      "nodes": "节点：",
+      "addLlm": "+ LLM",
+      "addSequential": "+ 顺序",
+      "addParallel": "+ 并行",
+      "edges": "边：",
+      "direct": "直连",
+      "conditional": "条件",
+      "delete": "删除"
+    },
+    "nodeConfig": {
+      "title": "节点配置",
+      "nodeId": "节点 ID",
+      "name": "名称",
+      "type": "类型",
+      "systemInstruction": "系统指令",
+      "instructionPlaceholder": "可选系统提示...",
+      "entryNode": "这是入口节点",
+      "setEntryNode": "设为入口节点",
+      "deleteNode": "删除节点"
+    },
+    "edgeConfig": {
+      "title": "边配置",
+      "type": "类型",
+      "from": "起点",
+      "to": "终点",
+      "conditionKey": "条件键",
+      "conditionKeyPlaceholder": "shared_state 键",
+      "defaultBranch": "默认分支（节点 ID）",
+      "defaultBranchPlaceholder": "可选默认目标节点",
+      "branches": "分支",
+      "noBranches": "未定义分支",
+      "value": "值",
+      "nodeIdLabel": "节点 ID",
+      "deleteEdge": "删除边"
+    },
+    "nodeTypes": {
+      "llm": "LLM",
+      "sequential": "顺序",
+      "parallel": "并行",
+      "conditional": "条件",
+      "entryNode": "入口节点"
+    }
+  },
+
+  "evaluation": {
+    "tabs": {
+      "evaluators": "评估器",
+      "runs": "运行",
+      "reports": "报告"
+    },
+    "setup": {
+      "title": "评估设置",
+      "description": "定义评估器和标准，评估不同模型的代理性能。",
+      "createFirst": "创建你的第一个评估器",
+      "listTitle": "评估器",
+      "newButton": "+ 新建",
+      "loading": "加载中...",
+      "empty": "暂无评估器",
+      "new": "新建",
+      "newEvaluator": "新建评估器",
+      "editEvaluator": "编辑评估器",
+      "close": "关闭",
+      "delete": "删除",
+      "saving": "保存中...",
+      "save": "保存",
+      "evaluatorName": "评估器名称",
+      "evaluatorNamePlaceholder": "例如：代码质量检查",
+      "evaluationCriteria": "评估标准",
+      "criteriaTrajectory": "工具轨迹",
+      "criteriaTrajectoryDesc": "对比工具调用与预期工具",
+      "criteriaSimilarity": "响应相似度",
+      "criteriaSimilarityDesc": "使用字符串距离对比响应与参考",
+      "criteriaLlmJudge": "LLM 评审",
+      "criteriaLlmJudgeDesc": "使用单独的 LLM 评判响应质量",
+      "trajectory": {
+        "expectedTools": "预期工具",
+        "toolPlaceholder": "工具名称（按回车添加）",
+        "orderMatters": "顺序重要"
+      },
+      "similarity": {
+        "referenceResponse": "参考响应",
+        "referencePlaceholder": "用于对比的预期响应...",
+        "threshold": "阈值"
+      },
+      "judge": {
+        "provider": "评审提供商",
+        "model": "评审模型",
+        "modelPlaceholder": "例如：claude-sonnet-4-20250514",
+        "rubric": "评分标准",
+        "rubricPlaceholder": "描述如何评估响应（0.0-1.0 评分）..."
+      },
+      "badgeTrajectory": "轨迹",
+      "badgeSimilarity": "相似度",
+      "badgeLlmJudge": "LLM 评审"
+    },
+    "runs": {
+      "title": "评估运行",
+      "cancel": "取消",
+      "newRun": "+ 新建运行",
+      "noEvaluator": "请先在设置标签中创建评估器。",
+      "configTitle": "配置新运行",
+      "evaluator": "评估器",
+      "evaluatorPlaceholder": "选择评估器...",
+      "modelsToCompare": "比较的模型",
+      "testCases": "测试用例",
+      "createButton": "创建评估运行",
+      "creating": "正在创建运行...",
+      "loading": "正在加载运行...",
+      "empty": "暂无评估运行",
+      "emptyHint": "创建新运行以比较模型",
+      "modelCount": "{{count}} 个模型",
+      "modelCount_plural": "{{count}} 个模型",
+      "caseCount": "{{count}} 个用例",
+      "caseCount_plural": "{{count}} 个用例",
+      "viewReports": "查看报告",
+      "delete": "删除",
+      "modelNamePlaceholder": "模型名称（例如：claude-sonnet-4-20250514）",
+      "caseName": "用例名称",
+      "remove": "移除",
+      "inputPlaceholder": "输入提示...",
+      "expectedOutput": "预期输出（可选）",
+      "addTestCase": "+ 添加测试用例",
+      "providerAnthropic": "Anthropic",
+      "providerOpenAI": "OpenAI",
+      "providerDeepSeek": "DeepSeek",
+      "providerOllama": "Ollama"
+    },
+    "reports": {
+      "loading": "正在加载报告...",
+      "title": "评估报告",
+      "empty": "暂无已完成的运行",
+      "emptyHint": "在运行标签中创建并执行评估",
+      "selectRun": "选择已完成的运行查看报告：",
+      "runLabel": "运行",
+      "models": "个模型",
+      "cases": "个用例",
+      "backToRuns": "返回运行列表",
+      "modelRanking": "模型排名",
+      "passed": "通过",
+      "scoreTable": "分数表",
+      "model": "模型",
+      "overall": "总分",
+      "durationComparison": "耗时对比",
+      "costComparison": "成本对比",
+      "tokens": "令牌"
+    }
   }
 }

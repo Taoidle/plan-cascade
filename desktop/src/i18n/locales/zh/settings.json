@@ -10,7 +10,8 @@
     "phases": "阶段代理",
     "importExport": "导入/导出",
     "lsp": "LSP 服务器",
-    "plugins": "插件"
+    "plugins": "插件",
+    "security": "安全"
   },
 
   "general": {
@@ -506,6 +507,84 @@
     "info": {
       "title": "关于 LSP 增强",
       "description": "LSP 增强是可选功能，通过检测到的语言服务器为 Tree-sitter 索引添加类型信息、交叉引用和调用图。它在索引完成后作为后处理步骤运行。"
+    }
+  },
+
+  "plugins": {
+    "title": "插件",
+    "description": "兼容 Claude Code 的插件，包含技能、命令和钩子。",
+    "refresh": "刷新",
+    "noDescription": "暂无描述",
+    "skills": "技能",
+    "commands": "命令",
+    "hooks": "钩子",
+    "instructions": "说明",
+    "permissions": "权限",
+    "invocable": "可调用",
+    "async": "异步",
+    "allow": "允许：",
+    "deny": "拒绝：",
+    "location": "位置：",
+    "tools": "工具：",
+    "matcher": "匹配器：",
+    "toggle": "切换 {{name}}",
+    "viewDetails": "查看 {{name}} 详情",
+    "skillCount": "{{count}} 个技能",
+    "skillCount_plural": "{{count}} 个技能",
+    "commandCount": "{{count}} 个命令",
+    "commandCount_plural": "{{count}} 个命令",
+    "hookCount": "{{count}} 个钩子",
+    "hookCount_plural": "{{count}} 个钩子",
+    "empty": {
+      "title": "未发现插件。",
+      "description": "将插件放在项目的 .claude-plugin/ 目录、~/.claude/plugins/cache/ 或 ~/.plan-cascade/plugins/ 中。"
+    },
+    "summary": "发现 {{count}} 个插件，{{enabled}} 个已启用",
+    "summary_plural": "发现 {{count}} 个插件，{{enabled}} 个已启用"
+  },
+
+  "security": {
+    "title": "安全护栏",
+    "description": "配置内容验证规则，防止敏感数据泄露和代码安全问题。",
+    "dismiss": "关闭",
+    "loading": "正在加载护栏...",
+    "removeRule": "移除规则",
+
+    "builtin": {
+      "title": "内置护栏",
+      "empty": "没有可用的内置护栏。"
+    },
+
+    "custom": {
+      "title": "自定义规则",
+      "empty": "未定义自定义规则。",
+      "addTitle": "添加自定义规则",
+      "ruleName": "规则名称",
+      "ruleNamePlaceholder": "例如：禁止 TODO",
+      "regexPattern": "正则表达式",
+      "regexPatternPlaceholder": "例如：TODO|FIXME",
+      "action": "操作",
+      "actionWarn": "警告",
+      "actionBlock": "阻止",
+      "actionRedact": "脱敏",
+      "addButton": "添加规则",
+      "adding": "添加中...",
+      "nameRequired": "名称和模式为必填项",
+      "addFailed": "添加规则失败。请检查正则表达式。"
+    },
+
+    "triggerLog": {
+      "title": "触发日志",
+      "loading": "正在加载触发日志...",
+      "empty": "暂无触发事件记录。",
+      "eventCount": "{{count}} 个事件",
+      "eventCount_plural": "{{count}} 个事件",
+      "clearLog": "清除日志",
+      "colTime": "时间",
+      "colGuardrail": "护栏",
+      "colDirection": "方向",
+      "colResult": "结果",
+      "colContent": "内容"
     }
   }
 }

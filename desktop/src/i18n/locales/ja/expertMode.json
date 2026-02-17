@@ -3,10 +3,15 @@
 
   "tabs": {
     "generate": "生成",
+    "interview": "スペックインタビュー",
+    "designDoc": "設計ドキュメント",
     "prdEditor": "PRDエディタ",
     "preview": "プレビュー",
     "execution": "実行",
-    "logs": "ログ"
+    "logs": "ログ",
+    "composer": "エージェントコンポーザー",
+    "graphWorkflows": "グラフワークフロー",
+    "modelEvaluation": "モデル評価"
   },
 
   "generate": {
@@ -187,5 +192,345 @@
     "title": "依存関係を編集",
     "blockedBy": "ブロック元",
     "blocks": "ブロック先"
+  },
+
+  "specInterview": {
+    "title": "スペックインタビュー",
+    "description": "一連の質問に答えて、完全なプロジェクト仕様を作成します。インタビューは概要、スコープ、要件、ストーリーを通じてガイドします。",
+    "projectDescription": "プロジェクト説明",
+    "projectDescriptionPlaceholder": "作りたいものを説明してください...",
+    "flowLevel": "フローレベル",
+    "flowQuick": "クイック",
+    "flowStandard": "スタンダード",
+    "flowFull": "フル",
+    "flowQuickHint": "質問が少なく、早く完了",
+    "flowStandardHint": "全スペック領域をバランスよくカバー",
+    "flowFullHint": "必須フィールドを含む包括的なカバー",
+    "firstPrinciples": "第一原理モード",
+    "maxQuestions": "最大質問数：",
+    "startButton": "インタビューを開始",
+    "starting": "インタビューを開始中...",
+    "cancelInterview": "インタビューをキャンセル",
+    "flowInfo": "{{flow}} フロー | {{cursor}}/{{max}} 質問",
+    "dismiss": "閉じる",
+    "conversationEmpty": "インタビューの会話がここに表示されます...",
+    "required": "必須",
+    "submit": "送信",
+    "skip": "スキップ",
+    "listPlaceholder": "カンマまたは改行で区切って項目を入力",
+    "textPlaceholder": "回答を入力...",
+    "skipped": "（スキップ）",
+    "phase": "フェーズ：{{phase}}",
+    "progress": "{{cursor}}/{{max}} 質問 | {{progress}}% 完了",
+    "complete": {
+      "title": "インタビュー完了",
+      "description": "すべての質問に回答しました。インタビューを仕様にコンパイルします。",
+      "compileButton": "仕様をコンパイル",
+      "compiling": "仕様をコンパイル中..."
+    },
+    "results": {
+      "title": "コンパイル済み仕様",
+      "description": "spec.json、spec.md、prd.json が生成されました",
+      "newInterview": "新しいインタビュー"
+    }
+  },
+
+  "designDoc": {
+    "title": "設計ドキュメント",
+    "description": "PRDから設計ドキュメントを生成、既存のドキュメントをインポート、またはプロジェクトから読み込みます。",
+    "dismiss": "閉じる",
+    "newDocument": "新規ドキュメント",
+    "generateTab": "PRDから生成",
+    "importTab": "インポート",
+    "loadTab": "既存を読み込み",
+    "generate": {
+      "prdPath": "PRDファイルパス",
+      "prdPathPlaceholder": "/path/to/prd.json",
+      "prdPathHint": "スペックインタビューまたはPRD生成で作成されたprd.jsonファイルのパス。",
+      "button": "設計ドキュメントを生成",
+      "generating": "生成中..."
+    },
+    "import": {
+      "filePath": "ファイルパス",
+      "filePathPlaceholder": "/path/to/design.md または /path/to/design.json",
+      "format": "フォーマット（任意）",
+      "autoDetect": "自動検出",
+      "button": "設計ドキュメントをインポート",
+      "importing": "インポート中..."
+    },
+    "load": {
+      "projectPath": "プロジェクトパス（任意）",
+      "projectPathPlaceholder": "空欄の場合は現在のディレクトリを使用",
+      "projectPathHint": "プロジェクトルートディレクトリからdesign_doc.jsonを読み込みます。",
+      "button": "設計ドキュメントを読み込み",
+      "loading": "読み込み中..."
+    },
+    "header": {
+      "source": "ソース：{{source}}",
+      "stats": "{{components}} コンポーネント、{{decisions}} ADR、{{mappings}} マッピング"
+    },
+    "warnings": {
+      "count": "{{count}} 件のインポート警告",
+      "count_plural": "{{count}} 件のインポート警告",
+      "high": "{{count}} 件の高",
+      "medium": "{{count}} 件の中",
+      "show": "表示",
+      "hide": "非表示"
+    },
+    "sections": {
+      "overview": "概要",
+      "goals": "目標",
+      "nonGoals": "非目標",
+      "architecture": "アーキテクチャ",
+      "systemOverview": "システム概要",
+      "dataFlow": "データフロー",
+      "infrastructure": "インフラストラクチャ",
+      "components": "コンポーネント",
+      "designPatterns": "デザインパターン",
+      "rationale": "根拠：{{text}}",
+      "apiInterfaces": "API / インターフェース",
+      "style": "スタイル",
+      "errorHandling": "エラーハンドリング",
+      "asyncPattern": "非同期パターン",
+      "adr": "アーキテクチャ決定記録 (ADR)",
+      "storyMappings": "ストーリーとコンポーネントのマッピング",
+      "deps": "依存：",
+      "appliesTo": "適用先：",
+      "mappingComponents": "コンポーネント",
+      "mappingPatterns": "パターン",
+      "mappingDecisions": "ADR"
+    }
+  },
+
+  "agentComposer": {
+    "title": "エージェントコンポーザー",
+    "description": "LLMエージェントを順次、並列、条件付き制御フローと組み合わせて、構成可能なエージェントパイプラインを構築します。",
+    "createFirst": "最初のパイプラインを作成",
+    "pipelineName": "パイプライン名",
+    "new": "新規",
+    "runner": "ランナー",
+    "close": "閉じる",
+    "saving": "保存中...",
+    "save": "保存",
+    "descriptionPlaceholder": "説明を追加...",
+    "addLlmAgent": "+ LLMエージェント",
+    "addSequential": "+ 順次",
+    "addParallel": "+ 並列",
+    "addConditional": "+ 条件分岐",
+    "emptyPipeline": "上のボタンでエージェントステップを追加してパイプラインを構築",
+    "list": {
+      "title": "保存済みパイプライン",
+      "newPipeline": "+ 新規パイプライン",
+      "loading": "パイプラインを読み込み中...",
+      "empty": "パイプラインがありません。作成して始めましょう。",
+      "deletePipeline": "パイプラインを削除",
+      "steps": "ステップ"
+    },
+    "node": {
+      "collapse": "折りたたみ",
+      "expand": "展開",
+      "edit": "編集",
+      "removeStep": "ステップを削除",
+      "remove": "削除",
+      "name": "名前",
+      "instruction": "インストラクション",
+      "instructionPlaceholder": "このエージェントのシステムプロンプト...",
+      "model": "モデル（任意）",
+      "modelPlaceholder": "空欄の場合はデフォルトモデルを使用",
+      "tools": "ツール（カンマ区切り、任意）",
+      "toolsPlaceholder": "read_file, grep, bash（空 = 全ツール）",
+      "maxIterations": "最大イテレーション数",
+      "temperature": "温度",
+      "default": "デフォルト",
+      "typeLlm": "LLM",
+      "typeSequential": "順次",
+      "typeParallel": "並列",
+      "typeConditional": "条件分岐",
+      "subSteps": "サブステップ",
+      "conditionKey": "条件キー：",
+      "branches": "ブランチ"
+    },
+    "runner": {
+      "empty": "実行中のタスクがありません。パイプラインを実行してイベントを表示します。",
+      "title": "実行イベント",
+      "clear": "クリア",
+      "toolCall": "[ツール呼び出し]",
+      "toolResult": "[ツール結果]",
+      "state": "[ステート]",
+      "transfer": "[転送]",
+      "done": "[完了]",
+      "completed": "完了"
+    }
+  },
+
+  "graphWorkflow": {
+    "title": "グラフワークフロー",
+    "description": "条件分岐、ステートチャネル、ビジュアルノード編集を使用して、グラフベースのエージェントワークフローを構築します。",
+    "createFirst": "最初のワークフローを作成",
+    "workflowName": "ワークフロー名",
+    "new": "新規",
+    "edgeMode": "2つのノードをクリックしてエッジを作成",
+    "cancelEdge": "エッジ作成をキャンセル",
+    "close": "閉じる",
+    "saving": "保存中...",
+    "save": "保存",
+    "emptyCanvas": "上のツールバーでノードを追加してください",
+    "emptyCanvasHint": "次にエッジで接続してください",
+    "list": {
+      "title": "ワークフロー",
+      "newWorkflow": "+ 新規",
+      "loading": "読み込み中...",
+      "empty": "ワークフローがありません",
+      "nodeCount": "{{nodes}} ノード、",
+      "edgeCount": "{{edges}} エッジ",
+      "deleteWorkflow": "ワークフローを削除"
+    },
+    "toolbar": {
+      "nodes": "ノード：",
+      "addLlm": "+ LLM",
+      "addSequential": "+ 順次",
+      "addParallel": "+ 並列",
+      "edges": "エッジ：",
+      "direct": "ダイレクト",
+      "conditional": "条件付き",
+      "delete": "削除"
+    },
+    "nodeConfig": {
+      "title": "ノード設定",
+      "nodeId": "ノードID",
+      "name": "名前",
+      "type": "タイプ",
+      "systemInstruction": "システムインストラクション",
+      "instructionPlaceholder": "オプションのシステムプロンプト...",
+      "entryNode": "これはエントリーノードです",
+      "setEntryNode": "エントリーノードに設定",
+      "deleteNode": "ノードを削除"
+    },
+    "edgeConfig": {
+      "title": "エッジ設定",
+      "type": "タイプ",
+      "from": "開始",
+      "to": "終了",
+      "conditionKey": "条件キー",
+      "conditionKeyPlaceholder": "shared_stateキー",
+      "defaultBranch": "デフォルトブランチ（ノードID）",
+      "defaultBranchPlaceholder": "オプションのデフォルトターゲットノード",
+      "branches": "ブランチ",
+      "noBranches": "ブランチが定義されていません",
+      "value": "値",
+      "nodeIdLabel": "ノードID",
+      "deleteEdge": "エッジを削除"
+    },
+    "nodeTypes": {
+      "llm": "LLM",
+      "sequential": "順次",
+      "parallel": "並列",
+      "conditional": "条件分岐",
+      "entryNode": "エントリーノード"
+    }
+  },
+
+  "evaluation": {
+    "tabs": {
+      "evaluators": "評価器",
+      "runs": "実行",
+      "reports": "レポート"
+    },
+    "setup": {
+      "title": "評価セットアップ",
+      "description": "異なるモデル間のエージェントパフォーマンスを評価するための評価器と基準を定義します。",
+      "createFirst": "最初の評価器を作成",
+      "listTitle": "評価器",
+      "newButton": "+ 新規",
+      "loading": "読み込み中...",
+      "empty": "評価器がありません",
+      "new": "新規",
+      "newEvaluator": "新規評価器",
+      "editEvaluator": "評価器を編集",
+      "close": "閉じる",
+      "delete": "削除",
+      "saving": "保存中...",
+      "save": "保存",
+      "evaluatorName": "評価器名",
+      "evaluatorNamePlaceholder": "例：コード品質チェック",
+      "evaluationCriteria": "評価基準",
+      "criteriaTrajectory": "ツール軌跡",
+      "criteriaTrajectoryDesc": "ツール呼び出しを期待されるツールと比較",
+      "criteriaSimilarity": "レスポンス類似度",
+      "criteriaSimilarityDesc": "文字列距離を使用してレスポンスをリファレンスと比較",
+      "criteriaLlmJudge": "LLMジャッジ",
+      "criteriaLlmJudgeDesc": "別のLLMを使用してレスポンス品質を判定",
+      "trajectory": {
+        "expectedTools": "期待されるツール",
+        "toolPlaceholder": "ツール名（Enterで追加）",
+        "orderMatters": "順序が重要"
+      },
+      "similarity": {
+        "referenceResponse": "リファレンスレスポンス",
+        "referencePlaceholder": "比較対象の期待されるレスポンス...",
+        "threshold": "閾値"
+      },
+      "judge": {
+        "provider": "ジャッジプロバイダー",
+        "model": "ジャッジモデル",
+        "modelPlaceholder": "例：claude-sonnet-4-20250514",
+        "rubric": "ルーブリック",
+        "rubricPlaceholder": "レスポンスの評価方法を説明してください（0.0-1.0スケール）..."
+      },
+      "badgeTrajectory": "軌跡",
+      "badgeSimilarity": "類似度",
+      "badgeLlmJudge": "LLMジャッジ"
+    },
+    "runs": {
+      "title": "評価実行",
+      "cancel": "キャンセル",
+      "newRun": "+ 新規実行",
+      "noEvaluator": "まずセットアップタブで評価器を作成してください。",
+      "configTitle": "新規実行を設定",
+      "evaluator": "評価器",
+      "evaluatorPlaceholder": "評価器を選択...",
+      "modelsToCompare": "比較するモデル",
+      "testCases": "テストケース",
+      "createButton": "評価実行を作成",
+      "creating": "実行を作成中...",
+      "loading": "実行を読み込み中...",
+      "empty": "評価実行がありません",
+      "emptyHint": "モデルを比較するために新しい実行を作成してください",
+      "modelCount": "{{count}} モデル",
+      "modelCount_plural": "{{count}} モデル",
+      "caseCount": "{{count}} ケース",
+      "caseCount_plural": "{{count}} ケース",
+      "viewReports": "レポートを表示",
+      "delete": "削除",
+      "modelNamePlaceholder": "モデル名（例：claude-sonnet-4-20250514）",
+      "caseName": "ケース名",
+      "remove": "削除",
+      "inputPlaceholder": "入力プロンプト...",
+      "expectedOutput": "期待される出力（任意）",
+      "addTestCase": "+ テストケースを追加",
+      "providerAnthropic": "Anthropic",
+      "providerOpenAI": "OpenAI",
+      "providerDeepSeek": "DeepSeek",
+      "providerOllama": "Ollama"
+    },
+    "reports": {
+      "loading": "レポートを読み込み中...",
+      "title": "評価レポート",
+      "empty": "完了した実行がありません",
+      "emptyHint": "実行タブから評価を作成して実行してください",
+      "selectRun": "完了した実行を選択してレポートを表示：",
+      "runLabel": "実行",
+      "models": "モデル",
+      "cases": "ケース",
+      "backToRuns": "実行一覧に戻る",
+      "modelRanking": "モデルランキング",
+      "passed": "合格",
+      "scoreTable": "スコア表",
+      "model": "モデル",
+      "overall": "総合",
+      "durationComparison": "所要時間比較",
+      "costComparison": "コスト比較",
+      "tokens": "トークン"
+    }
   }
 }

@@ -10,7 +10,8 @@
     "phases": "フェーズエージェント",
     "importExport": "インポート/エクスポート",
     "lsp": "LSPサーバー",
-    "plugins": "プラグイン"
+    "plugins": "プラグイン",
+    "security": "セキュリティ"
   },
 
   "general": {
@@ -462,6 +463,84 @@
     "reindex": {
       "title": "再インデックスが必要です",
       "message": "エンベディングプロバイダーまたはモデルが変更されました。新しいエンベディングを使用するには、コードベースの完全な再インデックスをお勧めします。"
+    }
+  },
+
+  "plugins": {
+    "title": "プラグイン",
+    "description": "Claude Code互換のプラグイン。スキル、コマンド、フックを含みます。",
+    "refresh": "更新",
+    "noDescription": "説明なし",
+    "skills": "スキル",
+    "commands": "コマンド",
+    "hooks": "フック",
+    "instructions": "インストラクション",
+    "permissions": "権限",
+    "invocable": "呼び出し可能",
+    "async": "非同期",
+    "allow": "許可：",
+    "deny": "拒否：",
+    "location": "場所：",
+    "tools": "ツール：",
+    "matcher": "マッチャー：",
+    "toggle": "{{name}}を切り替え",
+    "viewDetails": "{{name}}の詳細を表示",
+    "skillCount": "{{count}} スキル",
+    "skillCount_plural": "{{count}} スキル",
+    "commandCount": "{{count}} コマンド",
+    "commandCount_plural": "{{count}} コマンド",
+    "hookCount": "{{count}} フック",
+    "hookCount_plural": "{{count}} フック",
+    "empty": {
+      "title": "プラグインが見つかりません。",
+      "description": "プロジェクトの .claude-plugin/ ディレクトリ、~/.claude/plugins/cache/、または ~/.plan-cascade/plugins/ にプラグインを配置してください。"
+    },
+    "summary": "{{count}} 個のプラグインが見つかりました、{{enabled}} 個が有効",
+    "summary_plural": "{{count}} 個のプラグインが見つかりました、{{enabled}} 個が有効"
+  },
+
+  "security": {
+    "title": "セキュリティガードレール",
+    "description": "機密データの漏洩やコードセキュリティの問題から保護するコンテンツ検証ルールを設定します。",
+    "dismiss": "閉じる",
+    "loading": "ガードレールを読み込み中...",
+    "removeRule": "ルールを削除",
+
+    "builtin": {
+      "title": "組み込みガードレール",
+      "empty": "利用可能な組み込みガードレールがありません。"
+    },
+
+    "custom": {
+      "title": "カスタムルール",
+      "empty": "カスタムルールが定義されていません。",
+      "addTitle": "カスタムルールを追加",
+      "ruleName": "ルール名",
+      "ruleNamePlaceholder": "例：TODO禁止",
+      "regexPattern": "正規表現パターン",
+      "regexPatternPlaceholder": "例：TODO|FIXME",
+      "action": "アクション",
+      "actionWarn": "警告",
+      "actionBlock": "ブロック",
+      "actionRedact": "マスク",
+      "addButton": "ルールを追加",
+      "adding": "追加中...",
+      "nameRequired": "名前とパターンは必須です",
+      "addFailed": "ルールの追加に失敗しました。正規表現パターンを確認してください。"
+    },
+
+    "triggerLog": {
+      "title": "トリガーログ",
+      "loading": "トリガーログを読み込み中...",
+      "empty": "トリガーイベントはまだ記録されていません。",
+      "eventCount": "{{count}} 件のイベント",
+      "eventCount_plural": "{{count}} 件のイベント",
+      "clearLog": "ログをクリア",
+      "colTime": "時間",
+      "colGuardrail": "ガードレール",
+      "colDirection": "方向",
+      "colResult": "結果",
+      "colContent": "内容"
     }
   }
 }

@@ -4,6 +4,7 @@
  * Sidebar panel for editing a selected graph node's configuration.
  */
 
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { GraphNode } from '../../types/graphWorkflow';
 
@@ -22,18 +23,19 @@ export function GraphNodeConfig({
   onSetEntry,
   onDelete,
 }: GraphNodeConfigProps) {
+  const { t } = useTranslation('expertMode');
   const stepType = node.agent_step.step_type;
 
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-        Node Configuration
+        {t('graphWorkflow.nodeConfig.title')}
       </h3>
 
       {/* Node ID */}
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-          Node ID
+          {t('graphWorkflow.nodeConfig.nodeId')}
         </label>
         <div className="text-xs text-gray-700 dark:text-gray-300 font-mono bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded">
           {node.id}
@@ -43,7 +45,7 @@ export function GraphNodeConfig({
       {/* Step Name */}
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-          Name
+          {t('graphWorkflow.nodeConfig.name')}
         </label>
         <input
           type="text"
@@ -60,7 +62,7 @@ export function GraphNodeConfig({
       {/* Step Type (read-only) */}
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-          Type
+          {t('graphWorkflow.nodeConfig.type')}
         </label>
         <div className="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded">
           {stepType}
@@ -71,7 +73,7 @@ export function GraphNodeConfig({
       {stepType === 'llm_step' && 'instruction' in node.agent_step && (
         <div>
           <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-            System Instruction
+            {t('graphWorkflow.nodeConfig.systemInstruction')}
           </label>
           <textarea
             value={node.agent_step.instruction ?? ''}
@@ -84,7 +86,7 @@ export function GraphNodeConfig({
               });
             }}
             className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white h-24 resize-y"
-            placeholder="Optional system prompt..."
+            placeholder={t('graphWorkflow.nodeConfig.instructionPlaceholder')}
           />
         </div>
       )}
@@ -93,14 +95,14 @@ export function GraphNodeConfig({
       <div>
         {isEntryNode ? (
           <span className="text-xs text-green-600 dark:text-green-400 font-medium">
-            This is the entry node
+            {t('graphWorkflow.nodeConfig.entryNode')}
           </span>
         ) : (
           <button
             onClick={onSetEntry}
             className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
           >
-            Set as entry node
+            {t('graphWorkflow.nodeConfig.setEntryNode')}
           </button>
         )}
       </div>
@@ -115,7 +117,7 @@ export function GraphNodeConfig({
           'hover:bg-red-50 dark:hover:bg-red-900/20'
         )}
       >
-        Delete Node
+        {t('graphWorkflow.nodeConfig.deleteNode')}
       </button>
     </div>
   );

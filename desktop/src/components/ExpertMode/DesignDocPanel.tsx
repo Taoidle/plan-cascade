@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useDesignDocStore } from '../../store/designDoc';
 import type {
   DesignDoc,
@@ -25,6 +26,7 @@ import type {
 // ============================================================================
 
 export function DesignDocPanel() {
+  const { t } = useTranslation('expertMode');
   const {
     designDoc,
     generationInfo,
@@ -76,7 +78,7 @@ export function DesignDocPanel() {
               onClick={clearError}
               className="text-red-500 hover:text-red-700 text-sm font-medium"
             >
-              Dismiss
+              {t('designDoc.dismiss')}
             </button>
           </div>
         </div>
@@ -117,6 +119,7 @@ function DesignDocActions({
   error,
   onClearError,
 }: DesignDocActionsProps) {
+  const { t } = useTranslation('expertMode');
   const [prdPath, setPrdPath] = useState('');
   const [importPath, setImportPath] = useState('');
   const [importFormat, setImportFormat] = useState<string>('');
@@ -145,11 +148,10 @@ function DesignDocActions({
       <div className="max-w-lg w-full">
         <div className="mb-8 text-center">
           <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">
-            Design Document
+            {t('designDoc.title')}
           </h2>
           <p className="text-gray-600 dark:text-gray-400">
-            Generate a design document from a PRD, import an existing document,
-            or load one from your project.
+            {t('designDoc.description')}
           </p>
         </div>
 
@@ -158,7 +160,7 @@ function DesignDocActions({
             <div className="flex items-center justify-between">
               <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
               <button onClick={onClearError} className="text-red-500 hover:text-red-700 text-sm">
-                Dismiss
+                {t('designDoc.dismiss')}
               </button>
             </div>
           </div>
@@ -167,9 +169,9 @@ function DesignDocActions({
         {/* Action Tabs */}
         <div className="flex gap-1 mb-4 border-b border-gray-200 dark:border-gray-700">
           {([
-            { id: 'generate' as const, label: 'Generate from PRD' },
-            { id: 'import' as const, label: 'Import' },
-            { id: 'load' as const, label: 'Load Existing' },
+            { id: 'generate' as const, label: t('designDoc.generateTab') },
+            { id: 'import' as const, label: t('designDoc.importTab') },
+            { id: 'load' as const, label: t('designDoc.loadTab') },
           ]).map((tab) => (
             <button
               key={tab.id}
@@ -191,13 +193,13 @@ function DesignDocActions({
           <form onSubmit={handleGenerate} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                PRD File Path
+                {t('designDoc.generate.prdPath')}
               </label>
               <input
                 type="text"
                 value={prdPath}
                 onChange={(e) => setPrdPath(e.target.value)}
-                placeholder="/path/to/prd.json"
+                placeholder={t('designDoc.generate.prdPathPlaceholder')}
                 className={clsx(
                   'w-full px-4 py-2.5 rounded-lg border text-sm',
                   'bg-white dark:bg-gray-800',
@@ -209,7 +211,7 @@ function DesignDocActions({
                 required
               />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Path to the prd.json file generated from a spec interview or PRD generation.
+                {t('designDoc.generate.prdPathHint')}
               </p>
             </div>
             <button
@@ -222,7 +224,7 @@ function DesignDocActions({
                 'transition-colors'
               )}
             >
-              {loading.generating ? 'Generating...' : 'Generate Design Document'}
+              {loading.generating ? t('designDoc.generate.generating') : t('designDoc.generate.button')}
             </button>
           </form>
         )}
@@ -232,13 +234,13 @@ function DesignDocActions({
           <form onSubmit={handleImport} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                File Path
+                {t('designDoc.import.filePath')}
               </label>
               <input
                 type="text"
                 value={importPath}
                 onChange={(e) => setImportPath(e.target.value)}
-                placeholder="/path/to/design.md or /path/to/design.json"
+                placeholder={t('designDoc.import.filePathPlaceholder')}
                 className={clsx(
                   'w-full px-4 py-2.5 rounded-lg border text-sm',
                   'bg-white dark:bg-gray-800',
@@ -252,7 +254,7 @@ function DesignDocActions({
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Format (optional)
+                {t('designDoc.import.format')}
               </label>
               <div className="flex gap-3">
                 {(['', 'markdown', 'json'] as const).map((fmt) => (
@@ -267,7 +269,7 @@ function DesignDocActions({
                         : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                     )}
                   >
-                    {fmt || 'Auto-detect'}
+                    {fmt || t('designDoc.import.autoDetect')}
                   </button>
                 ))}
               </div>
@@ -282,7 +284,7 @@ function DesignDocActions({
                 'transition-colors'
               )}
             >
-              {loading.importing ? 'Importing...' : 'Import Design Document'}
+              {loading.importing ? t('designDoc.import.importing') : t('designDoc.import.button')}
             </button>
           </form>
         )}
@@ -292,13 +294,13 @@ function DesignDocActions({
           <form onSubmit={handleLoad} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Project Path (optional)
+                {t('designDoc.load.projectPath')}
               </label>
               <input
                 type="text"
                 value={loadPath}
                 onChange={(e) => setLoadPath(e.target.value)}
-                placeholder="Leave empty for current directory"
+                placeholder={t('designDoc.load.projectPathPlaceholder')}
                 className={clsx(
                   'w-full px-4 py-2.5 rounded-lg border text-sm',
                   'bg-white dark:bg-gray-800',
@@ -309,7 +311,7 @@ function DesignDocActions({
                 )}
               />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Loads design_doc.json from the project root directory.
+                {t('designDoc.load.projectPathHint')}
               </p>
             </div>
             <button
@@ -322,7 +324,7 @@ function DesignDocActions({
                 'transition-colors'
               )}
             >
-              {loading.loading ? 'Loading...' : 'Load Design Document'}
+              {loading.loading ? t('designDoc.load.loading') : t('designDoc.load.button')}
             </button>
           </form>
         )}
@@ -342,11 +344,13 @@ interface DesignDocHeaderProps {
 }
 
 function DesignDocHeader({ doc, generationInfo, onReset }: DesignDocHeaderProps) {
+  const { t } = useTranslation('expertMode');
+
   return (
     <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {doc.overview.title || 'Design Document'}
+          {doc.overview.title || t('designDoc.title')}
         </h2>
         <div className="flex items-center gap-3 mt-1">
           <span className={clsx(
@@ -359,12 +363,16 @@ function DesignDocHeader({ doc, generationInfo, onReset }: DesignDocHeaderProps)
           </span>
           {doc.metadata.source && (
             <span className="text-xs text-gray-500 dark:text-gray-400">
-              Source: {doc.metadata.source}
+              {t('designDoc.header.source', { source: doc.metadata.source })}
             </span>
           )}
           {generationInfo && (
             <span className="text-xs text-gray-500 dark:text-gray-400">
-              {generationInfo.components_generated} components, {generationInfo.decisions_created} ADRs, {generationInfo.feature_mappings_created} mappings
+              {t('designDoc.header.stats', {
+                components: generationInfo.components_generated,
+                decisions: generationInfo.decisions_created,
+                mappings: generationInfo.feature_mappings_created,
+              })}
             </span>
           )}
         </div>
@@ -379,7 +387,7 @@ function DesignDocHeader({ doc, generationInfo, onReset }: DesignDocHeaderProps)
           'transition-colors'
         )}
       >
-        New Document
+        {t('designDoc.newDocument')}
       </button>
     </div>
   );
@@ -394,6 +402,7 @@ interface WarningsBannerProps {
 }
 
 function WarningsBanner({ warnings }: WarningsBannerProps) {
+  const { t } = useTranslation('expertMode');
   const [expanded, setExpanded] = useState(false);
 
   const highCount = warnings.filter((w) => w.severity === 'high').length;
@@ -403,15 +412,15 @@ function WarningsBanner({ warnings }: WarningsBannerProps) {
     <div className="mx-6 mt-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
       <div className="flex items-center justify-between">
         <span className="text-sm text-yellow-700 dark:text-yellow-300">
-          {warnings.length} import warning{warnings.length !== 1 ? 's' : ''}
-          {highCount > 0 && ` (${highCount} high)`}
-          {mediumCount > 0 && ` (${mediumCount} medium)`}
+          {t('designDoc.warnings.count', { count: warnings.length })}
+          {highCount > 0 && ` (${t('designDoc.warnings.high', { count: highCount })})`}
+          {mediumCount > 0 && ` (${t('designDoc.warnings.medium', { count: mediumCount })})`}
         </span>
         <button
           onClick={() => setExpanded(!expanded)}
           className="text-yellow-600 hover:text-yellow-800 text-sm font-medium"
         >
-          {expanded ? 'Hide' : 'Show'}
+          {expanded ? t('designDoc.warnings.hide') : t('designDoc.warnings.show')}
         </button>
       </div>
       {expanded && (
@@ -491,15 +500,17 @@ function CollapsibleSection({ title, count, defaultOpen = true, children }: Coll
 // ============================================================================
 
 function OverviewSection({ doc }: { doc: DesignDoc }) {
+  const { t } = useTranslation('expertMode');
+
   return (
-    <CollapsibleSection title="Overview">
+    <CollapsibleSection title={t('designDoc.sections.overview')}>
       <div className="space-y-3">
         {doc.overview.summary && (
           <p className="text-sm text-gray-700 dark:text-gray-300">{doc.overview.summary}</p>
         )}
         {doc.overview.goals.length > 0 && (
           <div>
-            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Goals</h4>
+            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('designDoc.sections.goals')}</h4>
             <ul className="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-0.5">
               {doc.overview.goals.map((goal, idx) => (
                 <li key={idx}>{goal}</li>
@@ -509,7 +520,7 @@ function OverviewSection({ doc }: { doc: DesignDoc }) {
         )}
         {doc.overview.non_goals.length > 0 && (
           <div>
-            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Non-Goals</h4>
+            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('designDoc.sections.nonGoals')}</h4>
             <ul className="list-disc list-inside text-sm text-gray-500 dark:text-gray-400 space-y-0.5">
               {doc.overview.non_goals.map((ng, idx) => (
                 <li key={idx}>{ng}</li>
@@ -523,25 +534,27 @@ function OverviewSection({ doc }: { doc: DesignDoc }) {
 }
 
 function ArchitectureSection({ doc }: { doc: DesignDoc }) {
+  const { t } = useTranslation('expertMode');
+
   return (
-    <CollapsibleSection title="Architecture">
+    <CollapsibleSection title={t('designDoc.sections.architecture')}>
       <div className="space-y-3">
         {doc.architecture.system_overview && (
           <div>
-            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">System Overview</h4>
+            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('designDoc.sections.systemOverview')}</h4>
             <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{doc.architecture.system_overview}</p>
           </div>
         )}
         {doc.architecture.data_flow && (
           <div>
-            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Data Flow</h4>
+            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('designDoc.sections.dataFlow')}</h4>
             <p className="text-sm text-gray-700 dark:text-gray-300">{doc.architecture.data_flow}</p>
           </div>
         )}
         {(doc.architecture.infrastructure.existing_services.length > 0 ||
           doc.architecture.infrastructure.new_services.length > 0) && (
           <div>
-            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Infrastructure</h4>
+            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('designDoc.sections.infrastructure')}</h4>
             {doc.architecture.infrastructure.new_services.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-1">
                 {doc.architecture.infrastructure.new_services.map((svc, idx) => (
@@ -562,10 +575,12 @@ function ArchitectureSection({ doc }: { doc: DesignDoc }) {
 }
 
 function ComponentsSection({ components }: { components: DesignComponent[] }) {
+  const { t } = useTranslation('expertMode');
+
   if (components.length === 0) return null;
 
   return (
-    <CollapsibleSection title="Components" count={components.length}>
+    <CollapsibleSection title={t('designDoc.sections.components')} count={components.length}>
       <div className="space-y-3">
         {components.map((comp) => (
           <div
@@ -604,7 +619,7 @@ function ComponentsSection({ components }: { components: DesignComponent[] }) {
             )}
             {comp.dependencies.length > 0 && (
               <div className="mt-2 flex items-center gap-1">
-                <span className="text-[10px] text-gray-400">Deps:</span>
+                <span className="text-[10px] text-gray-400">{t('designDoc.sections.deps')}</span>
                 {comp.dependencies.map((dep, idx) => (
                   <span
                     key={idx}
@@ -623,10 +638,12 @@ function ComponentsSection({ components }: { components: DesignComponent[] }) {
 }
 
 function PatternsSection({ patterns }: { patterns: DesignPattern[] }) {
+  const { t } = useTranslation('expertMode');
+
   if (patterns.length === 0) return null;
 
   return (
-    <CollapsibleSection title="Design Patterns" count={patterns.length} defaultOpen={false}>
+    <CollapsibleSection title={t('designDoc.sections.designPatterns')} count={patterns.length} defaultOpen={false}>
       <div className="space-y-2">
         {patterns.map((pattern) => (
           <div
@@ -639,7 +656,7 @@ function PatternsSection({ patterns }: { patterns: DesignPattern[] }) {
             )}
             {pattern.rationale && (
               <p className="text-xs text-gray-500 dark:text-gray-500 mt-1 italic">
-                Rationale: {pattern.rationale}
+                {t('designDoc.sections.rationale', { text: pattern.rationale })}
               </p>
             )}
             {pattern.applies_to.length > 0 && (
@@ -662,30 +679,31 @@ function PatternsSection({ patterns }: { patterns: DesignPattern[] }) {
 }
 
 function InterfacesSection({ doc }: { doc: DesignDoc }) {
+  const { t } = useTranslation('expertMode');
   const { api_standards, shared_data_models } = doc.interfaces;
   const hasContent = api_standards.style || shared_data_models.length > 0;
 
   if (!hasContent) return null;
 
   return (
-    <CollapsibleSection title="API / Interfaces" defaultOpen={false}>
+    <CollapsibleSection title={t('designDoc.sections.apiInterfaces')} defaultOpen={false}>
       <div className="space-y-3">
         <div className="grid grid-cols-3 gap-3">
           {api_standards.style && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-0.5">Style</h4>
+              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-0.5">{t('designDoc.sections.style')}</h4>
               <p className="text-sm text-gray-700 dark:text-gray-300">{api_standards.style}</p>
             </div>
           )}
           {api_standards.error_handling && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-0.5">Error Handling</h4>
+              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-0.5">{t('designDoc.sections.errorHandling')}</h4>
               <p className="text-sm text-gray-700 dark:text-gray-300">{api_standards.error_handling}</p>
             </div>
           )}
           {api_standards.async_pattern && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-0.5">Async Pattern</h4>
+              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-0.5">{t('designDoc.sections.asyncPattern')}</h4>
               <p className="text-sm text-gray-700 dark:text-gray-300">{api_standards.async_pattern}</p>
             </div>
           )}
@@ -696,6 +714,8 @@ function InterfacesSection({ doc }: { doc: DesignDoc }) {
 }
 
 function DecisionsSection({ decisions }: { decisions: DesignDecision[] }) {
+  const { t } = useTranslation('expertMode');
+
   if (decisions.length === 0) return null;
 
   const statusColors: Record<string, string> = {
@@ -706,7 +726,7 @@ function DecisionsSection({ decisions }: { decisions: DesignDecision[] }) {
   };
 
   return (
-    <CollapsibleSection title="Architecture Decisions (ADRs)" count={decisions.length} defaultOpen={false}>
+    <CollapsibleSection title={t('designDoc.sections.adr')} count={decisions.length} defaultOpen={false}>
       <div className="space-y-2">
         {decisions.map((decision) => (
           <div
@@ -728,12 +748,12 @@ function DecisionsSection({ decisions }: { decisions: DesignDecision[] }) {
             )}
             {decision.rationale && (
               <p className="text-xs text-gray-500 dark:text-gray-500 mt-1 italic">
-                Rationale: {decision.rationale}
+                {t('designDoc.sections.rationale', { text: decision.rationale })}
               </p>
             )}
             {decision.applies_to.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-1">
-                <span className="text-[10px] text-gray-400">Applies to:</span>
+                <span className="text-[10px] text-gray-400">{t('designDoc.sections.appliesTo')}</span>
                 {decision.applies_to.map((target, idx) => (
                   <span
                     key={idx}
@@ -752,11 +772,12 @@ function DecisionsSection({ decisions }: { decisions: DesignDecision[] }) {
 }
 
 function FeatureMappingsSection({ mappings }: { mappings: Record<string, FeatureMapping> }) {
+  const { t } = useTranslation('expertMode');
   const entries = Object.entries(mappings);
   if (entries.length === 0) return null;
 
   return (
-    <CollapsibleSection title="Story-to-Component Mappings" count={entries.length}>
+    <CollapsibleSection title={t('designDoc.sections.storyMappings')} count={entries.length}>
       <div className="space-y-3">
         {entries.map(([featureId, mapping]) => (
           <div
@@ -778,7 +799,7 @@ function FeatureMappingsSection({ mappings }: { mappings: Record<string, Feature
             <div className="flex flex-wrap gap-4">
               {mapping.components.length > 0 && (
                 <div>
-                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Components</span>
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t('designDoc.sections.mappingComponents')}</span>
                   <div className="flex flex-wrap gap-1 mt-0.5">
                     {mapping.components.map((comp, idx) => (
                       <span
@@ -793,7 +814,7 @@ function FeatureMappingsSection({ mappings }: { mappings: Record<string, Feature
               )}
               {mapping.patterns.length > 0 && (
                 <div>
-                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Patterns</span>
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t('designDoc.sections.mappingPatterns')}</span>
                   <div className="flex flex-wrap gap-1 mt-0.5">
                     {mapping.patterns.map((pat, idx) => (
                       <span
@@ -808,7 +829,7 @@ function FeatureMappingsSection({ mappings }: { mappings: Record<string, Feature
               )}
               {mapping.decisions.length > 0 && (
                 <div>
-                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">ADRs</span>
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t('designDoc.sections.mappingDecisions')}</span>
                   <div className="flex flex-wrap gap-1 mt-0.5">
                     {mapping.decisions.map((dec, idx) => (
                       <span

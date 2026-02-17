@@ -108,8 +108,8 @@ export function ExpertMode() {
         )}>
           <Tabs.List className="flex gap-1">
             <TabTrigger value="generate">{t('tabs.generate')}</TabTrigger>
-            <TabTrigger value="interview">Spec Interview</TabTrigger>
-            <TabTrigger value="design-doc">Design Doc</TabTrigger>
+            <TabTrigger value="interview">{t('tabs.interview')}</TabTrigger>
+            <TabTrigger value="design-doc">{t('tabs.designDoc')}</TabTrigger>
             <TabTrigger value="prd" disabled={!hasStories}>
               {t('tabs.prdEditor')} {hasStories && t('prdEditor.storyCount', { count: prd.stories.length })}
             </TabTrigger>
@@ -123,13 +123,13 @@ export function ExpertMode() {
               {t('tabs.logs')}
             </TabTrigger>
             <TabTrigger value="composer">
-              Agent Composer
+              {t('tabs.composer')}
             </TabTrigger>
             <TabTrigger value="graph-workflows">
-              Graph Workflows
+              {t('tabs.graphWorkflows')}
             </TabTrigger>
             <TabTrigger value="model-evaluation">
-              Model Evaluation
+              {t('tabs.modelEvaluation')}
             </TabTrigger>
           </Tabs.List>
 

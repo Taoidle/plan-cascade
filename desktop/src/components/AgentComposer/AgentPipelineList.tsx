@@ -6,10 +6,13 @@
 
 import { useEffect } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useAgentComposerStore } from '../../store/agentComposer';
 import type { AgentPipelineInfo } from '../../types/agentComposer';
 
 export function AgentPipelineList() {
+  const { t } = useTranslation('expertMode');
+
   const {
     pipelines,
     currentPipeline,
@@ -30,7 +33,7 @@ export function AgentPipelineList() {
       {/* Header with create button */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          Saved Pipelines
+          {t('agentComposer.list.title')}
         </h3>
         <button
           onClick={startNewPipeline}
@@ -40,7 +43,7 @@ export function AgentPipelineList() {
             'transition-colors'
           )}
         >
-          + New Pipeline
+          {t('agentComposer.list.newPipeline')}
         </button>
       </div>
 
@@ -54,14 +57,14 @@ export function AgentPipelineList() {
       {/* Loading state */}
       {loading.list && (
         <div className="text-center py-4 text-sm text-gray-500 dark:text-gray-400">
-          Loading pipelines...
+          {t('agentComposer.list.loading')}
         </div>
       )}
 
       {/* Pipeline list */}
       {!loading.list && pipelines.length === 0 && (
         <div className="text-center py-6 text-sm text-gray-500 dark:text-gray-400">
-          No pipelines yet. Create one to get started.
+          {t('agentComposer.list.empty')}
         </div>
       )}
 
@@ -88,6 +91,8 @@ interface PipelineCardProps {
 }
 
 function PipelineCard({ pipeline, isSelected, onSelect, onDelete }: PipelineCardProps) {
+  const { t } = useTranslation('expertMode');
+
   return (
     <div
       onClick={onSelect}
@@ -110,7 +115,7 @@ function PipelineCard({ pipeline, isSelected, onSelect, onDelete }: PipelineCard
           )}
           <div className="flex items-center gap-2 mt-1">
             <span className="text-xs text-gray-400 dark:text-gray-500">
-              {pipeline.step_count} step(s)
+              {pipeline.step_count} {t('agentComposer.list.steps')}
             </span>
             <span className="text-xs text-gray-400 dark:text-gray-500">
               {new Date(pipeline.created_at).toLocaleDateString()}
@@ -125,7 +130,7 @@ function PipelineCard({ pipeline, isSelected, onSelect, onDelete }: PipelineCard
             }
           }}
           className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-          title="Delete pipeline"
+          title={t('agentComposer.list.deletePipeline')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />

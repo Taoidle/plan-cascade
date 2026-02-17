@@ -6,6 +6,7 @@
  */
 
 import { useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { GraphNode, NodePosition } from '../../types/graphWorkflow';
 
@@ -24,11 +25,11 @@ const STEP_TYPE_COLORS: Record<string, string> = {
   conditional_step: 'border-amber-400 dark:border-amber-600',
 };
 
-const STEP_TYPE_LABELS: Record<string, string> = {
-  llm_step: 'LLM',
-  sequential_step: 'Sequential',
-  parallel_step: 'Parallel',
-  conditional_step: 'Conditional',
+const STEP_TYPE_LABEL_KEYS: Record<string, string> = {
+  llm_step: 'graphWorkflow.nodeTypes.llm',
+  sequential_step: 'graphWorkflow.nodeTypes.sequential',
+  parallel_step: 'graphWorkflow.nodeTypes.parallel',
+  conditional_step: 'graphWorkflow.nodeTypes.conditional',
 };
 
 export function GraphNodeComponent({
@@ -38,6 +39,7 @@ export function GraphNodeComponent({
   onClick,
   onDrag,
 }: GraphNodeComponentProps) {
+  const { t } = useTranslation('expertMode');
   const nodeRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
@@ -93,13 +95,13 @@ export function GraphNodeComponent({
       {/* Entry indicator */}
       {isEntryNode && (
         <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-green-500 border-2 border-white dark:border-gray-900"
-          title="Entry node"
+          title={t('graphWorkflow.nodeTypes.entryNode')}
         />
       )}
 
       {/* Step type badge */}
       <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-        {STEP_TYPE_LABELS[stepType] ?? stepType}
+        {STEP_TYPE_LABEL_KEYS[stepType] ? t(STEP_TYPE_LABEL_KEYS[stepType]) : stepType}
       </div>
 
       {/* Node name */}

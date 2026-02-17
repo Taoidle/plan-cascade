@@ -7,8 +7,8 @@
 
 import { useState } from 'react';
 import { clsx } from 'clsx';
-import type { AgentStep, AgentConfig } from '../../types/agentComposer';
-import { DEFAULT_AGENT_CONFIG, createLlmStep } from '../../types/agentComposer';
+import { useTranslation } from 'react-i18next';
+import type { AgentStep } from '../../types/agentComposer';
 
 interface AgentNodeProps {
   step: AgentStep;
@@ -18,9 +18,10 @@ interface AgentNodeProps {
 }
 
 export function AgentNode({ step, index, onUpdate, onRemove }: AgentNodeProps) {
+  const { t } = useTranslation('expertMode');
   const [expanded, setExpanded] = useState(false);
 
-  const typeLabel = getStepTypeLabel(step.step_type);
+  const typeLabel = getStepTypeLabel(step.step_type, t);
   const typeColor = getStepTypeColor(step.step_type);
 
   return (
@@ -50,16 +51,16 @@ export function AgentNode({ step, index, onUpdate, onRemove }: AgentNodeProps) {
           <button
             onClick={() => setExpanded(!expanded)}
             className="p-1 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs"
-            title={expanded ? 'Collapse' : 'Expand'}
+            title={expanded ? t('agentComposer.node.collapse') : t('agentComposer.node.expand')}
           >
-            {expanded ? 'Collapse' : 'Edit'}
+            {expanded ? t('agentComposer.node.collapse') : t('agentComposer.node.edit')}
           </button>
           <button
             onClick={() => onRemove(index)}
             className="p-1 text-red-400 hover:text-red-600 text-xs"
-            title="Remove step"
+            title={t('agentComposer.node.removeStep')}
           >
-            Remove
+            {t('agentComposer.node.remove')}
           </button>
         </div>
       </div>
@@ -70,7 +71,7 @@ export function AgentNode({ step, index, onUpdate, onRemove }: AgentNodeProps) {
           {/* Name field */}
           <div>
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              Name
+              {t('agentComposer.node.name')}
             </label>
             <input
               type="text"
@@ -94,14 +95,14 @@ export function AgentNode({ step, index, onUpdate, onRemove }: AgentNodeProps) {
           {/* Sequential/Parallel sub-steps indicator */}
           {(step.step_type === 'sequential_step' || step.step_type === 'parallel_step') && (
             <div className="text-xs text-gray-500 dark:text-gray-400">
-              {step.steps.length} sub-step(s)
+              {step.steps.length} {t('agentComposer.node.subSteps')}
             </div>
           )}
 
           {/* Conditional branches indicator */}
           {step.step_type === 'conditional_step' && (
             <div className="text-xs text-gray-500 dark:text-gray-400">
-              Condition key: {step.condition_key} | {Object.keys(step.branches).length} branch(es)
+              {t('agentComposer.node.conditionKey')} {step.condition_key} | {Object.keys(step.branches).length} {t('agentComposer.node.branches')}
             </div>
           )}
         </div>
@@ -117,11 +118,13 @@ interface LlmStepFieldsProps {
 }
 
 function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
+  const { t } = useTranslation('expertMode');
+
   return (
     <>
       <div>
         <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-          Instruction
+          {t('agentComposer.node.instruction')}
         </label>
         <textarea
           value={step.instruction ?? ''}
@@ -133,12 +136,12 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
           }
           rows={3}
           className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-y"
-          placeholder="System prompt for this agent..."
+          placeholder={t('agentComposer.node.instructionPlaceholder')}
         />
       </div>
       <div>
         <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-          Model (optional)
+          {t('agentComposer.node.model')}
         </label>
         <input
           type="text"
@@ -147,12 +150,12 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
             onUpdate(index, { ...step, model: e.target.value || null })
           }
           className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-          placeholder="Leave empty for default model"
+          placeholder={t('agentComposer.node.modelPlaceholder')}
         />
       </div>
       <div>
         <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-          Tools (comma-separated, optional)
+          {t('agentComposer.node.tools')}
         </label>
         <input
           type="text"
@@ -164,13 +167,13 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
             onUpdate(index, { ...step, tools });
           }}
           className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-          placeholder="read_file, grep, bash (empty = all tools)"
+          placeholder={t('agentComposer.node.toolsPlaceholder')}
         />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-            Max Iterations
+            {t('agentComposer.node.maxIterations')}
           </label>
           <input
             type="number"
@@ -188,7 +191,7 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-            Temperature
+            {t('agentComposer.node.temperature')}
           </label>
           <input
             type="number"
@@ -206,7 +209,7 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
             min={0}
             max={2}
             className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            placeholder="Default"
+            placeholder={t('agentComposer.node.default')}
           />
         </div>
       </div>
@@ -214,12 +217,12 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
   );
 }
 
-function getStepTypeLabel(type_: string): string {
+function getStepTypeLabel(type_: string, t: (key: string) => string): string {
   switch (type_) {
-    case 'llm_step': return 'LLM';
-    case 'sequential_step': return 'Sequential';
-    case 'parallel_step': return 'Parallel';
-    case 'conditional_step': return 'Conditional';
+    case 'llm_step': return t('agentComposer.node.typeLlm');
+    case 'sequential_step': return t('agentComposer.node.typeSequential');
+    case 'parallel_step': return t('agentComposer.node.typeParallel');
+    case 'conditional_step': return t('agentComposer.node.typeConditional');
     default: return type_;
   }
 }

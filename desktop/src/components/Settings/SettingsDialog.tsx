@@ -42,7 +42,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     { id: 'embedding', label: t('tabs.embedding') },
     { id: 'lsp', label: t('tabs.lsp') },
     { id: 'plugins', label: t('tabs.plugins', 'Plugins') },
-    { id: 'security', label: 'Security' },
+    { id: 'security', label: t('tabs.security') },
     { id: 'agents', label: t('tabs.agents') },
     { id: 'quality', label: t('tabs.quality') },
     { id: 'phases', label: t('tabs.phases') },

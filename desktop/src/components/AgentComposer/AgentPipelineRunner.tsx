@@ -5,17 +5,19 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useAgentComposerStore } from '../../store/agentComposer';
 import type { AgentEvent } from '../../types/agentComposer';
 
 export function AgentPipelineRunner() {
+  const { t } = useTranslation('expertMode');
   const { executionEvents, isExecuting, clearExecutionEvents } =
     useAgentComposerStore();
 
   if (executionEvents.length === 0 && !isExecuting) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-gray-500 dark:text-gray-400">
-        No execution in progress. Run a pipeline to see events here.
+        {t('agentComposer.runner.empty')}
       </div>
     );
   }
@@ -24,7 +26,7 @@ export function AgentPipelineRunner() {
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          Execution Events
+          {t('agentComposer.runner.title')}
           {isExecuting && (
             <span className="ml-2 inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
           )}
@@ -34,7 +36,7 @@ export function AgentPipelineRunner() {
             onClick={clearExecutionEvents}
             className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
           >
-            Clear
+            {t('agentComposer.runner.clear')}
           </button>
         )}
       </div>
@@ -55,6 +57,8 @@ export function AgentPipelineRunner() {
 }
 
 function EventLine({ event }: { event: AgentEvent }) {
+  const { t } = useTranslation('expertMode');
+
   switch (event.type) {
     case 'text_delta':
       return (
@@ -67,31 +71,31 @@ function EventLine({ event }: { event: AgentEvent }) {
     case 'tool_call':
       return (
         <div className="text-yellow-400">
-          [Tool Call] {event.name}({event.args.length > 80 ? event.args.slice(0, 80) + '...' : event.args})
+          {t('agentComposer.runner.toolCall')} {event.name}({event.args.length > 80 ? event.args.slice(0, 80) + '...' : event.args})
         </div>
       );
     case 'tool_result':
       return (
         <div className="text-cyan-400">
-          [Tool Result] {event.result.length > 120 ? event.result.slice(0, 120) + '...' : event.result}
+          {t('agentComposer.runner.toolResult')} {event.result.length > 120 ? event.result.slice(0, 120) + '...' : event.result}
         </div>
       );
     case 'state_update':
       return (
         <div className="text-purple-400">
-          [State] {event.key} = {JSON.stringify(event.value)}
+          {t('agentComposer.runner.state')} {event.key} = {JSON.stringify(event.value)}
         </div>
       );
     case 'agent_transfer':
       return (
         <div className="text-orange-400">
-          [Transfer] -&gt; {event.target}: {event.message}
+          {t('agentComposer.runner.transfer')} -&gt; {event.target}: {event.message}
         </div>
       );
     case 'done':
       return (
         <div className="text-green-300 font-bold mt-1">
-          [Done] {event.output ?? 'Completed'}
+          {t('agentComposer.runner.done')} {event.output ?? t('agentComposer.runner.completed')}
         </div>
       );
     default:

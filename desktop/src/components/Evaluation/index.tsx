@@ -10,6 +10,7 @@
 
 import { useEffect } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useEvaluationStore } from '../../store/evaluation';
 import type { EvaluationTab } from '../../store/evaluation';
 import { EvaluatorSetup } from './EvaluatorSetup';
@@ -17,6 +18,7 @@ import { EvaluationRunList } from './EvaluationRunList';
 import { EvaluationReportView } from './EvaluationReportView';
 
 export function EvaluationDashboard() {
+  const { t } = useTranslation('expertMode');
   const { activeTab, setActiveTab, fetchEvaluators, fetchRuns, error } = useEvaluationStore();
 
   useEffect(() => {
@@ -25,9 +27,9 @@ export function EvaluationDashboard() {
   }, [fetchEvaluators, fetchRuns]);
 
   const tabs: { value: EvaluationTab; label: string }[] = [
-    { value: 'setup', label: 'Evaluators' },
-    { value: 'runs', label: 'Runs' },
-    { value: 'reports', label: 'Reports' },
+    { value: 'setup', label: t('evaluation.tabs.evaluators') },
+    { value: 'runs', label: t('evaluation.tabs.runs') },
+    { value: 'reports', label: t('evaluation.tabs.reports') },
   ];
 
   return (

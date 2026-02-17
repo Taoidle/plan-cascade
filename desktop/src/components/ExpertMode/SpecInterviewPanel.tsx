@@ -8,6 +8,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   useSpecInterviewStore,
   getPhaseLabel,
@@ -25,6 +26,7 @@ import type {
 // ============================================================================
 
 export function SpecInterviewPanel() {
+  const { t } = useTranslation('expertMode');
   const {
     session,
     compiledSpec,
@@ -67,7 +69,7 @@ export function SpecInterviewPanel() {
               onClick={clearError}
               className="text-red-500 hover:text-red-700 text-sm font-medium"
             >
-              Dismiss
+              {t('specInterview.dismiss')}
             </button>
           </div>
         </div>
@@ -102,10 +104,10 @@ export function SpecInterviewPanel() {
             'transition-colors'
           )}
         >
-          Cancel Interview
+          {t('specInterview.cancelInterview')}
         </button>
         <div className="text-xs text-gray-400 dark:text-gray-500">
-          {session.flow_level} flow | {session.question_cursor}/{session.max_questions} questions
+          {t('specInterview.flowInfo', { flow: session.flow_level, cursor: session.question_cursor, max: session.max_questions })}
         </div>
       </div>
     </div>
@@ -124,6 +126,7 @@ interface StartInterviewFormProps {
 }
 
 function StartInterviewForm({ onStart, loading, error, onClearError }: StartInterviewFormProps) {
+  const { t } = useTranslation('expertMode');
   const [description, setDescription] = useState('');
   const [flowLevel, setFlowLevel] = useState('standard');
   const [maxQuestions, setMaxQuestions] = useState(18);
@@ -147,11 +150,10 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
       <div className="max-w-lg w-full">
         <div className="mb-8 text-center">
           <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">
-            Spec Interview
+            {t('specInterview.title')}
           </h2>
           <p className="text-gray-600 dark:text-gray-400">
-            Answer a series of questions to build a complete project specification.
-            The interview will guide you through overview, scope, requirements, and stories.
+            {t('specInterview.description')}
           </p>
         </div>
 
@@ -160,7 +162,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
             <div className="flex items-center justify-between">
               <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
               <button onClick={onClearError} className="text-red-500 hover:text-red-700 text-sm">
-                Dismiss
+                {t('specInterview.dismiss')}
               </button>
             </div>
           </div>
@@ -170,12 +172,12 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
           {/* Description */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Project Description
+              {t('specInterview.projectDescription')}
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe what you want to build..."
+              placeholder={t('specInterview.projectDescriptionPlaceholder')}
               className={clsx(
                 'w-full px-4 py-3 rounded-lg border',
                 'bg-white dark:bg-gray-800',
@@ -193,7 +195,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
           {/* Flow Level */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Flow Level
+              {t('specInterview.flowLevel')}
             </label>
             <div className="flex gap-3">
               {(['quick', 'standard', 'full'] as const).map((level) => (
@@ -213,9 +215,9 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
               ))}
             </div>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {flowLevel === 'quick' && 'Fewer questions, faster completion'}
-              {flowLevel === 'standard' && 'Balanced coverage of all spec areas'}
-              {flowLevel === 'full' && 'Comprehensive with mandatory fields'}
+              {flowLevel === 'quick' && t('specInterview.flowQuickHint')}
+              {flowLevel === 'standard' && t('specInterview.flowStandardHint')}
+              {flowLevel === 'full' && t('specInterview.flowFullHint')}
             </p>
           </div>
 
@@ -229,12 +231,12 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
                 className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               />
               <span className="text-sm text-gray-700 dark:text-gray-300">
-                First principles mode
+                {t('specInterview.firstPrinciples')}
               </span>
             </label>
 
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-700 dark:text-gray-300">Max questions:</label>
+              <label className="text-sm text-gray-700 dark:text-gray-300">{t('specInterview.maxQuestions')}</label>
               <input
                 type="number"
                 value={maxQuestions}
@@ -262,7 +264,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
               'transition-colors'
             )}
           >
-            {loading ? 'Starting Interview...' : 'Start Interview'}
+            {loading ? t('specInterview.starting') : t('specInterview.startButton')}
           </button>
         </form>
       </div>
@@ -282,6 +284,7 @@ interface InterviewProgressBarProps {
 }
 
 function InterviewProgressBar({ phase, progress, questionCursor, maxQuestions }: InterviewProgressBarProps) {
+  const { t } = useTranslation('expertMode');
   const phases = getPhaseOrder().filter((p) => p !== 'complete');
   const currentIdx = phase === 'complete' ? phases.length : phases.indexOf(phase);
 
@@ -324,8 +327,8 @@ function InterviewProgressBar({ phase, progress, questionCursor, maxQuestions }:
 
       {/* Overall progress */}
       <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-        <span>Phase: {getPhaseLabel(phase)}</span>
-        <span>{questionCursor}/{maxQuestions} questions | {Math.round(progress)}% complete</span>
+        <span>{t('specInterview.phase', { phase: getPhaseLabel(phase) })}</span>
+        <span>{t('specInterview.progress', { cursor: questionCursor, max: maxQuestions, progress: Math.round(progress) })}</span>
       </div>
     </div>
   );
@@ -340,6 +343,7 @@ interface ConversationHistoryProps {
 }
 
 function ConversationHistory({ history }: ConversationHistoryProps) {
+  const { t } = useTranslation('expertMode');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -352,7 +356,7 @@ function ConversationHistory({ history }: ConversationHistoryProps) {
     return (
       <div className="flex-1 flex items-center justify-center p-6">
         <p className="text-gray-400 dark:text-gray-500 text-sm">
-          Interview conversation will appear here...
+          {t('specInterview.conversationEmpty')}
         </p>
       </div>
     );
@@ -393,7 +397,7 @@ function ConversationHistory({ history }: ConversationHistoryProps) {
               'text-gray-800 dark:text-gray-200',
               'border border-primary-200 dark:border-primary-800'
             )}>
-              {entry.answer || <span className="text-gray-400 italic">(skipped)</span>}
+              {entry.answer || <span className="text-gray-400 italic">{t('specInterview.skipped')}</span>}
             </div>
             <div className={clsx(
               'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium',
@@ -419,6 +423,7 @@ interface QuestionInputProps {
 }
 
 function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
+  const { t } = useTranslation('expertMode');
   const [answer, setAnswer] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
 
@@ -452,7 +457,7 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
             {getPhaseLabel(question.phase)}
           </span>
           {question.required && (
-            <span className="text-[10px] text-red-500 font-medium">Required</span>
+            <span className="text-[10px] text-red-500 font-medium">{t('specInterview.required')}</span>
           )}
         </div>
         <p className="text-sm font-medium text-gray-900 dark:text-white">
@@ -478,7 +483,7 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
                 handleSubmit(e as unknown as React.FormEvent);
               }
             }}
-            placeholder={question.hint || (question.input_type === 'list' ? 'Enter items separated by commas or newlines' : 'Type your answer...')}
+            placeholder={question.hint || (question.input_type === 'list' ? t('specInterview.listPlaceholder') : t('specInterview.textPlaceholder'))}
             className={clsx(
               'flex-1 px-4 py-2.5 rounded-lg border text-sm resize-none',
               'bg-gray-50 dark:bg-gray-800',
@@ -497,7 +502,7 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={question.hint || 'Type your answer...'}
+            placeholder={question.hint || t('specInterview.textPlaceholder')}
             className={clsx(
               'flex-1 px-4 py-2.5 rounded-lg border text-sm',
               'bg-gray-50 dark:bg-gray-800',
@@ -521,7 +526,7 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
               'transition-colors'
             )}
           >
-            {loading ? '...' : 'Submit'}
+            {loading ? '...' : t('specInterview.submit')}
           </button>
           {!question.required && (
             <button
@@ -536,7 +541,7 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
                 'transition-colors'
               )}
             >
-              Skip
+              {t('specInterview.skip')}
             </button>
           )}
         </div>
@@ -555,14 +560,16 @@ interface CompileActionProps {
 }
 
 function CompileAction({ onCompile, loading }: CompileActionProps) {
+  const { t } = useTranslation('expertMode');
+
   return (
     <div className="px-6 py-6 border-t border-gray-200 dark:border-gray-700 bg-green-50 dark:bg-green-900/10">
       <div className="text-center">
         <div className="text-lg font-semibold text-green-700 dark:text-green-400 mb-2">
-          Interview Complete
+          {t('specInterview.complete.title')}
         </div>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          All questions have been answered. Compile the interview into a specification.
+          {t('specInterview.complete.description')}
         </p>
         <button
           onClick={onCompile}
@@ -574,7 +581,7 @@ function CompileAction({ onCompile, loading }: CompileActionProps) {
             'transition-colors'
           )}
         >
-          {loading ? 'Compiling Spec...' : 'Compile Specification'}
+          {loading ? t('specInterview.complete.compiling') : t('specInterview.complete.compileButton')}
         </button>
       </div>
     </div>
@@ -595,6 +602,7 @@ interface CompileResultsProps {
 }
 
 function CompileResults({ compiledSpec, onReset }: CompileResultsProps) {
+  const { t } = useTranslation('expertMode');
   const [activeTab, setActiveTab] = useState<'md' | 'json' | 'prd'>('md');
 
   return (
@@ -603,10 +611,10 @@ function CompileResults({ compiledSpec, onReset }: CompileResultsProps) {
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Compiled Specification
+            {t('specInterview.results.title')}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            spec.json, spec.md, and prd.json have been generated
+            {t('specInterview.results.description')}
           </p>
         </div>
         <button
@@ -619,7 +627,7 @@ function CompileResults({ compiledSpec, onReset }: CompileResultsProps) {
             'transition-colors'
           )}
         >
-          New Interview
+          {t('specInterview.results.newInterview')}
         </button>
       </div>
 

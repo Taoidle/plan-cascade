@@ -9,9 +9,11 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useEvaluationStore } from '../../store/evaluation';
 
 export function EvaluationReportView() {
+  const { t } = useTranslation('expertMode');
   const {
     selectedRunId,
     reports,
@@ -24,7 +26,7 @@ export function EvaluationReportView() {
   if (loading.reports) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
-        Loading reports...
+        {t('evaluation.reports.loading')}
       </div>
     );
   }
@@ -33,20 +35,20 @@ export function EvaluationReportView() {
     return (
       <div className="p-6 max-w-4xl mx-auto">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          Evaluation Reports
+          {t('evaluation.reports.title')}
         </h2>
 
         {runs.filter((r) => r.status === 'completed').length === 0 ? (
           <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-            <p className="text-sm">No completed runs yet</p>
+            <p className="text-sm">{t('evaluation.reports.empty')}</p>
             <p className="text-xs mt-1">
-              Create and run an evaluation from the Runs tab
+              {t('evaluation.reports.emptyHint')}
             </p>
           </div>
         ) : (
           <div className="space-y-2">
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              Select a completed run to view reports:
+              {t('evaluation.reports.selectRun')}
             </p>
             {runs
               .filter((r) => r.status === 'completed')
@@ -62,10 +64,10 @@ export function EvaluationReportView() {
                   )}
                 >
                   <div className="text-sm font-medium text-gray-900 dark:text-white">
-                    Run {run.id.slice(0, 8)}
+                    {t('evaluation.reports.runLabel')} {run.id.slice(0, 8)}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {run.model_count} models | {run.case_count} cases | {new Date(run.created_at).toLocaleDateString()}
+                    {run.model_count} {t('evaluation.reports.models')} | {run.case_count} {t('evaluation.reports.cases')} | {new Date(run.created_at).toLocaleDateString()}
                   </div>
                 </button>
               ))}
@@ -93,10 +95,10 @@ export function EvaluationReportView() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Evaluation Reports
+            {t('evaluation.reports.title')}
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Run {selectedRunId.slice(0, 8)} | {reports.length} model{reports.length !== 1 ? 's' : ''} compared
+            {t('evaluation.reports.runLabel')} {selectedRunId.slice(0, 8)} | {reports.length} {reports.length !== 1 ? t('evaluation.reports.models') : t('evaluation.reports.model')} compared
           </p>
         </div>
         <button
@@ -105,14 +107,14 @@ export function EvaluationReportView() {
           }}
           className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
         >
-          Back to Runs
+          {t('evaluation.reports.backToRuns')}
         </button>
       </div>
 
       {/* Model Ranking */}
       <div>
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-          Model Ranking
+          {t('evaluation.reports.modelRanking')}
         </h3>
         <div className="space-y-2">
           {sortedReports.map((report, rank) => (
@@ -140,7 +142,7 @@ export function EvaluationReportView() {
                   {report.provider}/{report.model}
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {report.results.filter((r) => r.passed).length}/{report.results.length} passed
+                  {report.results.filter((r) => r.passed).length}/{report.results.length} {t('evaluation.reports.passed')}
                 </div>
               </div>
               <div className="text-right shrink-0">
@@ -164,14 +166,14 @@ export function EvaluationReportView() {
       {caseIds.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-            Score Table
+            {t('evaluation.reports.scoreTable')}
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700">
                   <th className="text-left py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">
-                    Model
+                    {t('evaluation.reports.model')}
                   </th>
                   {caseIds.map((caseId) => (
                     <th
@@ -182,7 +184,7 @@ export function EvaluationReportView() {
                     </th>
                   ))}
                   <th className="text-center py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">
-                    Overall
+                    {t('evaluation.reports.overall')}
                   </th>
                 </tr>
               </thead>
@@ -242,7 +244,7 @@ export function EvaluationReportView() {
         {/* Duration */}
         <div>
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-            Duration Comparison
+            {t('evaluation.reports.durationComparison')}
           </h3>
           <div className="space-y-2">
             {sortedReports.map((report) => {
@@ -274,7 +276,7 @@ export function EvaluationReportView() {
         {/* Cost */}
         <div>
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-            Cost Comparison
+            {t('evaluation.reports.costComparison')}
           </h3>
           <div className="space-y-2">
             {sortedReports.map((report) => {
@@ -288,7 +290,7 @@ export function EvaluationReportView() {
                       {report.model}
                     </span>
                     <span className="text-gray-500 dark:text-gray-400 shrink-0 ml-2">
-                      ${report.estimated_cost.toFixed(4)} | {report.total_tokens.toLocaleString()} tokens
+                      ${report.estimated_cost.toFixed(4)} | {report.total_tokens.toLocaleString()} {t('evaluation.reports.tokens')}
                     </span>
                   </div>
                   <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">

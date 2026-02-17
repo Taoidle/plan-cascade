@@ -10,6 +10,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGraphWorkflowStore } from '../../store/graphWorkflow';
 import { GraphWorkflowList } from './GraphWorkflowList';
@@ -22,6 +23,7 @@ import type { GraphNode, Edge, NodePosition } from '../../types/graphWorkflow';
 import { createLlmStep } from '../../types/agentComposer';
 
 export function GraphWorkflowEditor() {
+  const { t } = useTranslation('expertMode');
   const {
     currentWorkflow,
     isCreating,
@@ -154,16 +156,16 @@ export function GraphWorkflowEditor() {
                     'text-gray-900 dark:text-white',
                     'focus:ring-1 focus:ring-primary-500 rounded px-1'
                   )}
-                  placeholder="Workflow name"
+                  placeholder={t('graphWorkflow.workflowName')}
                 />
                 {isCreating && (
                   <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
-                    NEW
+                    {t('graphWorkflow.new')}
                   </span>
                 )}
                 {edgeMode && (
                   <span className="text-xs text-amber-600 dark:text-amber-400 font-medium px-2 py-0.5 bg-amber-50 dark:bg-amber-900/20 rounded">
-                    Click two nodes to create {edgeMode} edge
+                    {t('graphWorkflow.edgeMode')}
                   </span>
                 )}
               </div>
@@ -174,14 +176,14 @@ export function GraphWorkflowEditor() {
                     onClick={() => { setEdgeMode(null); setSelectedNode(null); }}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-600 dark:text-amber-400"
                   >
-                    Cancel Edge
+                    {t('graphWorkflow.cancelEdge')}
                   </button>
                 )}
                 <button
                   onClick={clearSelection}
                   className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 >
-                  Close
+                  {t('graphWorkflow.close')}
                 </button>
                 <button
                   onClick={saveWorkflow}
@@ -192,7 +194,7 @@ export function GraphWorkflowEditor() {
                     'disabled:opacity-50 disabled:cursor-not-allowed'
                   )}
                 >
-                  {loading.save ? 'Saving...' : 'Save'}
+                  {loading.save ? t('graphWorkflow.saving') : t('graphWorkflow.save')}
                 </button>
               </div>
             </div>
@@ -257,8 +259,8 @@ export function GraphWorkflowEditor() {
                 {Object.keys(currentWorkflow.nodes).length === 0 && (
                   <div className="absolute inset-0 flex items-center justify-center">
                     <div className="text-center text-gray-500 dark:text-gray-400">
-                      <p className="text-sm">Add nodes using the toolbar above</p>
-                      <p className="text-xs mt-1">Then connect them with edges</p>
+                      <p className="text-sm">{t('graphWorkflow.emptyCanvas')}</p>
+                      <p className="text-xs mt-1">{t('graphWorkflow.emptyCanvasHint')}</p>
                     </div>
                   </div>
                 )}
@@ -302,11 +304,10 @@ export function GraphWorkflowEditor() {
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                Graph Workflows
+                {t('graphWorkflow.title')}
               </h2>
               <p className="text-gray-500 dark:text-gray-400 mb-4 max-w-md">
-                Build graph-based agent workflows with conditional branching,
-                state channels, and visual node editing.
+                {t('graphWorkflow.description')}
               </p>
               <button
                 onClick={() => useGraphWorkflowStore.getState().startNewWorkflow()}
@@ -316,7 +317,7 @@ export function GraphWorkflowEditor() {
                   'transition-colors'
                 )}
               >
-                Create Your First Workflow
+                {t('graphWorkflow.createFirst')}
               </button>
             </div>
           </div>

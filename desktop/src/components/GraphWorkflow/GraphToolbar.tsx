@@ -4,6 +4,7 @@
  * Toolbar with buttons for adding nodes, edges, and deleting selections.
  */
 
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 
 interface GraphToolbarProps {
@@ -19,6 +20,7 @@ export function GraphToolbar({
   onDeleteSelected,
   hasSelection,
 }: GraphToolbarProps) {
+  const { t } = useTranslation('expertMode');
   return (
     <div
       className={clsx(
@@ -28,19 +30,19 @@ export function GraphToolbar({
       )}
     >
       {/* Add Node buttons */}
-      <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">Nodes:</span>
+      <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">{t('graphWorkflow.toolbar.nodes')}</span>
       <ToolbarButton
-        label="+ LLM"
+        label={t('graphWorkflow.toolbar.addLlm')}
         color="blue"
         onClick={() => onAddNode('llm')}
       />
       <ToolbarButton
-        label="+ Sequential"
+        label={t('graphWorkflow.toolbar.addSequential')}
         color="green"
         onClick={() => onAddNode('sequential')}
       />
       <ToolbarButton
-        label="+ Parallel"
+        label={t('graphWorkflow.toolbar.addParallel')}
         color="purple"
         onClick={() => onAddNode('parallel')}
       />
@@ -48,14 +50,14 @@ export function GraphToolbar({
       <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 
       {/* Add Edge buttons */}
-      <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">Edges:</span>
+      <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">{t('graphWorkflow.toolbar.edges')}</span>
       <ToolbarButton
-        label="Direct"
+        label={t('graphWorkflow.toolbar.direct')}
         color="gray"
         onClick={() => onAddEdge('direct')}
       />
       <ToolbarButton
-        label="Conditional"
+        label={t('graphWorkflow.toolbar.conditional')}
         color="amber"
         onClick={() => onAddEdge('conditional')}
       />
@@ -74,7 +76,7 @@ export function GraphToolbar({
           'disabled:opacity-30 disabled:cursor-not-allowed'
         )}
       >
-        Delete
+        {t('graphWorkflow.toolbar.delete')}
       </button>
     </div>
   );

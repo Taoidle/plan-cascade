@@ -8,10 +8,12 @@
 
 import { useState } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useEvaluationStore } from '../../store/evaluation';
 import type { ToolTrajectoryConfig, ResponseSimilarityConfig, LlmJudgeConfig } from '../../types/evaluation';
 
 export function EvaluatorSetup() {
+  const { t } = useTranslation('expertMode');
   const {
     evaluators,
     currentEvaluator,
@@ -38,21 +40,21 @@ export function EvaluatorSetup() {
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            Evaluators
+            {t('evaluation.setup.listTitle')}
           </h3>
           <button
             onClick={startNewEvaluator}
             className="px-2 py-1 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-700 transition-colors"
           >
-            + New
+            {t('evaluation.setup.newButton')}
           </button>
         </div>
 
         {loading.evaluators ? (
-          <div className="text-xs text-gray-500 dark:text-gray-400">Loading...</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">{t('evaluation.setup.loading')}</div>
         ) : evaluators.length === 0 ? (
           <div className="text-xs text-gray-500 dark:text-gray-400 italic">
-            No evaluators yet
+            {t('evaluation.setup.empty')}
           </div>
         ) : (
           <div className="space-y-1">
@@ -73,17 +75,17 @@ export function EvaluatorSetup() {
                 <div className="flex gap-1 mt-1">
                   {ev.has_tool_trajectory && (
                     <span className="text-[10px] px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-                      Trajectory
+                      {t('evaluation.setup.badgeTrajectory')}
                     </span>
                   )}
                   {ev.has_response_similarity && (
                     <span className="text-[10px] px-1 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
-                      Similarity
+                      {t('evaluation.setup.badgeSimilarity')}
                     </span>
                   )}
                   {ev.has_llm_judge && (
                     <span className="text-[10px] px-1 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
-                      LLM Judge
+                      {t('evaluation.setup.badgeLlmJudge')}
                     </span>
                   )}
                 </div>
@@ -101,11 +103,11 @@ export function EvaluatorSetup() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {isCreatingEvaluator ? 'New Evaluator' : 'Edit Evaluator'}
+                  {isCreatingEvaluator ? t('evaluation.setup.newEvaluator') : t('evaluation.setup.editEvaluator')}
                 </h2>
                 {isCreatingEvaluator && (
                   <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
-                    NEW
+                    {t('evaluation.setup.new')}
                   </span>
                 )}
               </div>
@@ -114,14 +116,14 @@ export function EvaluatorSetup() {
                   onClick={clearCurrentEvaluator}
                   className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 >
-                  Close
+                  {t('evaluation.setup.close')}
                 </button>
                 {!isCreatingEvaluator && (
                   <button
                     onClick={() => removeEvaluator(currentEvaluator.id)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                   >
-                    Delete
+                    {t('evaluation.setup.delete')}
                   </button>
                 )}
                 <button
@@ -133,7 +135,7 @@ export function EvaluatorSetup() {
                     'disabled:opacity-50 disabled:cursor-not-allowed'
                   )}
                 >
-                  {loading.save ? 'Saving...' : 'Save'}
+                  {loading.save ? t('evaluation.setup.saving') : t('evaluation.setup.save')}
                 </button>
               </div>
             </div>
@@ -141,27 +143,27 @@ export function EvaluatorSetup() {
             {/* Name */}
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-                Evaluator Name
+                {t('evaluation.setup.evaluatorName')}
               </label>
               <input
                 type="text"
                 value={currentEvaluator.name}
                 onChange={(e) => updateCurrentEvaluator({ name: e.target.value })}
                 className="w-full text-sm px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                placeholder="e.g., Code Quality Check"
+                placeholder={t('evaluation.setup.evaluatorNamePlaceholder')}
               />
             </div>
 
             {/* Criteria Sections */}
             <div className="space-y-4">
               <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                Evaluation Criteria
+                {t('evaluation.setup.evaluationCriteria')}
               </h3>
 
               {/* Tool Trajectory */}
               <CriteriaSection
-                title="Tool Trajectory"
-                description="Compare tool calls against expected tools"
+                title={t('evaluation.setup.criteriaTrajectory')}
+                description={t('evaluation.setup.criteriaTrajectoryDesc')}
                 color="blue"
                 enabled={currentEvaluator.criteria.tool_trajectory !== null && currentEvaluator.criteria.tool_trajectory !== undefined}
                 onToggle={(enabled) => {
@@ -180,8 +182,8 @@ export function EvaluatorSetup() {
 
               {/* Response Similarity */}
               <CriteriaSection
-                title="Response Similarity"
-                description="Compare response against a reference using string distance"
+                title={t('evaluation.setup.criteriaSimilarity')}
+                description={t('evaluation.setup.criteriaSimilarityDesc')}
                 color="green"
                 enabled={currentEvaluator.criteria.response_similarity !== null && currentEvaluator.criteria.response_similarity !== undefined}
                 onToggle={(enabled) => {
@@ -200,8 +202,8 @@ export function EvaluatorSetup() {
 
               {/* LLM Judge */}
               <CriteriaSection
-                title="LLM Judge"
-                description="Use a separate LLM to judge response quality"
+                title={t('evaluation.setup.criteriaLlmJudge')}
+                description={t('evaluation.setup.criteriaLlmJudgeDesc')}
                 color="purple"
                 enabled={currentEvaluator.criteria.llm_judge !== null && currentEvaluator.criteria.llm_judge !== undefined}
                 onToggle={(enabled) => {
@@ -224,17 +226,16 @@ export function EvaluatorSetup() {
           <div className="flex-1 flex items-center justify-center h-full">
             <div className="text-center">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                Evaluation Setup
+                {t('evaluation.setup.title')}
               </h2>
               <p className="text-gray-500 dark:text-gray-400 mb-4 max-w-md">
-                Define evaluators with criteria to assess agent performance
-                across different models.
+                {t('evaluation.setup.description')}
               </p>
               <button
                 onClick={startNewEvaluator}
                 className="px-4 py-2 text-sm font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
               >
-                Create Your First Evaluator
+                {t('evaluation.setup.createFirst')}
               </button>
             </div>
           </div>
@@ -299,13 +300,14 @@ function ToolTrajectoryEditor({
   config: ToolTrajectoryConfig;
   onChange: (config: ToolTrajectoryConfig) => void;
 }) {
+  const { t } = useTranslation('expertMode');
   const [newTool, setNewTool] = useState('');
 
   return (
     <div className="space-y-3">
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-          Expected Tools
+          {t('evaluation.setup.trajectory.expectedTools')}
         </label>
         <div className="flex flex-wrap gap-1 mb-2">
           {config.expected_tools.map((tool, i) => (
@@ -338,7 +340,7 @@ function ToolTrajectoryEditor({
               }
             }}
             className="flex-1 text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-            placeholder="Tool name (press Enter to add)"
+            placeholder={t('evaluation.setup.trajectory.toolPlaceholder')}
           />
           <button
             onClick={() => {
@@ -361,7 +363,7 @@ function ToolTrajectoryEditor({
           onChange={(e) => onChange({ ...config, order_matters: e.target.checked })}
           className="rounded"
         />
-        Order matters
+        {t('evaluation.setup.trajectory.orderMatters')}
       </label>
     </div>
   );
@@ -374,22 +376,24 @@ function ResponseSimilarityEditor({
   config: ResponseSimilarityConfig;
   onChange: (config: ResponseSimilarityConfig) => void;
 }) {
+  const { t } = useTranslation('expertMode');
+
   return (
     <div className="space-y-3">
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-          Reference Response
+          {t('evaluation.setup.similarity.referenceResponse')}
         </label>
         <textarea
           value={config.reference_response}
           onChange={(e) => onChange({ ...config, reference_response: e.target.value })}
           className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white h-20 resize-y"
-          placeholder="Expected response to compare against..."
+          placeholder={t('evaluation.setup.similarity.referencePlaceholder')}
         />
       </div>
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-          Threshold ({(config.threshold * 100).toFixed(0)}%)
+          {t('evaluation.setup.similarity.threshold')} ({(config.threshold * 100).toFixed(0)}%)
         </label>
         <input
           type="range"
@@ -411,12 +415,14 @@ function LlmJudgeEditor({
   config: LlmJudgeConfig;
   onChange: (config: LlmJudgeConfig) => void;
 }) {
+  const { t } = useTranslation('expertMode');
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-            Judge Provider
+            {t('evaluation.setup.judge.provider')}
           </label>
           <select
             value={config.judge_provider}
@@ -431,26 +437,26 @@ function LlmJudgeEditor({
         </div>
         <div>
           <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-            Judge Model
+            {t('evaluation.setup.judge.model')}
           </label>
           <input
             type="text"
             value={config.judge_model}
             onChange={(e) => onChange({ ...config, judge_model: e.target.value })}
             className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-            placeholder="e.g., claude-sonnet-4-20250514"
+            placeholder={t('evaluation.setup.judge.modelPlaceholder')}
           />
         </div>
       </div>
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-          Rubric
+          {t('evaluation.setup.judge.rubric')}
         </label>
         <textarea
           value={config.rubric}
           onChange={(e) => onChange({ ...config, rubric: e.target.value })}
           className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white h-24 resize-y"
-          placeholder="Describe how to evaluate the response (0.0-1.0 scale)..."
+          placeholder={t('evaluation.setup.judge.rubricPlaceholder')}
         />
       </div>
     </div>

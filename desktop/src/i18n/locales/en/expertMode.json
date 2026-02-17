@@ -3,10 +3,15 @@
 
   "tabs": {
     "generate": "Generate",
+    "interview": "Spec Interview",
+    "designDoc": "Design Doc",
     "prdEditor": "PRD Editor",
     "preview": "Preview",
     "execution": "Execution",
-    "logs": "Logs"
+    "logs": "Logs",
+    "composer": "Agent Composer",
+    "graphWorkflows": "Graph Workflows",
+    "modelEvaluation": "Model Evaluation"
   },
 
   "generate": {
@@ -187,5 +192,345 @@
     "title": "Edit Dependencies",
     "blockedBy": "Blocked By",
     "blocks": "Blocks"
+  },
+
+  "specInterview": {
+    "title": "Spec Interview",
+    "description": "Answer a series of questions to build a complete project specification. The interview will guide you through overview, scope, requirements, and stories.",
+    "projectDescription": "Project Description",
+    "projectDescriptionPlaceholder": "Describe what you want to build...",
+    "flowLevel": "Flow Level",
+    "flowQuick": "Quick",
+    "flowStandard": "Standard",
+    "flowFull": "Full",
+    "flowQuickHint": "Fewer questions, faster completion",
+    "flowStandardHint": "Balanced coverage of all spec areas",
+    "flowFullHint": "Comprehensive with mandatory fields",
+    "firstPrinciples": "First principles mode",
+    "maxQuestions": "Max questions:",
+    "startButton": "Start Interview",
+    "starting": "Starting Interview...",
+    "cancelInterview": "Cancel Interview",
+    "flowInfo": "{{flow}} flow | {{cursor}}/{{max}} questions",
+    "dismiss": "Dismiss",
+    "conversationEmpty": "Interview conversation will appear here...",
+    "required": "Required",
+    "submit": "Submit",
+    "skip": "Skip",
+    "listPlaceholder": "Enter items separated by commas or newlines",
+    "textPlaceholder": "Type your answer...",
+    "skipped": "(skipped)",
+    "phase": "Phase: {{phase}}",
+    "progress": "{{cursor}}/{{max}} questions | {{progress}}% complete",
+    "complete": {
+      "title": "Interview Complete",
+      "description": "All questions have been answered. Compile the interview into a specification.",
+      "compileButton": "Compile Specification",
+      "compiling": "Compiling Spec..."
+    },
+    "results": {
+      "title": "Compiled Specification",
+      "description": "spec.json, spec.md, and prd.json have been generated",
+      "newInterview": "New Interview"
+    }
+  },
+
+  "designDoc": {
+    "title": "Design Document",
+    "description": "Generate a design document from a PRD, import an existing document, or load one from your project.",
+    "dismiss": "Dismiss",
+    "newDocument": "New Document",
+    "generateTab": "Generate from PRD",
+    "importTab": "Import",
+    "loadTab": "Load Existing",
+    "generate": {
+      "prdPath": "PRD File Path",
+      "prdPathPlaceholder": "/path/to/prd.json",
+      "prdPathHint": "Path to the prd.json file generated from a spec interview or PRD generation.",
+      "button": "Generate Design Document",
+      "generating": "Generating..."
+    },
+    "import": {
+      "filePath": "File Path",
+      "filePathPlaceholder": "/path/to/design.md or /path/to/design.json",
+      "format": "Format (optional)",
+      "autoDetect": "Auto-detect",
+      "button": "Import Design Document",
+      "importing": "Importing..."
+    },
+    "load": {
+      "projectPath": "Project Path (optional)",
+      "projectPathPlaceholder": "Leave empty for current directory",
+      "projectPathHint": "Loads design_doc.json from the project root directory.",
+      "button": "Load Design Document",
+      "loading": "Loading..."
+    },
+    "header": {
+      "source": "Source: {{source}}",
+      "stats": "{{components}} components, {{decisions}} ADRs, {{mappings}} mappings"
+    },
+    "warnings": {
+      "count": "{{count}} import warning",
+      "count_plural": "{{count}} import warnings",
+      "high": "{{count}} high",
+      "medium": "{{count}} medium",
+      "show": "Show",
+      "hide": "Hide"
+    },
+    "sections": {
+      "overview": "Overview",
+      "goals": "Goals",
+      "nonGoals": "Non-Goals",
+      "architecture": "Architecture",
+      "systemOverview": "System Overview",
+      "dataFlow": "Data Flow",
+      "infrastructure": "Infrastructure",
+      "components": "Components",
+      "designPatterns": "Design Patterns",
+      "rationale": "Rationale: {{text}}",
+      "apiInterfaces": "API / Interfaces",
+      "style": "Style",
+      "errorHandling": "Error Handling",
+      "asyncPattern": "Async Pattern",
+      "adr": "Architecture Decisions (ADRs)",
+      "storyMappings": "Story-to-Component Mappings",
+      "deps": "Deps:",
+      "appliesTo": "Applies to:",
+      "mappingComponents": "Components",
+      "mappingPatterns": "Patterns",
+      "mappingDecisions": "ADRs"
+    }
+  },
+
+  "agentComposer": {
+    "title": "Agent Composer",
+    "description": "Build composable agent pipelines by combining LLM agents with sequential, parallel, and conditional control flow.",
+    "createFirst": "Create Your First Pipeline",
+    "pipelineName": "Pipeline name",
+    "new": "NEW",
+    "runner": "Runner",
+    "close": "Close",
+    "saving": "Saving...",
+    "save": "Save",
+    "descriptionPlaceholder": "Add a description...",
+    "addLlmAgent": "+ LLM Agent",
+    "addSequential": "+ Sequential",
+    "addParallel": "+ Parallel",
+    "addConditional": "+ Conditional",
+    "emptyPipeline": "Add agent steps above to build your pipeline",
+    "list": {
+      "title": "Saved Pipelines",
+      "newPipeline": "+ New Pipeline",
+      "loading": "Loading pipelines...",
+      "empty": "No pipelines yet. Create one to get started.",
+      "deletePipeline": "Delete pipeline",
+      "steps": "step(s)"
+    },
+    "node": {
+      "collapse": "Collapse",
+      "expand": "Expand",
+      "edit": "Edit",
+      "removeStep": "Remove step",
+      "remove": "Remove",
+      "name": "Name",
+      "instruction": "Instruction",
+      "instructionPlaceholder": "System prompt for this agent...",
+      "model": "Model (optional)",
+      "modelPlaceholder": "Leave empty for default model",
+      "tools": "Tools (comma-separated, optional)",
+      "toolsPlaceholder": "read_file, grep, bash (empty = all tools)",
+      "maxIterations": "Max Iterations",
+      "temperature": "Temperature",
+      "default": "Default",
+      "typeLlm": "LLM",
+      "typeSequential": "Sequential",
+      "typeParallel": "Parallel",
+      "typeConditional": "Conditional",
+      "subSteps": "sub-step(s)",
+      "conditionKey": "Condition key:",
+      "branches": "branch(es)"
+    },
+    "runner": {
+      "empty": "No execution in progress. Run a pipeline to see events here.",
+      "title": "Execution Events",
+      "clear": "Clear",
+      "toolCall": "[Tool Call]",
+      "toolResult": "[Tool Result]",
+      "state": "[State]",
+      "transfer": "[Transfer]",
+      "done": "[Done]",
+      "completed": "Completed"
+    }
+  },
+
+  "graphWorkflow": {
+    "title": "Graph Workflows",
+    "description": "Build graph-based agent workflows with conditional branching, state channels, and visual node editing.",
+    "createFirst": "Create Your First Workflow",
+    "workflowName": "Workflow name",
+    "new": "NEW",
+    "edgeMode": "Click two nodes to create edge",
+    "cancelEdge": "Cancel Edge",
+    "close": "Close",
+    "saving": "Saving...",
+    "save": "Save",
+    "emptyCanvas": "Add nodes using the toolbar above",
+    "emptyCanvasHint": "Then connect them with edges",
+    "list": {
+      "title": "Workflows",
+      "newWorkflow": "+ New",
+      "loading": "Loading...",
+      "empty": "No workflows yet",
+      "nodeCount": "{{nodes}} nodes,",
+      "edgeCount": "{{edges}} edges",
+      "deleteWorkflow": "Delete workflow"
+    },
+    "toolbar": {
+      "nodes": "Nodes:",
+      "addLlm": "+ LLM",
+      "addSequential": "+ Sequential",
+      "addParallel": "+ Parallel",
+      "edges": "Edges:",
+      "direct": "Direct",
+      "conditional": "Conditional",
+      "delete": "Delete"
+    },
+    "nodeConfig": {
+      "title": "Node Configuration",
+      "nodeId": "Node ID",
+      "name": "Name",
+      "type": "Type",
+      "systemInstruction": "System Instruction",
+      "instructionPlaceholder": "Optional system prompt...",
+      "entryNode": "This is the entry node",
+      "setEntryNode": "Set as entry node",
+      "deleteNode": "Delete Node"
+    },
+    "edgeConfig": {
+      "title": "Edge Configuration",
+      "type": "Type",
+      "from": "From",
+      "to": "To",
+      "conditionKey": "Condition Key",
+      "conditionKeyPlaceholder": "shared_state key",
+      "defaultBranch": "Default Branch (node ID)",
+      "defaultBranchPlaceholder": "Optional default target node",
+      "branches": "Branches",
+      "noBranches": "No branches defined",
+      "value": "Value",
+      "nodeIdLabel": "Node ID",
+      "deleteEdge": "Delete Edge"
+    },
+    "nodeTypes": {
+      "llm": "LLM",
+      "sequential": "Sequential",
+      "parallel": "Parallel",
+      "conditional": "Conditional",
+      "entryNode": "Entry node"
+    }
+  },
+
+  "evaluation": {
+    "tabs": {
+      "evaluators": "Evaluators",
+      "runs": "Runs",
+      "reports": "Reports"
+    },
+    "setup": {
+      "title": "Evaluation Setup",
+      "description": "Define evaluators with criteria to assess agent performance across different models.",
+      "createFirst": "Create Your First Evaluator",
+      "listTitle": "Evaluators",
+      "newButton": "+ New",
+      "loading": "Loading...",
+      "empty": "No evaluators yet",
+      "new": "NEW",
+      "newEvaluator": "New Evaluator",
+      "editEvaluator": "Edit Evaluator",
+      "close": "Close",
+      "delete": "Delete",
+      "saving": "Saving...",
+      "save": "Save",
+      "evaluatorName": "Evaluator Name",
+      "evaluatorNamePlaceholder": "e.g., Code Quality Check",
+      "evaluationCriteria": "Evaluation Criteria",
+      "criteriaTrajectory": "Tool Trajectory",
+      "criteriaTrajectoryDesc": "Compare tool calls against expected tools",
+      "criteriaSimilarity": "Response Similarity",
+      "criteriaSimilarityDesc": "Compare response against a reference using string distance",
+      "criteriaLlmJudge": "LLM Judge",
+      "criteriaLlmJudgeDesc": "Use a separate LLM to judge response quality",
+      "trajectory": {
+        "expectedTools": "Expected Tools",
+        "toolPlaceholder": "Tool name (press Enter to add)",
+        "orderMatters": "Order matters"
+      },
+      "similarity": {
+        "referenceResponse": "Reference Response",
+        "referencePlaceholder": "Expected response to compare against...",
+        "threshold": "Threshold"
+      },
+      "judge": {
+        "provider": "Judge Provider",
+        "model": "Judge Model",
+        "modelPlaceholder": "e.g., claude-sonnet-4-20250514",
+        "rubric": "Rubric",
+        "rubricPlaceholder": "Describe how to evaluate the response (0.0-1.0 scale)..."
+      },
+      "badgeTrajectory": "Trajectory",
+      "badgeSimilarity": "Similarity",
+      "badgeLlmJudge": "LLM Judge"
+    },
+    "runs": {
+      "title": "Evaluation Runs",
+      "cancel": "Cancel",
+      "newRun": "+ New Run",
+      "noEvaluator": "Create an evaluator first in the Setup tab.",
+      "configTitle": "Configure New Run",
+      "evaluator": "Evaluator",
+      "evaluatorPlaceholder": "Select an evaluator...",
+      "modelsToCompare": "Models to Compare",
+      "testCases": "Test Cases",
+      "createButton": "Create Evaluation Run",
+      "creating": "Creating Run...",
+      "loading": "Loading runs...",
+      "empty": "No evaluation runs yet",
+      "emptyHint": "Create a new run to compare models",
+      "modelCount": "{{count}} model",
+      "modelCount_plural": "{{count}} models",
+      "caseCount": "{{count}} case",
+      "caseCount_plural": "{{count}} cases",
+      "viewReports": "View Reports",
+      "delete": "Delete",
+      "modelNamePlaceholder": "Model name (e.g., claude-sonnet-4-20250514)",
+      "caseName": "Case name",
+      "remove": "Remove",
+      "inputPlaceholder": "Input prompt...",
+      "expectedOutput": "Expected output (optional)",
+      "addTestCase": "+ Add Test Case",
+      "providerAnthropic": "Anthropic",
+      "providerOpenAI": "OpenAI",
+      "providerDeepSeek": "DeepSeek",
+      "providerOllama": "Ollama"
+    },
+    "reports": {
+      "loading": "Loading reports...",
+      "title": "Evaluation Reports",
+      "empty": "No completed runs yet",
+      "emptyHint": "Create and run an evaluation from the Runs tab",
+      "selectRun": "Select a completed run to view reports:",
+      "runLabel": "Run",
+      "models": "models",
+      "cases": "cases",
+      "backToRuns": "Back to Runs",
+      "modelRanking": "Model Ranking",
+      "passed": "passed",
+      "scoreTable": "Score Table",
+      "model": "Model",
+      "overall": "Overall",
+      "durationComparison": "Duration Comparison",
+      "costComparison": "Cost Comparison",
+      "tokens": "tokens"
+    }
   }
 }
