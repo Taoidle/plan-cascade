@@ -52,8 +52,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 
-# Secure secret storage
-keyring = "3"
+# Secure secret storage (platform-native backends for OS keychain access)
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 
 # Error handling
 thiserror = "2"
