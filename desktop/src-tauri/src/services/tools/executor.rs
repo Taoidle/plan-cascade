@@ -328,13 +328,17 @@ pub struct ToolExecutor {
     /// Task sub-agent deduplication cache (story-005).
     /// Keyed by hash of the prompt string. Only successful results are cached.
     /// This prevents identical Task sub-agent prompts from being re-executed.
-    task_dedup_cache: Mutex<HashMap<u64, String>>,
-    /// Persistent working directory for Bash commands
-    current_working_dir: Mutex<PathBuf>,
-    /// WebFetch service for fetching web pages
-    web_fetch: super::web_fetch::WebFetchService,
-    /// WebSearch service (None if no search provider configured)
-    web_search: Option<super::web_search::WebSearchService>,
+    /// Wrapped in Arc for sharing with ToolExecutionContext.
+    task_dedup_cache: Arc<Mutex<HashMap<u64, String>>>,
+    /// Persistent working directory for Bash commands.
+    /// Wrapped in Arc<Mutex> for sharing with ToolExecutionContext.
+    current_working_dir: Arc<Mutex<PathBuf>>,
+    /// WebFetch service for fetching web pages.
+    /// Wrapped in Arc for sharing with ToolExecutionContext.
+    web_fetch: Arc<super::web_fetch::WebFetchService>,
+    /// WebSearch service (None if no search provider configured).
+    /// Wrapped in Arc for sharing with ToolExecutionContext.
+    web_search: Option<Arc<super::web_search::WebSearchService>>,
     /// Optional index store for CodebaseSearch tool
     index_store: Option<Arc<IndexStore>>,
     /// Optional embedding service for semantic search in CodebaseSearch
@@ -384,13 +388,13 @@ impl ToolExecutor {
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         let root: PathBuf = project_root.into();
         Self {
-            current_working_dir: Mutex::new(root.clone()),
+            current_working_dir: Arc::new(Mutex::new(root.clone())),
             project_root: root,
             default_timeout: 120_000, // 2 minutes
             read_files: Arc::new(Mutex::new(HashSet::new())),
             read_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_dedup_cache: Mutex::new(HashMap::new()),
-            web_fetch: super::web_fetch::WebFetchService::new(),
+            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
+            web_fetch: Arc::new(super::web_fetch::WebFetchService::new()),
             web_search: None,
             index_store: None,
             embedding_service: None,
@@ -410,13 +414,13 @@ impl ToolExecutor {
     ) -> Self {
         let root: PathBuf = project_root.into();
         Self {
-            current_working_dir: Mutex::new(root.clone()),
+            current_working_dir: Arc::new(Mutex::new(root.clone())),
             project_root: root,
             default_timeout: 120_000,
             read_files: Arc::new(Mutex::new(HashSet::new())),
             read_cache: shared_cache,
-            task_dedup_cache: Mutex::new(HashMap::new()),
-            web_fetch: super::web_fetch::WebFetchService::new(),
+            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
+            web_fetch: Arc::new(super::web_fetch::WebFetchService::new()),
             web_search: None,
             index_store: None,
             embedding_service: None,
@@ -439,7 +443,7 @@ impl ToolExecutor {
     /// Configure the web search provider
     pub fn set_search_provider(&mut self, provider_name: &str, api_key: Option<String>) {
         match super::web_search::WebSearchService::new(provider_name, api_key.as_deref()) {
-            Ok(service) => self.web_search = Some(service),
+            Ok(service) => self.web_search = Some(Arc::new(service)),
             Err(e) => {
                 tracing::warn!(
                     "Failed to configure search provider '{}': {}",
@@ -536,40 +540,54 @@ impl ToolExecutor {
     /// Build a ToolExecutionContext from this executor's current state.
     ///
     /// Used to pass shared state to trait-based tool implementations.
+    /// Populates ALL fields so tools can access services through context
+    /// instead of requiring executor-private state.
     fn build_tool_context(&self) -> super::trait_def::ToolExecutionContext {
-        let working_dir = self
-            .current_working_dir
-            .lock()
-            .map(|cwd| cwd.clone())
-            .unwrap_or_else(|_| self.project_root.clone());
-
         super::trait_def::ToolExecutionContext {
             session_id: String::new(),
             project_root: self.project_root.clone(),
-            working_directory: working_dir,
+            working_directory: Arc::clone(&self.current_working_dir),
             read_cache: Arc::clone(&self.read_cache),
             read_files: Arc::clone(&self.read_files),
             cancellation_token: tokio_util::sync::CancellationToken::new(),
+            web_fetch: Arc::clone(&self.web_fetch),
+            web_search: self.web_search.clone(),
+            index_store: self.index_store.clone(),
+            embedding_service: self.embedding_service.clone(),
+            embedding_manager: self.embedding_manager.clone(),
+            hnsw_index: self.hnsw_index.clone(),
+            task_dedup_cache: Arc::clone(&self.task_dedup_cache),
+            task_context: None, // Set by callers who have TaskContext
         }
     }
 
-    /// Execute a tool by name with given arguments
+    /// Build a ToolExecutionContext with a TaskContext for sub-agent support.
+    ///
+    /// Used by execute_with_context() when TaskContext is available.
+    pub fn build_tool_context_with_task(
+        &self,
+        task_ctx: &super::task_spawner::TaskContext,
+    ) -> super::trait_def::ToolExecutionContext {
+        let mut ctx = self.build_tool_context();
+        ctx.task_context = Some(Arc::new(super::task_spawner::TaskContext {
+            spawner: Arc::clone(&task_ctx.spawner),
+            tx: task_ctx.tx.clone(),
+            cancellation_token: task_ctx.cancellation_token.clone(),
+        }));
+        ctx
+    }
+
+    /// Execute a tool by name with given arguments.
+    ///
+    /// All tools are dispatched through the `ToolRegistry`, which looks up the
+    /// tool by name and calls its `Tool::execute()` implementation. The shared
+    /// state is passed via `ToolExecutionContext` (built from executor fields).
+    ///
+    /// When no `TaskContext` is available (e.g., sub-agent execution), the
+    /// Task tool will return a depth-limit error.
     pub async fn execute(&self, tool_name: &str, arguments: &serde_json::Value) -> ToolResult {
-        match tool_name {
-            "Read" => self.execute_read(arguments).await,
-            "Write" => self.execute_write(arguments).await,
-            "Edit" => self.execute_edit(arguments).await,
-            "Bash" => self.execute_bash(arguments).await,
-            "Glob" => self.execute_glob(arguments).await,
-            "Grep" => self.execute_grep(arguments).await,
-            "LS" => self.execute_ls(arguments).await,
-            "Cwd" => self.execute_cwd(arguments).await,
-            "WebFetch" => self.execute_web_fetch(arguments).await,
-            "WebSearch" => self.execute_web_search(arguments).await,
-            "NotebookEdit" => self.execute_notebook_edit(arguments).await,
-            "CodebaseSearch" => self.execute_codebase_search(arguments).await,
-            _ => ToolResult::err(format!("Unknown tool: {}", tool_name)),
-        }
+        let ctx = self.build_tool_context();
+        self.registry.execute(tool_name, &ctx, arguments.clone()).await
     }
 
     /// Validate and resolve a file path
@@ -2128,23 +2146,23 @@ impl ToolExecutor {
         }
     }
 
-    /// Execute a tool by name with optional TaskContext for sub-agent support
+    /// Execute a tool by name with optional TaskContext for sub-agent support.
     ///
-    /// When `task_ctx` is provided, the Task tool becomes available.
-    /// When `task_ctx` is None, the Task tool returns an error (sub-agents).
+    /// All tools are dispatched through the `ToolRegistry`. When `task_ctx`
+    /// is provided, it is included in the `ToolExecutionContext` so the Task
+    /// tool can spawn sub-agents. When `task_ctx` is None, the Task tool
+    /// returns a depth-limit error automatically.
     pub async fn execute_with_context(
         &self,
         tool_name: &str,
         arguments: &serde_json::Value,
         task_ctx: Option<&super::task_spawner::TaskContext>,
     ) -> ToolResult {
-        match tool_name {
-            "Task" => match task_ctx {
-                Some(ctx) => self.execute_task(arguments, ctx).await,
-                None => ToolResult::err("Task tool is not available at this depth. Sub-agents cannot spawn further sub-agents."),
-            },
-            _ => self.execute(tool_name, arguments).await,
-        }
+        let ctx = match task_ctx {
+            Some(tc) => self.build_tool_context_with_task(tc),
+            None => self.build_tool_context(),
+        };
+        self.registry.execute(tool_name, &ctx, arguments.clone()).await
     }
 
     /// Compute a hash of a string using DefaultHasher (story-005).

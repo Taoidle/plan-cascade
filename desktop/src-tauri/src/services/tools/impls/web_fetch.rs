@@ -1,6 +1,7 @@
 //! WebFetch Tool Implementation
 //!
 //! Fetches web pages and converts them to markdown.
+//! Uses WebFetchService from ToolExecutionContext for actual fetching.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -12,9 +13,8 @@ use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
 
 /// WebFetch tool — fetches web pages and converts to markdown.
 ///
-/// The actual fetching is handled by WebFetchService which is owned by ToolExecutor.
-/// This trait implementation provides the tool definition. The ToolExecutor
-/// intercepts "WebFetch" calls and delegates to its internal WebFetchService.
+/// Uses `ctx.web_fetch` (Arc<WebFetchService>) from the execution context.
+/// The service is always available since WebFetchService is created unconditionally.
 pub struct WebFetchTool;
 
 impl WebFetchTool {
@@ -60,14 +60,33 @@ impl Tool for WebFetchTool {
         true
     }
 
-    async fn execute(&self, _ctx: &ToolExecutionContext, args: Value) -> ToolResult {
-        // WebFetch execution is handled by ToolExecutor which owns the WebFetchService.
-        // This fallback handles the case where the tool is called directly.
-        let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("(no url)");
-        ToolResult::err(format!(
-            "WebFetch for '{}' requires WebFetchService which is not available in this context.",
-            url
-        ))
+    async fn execute(&self, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
+        let url = match args.get("url").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => return ToolResult::err("Missing required parameter: url"),
+        };
+
+        let prompt = args.get("prompt").and_then(|v| v.as_str());
+
+        let timeout_secs = args
+            .get("timeout")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30)
+            .min(60);
+
+        match ctx.web_fetch.fetch(url, Some(timeout_secs)).await {
+            Ok(content) => {
+                let mut output = String::new();
+                if let Some(p) = prompt {
+                    output.push_str(&format!("## Fetched: {}\n### Context: {}\n\n", url, p));
+                } else {
+                    output.push_str(&format!("## Fetched: {}\n\n", url));
+                }
+                output.push_str(&content);
+                ToolResult::ok(output)
+            }
+            Err(e) => ToolResult::err(e),
+        }
     }
 }
 
@@ -85,5 +104,17 @@ mod tests {
     fn test_web_fetch_tool_is_long_running() {
         let tool = WebFetchTool::new();
         assert!(tool.is_long_running());
+    }
+
+    #[test]
+    fn test_web_fetch_tool_schema() {
+        let tool = WebFetchTool::new();
+        let schema = tool.parameters_schema();
+        let props = schema.properties.as_ref().unwrap();
+        assert!(props.contains_key("url"));
+        assert!(props.contains_key("prompt"));
+        assert!(props.contains_key("timeout"));
+        let required = schema.required.as_ref().unwrap();
+        assert!(required.contains(&"url".to_string()));
     }
 }

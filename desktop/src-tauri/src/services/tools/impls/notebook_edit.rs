@@ -83,7 +83,7 @@ impl Tool for NotebookEditTool {
         let cell_type = args.get("cell_type").and_then(|v| v.as_str());
         let new_source = args.get("new_source").and_then(|v| v.as_str());
 
-        let path = match validate_path(notebook_path, &ctx.working_directory, &ctx.project_root) {
+        let path = match validate_path(notebook_path, &ctx.working_directory_snapshot(), &ctx.project_root) {
             Ok(p) => p,
             Err(e) => return ToolResult::err(e),
         };

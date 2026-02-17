@@ -82,7 +82,7 @@ impl Tool for LsTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let path = match validate_path(dir_path, &ctx.working_directory, &ctx.project_root) {
+        let path = match validate_path(dir_path, &ctx.working_directory_snapshot(), &ctx.project_root) {
             Ok(p) => p,
             Err(e) => return ToolResult::err(e),
         };
@@ -180,10 +180,18 @@ mod tests {
         ToolExecutionContext {
             session_id: "test".to_string(),
             project_root: dir.to_path_buf(),
-            working_directory: dir.to_path_buf(),
+            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
             read_cache: Arc::new(Mutex::new(HashMap::new())),
             read_files: Arc::new(Mutex::new(HashSet::new())),
             cancellation_token: tokio_util::sync::CancellationToken::new(),
+            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
+            web_search: None,
+            index_store: None,
+            embedding_service: None,
+            embedding_manager: None,
+            hnsw_index: None,
+            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
+            task_context: None,
         }
     }
 
