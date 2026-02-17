@@ -4,6 +4,7 @@
 
 use plan_cascade_desktop::commands::analytics::AnalyticsState;
 use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
+use plan_cascade_desktop::commands::guardrails::GuardrailState;
 use plan_cascade_desktop::commands::lsp::LspState;
 use plan_cascade_desktop::commands::mcp::McpRuntimeState;
 use plan_cascade_desktop::commands::plugins::PluginState;
@@ -29,6 +30,7 @@ fn main() {
         .manage(McpRuntimeState::new())
         .manage(LspState::new())
         .manage(PluginState::new())
+        .manage(GuardrailState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -230,6 +232,13 @@ fn main() {
             plan_cascade_desktop::commands::lsp::get_lsp_status,
             plan_cascade_desktop::commands::lsp::trigger_lsp_enrichment,
             plan_cascade_desktop::commands::lsp::get_enrichment_report,
+            // Guardrail commands
+            plan_cascade_desktop::commands::guardrails::list_guardrails,
+            plan_cascade_desktop::commands::guardrails::toggle_guardrail,
+            plan_cascade_desktop::commands::guardrails::add_custom_rule,
+            plan_cascade_desktop::commands::guardrails::remove_custom_rule,
+            plan_cascade_desktop::commands::guardrails::get_trigger_log,
+            plan_cascade_desktop::commands::guardrails::clear_trigger_log,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

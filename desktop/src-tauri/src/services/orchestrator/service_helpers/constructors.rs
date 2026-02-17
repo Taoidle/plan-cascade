@@ -290,6 +290,22 @@ impl OrchestratorService {
         self
     }
 
+    /// Register guardrail-related lifecycle hooks.
+    ///
+    /// Wires the GuardrailRegistry into the agentic lifecycle so that:
+    /// - `on_user_message` validates user input (may block or redact)
+    /// - `on_after_tool` validates tool output (may warn)
+    pub fn with_guardrail_hooks(
+        mut self,
+        registry: std::sync::Arc<tokio::sync::RwLock<crate::services::guardrail::GuardrailRegistry>>,
+    ) -> Self {
+        crate::services::guardrail::register_guardrail_hooks(
+            &mut self.hooks,
+            registry,
+        );
+        self
+    }
+
     /// Set the database pool for session persistence.
     ///
     /// Indexing is no longer started here; use `IndexManager::ensure_indexed()`

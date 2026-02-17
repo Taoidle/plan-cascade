@@ -11,6 +11,7 @@ pub mod context;
 pub mod dependency;
 pub mod design;
 pub mod fallback;
+pub mod guardrail;
 pub mod iteration;
 pub mod llm;
 pub mod markdown;

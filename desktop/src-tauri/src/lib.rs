@@ -205,6 +205,14 @@ pub use commands::{
     refresh_plugins,
     toggle_plugin,
     PluginState,
+    // Guardrail commands
+    add_custom_rule,
+    clear_trigger_log,
+    get_trigger_log,
+    list_guardrails,
+    remove_custom_rule,
+    toggle_guardrail,
+    GuardrailState,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,
