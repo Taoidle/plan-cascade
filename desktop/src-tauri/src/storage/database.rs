@@ -672,6 +672,49 @@ impl Database {
             )"
         )?;
 
+        // ====================================================================
+        // Feature-004: Guardrail Security System tables
+        // ====================================================================
+
+        // Custom guardrail rules persisted across sessions
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS guardrail_rules (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                pattern TEXT NOT NULL,
+                action TEXT NOT NULL DEFAULT 'warn',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        // Guardrail trigger event log
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS guardrail_trigger_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guardrail_name TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                result_type TEXT NOT NULL,
+                content_snippet TEXT NOT NULL DEFAULT '',
+                timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+
+        // Indexes for guardrail queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_guardrail_trigger_log_timestamp
+             ON guardrail_trigger_log(timestamp DESC)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_guardrail_trigger_log_name
+             ON guardrail_trigger_log(guardrail_name)",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -1732,5 +1775,134 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert!(count > 0, "filepath_fts should have been populated from existing data");
+    }
+
+    // =========================================================================
+    // Feature-004: Guardrail Security System schema tests
+    // =========================================================================
+
+    #[test]
+    fn test_guardrail_rules_table_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='guardrail_rules'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "guardrail_rules table should exist");
+    }
+
+    #[test]
+    fn test_guardrail_rules_crud() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert
+        conn.execute(
+            "INSERT INTO guardrail_rules (id, name, pattern, action, enabled)
+             VALUES ('rule-1', 'No TODOs', 'TODO', 'warn', 1)",
+            [],
+        ).unwrap();
+
+        // Query
+        let (name, pattern, action): (String, String, String) = conn.query_row(
+            "SELECT name, pattern, action FROM guardrail_rules WHERE id = 'rule-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(name, "No TODOs");
+        assert_eq!(pattern, "TODO");
+        assert_eq!(action, "warn");
+
+        // Update
+        conn.execute(
+            "UPDATE guardrail_rules SET enabled = 0 WHERE id = 'rule-1'",
+            [],
+        ).unwrap();
+
+        let enabled: i32 = conn.query_row(
+            "SELECT enabled FROM guardrail_rules WHERE id = 'rule-1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(enabled, 0);
+
+        // Delete
+        conn.execute("DELETE FROM guardrail_rules WHERE id = 'rule-1'", []).unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM guardrail_rules",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_guardrail_trigger_log_table_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='guardrail_trigger_log'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "guardrail_trigger_log table should exist");
+    }
+
+    #[test]
+    fn test_guardrail_trigger_log_crud() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert
+        conn.execute(
+            "INSERT INTO guardrail_trigger_log (guardrail_name, direction, result_type, content_snippet)
+             VALUES ('SensitiveData', 'input', 'redact', 'sk-abc...')",
+            [],
+        ).unwrap();
+
+        // Query
+        let (name, direction, result_type): (String, String, String) = conn.query_row(
+            "SELECT guardrail_name, direction, result_type FROM guardrail_trigger_log WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(name, "SensitiveData");
+        assert_eq!(direction, "input");
+        assert_eq!(result_type, "redact");
+    }
+
+    #[test]
+    fn test_guardrail_trigger_log_indexes_exist() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='guardrail_trigger_log'"
+        ).unwrap();
+        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(indexes.contains(&"idx_guardrail_trigger_log_timestamp".to_string()));
+        assert!(indexes.contains(&"idx_guardrail_trigger_log_name".to_string()));
+    }
+
+    #[test]
+    fn test_guardrail_schema_idempotent() {
+        let db = create_test_db().unwrap();
+        db.init_schema().unwrap(); // second call
+
+        let conn = db.get_connection().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='guardrail_rules'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "guardrail_rules should still exist after double init");
     }
 }

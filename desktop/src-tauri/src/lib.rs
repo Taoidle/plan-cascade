@@ -198,6 +198,14 @@ pub use commands::{
     search_skills,
     set_embedding_api_key,
     set_embedding_config,
+    // Guardrail commands
+    add_custom_rule,
+    clear_trigger_log,
+    get_trigger_log,
+    list_guardrails,
+    remove_custom_rule,
+    toggle_guardrail,
+    GuardrailState,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,
