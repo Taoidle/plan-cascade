@@ -723,6 +723,108 @@ impl IndexStore {
     }
 
     // =========================================================================
+    // HNSW rebuild helpers (feature-001)
+    // =========================================================================
+
+    /// Retrieve all embedding IDs and vectors for a project.
+    ///
+    /// Returns a vector of `(row_id, embedding_f32_vec)` suitable for
+    /// rebuilding an HNSW index.  The `row_id` is the SQLite ROWID of the
+    /// `file_embeddings` row, used as the HNSW data ID.
+    pub fn get_all_embedding_ids_and_vectors(
+        &self,
+        project_path: &str,
+    ) -> AppResult<Vec<(usize, Vec<f32>)>> {
+        let conn = self.get_connection()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT rowid, embedding FROM file_embeddings WHERE project_path = ?1",
+        )?;
+
+        let rows: Vec<(usize, Vec<f32>)> = stmt
+            .query_map(params![project_path], |row| {
+                let rowid: i64 = row.get(0)?;
+                let emb_bytes: Vec<u8> = row.get(1)?;
+                Ok((rowid as usize, bytes_to_embedding(&emb_bytes)))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Retrieve chunk metadata (file_path, chunk_text) for a given ROWID.
+    ///
+    /// Used by HNSW search to fetch display data for matched embedding IDs.
+    pub fn get_embedding_by_rowid(
+        &self,
+        rowid: usize,
+    ) -> AppResult<Option<(String, i64, String)>> {
+        let conn = self.get_connection()?;
+
+        let result = conn.query_row(
+            "SELECT file_path, chunk_index, chunk_text FROM file_embeddings WHERE rowid = ?1",
+            params![rowid as i64],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        );
+
+        match result {
+            Ok(data) => Ok(Some(data)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// Retrieve chunk metadata for multiple ROWIDs at once.
+    ///
+    /// Returns a map from rowid to (file_path, chunk_index, chunk_text).
+    pub fn get_embeddings_by_rowids(
+        &self,
+        rowids: &[usize],
+    ) -> AppResult<std::collections::HashMap<usize, (String, i64, String)>> {
+        if rowids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let conn = self.get_connection()?;
+
+        // Build a parameterized query for the rowids
+        let placeholders: Vec<String> = rowids.iter().map(|_| "?".to_string()).collect();
+        let query = format!(
+            "SELECT rowid, file_path, chunk_index, chunk_text FROM file_embeddings WHERE rowid IN ({})",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = conn.prepare(&query)?;
+
+        let params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = rowids
+            .iter()
+            .map(|id| Box::new(*id as i64) as Box<dyn rusqlite::types::ToSql>)
+            .collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let result: std::collections::HashMap<usize, (String, i64, String)> = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let rowid: i64 = row.get(0)?;
+                let file_path: String = row.get(1)?;
+                let chunk_index: i64 = row.get(2)?;
+                let chunk_text: String = row.get(3)?;
+                Ok((rowid as usize, (file_path, chunk_index, chunk_text)))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(result)
+    }
+
+    // =========================================================================
     // Vocabulary persistence methods (feature-003, story-002)
     // =========================================================================
 

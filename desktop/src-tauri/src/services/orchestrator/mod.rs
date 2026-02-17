@@ -17,6 +17,7 @@ pub mod embedding_provider_qwen;
 pub mod embedding_provider_tfidf;
 pub mod embedding_service;
 pub mod hooks;
+pub mod hnsw_index;
 pub mod hybrid_search;
 pub mod index_manager;
 pub mod index_store;

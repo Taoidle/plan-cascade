@@ -14,6 +14,7 @@ use tokio::time::timeout;
 
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
+use crate::services::orchestrator::hnsw_index::HnswIndex;
 use crate::services::orchestrator::index_store::IndexStore;
 use crate::services::orchestrator::text_describes_pending_action;
 
@@ -340,6 +341,10 @@ pub struct ToolExecutor {
     /// Optional EmbeddingManager for provider-aware semantic search (ADR-F002).
     /// When set, used in preference to `embedding_service` for query embedding.
     embedding_manager: Option<Arc<EmbeddingManager>>,
+    /// Optional HNSW index for O(log n) approximate nearest neighbor search.
+    /// When set and ready, `execute_codebase_search` uses HNSW for semantic
+    /// search instead of brute-force cosine similarity scan.
+    hnsw_index: Option<Arc<HnswIndex>>,
     /// Registry of all available tools (trait-based).
     /// Used for definition generation and dynamic tool management.
     registry: super::trait_def::ToolRegistry,
@@ -389,6 +394,7 @@ impl ToolExecutor {
             index_store: None,
             embedding_service: None,
             embedding_manager: None,
+            hnsw_index: None,
             registry: Self::build_registry(),
         }
     }
@@ -414,6 +420,7 @@ impl ToolExecutor {
             index_store: None,
             embedding_service: None,
             embedding_manager: None,
+            hnsw_index: None,
             registry: Self::build_registry(),
         }
     }
@@ -475,6 +482,19 @@ impl ToolExecutor {
     /// Get the EmbeddingManager Arc (if set), for sharing with sub-agents.
     pub fn get_embedding_manager(&self) -> Option<Arc<EmbeddingManager>> {
         self.embedding_manager.clone()
+    }
+
+    /// Set the HNSW index for O(log n) approximate nearest neighbor search.
+    ///
+    /// When set and ready, `execute_codebase_search` uses HNSW for the
+    /// semantic search path instead of brute-force cosine similarity scan.
+    pub fn set_hnsw_index(&mut self, hnsw: Arc<HnswIndex>) {
+        self.hnsw_index = Some(hnsw);
+    }
+
+    /// Get the HNSW index Arc (if set), for sharing with sub-agents.
+    pub fn get_hnsw_index(&self) -> Option<Arc<HnswIndex>> {
+        self.hnsw_index.clone()
     }
 
     /// Get a reference to the tool registry.
@@ -1799,7 +1819,45 @@ impl ToolExecutor {
                     // Use EmbeddingManager.embed_query for the query vector
                     match emb_mgr.embed_query(query).await {
                         Ok(query_embedding) if !query_embedding.is_empty() => {
-                            match index_store.semantic_search(&query_embedding, &project_path, 10) {
+                            // Try HNSW search first (O(log n)), fall back to brute-force (O(n))
+                            let search_result = if let Some(ref hnsw) = self.hnsw_index {
+                                if hnsw.is_ready().await {
+                                    // HNSW path: search for nearest neighbors, then fetch metadata
+                                    let hnsw_hits = hnsw.search(&query_embedding, 10).await;
+                                    if !hnsw_hits.is_empty() {
+                                        let rowids: Vec<usize> = hnsw_hits.iter().map(|(id, _)| *id).collect();
+                                        match index_store.get_embeddings_by_rowids(&rowids) {
+                                            Ok(metadata) => {
+                                                let results: Vec<crate::services::orchestrator::embedding_service::SemanticSearchResult> = hnsw_hits
+                                                    .into_iter()
+                                                    .filter_map(|(id, distance)| {
+                                                        metadata.get(&id).map(|(file_path, chunk_index, chunk_text)| {
+                                                            crate::services::orchestrator::embedding_service::SemanticSearchResult {
+                                                                file_path: file_path.clone(),
+                                                                chunk_index: *chunk_index,
+                                                                chunk_text: chunk_text.clone(),
+                                                                similarity: 1.0 - distance, // DistCosine: distance = 1 - similarity
+                                                            }
+                                                        })
+                                                    })
+                                                    .collect();
+                                                Ok(results)
+                                            }
+                                            Err(e) => Err(e),
+                                        }
+                                    } else {
+                                        Ok(Vec::new())
+                                    }
+                                } else {
+                                    // HNSW not ready, fall back to brute-force
+                                    index_store.semantic_search(&query_embedding, &project_path, 10)
+                                }
+                            } else {
+                                // No HNSW index, use brute-force
+                                index_store.semantic_search(&query_embedding, &project_path, 10)
+                            };
+
+                            match search_result {
                                 Ok(results) if !results.is_empty() => {
                                     let mut section = format!(
                                         "## Semantic search for '{}' ({} results)\n",

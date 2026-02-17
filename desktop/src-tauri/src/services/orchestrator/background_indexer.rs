@@ -15,6 +15,7 @@ use super::embedding_manager::EmbeddingManager;
 use super::embedding_provider::EmbeddingProviderType;
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::{embedding_to_bytes, EmbeddingService};
+use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
 use super::tree_sitter_parser;
 
@@ -37,6 +38,7 @@ pub struct BackgroundIndexer {
     index_store: Arc<IndexStore>,
     embedding_service: Option<Arc<EmbeddingService>>,
     embedding_manager: Option<Arc<EmbeddingManager>>,
+    hnsw_index: Option<Arc<HnswIndex>>,
     change_rx: Option<tokio::sync::mpsc::Receiver<PathBuf>>,
     progress_callback: Option<IndexProgressCallback>,
 }
@@ -49,6 +51,7 @@ impl BackgroundIndexer {
             index_store,
             embedding_service: None,
             embedding_manager: None,
+            hnsw_index: None,
             change_rx: None,
             progress_callback: None,
         }
@@ -72,6 +75,15 @@ impl BackgroundIndexer {
     /// manager takes precedence.
     pub fn with_embedding_manager(mut self, mgr: Arc<EmbeddingManager>) -> Self {
         self.embedding_manager = Some(mgr);
+        self
+    }
+
+    /// Attach an HNSW index for O(log n) approximate nearest neighbor search.
+    ///
+    /// When set, the indexer will insert embeddings into the HNSW index
+    /// during the embedding pass and save the index to disk afterwards.
+    pub fn with_hnsw_index(mut self, idx: Arc<HnswIndex>) -> Self {
+        self.hnsw_index = Some(idx);
         self
     }
 
@@ -108,6 +120,7 @@ impl BackgroundIndexer {
         let index_store = self.index_store;
         let embedding_service = self.embedding_service;
         let embedding_manager = self.embedding_manager;
+        let hnsw_index: Option<Arc<HnswIndex>> = self.hnsw_index;
         let change_rx = self.change_rx;
         let progress_callback = self.progress_callback;
 
@@ -132,7 +145,7 @@ impl BackgroundIndexer {
             if let Some(ref emb_mgr) = embedding_manager {
                 info!("background indexer: starting embedding generation (via EmbeddingManager)");
                 if let Err(e) =
-                    run_embedding_pass_managed(&project_root, &index_store, emb_mgr).await
+                    run_embedding_pass_managed(&project_root, &index_store, emb_mgr, hnsw_index.as_ref()).await
                 {
                     warn!(
                         error = %e,
@@ -143,7 +156,7 @@ impl BackgroundIndexer {
                 }
             } else if let Some(ref emb_svc) = embedding_service {
                 info!("background indexer: starting embedding generation");
-                if let Err(e) = run_embedding_pass(&project_root, &index_store, emb_svc) {
+                if let Err(e) = run_embedding_pass(&project_root, &index_store, emb_svc, hnsw_index.as_ref()).await {
                     warn!(
                         error = %e,
                         "background indexer: embedding generation failed"
@@ -173,6 +186,7 @@ impl BackgroundIndexer {
                             &index_store,
                             emb_mgr,
                             &changed_path,
+                            hnsw_index.as_ref(),
                         )
                         .await
                         {
@@ -188,7 +202,8 @@ impl BackgroundIndexer {
                             &index_store,
                             emb_svc,
                             &changed_path,
-                        ) {
+                            hnsw_index.as_ref(),
+                        ).await {
                             warn!(
                                 path = %changed_path.display(),
                                 error = %e,
@@ -522,10 +537,11 @@ fn chunk_by_window(lines: &[&str]) -> Vec<FileChunk> {
 /// 2. Chunks the content using `chunk_file_content`
 /// 3. Builds the TF-IDF vocabulary from all chunks
 /// 4. Generates and stores embedding vectors
-fn run_embedding_pass(
+async fn run_embedding_pass(
     project_root: &Path,
     index_store: &IndexStore,
     embedding_service: &EmbeddingService,
+    hnsw_index: Option<&Arc<HnswIndex>>,
 ) -> Result<(), String> {
     let project_path = project_root.to_string_lossy().to_string();
 
@@ -588,6 +604,18 @@ fn run_embedding_pass(
         "background indexer: embeddings stored"
     );
 
+    // Rebuild HNSW index from SQLite after full embedding pass.
+    // This is more efficient than inserting one-by-one during the loop,
+    // because we can batch-insert all embeddings at once.
+    if let Some(hnsw) = hnsw_index {
+        if let Err(e) = rebuild_hnsw_after_embedding(index_store, &project_path, hnsw).await {
+            warn!(
+                error = %e,
+                "background indexer: HNSW rebuild after embedding pass failed"
+            );
+        }
+    }
+
     // Persist the vocabulary to SQLite so it survives app restart
     if let Some(vocab_json) = embedding_service.export_vocabulary() {
         if let Err(e) = index_store.save_vocabulary(&project_path, &vocab_json) {
@@ -604,11 +632,12 @@ fn run_embedding_pass(
 }
 
 /// Re-embed a single changed file.
-fn run_incremental_embedding(
+async fn run_incremental_embedding(
     project_root: &Path,
     index_store: &IndexStore,
     embedding_service: &EmbeddingService,
     changed_path: &Path,
+    hnsw_index: Option<&Arc<HnswIndex>>,
 ) -> Result<(), String> {
     if !changed_path.is_file() {
         return Ok(());
@@ -631,6 +660,26 @@ fn run_incremental_embedding(
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
     let language = detect_language_simple(ext.as_deref());
+
+    // Mark old embeddings for this file as stale in HNSW before deleting from SQLite.
+    // We need to capture the ROWIDs before deleting.
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            if let Ok(all_ids) = index_store.get_all_embedding_ids_and_vectors(&project_path) {
+                // We need to find ROWIDs for this specific file.
+                // Since get_all_embedding_ids_and_vectors returns all project embeddings,
+                // we use get_embeddings_by_rowids to find which belong to this file.
+                let rowids: Vec<usize> = all_ids.iter().map(|(id, _)| *id).collect();
+                if let Ok(metadata) = index_store.get_embeddings_by_rowids(&rowids) {
+                    for (rowid, (file_path, _, _)) in &metadata {
+                        if file_path == &rel_str {
+                            hnsw.mark_stale(*rowid).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Delete old embeddings for this file
     let _ = index_store.delete_embeddings_for_file(&project_path, &rel_str);
@@ -674,6 +723,41 @@ fn run_incremental_embedding(
                 error = %e,
                 "background indexer: incremental embedding failed"
             );
+        } else {
+            // Insert new embedding into HNSW
+            if let Some(hnsw) = hnsw_index {
+                if hnsw.is_ready().await {
+                    // Retrieve the ROWID of the just-inserted embedding
+                    if let Ok(all_ids) = index_store.get_all_embedding_ids_and_vectors(&project_path) {
+                        if let Some((rowid, _)) = all_ids.iter().rev().find(|(_, v)| v == &embedding) {
+                            hnsw.insert(*rowid, &embedding).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%)
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await && hnsw.needs_rebuild().await {
+            info!(
+                "background indexer: HNSW stale ratio exceeded 10%, triggering full rebuild"
+            );
+            if let Err(e) = rebuild_hnsw_after_embedding(index_store, &project_path, hnsw).await {
+                warn!(
+                    error = %e,
+                    "background indexer: periodic HNSW rebuild failed"
+                );
+            }
+        } else if hnsw.is_ready().await {
+            // Just save incrementally
+            if let Err(e) = hnsw.save_to_disk().await {
+                warn!(
+                    error = %e,
+                    "background indexer: failed to save HNSW after incremental embedding"
+                );
+            }
         }
     }
 
@@ -701,6 +785,7 @@ async fn run_embedding_pass_managed(
     project_root: &Path,
     index_store: &IndexStore,
     manager: &EmbeddingManager,
+    hnsw_index: Option<&Arc<HnswIndex>>,
 ) -> Result<(), String> {
     let project_path = project_root.to_string_lossy().to_string();
 
@@ -777,6 +862,16 @@ async fn run_embedding_pass_managed(
         "background indexer: embeddings stored (managed)"
     );
 
+    // Rebuild HNSW index from SQLite after full embedding pass
+    if let Some(hnsw) = hnsw_index {
+        if let Err(e) = rebuild_hnsw_after_embedding(index_store, &project_path, hnsw).await {
+            warn!(
+                error = %e,
+                "background indexer: HNSW rebuild after managed embedding pass failed"
+            );
+        }
+    }
+
     // Persist TF-IDF vocabulary to SQLite if applicable
     if manager.provider_type() == EmbeddingProviderType::TfIdf {
         let primary = manager.primary_provider();
@@ -806,6 +901,7 @@ async fn run_incremental_embedding_managed(
     index_store: &IndexStore,
     manager: &EmbeddingManager,
     changed_path: &Path,
+    hnsw_index: Option<&Arc<HnswIndex>>,
 ) -> Result<(), String> {
     if !changed_path.is_file() {
         return Ok(());
@@ -828,6 +924,22 @@ async fn run_incremental_embedding_managed(
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
     let language = detect_language_simple(ext.as_deref());
+
+    // Mark old embeddings for this file as stale in HNSW before deleting from SQLite
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            if let Ok(all_ids) = index_store.get_all_embedding_ids_and_vectors(&project_path) {
+                let rowids: Vec<usize> = all_ids.iter().map(|(id, _)| *id).collect();
+                if let Ok(metadata) = index_store.get_embeddings_by_rowids(&rowids) {
+                    for (rowid, (file_path, _, _)) in &metadata {
+                        if file_path == &rel_str {
+                            hnsw.mark_stale(*rowid).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Delete old embeddings for this file
     let _ = index_store.delete_embeddings_for_file(&project_path, &rel_str);
@@ -887,6 +999,40 @@ async fn run_incremental_embedding_managed(
                 error = %e,
                 "background indexer: incremental embedding failed (managed)"
             );
+        } else {
+            // Insert new embedding into HNSW
+            if let Some(hnsw) = hnsw_index {
+                if hnsw.is_ready().await {
+                    if let Ok(all_ids) = index_store.get_all_embedding_ids_and_vectors(&project_path) {
+                        if let Some((rowid, _)) = all_ids.iter().rev().find(|(_, v)| v == embedding) {
+                            hnsw.insert(*rowid, embedding).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%)
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await && hnsw.needs_rebuild().await {
+            info!(
+                "background indexer: HNSW stale ratio exceeded 10% (managed), triggering full rebuild"
+            );
+            if let Err(e) = rebuild_hnsw_after_embedding(index_store, &project_path, hnsw).await {
+                warn!(
+                    error = %e,
+                    "background indexer: periodic HNSW rebuild failed (managed)"
+                );
+            }
+        } else if hnsw.is_ready().await {
+            // Just save incrementally
+            if let Err(e) = hnsw.save_to_disk().await {
+                warn!(
+                    error = %e,
+                    "background indexer: failed to save HNSW after incremental embedding (managed)"
+                );
+            }
         }
     }
 
@@ -895,6 +1041,47 @@ async fn run_incremental_embedding_managed(
         chunks = chunks.len(),
         "background indexer: incremental embedding updated (managed)"
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// HNSW helpers
+// ---------------------------------------------------------------------------
+
+/// Rebuild the HNSW index from all embeddings in SQLite after a full embedding pass.
+///
+/// Resets the HNSW index, batch-inserts all embeddings, and saves to disk.
+/// This is more efficient than inserting one-by-one during the embedding loop.
+async fn rebuild_hnsw_after_embedding(
+    index_store: &IndexStore,
+    project_path: &str,
+    hnsw: &Arc<HnswIndex>,
+) -> Result<(), String> {
+    let all_embeddings = index_store
+        .get_all_embedding_ids_and_vectors(project_path)
+        .map_err(|e| format!("failed to get embeddings for HNSW rebuild: {}", e))?;
+
+    if all_embeddings.is_empty() {
+        debug!("background indexer: no embeddings to insert into HNSW");
+        return Ok(());
+    }
+
+    // Reset the HNSW index to clear any stale data from a previous pass
+    hnsw.reset().await;
+
+    // Batch insert all embeddings
+    hnsw.batch_insert(&all_embeddings).await;
+
+    // Save to disk
+    hnsw.save_to_disk().await.map_err(|e| {
+        format!("failed to save HNSW index to disk: {}", e)
+    })?;
+
+    info!(
+        vectors = all_embeddings.len(),
+        "background indexer: HNSW index rebuilt and saved to disk"
+    );
+
     Ok(())
 }
 
@@ -1266,8 +1453,8 @@ pub fn process_config(config: &Config) -> String {
     // Embedding pass integration test
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn embedding_pass_stores_embeddings() {
+    #[tokio::test]
+    async fn embedding_pass_stores_embeddings() {
         let dir = tempdir().expect("tempdir");
         fs::create_dir_all(dir.path().join("src")).expect("mkdir");
         fs::write(
@@ -1286,7 +1473,9 @@ pub fn process_config(config: &Config) -> String {
         run_full_index(dir.path(), &store, None).expect("full index");
 
         let emb_svc = EmbeddingService::new();
-        run_embedding_pass(dir.path(), &store, &emb_svc).expect("embedding pass");
+        run_embedding_pass(dir.path(), &store, &emb_svc, None)
+            .await
+            .expect("embedding pass");
 
         let project_path = dir.path().to_string_lossy().to_string();
         let count = store.count_embeddings(&project_path).expect("count");
@@ -1310,8 +1499,8 @@ pub fn process_config(config: &Config) -> String {
     // Embedding pass saves vocabulary to SQLite (story-003)
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn embedding_pass_saves_vocabulary_to_sqlite() {
+    #[tokio::test]
+    async fn embedding_pass_saves_vocabulary_to_sqlite() {
         let dir = tempdir().expect("tempdir");
         fs::create_dir_all(dir.path().join("src")).expect("mkdir");
         fs::write(
@@ -1329,7 +1518,9 @@ pub fn process_config(config: &Config) -> String {
         run_full_index(dir.path(), &store, None).expect("full index");
 
         let emb_svc = EmbeddingService::new();
-        run_embedding_pass(dir.path(), &store, &emb_svc).expect("embedding pass");
+        run_embedding_pass(dir.path(), &store, &emb_svc, None)
+            .await
+            .expect("embedding pass");
 
         let project_path = dir.path().to_string_lossy().to_string();
         let vocab_json = store.load_vocabulary(&project_path).expect("load vocab");
@@ -1357,8 +1548,8 @@ pub fn process_config(config: &Config) -> String {
     // Incremental embedding restores vocabulary from DB (story-004)
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn incremental_embedding_restores_vocab_from_db_when_not_ready() {
+    #[tokio::test]
+    async fn incremental_embedding_restores_vocab_from_db_when_not_ready() {
         let dir = tempdir().expect("tempdir");
         fs::create_dir_all(dir.path().join("src")).expect("mkdir");
         fs::write(
@@ -1378,7 +1569,9 @@ pub fn process_config(config: &Config) -> String {
         // First: full index + embedding pass to build and save vocabulary
         run_full_index(dir.path(), &store, None).expect("full index");
         let emb_svc1 = EmbeddingService::new();
-        run_embedding_pass(dir.path(), &store, &emb_svc1).expect("embedding pass");
+        run_embedding_pass(dir.path(), &store, &emb_svc1, None)
+            .await
+            .expect("embedding pass");
 
         // Verify vocab was saved
         assert!(
@@ -1399,7 +1592,8 @@ pub fn process_config(config: &Config) -> String {
 
         // Incremental embedding should restore vocab from DB and proceed
         let changed_path = dir.path().join("src/main.rs");
-        run_incremental_embedding(dir.path(), &store, &emb_svc2, &changed_path)
+        run_incremental_embedding(dir.path(), &store, &emb_svc2, &changed_path, None)
+            .await
             .expect("incremental embedding");
 
         // Verify the service is now ready (vocab was restored)
@@ -1420,8 +1614,8 @@ pub fn process_config(config: &Config) -> String {
         );
     }
 
-    #[test]
-    fn incremental_embedding_skips_when_no_vocab_in_db() {
+    #[tokio::test]
+    async fn incremental_embedding_skips_when_no_vocab_in_db() {
         let dir = tempdir().expect("tempdir");
         fs::write(dir.path().join("test.py"), "x = 1\n").expect("write");
 
@@ -1435,7 +1629,8 @@ pub fn process_config(config: &Config) -> String {
 
         // Incremental embedding should skip gracefully (no panic, no error)
         let changed_path = dir.path().join("test.py");
-        let result = run_incremental_embedding(dir.path(), &store, &emb_svc, &changed_path);
+        let result =
+            run_incremental_embedding(dir.path(), &store, &emb_svc, &changed_path, None).await;
         assert!(result.is_ok(), "should succeed even without vocab in DB");
         assert!(!emb_svc.is_ready(), "service should remain not-ready");
     }
@@ -1509,7 +1704,7 @@ pub fn process_config(config: &Config) -> String {
         run_full_index(dir.path(), &store, None).expect("full index");
 
         let manager = test_tfidf_manager();
-        run_embedding_pass_managed(dir.path(), &store, &manager)
+        run_embedding_pass_managed(dir.path(), &store, &manager, None)
             .await
             .expect("managed embedding pass");
 
@@ -1549,7 +1744,7 @@ pub fn process_config(config: &Config) -> String {
         run_full_index(dir.path(), &store, None).expect("full index");
 
         let manager = test_tfidf_manager();
-        run_embedding_pass_managed(dir.path(), &store, &manager)
+        run_embedding_pass_managed(dir.path(), &store, &manager, None)
             .await
             .expect("managed embedding pass");
 
@@ -1582,7 +1777,7 @@ pub fn process_config(config: &Config) -> String {
         // Full index + managed embedding pass to build and save vocabulary
         run_full_index(dir.path(), &store, None).expect("full index");
         let manager = test_tfidf_manager();
-        run_embedding_pass_managed(dir.path(), &store, &manager)
+        run_embedding_pass_managed(dir.path(), &store, &manager, None)
             .await
             .expect("managed embedding pass");
 
@@ -1612,7 +1807,7 @@ pub fn process_config(config: &Config) -> String {
 
         // Incremental embedding should restore vocab from DB and proceed
         let changed_path = dir.path().join("src/main.rs");
-        run_incremental_embedding_managed(dir.path(), &store, &manager2, &changed_path)
+        run_incremental_embedding_managed(dir.path(), &store, &manager2, &changed_path, None)
             .await
             .expect("managed incremental embedding");
 
@@ -1655,7 +1850,8 @@ pub fn process_config(config: &Config) -> String {
         // Incremental embedding should skip gracefully (no panic, no error)
         let changed_path = dir.path().join("test.py");
         let result =
-            run_incremental_embedding_managed(dir.path(), &store, &manager, &changed_path).await;
+            run_incremental_embedding_managed(dir.path(), &store, &manager, &changed_path, None)
+                .await;
         assert!(result.is_ok(), "should succeed even without vocab in DB");
         assert!(
             !tfidf.is_ready(),
@@ -1727,5 +1923,395 @@ pub fn process_config(config: &Config) -> String {
             !emb_svc.is_ready(),
             "direct EmbeddingService should not have been used when manager is set"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Story-005 Integration Tests: HNSW + brute-force comparison
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn hnsw_results_match_brute_force_semantic_search() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        // Create several files with distinct content for meaningful embeddings
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn main() {\n    println!(\"hello world\");\n    run_server();\n}\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub struct Config {\n    name: String,\n    port: u16,\n}\n\nimpl Config {\n    pub fn new() -> Self {\n        Self { name: String::new(), port: 8080 }\n    }\n}\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join("src/server.rs"),
+            "pub fn run_server() {\n    let config = Config::new();\n    start_listener(config.port);\n}\n\nfn start_listener(port: u16) {\n    // bind to port\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // Full index + embedding pass
+        run_full_index(dir.path(), &store, None).expect("full index");
+        let emb_svc = EmbeddingService::new();
+        run_embedding_pass(dir.path(), &store, &emb_svc, None)
+            .await
+            .expect("embedding pass");
+
+        // Build HNSW from the stored embeddings
+        let hnsw_dir = dir.path().join("hnsw");
+        let all_embeddings = store
+            .get_all_embedding_ids_and_vectors(&project_path)
+            .expect("get all embeddings");
+        assert!(!all_embeddings.is_empty(), "should have embeddings");
+
+        // Determine dimension from first embedding
+        let dimension = all_embeddings[0].1.len();
+        let hnsw = Arc::new(HnswIndex::new(&hnsw_dir, dimension));
+        hnsw.initialize().await;
+        hnsw.batch_insert(&all_embeddings).await;
+
+        // Generate a query embedding
+        let query_text = "pub fn main";
+        let query_embedding = emb_svc.embed_text(query_text);
+        assert!(!query_embedding.is_empty(), "query embedding should not be empty");
+
+        let top_k = all_embeddings.len(); // Request all results to measure recall
+
+        // Brute-force search via IndexStore
+        let brute_results = store
+            .semantic_search(&query_embedding, &project_path, top_k)
+            .expect("brute force search");
+
+        // HNSW search
+        let hnsw_results = hnsw.search(&query_embedding, top_k).await;
+
+        // Both should return results
+        assert!(
+            !brute_results.is_empty(),
+            "brute force should return results"
+        );
+        assert!(
+            !hnsw_results.is_empty(),
+            "HNSW should return results"
+        );
+
+        // Both should return the same number of results
+        assert_eq!(
+            hnsw_results.len(),
+            brute_results.len(),
+            "HNSW and brute-force should return same number of results"
+        );
+
+        // Check recall: all brute-force files should appear in HNSW results.
+        // Since HNSW is approximate, we check that recall is >= 95%.
+        let hnsw_rowids: Vec<usize> = hnsw_results.iter().map(|(id, _)| *id).collect();
+        let hnsw_metadata = store.get_embeddings_by_rowids(&hnsw_rowids).expect("metadata");
+        let hnsw_files: std::collections::HashSet<&String> = hnsw_metadata
+            .values()
+            .map(|(fp, _, _)| fp)
+            .collect();
+
+        let brute_files: std::collections::HashSet<&String> = brute_results
+            .iter()
+            .map(|r| &r.file_path)
+            .collect();
+
+        // All files found by brute-force should also appear in HNSW results
+        let recall_files = brute_files
+            .iter()
+            .filter(|f| hnsw_files.contains(*f))
+            .count();
+        let total_files = brute_files.len();
+
+        assert!(
+            recall_files == total_files,
+            "HNSW should find all the same files as brute-force. \
+             Found {}/{} files. HNSW files: {:?}, brute files: {:?}",
+            recall_files,
+            total_files,
+            hnsw_files,
+            brute_files,
+        );
+
+        // Verify HNSW distances are valid (non-negative, within expected range)
+        for (id, distance) in &hnsw_results {
+            assert!(
+                *distance >= 0.0 && *distance <= 2.0,
+                "HNSW cosine distance for id {} should be in [0, 2], got {}",
+                id,
+                distance
+            );
+        }
+
+        // Verify brute-force similarities are valid
+        for result in &brute_results {
+            assert!(
+                result.similarity >= -1.0 && result.similarity <= 1.0,
+                "brute-force similarity for {} should be in [-1, 1], got {}",
+                result.file_path,
+                result.similarity
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Story-005: Stale ID exclusion after incremental file update
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn incremental_update_marks_old_embeddings_stale_in_hnsw() {
+        // This test directly verifies the stale ID tracking mechanism:
+        // 1. Build embeddings and HNSW index
+        // 2. Manually mark old rowids as stale (simulating what run_incremental_embedding does)
+        // 3. Verify stale IDs are excluded from search results
+        // 4. Verify new embeddings appear in search results
+
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(
+            dir.path().join("src/main.rs"),
+            "pub fn old_function() {\n    println!(\"old code\");\n}\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub struct Config {\n    name: String,\n}\n",
+        )
+        .expect("write");
+
+        let store = test_store();
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // Full index + embedding pass
+        run_full_index(dir.path(), &store, None).expect("full index");
+        let emb_svc = EmbeddingService::new();
+        run_embedding_pass(dir.path(), &store, &emb_svc, None)
+            .await
+            .expect("embedding pass");
+
+        // Build HNSW index from stored embeddings
+        let hnsw_dir = dir.path().join("hnsw");
+        let all_embeddings = store
+            .get_all_embedding_ids_and_vectors(&project_path)
+            .expect("get embeddings");
+        assert!(!all_embeddings.is_empty(), "should have embeddings");
+        let dimension = all_embeddings[0].1.len();
+        let hnsw = Arc::new(HnswIndex::new(&hnsw_dir, dimension));
+        hnsw.initialize().await;
+        hnsw.batch_insert(&all_embeddings).await;
+
+        // Identify which rowids belong to main.rs
+        let all_rowids: Vec<usize> = all_embeddings.iter().map(|(id, _)| *id).collect();
+        let all_metadata = store.get_embeddings_by_rowids(&all_rowids).expect("metadata");
+        let main_rs_rowids: Vec<usize> = all_metadata
+            .iter()
+            .filter(|(_, (fp, _, _))| fp.contains("main.rs"))
+            .map(|(id, _)| *id)
+            .collect();
+        assert!(
+            !main_rs_rowids.is_empty(),
+            "should have embeddings for main.rs"
+        );
+
+        // Verify main.rs embeddings appear in search results before marking stale
+        let query = emb_svc.embed_text("pub fn old_function");
+        let results_before = hnsw.search(&query, all_embeddings.len()).await;
+        let before_ids: Vec<usize> = results_before.iter().map(|(id, _)| *id).collect();
+        assert!(
+            main_rs_rowids.iter().any(|id| before_ids.contains(id)),
+            "main.rs embeddings should appear in search before marking stale"
+        );
+
+        // Mark main.rs embeddings as stale (simulating incremental update)
+        for rowid in &main_rs_rowids {
+            hnsw.mark_stale(*rowid).await;
+        }
+
+        let stale_count = hnsw.get_stale_count().await;
+        assert!(
+            stale_count > 0,
+            "should have stale IDs after marking, got {}",
+            stale_count
+        );
+        assert_eq!(
+            stale_count,
+            main_rs_rowids.len(),
+            "stale count should match number of main.rs embeddings"
+        );
+
+        // Verify main.rs embeddings are filtered from search results
+        let results_after = hnsw.search(&query, all_embeddings.len()).await;
+        let after_ids: Vec<usize> = results_after.iter().map(|(id, _)| *id).collect();
+        assert!(
+            !main_rs_rowids.iter().any(|id| after_ids.contains(id)),
+            "main.rs embeddings should be filtered from search after marking stale"
+        );
+
+        // Verify that non-stale embeddings (lib.rs) still appear
+        let lib_rs_rowids: Vec<usize> = all_metadata
+            .iter()
+            .filter(|(_, (fp, _, _))| fp.contains("lib.rs"))
+            .map(|(id, _)| *id)
+            .collect();
+        assert!(
+            lib_rs_rowids.iter().any(|id| after_ids.contains(id)),
+            "lib.rs embeddings should still appear in search (not stale)"
+        );
+
+        // Insert new embeddings for updated main.rs and verify they appear
+        let new_text = "pub fn new_function";
+        let new_embedding = emb_svc.embed_text(new_text);
+        let new_id = 9999; // Use a distinct ID
+        hnsw.insert(new_id, &new_embedding).await;
+
+        let results_with_new = hnsw.search(&new_embedding, 1).await;
+        assert!(!results_with_new.is_empty(), "should find the new embedding");
+        assert_eq!(
+            results_with_new[0].0, new_id,
+            "top result should be the newly inserted embedding"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Story-005: Periodic rebuild triggered when stale ratio exceeds 10%
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn periodic_rebuild_triggered_when_stale_threshold_exceeded() {
+        let dir = tempdir().expect("tempdir");
+        // Create many small files so we have enough embeddings to test the 10% threshold
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        for i in 0..12 {
+            fs::write(
+                dir.path().join(format!("src/mod_{}.rs", i)),
+                format!(
+                    "pub fn function_{}() {{\n    println!(\"hello from {}\");\n}}\n",
+                    i, i
+                ),
+            )
+            .expect("write");
+        }
+
+        let store = test_store();
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // Full index + embedding pass
+        run_full_index(dir.path(), &store, None).expect("full index");
+        let emb_svc = EmbeddingService::new();
+        run_embedding_pass(dir.path(), &store, &emb_svc, None)
+            .await
+            .expect("embedding pass");
+
+        // Build HNSW
+        let hnsw_dir = dir.path().join("hnsw");
+        let all_embeddings = store
+            .get_all_embedding_ids_and_vectors(&project_path)
+            .expect("get embeddings");
+        assert!(
+            all_embeddings.len() >= 10,
+            "need at least 10 embeddings for threshold test, got {}",
+            all_embeddings.len()
+        );
+        let dimension = all_embeddings[0].1.len();
+        let hnsw = Arc::new(HnswIndex::new(&hnsw_dir, dimension));
+        hnsw.initialize().await;
+        hnsw.batch_insert(&all_embeddings).await;
+
+        let total_before = hnsw.get_count().await;
+        assert!(!hnsw.needs_rebuild().await, "should not need rebuild initially");
+
+        // Mark >10% as stale manually
+        let stale_target = (total_before as f64 * 0.11).ceil() as usize;
+        for i in 0..stale_target {
+            if i < all_embeddings.len() {
+                hnsw.mark_stale(all_embeddings[i].0).await;
+            }
+        }
+
+        assert!(
+            hnsw.needs_rebuild().await,
+            "should need rebuild after marking >10% as stale"
+        );
+
+        // Simulate what the incremental function does: check and rebuild
+        if hnsw.needs_rebuild().await {
+            rebuild_hnsw_after_embedding(&store, &project_path, &hnsw)
+                .await
+                .expect("rebuild should succeed");
+        }
+
+        // After rebuild: stale count should be 0, count should be restored
+        assert_eq!(
+            hnsw.get_stale_count().await,
+            0,
+            "stale count should be 0 after rebuild"
+        );
+        assert!(
+            hnsw.get_count().await > 0,
+            "should have vectors after rebuild"
+        );
+        assert!(
+            !hnsw.needs_rebuild().await,
+            "should not need rebuild after fresh rebuild"
+        );
+
+        // Verify search still works after rebuild
+        let query = emb_svc.embed_text("pub fn function_5");
+        let results = hnsw.search(&query, 5).await;
+        assert!(
+            !results.is_empty(),
+            "search should return results after rebuild"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Story-005: trigger_reindex creates fresh HNSW index (IndexManager test)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn trigger_reindex_creates_fresh_hnsw() {
+        let dim = 16;
+        let hnsw_dir = tempdir().expect("tempdir");
+        let hnsw = Arc::new(HnswIndex::new(hnsw_dir.path().join("hnsw"), dim));
+        hnsw.initialize().await;
+
+        // Insert some vectors and mark some as stale
+        for i in 0..20 {
+            let mut v = vec![0.0f32; dim];
+            v[i % dim] = 1.0;
+            hnsw.insert(i, &v).await;
+        }
+        for i in 0..5 {
+            hnsw.mark_stale(i).await;
+        }
+
+        assert_eq!(hnsw.get_count().await, 20);
+        assert_eq!(hnsw.get_stale_count().await, 5);
+        assert!(hnsw.needs_rebuild().await); // 5/20 = 25% > 10%
+
+        // Reset (simulating what trigger_reindex does: discard old, create fresh)
+        hnsw.reset().await;
+
+        assert_eq!(hnsw.get_count().await, 0);
+        assert_eq!(hnsw.get_stale_count().await, 0);
+        assert!(hnsw.is_ready().await);
+        assert!(!hnsw.needs_rebuild().await);
+
+        // Re-insert to verify the fresh index works
+        for i in 0..10 {
+            let mut v = vec![0.0f32; dim];
+            v[i % dim] = 1.0;
+            hnsw.insert(i, &v).await;
+        }
+        assert_eq!(hnsw.get_count().await, 10);
+
+        let mut query = vec![0.0f32; dim];
+        query[3] = 1.0;
+        let results = hnsw.search(&query, 1).await;
+        assert!(!results.is_empty(), "search should work on fresh index");
+        assert_eq!(results[0].0, 3, "should find the matching vector");
     }
 }
