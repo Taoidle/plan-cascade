@@ -43,10 +43,10 @@ use crate::services::llm::{
 use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::services::tools::{
-    build_project_summary, build_system_prompt, build_tool_call_instructions, detect_language,
-    extract_text_without_tool_calls, format_tool_result, get_basic_tool_definitions,
-    get_tool_definitions, merge_system_prompts, parse_tool_calls, ParsedToolCall, TaskContext,
-    TaskExecutionResult, TaskSpawner, ToolExecutor,
+    build_project_summary, build_skills_section, build_system_prompt_with_memories,
+    build_tool_call_instructions, detect_language, extract_text_without_tool_calls,
+    format_tool_result, get_basic_tool_definitions, get_tool_definitions, merge_system_prompts,
+    parse_tool_calls, ParsedToolCall, TaskContext, TaskExecutionResult, TaskSpawner, ToolExecutor,
 };
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -304,6 +304,12 @@ pub struct OrchestratorService {
     detected_language: Mutex<Option<String>>,
     /// Lifecycle hooks for cross-cutting concerns (memory, skills, etc.)
     hooks: crate::services::orchestrator::hooks::AgenticHooks,
+    /// Shared selected skills from skill hooks for system prompt injection.
+    /// Populated by `on_session_start` and `on_user_message` hooks.
+    selected_skills: Option<Arc<RwLock<Vec<crate::services::skills::model::SkillMatch>>>>,
+    /// Shared loaded memories from memory hooks for system prompt injection.
+    /// Populated by `on_session_start` hook.
+    loaded_memories: Option<Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>>>,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances

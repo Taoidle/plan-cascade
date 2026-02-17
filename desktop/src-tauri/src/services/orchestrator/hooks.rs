@@ -24,6 +24,14 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use crate::services::memory::store::ProjectMemoryStore;
+use crate::services::memory::retrieval::search_memories;
+use crate::services::memory::store::{MemorySearchRequest, NewMemoryEntry, MemoryCategory};
+use crate::services::skills::model::{InjectionPhase, SelectionPolicy, SkillIndex, SkillMatch};
+use crate::services::skills::select::select_skills_for_session;
 
 /// Context provided to all hooks, describing the current session state.
 #[derive(Debug, Clone)]
@@ -469,6 +477,254 @@ pub fn build_default_hooks() -> AgenticHooks {
     hooks
 }
 
+/// Register Skill-related hooks onto an AgenticHooks instance.
+///
+/// This wires the SkillIndex into the agentic lifecycle:
+///
+/// 1. **on_session_start**: Auto-detect applicable skills for the project
+///    using the SkillIndex detection rules and store selected skills.
+///
+/// 2. **on_user_message**: Refine skill selection based on user message
+///    content using lexical scoring.
+///
+/// The selected skills are stored in the `Arc<RwLock<Vec<SkillMatch>>>` shared
+/// state, which can be read by the system prompt builder to inject skill content.
+pub fn register_skill_hooks(
+    hooks: &mut AgenticHooks,
+    skill_index: Arc<RwLock<SkillIndex>>,
+    policy: SelectionPolicy,
+    selected_skills: Arc<RwLock<Vec<SkillMatch>>>,
+) {
+    // on_session_start: auto-detect applicable skills for the project
+    let index_clone = skill_index.clone();
+    let policy_clone = policy.clone();
+    let skills_store = selected_skills.clone();
+    hooks.register_on_session_start(Box::new(move |ctx| {
+        let index = index_clone.clone();
+        let policy = policy_clone.clone();
+        let store = skills_store.clone();
+        Box::pin(async move {
+            let guard = index.read().await;
+            let matches = select_skills_for_session(
+                &guard,
+                &ctx.project_path,
+                "", // no user message yet at session start
+                &InjectionPhase::Always,
+                &policy,
+            );
+            let count = matches.len();
+            let mut w = store.write().await;
+            *w = matches;
+            eprintln!(
+                "[hooks] Skill detection: session={}, detected_skills={}",
+                ctx.session_id, count,
+            );
+            Ok(())
+        })
+    }));
+
+    // on_user_message: refine skill selection based on message content
+    let index_clone2 = skill_index.clone();
+    let policy_clone2 = policy;
+    let skills_store2 = selected_skills;
+    hooks.register_on_user_message(Box::new(move |ctx, msg| {
+        let index = index_clone2.clone();
+        let policy = policy_clone2.clone();
+        let store = skills_store2.clone();
+        Box::pin(async move {
+            let guard = index.read().await;
+            let matches = select_skills_for_session(
+                &guard,
+                &ctx.project_path,
+                &msg,
+                &InjectionPhase::Always,
+                &policy,
+            );
+            if !matches.is_empty() {
+                let mut w = store.write().await;
+                *w = matches;
+            }
+            Ok(None) // do not modify the message
+        })
+    }));
+}
+
+/// Register Memory-related hooks onto an AgenticHooks instance.
+///
+/// This wires the ProjectMemoryStore into the agentic lifecycle:
+///
+/// 1. **on_session_start**: Load relevant memories for the project and store
+///    them for system prompt injection.
+///
+/// 2. **on_session_end**: Extract new memories from the session summary
+///    and persist them using the MemoryExtractor heuristic approach.
+///
+/// 3. **on_compaction**: Extract key information from compacted content
+///    snippets and store them as memories for future sessions.
+///
+/// The loaded memories are stored in the `Arc<RwLock<Vec<MemoryEntry>>>` shared
+/// state, which can be read by the system prompt builder.
+pub fn register_memory_hooks(
+    hooks: &mut AgenticHooks,
+    memory_store: Arc<ProjectMemoryStore>,
+    loaded_memories: Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>>,
+) {
+    // on_session_start: load relevant memories for this project
+    let store_clone = memory_store.clone();
+    let memories_out = loaded_memories.clone();
+    hooks.register_on_session_start(Box::new(move |ctx| {
+        let store = store_clone.clone();
+        let out = memories_out.clone();
+        Box::pin(async move {
+            let project_path = ctx.project_path.to_string_lossy().to_string();
+            let request = MemorySearchRequest {
+                project_path,
+                query: String::new(), // empty query = load by importance
+                categories: None,
+                top_k: 10,
+                min_importance: 0.1,
+            };
+            match search_memories(&store, &request) {
+                Ok(results) => {
+                    let count = results.len();
+                    let entries: Vec<_> = results.into_iter().map(|r| r.entry).collect();
+                    let mut w = out.write().await;
+                    *w = entries;
+                    eprintln!(
+                        "[hooks] Memory loaded: session={}, memories={}",
+                        ctx.session_id, count,
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[hooks] Memory load failed: session={}, error={}",
+                        ctx.session_id, e,
+                    );
+                }
+            }
+            Ok(())
+        })
+    }));
+
+    // on_session_end: extract new memories from the session summary
+    let store_clone2 = memory_store.clone();
+    hooks.register_on_session_end(Box::new(move |ctx, summary| {
+        let store = store_clone2.clone();
+        Box::pin(async move {
+            let project_path = ctx.project_path.to_string_lossy().to_string();
+
+            // Build a simple conversation summary from the available data
+            let conversation_summary = format!(
+                "Task: {}. {} files read. {} key findings. {} tool calls across {} turns. Success: {}.",
+                summary.task_description,
+                summary.files_read.len(),
+                summary.key_findings.len(),
+                summary.tool_usage.values().sum::<usize>(),
+                summary.total_turns,
+                summary.success,
+            );
+
+            // Load existing memories to avoid duplicates
+            let existing = store
+                .list_memories(&project_path, None, 0, 100)
+                .unwrap_or_default();
+
+            // Use rule-based extraction from key_findings
+            // (LLM-based extraction requires an LLM call which is not available here)
+            let mut new_memories = Vec::new();
+            for finding in &summary.key_findings {
+                if finding.trim().is_empty() {
+                    continue;
+                }
+                // Skip if similar content already exists
+                let already_exists = existing.iter().any(|m| m.content.contains(finding.as_str()));
+                if already_exists {
+                    continue;
+                }
+                new_memories.push(NewMemoryEntry {
+                    project_path: project_path.clone(),
+                    category: MemoryCategory::Fact,
+                    content: finding.clone(),
+                    keywords: crate::services::memory::retrieval::extract_query_keywords(finding),
+                    importance: 0.5,
+                    source_session_id: Some(ctx.session_id.clone()),
+                    source_context: Some(conversation_summary.clone()),
+                });
+            }
+
+            let count = new_memories.len();
+            if !new_memories.is_empty() {
+                match store.add_memories(new_memories) {
+                    Ok(_) => {
+                        eprintln!(
+                            "[hooks] Memory extracted: session={}, new_memories={}",
+                            ctx.session_id, count,
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[hooks] Memory extraction failed: session={}, error={}",
+                            ctx.session_id, e,
+                        );
+                    }
+                }
+            }
+            Ok(())
+        })
+    }));
+
+    // on_compaction: extract key information from compacted content
+    let store_clone3 = memory_store;
+    hooks.register_on_compaction(Box::new(move |ctx, snippets| {
+        let store = store_clone3.clone();
+        Box::pin(async move {
+            let project_path = ctx.project_path.to_string_lossy().to_string();
+
+            // Extract potential memories from compacted snippets
+            let mut new_memories = Vec::new();
+            for snippet in &snippets {
+                // Only extract from substantial snippets
+                if snippet.len() < 50 {
+                    continue;
+                }
+                // Limit each snippet contribution
+                let content = if snippet.len() > 200 {
+                    format!("{}...", &snippet[..200])
+                } else {
+                    snippet.clone()
+                };
+                new_memories.push(NewMemoryEntry {
+                    project_path: project_path.clone(),
+                    category: MemoryCategory::Fact,
+                    content,
+                    keywords: crate::services::memory::retrieval::extract_query_keywords(snippet),
+                    importance: 0.3, // lower importance for compacted content
+                    source_session_id: Some(ctx.session_id.clone()),
+                    source_context: Some("compaction".to_string()),
+                });
+            }
+
+            let count = new_memories.len();
+            if !new_memories.is_empty() {
+                // Use upsert to avoid duplicates
+                for entry in new_memories {
+                    if let Err(e) = store.upsert_memory(entry) {
+                        eprintln!(
+                            "[hooks] Compaction memory upsert failed: session={}, error={}",
+                            ctx.session_id, e,
+                        );
+                    }
+                }
+                eprintln!(
+                    "[hooks] Compaction memory extracted: session={}, candidates={}",
+                    ctx.session_id, count,
+                );
+            }
+            Ok(())
+        })
+    }));
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -864,5 +1120,353 @@ mod tests {
             Box::pin(async move { Ok(()) })
         }));
         assert_eq!(hooks.total_hooks(), 2);
+    }
+
+    // ========================================================================
+    // Story-001: register_skill_hooks tests
+    // ========================================================================
+
+    #[test]
+    fn test_register_skill_hooks_adds_two_hooks() {
+        let mut hooks = AgenticHooks::new();
+        assert_eq!(hooks.total_hooks(), 0);
+
+        let skill_index = Arc::new(RwLock::new(SkillIndex::new(vec![])));
+        let policy = SelectionPolicy::default();
+        let selected_skills = Arc::new(RwLock::new(Vec::new()));
+
+        register_skill_hooks(&mut hooks, skill_index, policy, selected_skills);
+
+        // Should register 2 hooks: on_session_start + on_user_message
+        assert_eq!(hooks.total_hooks(), 2);
+    }
+
+    #[test]
+    fn test_register_skill_hooks_plus_defaults() {
+        let mut hooks = build_default_hooks();
+        assert_eq!(hooks.total_hooks(), 3); // default = 3
+
+        let skill_index = Arc::new(RwLock::new(SkillIndex::new(vec![])));
+        let policy = SelectionPolicy::default();
+        let selected_skills = Arc::new(RwLock::new(Vec::new()));
+
+        register_skill_hooks(&mut hooks, skill_index, policy, selected_skills);
+
+        // defaults(3) + skill hooks(2) = 5
+        assert_eq!(hooks.total_hooks(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_register_skill_hooks_session_start_fires() {
+        let mut hooks = AgenticHooks::new();
+
+        let skill_index = Arc::new(RwLock::new(SkillIndex::new(vec![])));
+        let policy = SelectionPolicy::default();
+        let selected_skills: Arc<RwLock<Vec<SkillMatch>>> = Arc::new(RwLock::new(Vec::new()));
+
+        register_skill_hooks(&mut hooks, skill_index, policy, selected_skills.clone());
+
+        let ctx = test_context();
+        // Should not panic, and should set selected_skills (empty index -> empty result)
+        hooks.fire_on_session_start(&ctx).await;
+
+        let skills = selected_skills.read().await;
+        // With empty index, no skills detected
+        assert!(skills.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_register_skill_hooks_user_message_fires() {
+        let mut hooks = AgenticHooks::new();
+
+        let skill_index = Arc::new(RwLock::new(SkillIndex::new(vec![])));
+        let policy = SelectionPolicy::default();
+        let selected_skills: Arc<RwLock<Vec<SkillMatch>>> = Arc::new(RwLock::new(Vec::new()));
+
+        register_skill_hooks(&mut hooks, skill_index, policy, selected_skills.clone());
+
+        let ctx = test_context();
+        // user_message hook should not modify the message
+        let result = hooks.fire_on_user_message(&ctx, "test message".to_string()).await;
+        assert_eq!(result, "test message", "Skill hook should not modify the user message");
+    }
+
+    // ========================================================================
+    // Story-002: register_memory_hooks tests
+    // ========================================================================
+
+    fn create_test_memory_store() -> Arc<ProjectMemoryStore> {
+        let db = crate::storage::database::Database::new_in_memory().unwrap();
+        let embedding_service = Arc::new(
+            crate::services::orchestrator::embedding_service::EmbeddingService::new(),
+        );
+        Arc::new(ProjectMemoryStore::from_database(&db, embedding_service))
+    }
+
+    #[test]
+    fn test_register_memory_hooks_adds_three_hooks() {
+        let mut hooks = AgenticHooks::new();
+        assert_eq!(hooks.total_hooks(), 0);
+
+        let store = create_test_memory_store();
+        let loaded_memories = Arc::new(RwLock::new(Vec::new()));
+
+        register_memory_hooks(&mut hooks, store, loaded_memories);
+
+        // Should register 3 hooks: on_session_start + on_session_end + on_compaction
+        assert_eq!(hooks.total_hooks(), 3);
+    }
+
+    #[test]
+    fn test_register_memory_hooks_plus_defaults() {
+        let mut hooks = build_default_hooks();
+        assert_eq!(hooks.total_hooks(), 3);
+
+        let store = create_test_memory_store();
+        let loaded_memories = Arc::new(RwLock::new(Vec::new()));
+
+        register_memory_hooks(&mut hooks, store, loaded_memories);
+
+        // defaults(3) + memory hooks(3) = 6
+        assert_eq!(hooks.total_hooks(), 6);
+    }
+
+    #[tokio::test]
+    async fn test_register_memory_hooks_session_start_fires() {
+        let mut hooks = AgenticHooks::new();
+
+        let store = create_test_memory_store();
+        let loaded_memories: Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>> =
+            Arc::new(RwLock::new(Vec::new()));
+
+        register_memory_hooks(&mut hooks, store, loaded_memories.clone());
+
+        let ctx = test_context();
+        // Should not panic, and should attempt to load memories (empty store -> empty result)
+        hooks.fire_on_session_start(&ctx).await;
+
+        let memories = loaded_memories.read().await;
+        assert!(memories.is_empty(), "Empty store should yield no memories");
+    }
+
+    #[tokio::test]
+    async fn test_register_memory_hooks_session_end_extracts_findings() {
+        let mut hooks = AgenticHooks::new();
+
+        let store = create_test_memory_store();
+        let loaded_memories = Arc::new(RwLock::new(Vec::new()));
+
+        register_memory_hooks(&mut hooks, store.clone(), loaded_memories);
+
+        let ctx = test_context();
+        let summary = SessionSummary {
+            task_description: "Fix authentication bug".to_string(),
+            files_read: vec!["src/auth.rs".to_string()],
+            key_findings: vec![
+                "The token expiry was set to 0 instead of 3600".to_string(),
+                "JWT validation was bypassed for admin routes".to_string(),
+            ],
+            tool_usage: HashMap::new(),
+            total_turns: 5,
+            success: true,
+        };
+
+        hooks.fire_on_session_end(&ctx, summary).await;
+
+        // Verify memories were extracted from key_findings
+        let project_path = ctx.project_path.to_string_lossy().to_string();
+        let memories = store.list_memories(&project_path, None, 0, 100).unwrap_or_default();
+        assert_eq!(
+            memories.len(),
+            2,
+            "Should have extracted 2 memories from key_findings"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_register_memory_hooks_compaction_fires() {
+        let mut hooks = AgenticHooks::new();
+
+        let store = create_test_memory_store();
+        let loaded_memories = Arc::new(RwLock::new(Vec::new()));
+
+        register_memory_hooks(&mut hooks, store.clone(), loaded_memories);
+
+        let ctx = test_context();
+        let snippets = vec![
+            "The authentication module uses JWT tokens with RSA256 signing for stateless session management across microservices".to_string(),
+            "short".to_string(), // too short, should be skipped
+        ];
+
+        hooks.fire_on_compaction(&ctx, snippets).await;
+
+        // Only the substantial snippet should be stored
+        let project_path = ctx.project_path.to_string_lossy().to_string();
+        let memories = store.list_memories(&project_path, None, 0, 100).unwrap_or_default();
+        assert_eq!(
+            memories.len(),
+            1,
+            "Should have extracted 1 memory from substantial snippet, skipping short one"
+        );
+    }
+
+    #[test]
+    fn test_register_all_hooks_combined() {
+        let mut hooks = build_default_hooks();
+        assert_eq!(hooks.total_hooks(), 3);
+
+        // Register skill hooks
+        let skill_index = Arc::new(RwLock::new(SkillIndex::new(vec![])));
+        let policy = SelectionPolicy::default();
+        let selected_skills = Arc::new(RwLock::new(Vec::new()));
+        register_skill_hooks(&mut hooks, skill_index, policy, selected_skills);
+
+        // Register memory hooks
+        let store = create_test_memory_store();
+        let loaded_memories = Arc::new(RwLock::new(Vec::new()));
+        register_memory_hooks(&mut hooks, store, loaded_memories);
+
+        // defaults(3) + skill(2) + memory(3) = 8
+        assert_eq!(hooks.total_hooks(), 8);
+        assert!(!hooks.is_empty());
+    }
+
+    // ========================================================================
+    // Story-005: End-to-end integration tests
+    // ========================================================================
+
+    /// Full lifecycle integration test:
+    /// 1. Build hooks with defaults + skill + memory
+    /// 2. Fire session_start -> skills detected, memories loaded
+    /// 3. Fire user_message -> skill selection refined
+    /// 4. Fire session_end -> memories extracted from findings
+    /// 5. Fire compaction -> memories extracted from snippets
+    /// 6. Verify shared state correctness at each step
+    #[tokio::test]
+    async fn test_full_session_lifecycle_wire_up() {
+        // 1. Build hooks with all registrations
+        let mut hooks = build_default_hooks();
+        let initial_count = hooks.total_hooks();
+        assert_eq!(initial_count, 3, "Default hooks should have 3");
+
+        // Skill setup
+        let skill_index = Arc::new(RwLock::new(SkillIndex::new(vec![])));
+        let policy = SelectionPolicy::default();
+        let selected_skills: Arc<RwLock<Vec<SkillMatch>>> = Arc::new(RwLock::new(Vec::new()));
+        register_skill_hooks(
+            &mut hooks,
+            skill_index,
+            policy,
+            selected_skills.clone(),
+        );
+
+        // Memory setup
+        let store = create_test_memory_store();
+        let loaded_memories: Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>> =
+            Arc::new(RwLock::new(Vec::new()));
+        register_memory_hooks(&mut hooks, store.clone(), loaded_memories.clone());
+
+        assert_eq!(hooks.total_hooks(), 8, "defaults(3) + skill(2) + memory(3) = 8");
+
+        let ctx = test_context();
+
+        // 2. Fire session_start -> skills detected, memories loaded
+        hooks.fire_on_session_start(&ctx).await;
+        {
+            let skills = selected_skills.read().await;
+            assert!(skills.is_empty(), "Empty index should yield no skills");
+        }
+        {
+            let memories = loaded_memories.read().await;
+            assert!(memories.is_empty(), "Empty store should yield no memories");
+        }
+
+        // 3. Fire user_message -> skill selection refined
+        let msg = hooks
+            .fire_on_user_message(&ctx, "implement the Rust module".to_string())
+            .await;
+        assert_eq!(msg, "implement the Rust module", "Message should not be modified");
+
+        // 4. Fire session_end -> memories extracted
+        let summary = SessionSummary {
+            task_description: "Implement authentication module".to_string(),
+            files_read: vec!["src/auth.rs".to_string(), "src/main.rs".to_string()],
+            key_findings: vec![
+                "The auth module uses JWT with RS256 signing".to_string(),
+                "Session tokens expire after 3600 seconds".to_string(),
+            ],
+            tool_usage: {
+                let mut m = HashMap::new();
+                m.insert("Read".to_string(), 5);
+                m.insert("Edit".to_string(), 3);
+                m
+            },
+            total_turns: 8,
+            success: true,
+        };
+        hooks.fire_on_session_end(&ctx, summary).await;
+
+        // Verify memories were stored
+        let project_path = ctx.project_path.to_string_lossy().to_string();
+        let stored = store.list_memories(&project_path, None, 0, 100).unwrap_or_default();
+        assert_eq!(
+            stored.len(),
+            2,
+            "Should have stored 2 memories from key_findings"
+        );
+
+        // 5. Fire compaction -> more memories
+        let snippets = vec![
+            "The database schema uses foreign key constraints with CASCADE delete for referential integrity across all entity tables".to_string(),
+        ];
+        hooks.fire_on_compaction(&ctx, snippets).await;
+
+        let stored_after = store.list_memories(&project_path, None, 0, 100).unwrap_or_default();
+        assert_eq!(
+            stored_after.len(),
+            3,
+            "Should now have 3 memories (2 from findings + 1 from compaction)"
+        );
+    }
+
+    /// Verify that sub-agent hooks remain empty per design.
+    /// Sub-agents should NOT inherit parent hooks because they have
+    /// independent context windows.
+    #[test]
+    fn test_sub_agent_hooks_remain_empty() {
+        // Sub-agents are constructed with AgenticHooks::new() (empty)
+        let sub_agent_hooks = AgenticHooks::new();
+        assert!(sub_agent_hooks.is_empty());
+        assert_eq!(sub_agent_hooks.total_hooks(), 0);
+    }
+
+    /// Verify that the full hook set produces the expected hook distribution.
+    #[test]
+    fn test_hook_distribution_after_full_registration() {
+        let mut hooks = build_default_hooks();
+
+        let skill_index = Arc::new(RwLock::new(SkillIndex::new(vec![])));
+        let policy = SelectionPolicy::default();
+        let selected_skills = Arc::new(RwLock::new(Vec::new()));
+        register_skill_hooks(&mut hooks, skill_index, policy, selected_skills);
+
+        let store = create_test_memory_store();
+        let loaded_memories = Arc::new(RwLock::new(Vec::new()));
+        register_memory_hooks(&mut hooks, store, loaded_memories);
+
+        // Expected distribution:
+        // on_session_start: 1 (default) + 1 (skill) + 1 (memory) = 3
+        // on_user_message: 1 (skill) = 1
+        // on_session_end: 1 (default) + 1 (memory) = 2
+        // on_compaction: 1 (default) + 1 (memory) = 2
+        // Total: 3 + 1 + 2 + 2 = 8
+        assert_eq!(hooks.total_hooks(), 8);
+
+        // Verify the debug format reflects the distribution
+        let debug = format!("{:?}", hooks);
+        assert!(debug.contains("on_session_start: 3"));
+        assert!(debug.contains("on_user_message: 1"));
+        assert!(debug.contains("on_session_end: 2"));
+        assert!(debug.contains("on_compaction: 2"));
     }
 }
