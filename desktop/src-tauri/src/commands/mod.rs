@@ -5,6 +5,8 @@
 
 pub mod agent_composer;
 pub mod agents;
+pub mod evaluation;
+pub mod graph_workflow;
 pub mod analytics;
 pub mod claude_code;
 pub mod design;
@@ -32,6 +34,8 @@ pub mod worktree;
 
 pub use agent_composer::*;
 pub use agents::*;
+pub use evaluation::*;
+pub use graph_workflow::*;
 pub use analytics::*;
 pub use claude_code::*;
 pub use design::*;

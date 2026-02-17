@@ -219,6 +219,20 @@ pub use commands::{
     get_agent_pipeline,
     list_agent_pipelines,
     update_agent_pipeline,
+    // Graph Workflow commands
+    list_graph_workflows,
+    get_graph_workflow,
+    create_graph_workflow,
+    update_graph_workflow,
+    delete_graph_workflow,
+    // Evaluation commands
+    list_evaluators,
+    create_evaluator,
+    delete_evaluator,
+    create_evaluation_run,
+    list_evaluation_runs,
+    get_evaluation_reports,
+    delete_evaluation_run,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,
