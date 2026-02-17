@@ -213,6 +213,12 @@ pub use commands::{
     remove_custom_rule,
     toggle_guardrail,
     GuardrailState,
+    // Agent Composer commands
+    create_agent_pipeline,
+    delete_agent_pipeline,
+    get_agent_pipeline,
+    list_agent_pipelines,
+    update_agent_pipeline,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,

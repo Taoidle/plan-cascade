@@ -3,6 +3,7 @@
 //! Contains all Tauri command handlers that can be called from the frontend.
 //! These are the IPC entry points for the application.
 
+pub mod agent_composer;
 pub mod agents;
 pub mod analytics;
 pub mod claude_code;
@@ -29,6 +30,7 @@ pub mod strategy;
 pub mod timeline;
 pub mod worktree;
 
+pub use agent_composer::*;
 pub use agents::*;
 pub use analytics::*;
 pub use claude_code::*;
