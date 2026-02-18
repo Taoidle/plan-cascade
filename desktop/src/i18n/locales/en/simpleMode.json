@@ -161,6 +161,8 @@
     "manageAll": "Manage All...",
     "loading": "Loading plugins...",
     "noPlugins": "No plugins discovered",
-    "enabledCount": "{{count}} enabled"
+    "enabledCount": "{{count}} enabled",
+    "marketplace": "Marketplace",
+    "installFromUrl": "Install from URL"
   }
 }

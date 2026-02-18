@@ -14,5 +14,8 @@ pub mod loader;
 pub mod dispatcher;
 pub mod manager;
 pub mod lifecycle;
+pub mod settings;
+pub mod registry;
+pub mod installer;
 
 pub use models::*;

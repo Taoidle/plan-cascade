@@ -154,5 +154,15 @@
     "content": "内容",
     "keywords": "キーワード",
     "activeSkillsTooltip": "{{count}} 個のアクティブスキル"
+  },
+
+  "pluginPanel": {
+    "title": "プラグイン",
+    "manageAll": "すべて管理...",
+    "loading": "プラグインを読み込み中...",
+    "noPlugins": "プラグインが見つかりません",
+    "enabledCount": "{{count}} 個が有効",
+    "marketplace": "マーケットプレイス",
+    "installFromUrl": "URLからインストール"
   }
 }

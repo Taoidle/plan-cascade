@@ -6,11 +6,13 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::models::response::CommandResponse;
+use crate::services::plugins::installer;
 use crate::services::plugins::manager::PluginManager;
 use crate::services::plugins::models::*;
+use crate::services::plugins::registry;
 
 // ============================================================================
 // Plugin State
@@ -242,6 +244,122 @@ pub async fn install_plugin(
         )),
         Err(e) => Ok(CommandResponse::err(e)),
     }
+}
+
+/// Fetch marketplace plugins from the registry.
+///
+/// Fetches the remote registry and enriches each entry with local
+/// install/enable status from the PluginManager.
+#[tauri::command]
+pub async fn fetch_marketplace(
+    registry_url: Option<String>,
+    state: State<'_, PluginState>,
+) -> Result<CommandResponse<Vec<MarketplacePlugin>>, String> {
+    let reg = registry::fetch_registry(registry_url.as_deref()).await;
+
+    let installed_plugins = state
+        .with_manager(|m| m.list_plugins())
+        .await
+        .unwrap_or_default();
+
+    let marketplace: Vec<MarketplacePlugin> = reg
+        .plugins
+        .into_iter()
+        .map(|entry| {
+            let local = installed_plugins
+                .iter()
+                .find(|p| p.name == entry.name);
+            MarketplacePlugin {
+                installed: local.is_some(),
+                enabled: local.map_or(false, |p| p.enabled),
+                entry,
+            }
+        })
+        .collect();
+
+    Ok(CommandResponse::ok(marketplace))
+}
+
+/// Install a plugin from a git URL.
+///
+/// Clones the repository, validates plugin.json, installs to managed
+/// plugins directory, and refreshes the plugin manager.
+#[tauri::command]
+pub async fn install_plugin_from_git(
+    git_url: String,
+    app: AppHandle,
+    state: State<'_, PluginState>,
+) -> Result<CommandResponse<PluginInfo>, String> {
+    // Do the heavy git clone work OUTSIDE the PluginState lock
+    let manifest = match installer::install_from_git(&git_url, &app).await {
+        Ok(m) => m,
+        Err(e) => return Ok(CommandResponse::err(e)),
+    };
+
+    // Brief lock to refresh and get the installed plugin info
+    let result = state
+        .with_manager_mut(|m| {
+            m.refresh_plugins();
+            m.get_plugin(&manifest.name).map(|p| p.to_info())
+        })
+        .await;
+
+    match result {
+        Ok(Some(info)) => Ok(CommandResponse::ok(info)),
+        Ok(None) => Ok(CommandResponse::err(
+            "Plugin installed but not found after refresh".to_string(),
+        )),
+        Err(e) => Ok(CommandResponse::err(e)),
+    }
+}
+
+/// Uninstall a plugin by name.
+///
+/// Only plugins with `ProjectLocal` source can be uninstalled.
+/// Removes the plugin directory and refreshes the plugin manager.
+#[tauri::command]
+pub async fn uninstall_plugin(
+    name: String,
+    state: State<'_, PluginState>,
+) -> Result<CommandResponse<bool>, String> {
+    // Verify the plugin exists and is ProjectLocal source
+    let is_project_local = state
+        .with_manager(|m| {
+            m.get_plugin(&name)
+                .map(|p| p.source == PluginSource::ProjectLocal)
+        })
+        .await;
+
+    match is_project_local {
+        Ok(Some(true)) => {}
+        Ok(Some(false)) => {
+            return Ok(CommandResponse::err(format!(
+                "Only project-local plugins can be uninstalled. Plugin '{}' has a different source.",
+                name
+            )));
+        }
+        Ok(None) => {
+            return Ok(CommandResponse::err(format!(
+                "Plugin not found: {}",
+                name
+            )));
+        }
+        Err(e) => return Ok(CommandResponse::err(e)),
+    }
+
+    // Remove the plugin directory
+    if let Err(e) = installer::uninstall_plugin(&name) {
+        return Ok(CommandResponse::err(e));
+    }
+
+    // Refresh to remove the plugin from the manager
+    let _ = state
+        .with_manager_mut(|m| {
+            m.refresh_plugins();
+        })
+        .await;
+
+    Ok(CommandResponse::ok(true))
 }
 
 /// Recursively copy a directory.

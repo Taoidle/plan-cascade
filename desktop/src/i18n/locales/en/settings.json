@@ -543,7 +543,32 @@
       "description": "Place plugins in your project's .claude-plugin/ directory, ~/.claude/plugins/cache/, or ~/.plan-cascade/plugins/."
     },
     "summary": "{{count}} plugin discovered, {{enabled}} enabled",
-    "summary_plural": "{{count}} plugins discovered, {{enabled}} enabled"
+    "summary_plural": "{{count}} plugins discovered, {{enabled}} enabled",
+    "marketplace": "Marketplace",
+    "installedTab": "Installed",
+    "installed": "Installed",
+    "install": "Install",
+    "installFromUrl": "Install from URL",
+    "installFromUrlDesc": "Enter the git URL of a Claude Code plugin repository to install it.",
+    "gitUrlPlaceholder": "https://github.com/user/plugin-repo.git",
+    "invalidGitUrl": "URL must start with https://, http://, or git@",
+    "installing": "Installing plugin...",
+    "installSuccess": "Plugin \"{{name}}\" installed successfully",
+    "installFailed": "Failed to install plugin",
+    "uninstall": "Uninstall",
+    "uninstallConfirm": "Are you sure you want to uninstall \"{{name}}\"?",
+    "uninstallDesc": "This will remove the plugin from your system.",
+    "uninstallSuccess": "Plugin \"{{name}}\" uninstalled",
+    "uninstallFailed": "Failed to uninstall plugin",
+    "browseMarketplace": "Browse Marketplace",
+    "allCategories": "All",
+    "searchMarketplace": "Search marketplace...",
+    "noMarketplaceResults": "No plugins found",
+    "offlineRegistry": "Using offline registry (network unavailable)",
+    "stars": "stars",
+    "downloads": "downloads",
+    "alreadyInstalled": "Already installed",
+    "cancel": "Cancel"
   },
 
   "security": {

@@ -8,7 +8,7 @@
 import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
-import { GearIcon } from '@radix-ui/react-icons';
+import { GearIcon, GlobeIcon } from '@radix-ui/react-icons';
 import { usePluginStore } from '../../store/plugins';
 import { getPluginSourceLabel } from '../../types/plugin';
 
@@ -25,6 +25,7 @@ export function PluginPanel() {
   const loadPlugins = usePluginStore((s) => s.loadPlugins);
   const togglePlugin = usePluginStore((s) => s.togglePlugin);
   const openDialog = usePluginStore((s) => s.openDialog);
+  const setActiveTab = usePluginStore((s) => s.setActiveTab);
 
   // Load data when panel opens
   useEffect(() => {
@@ -43,6 +44,11 @@ export function PluginPanel() {
   const handleManageAll = useCallback(() => {
     openDialog();
   }, [openDialog]);
+
+  const handleMarketplace = useCallback(() => {
+    setActiveTab('marketplace');
+    openDialog();
+  }, [setActiveTab, openDialog]);
 
   if (!panelOpen) return null;
 
@@ -150,18 +156,31 @@ export function PluginPanel() {
         ))}
       </div>
 
-      {/* Manage All button */}
-      <div className="px-3 pb-2">
+      {/* Manage All & Marketplace buttons */}
+      <div className="px-3 pb-2 flex gap-2">
         <button
           onClick={handleManageAll}
           className={clsx(
-            'w-full px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
+            'flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
             'text-primary-600 dark:text-primary-400',
             'hover:bg-primary-50 dark:hover:bg-primary-900/20',
             'border border-primary-200 dark:border-primary-800'
           )}
         >
           {t('pluginPanel.manageAll')}
+        </button>
+        <button
+          onClick={handleMarketplace}
+          className={clsx(
+            'inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
+            'text-gray-600 dark:text-gray-400',
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
+            'border border-gray-200 dark:border-gray-700'
+          )}
+          title={t('pluginPanel.marketplace')}
+        >
+          <GlobeIcon className="w-3 h-3" />
+          {t('pluginPanel.marketplace')}
         </button>
       </div>
     </div>

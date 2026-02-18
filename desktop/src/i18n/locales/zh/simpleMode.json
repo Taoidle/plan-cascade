@@ -161,6 +161,8 @@
     "manageAll": "管理全部...",
     "loading": "加载插件中...",
     "noPlugins": "未发现插件",
-    "enabledCount": "{{count}} 个已启用"
+    "enabledCount": "{{count}} 个已启用",
+    "marketplace": "插件市场",
+    "installFromUrl": "从 URL 安装"
   }
 }

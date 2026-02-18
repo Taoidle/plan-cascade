@@ -6,7 +6,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { PluginInfo, PluginDetail } from '../types/plugin';
+import type { PluginInfo, PluginDetail, MarketplacePlugin } from '../types/plugin';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -93,6 +93,65 @@ export async function installPlugin(
   try {
     return await invoke<CommandResponse<PluginInfo>>('install_plugin', {
       sourcePath,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Fetch marketplace plugins from the registry.
+ */
+export async function fetchMarketplace(
+  registryUrl?: string
+): Promise<CommandResponse<MarketplacePlugin[]>> {
+  try {
+    return await invoke<CommandResponse<MarketplacePlugin[]>>(
+      'fetch_marketplace',
+      { registryUrl: registryUrl ?? null }
+    );
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Install a plugin from a git URL.
+ */
+export async function installPluginFromGit(
+  gitUrl: string
+): Promise<CommandResponse<PluginInfo>> {
+  try {
+    return await invoke<CommandResponse<PluginInfo>>(
+      'install_plugin_from_git',
+      { gitUrl }
+    );
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Uninstall a plugin by name.
+ */
+export async function uninstallPlugin(
+  name: string
+): Promise<CommandResponse<boolean>> {
+  try {
+    return await invoke<CommandResponse<boolean>>('uninstall_plugin', {
+      name,
     });
   } catch (error) {
     return {

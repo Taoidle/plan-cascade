@@ -420,6 +420,101 @@ impl LoadedPlugin {
 }
 
 // ============================================================================
+// Registry & Marketplace Types
+// ============================================================================
+
+/// A plugin entry in the remote registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryEntry {
+    /// Plugin name (unique identifier)
+    pub name: String,
+    /// Semantic version
+    #[serde(default)]
+    pub version: String,
+    /// Human-readable description
+    #[serde(default)]
+    pub description: String,
+    /// Author name
+    #[serde(default)]
+    pub author: Option<String>,
+    /// Repository URL (informational)
+    #[serde(default)]
+    pub repository: Option<String>,
+    /// License identifier
+    #[serde(default)]
+    pub license: Option<String>,
+    /// Categorization keywords
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// Category identifier
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Git URL for cloning
+    pub git_url: String,
+    /// GitHub stars count
+    #[serde(default)]
+    pub stars: u64,
+    /// Download count
+    #[serde(default)]
+    pub downloads: u64,
+}
+
+/// A category in the plugin registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryCategory {
+    /// Category identifier
+    pub id: String,
+    /// Human-readable label
+    pub label: String,
+}
+
+/// The full plugin registry fetched from a remote URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginRegistry {
+    /// Registry format version
+    pub version: String,
+    /// Last updated timestamp
+    pub updated_at: String,
+    /// All available plugins
+    pub plugins: Vec<RegistryEntry>,
+    /// Available categories
+    pub categories: Vec<RegistryCategory>,
+}
+
+/// A marketplace plugin enriched with local install/enable status.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplacePlugin {
+    /// Registry entry data
+    #[serde(flatten)]
+    pub entry: RegistryEntry,
+    /// Whether this plugin is installed locally
+    pub installed: bool,
+    /// Whether this plugin is currently enabled
+    pub enabled: bool,
+}
+
+/// Progress update during plugin installation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallProgress {
+    /// Plugin being installed
+    pub plugin_name: String,
+    /// Current phase (cloning, validating, installing, complete)
+    pub phase: String,
+    /// Human-readable message
+    pub message: String,
+    /// Progress percentage (0.0 to 1.0)
+    pub progress: f64,
+}
+
+/// Persistent plugin settings (enabled/disabled state).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PluginSettings {
+    /// List of plugin names that are disabled
+    #[serde(default)]
+    pub disabled_plugins: Vec<String>,
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

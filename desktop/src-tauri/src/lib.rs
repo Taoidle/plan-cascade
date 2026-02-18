@@ -201,6 +201,9 @@ pub use commands::{
     // Plugin commands
     get_plugin_detail,
     install_plugin,
+    fetch_marketplace,
+    install_plugin_from_git,
+    uninstall_plugin,
     list_plugins,
     refresh_plugins,
     toggle_plugin,

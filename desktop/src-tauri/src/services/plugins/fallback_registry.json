@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2025-01-01T00:00:00Z",
+  "plugins": [],
+  "categories": [
+    { "id": "coding", "label": "Coding" },
+    { "id": "testing", "label": "Testing" },
+    { "id": "linting", "label": "Linting" },
+    { "id": "devops", "label": "DevOps" },
+    { "id": "documentation", "label": "Documentation" },
+    { "id": "security", "label": "Security" },
+    { "id": "productivity", "label": "Productivity" },
+    { "id": "other", "label": "Other" }
+  ]
+}

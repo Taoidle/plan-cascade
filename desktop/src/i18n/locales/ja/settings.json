@@ -543,7 +543,32 @@
       "description": "プロジェクトの .claude-plugin/ ディレクトリ、~/.claude/plugins/cache/、または ~/.plan-cascade/plugins/ にプラグインを配置してください。"
     },
     "summary": "{{count}} 個のプラグインが見つかりました、{{enabled}} 個が有効",
-    "summary_plural": "{{count}} 個のプラグインが見つかりました、{{enabled}} 個が有効"
+    "summary_plural": "{{count}} 個のプラグインが見つかりました、{{enabled}} 個が有効",
+    "marketplace": "マーケットプレイス",
+    "installedTab": "インストール済み",
+    "installed": "インストール済み",
+    "install": "インストール",
+    "installFromUrl": "URLからインストール",
+    "installFromUrlDesc": "Claude Codeプラグインリポジトリの Git URLを入力してインストールします。",
+    "gitUrlPlaceholder": "https://github.com/user/plugin-repo.git",
+    "invalidGitUrl": "URLは https://、http://、または git@ で始まる必要があります",
+    "installing": "プラグインをインストール中...",
+    "installSuccess": "プラグイン \"{{name}}\" のインストールが完了しました",
+    "installFailed": "プラグインのインストールに失敗しました",
+    "uninstall": "アンインストール",
+    "uninstallConfirm": "\"{{name}}\" をアンインストールしますか？",
+    "uninstallDesc": "このプラグインをシステムから削除します。",
+    "uninstallSuccess": "プラグイン \"{{name}}\" をアンインストールしました",
+    "uninstallFailed": "プラグインのアンインストールに失敗しました",
+    "browseMarketplace": "マーケットプレイスを閲覧",
+    "allCategories": "すべて",
+    "searchMarketplace": "マーケットプレイスを検索...",
+    "noMarketplaceResults": "プラグインが見つかりません",
+    "offlineRegistry": "オフラインレジストリを使用中（ネットワーク利用不可）",
+    "stars": "スター",
+    "downloads": "ダウンロード",
+    "alreadyInstalled": "インストール済み",
+    "cancel": "キャンセル"
   },
 
   "security": {

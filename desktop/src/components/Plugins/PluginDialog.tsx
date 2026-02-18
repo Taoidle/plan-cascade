@@ -1,9 +1,9 @@
 /**
  * PluginDialog Component
  *
- * Full management dialog for plugins. Shows a list of discovered plugins
- * with toggle switches, detail view, search/filter, and refresh.
- * Uses Radix UI Dialog primitive.
+ * Full management dialog for plugins. Shows tabs for "Installed" (existing
+ * list with toggle/detail) and "Marketplace" (registry browsing).
+ * Includes "Install from URL" button and uses Radix UI Dialog.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -16,10 +16,13 @@ import {
   ReloadIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  DownloadIcon,
 } from '@radix-ui/react-icons';
 import { usePluginStore } from '../../store/plugins';
 import { getPluginSourceLabel } from '../../types/plugin';
 import type { PluginInfo, PluginDetail } from '../../types/plugin';
+import { MarketplaceView } from './MarketplaceView';
+import { InstallFromUrlDialog } from './InstallFromUrlDialog';
 
 // ============================================================================
 // PluginListItem
@@ -304,7 +307,8 @@ function DetailSection({
 // ============================================================================
 
 export function PluginDialog() {
-  const { t } = useTranslation('simpleMode');
+  const { t } = useTranslation('settings');
+  const { t: tSimple } = useTranslation('simpleMode');
 
   const plugins = usePluginStore((s) => s.plugins);
   const selectedPlugin = usePluginStore((s) => s.selectedPlugin);
@@ -312,12 +316,15 @@ export function PluginDialog() {
   const detailLoading = usePluginStore((s) => s.detailLoading);
   const refreshing = usePluginStore((s) => s.refreshing);
   const dialogOpen = usePluginStore((s) => s.dialogOpen);
+  const activeTab = usePluginStore((s) => s.activeTab);
   const closeDialog = usePluginStore((s) => s.closeDialog);
   const loadPlugins = usePluginStore((s) => s.loadPlugins);
   const togglePlugin = usePluginStore((s) => s.togglePlugin);
   const refresh = usePluginStore((s) => s.refresh);
   const loadPluginDetail = usePluginStore((s) => s.loadPluginDetail);
   const clearSelectedPlugin = usePluginStore((s) => s.clearSelectedPlugin);
+  const setActiveTab = usePluginStore((s) => s.setActiveTab);
+  const openInstallDialog = usePluginStore((s) => s.openInstallDialog);
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -384,7 +391,7 @@ export function PluginDialog() {
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
               <Dialog.Title className="text-sm font-semibold text-gray-900 dark:text-white">
-                {t('pluginPanel.title')}
+                {tSimple('pluginPanel.title')}
               </Dialog.Title>
               <Dialog.Close asChild>
                 <button
@@ -401,6 +408,7 @@ export function PluginDialog() {
             <PluginDetailView detail={selectedPlugin} onBack={clearSelectedPlugin} />
           </Dialog.Content>
         </Dialog.Portal>
+        <InstallFromUrlDialog />
       </Dialog.Root>
     );
   }
@@ -423,91 +431,141 @@ export function PluginDialog() {
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
             <Dialog.Title className="text-sm font-semibold text-gray-900 dark:text-white">
-              {t('pluginPanel.title')}
+              {tSimple('pluginPanel.title')}
             </Dialog.Title>
-            <Dialog.Close asChild>
+            <div className="flex items-center gap-2">
+              {/* Install from URL button */}
               <button
+                onClick={openInstallDialog}
                 className={clsx(
-                  'p-1.5 rounded-md',
-                  'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-                  'hover:bg-gray-100 dark:hover:bg-gray-800'
+                  'inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs',
+                  'text-gray-500 dark:text-gray-400',
+                  'hover:bg-gray-100 dark:hover:bg-gray-800',
+                  'transition-colors'
                 )}
+                title={t('plugins.installFromUrl')}
               >
-                <Cross2Icon className="w-4 h-4" />
+                <DownloadIcon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{t('plugins.installFromUrl')}</span>
               </button>
-            </Dialog.Close>
+              <Dialog.Close asChild>
+                <button
+                  className={clsx(
+                    'p-1.5 rounded-md',
+                    'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                    'hover:bg-gray-100 dark:hover:bg-gray-800'
+                  )}
+                >
+                  <Cross2Icon className="w-4 h-4" />
+                </button>
+              </Dialog.Close>
+            </div>
           </div>
 
-          {/* Toolbar: search + refresh */}
-          <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
-            <div className="relative flex-1">
-              <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search plugins..."
-                className={clsx(
-                  'w-full pl-8 pr-3 py-1.5 rounded-md text-xs',
-                  'bg-gray-50 dark:bg-gray-800',
-                  'border border-gray-200 dark:border-gray-700',
-                  'text-gray-700 dark:text-gray-300',
-                  'placeholder:text-gray-400 dark:placeholder:text-gray-500',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-                )}
-              />
-            </div>
+          {/* Tabs */}
+          <div className="flex border-b border-gray-200 dark:border-gray-700">
             <button
-              onClick={handleRefresh}
-              disabled={refreshing}
+              onClick={() => setActiveTab('installed')}
               className={clsx(
-                'p-1.5 rounded-md transition-colors',
-                'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-                'hover:bg-gray-100 dark:hover:bg-gray-800',
-                'disabled:opacity-50'
+                'flex-1 px-4 py-2 text-xs font-medium transition-colors',
+                activeTab === 'installed'
+                  ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
               )}
-              title="Refresh"
             >
-              <ReloadIcon className={clsx('w-3.5 h-3.5', refreshing && 'animate-spin')} />
+              {t('plugins.installedTab')} ({plugins.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('marketplace')}
+              className={clsx(
+                'flex-1 px-4 py-2 text-xs font-medium transition-colors',
+                activeTab === 'marketplace'
+                  ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              )}
+            >
+              {t('plugins.marketplace')}
             </button>
           </div>
 
-          {/* Plugin list */}
-          <div className="flex-1 overflow-y-auto p-3">
-            {loading && filteredPlugins.length === 0 ? (
-              <div className="flex items-center justify-center py-8">
-                <span className="text-xs text-gray-400">{t('pluginPanel.loading')}</span>
-              </div>
-            ) : filteredPlugins.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {t('pluginPanel.noPlugins')}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {filteredPlugins.map((plugin) => (
-                  <PluginListItem
-                    key={plugin.name}
-                    plugin={plugin}
-                    onToggle={handleToggle}
-                    onSelect={handleSelect}
+          {/* Tab Content */}
+          {activeTab === 'installed' ? (
+            <>
+              {/* Toolbar: search + refresh */}
+              <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+                <div className="relative flex-1">
+                  <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search plugins..."
+                    className={clsx(
+                      'w-full pl-8 pr-3 py-1.5 rounded-md text-xs',
+                      'bg-gray-50 dark:bg-gray-800',
+                      'border border-gray-200 dark:border-gray-700',
+                      'text-gray-700 dark:text-gray-300',
+                      'placeholder:text-gray-400 dark:placeholder:text-gray-500',
+                      'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+                    )}
                   />
-                ))}
+                </div>
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  className={clsx(
+                    'p-1.5 rounded-md transition-colors',
+                    'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                    'hover:bg-gray-100 dark:hover:bg-gray-800',
+                    'disabled:opacity-50'
+                  )}
+                  title="Refresh"
+                >
+                  <ReloadIcon className={clsx('w-3.5 h-3.5', refreshing && 'animate-spin')} />
+                </button>
               </div>
-            )}
-          </div>
 
-          {/* Footer summary */}
-          {!loading && plugins.length > 0 && (
-            <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
-              <p className="text-2xs text-gray-400 dark:text-gray-500">
-                {plugins.length} plugin(s), {plugins.filter((p) => p.enabled).length} enabled
-              </p>
-            </div>
+              {/* Plugin list */}
+              <div className="flex-1 overflow-y-auto p-3">
+                {loading && filteredPlugins.length === 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <span className="text-xs text-gray-400">{tSimple('pluginPanel.loading')}</span>
+                  </div>
+                ) : filteredPlugins.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {tSimple('pluginPanel.noPlugins')}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredPlugins.map((plugin) => (
+                      <PluginListItem
+                        key={plugin.name}
+                        plugin={plugin}
+                        onToggle={handleToggle}
+                        onSelect={handleSelect}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer summary */}
+              {!loading && plugins.length > 0 && (
+                <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
+                  <p className="text-2xs text-gray-400 dark:text-gray-500">
+                    {plugins.length} plugin(s), {plugins.filter((p) => p.enabled).length} enabled
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <MarketplaceView />
           )}
         </Dialog.Content>
       </Dialog.Portal>
+      <InstallFromUrlDialog />
     </Dialog.Root>
   );
 }

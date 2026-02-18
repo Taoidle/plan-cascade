@@ -6,12 +6,15 @@
  */
 
 import { create } from 'zustand';
-import type { PluginInfo, PluginDetail } from '../types/plugin';
+import type { PluginInfo, PluginDetail, MarketplacePlugin, InstallProgress } from '../types/plugin';
 import {
   listPlugins,
   togglePlugin as togglePluginApi,
   refreshPlugins as refreshPluginsApi,
   getPluginDetail as getPluginDetailApi,
+  fetchMarketplace as fetchMarketplaceApi,
+  installPluginFromGit as installPluginFromGitApi,
+  uninstallPlugin as uninstallPluginApi,
 } from '../lib/pluginApi';
 
 // ============================================================================
@@ -22,6 +25,18 @@ interface PluginState {
   // Data
   plugins: PluginInfo[];
   selectedPlugin: PluginDetail | null;
+
+  // Marketplace
+  marketplacePlugins: MarketplacePlugin[];
+  marketplaceLoading: boolean;
+  marketplaceError: string | null;
+
+  // Install
+  installing: boolean;
+  installProgress: InstallProgress | null;
+
+  // Uninstall
+  uninstalling: string | null;
 
   // Loading states
   loading: boolean;
@@ -38,6 +53,8 @@ interface PluginState {
   // Panel & Dialog
   panelOpen: boolean;
   dialogOpen: boolean;
+  activeTab: 'installed' | 'marketplace';
+  installDialogOpen: boolean;
 
   // Actions
   loadPlugins: () => Promise<void>;
@@ -50,6 +67,13 @@ interface PluginState {
   togglePanel: () => void;
   openDialog: () => void;
   closeDialog: () => void;
+  setActiveTab: (tab: 'installed' | 'marketplace') => void;
+  loadMarketplace: () => Promise<void>;
+  installFromGit: (gitUrl: string) => Promise<void>;
+  uninstallPlugin: (name: string) => Promise<void>;
+  openInstallDialog: () => void;
+  closeInstallDialog: () => void;
+  setInstallProgress: (progress: InstallProgress | null) => void;
   reset: () => void;
 }
 
@@ -60,6 +84,12 @@ interface PluginState {
 const defaultState = {
   plugins: [] as PluginInfo[],
   selectedPlugin: null as PluginDetail | null,
+  marketplacePlugins: [] as MarketplacePlugin[],
+  marketplaceLoading: false,
+  marketplaceError: null as string | null,
+  installing: false,
+  installProgress: null as InstallProgress | null,
+  uninstalling: null as string | null,
   loading: false,
   detailLoading: false,
   refreshing: false,
@@ -68,6 +98,8 @@ const defaultState = {
   toastType: 'info' as const,
   panelOpen: false,
   dialogOpen: false,
+  activeTab: 'installed' as const,
+  installDialogOpen: false,
 };
 
 // ============================================================================
@@ -186,6 +218,89 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
   openDialog: () => set({ dialogOpen: true }),
 
   closeDialog: () => set({ dialogOpen: false, selectedPlugin: null }),
+
+  setActiveTab: (tab: 'installed' | 'marketplace') => {
+    set({ activeTab: tab });
+    if (tab === 'marketplace' && get().marketplacePlugins.length === 0) {
+      get().loadMarketplace();
+    }
+  },
+
+  loadMarketplace: async () => {
+    set({ marketplaceLoading: true, marketplaceError: null });
+    try {
+      const response = await fetchMarketplaceApi();
+      if (response.success && response.data) {
+        set({ marketplacePlugins: response.data, marketplaceLoading: false });
+      } else {
+        set({
+          marketplaceError: response.error || 'Failed to load marketplace',
+          marketplaceLoading: false,
+        });
+      }
+    } catch (error) {
+      set({
+        marketplaceError: error instanceof Error ? error.message : String(error),
+        marketplaceLoading: false,
+      });
+    }
+  },
+
+  installFromGit: async (gitUrl: string) => {
+    set({ installing: true, installProgress: null });
+    try {
+      const response = await installPluginFromGitApi(gitUrl);
+      if (response.success && response.data) {
+        set({ installing: false, installProgress: null, installDialogOpen: false });
+        get().showToast(`Plugin "${response.data.name}" installed successfully`, 'success');
+        // Refresh both lists
+        await get().loadPlugins();
+        if (get().marketplacePlugins.length > 0) {
+          await get().loadMarketplace();
+        }
+      } else {
+        set({ installing: false, installProgress: null });
+        get().showToast(response.error || 'Installation failed', 'error');
+      }
+    } catch (error) {
+      set({ installing: false, installProgress: null });
+      get().showToast(
+        error instanceof Error ? error.message : String(error),
+        'error'
+      );
+    }
+  },
+
+  uninstallPlugin: async (name: string) => {
+    set({ uninstalling: name });
+    try {
+      const response = await uninstallPluginApi(name);
+      if (response.success) {
+        set({ uninstalling: null });
+        get().showToast(`Plugin "${name}" uninstalled`, 'success');
+        // Refresh both lists
+        await get().loadPlugins();
+        if (get().marketplacePlugins.length > 0) {
+          await get().loadMarketplace();
+        }
+      } else {
+        set({ uninstalling: null });
+        get().showToast(response.error || 'Uninstall failed', 'error');
+      }
+    } catch (error) {
+      set({ uninstalling: null });
+      get().showToast(
+        error instanceof Error ? error.message : String(error),
+        'error'
+      );
+    }
+  },
+
+  openInstallDialog: () => set({ installDialogOpen: true }),
+
+  closeInstallDialog: () => set({ installDialogOpen: false, installProgress: null }),
+
+  setInstallProgress: (progress: InstallProgress | null) => set({ installProgress: progress }),
 
   reset: () => set(defaultState),
 }));

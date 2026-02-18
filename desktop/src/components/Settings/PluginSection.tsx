@@ -14,6 +14,8 @@ import {
   ChevronRightIcon,
   ChevronLeftIcon,
   InfoCircledIcon,
+  TrashIcon,
+  GlobeIcon,
 } from '@radix-ui/react-icons';
 import { usePluginStore } from '../../store/plugins';
 import { getPluginSourceLabel } from '../../types/plugin';
@@ -27,10 +29,14 @@ function PluginListItem({
   plugin,
   onToggle,
   onSelect,
+  onUninstall,
+  isUninstalling,
 }: {
   plugin: PluginInfo;
   onToggle: (name: string, enabled: boolean) => void;
   onSelect: (name: string) => void;
+  onUninstall?: (name: string) => void;
+  isUninstalling?: boolean;
 }) {
   const { t } = useTranslation('settings');
 
@@ -79,6 +85,34 @@ function PluginListItem({
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
+        {/* Uninstall button (only for project_local) */}
+        {plugin.source === 'project_local' && onUninstall && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(t('plugins.uninstallConfirm', { name: plugin.name }))) {
+                onUninstall(plugin.name);
+              }
+            }}
+            disabled={isUninstalling}
+            className={clsx(
+              'p-1.5 rounded-md',
+              'text-red-500 dark:text-red-400',
+              'hover:bg-red-50 dark:hover:bg-red-900/20',
+              'disabled:opacity-50',
+              'transition-colors'
+            )}
+            aria-label={t('plugins.uninstall')}
+            title={t('plugins.uninstall')}
+          >
+            {isUninstalling ? (
+              <ReloadIcon className="w-4 h-4 animate-spin" />
+            ) : (
+              <TrashIcon className="w-4 h-4" />
+            )}
+          </button>
+        )}
+
         {/* Toggle switch */}
         <button
           onClick={(e) => {
@@ -356,13 +390,17 @@ export function PluginSection() {
     error,
     toastMessage,
     toastType,
+    uninstalling,
     loadPlugins,
     togglePlugin,
     refresh,
     loadPluginDetail,
     clearSelectedPlugin,
     clearToast,
+    openDialog,
+    setActiveTab,
   } = usePluginStore();
+  const uninstallPlugin = usePluginStore((s) => s.uninstallPlugin);
 
   const [_initialized, setInitialized] = useState(false);
 
@@ -395,6 +433,18 @@ export function PluginSection() {
     [loadPluginDetail]
   );
 
+  const handleUninstall = useCallback(
+    (name: string) => {
+      uninstallPlugin(name);
+    },
+    [uninstallPlugin]
+  );
+
+  const handleBrowseMarketplace = useCallback(() => {
+    setActiveTab('marketplace');
+    openDialog();
+  }, [setActiveTab, openDialog]);
+
   // Detail view
   if (selectedPlugin) {
     if (detailLoading) {
@@ -420,21 +470,36 @@ export function PluginSection() {
             {t('plugins.description')}
           </p>
         </div>
-        <button
-          onClick={refresh}
-          disabled={refreshing}
-          className={clsx(
-            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm',
-            'bg-gray-100 dark:bg-gray-800',
-            'text-gray-700 dark:text-gray-300',
-            'hover:bg-gray-200 dark:hover:bg-gray-700',
-            'disabled:opacity-50',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500'
-          )}
-        >
-          <ReloadIcon className={clsx('w-3.5 h-3.5', refreshing && 'animate-spin')} />
-          {t('plugins.refresh')}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleBrowseMarketplace}
+            className={clsx(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm',
+              'bg-primary-50 dark:bg-primary-900/20',
+              'text-primary-700 dark:text-primary-300',
+              'hover:bg-primary-100 dark:hover:bg-primary-900/40',
+              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+            )}
+          >
+            <GlobeIcon className="w-3.5 h-3.5" />
+            {t('plugins.browseMarketplace')}
+          </button>
+          <button
+            onClick={refresh}
+            disabled={refreshing}
+            className={clsx(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm',
+              'bg-gray-100 dark:bg-gray-800',
+              'text-gray-700 dark:text-gray-300',
+              'hover:bg-gray-200 dark:hover:bg-gray-700',
+              'disabled:opacity-50',
+              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+            )}
+          >
+            <ReloadIcon className={clsx('w-3.5 h-3.5', refreshing && 'animate-spin')} />
+            {t('plugins.refresh')}
+          </button>
+        </div>
       </div>
 
       {/* Toast */}
@@ -487,6 +552,8 @@ export function PluginSection() {
               plugin={plugin}
               onToggle={handleToggle}
               onSelect={handleSelect}
+              onUninstall={handleUninstall}
+              isUninstalling={uninstalling === plugin.name}
             />
           ))}
         </div>

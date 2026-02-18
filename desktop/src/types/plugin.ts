@@ -139,3 +139,50 @@ export interface PluginDetail {
   plugin: LoadedPlugin;
   root_path: string;
 }
+
+// ============================================================================
+// Registry & Marketplace Types
+// ============================================================================
+
+/** A plugin entry in the remote registry */
+export interface RegistryEntry {
+  name: string;
+  version: string;
+  description: string;
+  author: string | null;
+  repository: string | null;
+  license: string | null;
+  keywords: string[];
+  category: string | null;
+  git_url: string;
+  stars: number;
+  downloads: number;
+}
+
+/** A category in the plugin registry */
+export interface RegistryCategory {
+  id: string;
+  label: string;
+}
+
+/** The full plugin registry */
+export interface PluginRegistry {
+  version: string;
+  updated_at: string;
+  plugins: RegistryEntry[];
+  categories: RegistryCategory[];
+}
+
+/** A marketplace plugin enriched with local status */
+export interface MarketplacePlugin extends RegistryEntry {
+  installed: boolean;
+  enabled: boolean;
+}
+
+/** Progress update during plugin installation */
+export interface InstallProgress {
+  plugin_name: string;
+  phase: string;
+  message: string;
+  progress: number;
+}

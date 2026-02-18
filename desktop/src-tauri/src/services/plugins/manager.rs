@@ -14,6 +14,7 @@ use crate::services::orchestrator::hooks::AgenticHooks;
 use crate::services::plugins::dispatcher::register_plugin_hooks;
 use crate::services::plugins::loader::{discover_all_plugins, discover_all_plugins_with_home};
 use crate::services::plugins::models::*;
+use crate::services::plugins::settings::{load_plugin_settings, save_plugin_settings};
 
 /// Unified plugin manager.
 ///
@@ -71,6 +72,15 @@ impl PluginManager {
             Some(home) => discover_all_plugins_with_home(&self.project_root, Some(home.clone())),
             None => discover_all_plugins(&self.project_root),
         };
+
+        // Apply persisted disabled state
+        let settings = load_plugin_settings();
+        for plugin in &mut self.plugins {
+            if settings.disabled_plugins.contains(&plugin.manifest.name) {
+                plugin.enabled = false;
+            }
+        }
+
         eprintln!(
             "[plugins] Discovered {} plugins for project {}",
             self.plugins.len(),
@@ -91,7 +101,7 @@ impl PluginManager {
     ///
     /// Preserves enabled/disabled state for plugins that still exist.
     pub fn refresh_plugins(&mut self) {
-        // Save current enabled state
+        // Save current in-memory enabled state
         let enabled_state: std::collections::HashMap<String, bool> = self
             .plugins
             .iter()
@@ -104,10 +114,13 @@ impl PluginManager {
             None => discover_all_plugins(&self.project_root),
         };
 
-        // Restore enabled state
+        // Apply persisted settings first, then overlay in-memory state
+        let settings = load_plugin_settings();
         for plugin in &mut self.plugins {
             if let Some(&was_enabled) = enabled_state.get(&plugin.manifest.name) {
                 plugin.enabled = was_enabled;
+            } else if settings.disabled_plugins.contains(&plugin.manifest.name) {
+                plugin.enabled = false;
             }
         }
 
@@ -213,6 +226,18 @@ impl PluginManager {
                 name,
                 if enabled { "enabled" } else { "disabled" }
             );
+
+            // Persist the toggle state
+            let mut settings = load_plugin_settings();
+            if enabled {
+                settings.disabled_plugins.retain(|n| n != name);
+            } else if !settings.disabled_plugins.contains(&name.to_string()) {
+                settings.disabled_plugins.push(name.to_string());
+            }
+            if let Err(e) = save_plugin_settings(&settings) {
+                eprintln!("[plugins] Failed to persist toggle state: {}", e);
+            }
+
             true
         } else {
             false
