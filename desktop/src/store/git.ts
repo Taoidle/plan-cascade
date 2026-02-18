@@ -2,8 +2,8 @@
  * Git Store
  *
  * Zustand store for git state management. Provides reactive access to
- * repository status, staging, commits, stash, merge operations, and
- * commit graph visualization state via Tauri IPC commands.
+ * repository status, staging, commits, stash, merge/conflict operations,
+ * and commit graph visualization state via Tauri IPC commands.
  */
 
 import { create } from 'zustand';
@@ -26,6 +26,8 @@ import type {
   DiffHunk,
   FileDiff,
   DiffLineKind,
+  ConflictFile,
+  MergeBranchResult,
 } from '../types/git';
 
 // Re-export types for consumers that import from store
@@ -45,6 +47,8 @@ export type {
   BranchInfo,
   GraphLayout,
   CompareSelection,
+  ConflictFile,
+  MergeBranchResult,
 };
 
 // ============================================================================
@@ -54,7 +58,7 @@ export type {
 export type GitTabId = 'changes' | 'history' | 'branches';
 
 interface GitState {
-  // --- Data (from feature-002: Changes Tab) ---
+  // --- Data (feature-002: Changes Tab) ---
   status: GitFullStatus | null;
   stagedDiffs: DiffOutput | null;
   unstagedDiffs: DiffOutput | null;
@@ -64,13 +68,13 @@ interface GitState {
   commitLog: CommitNode[];
   branches: BranchInfo[];
 
-  // --- UI state (from feature-002) ---
+  // --- UI state (feature-002) ---
   isLoading: boolean;
   error: string | null;
   commitMessage: string;
   isAmend: boolean;
 
-  // --- Graph UI state (from feature-003: Commit Graph) ---
+  // --- Graph UI state (feature-003: Commit Graph) ---
   selectedCommitSha: string | null;
   compareSelection: CompareSelection | null;
   commitDetailExpanded: boolean;
@@ -78,6 +82,15 @@ interface GitState {
   branchFilter: string | null;
   searchQuery: string;
   selectedCommitDiff: DiffOutput | null;
+
+  // --- Merge/Conflict state (feature-004: Branches & Merge) ---
+  mergeSourceBranch: string | null;
+  conflictFiles: ConflictFile[];
+  resolvedFiles: Set<string>;
+  isInMerge: boolean;
+  isFetching: boolean;
+  isPulling: boolean;
+  isPushing: boolean;
 
   // --- Actions (feature-002: operational) ---
   refreshStatus: () => Promise<void>;
@@ -111,6 +124,18 @@ interface GitState {
   setSearchQuery: (query: string) => void;
   setSelectedCommitDiff: (diff: DiffOutput | null) => void;
   resetGraphState: () => void;
+
+  // --- Actions (feature-004: merge/conflict) ---
+  startMerge: (repoPath: string, branch: string) => Promise<MergeBranchResult | null>;
+  abortMerge: (repoPath: string) => Promise<boolean>;
+  completeMerge: (repoPath: string) => Promise<boolean>;
+  refreshConflictFiles: (repoPath: string) => Promise<void>;
+  markFileResolved: (filePath: string) => void;
+  markFileUnresolved: (filePath: string) => void;
+  clearMergeState: () => void;
+  setFetching: (v: boolean) => void;
+  setPulling: (v: boolean) => void;
+  setPushing: (v: boolean) => void;
 }
 
 // ============================================================================
@@ -156,6 +181,15 @@ export const useGitStore = create<GitState>((set, get) => ({
   branchFilter: null,
   searchQuery: '',
   selectedCommitDiff: null,
+
+  // --- Initial state (feature-004: merge/conflict) ---
+  mergeSourceBranch: null,
+  conflictFiles: [],
+  resolvedFiles: new Set(),
+  isInMerge: false,
+  isFetching: false,
+  isPulling: false,
+  isPushing: false,
 
   // ---- Operational Actions (feature-002) ----
 
@@ -214,9 +248,13 @@ export const useGitStore = create<GitState>((set, get) => ({
       const mergeState = await invokeGit<MergeState>('git_get_merge_state', {
         repoPath,
       });
-      set({ mergeState });
+      const isInMerge = mergeState.kind !== 'none';
+      set({ mergeState, isInMerge });
+      if (isInMerge) {
+        await get().refreshConflictFiles(repoPath);
+      }
     } catch {
-      set({ mergeState: null });
+      set({ mergeState: null, isInMerge: false });
     }
   },
 
@@ -399,6 +437,114 @@ export const useGitStore = create<GitState>((set, get) => ({
       searchQuery: '',
       selectedCommitDiff: null,
     }),
+
+  // ---- Merge/Conflict Actions (feature-004) ----
+
+  startMerge: async (repoPath: string, branch: string): Promise<MergeBranchResult | null> => {
+    try {
+      set({ mergeSourceBranch: branch });
+      const res = await invoke<CommandResponse<MergeBranchResult>>('git_merge_branch', {
+        repoPath,
+        branch,
+      });
+      if (res.success && res.data) {
+        const result = res.data;
+        if (result.has_conflicts) {
+          set({ isInMerge: true });
+          await get().refreshMergeState();
+          const rp = getRepoPath();
+          if (rp) await get().refreshConflictFiles(rp);
+        } else if (result.success) {
+          set({ isInMerge: false, mergeSourceBranch: null });
+        }
+        return result;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
+
+  abortMerge: async (repoPath: string): Promise<boolean> => {
+    try {
+      const res = await invoke<CommandResponse<void>>('git_merge_abort', { repoPath });
+      if (res.success) {
+        set({
+          isInMerge: false,
+          mergeState: null,
+          mergeSourceBranch: null,
+          conflictFiles: [],
+          resolvedFiles: new Set(),
+        });
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  },
+
+  completeMerge: async (repoPath: string): Promise<boolean> => {
+    try {
+      const res = await invoke<CommandResponse<string>>('git_merge_continue', { repoPath });
+      if (res.success) {
+        set({
+          isInMerge: false,
+          mergeState: null,
+          mergeSourceBranch: null,
+          conflictFiles: [],
+          resolvedFiles: new Set(),
+        });
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  },
+
+  refreshConflictFiles: async (repoPath: string) => {
+    try {
+      const res = await invoke<CommandResponse<ConflictFile[]>>('git_get_conflict_files', {
+        repoPath,
+      });
+      if (res.success && res.data) {
+        set({ conflictFiles: res.data });
+      }
+    } catch {
+      // Silently fail
+    }
+  },
+
+  markFileResolved: (filePath: string) => {
+    set((state) => {
+      const next = new Set(state.resolvedFiles);
+      next.add(filePath);
+      return { resolvedFiles: next };
+    });
+  },
+
+  markFileUnresolved: (filePath: string) => {
+    set((state) => {
+      const next = new Set(state.resolvedFiles);
+      next.delete(filePath);
+      return { resolvedFiles: next };
+    });
+  },
+
+  clearMergeState: () => {
+    set({
+      isInMerge: false,
+      mergeState: null,
+      mergeSourceBranch: null,
+      conflictFiles: [],
+      resolvedFiles: new Set(),
+    });
+  },
+
+  setFetching: (v: boolean) => set({ isFetching: v }),
+  setPulling: (v: boolean) => set({ isPulling: v }),
+  setPushing: (v: boolean) => set({ isPushing: v }),
 }));
 
 export default useGitStore;

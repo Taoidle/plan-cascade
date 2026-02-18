@@ -3,8 +3,6 @@
  *
  * TypeScript interfaces matching Rust backend types in
  * desktop/src-tauri/src/services/git/types.rs
- *
- * Feature-003: Commit History Graph with SVG Visualization
  */
 
 // ---------------------------------------------------------------------------
@@ -67,19 +65,30 @@ export interface CommitNode {
 // ---------------------------------------------------------------------------
 
 export interface BranchInfo {
+  /** Branch name (e.g. "main", "feature/xyz"). */
   name: string;
+  /** Whether this is the currently checked-out branch. */
   is_head: boolean;
+  /** SHA of the branch tip. */
   tip_sha: string;
+  /** Upstream tracking branch (e.g. "origin/main"). */
   upstream?: string;
+  /** Commits ahead of upstream. */
   ahead: number;
+  /** Commits behind upstream. */
   behind: number;
+  /** Last commit message on this branch. */
   last_commit_message?: string;
 }
 
 export interface RemoteBranchInfo {
+  /** Full ref name (e.g. "origin/main"). */
   name: string;
+  /** Remote name (e.g. "origin"). */
   remote: string;
+  /** Branch name on the remote. */
   branch: string;
+  /** SHA of the remote branch tip. */
   tip_sha: string;
 }
 
@@ -118,6 +127,92 @@ export interface GraphLayout {
   edges: GraphEdge[];
   /** Maximum lane used (for sizing the graph width) */
   max_lane: number;
+}
+
+// ---------------------------------------------------------------------------
+// Conflicts
+// ---------------------------------------------------------------------------
+
+export type ConflictSide = 'ours' | 'theirs' | 'ancestor';
+
+export interface ConflictFile {
+  /** File path relative to repo root. */
+  path: string;
+  /** Number of conflict regions in the file. */
+  conflict_count: number;
+}
+
+export interface ConflictRegion {
+  /** Content from the "ours" side. */
+  ours: string;
+  /** Content from the "theirs" side. */
+  theirs: string;
+  /** Content from the common ancestor (diff3 style). */
+  ancestor?: string;
+  /** Start line (1-based) in the original file. */
+  start_line: number;
+  /** End line (1-based) in the original file. */
+  end_line: number;
+}
+
+export type ConflictStrategy = 'ours' | 'theirs' | 'both';
+
+// ---------------------------------------------------------------------------
+// Merge State
+// ---------------------------------------------------------------------------
+
+export type MergeStateKind =
+  | 'none'
+  | 'merging'
+  | 'rebasing'
+  | 'cherry_picking'
+  | 'reverting';
+
+export interface MergeState {
+  /** Kind of operation. */
+  kind: MergeStateKind;
+  /** Current HEAD SHA. */
+  head: string;
+  /** MERGE_HEAD / REBASE_HEAD SHA (if applicable). */
+  merge_head?: string;
+  /** Name of the branch being merged / rebased onto. */
+  branch_name?: string;
+}
+
+export interface MergeBranchResult {
+  /** Whether the merge was successful (no conflicts). */
+  success: boolean;
+  /** Whether there are merge conflicts. */
+  has_conflicts: boolean;
+  /** List of files with conflicts (if any). */
+  conflicting_files: string[];
+  /** Error message if the merge failed for non-conflict reasons. */
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Worktree
+// ---------------------------------------------------------------------------
+
+export type WorktreeStatus =
+  | 'creating'
+  | 'active'
+  | 'in_progress'
+  | 'ready'
+  | 'merging'
+  | 'completed'
+  | 'error';
+
+export interface Worktree {
+  id: string;
+  name: string;
+  path: string;
+  branch: string;
+  target_branch: string;
+  status: WorktreeStatus;
+  created_at: string;
+  updated_at: string;
+  error?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,19 +260,6 @@ export interface StashEntry {
   index: number;
   message: string;
   date: string;
-}
-
-// ---------------------------------------------------------------------------
-// Merge State
-// ---------------------------------------------------------------------------
-
-export type MergeStateKind = 'none' | 'merging' | 'rebasing' | 'cherry_picking' | 'reverting';
-
-export interface MergeState {
-  kind: MergeStateKind;
-  head: string;
-  merge_head?: string;
-  branch_name?: string;
 }
 
 // ---------------------------------------------------------------------------

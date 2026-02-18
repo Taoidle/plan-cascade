@@ -9,3 +9,5 @@
 export { useAutoSave } from './useAutoSave';
 export { useGlobalCommands } from './useGlobalCommands';
 export { useGitStatus } from './useGitStatus';
+export { useGitBranches } from './useGitBranches';
+export { useGitMergeState } from './useGitMergeState';
