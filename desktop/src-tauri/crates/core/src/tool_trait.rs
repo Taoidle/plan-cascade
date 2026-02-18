@@ -19,8 +19,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::utils::error::{AppError, AppResult};
-use super::context::ToolContext;
+use crate::error::{CoreError, CoreResult};
+use crate::context::ToolContext;
 
 // ============================================================================
 // Trait Definitions
@@ -84,8 +84,8 @@ pub trait ToolExecutable: Send + Sync {
     ///
     /// # Returns
     /// - `Ok(Value)` - The tool's output as a JSON value
-    /// - `Err(AppError)` - If the tool execution failed
-    async fn execute(&self, ctx: &ToolContext, args: Value) -> AppResult<Value>;
+    /// - `Err(CoreError)` - If the tool execution failed
+    async fn execute(&self, ctx: &ToolContext, args: Value) -> CoreResult<Value>;
 }
 
 /// Combined trait for tools that provide both definition and execution.
@@ -112,7 +112,7 @@ impl<T: ToolDefinitionTrait + ToolExecutable> UnifiedTool for T {}
 ///
 /// Key differences from the existing `ToolRegistry`:
 /// - Uses `ToolContext` from the core context hierarchy (not `ToolExecutionContext`)
-/// - Returns `AppResult<Value>` instead of `ToolResult` struct
+/// - Returns `CoreResult<Value>` instead of `ToolResult` struct
 /// - Supports permission checking via `required_permissions()`
 pub struct UnifiedToolRegistry {
     tools: HashMap<String, Arc<dyn UnifiedTool>>,
@@ -218,16 +218,16 @@ impl UnifiedToolRegistry {
 
     /// Execute a tool by name.
     ///
-    /// Returns `Err(AppError::NotFound)` if the tool is not registered.
+    /// Returns `Err(CoreError::NotFound)` if the tool is not registered.
     pub async fn execute(
         &self,
         name: &str,
         ctx: &ToolContext,
         args: Value,
-    ) -> AppResult<Value> {
+    ) -> CoreResult<Value> {
         match self.tools.get(name) {
             Some(tool) => tool.execute(ctx, args).await,
-            None => Err(AppError::not_found(format!("Tool not found: {}", name))),
+            None => Err(CoreError::not_found(format!("Tool not found: {}", name))),
         }
     }
 }
@@ -245,9 +245,8 @@ impl Default for UnifiedToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
-    // ── Mock Tool ────────────────────────────────────────────────────
+    // -- Mock Tool --
 
     /// A mock tool for testing the unified tool traits and registry.
     struct MockUnifiedTool {
@@ -308,7 +307,7 @@ mod tests {
 
     #[async_trait]
     impl ToolExecutable for MockUnifiedTool {
-        async fn execute(&self, _ctx: &ToolContext, args: Value) -> AppResult<Value> {
+        async fn execute(&self, _ctx: &ToolContext, args: Value) -> CoreResult<Value> {
             let input = args
                 .get("input")
                 .and_then(|v| v.as_str())
@@ -336,8 +335,8 @@ mod tests {
 
     #[async_trait]
     impl ToolExecutable for FailingTool {
-        async fn execute(&self, _ctx: &ToolContext, _args: Value) -> AppResult<Value> {
-            Err(AppError::command("Tool execution failed"))
+        async fn execute(&self, _ctx: &ToolContext, _args: Value) -> CoreResult<Value> {
+            Err(CoreError::command("Tool execution failed"))
         }
     }
 
@@ -345,7 +344,7 @@ mod tests {
         ToolContext::new("test-session", "/tmp/test", "test-agent", "tc-001")
     }
 
-    // ── ToolDefinitionTrait tests ────────────────────────────────────
+    // -- ToolDefinitionTrait tests --
 
     #[test]
     fn test_tool_definition_basic() {
@@ -381,7 +380,7 @@ mod tests {
         assert!(tool.is_long_running());
     }
 
-    // ── ToolExecutable tests ─────────────────────────────────────────
+    // -- ToolExecutable tests --
 
     #[tokio::test]
     async fn test_tool_execute_success() {
@@ -402,12 +401,10 @@ mod tests {
         assert!(err.to_string().contains("Tool execution failed"));
     }
 
-    // ── UnifiedTool blanket impl tests ───────────────────────────────
+    // -- UnifiedTool blanket impl tests --
 
     #[test]
     fn test_unified_tool_blanket_impl() {
-        // MockUnifiedTool implements both ToolDefinitionTrait + ToolExecutable,
-        // so it should automatically implement UnifiedTool
         let tool = MockUnifiedTool::new("Test", "Test tool");
         let _unified: &dyn UnifiedTool = &tool;
         assert_eq!(_unified.name(), "Test");
@@ -421,7 +418,7 @@ mod tests {
         assert!(!tool.is_long_running());
     }
 
-    // ── UnifiedToolRegistry tests ────────────────────────────────────
+    // -- UnifiedToolRegistry tests --
 
     #[test]
     fn test_registry_new_is_empty() {
@@ -630,7 +627,7 @@ mod tests {
         }
     }
 
-    // ── Send + Sync assertion tests ──────────────────────────────────
+    // -- Send + Sync assertion tests --
 
     #[test]
     fn test_traits_are_send_sync() {

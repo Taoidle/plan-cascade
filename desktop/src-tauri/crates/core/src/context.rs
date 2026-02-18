@@ -17,7 +17,7 @@ use std::sync::{Arc, RwLock};
 
 use serde_json::Value;
 
-use crate::utils::error::{AppError, AppResult};
+use crate::error::{CoreError, CoreResult};
 
 // ============================================================================
 // ExecutionContext Trait
@@ -192,17 +192,17 @@ impl OrchestratorContext {
     /// Get a mutable reference to the session state.
     ///
     /// Allows the orchestrator to read and write session state entries.
-    pub fn session_mut(&self) -> AppResult<std::sync::RwLockWriteGuard<'_, HashMap<String, Value>>> {
+    pub fn session_mut(&self) -> CoreResult<std::sync::RwLockWriteGuard<'_, HashMap<String, Value>>> {
         self.session_state
             .write()
-            .map_err(|e| AppError::internal(format!("Session state lock poisoned: {}", e)))
+            .map_err(|e| CoreError::internal(format!("Session state lock poisoned: {}", e)))
     }
 
     /// Get a read reference to the session state.
-    pub fn session_ref(&self) -> AppResult<std::sync::RwLockReadGuard<'_, HashMap<String, Value>>> {
+    pub fn session_ref(&self) -> CoreResult<std::sync::RwLockReadGuard<'_, HashMap<String, Value>>> {
         self.session_state
             .read()
-            .map_err(|e| AppError::internal(format!("Session state lock poisoned: {}", e)))
+            .map_err(|e| CoreError::internal(format!("Session state lock poisoned: {}", e)))
     }
 
     /// Signal that execution should end.
@@ -236,9 +236,9 @@ impl OrchestratorContext {
     }
 
     /// Write a value to the memory store (shared with tool contexts).
-    pub fn set_memory(&self, key: impl Into<String>, value: Value) -> AppResult<()> {
+    pub fn set_memory(&self, key: impl Into<String>, value: Value) -> CoreResult<()> {
         let mut store = self.memory_store.write().map_err(|e| {
-            AppError::internal(format!("Memory store lock poisoned: {}", e))
+            CoreError::internal(format!("Memory store lock poisoned: {}", e))
         })?;
         store.insert(key.into(), value);
         Ok(())
@@ -276,9 +276,8 @@ impl ExecutionContext for OrchestratorContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
-    // ── ExecutionContext trait tests ──────────────────────────────────
+    // -- ExecutionContext trait tests --
 
     #[test]
     fn test_tool_context_implements_execution_context() {
@@ -312,7 +311,7 @@ mod tests {
         assert_eq!(ctx.execution_tag(), Some("task"));
     }
 
-    // ── ToolContext tests ────────────────────────────────────────────
+    // -- ToolContext tests --
 
     #[test]
     fn test_tool_context_tool_call_id() {
@@ -351,7 +350,7 @@ mod tests {
         assert!(results.is_empty());
     }
 
-    // ── OrchestratorContext tests ────────────────────────────────────
+    // -- OrchestratorContext tests --
 
     #[test]
     fn test_orchestrator_session_mut() {
@@ -429,7 +428,7 @@ mod tests {
         assert_eq!(results[0].1, Value::Bool(true));
     }
 
-    // ── Trait object tests ───────────────────────────────────────────
+    // -- Trait object tests --
 
     #[test]
     fn test_execution_context_trait_object_from_tool_context() {

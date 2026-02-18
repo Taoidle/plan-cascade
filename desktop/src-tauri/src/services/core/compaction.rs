@@ -20,8 +20,8 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use plan_cascade_core::error::{CoreError, CoreResult};
 use crate::services::llm::types::{Message, MessageRole};
-use crate::utils::error::{AppError, AppResult};
 
 // ============================================================================
 // CompactionStrategy Enum
@@ -170,7 +170,7 @@ pub trait ContextCompactor: Send + Sync {
         &self,
         messages: &[Message],
         config: &CompactionConfig,
-    ) -> AppResult<CompactionResult>;
+    ) -> CoreResult<CompactionResult>;
 
     /// Human-readable name for this compactor.
     fn name(&self) -> &str;
@@ -230,7 +230,7 @@ impl ContextCompactor for SlidingWindowCompactor {
         &self,
         messages: &[Message],
         config: &CompactionConfig,
-    ) -> AppResult<CompactionResult> {
+    ) -> CoreResult<CompactionResult> {
         if !config.enabled {
             return Ok(CompactionResult {
                 messages: messages.to_vec(),
@@ -294,7 +294,7 @@ impl ContextCompactor for SlidingWindowCompactor {
 /// a summary string. This allows the compactor to be used without
 /// directly depending on LLM provider types.
 pub type SummarizeFn = Box<
-    dyn Fn(Vec<Message>) -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<String>> + Send>>
+    dyn Fn(Vec<Message>) -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<String>> + Send>>
         + Send
         + Sync,
 >;
@@ -316,7 +316,7 @@ impl LlmSummaryCompactor {
     /// Create a new LlmSummaryCompactor with the given summarization function.
     pub fn new<F>(summarize: F) -> Self
     where
-        F: Fn(Vec<Message>) -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<String>> + Send>>
+        F: Fn(Vec<Message>) -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<String>> + Send>>
             + Send
             + Sync
             + 'static,
@@ -333,7 +333,7 @@ impl ContextCompactor for LlmSummaryCompactor {
         &self,
         messages: &[Message],
         config: &CompactionConfig,
-    ) -> AppResult<CompactionResult> {
+    ) -> CoreResult<CompactionResult> {
         if !config.enabled {
             return Ok(CompactionResult {
                 messages: messages.to_vec(),
@@ -690,7 +690,7 @@ mod tests {
     #[tokio::test]
     async fn test_llm_summary_error_propagation() {
         let compactor = LlmSummaryCompactor::new(|_| {
-            Box::pin(async { Err(AppError::internal("LLM call failed")) })
+            Box::pin(async { Err(CoreError::internal("LLM call failed")) })
         });
 
         let messages = make_messages(20);

@@ -1,0 +1,22 @@
+[package]
+name = "plan-cascade-core"
+version = "0.1.0"
+description = "Core traits, error types, and context hierarchy for Plan Cascade Desktop"
+authors = ["Plan Cascade Team"]
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async trait support
+async-trait = "0.1"
+
+# Error handling
+thiserror = "2"
+
+[dev-dependencies]
+# Async test runtime
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
