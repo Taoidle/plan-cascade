@@ -27,6 +27,7 @@ pub mod lsp_client;
 pub mod lsp_enricher;
 pub mod lsp_registry;
 pub mod tree_sitter_parser;
+pub mod event_actions_applicator;
 
 pub use hooks::{AgenticHooks, BeforeToolResult, HookContext, SessionSummary, build_default_hooks, register_skill_hooks, register_memory_hooks};
 pub use service::{

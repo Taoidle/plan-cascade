@@ -1258,6 +1258,11 @@ impl OrchestratorService {
         // Session memory manager for Layer 2 context (placed at index 1, after system prompt)
         let mut session_memory_manager = SessionMemoryManager::new(1);
 
+        // EventActions state map: accumulates state deltas from tool EventActions.
+        // The orchestrator is the sole action applicator - all agent-initiated
+        // state changes flow through this map via the event_actions_applicator.
+        let mut event_actions_state: HashMap<String, serde_json::Value> = HashMap::new();
+
         // Build hook context for lifecycle hooks
         let hook_ctx = crate::services::orchestrator::hooks::HookContext {
             session_id: uuid::Uuid::new_v4().to_string(),
@@ -1638,6 +1643,27 @@ impl OrchestratorService {
                         result.output.as_ref().map(|o| truncate_for_log(o, 200)),
                     ).await;
 
+                    // Apply EventActions if the tool declared any side effects.
+                    // The orchestrator is the sole action applicator: state deltas,
+                    // checkpoints, quality gate results, and transfer requests are
+                    // all processed here in deterministic order.
+                    if let Some(ref actions) = result.event_actions {
+                        if actions.has_actions() {
+                            let apply_result = crate::services::orchestrator::event_actions_applicator::apply_actions(
+                                actions,
+                                &mut event_actions_state,
+                                None, // TimelineService not available in basic execute()
+                                &self.config.project_root.to_string_lossy(),
+                                &hook_ctx.session_id,
+                                &[],
+                                &tx,
+                            ).await;
+                            if let Err(e) = apply_result {
+                                eprintln!("[event-actions] Failed to apply actions from {}: {}", effective_tool_name, e);
+                            }
+                        }
+                    }
+
                     // If the result is a dedup hit, push a short informative
                     // tool_result so the LLM knows the file was already read
                     // and should use session memory instead of re-reading.
@@ -1837,6 +1863,24 @@ impl OrchestratorService {
                         result.success,
                         result.output.as_ref().map(|o| truncate_for_log(o, 200)),
                     ).await;
+
+                    // Apply EventActions if the tool declared any side effects (fallback path).
+                    if let Some(ref actions) = result.event_actions {
+                        if actions.has_actions() {
+                            let apply_result = crate::services::orchestrator::event_actions_applicator::apply_actions(
+                                actions,
+                                &mut event_actions_state,
+                                None,
+                                &self.config.project_root.to_string_lossy(),
+                                &hook_ctx.session_id,
+                                &[],
+                                &tx,
+                            ).await;
+                            if let Err(e) = apply_result {
+                                eprintln!("[event-actions] Failed to apply actions from {} (fallback): {}", ptc.tool_name, e);
+                            }
+                        }
+                    }
 
                     // For dedup results, push the dedup message so the LLM
                     // knows the file was already read. For normal results,

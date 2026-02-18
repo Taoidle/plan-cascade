@@ -193,6 +193,18 @@ pub enum AgentEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         surface_id: Option<String>,
     },
+    /// Declared side effects from an agent or tool.
+    ///
+    /// Instead of directly causing state mutations, agents can emit this
+    /// variant to declare desired side effects. The orchestrator processes
+    /// the enclosed `EventActions` after handling the event.
+    ///
+    /// Composite agents (Sequential, Parallel, Conditional) forward this
+    /// variant unchanged — only the orchestrator applies the actions.
+    Actions {
+        /// The EventActions bundle to be applied by the orchestrator.
+        actions: crate::services::core::event_actions::EventActions,
+    },
     /// Agent execution completed successfully with optional output.
     Done {
         output: Option<String>,
