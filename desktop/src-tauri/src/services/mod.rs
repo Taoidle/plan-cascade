@@ -6,6 +6,7 @@
 pub mod agent;
 pub mod agent_composer;
 pub mod agent_executor;
+pub mod core;
 pub mod analytics;
 pub mod claude_code;
 pub mod context;
