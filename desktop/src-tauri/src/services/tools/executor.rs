@@ -64,6 +64,14 @@ pub struct ToolResult {
     /// instead of the full content, to prevent weak models from re-reading files.
     #[serde(default)]
     pub is_dedup: bool,
+    /// Optional EventActions declared by the tool alongside its result.
+    ///
+    /// When present, the orchestrator's agentic loop processes these actions
+    /// after handling the tool result. This enables tools to declare side
+    /// effects (state mutations, checkpoints, quality gate results, transfers)
+    /// without directly causing them.
+    #[serde(skip)]
+    pub event_actions: Option<crate::services::core::event_actions::EventActions>,
 }
 
 impl ToolResult {
@@ -75,6 +83,7 @@ impl ToolResult {
             error: None,
             image_data: None,
             is_dedup: false,
+            event_actions: None,
         }
     }
 
@@ -86,6 +95,7 @@ impl ToolResult {
             error: Some(error.into()),
             image_data: None,
             is_dedup: false,
+            event_actions: None,
         }
     }
 
@@ -101,6 +111,7 @@ impl ToolResult {
             error: None,
             image_data: Some((mime_type, base64_data)),
             is_dedup: false,
+            event_actions: None,
         }
     }
 
@@ -115,7 +126,18 @@ impl ToolResult {
             error: None,
             image_data: None,
             is_dedup: true,
+            event_actions: None,
         }
+    }
+
+    /// Attach EventActions to this tool result.
+    ///
+    /// The orchestrator will process these actions after handling the tool result.
+    pub fn with_event_actions(mut self, actions: crate::services::core::event_actions::EventActions) -> Self {
+        if actions.has_actions() {
+            self.event_actions = Some(actions);
+        }
+        self
     }
 
     /// Convert to string for LLM consumption
