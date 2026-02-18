@@ -1,0 +1,55 @@
+{
+  "title": "Artifacts",
+  "count": "{{count}} artifact(s)",
+  "loading": "Loading artifacts...",
+  "noArtifacts": "No artifacts found",
+  "noArtifactsHint": "Artifacts are created during execution and agent workflows",
+  "selectArtifact": "Select an artifact to view details",
+  "dismiss": "Dismiss",
+  "delete": "Delete",
+  "deleting": "Deleting...",
+  "searchPlaceholder": "Search artifacts...",
+
+  "scope": {
+    "project": "Project",
+    "session": "Session",
+    "user": "User"
+  },
+
+  "deleteArtifact": "Delete Artifact",
+  "deleteConfirm": "Are you sure you want to delete \"{{name}}\" and all its versions? This cannot be undone.",
+
+  "detail": {
+    "id": "Artifact ID",
+    "checksum": "Checksum",
+    "createdAt": "Created",
+    "updatedAt": "Updated",
+    "preview": "Content Preview",
+    "loadingPreview": "Loading preview...",
+    "binaryContent": "Binary content ({{size}})",
+    "useDownload": "Use the download button to save this file",
+    "noPreview": "No preview available",
+    "versionHistory": "Version History",
+    "loadingVersions": "Loading versions...",
+    "noVersions": "No version history available",
+    "latest": "latest",
+    "viewVersion": "View"
+  },
+
+  "actions": {
+    "download": "Download",
+    "copyPath": "Copy Path",
+    "copied": "Copied!"
+  },
+
+  "diff": {
+    "title": "Version Comparison",
+    "from": "From",
+    "to": "To",
+    "added": "added",
+    "removed": "removed",
+    "modified": "modified",
+    "loading": "Loading diff...",
+    "binaryNotSupported": "Diff is only available for text-based artifacts"
+  }
+}

@@ -136,3 +136,9 @@ export type {
   DimensionScore,
   TaskModeState,
 } from './taskMode';
+
+export { useKnowledgeStore } from './knowledge';
+export type { KnowledgeState } from './knowledge';
+
+export { useArtifactsStore } from './artifacts';
+export type { ArtifactsState, ScopeFilter } from './artifacts';

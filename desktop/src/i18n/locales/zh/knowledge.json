@@ -1,0 +1,64 @@
+{
+  "title": "知识库",
+  "subtitle": "{{count}} 个集合",
+  "newCollection": "新建集合",
+  "loading": "加载集合中...",
+  "noCollections": "暂无知识集合",
+  "noCollectionsHint": "创建一个集合并上传文档以开始使用",
+  "selectCollection": "选择一个集合查看详情",
+  "dismiss": "关闭",
+  "delete": "删除",
+  "deleting": "删除中...",
+  "creating": "创建中...",
+  "create": "创建",
+
+  "createCollection": "创建集合",
+  "collectionName": "集合名称",
+  "collectionNamePlaceholder": "例如：project-docs",
+  "description": "描述",
+  "descriptionPlaceholder": "简要描述此集合",
+
+  "deleteCollection": "删除集合",
+  "deleteConfirm": "确定要删除集合 \"{{name}}\" 吗？这将移除所有文档和索引数据。",
+
+  "chunks": "{{count}} 个分块",
+
+  "tabs": {
+    "details": "详情",
+    "upload": "上传",
+    "query": "查询"
+  },
+
+  "detail": {
+    "chunkCount": "分块数量",
+    "projectId": "项目 ID",
+    "collectionId": "集合 ID",
+    "timestamps": "时间信息",
+    "createdAt": "创建时间",
+    "updatedAt": "最后更新"
+  },
+
+  "upload": {
+    "title": "上传文档",
+    "subtitle": "上传文档以将其索引到此知识集合中",
+    "dragOrClick": "将文件拖到此处或点击浏览",
+    "dropHere": "将文件放在此处",
+    "acceptedFormats": "支持格式：PDF、DOCX、XLSX、Markdown、纯文本",
+    "noValidFiles": "未找到有效文件。支持的格式：PDF、DOCX、XLSX、MD、TXT",
+    "selectedFiles": "已选择 {{count}} 个文件",
+    "ingesting": "正在索引文档...",
+    "uploadAndIndex": "上传并索引 {{count}} 个文件"
+  },
+
+  "query": {
+    "title": "查询知识",
+    "subtitle": "在此集合中搜索相关信息",
+    "placeholder": "输入搜索查询...",
+    "search": "搜索",
+    "searching": "搜索中...",
+    "topK": "结果数：",
+    "clearResults": "清除",
+    "resultsFound": "从 {{total}} 个分块中找到 {{count}} 条结果",
+    "noResults": "未找到匹配结果"
+  }
+}

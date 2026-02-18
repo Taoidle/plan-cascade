@@ -62,6 +62,14 @@
     "analytics": {
       "name": "Analytics",
       "description": "Track usage, costs, and API analytics"
+    },
+    "knowledge": {
+      "name": "Knowledge",
+      "description": "Project knowledge base with RAG search"
+    },
+    "artifacts": {
+      "name": "Artifacts",
+      "description": "Browse and manage versioned artifacts"
     }
   },
 

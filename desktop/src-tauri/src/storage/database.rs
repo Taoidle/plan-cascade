@@ -50,6 +50,12 @@ pub struct Database {
 }
 
 impl Database {
+    /// Create a database from an existing pool (for testing).
+    #[cfg(test)]
+    pub fn from_pool_for_test(pool: DbPool) -> Self {
+        Self { pool }
+    }
+
     /// Create an in-memory database for testing.
     ///
     /// Uses an in-memory SQLite database with the same schema as the

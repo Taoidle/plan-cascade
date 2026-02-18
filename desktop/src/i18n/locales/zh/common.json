@@ -62,6 +62,14 @@
     "analytics": {
       "name": "分析",
       "description": "追踪使用量、成本和API分析"
+    },
+    "knowledge": {
+      "name": "知识库",
+      "description": "项目知识库与RAG搜索"
+    },
+    "artifacts": {
+      "name": "产物",
+      "description": "浏览和管理版本化产物"
     }
   },
 

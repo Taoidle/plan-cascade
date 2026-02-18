@@ -21,6 +21,8 @@ import {
   ChatBubbleIcon,
   FileIcon,
   BarChartIcon,
+  ReaderIcon,
+  ArchiveIcon,
 } from '@radix-ui/react-icons';
 import { Mode, MODES, useModeStore } from '../store/mode';
 
@@ -39,6 +41,8 @@ const MODE_ICONS: Record<Mode, typeof LightningBoltIcon> = {
   'claude-code': ChatBubbleIcon,
   projects: FileIcon,
   analytics: BarChartIcon,
+  knowledge: ReaderIcon,
+  artifacts: ArchiveIcon,
 };
 
 export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps) {
@@ -54,6 +58,8 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
       'claude-code': t('modeSwitch.claudeCode.name'),
       projects: t('modeSwitch.projects.name'),
       analytics: t('modeSwitch.analytics.name'),
+      knowledge: t('modeSwitch.knowledge.name'),
+      artifacts: t('modeSwitch.artifacts.name'),
     };
     return labels[m];
   };
@@ -65,6 +71,8 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
       'claude-code': t('modeSwitch.claudeCode.description'),
       projects: t('modeSwitch.projects.description'),
       analytics: t('modeSwitch.analytics.description'),
+      knowledge: t('modeSwitch.knowledge.description'),
+      artifacts: t('modeSwitch.artifacts.description'),
     };
     return descriptions[m];
   };
@@ -262,6 +270,8 @@ export function ModeTabs({ mode, onChange, disabled = false }: ModeTabsProps) {
       'claude-code': t('modeSwitch.claudeCode.name'),
       projects: t('modeSwitch.projects.name'),
       analytics: t('modeSwitch.analytics.name'),
+      knowledge: t('modeSwitch.knowledge.name'),
+      artifacts: t('modeSwitch.artifacts.name'),
     };
     return labels[m];
   };
@@ -273,6 +283,8 @@ export function ModeTabs({ mode, onChange, disabled = false }: ModeTabsProps) {
       'claude-code': t('modeSwitch.claudeCode.description'),
       projects: t('modeSwitch.projects.description'),
       analytics: t('modeSwitch.analytics.description'),
+      knowledge: t('modeSwitch.knowledge.description'),
+      artifacts: t('modeSwitch.artifacts.description'),
     };
     return descriptions[m];
   };

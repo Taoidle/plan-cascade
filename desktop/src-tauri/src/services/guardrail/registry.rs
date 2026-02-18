@@ -11,7 +11,8 @@ use crate::storage::database::Database;
 
 use super::{
     CodeSecurityGuardrail, CustomGuardrail, Direction, Guardrail, GuardrailAction,
-    GuardrailInfo, GuardrailResult, SensitiveDataGuardrail, TriggerLogEntry,
+    GuardrailInfo, GuardrailResult, SchemaValidationGuardrail, SensitiveDataGuardrail,
+    TriggerLogEntry,
 };
 
 /// Managed guardrail entry with enabled state.
@@ -42,6 +43,7 @@ impl GuardrailRegistry {
         let mut registry = Self::new();
         registry.add_builtin(Box::new(SensitiveDataGuardrail::new()), true);
         registry.add_builtin(Box::new(CodeSecurityGuardrail::new()), true);
+        registry.add_builtin(Box::new(SchemaValidationGuardrail::new()), true);
         registry
     }
 
@@ -435,9 +437,10 @@ mod tests {
     fn test_registry_with_defaults() {
         let registry = GuardrailRegistry::with_defaults();
         let list = registry.list_guardrails();
-        assert_eq!(list.len(), 2);
+        assert_eq!(list.len(), 3);
         assert!(list.iter().any(|g| g.name == "SensitiveData"));
         assert!(list.iter().any(|g| g.name == "CodeSecurity"));
+        assert!(list.iter().any(|g| g.name == "SchemaValidation"));
     }
 
     #[test]
