@@ -34,6 +34,7 @@ pub mod streaming;
 pub mod sync;
 pub mod timeline;
 pub mod tools;
+pub mod remote;
 pub mod webhook;
 pub mod worktree;
 

@@ -137,6 +137,12 @@ lsp-types = "0.97"
 # Concurrent hash map for LSP request correlation
 dashmap = "6"
 
+# Remote control - Telegram bot
+teloxide = { version = "0.13", features = ["macros"] }
+
+# Webhook - HMAC signature
+hmac = "0.12"
+
 # Tree-sitter parsing for accurate symbol extraction
 tree-sitter = "0.24"
 tree-sitter-python = "0.23"

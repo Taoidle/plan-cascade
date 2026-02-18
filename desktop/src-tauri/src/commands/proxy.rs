@@ -44,6 +44,7 @@ const PROVIDER_IDS: &[&str] = &[
     "webhook_telegram",
     "webhook_discord",
     "webhook_custom",
+    "remote_telegram",
 ];
 
 /// Settings DB key prefix for per-provider proxy strategy.
@@ -416,7 +417,9 @@ pub fn resolve_provider_proxy(
 /// - Claude Code: use_global
 fn default_strategy_for(provider: &str) -> ProxyStrategy {
     match provider {
-        "anthropic" | "openai" | "claude_code" | "embedding_openai" => ProxyStrategy::UseGlobal,
+        "anthropic" | "openai" | "claude_code" | "embedding_openai" | "remote_telegram" => {
+            ProxyStrategy::UseGlobal
+        }
         // Webhook channels: international services default to global proxy
         "webhook_slack" | "webhook_discord" | "webhook_telegram" | "webhook_custom" => {
             ProxyStrategy::UseGlobal

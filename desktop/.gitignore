@@ -1,0 +1,40 @@
+# Plan Cascade - AI Planning Framework
+# https://github.com/anthropics/plan-cascade
+
+# Runtime directories
+.worktree/
+.locks/
+.state/
+
+# Planning documents (regenerated, not source code)
+spec.json
+spec.md
+prd.json
+mega-plan.json
+design_doc.json
+
+# Status and state files
+.mega-status.json
+.planning-config.json
+.agent-status.json
+.iteration-state.json
+.retry-state.json
+
+# Progress tracking files
+findings.md
+mega-findings.md
+progress.txt
+
+# Context recovery files
+.hybrid-execution-context.md
+.mega-execution-context.md
+
+# Project link and backup (new mode)
+.plan-cascade-link.json
+.plan-cascade-backup/
+
+# Project config
+.plan-cascade.json
+
+# Agent outputs
+.agent-outputs/

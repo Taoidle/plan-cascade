@@ -25,13 +25,14 @@ import { LspSection } from './LspSection';
 import { PluginSection } from './PluginSection';
 import { NetworkSection } from './NetworkSection';
 import { WebhookSection } from './WebhookSection';
+import { RemoteSection } from './RemoteSection';
 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-type SettingsTab = 'general' | 'llm' | 'embedding' | 'lsp' | 'network' | 'notifications' | 'plugins' | 'security' | 'agents' | 'quality' | 'phases' | 'import-export';
+type SettingsTab = 'general' | 'llm' | 'embedding' | 'lsp' | 'network' | 'notifications' | 'remote' | 'plugins' | 'security' | 'agents' | 'quality' | 'phases' | 'import-export';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { t } = useTranslation('settings');
@@ -45,6 +46,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     { id: 'lsp', label: t('tabs.lsp') },
     { id: 'network', label: t('tabs.network') },
     { id: 'notifications', label: t('tabs.notifications', 'Notifications') },
+    { id: 'remote', label: t('tabs.remote', 'Remote') },
     { id: 'plugins', label: t('tabs.plugins', 'Plugins') },
     { id: 'security', label: t('tabs.security') },
     { id: 'agents', label: t('tabs.agents') },
@@ -150,6 +152,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </Tabs.Content>
               <Tabs.Content value="notifications" className="outline-none">
                 <WebhookSection />
+              </Tabs.Content>
+              <Tabs.Content value="remote" className="outline-none">
+                <RemoteSection />
               </Tabs.Content>
               <Tabs.Content value="plugins" className="outline-none">
                 <PluginSection />

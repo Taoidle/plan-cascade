@@ -9,6 +9,7 @@ use plan_cascade_desktop::commands::lsp::LspState;
 use plan_cascade_desktop::commands::mcp::McpRuntimeState;
 use plan_cascade_desktop::commands::plugins::PluginState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
+use plan_cascade_desktop::commands::remote::RemoteState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
 use plan_cascade_desktop::commands::standalone::StandaloneState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
@@ -33,6 +34,7 @@ fn main() {
         .manage(PluginState::new())
         .manage(GuardrailState::new())
         .manage(WebhookState::new_empty())
+        .manage(RemoteState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -267,6 +269,17 @@ fn main() {
             plan_cascade_desktop::commands::webhook::test_webhook_channel,
             plan_cascade_desktop::commands::webhook::get_webhook_deliveries,
             plan_cascade_desktop::commands::webhook::retry_webhook_delivery,
+            // Remote Control commands
+            plan_cascade_desktop::commands::remote::get_remote_gateway_status,
+            plan_cascade_desktop::commands::remote::start_remote_gateway,
+            plan_cascade_desktop::commands::remote::stop_remote_gateway,
+            plan_cascade_desktop::commands::remote::get_remote_config,
+            plan_cascade_desktop::commands::remote::update_remote_config,
+            plan_cascade_desktop::commands::remote::get_telegram_config,
+            plan_cascade_desktop::commands::remote::update_telegram_config,
+            plan_cascade_desktop::commands::remote::list_remote_sessions,
+            plan_cascade_desktop::commands::remote::disconnect_remote_session,
+            plan_cascade_desktop::commands::remote::get_remote_audit_log,
             // Evaluation commands
             plan_cascade_desktop::commands::evaluation::list_evaluators,
             plan_cascade_desktop::commands::evaluation::create_evaluator,

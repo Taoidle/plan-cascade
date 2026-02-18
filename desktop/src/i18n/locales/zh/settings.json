@@ -13,7 +13,8 @@
     "plugins": "插件",
     "security": "安全",
     "network": "网络",
-    "notifications": "通知"
+    "notifications": "通知",
+    "remote": "远程控制"
   },
 
   "general": {
@@ -653,7 +654,8 @@
       "webhook_feishu": "Webhook: 飞书",
       "webhook_telegram": "Webhook: Telegram",
       "webhook_discord": "Webhook: Discord",
-      "webhook_custom": "Webhook: 自定义"
+      "webhook_custom": "Webhook: 自定义",
+      "remote_telegram": "Telegram 远程"
     }
   },
 
@@ -708,6 +710,69 @@
       "template": "自定义模板",
       "optional": "可选",
       "sessionIds": "以逗号分隔的会话 ID"
+    }
+  },
+
+  "remote": {
+    "title": "远程控制",
+    "save": "保存",
+    "saving": "保存中...",
+    "saveSuccess": "配置已保存",
+    "dismiss": "关闭",
+
+    "gateway": {
+      "title": "网关状态",
+      "start": "启动",
+      "stop": "停止",
+      "running": "运行中",
+      "stopped": "已停止",
+      "connectedSince": "连接时间",
+      "commandsProcessed": "已处理命令",
+      "activeSessions": "活跃会话"
+    },
+
+    "config": {
+      "title": "网关配置",
+      "enabled": "启用远程控制",
+      "autoStart": "启动时自动开启"
+    },
+
+    "telegram": {
+      "title": "Telegram Bot 配置",
+      "botToken": "Bot Token",
+      "botTokenPlaceholder": "输入 Bot Token...",
+      "tokenSet": "已设置",
+      "autoStart": "自动启动",
+      "allowedChatIds": "允许的 Chat ID",
+      "chatIdPlaceholder": "Chat ID...",
+      "chatIdHint": "留空则允许所有聊天。",
+      "allowedUserIds": "允许的 User ID",
+      "userIdPlaceholder": "User ID...",
+      "userIdHint": "留空则允许所有用户。",
+      "passwordProtection": "需要密码",
+      "accessPassword": "访问密码",
+      "accessPasswordPlaceholder": "设置访问密码...",
+      "streamingMode": "流式模式",
+      "modeWaitForComplete": "等待完成",
+      "modePeriodicUpdate": "定期更新",
+      "modeLiveEdit": "实时编辑",
+      "allowedPaths": "允许的项目路径"
+    },
+
+    "sessions": {
+      "title": "活跃远程会话",
+      "none": "暂无活跃的远程会话。",
+      "disconnect": "断开连接"
+    },
+
+    "audit": {
+      "title": "审计日志",
+      "none": "暂无审计日志。",
+      "time": "时间",
+      "user": "用户",
+      "command": "命令",
+      "status": "状态",
+      "viewAll": "查看所有条目"
     }
   }
 }
