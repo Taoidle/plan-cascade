@@ -522,6 +522,129 @@ pub async fn git_get_remotes(
 }
 
 // ===========================================================================
+// Merge Commands
+// ===========================================================================
+
+/// Merge a branch into the current branch.
+#[tauri::command]
+pub async fn git_merge_branch(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    branch: String,
+) -> Result<CommandResponse<MergeBranchResult>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+    match service.merge_branch(&path, &branch) {
+        Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Abort a merge in progress.
+#[tauri::command]
+pub async fn git_merge_abort(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+) -> Result<CommandResponse<()>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+    match service.merge_abort(&path) {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Complete a merge after resolving all conflicts.
+#[tauri::command]
+pub async fn git_merge_continue(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+) -> Result<CommandResponse<String>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+    match service.merge_continue(&path) {
+        Ok(sha) => Ok(CommandResponse::ok(sha)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Rename a branch.
+#[tauri::command]
+pub async fn git_rename_branch(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    old_name: String,
+    new_name: String,
+) -> Result<CommandResponse<()>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+    match service.rename_branch(&path, &old_name, &new_name) {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// List remote branches.
+#[tauri::command]
+pub async fn git_list_remote_branches(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+) -> Result<CommandResponse<Vec<RemoteBranchInfo>>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+    match service.list_remote_branches(&path) {
+        Ok(branches) => Ok(CommandResponse::ok(branches)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Read a file's content (for conflict resolution).
+#[tauri::command]
+pub async fn git_read_file_content(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    file_path: String,
+) -> Result<CommandResponse<String>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+    match service.read_file_content(&path, &file_path) {
+        Ok(content) => Ok(CommandResponse::ok(content)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Parse conflict regions from a file.
+#[tauri::command]
+pub async fn git_parse_file_conflicts(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    file_path: String,
+) -> Result<CommandResponse<Vec<ConflictRegion>>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+    match service.parse_file_conflicts(&path, &file_path) {
+        Ok(regions) => Ok(CommandResponse::ok(regions)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Resolve a file by writing content and staging it.
+#[tauri::command]
+pub async fn git_resolve_file_and_stage(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    file_path: String,
+    content: String,
+) -> Result<CommandResponse<()>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+    match service.resolve_file_and_stage(&path, &file_path, &content) {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+// ===========================================================================
 // LLM-Assisted Commands
 // ===========================================================================
 

@@ -221,6 +221,137 @@ impl GitService {
         self.git.checkout(repo_path, name)
     }
 
+    /// Rename a branch.
+    pub fn rename_branch(
+        &self,
+        repo_path: &Path,
+        old_name: &str,
+        new_name: &str,
+    ) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["branch", "-m", old_name, new_name])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Merge a branch into the current branch.
+    pub fn merge_branch(
+        &self,
+        repo_path: &Path,
+        branch: &str,
+    ) -> AppResult<MergeBranchResult> {
+        let result = self
+            .git
+            .execute(repo_path, &["merge", "--no-ff", branch])?;
+
+        if result.success {
+            Ok(MergeBranchResult {
+                success: true,
+                has_conflicts: false,
+                conflicting_files: Vec::new(),
+                error: None,
+            })
+        } else if result.stdout.contains("CONFLICT") || result.stderr.contains("CONFLICT") {
+            // Get conflicting files
+            let conflict_output = self
+                .git
+                .execute(repo_path, &["diff", "--name-only", "--diff-filter=U"])?
+                .into_result()
+                .unwrap_or_default();
+            let conflicts: Vec<String> = conflict_output
+                .lines()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            Ok(MergeBranchResult {
+                success: false,
+                has_conflicts: true,
+                conflicting_files: conflicts,
+                error: None,
+            })
+        } else {
+            Ok(MergeBranchResult {
+                success: false,
+                has_conflicts: false,
+                conflicting_files: Vec::new(),
+                error: Some(result.stderr.trim().to_string()),
+            })
+        }
+    }
+
+    /// Abort a merge in progress.
+    pub fn merge_abort(&self, repo_path: &Path) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["merge", "--abort"])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Complete a merge (commit after all conflicts resolved).
+    pub fn merge_continue(&self, repo_path: &Path) -> AppResult<String> {
+        // Stage all resolved files and commit
+        self.git
+            .execute(repo_path, &["commit", "--no-edit"])?
+            .into_result()?;
+        let sha = self
+            .git
+            .execute(repo_path, &["rev-parse", "HEAD"])?
+            .into_result()?
+            .trim()
+            .to_string();
+        Ok(sha)
+    }
+
+    /// List remote branches.
+    pub fn list_remote_branches(&self, repo_path: &Path) -> AppResult<Vec<RemoteBranchInfo>> {
+        let output = self
+            .git
+            .execute(
+                repo_path,
+                &[
+                    "for-each-ref",
+                    "--format=%(refname:short)%00%(objectname:short)",
+                    "refs/remotes/",
+                ],
+            )?
+            .into_result()?;
+
+        Ok(parse_remote_branch_list(&output))
+    }
+
+    /// Read file content (for conflict resolution).
+    pub fn read_file_content(&self, repo_path: &Path, file_path: &str) -> AppResult<String> {
+        let full_path = repo_path.join(file_path);
+        std::fs::read_to_string(&full_path).map_err(|e| {
+            AppError::command(format!("Failed to read file {}: {}", file_path, e))
+        })
+    }
+
+    /// Write resolved content and stage the file.
+    pub fn resolve_file_and_stage(
+        &self,
+        repo_path: &Path,
+        file_path: &str,
+        content: &str,
+    ) -> AppResult<()> {
+        let full_path = repo_path.join(file_path);
+        std::fs::write(&full_path, content).map_err(|e| {
+            AppError::command(format!("Failed to write file {}: {}", file_path, e))
+        })?;
+        self.git.add(repo_path, &[file_path])?;
+        Ok(())
+    }
+
+    /// Parse conflict regions from a file.
+    pub fn parse_file_conflicts(
+        &self,
+        repo_path: &Path,
+        file_path: &str,
+    ) -> AppResult<Vec<ConflictRegion>> {
+        let content = self.read_file_content(repo_path, file_path)?;
+        Ok(super::conflict::parse_conflicts(&content))
+    }
+
     // -----------------------------------------------------------------------
     // Stash
     // -----------------------------------------------------------------------
@@ -895,6 +1026,44 @@ pub fn parse_remotes(output: &str) -> Vec<RemoteInfo> {
     }
 
     map.into_values().collect()
+}
+
+/// Parse `git for-each-ref` output for remote branches.
+pub fn parse_remote_branch_list(output: &str) -> Vec<RemoteBranchInfo> {
+    output
+        .lines()
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split('\0').collect();
+            if parts.len() < 2 {
+                return None;
+            }
+            let full_name = parts[0].to_string(); // e.g. "origin/main"
+            let tip_sha = parts[1].to_string();
+
+            // Skip HEAD references like "origin/HEAD"
+            if full_name.ends_with("/HEAD") {
+                return None;
+            }
+
+            // Split into remote and branch
+            let (remote, branch) = if let Some(pos) = full_name.find('/') {
+                (
+                    full_name[..pos].to_string(),
+                    full_name[pos + 1..].to_string(),
+                )
+            } else {
+                return None;
+            };
+
+            Some(RemoteBranchInfo {
+                name: full_name,
+                remote,
+                branch,
+                tip_sha,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

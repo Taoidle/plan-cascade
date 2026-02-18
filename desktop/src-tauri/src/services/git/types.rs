@@ -237,6 +237,20 @@ pub struct MergeState {
     pub branch_name: Option<String>,
 }
 
+/// Result of a merge branch operation (returned to frontend).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeBranchResult {
+    /// Whether the merge was successful (no conflicts).
+    pub success: bool,
+    /// Whether there are merge conflicts.
+    pub has_conflicts: bool,
+    /// List of files with conflicts (if any).
+    pub conflicting_files: Vec<String>,
+    /// Error message if the merge failed for non-conflict reasons.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Graph Layout (DAG visualization)
 // ---------------------------------------------------------------------------

@@ -152,3 +152,5 @@ export type { KnowledgeState } from './knowledge';
 
 export { useArtifactsStore } from './artifacts';
 export type { ArtifactsState, ScopeFilter } from './artifacts';
+
+export { useGitStore } from './git';
