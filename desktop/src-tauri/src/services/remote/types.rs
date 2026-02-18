@@ -46,12 +46,12 @@ impl Default for RemoteGatewayConfig {
 /// Telegram-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramAdapterConfig {
-    #[serde(skip_serializing, default)]
+    #[serde(default)]
     pub bot_token: Option<String>,
     pub allowed_chat_ids: Vec<i64>,
     pub allowed_user_ids: Vec<i64>,
     pub require_password: bool,
-    #[serde(skip_serializing, default)]
+    #[serde(default)]
     pub access_password: Option<String>,
     #[serde(default = "default_max_message_length")]
     pub max_message_length: usize,
@@ -387,16 +387,29 @@ mod tests {
     }
 
     #[test]
-    fn test_telegram_adapter_config_skip_serializing_secrets() {
+    fn test_telegram_adapter_config_serializes_secrets() {
+        // After removing skip_serializing, bot_token and access_password appear
+        // in serialized output. In practice, get_telegram_config masks them
+        // as "***" or sets them to None -- real values never reach the frontend.
         let config = TelegramAdapterConfig {
-            bot_token: Some("my-secret-token".to_string()),
-            access_password: Some("my-password".to_string()),
+            bot_token: Some("***".to_string()),
+            access_password: Some("***".to_string()),
             ..Default::default()
         };
         let json = serde_json::to_string(&config).unwrap();
-        // bot_token and access_password should NOT appear in serialized output
-        assert!(!json.contains("my-secret-token"));
-        assert!(!json.contains("my-password"));
+        // Fields should now appear in serialized output (masked values)
+        assert!(json.contains("\"bot_token\":\"***\""));
+        assert!(json.contains("\"access_password\":\"***\""));
+    }
+
+    #[test]
+    fn test_telegram_adapter_config_serializes_null_when_unset() {
+        // When bot_token / access_password are None, they serialize as null
+        // so the frontend receives an explicit null (not undefined).
+        let config = TelegramAdapterConfig::default();
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"bot_token\":null"));
+        assert!(json.contains("\"access_password\":null"));
     }
 
     #[test]

@@ -78,9 +78,9 @@ export function RemoteSection() {
 
   useEffect(() => {
     if (telegramConfig) {
-      setHasBotToken(telegramConfig.bot_token !== null && telegramConfig.bot_token !== '');
+      setHasBotToken(!!telegramConfig.bot_token && telegramConfig.bot_token !== '');
       setRequirePassword(telegramConfig.require_password);
-      setHasAccessPassword(telegramConfig.access_password !== null && telegramConfig.access_password !== '');
+      setHasAccessPassword(!!telegramConfig.access_password && telegramConfig.access_password !== '');
       setChatIds(telegramConfig.allowed_chat_ids);
       setUserIds(telegramConfig.allowed_user_ids);
       if (typeof telegramConfig.streaming_mode === 'string') {

@@ -293,6 +293,8 @@ pub async fn get_telegram_config(
                 .is_some();
             if has_token {
                 config.bot_token = Some("***".to_string());
+            } else {
+                config.bot_token = None; // Explicit null for frontend
             }
 
             let has_password = keyring
@@ -302,6 +304,8 @@ pub async fn get_telegram_config(
                 .is_some();
             if has_password {
                 config.access_password = Some("***".to_string());
+            } else {
+                config.access_password = None; // Explicit null for frontend
             }
 
             Ok(config)

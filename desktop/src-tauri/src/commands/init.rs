@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
+use crate::commands::plugins::PluginState;
 use crate::commands::remote::RemoteState;
 use crate::commands::standalone::StandaloneState;
 use crate::models::response::CommandResponse;
@@ -37,6 +38,7 @@ pub async fn init_app(
     state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
     remote_state: State<'_, RemoteState>,
+    plugin_state: State<'_, PluginState>,
     app: AppHandle,
 ) -> Result<CommandResponse<InitResult>, String> {
     // Initialize all services
@@ -60,6 +62,24 @@ pub async fn init_app(
                 // Store in StandaloneState
                 let mut mgr_lock = standalone_state.index_manager.write().await;
                 *mgr_lock = Some(manager);
+            }
+
+            // Initialize the plugin system (ADR-F003)
+            {
+                let plugin_root = {
+                    let wd = standalone_state.working_directory.read().await;
+                    let wd_str = wd.to_string_lossy().to_string();
+                    if wd_str.is_empty() || wd_str == "." {
+                        // Fall back to user home directory
+                        dirs::home_dir()
+                            .map(|h| h.to_string_lossy().to_string())
+                            .unwrap_or_else(|| ".".to_string())
+                    } else {
+                        wd_str
+                    }
+                };
+                plugin_state.initialize(&plugin_root).await;
+                tracing::info!("Plugin system initialized with root: {}", plugin_root);
             }
 
             // Scan for incomplete executions after initialization

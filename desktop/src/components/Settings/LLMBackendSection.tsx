@@ -123,7 +123,26 @@ export function LLMBackendSection() {
   const fetchApiKeyStatuses = useCallback(async () => {
     const localFallbackStatuses = getLocalProviderApiKeyStatuses();
 
-    // Preferred path: directly verify each provider by attempting to read stored key.
+    // Preferred path: batch query via list_configured_api_key_providers (single keychain access).
+    try {
+      const result = await invoke<CommandResponse<string[]>>('list_configured_api_key_providers');
+      if (result.success) {
+        const providers = result.data || [];
+        const statuses: ApiKeyStatus = {};
+        providers.forEach((provider) => {
+          statuses[normalizeProvider(provider)] = true;
+        });
+        const merged = { ...statuses, ...localFallbackStatuses };
+        setApiKeyStatuses(merged);
+        localStorage.setItem('plan-cascade-api-keys', JSON.stringify(merged));
+        return;
+      }
+      throw new Error(result.error || 'Failed to fetch API key statuses');
+    } catch {
+      // Fall through to per-provider fallback path.
+    }
+
+    // Fallback path: individually verify each provider by attempting to read stored key.
     try {
       const checks = await Promise.all(
         API_KEY_REQUIRED_PROVIDERS.map(async (provider) => {
@@ -154,30 +173,14 @@ export function LLMBackendSection() {
         localStorage.setItem('plan-cascade-api-keys', JSON.stringify(merged));
         return;
       }
-    } catch {
-      // Fall through to compatibility path.
-    }
-
-    // Compatibility fallback for older backend versions.
-    try {
-      const result = await invoke<CommandResponse<string[]>>('list_configured_api_key_providers');
-      if (result.success) {
-        const providers = result.data || [];
-        const statuses: ApiKeyStatus = {};
-        providers.forEach((provider) => {
-          statuses[normalizeProvider(provider)] = true;
-        });
-        const merged = { ...statuses, ...localFallbackStatuses };
-        setApiKeyStatuses(merged);
-        localStorage.setItem('plan-cascade-api-keys', JSON.stringify(merged));
-        return;
-      }
-      throw new Error(result.error || 'Failed to fetch API key statuses');
     } catch (error) {
       console.error('Failed to fetch API key statuses:', error);
-      // Final fallback: local cache.
-      const stored = localStorage.getItem('plan-cascade-api-keys');
-      if (stored) {
+    }
+
+    // Final fallback: local cache.
+    const stored = localStorage.getItem('plan-cascade-api-keys');
+    if (stored) {
+      try {
         const parsed = JSON.parse(stored) as ApiKeyStatus;
         const normalized: ApiKeyStatus = {};
         Object.entries(parsed).forEach(([provider, configured]) => {
@@ -186,9 +189,11 @@ export function LLMBackendSection() {
           }
         });
         setApiKeyStatuses({ ...normalized, ...localFallbackStatuses });
-      } else {
+      } catch {
         setApiKeyStatuses(localFallbackStatuses);
       }
+    } else {
+      setApiKeyStatuses(localFallbackStatuses);
     }
   }, []);
 
