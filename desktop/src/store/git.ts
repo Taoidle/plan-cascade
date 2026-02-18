@@ -2,120 +2,50 @@
  * Git Store
  *
  * Zustand store for git state management. Provides reactive access to
- * repository status, staging, commits, stash, and merge operations via
- * Tauri IPC commands.
+ * repository status, staging, commits, stash, merge operations, and
+ * commit graph visualization state via Tauri IPC commands.
  */
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { CommandResponse } from '../lib/tauri';
 import { useSettingsStore } from './settings';
+import type {
+  FileStatusKind,
+  FileStatus,
+  GitFullStatus,
+  DiffOutput,
+  StashEntry,
+  MergeState,
+  MergeStateKind,
+  CommitNode,
+  BranchInfo,
+  GraphLayout,
+  CompareSelection,
+  DiffLine,
+  DiffHunk,
+  FileDiff,
+  DiffLineKind,
+} from '../types/git';
 
-// ============================================================================
-// Git Types (mirroring Rust types in services/git/types.rs)
-// ============================================================================
-
-export type FileStatusKind =
-  | 'added'
-  | 'modified'
-  | 'deleted'
-  | 'renamed'
-  | 'copied'
-  | 'untracked'
-  | 'ignored'
-  | 'unmerged'
-  | 'type_changed';
-
-export interface FileStatus {
-  path: string;
-  original_path?: string;
-  kind: FileStatusKind;
-}
-
-export interface GitFullStatus {
-  staged: FileStatus[];
-  unstaged: FileStatus[];
-  untracked: FileStatus[];
-  conflicted: FileStatus[];
-  branch: string;
-  upstream?: string;
-  ahead: number;
-  behind: number;
-}
-
-export interface DiffLineKind {
-  context: 'context';
-  addition: 'addition';
-  deletion: 'deletion';
-  hunk_header: 'hunk_header';
-}
-
-export interface DiffLine {
-  kind: 'context' | 'addition' | 'deletion' | 'hunk_header';
-  content: string;
-  old_line_no?: number;
-  new_line_no?: number;
-}
-
-export interface DiffHunk {
-  header: string;
-  old_start: number;
-  old_count: number;
-  new_start: number;
-  new_count: number;
-  lines: DiffLine[];
-}
-
-export interface FileDiff {
-  path: string;
-  is_new: boolean;
-  is_deleted: boolean;
-  is_renamed: boolean;
-  old_path?: string;
-  hunks: DiffHunk[];
-}
-
-export interface DiffOutput {
-  files: FileDiff[];
-  total_additions: number;
-  total_deletions: number;
-}
-
-export interface StashEntry {
-  index: number;
-  message: string;
-  date: string;
-}
-
-export type MergeStateKind = 'none' | 'merging' | 'rebasing' | 'cherry_picking' | 'reverting';
-
-export interface MergeState {
-  kind: MergeStateKind;
-  head: string;
-  merge_head?: string;
-  branch_name?: string;
-}
-
-export interface CommitNode {
-  sha: string;
-  short_sha: string;
-  parents: string[];
-  author_name: string;
-  author_email: string;
-  date: string;
-  message: string;
-  refs: string[];
-}
-
-export interface BranchInfo {
-  name: string;
-  is_head: boolean;
-  tip_sha: string;
-  upstream?: string;
-  ahead: number;
-  behind: number;
-  last_commit_message?: string;
-}
+// Re-export types for consumers that import from store
+export type {
+  FileStatusKind,
+  FileStatus,
+  GitFullStatus,
+  DiffOutput,
+  DiffLine,
+  DiffHunk,
+  FileDiff,
+  DiffLineKind,
+  StashEntry,
+  MergeStateKind,
+  MergeState,
+  CommitNode,
+  BranchInfo,
+  GraphLayout,
+  CompareSelection,
+};
 
 // ============================================================================
 // Store Types
@@ -124,7 +54,7 @@ export interface BranchInfo {
 export type GitTabId = 'changes' | 'history' | 'branches';
 
 interface GitState {
-  // Data
+  // --- Data (from feature-002: Changes Tab) ---
   status: GitFullStatus | null;
   stagedDiffs: DiffOutput | null;
   unstagedDiffs: DiffOutput | null;
@@ -134,13 +64,22 @@ interface GitState {
   commitLog: CommitNode[];
   branches: BranchInfo[];
 
-  // UI state
+  // --- UI state (from feature-002) ---
   isLoading: boolean;
   error: string | null;
   commitMessage: string;
   isAmend: boolean;
 
-  // Actions
+  // --- Graph UI state (from feature-003: Commit Graph) ---
+  selectedCommitSha: string | null;
+  compareSelection: CompareSelection | null;
+  commitDetailExpanded: boolean;
+  graphLayout: GraphLayout | null;
+  branchFilter: string | null;
+  searchQuery: string;
+  selectedCommitDiff: DiffOutput | null;
+
+  // --- Actions (feature-002: operational) ---
   refreshStatus: () => Promise<void>;
   refreshDiffs: () => Promise<void>;
   refreshStashList: () => Promise<void>;
@@ -160,6 +99,18 @@ interface GitState {
   setError: (error: string | null) => void;
   getDiffForFile: (filePath: string) => Promise<DiffOutput | null>;
   stageHunk: (filePath: string, hunkIndex: number, isStaged: boolean) => Promise<void>;
+
+  // --- Actions (feature-003: graph UI) ---
+  setSelectedCommitSha: (sha: string | null) => void;
+  setCompareSelection: (selection: CompareSelection | null) => void;
+  setCommitDetailExpanded: (expanded: boolean) => void;
+  setCommits: (commits: CommitNode[]) => void;
+  setGraphLayout: (layout: GraphLayout | null) => void;
+  setBranches: (branches: BranchInfo[]) => void;
+  setBranchFilter: (branch: string | null) => void;
+  setSearchQuery: (query: string) => void;
+  setSelectedCommitDiff: (diff: DiffOutput | null) => void;
+  resetGraphState: () => void;
 }
 
 // ============================================================================
@@ -183,7 +134,7 @@ async function invokeGit<T>(command: string, args: Record<string, unknown>): Pro
 // ============================================================================
 
 export const useGitStore = create<GitState>((set, get) => ({
-  // Initial state
+  // --- Initial state (feature-002) ---
   status: null,
   stagedDiffs: null,
   unstagedDiffs: null,
@@ -197,7 +148,16 @@ export const useGitStore = create<GitState>((set, get) => ({
   commitMessage: '',
   isAmend: false,
 
-  // ---- Actions ----
+  // --- Initial state (feature-003: graph) ---
+  selectedCommitSha: null,
+  compareSelection: null,
+  commitDetailExpanded: false,
+  graphLayout: null,
+  branchFilter: null,
+  searchQuery: '',
+  selectedCommitDiff: null,
+
+  // ---- Operational Actions (feature-002) ----
 
   refreshStatus: async () => {
     const repoPath = getRepoPath();
@@ -228,7 +188,6 @@ export const useGitStore = create<GitState>((set, get) => ({
       ]);
       set({ stagedDiffs: staged, unstagedDiffs: unstaged });
     } catch (e) {
-      // Diff failures are non-critical; status still works
       console.warn('Failed to refresh diffs:', e);
     }
   },
@@ -277,7 +236,6 @@ export const useGitStore = create<GitState>((set, get) => ({
 
     try {
       await invokeGit<null>('git_stage_files', { repoPath, paths });
-      // Refresh status and diffs after staging
       await Promise.all([get().refreshStatus(), get().refreshDiffs()]);
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) });
@@ -405,6 +363,42 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ error: e instanceof Error ? e.message : String(e) });
     }
   },
+
+  // ---- Graph UI Actions (feature-003) ----
+
+  setSelectedCommitSha: (sha) =>
+    set({
+      selectedCommitSha: sha,
+      commitDetailExpanded: sha !== null,
+      compareSelection: null,
+    }),
+
+  setCompareSelection: (selection) => set({ compareSelection: selection }),
+
+  setCommitDetailExpanded: (expanded) => set({ commitDetailExpanded: expanded }),
+
+  setCommits: (commits) => set({ commitLog: commits }),
+
+  setGraphLayout: (layout) => set({ graphLayout: layout }),
+
+  setBranches: (branches) => set({ branches }),
+
+  setBranchFilter: (branch) => set({ branchFilter: branch }),
+
+  setSearchQuery: (query) => set({ searchQuery: query }),
+
+  setSelectedCommitDiff: (diff) => set({ selectedCommitDiff: diff }),
+
+  resetGraphState: () =>
+    set({
+      selectedCommitSha: null,
+      compareSelection: null,
+      commitDetailExpanded: false,
+      graphLayout: null,
+      branchFilter: null,
+      searchQuery: '',
+      selectedCommitDiff: null,
+    }),
 }));
 
 export default useGitStore;

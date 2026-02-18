@@ -154,18 +154,4 @@ export { useArtifactsStore } from './artifacts';
 export type { ArtifactsState, ScopeFilter } from './artifacts';
 
 export { useGitStore } from './git';
-export type {
-  FileStatusKind,
-  FileStatus,
-  GitFullStatus,
-  DiffLine,
-  DiffHunk,
-  FileDiff,
-  DiffOutput,
-  StashEntry,
-  MergeStateKind,
-  MergeState,
-  CommitNode,
-  BranchInfo,
-  GitTabId,
-} from './git';
+export type { GitTabId } from './git';
