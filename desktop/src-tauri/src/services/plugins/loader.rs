@@ -118,17 +118,176 @@ pub fn discover_plugin_dirs(parent: &Path) -> Vec<PathBuf> {
     dirs
 }
 
+/// Load a plugin from a Claude Code cache install path.
+///
+/// In the Claude Code cache, the directory structure is:
+/// ```text
+/// <install_path>/              (version root, e.g. ~/.claude/plugins/cache/org/name/1.0.0/)
+/// ├── .claude-plugin/
+/// │   └── plugin.json          ← manifest lives here
+/// ├── skills/                  ← skills at version root level
+/// ├── commands/                ← commands at version root level
+/// ├── CLAUDE.md
+/// └── .claude/
+///     └── settings.json
+/// ```
+///
+/// The `install_path` is the version root directory. The manifest is read from
+/// `.claude-plugin/plugin.json`, while skills, commands, hooks, and instructions
+/// are discovered from the version root.
+pub fn load_plugin_from_install_path(install_path: &Path, source: PluginSource) -> AppResult<LoadedPlugin> {
+    let manifest_path = install_path.join(".claude-plugin").join("plugin.json");
+    if !manifest_path.exists() {
+        return Err(AppError::not_found(format!(
+            ".claude-plugin/plugin.json not found in {}",
+            install_path.display()
+        )));
+    }
+
+    // Read and parse manifest
+    let manifest_content = std::fs::read_to_string(&manifest_path)?;
+    let manifest: PluginManifest = serde_json::from_str(&manifest_content)
+        .map_err(|e| AppError::parse(format!("Invalid plugin.json at {}: {}", manifest_path.display(), e)))?;
+
+    // Discover skills, commands, hooks, instructions from the version root
+    let skills = discover_skills(install_path);
+    let commands = discover_commands(install_path);
+
+    let mut hooks = Vec::new();
+    let settings_path = install_path.join(".claude").join("settings.json");
+    if settings_path.exists() {
+        if let Ok(h) = load_hooks_from_settings(&settings_path) {
+            hooks.extend(h);
+        }
+    }
+    let hooks_json_path = install_path.join("hooks").join("hooks.json");
+    if hooks_json_path.exists() {
+        if let Ok(h) = load_hooks_from_hooks_json(&hooks_json_path) {
+            hooks.extend(h);
+        }
+    }
+
+    let instructions = load_instructions(install_path);
+
+    let permissions = if settings_path.exists() {
+        load_permissions_from_settings(&settings_path).unwrap_or_default()
+    } else {
+        PluginPermissions::default()
+    };
+
+    Ok(LoadedPlugin {
+        manifest,
+        source,
+        enabled: true,
+        root_path: install_path.to_string_lossy().to_string(),
+        skills,
+        commands,
+        hooks,
+        instructions,
+        permissions,
+    })
+}
+
+/// Discover installed plugins by reading `~/.claude/plugins/installed_plugins.json`.
+///
+/// This file is maintained by Claude Code with the structure:
+/// ```json
+/// {
+///   "version": 2,
+///   "plugins": {
+///     "plan-cascade@plan-cascade": [
+///       {
+///         "scope": "user",
+///         "installPath": "/Users/.../.claude/plugins/cache/org/name/1.0.0",
+///         "version": "4.4.0",
+///         ...
+///       }
+///     ]
+///   }
+/// }
+/// ```
+///
+/// For each plugin entry, we use the first (latest) install record's `installPath`
+/// and look for `.claude-plugin/plugin.json` inside it.
+pub fn discover_installed_plugins() -> Vec<LoadedPlugin> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return Vec::new(),
+    };
+    let installed_json_path = home.join(".claude").join("plugins").join("installed_plugins.json");
+    discover_installed_plugins_from(&installed_json_path)
+}
+
+/// Internal helper that reads from a specific installed_plugins.json path.
+/// Separated from `discover_installed_plugins` for testability.
+fn discover_installed_plugins_from(installed_json_path: &Path) -> Vec<LoadedPlugin> {
+    let mut plugins = Vec::new();
+    if !installed_json_path.exists() {
+        return plugins;
+    }
+
+    let content = match std::fs::read_to_string(&installed_json_path) {
+        Ok(c) => c,
+        Err(_) => return plugins,
+    };
+
+    let root: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return plugins,
+    };
+
+    // Extract the "plugins" object: { "<key>": [ { "installPath": "..." }, ... ] }
+    let plugins_obj = match root.get("plugins").and_then(|v| v.as_object()) {
+        Some(obj) => obj,
+        None => return plugins,
+    };
+
+    for (_key, entries) in plugins_obj {
+        let entries_arr = match entries.as_array() {
+            Some(arr) => arr,
+            None => continue,
+        };
+
+        // Use the first (latest) install entry
+        let entry = match entries_arr.first() {
+            Some(e) => e,
+            None => continue,
+        };
+
+        let install_path_str = match entry.get("installPath").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let install_path = PathBuf::from(install_path_str);
+        if !install_path.exists() {
+            continue;
+        }
+
+        if let Ok(plugin) = load_plugin_from_install_path(&install_path, PluginSource::Installed) {
+            plugins.push(plugin);
+        }
+    }
+
+    plugins
+}
+
 /// Discover and load all plugins from the three source locations.
 ///
 /// Priority order (last loaded wins for name conflicts):
 /// 1. `~/.plan-cascade/plugins/` (lowest)
-/// 2. `~/.claude/plugins/cache/` (medium)
+/// 2. `~/.claude/plugins/cache/` via `installed_plugins.json` (medium)
 /// 3. `<project>/.claude-plugin/` (highest)
 pub fn discover_all_plugins(project_root: &Path) -> Vec<LoadedPlugin> {
+    discover_all_plugins_with_home(project_root, dirs::home_dir())
+}
+
+/// Internal implementation that accepts an explicit home dir for testability.
+pub(crate) fn discover_all_plugins_with_home(project_root: &Path, home: Option<PathBuf>) -> Vec<LoadedPlugin> {
     let mut plugins_by_name: HashMap<String, LoadedPlugin> = HashMap::new();
 
     // Source 3 (lowest priority): ~/.plan-cascade/plugins/
-    if let Some(home) = dirs::home_dir() {
+    if let Some(ref home) = home {
         let plan_cascade_plugins = home.join(".plan-cascade").join("plugins");
         for dir in discover_plugin_dirs(&plan_cascade_plugins) {
             if let Ok(plugin) = load_plugin_from_dir(&dir, PluginSource::ProjectLocal) {
@@ -137,13 +296,11 @@ pub fn discover_all_plugins(project_root: &Path) -> Vec<LoadedPlugin> {
         }
     }
 
-    // Source 2 (medium priority): ~/.claude/plugins/cache/
-    if let Some(home) = dirs::home_dir() {
-        let claude_plugins = home.join(".claude").join("plugins").join("cache");
-        for dir in discover_plugin_dirs(&claude_plugins) {
-            if let Ok(plugin) = load_plugin_from_dir(&dir, PluginSource::Installed) {
-                plugins_by_name.insert(plugin.manifest.name.clone(), plugin);
-            }
+    // Source 2 (medium priority): ~/.claude/plugins/ via installed_plugins.json
+    if let Some(ref home) = home {
+        let installed_json = home.join(".claude").join("plugins").join("installed_plugins.json");
+        for plugin in discover_installed_plugins_from(&installed_json) {
+            plugins_by_name.insert(plugin.manifest.name.clone(), plugin);
         }
     }
 
@@ -854,7 +1011,8 @@ mod tests {
         )
         .unwrap();
 
-        let plugins = discover_all_plugins(project_root);
+        // Use temp dir as home to avoid picking up real user plugins
+        let plugins = discover_all_plugins_with_home(project_root, Some(dir.path().to_path_buf()));
         assert!(!plugins.is_empty());
 
         let project_plugin = plugins
@@ -910,5 +1068,135 @@ mod tests {
         let plugin = load_plugin_from_dir(dir.path(), PluginSource::ClaudeCode).unwrap();
         assert_eq!(plugin.hooks.len(), 1);
         assert_eq!(plugin.hooks[0].event, HookEvent::PreToolUse);
+    }
+
+    #[test]
+    fn test_load_plugin_from_install_path() {
+        let dir = TempDir::new().unwrap();
+        let install_path = dir.path();
+
+        // Create .claude-plugin/plugin.json (Claude Code cache structure)
+        let claude_plugin_dir = install_path.join(".claude-plugin");
+        fs::create_dir_all(&claude_plugin_dir).unwrap();
+        fs::write(
+            claude_plugin_dir.join("plugin.json"),
+            r#"{"name": "cached-plugin", "version": "2.0.0", "description": "A cached plugin"}"#,
+        )
+        .unwrap();
+
+        // Create skills at version root level
+        let skill_dir = install_path.join("skills").join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: A test skill\n---\n\n# My Skill\n\nDo stuff.\n",
+        )
+        .unwrap();
+
+        // Create commands at version root level
+        let commands_dir = install_path.join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(
+            commands_dir.join("deploy.md"),
+            "# Deploy\n\nDeploy the app.\n",
+        )
+        .unwrap();
+
+        // Create CLAUDE.md at version root
+        fs::write(
+            install_path.join("CLAUDE.md"),
+            "# Instructions\n\nFollow these rules.\n",
+        )
+        .unwrap();
+
+        let plugin = load_plugin_from_install_path(install_path, PluginSource::Installed).unwrap();
+        assert_eq!(plugin.manifest.name, "cached-plugin");
+        assert_eq!(plugin.manifest.version, "2.0.0");
+        assert_eq!(plugin.source, PluginSource::Installed);
+        assert_eq!(plugin.skills.len(), 1);
+        assert_eq!(plugin.skills[0].name, "my-skill");
+        assert_eq!(plugin.commands.len(), 1);
+        assert_eq!(plugin.commands[0].name, "deploy");
+        assert!(plugin.instructions.is_some());
+        assert!(plugin.instructions.as_ref().unwrap().contains("Follow these rules"));
+    }
+
+    #[test]
+    fn test_load_plugin_from_install_path_missing_manifest() {
+        let dir = TempDir::new().unwrap();
+        let result = load_plugin_from_install_path(dir.path(), PluginSource::Installed);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(".claude-plugin/plugin.json not found"));
+    }
+
+    #[test]
+    fn test_load_plugin_from_install_path_author_object() {
+        let dir = TempDir::new().unwrap();
+        let claude_plugin_dir = dir.path().join(".claude-plugin");
+        fs::create_dir_all(&claude_plugin_dir).unwrap();
+        fs::write(
+            claude_plugin_dir.join("plugin.json"),
+            r#"{"name": "author-test", "author": {"name": "Jane Doe", "url": "https://example.com"}}"#,
+        )
+        .unwrap();
+
+        let plugin = load_plugin_from_install_path(dir.path(), PluginSource::Installed).unwrap();
+        assert_eq!(plugin.manifest.author.as_deref(), Some("Jane Doe"));
+    }
+
+    #[test]
+    fn test_discover_installed_plugins_from_v2_format() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a fake plugin at a fake installPath
+        let install_path = dir.path().join("cache").join("org").join("my-plugin").join("1.0.0");
+        fs::create_dir_all(install_path.join(".claude-plugin")).unwrap();
+        fs::write(
+            install_path.join(".claude-plugin").join("plugin.json"),
+            r#"{"name": "my-plugin", "version": "1.0.0", "description": "Test"}"#,
+        )
+        .unwrap();
+
+        // Create installed_plugins.json in v2 format
+        let installed_json = dir.path().join("installed_plugins.json");
+        let json_content = serde_json::json!({
+            "version": 2,
+            "plugins": {
+                "my-plugin@org": [
+                    {
+                        "scope": "user",
+                        "installPath": install_path.to_str().unwrap(),
+                        "version": "1.0.0"
+                    }
+                ]
+            }
+        });
+        fs::write(&installed_json, serde_json::to_string_pretty(&json_content).unwrap()).unwrap();
+
+        let plugins = discover_installed_plugins_from(&installed_json);
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].manifest.name, "my-plugin");
+        assert_eq!(plugins[0].manifest.version, "1.0.0");
+        assert_eq!(plugins[0].source, PluginSource::Installed);
+    }
+
+    #[test]
+    fn test_discover_installed_plugins_from_nonexistent() {
+        let plugins = discover_installed_plugins_from(Path::new("/nonexistent/installed_plugins.json"));
+        assert!(plugins.is_empty());
+    }
+
+    #[test]
+    fn test_discover_installed_plugins_from_empty_plugins() {
+        let dir = TempDir::new().unwrap();
+        let installed_json = dir.path().join("installed_plugins.json");
+        fs::write(
+            &installed_json,
+            r#"{"version": 2, "plugins": {}}"#,
+        )
+        .unwrap();
+
+        let plugins = discover_installed_plugins_from(&installed_json);
+        assert!(plugins.is_empty());
     }
 }

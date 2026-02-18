@@ -35,6 +35,10 @@ interface PluginState {
   toastMessage: string | null;
   toastType: 'success' | 'error' | 'info';
 
+  // Panel & Dialog
+  panelOpen: boolean;
+  dialogOpen: boolean;
+
   // Actions
   loadPlugins: () => Promise<void>;
   togglePlugin: (name: string, enabled: boolean) => Promise<void>;
@@ -43,6 +47,9 @@ interface PluginState {
   clearSelectedPlugin: () => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   clearToast: () => void;
+  togglePanel: () => void;
+  openDialog: () => void;
+  closeDialog: () => void;
   reset: () => void;
 }
 
@@ -59,6 +66,8 @@ const defaultState = {
   error: null as string | null,
   toastMessage: null as string | null,
   toastType: 'info' as const,
+  panelOpen: false,
+  dialogOpen: false,
 };
 
 // ============================================================================
@@ -171,6 +180,12 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
     set({ toastMessage: message, toastType: type }),
 
   clearToast: () => set({ toastMessage: null }),
+
+  togglePanel: () => set((state) => ({ panelOpen: !state.panelOpen })),
+
+  openDialog: () => set({ dialogOpen: true }),
+
+  closeDialog: () => set({ dialogOpen: false, selectedPlugin: null }),
 
   reset: () => set(defaultState),
 }));

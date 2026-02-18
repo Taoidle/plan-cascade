@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use crate::services::orchestrator::hooks::AgenticHooks;
 use crate::services::plugins::dispatcher::register_plugin_hooks;
-use crate::services::plugins::loader::discover_all_plugins;
+use crate::services::plugins::loader::{discover_all_plugins, discover_all_plugins_with_home};
 use crate::services::plugins::models::*;
 
 /// Unified plugin manager.
@@ -26,6 +26,8 @@ use crate::services::plugins::models::*;
 pub struct PluginManager {
     /// Project root path for plugin discovery
     project_root: PathBuf,
+    /// Optional home directory override (None = use system default)
+    home_override: Option<PathBuf>,
     /// All loaded plugins
     plugins: Vec<LoadedPlugin>,
 }
@@ -37,6 +39,19 @@ impl PluginManager {
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         Self {
             project_root: project_root.into(),
+            home_override: None,
+            plugins: Vec::new(),
+        }
+    }
+
+    /// Create a new PluginManager with an explicit home directory.
+    ///
+    /// Used for testing to avoid reading the real user's installed plugins.
+    #[cfg(test)]
+    pub fn new_with_home(project_root: impl Into<PathBuf>, home: impl Into<PathBuf>) -> Self {
+        Self {
+            project_root: project_root.into(),
+            home_override: Some(home.into()),
             plugins: Vec::new(),
         }
     }
@@ -52,7 +67,10 @@ impl PluginManager {
     /// in priority order (project > installed > plan-cascade), with
     /// higher-priority plugins overriding lower-priority ones by name.
     pub fn discover_and_load(&mut self) {
-        self.plugins = discover_all_plugins(&self.project_root);
+        self.plugins = match &self.home_override {
+            Some(home) => discover_all_plugins_with_home(&self.project_root, Some(home.clone())),
+            None => discover_all_plugins(&self.project_root),
+        };
         eprintln!(
             "[plugins] Discovered {} plugins for project {}",
             self.plugins.len(),
@@ -81,7 +99,10 @@ impl PluginManager {
             .collect();
 
         // Re-discover
-        self.plugins = discover_all_plugins(&self.project_root);
+        self.plugins = match &self.home_override {
+            Some(home) => discover_all_plugins_with_home(&self.project_root, Some(home.clone())),
+            None => discover_all_plugins(&self.project_root),
+        };
 
         // Restore enabled state
         for plugin in &mut self.plugins {
@@ -308,7 +329,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "project-plugin", true, true, true);
 
-        let mut manager = PluginManager::new(project_root);
+        let mut manager = PluginManager::new_with_home(project_root, dir.path());
         manager.discover_and_load();
 
         assert_eq!(manager.plugin_count(), 1);
@@ -323,7 +344,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "test-plugin", true, false, false);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         let list = manager.list_plugins();
@@ -341,7 +362,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "toggle-test", false, false, false);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         assert!(manager.is_plugin_enabled("toggle-test"));
@@ -367,7 +388,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "skill-plugin", true, false, false);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         let skills = manager.collect_skills();
@@ -382,7 +403,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "disabled-plugin", true, false, false);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
         manager.toggle_plugin("disabled-plugin", false);
 
@@ -406,7 +427,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         let commands = manager.collect_commands();
@@ -421,7 +442,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "inst-plugin", false, false, true);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         let instructions = manager.collect_instructions();
@@ -436,7 +457,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "disabled-inst", false, false, true);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
         manager.toggle_plugin("disabled-inst", false);
 
@@ -451,7 +472,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "hook-plugin", false, true, false);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         let mut hooks = AgenticHooks::new();
@@ -468,7 +489,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "disabled-hook", false, true, false);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
         manager.toggle_plugin("disabled-hook", false);
 
@@ -485,7 +506,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "detail-plugin", true, true, true);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         let plugin = manager.get_plugin("detail-plugin");
@@ -507,7 +528,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "refresh-plugin", false, false, false);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         // Disable the plugin
@@ -525,7 +546,7 @@ mod tests {
     #[test]
     fn test_plugin_manager_empty_project() {
         let dir = TempDir::new().unwrap();
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         assert_eq!(manager.plugin_count(), 0);
@@ -542,7 +563,7 @@ mod tests {
         fs::create_dir_all(&plugin_dir).unwrap();
         create_plugin(&plugin_dir, "convenience-plugin", false, true, false);
 
-        let mut manager = PluginManager::new(dir.path());
+        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
         manager.discover_and_load();
 
         let mut hooks = AgenticHooks::new();

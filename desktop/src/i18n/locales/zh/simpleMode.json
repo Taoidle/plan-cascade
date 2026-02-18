@@ -154,5 +154,13 @@
     "content": "内容",
     "keywords": "关键词",
     "activeSkillsTooltip": "{{count}} 个活跃技能"
+  },
+
+  "pluginPanel": {
+    "title": "插件",
+    "manageAll": "管理全部...",
+    "loading": "加载插件中...",
+    "noPlugins": "未发现插件",
+    "enabledCount": "{{count}} 个已启用"
   }
 }

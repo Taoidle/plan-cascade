@@ -154,5 +154,13 @@
     "content": "Content",
     "keywords": "Keywords",
     "activeSkillsTooltip": "{{count}} active skill(s)"
+  },
+
+  "pluginPanel": {
+    "title": "Plugins",
+    "manageAll": "Manage All...",
+    "loading": "Loading plugins...",
+    "noPlugins": "No plugins discovered",
+    "enabledCount": "{{count}} enabled"
   }
 }

@@ -16,7 +16,7 @@
 //! - `PluginPermissions` - allow/deny tool lists
 //! - `ShellResult` - result from executing a shell hook
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 // ============================================================================
 // Plugin Source
@@ -72,8 +72,8 @@ pub struct PluginManifest {
     /// Human-readable description
     #[serde(default)]
     pub description: String,
-    /// Author name
-    #[serde(default)]
+    /// Author name (accepts both `"author": "name"` and `"author": { "name": "...", "url": "..." }`)
+    #[serde(default, deserialize_with = "deserialize_author")]
     pub author: Option<String>,
     /// Repository URL
     #[serde(default)]
@@ -84,6 +84,22 @@ pub struct PluginManifest {
     /// Categorization keywords
     #[serde(default)]
     pub keywords: Vec<String>,
+}
+
+/// Deserialize `author` from either a plain string or an object `{ "name": "...", ... }`.
+fn deserialize_author<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::String(s)) => Ok(Some(s)),
+        Some(serde_json::Value::Object(map)) => {
+            Ok(map.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        }
+        Some(_) => Ok(None),
+    }
 }
 
 impl Default for PluginManifest {
@@ -687,5 +703,33 @@ mod tests {
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains("\"installed\""));
         assert!(json.contains("\"skill_count\":2"));
+    }
+
+    #[test]
+    fn test_plugin_manifest_author_string() {
+        let json = r#"{"name": "test", "author": "John Doe"}"#;
+        let manifest: PluginManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.author.as_deref(), Some("John Doe"));
+    }
+
+    #[test]
+    fn test_plugin_manifest_author_object() {
+        let json = r#"{"name": "test", "author": {"name": "John Doe", "url": "https://example.com"}}"#;
+        let manifest: PluginManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.author.as_deref(), Some("John Doe"));
+    }
+
+    #[test]
+    fn test_plugin_manifest_author_null() {
+        let json = r#"{"name": "test", "author": null}"#;
+        let manifest: PluginManifest = serde_json::from_str(json).unwrap();
+        assert!(manifest.author.is_none());
+    }
+
+    #[test]
+    fn test_plugin_manifest_author_missing() {
+        let json = r#"{"name": "test"}"#;
+        let manifest: PluginManifest = serde_json::from_str(json).unwrap();
+        assert!(manifest.author.is_none());
     }
 }

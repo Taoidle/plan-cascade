@@ -18,8 +18,11 @@ import {
 import { type ExecutionHistoryItem, type SessionSnapshot } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { useSkillMemoryStore } from '../../store/skillMemory';
+import { usePluginStore } from '../../store/plugins';
 import { SkillMemoryPanel } from './SkillMemoryPanel';
+import { PluginPanel } from './PluginPanel';
 import { SkillMemoryDialog } from '../SkillMemory/SkillMemoryDialog';
+import { PluginDialog } from '../Plugins/PluginDialog';
 import { SkillMemoryToast } from '../SkillMemory/SkillMemoryToast';
 
 // ---------------------------------------------------------------------------
@@ -135,12 +138,16 @@ function SidebarToolbar({
   onNewTask,
   onAddDirectory,
   onSkillsClick,
+  onPluginsClick,
   skillCount,
+  pluginCount,
 }: {
   onNewTask: () => void;
   onAddDirectory: () => void;
   onSkillsClick: () => void;
+  onPluginsClick: () => void;
   skillCount: number;
+  pluginCount: number;
 }) {
   const { t } = useTranslation('simpleMode');
 
@@ -190,14 +197,21 @@ function SidebarToolbar({
         </button>
 
         <button
-          disabled
+          data-testid="plugins-button"
+          onClick={onPluginsClick}
           className={clsx(
             'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
-            'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
+            'text-gray-600 dark:text-gray-400',
+            'hover:bg-gray-100 dark:hover:bg-gray-800'
           )}
           title={t('sidebar.plugins')}
         >
           {t('sidebar.plugins')}
+          {pluginCount > 0 && (
+            <span className="text-2xs px-1 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 min-w-[1.2rem] text-center">
+              {pluginCount}
+            </span>
+          )}
         </button>
       </div>
     </div>
@@ -670,11 +684,19 @@ export function WorkspaceTreeSidebar({
   const setWorkspacePath = useSettingsStore((s) => s.setWorkspacePath);
   const skills = useSkillMemoryStore((s) => s.skills);
   const togglePanel = useSkillMemoryStore((s) => s.togglePanel);
+  const plugins = usePluginStore((s) => s.plugins);
+  const togglePluginPanel = usePluginStore((s) => s.togglePanel);
 
   // Count of detected/enabled skills for badge
   const detectedSkillCount = useMemo(
     () => skills.filter((s) => s.detected || s.enabled).length,
     [skills]
+  );
+
+  // Count of plugins for badge
+  const pluginCount = useMemo(
+    () => plugins.length,
+    [plugins]
   );
 
   // Expand/collapse state for directory paths and "other" group
@@ -788,7 +810,9 @@ export function WorkspaceTreeSidebar({
         onNewTask={onNewTask}
         onAddDirectory={handleAddDirectory}
         onSkillsClick={togglePanel}
+        onPluginsClick={togglePluginPanel}
         skillCount={detectedSkillCount}
+        pluginCount={pluginCount}
       />
 
       {/* Current task indicator */}
@@ -866,6 +890,9 @@ export function WorkspaceTreeSidebar({
       {/* Skill & Memory Panel */}
       <SkillMemoryPanel />
 
+      {/* Plugin Panel */}
+      <PluginPanel />
+
       {/* Footer */}
       {history.length > 0 && (
         <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
@@ -884,6 +911,9 @@ export function WorkspaceTreeSidebar({
 
       {/* Skill & Memory Dialog (portal-rendered) */}
       <SkillMemoryDialog />
+
+      {/* Plugin Dialog (portal-rendered) */}
+      <PluginDialog />
 
       {/* Toast Notifications */}
       <SkillMemoryToast />
