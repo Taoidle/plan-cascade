@@ -7,6 +7,7 @@
 
 pub mod agent_resolver;
 pub mod batch_executor;
+pub mod prd_generator;
 
 pub use agent_resolver::{
     AgentAssignment, AgentOverrides, AgentResolver, AgentsConfig, ExecutionPhase,
@@ -14,5 +15,6 @@ pub use agent_resolver::{
 };
 pub use batch_executor::{
     BatchExecutionProgress, BatchExecutionResult, BatchExecutor, ExecutableStory, ExecutionBatch,
-    ExecutionConfig, RetryContext, StoryExecutionState, calculate_batches,
+    ExecutionConfig, RetryContext, StoryExecutionContext, StoryExecutionOutcome,
+    StoryExecutionState, TaskModeProgressEvent, TASK_MODE_EVENT_CHANNEL, calculate_batches,
 };

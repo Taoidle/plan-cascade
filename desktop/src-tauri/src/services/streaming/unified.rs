@@ -107,6 +107,34 @@ pub enum UnifiedStreamEvent {
     },
 
     // ========================================================================
+    // Agent transfer events (runtime agent-to-agent handoff)
+    // ========================================================================
+    /// An agent transfer has started — execution is being handed off.
+    AgentTransferStart {
+        /// Name of the source agent initiating the transfer.
+        from_agent: String,
+        /// Name of the target agent receiving execution.
+        to_agent: String,
+        /// Transfer message/context passed to the target agent.
+        message: String,
+        /// Current depth of the transfer chain.
+        depth: usize,
+    },
+
+    /// An agent transfer has completed.
+    AgentTransferEnd {
+        /// Name of the source agent that initiated the transfer.
+        from_agent: String,
+        /// Name of the target agent that was executed.
+        to_agent: String,
+        /// Whether the transfer completed successfully.
+        success: bool,
+        /// Error message if the transfer failed.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    // ========================================================================
     // Analysis pipeline events (evidence-first project analysis mode)
     // ========================================================================
     /// Analysis run has started and artifacts will be persisted to disk.

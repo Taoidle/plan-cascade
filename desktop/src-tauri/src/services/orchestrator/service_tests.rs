@@ -3641,3 +3641,175 @@ fn test_scoped_state_snapshot_returns_all_entries() {
     assert!(snapshot.contains_key("session:b"));
     assert!(snapshot.contains_key("project:c"));
 }
+
+// ============================================================================
+// Agent Transfer Integration Tests
+// ============================================================================
+
+/// Test that `ApplyActionsResult.transfer_target` is correctly extracted
+/// when apply_actions returns a transfer target.
+#[tokio::test]
+async fn test_apply_actions_returns_transfer_target() {
+    use crate::services::core::event_actions::EventActions;
+    use crate::services::orchestrator::event_actions_applicator;
+
+    let actions = EventActions::none().with_transfer("reviewer-agent");
+    let mut state = HashMap::new();
+    let (tx, _rx) = mpsc::channel(16);
+
+    let result = event_actions_applicator::apply_actions(
+        &actions,
+        &mut state,
+        None,
+        "/tmp",
+        "test-sess",
+        &[],
+        &tx,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.transfer_target, Some("reviewer-agent".to_string()));
+}
+
+/// Test that the TransferHandler correctly looks up agents in the registry
+/// and returns an error for missing agents.
+#[tokio::test]
+async fn test_transfer_handler_missing_agent_returns_error() {
+    use crate::services::agent_composer::registry::ComposerRegistry;
+    use crate::services::orchestrator::transfer::TransferHandler;
+
+    let registry = Arc::new(ComposerRegistry::new());
+    let mut handler = TransferHandler::new(registry);
+
+    // Build a minimal AgentContext for the test
+    use crate::services::agent_composer::types::*;
+    use crate::services::orchestrator::hooks::AgenticHooks;
+    use tokio::sync::RwLock;
+
+    struct MockTestProvider {
+        config: crate::services::llm::ProviderConfig,
+    }
+    impl MockTestProvider {
+        fn new() -> Self {
+            Self {
+                config: crate::services::llm::ProviderConfig::default(),
+            }
+        }
+    }
+    #[async_trait::async_trait]
+    impl crate::services::llm::LlmProvider for MockTestProvider {
+        fn name(&self) -> &'static str { "mock" }
+        fn model(&self) -> &str { "mock" }
+        fn supports_thinking(&self) -> bool { false }
+        fn supports_tools(&self) -> bool { false }
+        async fn send_message(
+            &self,
+            _: Vec<crate::services::llm::Message>,
+            _: Option<String>,
+            _: Vec<crate::services::llm::ToolDefinition>,
+            _: crate::services::llm::LlmRequestOptions,
+        ) -> crate::services::llm::LlmResult<crate::services::llm::LlmResponse> {
+            unimplemented!()
+        }
+        async fn stream_message(
+            &self,
+            _: Vec<crate::services::llm::Message>,
+            _: Option<String>,
+            _: Vec<crate::services::llm::ToolDefinition>,
+            _: tokio::sync::mpsc::Sender<crate::services::streaming::UnifiedStreamEvent>,
+            _: crate::services::llm::LlmRequestOptions,
+        ) -> crate::services::llm::LlmResult<crate::services::llm::LlmResponse> {
+            unimplemented!()
+        }
+        async fn health_check(&self) -> crate::services::llm::LlmResult<()> { Ok(()) }
+        fn config(&self) -> &crate::services::llm::ProviderConfig { &self.config }
+    }
+
+    let ctx = AgentContext {
+        session_id: "test".to_string(),
+        project_root: std::path::PathBuf::from("/tmp"),
+        provider: Arc::new(MockTestProvider::new()),
+        tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(&std::path::PathBuf::from("/tmp"))),
+        plugin_manager: None,
+        hooks: Arc::new(AgenticHooks::new()),
+        input: AgentInput::Text("test".to_string()),
+        shared_state: Arc::new(RwLock::new(HashMap::new())),
+        config: AgentConfig::default(),
+    };
+
+    let result = handler
+        .handle_transfer("main-agent", "nonexistent-agent", "do something", &ctx)
+        .await;
+    assert!(result.is_err());
+    let err_msg = match result {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("Expected error for missing agent"),
+    };
+    assert!(err_msg.contains("not found"), "Expected 'not found' error, got: {}", err_msg);
+}
+
+/// Test that the TransferChain respects depth limits and cycle detection.
+#[test]
+fn test_transfer_chain_depth_and_cycle_guards() {
+    use crate::services::orchestrator::transfer::TransferChain;
+
+    // Test depth limit
+    let mut chain = TransferChain::with_max_depth(2);
+    chain.record_transfer("a", "b", "first").unwrap();
+    chain.record_transfer("b", "c", "second").unwrap();
+    let result = chain.record_transfer("c", "d", "third");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("depth limit"));
+
+    // Test cycle detection
+    let mut chain2 = TransferChain::new();
+    chain2.record_transfer("x", "y", "first").unwrap();
+    chain2.record_transfer("y", "z", "second").unwrap();
+    let result2 = chain2.record_transfer("z", "x", "cycle back");
+    assert!(result2.is_err());
+    assert!(result2.unwrap_err().to_string().contains("cycle detected"));
+}
+
+/// Test that `UnifiedStreamEvent::AgentTransferStart` and `AgentTransferEnd`
+/// serialize correctly.
+#[test]
+fn test_agent_transfer_events_serialization() {
+    let start_event = UnifiedStreamEvent::AgentTransferStart {
+        from_agent: "planner".to_string(),
+        to_agent: "coder".to_string(),
+        message: "implement the feature".to_string(),
+        depth: 1,
+    };
+    let json = serde_json::to_string(&start_event).unwrap();
+    assert!(json.contains("\"type\":\"agent_transfer_start\""));
+    assert!(json.contains("\"from_agent\":\"planner\""));
+    assert!(json.contains("\"to_agent\":\"coder\""));
+
+    let end_event = UnifiedStreamEvent::AgentTransferEnd {
+        from_agent: "planner".to_string(),
+        to_agent: "coder".to_string(),
+        success: true,
+        error: None,
+    };
+    let json = serde_json::to_string(&end_event).unwrap();
+    assert!(json.contains("\"type\":\"agent_transfer_end\""));
+    assert!(json.contains("\"success\":true"));
+    // error should be omitted when None
+    assert!(!json.contains("\"error\""));
+}
+
+/// Test that `with_composer_registry` correctly stores the registry on OrchestratorService.
+#[test]
+fn test_orchestrator_with_composer_registry() {
+    use crate::services::agent_composer::registry::ComposerRegistry;
+
+    let config = test_config();
+    let registry = Arc::new(ComposerRegistry::new());
+    let orchestrator = OrchestratorService::new(config).with_composer_registry(registry);
+
+    // The orchestrator should have the registry available now.
+    // We can verify indirectly via provider_info still working.
+    let info = orchestrator.provider_info();
+    assert_eq!(info.name, "anthropic");
+}

@@ -6,16 +6,26 @@
 //! - execution status/cancel/report
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 
 use crate::models::CommandResponse;
 use crate::services::strategy::analyzer::{analyze_task_for_mode, StrategyAnalysis};
 use crate::services::task_mode::batch_executor::{
-    BatchExecutionProgress, ExecutableStory, ExecutionBatch, ExecutionConfig,
+    BatchExecutionProgress, BatchExecutionResult, BatchExecutor, ExecutableStory, ExecutionBatch,
+    ExecutionConfig, StoryExecutionContext, StoryExecutionOutcome, TaskModeProgressEvent,
+    TASK_MODE_EVENT_CHANNEL,
 };
+use crate::services::task_mode::agent_resolver::AgentResolver;
+use crate::services::task_mode::prd_generator;
+
+use crate::state::AppState;
+use crate::storage::KeyringService;
 
 // ============================================================================
 // Types
@@ -140,6 +150,10 @@ pub struct TaskExecutionStatus {
 /// Managed Tauri state for task mode.
 pub struct TaskModeState {
     session: Arc<RwLock<Option<TaskModeSession>>>,
+    /// Cancellation token for the currently executing batch.
+    cancellation_token: Arc<RwLock<Option<CancellationToken>>>,
+    /// Final execution result (populated when execution completes).
+    execution_result: Arc<RwLock<Option<BatchExecutionResult>>>,
 }
 
 impl TaskModeState {
@@ -147,6 +161,8 @@ impl TaskModeState {
     pub fn new() -> Self {
         Self {
             session: Arc::new(RwLock::new(None)),
+            cancellation_token: Arc::new(RwLock::new(None)),
+            execution_result: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -206,49 +222,202 @@ pub async fn enter_task_mode(
     Ok(CommandResponse::ok(session))
 }
 
-/// Generate a task PRD from the session description.
+/// Generate a task PRD from the session description using an LLM provider.
 ///
-/// In production, this would call the LLM provider to decompose the task.
-/// For now, it creates a placeholder PRD structure.
+/// Calls the configured LLM provider to decompose the task description into
+/// stories with dependencies, priorities, and acceptance criteria.
+/// Implements retry-with-repair per ADR-F002 for JSON parse failures.
+///
+/// # Parameters
+/// - `session_id`: The active task mode session ID
+/// - `provider`: LLM provider name (e.g., "anthropic", "openai", "ollama")
+/// - `model`: Model identifier (e.g., "claude-3-5-sonnet-20241022")
+/// - `api_key` / `apiKey`: Optional API key (falls back to OS keyring)
+/// - `base_url` / `baseUrl`: Optional base URL override
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn generate_task_prd(
     session_id: String,
+    provider: String,
+    model: String,
+    api_key: Option<String>,
+    apiKey: Option<String>,
+    base_url: Option<String>,
+    baseUrl: Option<String>,
     state: tauri::State<'_, TaskModeState>,
+    app_state: tauri::State<'_, AppState>,
 ) -> Result<CommandResponse<TaskPrd>, String> {
-    let mut session_guard = state.session.write().await;
-    let session = match session_guard.as_mut() {
-        Some(s) if s.session_id == session_id => s,
-        _ => return Ok(CommandResponse::err("Invalid session ID or no active session")),
+    // Validate and extract session
+    let (description, status) = {
+        let session_guard = state.session.read().await;
+        match session_guard.as_ref() {
+            Some(s) if s.session_id == session_id => {
+                (s.description.clone(), s.status.clone())
+            }
+            _ => return Ok(CommandResponse::err("Invalid session ID or no active session")),
+        }
     };
 
-    if session.status != TaskModeStatus::Initialized {
+    if status != TaskModeStatus::Initialized {
         return Ok(CommandResponse::err(format!(
             "Cannot generate PRD in {:?} status",
-            session.status
+            status
         )));
     }
 
-    session.status = TaskModeStatus::GeneratingPrd;
+    // Update status to GeneratingPrd
+    {
+        let mut session_guard = state.session.write().await;
+        if let Some(s) = session_guard.as_mut() {
+            s.status = TaskModeStatus::GeneratingPrd;
+        }
+    }
 
-    // Build a placeholder PRD (in production, this calls LLM)
-    let prd = TaskPrd {
-        title: format!("PRD: {}", session.description),
-        description: session.description.clone(),
-        stories: vec![],
-        batches: vec![],
+    // Resolve provider configuration
+    let llm_provider = match resolve_llm_provider(
+        &provider,
+        &model,
+        api_key.or(apiKey),
+        base_url.or(baseUrl),
+        &app_state,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            // Reset status back to Initialized on failure
+            let mut session_guard = state.session.write().await;
+            if let Some(s) = session_guard.as_mut() {
+                s.status = TaskModeStatus::Initialized;
+            }
+            return Ok(CommandResponse::err(e));
+        }
     };
 
-    session.status = TaskModeStatus::ReviewingPrd;
-    session.prd = Some(prd.clone());
+    // Call LLM for PRD generation
+    let prd = match prd_generator::generate_prd_with_llm(llm_provider, &description).await {
+        Ok(prd) => prd,
+        Err(e) => {
+            // Reset status back to Initialized on failure
+            let mut session_guard = state.session.write().await;
+            if let Some(s) = session_guard.as_mut() {
+                s.status = TaskModeStatus::Initialized;
+            }
+            return Ok(CommandResponse::err(format!(
+                "PRD generation failed: {}",
+                e
+            )));
+        }
+    };
+
+    // Update session with generated PRD
+    {
+        let mut session_guard = state.session.write().await;
+        if let Some(s) = session_guard.as_mut() {
+            s.status = TaskModeStatus::ReviewingPrd;
+            s.prd = Some(prd.clone());
+        }
+    }
 
     Ok(CommandResponse::ok(prd))
 }
 
+/// Resolve an LLM provider from frontend parameters and OS keyring.
+///
+/// Looks up the API key from the keyring if not provided explicitly.
+/// Returns an Arc<dyn LlmProvider> ready for use.
+async fn resolve_llm_provider(
+    provider_name: &str,
+    model: &str,
+    explicit_api_key: Option<String>,
+    explicit_base_url: Option<String>,
+    app_state: &tauri::State<'_, AppState>,
+) -> Result<Arc<dyn crate::services::llm::provider::LlmProvider>, String> {
+    use crate::commands::standalone::normalize_provider_name;
+    use crate::services::llm::types::{ProviderConfig, ProviderType};
+
+    let canonical = normalize_provider_name(provider_name)
+        .ok_or_else(|| format!("Unknown provider: {}", provider_name))?;
+
+    let provider_type = match canonical {
+        "anthropic" => ProviderType::Anthropic,
+        "openai" => ProviderType::OpenAI,
+        "deepseek" => ProviderType::DeepSeek,
+        "glm" => ProviderType::Glm,
+        "qwen" => ProviderType::Qwen,
+        "minimax" => ProviderType::Minimax,
+        "ollama" => ProviderType::Ollama,
+        _ => return Err(format!("Unsupported provider: {}", canonical)),
+    };
+
+    // Resolve API key: explicit parameter > OS keyring
+    let api_key = explicit_api_key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .or_else(|| {
+            let keyring = KeyringService::new();
+            keyring.get_api_key(canonical).ok().flatten()
+        });
+
+    // Validate API key for non-Ollama providers
+    if provider_type != ProviderType::Ollama && api_key.is_none() {
+        return Err(format!(
+            "API key not configured for provider '{}'. \
+             Please configure it in Settings or pass it explicitly.",
+            canonical
+        ));
+    }
+
+    // Resolve base URL: explicit > DB settings > default
+    let mut resolved_base_url = explicit_base_url
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty());
+
+    if resolved_base_url.is_none() {
+        let key = format!("provider_{}_base_url", canonical);
+        if let Ok(Some(db_url)) = app_state
+            .with_database(|db| db.get_setting(&key))
+            .await
+        {
+            if !db_url.is_empty() {
+                resolved_base_url = Some(db_url);
+            }
+        }
+    }
+
+    // Resolve proxy
+    let proxy = {
+        let keyring = KeyringService::new();
+        app_state
+            .with_database(|db| {
+                Ok(crate::commands::proxy::resolve_provider_proxy(
+                    &keyring, db, canonical,
+                ))
+            })
+            .await
+            .unwrap_or(None)
+    };
+
+    let config = ProviderConfig {
+        provider: provider_type,
+        api_key,
+        base_url: resolved_base_url,
+        model: model.to_string(),
+        proxy,
+        ..Default::default()
+    };
+
+    Ok(prd_generator::create_provider(config))
+}
+
 /// Approve a task PRD and trigger batch execution.
 ///
-/// Validates the PRD structure and starts execution in a background task.
+/// Validates the PRD structure, spawns execution as a background tokio task,
+/// and returns immediately. Progress events are emitted via Tauri's
+/// AppHandle::emit('task-mode-progress', payload) during execution.
 #[tauri::command]
 pub async fn approve_task_prd(
+    app: tauri::AppHandle,
     session_id: String,
     prd: TaskPrd,
     state: tauri::State<'_, TaskModeState>,
@@ -292,8 +461,84 @@ pub async fn approve_task_prd(
             approved_prd.batches = batches;
             session.prd = Some(approved_prd);
             session.status = TaskModeStatus::Executing;
-            // Note: In production, this would spawn a background tokio task
-            // that runs the BatchExecutor.
+
+            // Create cancellation token for this execution
+            let cancellation_token = CancellationToken::new();
+            {
+                let mut ct = state.cancellation_token.write().await;
+                *ct = Some(cancellation_token.clone());
+            }
+
+            // Clear any previous execution result
+            {
+                let mut er = state.execution_result.write().await;
+                *er = None;
+            }
+
+            // Clone what we need for the spawned background task
+            let session_arc = state.session.clone();
+            let result_arc = state.execution_result.clone();
+            let sid = session_id.clone();
+            let app_handle = app.clone();
+            let stories_for_exec = stories.clone();
+
+            // Spawn background tokio task for batch execution
+            tokio::spawn(async move {
+                let executor = BatchExecutor::new(
+                    stories_for_exec,
+                    ExecutionConfig::default(),
+                    cancellation_token,
+                );
+                let resolver = AgentResolver::with_defaults();
+
+                // Create emit callback that sends events via Tauri AppHandle
+                let app_for_emit = app_handle.clone();
+                let emit = move |event: TaskModeProgressEvent| {
+                    use tauri::Emitter;
+                    let _ = app_for_emit.emit(TASK_MODE_EVENT_CHANNEL, &event);
+                };
+
+                // Resolve project path from current working directory
+                let project_path = std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+                // Create story executor that delegates to the orchestrator service.
+                // Each story is sent to the LLM agent for code generation and execution.
+                let story_executor = build_story_executor(app_handle.clone());
+
+                let result = executor
+                    .execute(&sid, &resolver, project_path, emit, story_executor)
+                    .await;
+
+                // Update session state based on result
+                let mut session_guard = session_arc.write().await;
+                if let Some(ref mut session) = *session_guard {
+                    if session.session_id == sid {
+                        match &result {
+                            Ok(exec_result) => {
+                                // Update progress
+                                session.progress = Some(executor.get_progress().await);
+
+                                if exec_result.cancelled {
+                                    session.status = TaskModeStatus::Cancelled;
+                                } else if exec_result.success {
+                                    session.status = TaskModeStatus::Completed;
+                                } else {
+                                    session.status = TaskModeStatus::Failed;
+                                }
+
+                                // Store the result
+                                let mut er = result_arc.write().await;
+                                *er = Some(exec_result.clone());
+                            }
+                            Err(_) => {
+                                session.status = TaskModeStatus::Failed;
+                            }
+                        }
+                    }
+                }
+            });
+
             Ok(CommandResponse::ok(true))
         }
         Err(e) => Ok(CommandResponse::err(format!("PRD validation failed: {}", e))),
@@ -342,13 +587,16 @@ pub async fn get_task_execution_status(
 }
 
 /// Cancel the current task execution.
+///
+/// Triggers the CancellationToken to gracefully stop the background
+/// batch execution task.
 #[tauri::command]
 pub async fn cancel_task_execution(
     session_id: String,
     state: tauri::State<'_, TaskModeState>,
 ) -> Result<CommandResponse<bool>, String> {
-    let mut session_guard = state.session.write().await;
-    let session = match session_guard.as_mut() {
+    let session_guard = state.session.read().await;
+    let session = match session_guard.as_ref() {
         Some(s) if s.session_id == session_id => s,
         _ => return Ok(CommandResponse::err("Invalid session ID or no active session")),
     };
@@ -357,11 +605,20 @@ pub async fn cancel_task_execution(
         return Ok(CommandResponse::err("No execution in progress to cancel"));
     }
 
-    session.status = TaskModeStatus::Cancelled;
+    // Trigger the cancellation token
+    let ct = state.cancellation_token.read().await;
+    if let Some(ref token) = *ct {
+        token.cancel();
+    }
+
+    // Note: The background task will update session.status to Cancelled
+    // when it detects the cancellation token.
     Ok(CommandResponse::ok(true))
 }
 
 /// Get the execution report after completion.
+///
+/// Returns the final `BatchExecutionResult` populated by the background task.
 #[tauri::command]
 pub async fn get_task_execution_report(
     session_id: String,
@@ -380,6 +637,27 @@ pub async fn get_task_execution_report(
         return Ok(CommandResponse::err("Execution has not finished yet"));
     }
 
+    // Try to get the real execution result
+    let exec_result = state.execution_result.read().await;
+    if let Some(ref result) = *exec_result {
+        let agent_assignments: HashMap<String, String> = result
+            .agent_assignments
+            .iter()
+            .map(|(id, a)| (id.clone(), a.agent_name.clone()))
+            .collect();
+
+        return Ok(CommandResponse::ok(ExecutionReport {
+            session_id: session.session_id.clone(),
+            total_stories: result.total_stories,
+            stories_completed: result.completed,
+            stories_failed: result.failed,
+            total_duration_ms: result.total_duration_ms,
+            agent_assignments,
+            success: result.success,
+        }));
+    }
+
+    // Fallback to progress-based report
     let progress = session.progress.clone().unwrap_or(BatchExecutionProgress {
         current_batch: 0,
         total_batches: 0,
@@ -410,11 +688,208 @@ pub async fn exit_task_mode(
     let mut session_guard = state.session.write().await;
     match session_guard.as_ref() {
         Some(s) if s.session_id == session_id => {
+            // Cancel any running execution
+            {
+                let ct = state.cancellation_token.read().await;
+                if let Some(ref token) = *ct {
+                    token.cancel();
+                }
+            }
+
             *session_guard = None;
+
+            // Clean up cancellation token and execution result
+            {
+                let mut ct = state.cancellation_token.write().await;
+                *ct = None;
+            }
+            {
+                let mut er = state.execution_result.write().await;
+                *er = None;
+            }
+
             Ok(CommandResponse::ok(true))
         }
         _ => Ok(CommandResponse::err("Invalid session ID or no active session")),
     }
+}
+
+// ============================================================================
+// Story Executor
+// ============================================================================
+
+/// Build a story executor callback that runs each story through a CLI agent.
+///
+/// The returned callback creates an execution prompt from the story context
+/// and spawns a `claude` CLI process (or other configured agent) for code
+/// generation. The process runs in the project directory with the story
+/// prompt piped to stdin. If the agent binary is not available, execution
+/// fails (which triggers retry with a different agent if retry is enabled).
+fn build_story_executor(
+    app_handle: tauri::AppHandle,
+) -> impl Fn(StoryExecutionContext) -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>>
+       + Send
+       + Sync
+       + Clone
+       + 'static {
+    move |ctx: StoryExecutionContext| -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>> {
+        let app = app_handle.clone();
+        Box::pin(async move {
+            eprintln!(
+                "[INFO] Executing story '{}' (attempt {}) with agent '{}' in {}",
+                ctx.story_id,
+                ctx.attempt,
+                ctx.agent_name,
+                ctx.project_path.display()
+            );
+
+            // Emit story execution event for frontend tracking
+            {
+                use tauri::Emitter;
+                let _ = app.emit(
+                    TASK_MODE_EVENT_CHANNEL,
+                    &TaskModeProgressEvent {
+                        session_id: String::new(),
+                        event_type: "story_executing".to_string(),
+                        current_batch: 0,
+                        total_batches: 0,
+                        story_id: Some(ctx.story_id.clone()),
+                        story_status: Some("executing".to_string()),
+                        agent_name: Some(ctx.agent_name.clone()),
+                        gate_results: None,
+                        error: None,
+                        progress_pct: 0.0,
+                    },
+                );
+            }
+
+            // Build execution prompt from story context
+            let prompt = build_story_prompt(&ctx);
+
+            // Spawn agent CLI process to execute the story
+            execute_story_via_agent(&ctx.agent_name, &prompt, &ctx.project_path).await
+        })
+    }
+}
+
+/// Execute a story by spawning an agent CLI process in the project directory.
+///
+/// Supports multiple agent backends: `claude`, `codex`, `aider`, etc.
+/// The prompt is passed via the `-p` flag. The process exit code determines
+/// success or failure.
+async fn execute_story_via_agent(
+    agent_name: &str,
+    prompt: &str,
+    project_path: &std::path::Path,
+) -> StoryExecutionOutcome {
+    use tokio::process::Command;
+
+    // Resolve agent CLI command and arguments
+    let (command, args) = match agent_name {
+        name if name.starts_with("claude") => (
+            "claude".to_string(),
+            vec![
+                "-p".to_string(),
+                prompt.to_string(),
+                "--output-format".to_string(),
+                "text".to_string(),
+            ],
+        ),
+        "codex" => (
+            "codex".to_string(),
+            vec!["--prompt".to_string(), prompt.to_string()],
+        ),
+        "aider" => (
+            "aider".to_string(),
+            vec![
+                "--message".to_string(),
+                prompt.to_string(),
+                "--yes".to_string(),
+            ],
+        ),
+        other => (
+            other.to_string(),
+            vec!["-p".to_string(), prompt.to_string()],
+        ),
+    };
+
+    eprintln!("[INFO] Spawning agent '{}' in {}", command, project_path.display());
+
+    let result = Command::new(&command)
+        .args(&args)
+        .current_dir(project_path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await;
+
+    match result {
+        Ok(output) if output.status.success() => {
+            eprintln!("[INFO] Agent '{}' completed successfully", command);
+            StoryExecutionOutcome {
+                success: true,
+                error: None,
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let error_msg = format!(
+                "Agent '{}' exited with code {}: {}",
+                command,
+                output.status.code().unwrap_or(-1),
+                stderr.chars().take(500).collect::<String>()
+            );
+            eprintln!("[WARN] {}", error_msg);
+            StoryExecutionOutcome {
+                success: false,
+                error: Some(error_msg),
+            }
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to spawn agent '{}': {}", command, e);
+            eprintln!("[WARN] {}", error_msg);
+            StoryExecutionOutcome {
+                success: false,
+                error: Some(error_msg),
+            }
+        }
+    }
+}
+
+/// Build an execution prompt from story context for the LLM agent.
+fn build_story_prompt(ctx: &StoryExecutionContext) -> String {
+    let criteria = ctx
+        .acceptance_criteria
+        .iter()
+        .enumerate()
+        .map(|(i, c)| format!("{}. {}", i + 1, c))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut prompt = format!(
+        "Execute the following task:\n\n\
+         ## {} ({})\n\n\
+         {}\n\n\
+         ## Acceptance Criteria\n\
+         {}\n\n\
+         ## Instructions\n\
+         - Implement all acceptance criteria\n\
+         - Run relevant tests to verify correctness\n\
+         - Ensure code compiles without errors",
+        ctx.story_title, ctx.story_id, ctx.story_description, criteria,
+    );
+
+    if let Some(ref retry) = ctx.retry_context {
+        prompt.push_str(&format!(
+            "\n\n## Retry Context (Attempt {})\n\
+             Previous attempt failed: {}\n\
+             Previous agent: {}\n\
+             Please analyze the failure and try a different approach.",
+            retry.attempt, retry.failure_reason, retry.previous_agent,
+        ));
+    }
+
+    prompt
 }
 
 // ============================================================================

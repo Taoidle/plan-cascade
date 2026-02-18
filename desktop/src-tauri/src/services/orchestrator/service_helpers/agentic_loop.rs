@@ -1658,8 +1658,21 @@ impl OrchestratorService {
                                 &[],
                                 &tx,
                             ).await;
-                            if let Err(e) = apply_result {
-                                eprintln!("[event-actions] Failed to apply actions from {}: {}", effective_tool_name, e);
+                            match apply_result {
+                                Ok(ref action_outcome) => {
+                                    // Handle agent transfer if requested (ADR-F001)
+                                    if let Some(ref target_agent) = action_outcome.transfer_target {
+                                        self.handle_agent_transfer(
+                                            target_agent,
+                                            &hook_ctx.session_id,
+                                            &event_actions_state,
+                                            &tx,
+                                        ).await;
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[event-actions] Failed to apply actions from {}: {}", effective_tool_name, e);
+                                }
                             }
                         }
                     }
@@ -1876,8 +1889,21 @@ impl OrchestratorService {
                                 &[],
                                 &tx,
                             ).await;
-                            if let Err(e) = apply_result {
-                                eprintln!("[event-actions] Failed to apply actions from {} (fallback): {}", ptc.tool_name, e);
+                            match apply_result {
+                                Ok(ref action_outcome) => {
+                                    // Handle agent transfer if requested (ADR-F001, fallback path)
+                                    if let Some(ref target_agent) = action_outcome.transfer_target {
+                                        self.handle_agent_transfer(
+                                            target_agent,
+                                            &hook_ctx.session_id,
+                                            &event_actions_state,
+                                            &tx,
+                                        ).await;
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[event-actions] Failed to apply actions from {} (fallback): {}", ptc.tool_name, e);
+                                }
                             }
                         }
                     }
@@ -2892,5 +2918,162 @@ impl OrchestratorService {
         )?;
 
         Ok(count)
+    }
+
+    /// Handle an agent transfer requested by EventActions.
+    ///
+    /// Creates a `TransferHandler` with the registered `ComposerRegistry`,
+    /// invokes `handle_transfer` for the target agent, and forwards the
+    /// resulting `AgentEventStream` events through the `tx` channel to the
+    /// frontend.
+    ///
+    /// Errors during transfer are logged but do not crash the agentic loop
+    /// (acceptance criterion 7).
+    async fn handle_agent_transfer(
+        &self,
+        target_agent: &str,
+        session_id: &str,
+        event_actions_state: &std::collections::HashMap<String, serde_json::Value>,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+    ) {
+        use crate::services::orchestrator::transfer::TransferHandler;
+        use crate::services::agent_composer::types::{AgentContext, AgentConfig, AgentInput, AgentEvent};
+        use futures_util::StreamExt;
+
+        // Require a ComposerRegistry to be configured
+        let registry = match &self.composer_registry {
+            Some(r) => Arc::clone(r),
+            None => {
+                eprintln!(
+                    "[transfer] Transfer to '{}' requested but no ComposerRegistry configured — skipping",
+                    target_agent
+                );
+                return;
+            }
+        };
+
+        let from_agent = "orchestrator";
+        let transfer_message = format!("Transferred from orchestrator to '{}'", target_agent);
+
+        // Create TransferHandler with depth limits and cycle detection
+        let mut handler = TransferHandler::new(registry);
+
+        // Build AgentContext from the orchestrator's current state
+        let shared_state = event_actions_state.clone();
+
+        let agent_ctx = AgentContext {
+            session_id: session_id.to_string(),
+            project_root: self.config.project_root.clone(),
+            provider: Arc::clone(&self.provider),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(&self.config.project_root)),
+            plugin_manager: None,
+            hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
+            input: AgentInput::Text(format!("Transfer to agent '{}'", target_agent)),
+            shared_state: Arc::new(tokio::sync::RwLock::new(shared_state)),
+            config: AgentConfig::default(),
+        };
+
+        // Invoke handle_transfer with the target agent name
+        let stream_result = handler
+            .handle_transfer(from_agent, target_agent, &transfer_message, &agent_ctx)
+            .await;
+
+        match stream_result {
+            Ok(mut event_stream) => {
+                let depth = handler.chain().depth();
+
+                // Emit AgentTransferStart after successful setup (depth is now known)
+                let _ = tx
+                    .send(UnifiedStreamEvent::AgentTransferStart {
+                        from_agent: from_agent.to_string(),
+                        to_agent: target_agent.to_string(),
+                        message: transfer_message.clone(),
+                        depth,
+                    })
+                    .await;
+
+                // Forward agent events through the tx channel
+                let mut transfer_success = true;
+                while let Some(event_result) = event_stream.next().await {
+                    match event_result {
+                        Ok(agent_event) => {
+                            // Map AgentEvent to UnifiedStreamEvent for frontend
+                            let unified_event = match agent_event {
+                                AgentEvent::TextDelta { content } => {
+                                    Some(UnifiedStreamEvent::TextDelta { content })
+                                }
+                                AgentEvent::ThinkingDelta { content } => {
+                                    Some(UnifiedStreamEvent::ThinkingDelta {
+                                        content,
+                                        thinking_id: None,
+                                    })
+                                }
+                                AgentEvent::ToolCall { name, args } => {
+                                    Some(UnifiedStreamEvent::ToolStart {
+                                        tool_id: format!("transfer:{}:{}", target_agent, name),
+                                        tool_name: name,
+                                        arguments: Some(args),
+                                    })
+                                }
+                                AgentEvent::ToolResult { name, result } => {
+                                    Some(UnifiedStreamEvent::ToolResult {
+                                        tool_id: format!("transfer:{}:{}", target_agent, name),
+                                        result: Some(result),
+                                        error: None,
+                                    })
+                                }
+                                AgentEvent::Done { output: _ } => {
+                                    // Transfer agent completed; no separate event needed
+                                    None
+                                }
+                                _ => None,
+                            };
+
+                            if let Some(event) = unified_event {
+                                let _ = tx.send(event).await;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[transfer] Error in agent '{}' event stream: {}",
+                                target_agent, e
+                            );
+                            transfer_success = false;
+                            break;
+                        }
+                    }
+                }
+
+                // Emit AgentTransferEnd event
+                let _ = tx
+                    .send(UnifiedStreamEvent::AgentTransferEnd {
+                        from_agent: from_agent.to_string(),
+                        to_agent: target_agent.to_string(),
+                        success: transfer_success,
+                        error: if transfer_success {
+                            None
+                        } else {
+                            Some(format!("Transfer to '{}' encountered an error in event stream", target_agent))
+                        },
+                    })
+                    .await;
+            }
+            Err(e) => {
+                // Transfer setup failed (agent not found, cycle detected, depth limit, etc.)
+                // Errors do not crash the agentic loop — they are logged and execution continues.
+                eprintln!(
+                    "[transfer] Failed to transfer to agent '{}': {}",
+                    target_agent, e
+                );
+                let _ = tx
+                    .send(UnifiedStreamEvent::AgentTransferEnd {
+                        from_agent: from_agent.to_string(),
+                        to_agent: target_agent.to_string(),
+                        success: false,
+                        error: Some(e.to_string()),
+                    })
+                    .await;
+            }
+        }
     }
 }

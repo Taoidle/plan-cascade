@@ -182,7 +182,7 @@ impl RagPipeline {
     ) -> AppResult<KnowledgeCollection> {
         let collection_id = self.get_or_create_collection(collection_name, project_id, description)?;
 
-        // Chunk all documents
+        // Chunk all documents (sync)
         let mut all_chunks: Vec<Chunk> = Vec::new();
         for doc in &documents {
             let chunks = self.chunker.chunk(doc)?;
@@ -193,7 +193,7 @@ impl RagPipeline {
             return self.get_collection(&collection_id);
         }
 
-        // Embed all chunks
+        // Embed all chunks (async — no connection held)
         let chunk_texts: Vec<&str> = all_chunks.iter().map(|c| c.content.as_str()).collect();
         let embeddings = self
             .embedding_manager
@@ -201,61 +201,69 @@ impl RagPipeline {
             .await
             .map_err(|e| AppError::internal(format!("Embedding failed: {}", e)))?;
 
-        // Store chunks in SQLite and insert into HNSW
-        let conn = self
-            .database
-            .get_connection()
-            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+        // Store chunks in SQLite (sync scope — connection dropped before await)
+        let hnsw_items = {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        let mut hnsw_items: Vec<(usize, Vec<f32>)> = Vec::new();
+            let mut items: Vec<(usize, Vec<f32>)> = Vec::new();
 
-        for (i, chunk) in all_chunks.iter().enumerate() {
-            let embedding_bytes = embedding_to_bytes(&embeddings[i]);
-            let metadata_json =
-                serde_json::to_string(&chunk.metadata).unwrap_or_else(|_| "{}".to_string());
+            for (i, chunk) in all_chunks.iter().enumerate() {
+                let embedding_bytes = embedding_to_bytes(&embeddings[i]);
+                let metadata_json =
+                    serde_json::to_string(&chunk.metadata).unwrap_or_else(|_| "{}".to_string());
 
-            // Insert chunk into SQLite
-            conn.execute(
-                "INSERT INTO knowledge_chunks (collection_id, document_id, chunk_index, content, embedding, metadata)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![
-                    collection_id,
-                    chunk.document_id,
-                    chunk.index as i64,
-                    chunk.content,
-                    embedding_bytes,
-                    metadata_json,
-                ],
-            )
-            .map_err(|e| AppError::database(format!("Failed to insert chunk: {}", e)))?;
+                conn.execute(
+                    "INSERT INTO knowledge_chunks (collection_id, document_id, chunk_index, content, embedding, metadata)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    rusqlite::params![
+                        collection_id,
+                        chunk.document_id,
+                        chunk.index as i64,
+                        chunk.content,
+                        embedding_bytes,
+                        metadata_json,
+                    ],
+                )
+                .map_err(|e| AppError::database(format!("Failed to insert chunk: {}", e)))?;
 
-            // Get the auto-generated SQLite rowid for HNSW
-            let chunk_rowid = conn.last_insert_rowid() as usize;
-            hnsw_items.push((chunk_rowid, embeddings[i].clone()));
-        }
+                let chunk_rowid = conn.last_insert_rowid() as usize;
+                items.push((chunk_rowid, embeddings[i].clone()));
+            }
 
-        // Initialize HNSW if needed
+            items
+            // conn dropped here
+        };
+
+        // HNSW operations (async — no connection held)
         if !self.hnsw_index.is_ready().await {
             self.hnsw_index.initialize().await;
         }
-
-        // Batch insert into HNSW
         self.hnsw_index.batch_insert(&hnsw_items).await;
 
-        // Update chunk count
-        let chunk_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM knowledge_chunks WHERE collection_id = ?1",
-                rusqlite::params![collection_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
+        // Update chunk count (sync scope)
+        {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        conn.execute(
-            "UPDATE knowledge_collections SET chunk_count = ?1, updated_at = datetime('now') WHERE id = ?2",
-            rusqlite::params![chunk_count, collection_id],
-        )
-        .map_err(|e| AppError::database(format!("Failed to update collection: {}", e)))?;
+            let chunk_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM knowledge_chunks WHERE collection_id = ?1",
+                    rusqlite::params![collection_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+
+            conn.execute(
+                "UPDATE knowledge_collections SET chunk_count = ?1, updated_at = datetime('now') WHERE id = ?2",
+                rusqlite::params![chunk_count, collection_id],
+            )
+            .map_err(|e| AppError::database(format!("Failed to update collection: {}", e)))?;
+        }
 
         self.get_collection(&collection_id)
     }
@@ -268,81 +276,90 @@ impl RagPipeline {
         query_text: &str,
         top_k: usize,
     ) -> AppResult<RagQueryResult> {
-        // Find collection
-        let conn = self
-            .database
-            .get_connection()
-            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+        // Find collection (sync scope — connection dropped before await)
+        let collection_id = {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        let collection_id: String = conn
-            .query_row(
+            conn.query_row(
                 "SELECT id FROM knowledge_collections WHERE name = ?1 AND project_id = ?2",
                 rusqlite::params![collection_name, project_id],
-                |row| row.get(0),
+                |row| row.get::<_, String>(0),
             )
             .map_err(|_| {
                 AppError::not_found(format!(
                     "Collection '{}' not found for project '{}'",
                     collection_name, project_id
                 ))
-            })?;
+            })?
+            // conn dropped here
+        };
 
-        // Embed the query
+        // Embed the query (async — no connection held)
         let query_embedding = self
             .embedding_manager
             .embed_query(query_text)
             .await
             .map_err(|e| AppError::internal(format!("Query embedding failed: {}", e)))?;
 
-        // Search HNSW
+        // Search HNSW (async — no connection held)
         let hnsw_results = self.hnsw_index.search(&query_embedding, top_k * 3).await;
 
-        // Filter results to only include chunks from this collection
-        let mut search_results = Vec::new();
-        for (chunk_rowid, distance) in &hnsw_results {
-            // Look up chunk by rowid, filter by collection_id
-            let chunk_data: Option<(String, String, String, Vec<u8>)> = conn
-                .query_row(
-                    "SELECT document_id, content, metadata, COALESCE(embedding, X'')
-                     FROM knowledge_chunks
-                     WHERE rowid = ?1 AND collection_id = ?2",
-                    rusqlite::params![*chunk_rowid as i64, collection_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, Vec<u8>>(3)?,
-                        ))
-                    },
-                )
-                .ok();
+        // Look up chunks from DB (sync scope — connection dropped before await)
+        let mut search_results = {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-            if let Some((document_id, content, metadata_json, _emb_bytes)) = chunk_data {
-                let metadata: HashMap<String, String> =
-                    serde_json::from_str(&metadata_json).unwrap_or_default();
+            let mut results = Vec::new();
+            for (chunk_rowid, distance) in &hnsw_results {
+                let chunk_data: Option<(String, String, String, Vec<u8>)> = conn
+                    .query_row(
+                        "SELECT document_id, content, metadata, COALESCE(embedding, X'')
+                         FROM knowledge_chunks
+                         WHERE rowid = ?1 AND collection_id = ?2",
+                        rusqlite::params![*chunk_rowid as i64, collection_id],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                                row.get::<_, Vec<u8>>(3)?,
+                            ))
+                        },
+                    )
+                    .ok();
 
-                // Convert distance to similarity score (cosine distance to similarity)
-                let score = 1.0 - distance;
+                if let Some((document_id, content, metadata_json, _emb_bytes)) = chunk_data {
+                    let metadata: HashMap<String, String> =
+                        serde_json::from_str(&metadata_json).unwrap_or_default();
 
-                search_results.push(SearchResult {
-                    chunk_text: content,
-                    document_id,
-                    collection_name: collection_name.to_string(),
-                    score,
-                    metadata,
-                });
+                    let score = 1.0 - distance;
+
+                    results.push(SearchResult {
+                        chunk_text: content,
+                        document_id,
+                        collection_name: collection_name.to_string(),
+                        score,
+                        metadata,
+                    });
+                }
             }
-        }
+
+            results
+            // conn dropped here
+        };
 
         let total_searched = search_results.len();
 
-        // Apply reranker if configured
+        // Apply reranker if configured (async — no connection held)
         if let Some(ref reranker) = self.reranker {
             search_results = reranker.rerank(query_text, search_results).await?;
         }
 
-        // Truncate to top_k
         search_results.truncate(top_k);
 
         Ok(RagQueryResult {
@@ -389,53 +406,64 @@ impl RagPipeline {
         collection_name: &str,
         project_id: &str,
     ) -> AppResult<()> {
-        let conn = self
-            .database
-            .get_connection()
-            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+        // Collect collection_id and chunk rowids (sync scope)
+        let (collection_id, rowids) = {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        // Find collection
-        let collection_id: String = conn
-            .query_row(
-                "SELECT id FROM knowledge_collections WHERE name = ?1 AND project_id = ?2",
-                rusqlite::params![collection_name, project_id],
-                |row| row.get(0),
-            )
-            .map_err(|_| {
-                AppError::not_found(format!(
-                    "Collection '{}' not found",
-                    collection_name
-                ))
-            })?;
+            let collection_id: String = conn
+                .query_row(
+                    "SELECT id FROM knowledge_collections WHERE name = ?1 AND project_id = ?2",
+                    rusqlite::params![collection_name, project_id],
+                    |row| row.get(0),
+                )
+                .map_err(|_| {
+                    AppError::not_found(format!(
+                        "Collection '{}' not found",
+                        collection_name
+                    ))
+                })?;
 
-        // Get all chunk rowids to mark stale in HNSW
-        let mut stmt = conn
-            .prepare("SELECT rowid FROM knowledge_chunks WHERE collection_id = ?1")
-            .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
+            let mut stmt = conn
+                .prepare("SELECT rowid FROM knowledge_chunks WHERE collection_id = ?1")
+                .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
 
-        let rowids: Vec<i64> = stmt
-            .query_map(rusqlite::params![collection_id], |row| row.get(0))
-            .map_err(|e| AppError::database(format!("Failed to query chunk rowids: {}", e)))?
-            .filter_map(|r| r.ok())
-            .collect();
+            let rowids: Vec<i64> = stmt
+                .query_map(rusqlite::params![collection_id], |row| row.get(0))
+                .map_err(|e| AppError::database(format!("Failed to query chunk rowids: {}", e)))?
+                .filter_map(|r| r.ok())
+                .collect();
 
-        // Mark stale in HNSW
+            (collection_id, rowids)
+            // conn dropped here
+        };
+
+        // Mark stale in HNSW (async — no connection held)
         for rowid in rowids {
             self.hnsw_index.mark_stale(rowid as usize).await;
         }
 
-        // Delete from SQLite (cascade handles chunks)
-        conn.execute(
-            "DELETE FROM knowledge_chunks WHERE collection_id = ?1",
-            rusqlite::params![collection_id],
-        )
-        .map_err(|e| AppError::database(format!("Failed to delete chunks: {}", e)))?;
+        // Delete from SQLite (sync scope)
+        {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        conn.execute(
-            "DELETE FROM knowledge_collections WHERE id = ?1",
-            rusqlite::params![collection_id],
-        )
-        .map_err(|e| AppError::database(format!("Failed to delete collection: {}", e)))?;
+            conn.execute(
+                "DELETE FROM knowledge_chunks WHERE collection_id = ?1",
+                rusqlite::params![collection_id],
+            )
+            .map_err(|e| AppError::database(format!("Failed to delete chunks: {}", e)))?;
+
+            conn.execute(
+                "DELETE FROM knowledge_collections WHERE id = ?1",
+                rusqlite::params![collection_id],
+            )
+            .map_err(|e| AppError::database(format!("Failed to delete collection: {}", e)))?;
+        }
 
         Ok(())
     }

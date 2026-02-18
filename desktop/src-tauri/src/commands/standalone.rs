@@ -119,7 +119,7 @@ pub struct UsageStatistics {
 }
 
 /// Normalize provider aliases to canonical names used by orchestrator/keyring.
-fn normalize_provider_name(provider: &str) -> Option<&'static str> {
+pub fn normalize_provider_name(provider: &str) -> Option<&'static str> {
     match provider.trim().to_lowercase().as_str() {
         "anthropic" | "claude" | "claude-api" => Some("anthropic"),
         "openai" => Some("openai"),

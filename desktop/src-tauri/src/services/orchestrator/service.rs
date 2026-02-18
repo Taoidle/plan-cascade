@@ -30,6 +30,7 @@ use super::embedding_manager::EmbeddingManager;
 use super::embedding_service::EmbeddingService;
 use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
+use crate::services::agent_composer::registry::ComposerRegistry;
 use crate::models::orchestrator::{
     ExecutionProgress, ExecutionSession, ExecutionSessionSummary, ExecutionStatus,
     StoryExecutionState,
@@ -325,6 +326,10 @@ pub struct OrchestratorService {
     /// Cached knowledge context block, populated at the start of execution.
     /// This avoids re-querying the knowledge base on every LLM call iteration.
     cached_knowledge_block: Mutex<Option<String>>,
+    /// Optional composer registry for agent transfer support.
+    /// When present, the agentic loop can transfer execution to named agents
+    /// via the `TransferHandler` when `apply_actions` returns a `transfer_target`.
+    composer_registry: Option<Arc<ComposerRegistry>>,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances

@@ -119,6 +119,7 @@ impl OrchestratorService {
             knowledge_context: None,
             knowledge_context_config: KnowledgeContextConfig::default(),
             cached_knowledge_block: Mutex::new(None),
+            composer_registry: None,
         }
     }
 
@@ -157,6 +158,7 @@ impl OrchestratorService {
             knowledge_context: None,
             knowledge_context_config: KnowledgeContextConfig::default(),
             cached_knowledge_block: Mutex::new(None),
+            composer_registry: None,
         }
     }
 
@@ -223,6 +225,7 @@ impl OrchestratorService {
             knowledge_context: None,
             knowledge_context_config: KnowledgeContextConfig::default(),
             cached_knowledge_block: Mutex::new(None),
+            composer_registry: None,
         }
     }
 
@@ -373,6 +376,15 @@ impl OrchestratorService {
             &mut self.hooks,
             registry,
         );
+        self
+    }
+
+    /// Set the composer registry for agent transfer support.
+    ///
+    /// When configured, the agentic loop can transfer execution to named agents
+    /// via the `TransferHandler` when `apply_actions` returns a `transfer_target`.
+    pub fn with_composer_registry(mut self, registry: Arc<ComposerRegistry>) -> Self {
+        self.composer_registry = Some(registry);
         self
     }
 
