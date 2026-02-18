@@ -7,6 +7,7 @@ use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
 use plan_cascade_desktop::commands::guardrails::GuardrailState;
 use plan_cascade_desktop::commands::lsp::LspState;
 use plan_cascade_desktop::commands::mcp::McpRuntimeState;
+use plan_cascade_desktop::commands::pipeline_execution::ExecutionRegistry;
 use plan_cascade_desktop::commands::plugins::PluginState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
 use plan_cascade_desktop::commands::remote::RemoteState;
@@ -37,6 +38,7 @@ fn main() {
         .manage(WebhookState::new_empty())
         .manage(RemoteState::new())
         .manage(TaskModeState::new())
+        .manage(ExecutionRegistry::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -291,6 +293,11 @@ fn main() {
             plan_cascade_desktop::commands::remote::list_remote_sessions,
             plan_cascade_desktop::commands::remote::disconnect_remote_session,
             plan_cascade_desktop::commands::remote::get_remote_audit_log,
+            // Pipeline Execution commands
+            plan_cascade_desktop::commands::pipeline_execution::execute_agent_pipeline,
+            plan_cascade_desktop::commands::pipeline_execution::execute_graph_workflow_run,
+            plan_cascade_desktop::commands::pipeline_execution::get_pipeline_execution_status,
+            plan_cascade_desktop::commands::pipeline_execution::cancel_pipeline_execution,
             // Evaluation commands
             plan_cascade_desktop::commands::evaluation::list_evaluators,
             plan_cascade_desktop::commands::evaluation::create_evaluator,
