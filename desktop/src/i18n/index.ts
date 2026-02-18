@@ -17,6 +17,7 @@ import enSettings from './locales/en/settings.json';
 import enWizard from './locales/en/wizard.json';
 import enAnalytics from './locales/en/analytics.json';
 import enAgents from './locales/en/agents.json';
+import enTaskMode from './locales/en/taskMode.json';
 
 // Chinese translations
 import zhCommon from './locales/zh/common.json';
@@ -27,6 +28,7 @@ import zhSettings from './locales/zh/settings.json';
 import zhWizard from './locales/zh/wizard.json';
 import zhAnalytics from './locales/zh/analytics.json';
 import zhAgents from './locales/zh/agents.json';
+import zhTaskMode from './locales/zh/taskMode.json';
 
 // Japanese translations
 import jaCommon from './locales/ja/common.json';
@@ -37,6 +39,7 @@ import jaSettings from './locales/ja/settings.json';
 import jaWizard from './locales/ja/wizard.json';
 import jaAnalytics from './locales/ja/analytics.json';
 import jaAgents from './locales/ja/agents.json';
+import jaTaskMode from './locales/ja/taskMode.json';
 
 export const resources = {
   en: {
@@ -48,6 +51,7 @@ export const resources = {
     wizard: enWizard,
     analytics: enAnalytics,
     agents: enAgents,
+    taskMode: enTaskMode,
   },
   zh: {
     common: zhCommon,
@@ -58,6 +62,7 @@ export const resources = {
     wizard: zhWizard,
     analytics: zhAnalytics,
     agents: zhAgents,
+    taskMode: zhTaskMode,
   },
   ja: {
     common: jaCommon,
@@ -68,6 +73,7 @@ export const resources = {
     wizard: jaWizard,
     analytics: jaAnalytics,
     agents: jaAgents,
+    taskMode: jaTaskMode,
   },
 } as const;
 
@@ -87,7 +93,7 @@ i18n
     resources,
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics', 'agents'],
+    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics', 'agents', 'taskMode'],
     interpolation: {
       escapeValue: false, // React already handles escaping
     },

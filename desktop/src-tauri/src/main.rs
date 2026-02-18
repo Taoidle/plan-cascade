@@ -10,6 +10,7 @@ use plan_cascade_desktop::commands::mcp::McpRuntimeState;
 use plan_cascade_desktop::commands::plugins::PluginState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
 use plan_cascade_desktop::commands::remote::RemoteState;
+use plan_cascade_desktop::commands::task_mode::TaskModeState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
 use plan_cascade_desktop::commands::standalone::StandaloneState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
@@ -35,6 +36,7 @@ fn main() {
         .manage(GuardrailState::new())
         .manage(WebhookState::new_empty())
         .manage(RemoteState::new())
+        .manage(TaskModeState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -183,6 +185,15 @@ fn main() {
             plan_cascade_desktop::commands::strategy::get_strategy_options,
             plan_cascade_desktop::commands::strategy::classify_intent,
             plan_cascade_desktop::commands::strategy::override_task_strategy,
+            plan_cascade_desktop::commands::strategy::analyze_task_for_mode,
+            // Task Mode commands
+            plan_cascade_desktop::commands::task_mode::enter_task_mode,
+            plan_cascade_desktop::commands::task_mode::generate_task_prd,
+            plan_cascade_desktop::commands::task_mode::approve_task_prd,
+            plan_cascade_desktop::commands::task_mode::get_task_execution_status,
+            plan_cascade_desktop::commands::task_mode::cancel_task_execution,
+            plan_cascade_desktop::commands::task_mode::get_task_execution_report,
+            plan_cascade_desktop::commands::task_mode::exit_task_mode,
             // Spec Interview commands
             plan_cascade_desktop::commands::spec_interview::start_spec_interview,
             plan_cascade_desktop::commands::spec_interview::submit_interview_answer,

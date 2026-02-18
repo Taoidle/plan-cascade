@@ -25,6 +25,7 @@ pub mod phase;
 pub mod project;
 pub mod proxy;
 pub mod quality_gates;
+pub mod task_mode;
 pub mod recovery;
 pub mod session;
 pub mod skills;
@@ -55,7 +56,8 @@ pub use phase::{Phase, PhaseConfig, PhaseError, PhaseManager};
 pub use quality_gates::{ProjectDetector, QualityGateRunner, QualityGatesStore, ValidatorRegistry};
 pub use recovery::{IncompleteTask, RecoveryDetector, ResumeEngine, ResumeEvent, ResumeResult};
 pub use strategy::{
-    ExecutionStrategy, Intent, IntentClassifier, IntentResult, StrategyAnalyzer, StrategyDecision,
+    analyze_task_for_mode, Benefit, ExecutionMode, ExecutionStrategy, Intent, IntentClassifier,
+    IntentResult, RiskLevel, StrategyAnalysis, StrategyAnalyzer, StrategyDecision,
 };
 pub use sync::{start_default_watches, FileWatcherService, WatchTarget, WatcherConfig};
 pub use worktree::{GitOps, PlanningConfigService, WorktreeManager};

@@ -5,7 +5,8 @@
 
 use crate::models::CommandResponse;
 use crate::services::strategy::analyzer::{
-    AnalysisContext, ExecutionStrategy, StrategyAnalyzer, StrategyDecision, StrategyOption,
+    AnalysisContext, ExecutionStrategy, StrategyAnalysis, StrategyAnalyzer, StrategyDecision,
+    StrategyOption,
 };
 use crate::services::strategy::classifier::{IntentClassifier, IntentResult};
 
@@ -98,6 +99,33 @@ pub async fn override_task_strategy(
     CommandResponse::ok(overridden)
 }
 
+/// Analyze a task description for Chat/Task mode recommendation.
+///
+/// Wraps the existing StrategyAnalyzer with additional heuristics to determine
+/// whether the task should be handled in Chat mode (simple, direct) or Task mode
+/// (structured with PRD, stories, and quality gates).
+///
+/// # Arguments
+/// * `description` - The task description to analyze
+/// * `context` - Optional analysis context (greenfield, codebase size, etc.)
+///
+/// # Returns
+/// `CommandResponse<StrategyAnalysis>` with recommended mode, risk level,
+/// parallelization benefit, and the underlying strategy decision.
+#[tauri::command]
+pub async fn analyze_task_for_mode(
+    description: String,
+    context: Option<AnalysisContext>,
+) -> CommandResponse<StrategyAnalysis> {
+    if description.trim().is_empty() {
+        return CommandResponse::err("Task description cannot be empty");
+    }
+
+    let analysis =
+        crate::services::strategy::analyzer::analyze_task_for_mode(&description, context.as_ref());
+    CommandResponse::ok(analysis)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +195,38 @@ mod tests {
         let decision = result.data.unwrap();
         assert_eq!(decision.strategy, ExecutionStrategy::MegaPlan);
         assert!((decision.confidence - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn test_analyze_task_for_mode_simple() {
+        let result = analyze_task_for_mode("fix a typo".to_string(), None).await;
+        assert!(result.success);
+        let analysis = result.data.unwrap();
+        assert_eq!(
+            analysis.recommended_mode,
+            crate::services::strategy::analyzer::ExecutionMode::Chat
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyze_task_for_mode_complex() {
+        let result = analyze_task_for_mode(
+            "Build a comprehensive platform with multiple features, microservices, complete solution, full stack, end to end: 1. Auth 2. Payments 3. Dashboard 4. Analytics 5. Testing".to_string(),
+            None,
+        )
+        .await;
+        assert!(result.success);
+        let analysis = result.data.unwrap();
+        assert_eq!(
+            analysis.recommended_mode,
+            crate::services::strategy::analyzer::ExecutionMode::Task
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyze_task_for_mode_empty() {
+        let result = analyze_task_for_mode("".to_string(), None).await;
+        assert!(!result.success);
+        assert!(result.error.is_some());
     }
 }

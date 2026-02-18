@@ -475,12 +475,273 @@ pub fn get_strategy_options() -> Vec<StrategyOption> {
 }
 
 // ============================================================================
+// Task Mode Analysis
+// ============================================================================
+
+/// Execution mode for the UI: Chat (simple) or Task (structured).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// Simple chat-based execution for direct tasks
+    Chat,
+    /// Structured task mode with PRD, stories, and quality gates
+    Task,
+}
+
+impl std::fmt::Display for ExecutionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecutionMode::Chat => write!(f, "chat"),
+            ExecutionMode::Task => write!(f, "task"),
+        }
+    }
+}
+
+/// Risk level assessment for a task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskLevel {
+    /// Low risk - simple changes with minimal impact
+    Low,
+    /// Medium risk - moderate changes that need testing
+    Medium,
+    /// High risk - breaking changes, security, or production impact
+    High,
+}
+
+/// Benefit assessment for parallelization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Benefit {
+    /// No parallelization benefit
+    None,
+    /// Moderate parallelization benefit
+    Moderate,
+    /// Significant parallelization benefit
+    Significant,
+}
+
+/// Comprehensive strategy analysis result for Chat/Task mode recommendation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyAnalysis {
+    /// Identified functional areas in the task
+    pub functional_areas: Vec<String>,
+    /// Estimated number of stories
+    pub estimated_stories: u32,
+    /// Whether stories have dependencies on each other
+    pub has_dependencies: bool,
+    /// Risk level assessment
+    pub risk_level: RiskLevel,
+    /// Parallelization benefit assessment
+    pub parallelization_benefit: Benefit,
+    /// Recommended execution mode
+    pub recommended_mode: ExecutionMode,
+    /// Confidence in the recommendation (0.0 - 1.0)
+    pub confidence: f64,
+    /// Human-readable reasoning for the recommendation
+    pub reasoning: String,
+    /// The underlying strategy decision
+    pub strategy_decision: StrategyDecision,
+}
+
+/// Analyze a task description and return a Chat/Task mode recommendation.
+///
+/// Wraps `StrategyAnalyzer::analyze()` with additional heuristics:
+/// - Direct strategy -> Chat mode
+/// - HybridAuto/HybridWorktree/MegaPlan -> Task mode
+pub fn analyze_task_for_mode(
+    description: &str,
+    context: Option<&AnalysisContext>,
+) -> StrategyAnalysis {
+    let decision = StrategyAnalyzer::analyze(description, context);
+
+    let recommended_mode = match decision.strategy {
+        ExecutionStrategy::Direct => ExecutionMode::Chat,
+        ExecutionStrategy::HybridAuto
+        | ExecutionStrategy::HybridWorktree
+        | ExecutionStrategy::MegaPlan => ExecutionMode::Task,
+    };
+
+    let risk_level = if decision.dimension_scores.risk >= 0.6 {
+        RiskLevel::High
+    } else if decision.dimension_scores.risk >= 0.3 {
+        RiskLevel::Medium
+    } else {
+        RiskLevel::Low
+    };
+
+    let parallelization_benefit = if decision.dimension_scores.parallelization >= 0.6 {
+        Benefit::Significant
+    } else if decision.dimension_scores.parallelization >= 0.3 {
+        Benefit::Moderate
+    } else {
+        Benefit::None
+    };
+
+    let has_dependencies = decision.estimated_stories > 1
+        && (decision.dimension_scores.scope >= 0.3
+            || decision.dimension_scores.complexity >= 0.4);
+
+    // Extract functional areas from complexity indicators
+    let functional_areas = decision
+        .complexity_indicators
+        .iter()
+        .filter(|ind| {
+            !ind.contains("description suggests")
+                && !ind.contains("list items")
+                && !ind.contains("already uses")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let reasoning = match recommended_mode {
+        ExecutionMode::Chat => format!(
+            "Task is simple enough for direct chat execution. {}",
+            decision.reasoning
+        ),
+        ExecutionMode::Task => format!(
+            "Task complexity warrants structured task mode with PRD and quality gates. {}",
+            decision.reasoning
+        ),
+    };
+
+    StrategyAnalysis {
+        functional_areas,
+        estimated_stories: decision.estimated_stories,
+        has_dependencies,
+        risk_level,
+        parallelization_benefit,
+        recommended_mode,
+        confidence: decision.confidence,
+        reasoning,
+        strategy_decision: decision,
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ========================================================================
+    // StrategyAnalysis / analyze_task_for_mode tests
+    // ========================================================================
+
+    #[test]
+    fn test_simple_task_returns_chat_mode() {
+        let analysis = analyze_task_for_mode("fix a typo in the readme", None);
+        assert_eq!(analysis.recommended_mode, ExecutionMode::Chat);
+        assert_eq!(analysis.estimated_stories, 1);
+        assert!(analysis.confidence >= 0.5);
+        assert_eq!(analysis.risk_level, RiskLevel::Low);
+        assert!(analysis.reasoning.contains("chat execution"));
+    }
+
+    #[test]
+    fn test_complex_task_returns_task_mode() {
+        let analysis = analyze_task_for_mode(
+            "Build a comprehensive e2e platform with multiple features: \
+             1. User authentication system \
+             2. Payment processing microservices \
+             3. Full stack dashboard \
+             4. Complete solution for analytics \
+             5. End to end testing infrastructure",
+            None,
+        );
+        assert_eq!(analysis.recommended_mode, ExecutionMode::Task);
+        assert!(analysis.estimated_stories >= 2);
+        assert!(analysis.has_dependencies);
+        assert!(analysis.reasoning.contains("task mode"));
+    }
+
+    #[test]
+    fn test_medium_task_returns_task_mode() {
+        let analysis = analyze_task_for_mode(
+            "implement authentication system with OAuth integration, create API endpoints for user management, and build database migration workflow",
+            None,
+        );
+        assert_eq!(analysis.recommended_mode, ExecutionMode::Task);
+    }
+
+    #[test]
+    fn test_high_risk_detection() {
+        let analysis = analyze_task_for_mode(
+            "implement payment billing system with database schema migration for production deploy with breaking changes",
+            None,
+        );
+        assert!(matches!(analysis.risk_level, RiskLevel::Medium | RiskLevel::High));
+    }
+
+    #[test]
+    fn test_parallelization_benefit() {
+        let analysis = analyze_task_for_mode(
+            "create independent parallel modular decoupled separate isolated modules",
+            None,
+        );
+        assert!(matches!(
+            analysis.parallelization_benefit,
+            Benefit::Moderate | Benefit::Significant
+        ));
+    }
+
+    #[test]
+    fn test_execution_mode_serialization() {
+        let chat = serde_json::to_string(&ExecutionMode::Chat).unwrap();
+        assert_eq!(chat, "\"chat\"");
+        let task = serde_json::to_string(&ExecutionMode::Task).unwrap();
+        assert_eq!(task, "\"task\"");
+    }
+
+    #[test]
+    fn test_risk_level_serialization() {
+        let low = serde_json::to_string(&RiskLevel::Low).unwrap();
+        assert_eq!(low, "\"low\"");
+        let high = serde_json::to_string(&RiskLevel::High).unwrap();
+        assert_eq!(high, "\"high\"");
+    }
+
+    #[test]
+    fn test_benefit_serialization() {
+        let none = serde_json::to_string(&Benefit::None).unwrap();
+        assert_eq!(none, "\"none\"");
+        let sig = serde_json::to_string(&Benefit::Significant).unwrap();
+        assert_eq!(sig, "\"significant\"");
+    }
+
+    #[test]
+    fn test_strategy_analysis_camel_case_serialization() {
+        let analysis = analyze_task_for_mode("fix a typo", None);
+        let json = serde_json::to_string(&analysis).unwrap();
+        assert!(json.contains("\"recommendedMode\""));
+        assert!(json.contains("\"estimatedStories\""));
+        assert!(json.contains("\"hasDependencies\""));
+        assert!(json.contains("\"riskLevel\""));
+        assert!(json.contains("\"parallelizationBenefit\""));
+        assert!(json.contains("\"functionalAreas\""));
+        assert!(json.contains("\"strategyDecision\""));
+    }
+
+    #[test]
+    fn test_boundary_confidence_scores() {
+        // Simple task
+        let simple = analyze_task_for_mode("rename variable", None);
+        assert!(simple.confidence >= 0.5 && simple.confidence <= 1.0);
+
+        // Complex task
+        let complex = analyze_task_for_mode(
+            "Build a comprehensive system with architecture and multiple features, microservices, complete solution, full stack, end to end",
+            None,
+        );
+        assert!(complex.confidence >= 0.5 && complex.confidence <= 1.0);
+    }
+
+    // ========================================================================
+    // Existing StrategyAnalyzer tests (unchanged)
+    // ========================================================================
 
     #[test]
     fn test_simple_task_returns_direct() {
