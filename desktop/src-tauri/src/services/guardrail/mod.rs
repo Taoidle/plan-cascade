@@ -16,6 +16,7 @@
 pub mod code_security;
 pub mod custom;
 pub mod registry;
+pub mod schema_validation;
 pub mod sensitive_data;
 
 use async_trait::async_trait;
@@ -25,6 +26,7 @@ use serde::{Deserialize, Serialize};
 pub use code_security::CodeSecurityGuardrail;
 pub use custom::CustomGuardrail;
 pub use registry::{GuardrailRegistry, register_guardrail_hooks};
+pub use schema_validation::SchemaValidationGuardrail;
 pub use sensitive_data::SensitiveDataGuardrail;
 
 /// Direction of content flow being validated.

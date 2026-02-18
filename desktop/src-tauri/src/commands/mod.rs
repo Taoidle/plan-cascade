@@ -34,6 +34,8 @@ pub mod strategy;
 pub mod timeline;
 pub mod webhook;
 pub mod worktree;
+pub mod knowledge;
+pub mod artifacts;
 
 pub use agent_composer::*;
 pub use agents::*;
@@ -66,3 +68,5 @@ pub use strategy::*;
 pub use timeline::*;
 pub use webhook::*;
 pub use worktree::*;
+pub use knowledge::*;
+pub use artifacts::*;

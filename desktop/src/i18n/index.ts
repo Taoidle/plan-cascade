@@ -17,6 +17,8 @@ import enSettings from './locales/en/settings.json';
 import enWizard from './locales/en/wizard.json';
 import enAnalytics from './locales/en/analytics.json';
 import enAgents from './locales/en/agents.json';
+import enKnowledge from './locales/en/knowledge.json';
+import enArtifacts from './locales/en/artifacts.json';
 
 // Chinese translations
 import zhCommon from './locales/zh/common.json';
@@ -27,6 +29,8 @@ import zhSettings from './locales/zh/settings.json';
 import zhWizard from './locales/zh/wizard.json';
 import zhAnalytics from './locales/zh/analytics.json';
 import zhAgents from './locales/zh/agents.json';
+import zhKnowledge from './locales/zh/knowledge.json';
+import zhArtifacts from './locales/zh/artifacts.json';
 
 // Japanese translations
 import jaCommon from './locales/ja/common.json';
@@ -48,6 +52,8 @@ export const resources = {
     wizard: enWizard,
     analytics: enAnalytics,
     agents: enAgents,
+    knowledge: enKnowledge,
+    artifacts: enArtifacts,
   },
   zh: {
     common: zhCommon,
@@ -58,6 +64,8 @@ export const resources = {
     wizard: zhWizard,
     analytics: zhAnalytics,
     agents: zhAgents,
+    knowledge: zhKnowledge,
+    artifacts: zhArtifacts,
   },
   ja: {
     common: jaCommon,
@@ -68,6 +76,8 @@ export const resources = {
     wizard: jaWizard,
     analytics: jaAnalytics,
     agents: jaAgents,
+    knowledge: enKnowledge,
+    artifacts: enArtifacts,
   },
 } as const;
 
@@ -87,7 +97,7 @@ i18n
     resources,
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics', 'agents'],
+    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics', 'agents', 'knowledge', 'artifacts'],
     interpolation: {
       escapeValue: false, // React already handles escaping
     },

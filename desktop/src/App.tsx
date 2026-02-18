@@ -19,6 +19,8 @@ import { ExpertMode } from './components/ExpertMode';
 import { ClaudeCodeMode } from './components/ClaudeCodeMode';
 import { Projects } from './components/Projects';
 import { Dashboard } from './components/Analytics';
+import { KnowledgeBasePanel } from './components/KnowledgeBase';
+import { ArtifactBrowserPanel } from './components/ArtifactBrowser';
 import { SetupWizard } from './components/Settings';
 import { FeatureTour } from './components/shared/FeatureTour';
 import { GlobalCommandPaletteProvider, useGlobalCommandPalette } from './components/shared/CommandPalette';
@@ -194,6 +196,8 @@ function AppContent() {
           {mode === 'claude-code' && <div data-tour="mode-claude-code" className="h-full"><ClaudeCodeMode /></div>}
           {mode === 'projects' && <div data-tour="mode-projects" className="h-full"><Projects /></div>}
           {mode === 'analytics' && <div data-tour="mode-analytics" className="h-full"><Dashboard /></div>}
+          {mode === 'knowledge' && <div data-tour="mode-knowledge" className="h-full"><KnowledgeBasePanel /></div>}
+          {mode === 'artifacts' && <div data-tour="mode-artifacts" className="h-full"><ArtifactBrowserPanel /></div>}
         </AnimatedModeContent>
       </main>
 

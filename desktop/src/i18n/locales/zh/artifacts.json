@@ -1,0 +1,55 @@
+{
+  "title": "产物管理",
+  "count": "{{count}} 个产物",
+  "loading": "加载产物中...",
+  "noArtifacts": "暂无产物",
+  "noArtifactsHint": "产物在执行和代理工作流程中生成",
+  "selectArtifact": "选择一个产物查看详情",
+  "dismiss": "关闭",
+  "delete": "删除",
+  "deleting": "删除中...",
+  "searchPlaceholder": "搜索产物...",
+
+  "scope": {
+    "project": "项目",
+    "session": "会话",
+    "user": "用户"
+  },
+
+  "deleteArtifact": "删除产物",
+  "deleteConfirm": "确定要删除 \"{{name}}\" 及其所有版本吗？此操作不可撤销。",
+
+  "detail": {
+    "id": "产物 ID",
+    "checksum": "校验和",
+    "createdAt": "创建时间",
+    "updatedAt": "更新时间",
+    "preview": "内容预览",
+    "loadingPreview": "加载预览中...",
+    "binaryContent": "二进制内容 ({{size}})",
+    "useDownload": "使用下载按钮保存此文件",
+    "noPreview": "无可用预览",
+    "versionHistory": "版本历史",
+    "loadingVersions": "加载版本中...",
+    "noVersions": "暂无版本历史",
+    "latest": "最新",
+    "viewVersion": "查看"
+  },
+
+  "actions": {
+    "download": "下载",
+    "copyPath": "复制路径",
+    "copied": "已复制！"
+  },
+
+  "diff": {
+    "title": "版本对比",
+    "from": "从",
+    "to": "到",
+    "added": "新增",
+    "removed": "删除",
+    "modified": "修改",
+    "loading": "加载对比中...",
+    "binaryNotSupported": "差异对比仅适用于文本类型的产物"
+  }
+}

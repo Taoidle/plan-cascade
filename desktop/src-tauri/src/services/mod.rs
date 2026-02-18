@@ -37,6 +37,8 @@ pub mod tools;
 pub mod remote;
 pub mod webhook;
 pub mod worktree;
+pub mod knowledge;
+pub mod artifacts;
 
 pub use agent::AgentService;
 pub use agent_executor::{AgentEvent, AgentExecutor, ExecutionHandle, ExecutorConfig, ToolFilter};

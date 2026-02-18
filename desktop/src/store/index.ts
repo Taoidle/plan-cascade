@@ -117,3 +117,9 @@ export type {
 
 export { useEmbeddingStore } from './embedding';
 export type { EmbeddingState } from './embedding';
+
+export { useKnowledgeStore } from './knowledge';
+export type { KnowledgeState } from './knowledge';
+
+export { useArtifactsStore } from './artifacts';
+export type { ArtifactsState, ScopeFilter } from './artifacts';

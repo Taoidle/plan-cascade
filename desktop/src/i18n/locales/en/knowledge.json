@@ -1,0 +1,64 @@
+{
+  "title": "Knowledge Base",
+  "subtitle": "{{count}} collection(s)",
+  "newCollection": "New Collection",
+  "loading": "Loading collections...",
+  "noCollections": "No knowledge collections",
+  "noCollectionsHint": "Create a collection and upload documents to get started",
+  "selectCollection": "Select a collection to view details",
+  "dismiss": "Dismiss",
+  "delete": "Delete",
+  "deleting": "Deleting...",
+  "creating": "Creating...",
+  "create": "Create",
+
+  "createCollection": "Create Collection",
+  "collectionName": "Collection Name",
+  "collectionNamePlaceholder": "e.g., project-docs",
+  "description": "Description",
+  "descriptionPlaceholder": "Brief description of this collection",
+
+  "deleteCollection": "Delete Collection",
+  "deleteConfirm": "Are you sure you want to delete the collection \"{{name}}\"? This will remove all documents and indexed data.",
+
+  "chunks": "{{count}} chunks",
+
+  "tabs": {
+    "details": "Details",
+    "upload": "Upload",
+    "query": "Query"
+  },
+
+  "detail": {
+    "chunkCount": "Chunk Count",
+    "projectId": "Project ID",
+    "collectionId": "Collection ID",
+    "timestamps": "Timestamps",
+    "createdAt": "Created",
+    "updatedAt": "Last Updated"
+  },
+
+  "upload": {
+    "title": "Upload Documents",
+    "subtitle": "Upload documents to index them into this knowledge collection",
+    "dragOrClick": "Drag files here or click to browse",
+    "dropHere": "Drop files here",
+    "acceptedFormats": "Supported: PDF, DOCX, XLSX, Markdown, Plain Text",
+    "noValidFiles": "No valid files found. Supported formats: PDF, DOCX, XLSX, MD, TXT",
+    "selectedFiles": "{{count}} file(s) selected",
+    "ingesting": "Indexing documents...",
+    "uploadAndIndex": "Upload & Index {{count}} file(s)"
+  },
+
+  "query": {
+    "title": "Query Knowledge",
+    "subtitle": "Search this collection for relevant information",
+    "placeholder": "Enter your search query...",
+    "search": "Search",
+    "searching": "Searching...",
+    "topK": "Results:",
+    "clearResults": "Clear",
+    "resultsFound": "{{count}} results from {{total}} chunks searched",
+    "noResults": "No matching results found"
+  }
+}
