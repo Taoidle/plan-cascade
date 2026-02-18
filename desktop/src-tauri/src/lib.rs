@@ -255,6 +255,7 @@ pub use commands::{
     git_full_status,
     git_stage_files,
     git_unstage_files,
+    git_stage_hunk,
     git_commit,
     git_amend_commit,
     git_discard_changes,

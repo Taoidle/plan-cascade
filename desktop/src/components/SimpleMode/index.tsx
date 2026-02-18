@@ -17,7 +17,7 @@ import { ConnectionStatus } from './ConnectionStatus';
 import { MessageActions, EditMode } from './MessageActions';
 import { ModelSwitcher } from './ModelSwitcher';
 import { WorkspaceTreeSidebar } from './WorkspaceTreeSidebar';
-import { DiffPanel } from './DiffPanel';
+import { GitPanel } from './GitPanel';
 import { useExecutionStore, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { deriveConversationTurns } from '../../lib/conversationUtils';
@@ -325,7 +325,7 @@ export function SimpleMode() {
           )}
 
           {showDiffPanel && (
-            <DiffPanel
+            <GitPanel
               streamingOutput={streamingOutput}
               workspacePath={workspacePath}
             />

@@ -406,6 +406,58 @@ impl GitService {
     }
 
     // -----------------------------------------------------------------------
+    // Hunk-level Staging
+    // -----------------------------------------------------------------------
+
+    /// Stage or unstage a specific hunk from a file's diff.
+    ///
+    /// Extracts the Nth hunk from the file's diff output and applies it
+    /// using `git apply --cached` (or `git apply --cached -R` for unstaging).
+    ///
+    /// * `file_path` - Path relative to repository root
+    /// * `hunk_index` - Zero-based index of the hunk to stage/unstage
+    /// * `reverse` - If true, unstage (reverse apply) the hunk
+    pub fn stage_hunk(
+        &self,
+        repo_path: &Path,
+        file_path: &str,
+        hunk_index: usize,
+        reverse: bool,
+    ) -> AppResult<()> {
+        // Get the diff for this file (unstaged for staging, staged for unstaging)
+        let diff_args: &[&str] = if reverse {
+            &["diff", "--cached", "--", file_path]
+        } else {
+            &["diff", "--", file_path]
+        };
+
+        let diff_output = self.git.execute(repo_path, diff_args)?.into_result()?;
+
+        // Extract the specific hunk as a valid patch
+        let patch = extract_hunk_patch(&diff_output, hunk_index)?;
+
+        // Apply the patch
+        let apply_args: Vec<&str> = if reverse {
+            vec!["apply", "--cached", "--reverse", "-"]
+        } else {
+            vec!["apply", "--cached", "-"]
+        };
+
+        let result = self
+            .git
+            .execute_with_stdin(repo_path, &apply_args, patch.as_bytes())?;
+
+        if !result.success {
+            return Err(AppError::command(format!(
+                "Failed to apply hunk: {}",
+                result.stderr.trim()
+            )));
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
@@ -866,6 +918,54 @@ pub fn parse_stash_list(output: &str) -> Vec<StashEntry> {
             })
         })
         .collect()
+}
+
+/// Extract a single hunk from a unified diff output as a valid patch.
+///
+/// The patch includes the diff header (diff --git, ---, +++) and only the
+/// specified hunk, forming a valid input for `git apply`.
+fn extract_hunk_patch(diff_output: &str, hunk_index: usize) -> AppResult<String> {
+    let lines: Vec<&str> = diff_output.lines().collect();
+
+    // Collect header lines (everything before the first @@ line)
+    let mut header_lines: Vec<&str> = Vec::new();
+    let mut hunk_starts: Vec<usize> = Vec::new();
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("@@ ") {
+            hunk_starts.push(i);
+        } else if hunk_starts.is_empty() {
+            header_lines.push(line);
+        }
+    }
+
+    if hunk_index >= hunk_starts.len() {
+        return Err(AppError::command(format!(
+            "Hunk index {} out of range (file has {} hunks)",
+            hunk_index,
+            hunk_starts.len()
+        )));
+    }
+
+    let hunk_start = hunk_starts[hunk_index];
+    let hunk_end = if hunk_index + 1 < hunk_starts.len() {
+        hunk_starts[hunk_index + 1]
+    } else {
+        lines.len()
+    };
+
+    // Build the patch: header + the selected hunk
+    let mut patch = String::new();
+    for line in &header_lines {
+        patch.push_str(line);
+        patch.push('\n');
+    }
+    for i in hunk_start..hunk_end {
+        patch.push_str(lines[i]);
+        patch.push('\n');
+    }
+
+    Ok(patch)
 }
 
 /// Parse `git remote -v` output.

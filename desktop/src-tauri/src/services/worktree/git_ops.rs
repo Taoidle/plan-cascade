@@ -60,6 +60,41 @@ impl GitOps {
         })
     }
 
+    /// Execute a git command with stdin input piped in.
+    pub fn execute_with_stdin(&self, cwd: &Path, args: &[&str], stdin_data: &[u8]) -> AppResult<GitResult> {
+        use std::io::Write;
+
+        let mut child = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GCM_INTERACTIVE", "never")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| AppError::command(format!("Failed to spawn git: {}", e)))?;
+
+        if let Some(ref mut stdin) = child.stdin {
+            stdin
+                .write_all(stdin_data)
+                .map_err(|e| AppError::command(format!("Failed to write stdin: {}", e)))?;
+        }
+        // Drop stdin to signal EOF
+        drop(child.stdin.take());
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| AppError::command(format!("Failed to wait for git: {}", e)))?;
+
+        Ok(GitResult {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            exit_code: output.status.code().unwrap_or(-1),
+        })
+    }
+
     /// Get the repository root directory
     pub fn get_repo_root(&self, cwd: &Path) -> AppResult<String> {
         self.execute(cwd, &["rev-parse", "--show-toplevel"])?
