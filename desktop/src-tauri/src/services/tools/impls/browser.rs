@@ -13,7 +13,12 @@
 //! - `extract_text(selector)` - Extract text content from an element
 //! - `wait_for(selector, timeout)` - Wait for an element to appear
 //!
-//! Story 005: Browser automation tool types and feature-gated implementation
+//! ## Architecture
+//! - BrowserAction/BrowserActionResult: unconditional types
+//! - BrowserBackend: feature-gated (#[cfg(feature = "browser")]) backend
+//!   using chromiumoxide (ADR-002) with lazy initialization
+//! - BrowserTool: unconditional Tool trait impl, delegates to BrowserBackend
+//!   when the browser feature is enabled
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -84,6 +89,484 @@ pub struct BrowserActionResult {
 }
 
 // ============================================================================
+// BrowserBackend (feature-gated: requires "browser" feature)
+// ============================================================================
+
+#[cfg(feature = "browser")]
+mod backend {
+    use super::*;
+    use base64::Engine;
+    use chromiumoxide::browser::{Browser, BrowserConfig};
+    use chromiumoxide::page::ScreenshotParams;
+    use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
+    use futures::StreamExt;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::Mutex;
+    use tokio::task::JoinHandle;
+    use tracing::{debug, info, warn};
+
+    /// Internal state for an active browser session.
+    struct BrowserState {
+        /// The chromiumoxide Browser handle.
+        browser: Browser,
+        /// The active page/tab.
+        page: chromiumoxide::Page,
+        /// Handle for the CDP handler task.
+        _handler_handle: JoinHandle<()>,
+    }
+
+    /// Browser automation backend using chromiumoxide (CDP-native, async).
+    ///
+    /// Implements the Lazy Service Initialization pattern: the headless
+    /// Chrome process is only started when the first browser action is
+    /// requested. The browser state is stored behind `Arc<Mutex<Option<...>>>`
+    /// for thread-safe, async-compatible lazy init.
+    pub(super) struct BrowserBackend {
+        /// Lazily initialized browser state. `None` means not yet started.
+        state: Arc<Mutex<Option<BrowserState>>>,
+    }
+
+    impl BrowserBackend {
+        /// Create a new BrowserBackend (no browser process started yet).
+        pub fn new() -> Self {
+            Self {
+                state: Arc::new(Mutex::new(None)),
+            }
+        }
+
+        /// Ensure the browser is initialized. Returns a guard holding the lock.
+        /// If the browser has not been started yet, launches a headless Chrome
+        /// instance and creates a new page.
+        async fn ensure_initialized(
+            &self,
+        ) -> Result<tokio::sync::MutexGuard<'_, Option<BrowserState>>, String> {
+            let mut guard = self.state.lock().await;
+
+            if guard.is_none() {
+                info!("BrowserBackend: Launching headless Chrome...");
+
+                let config = BrowserConfig::builder()
+                    .no_sandbox()
+                    .arg("--disable-gpu")
+                    .arg("--disable-dev-shm-usage")
+                    .arg("--disable-extensions")
+                    .window_size(1280, 720)
+                    .build()
+                    .map_err(|e| format!("Failed to build browser config: {}", e))?;
+
+                let (browser, mut handler) = Browser::launch(config)
+                    .await
+                    .map_err(|e| format!("Failed to launch browser: {}", e))?;
+
+                // Spawn the CDP handler task. This task processes WebSocket
+                // messages between our code and the Chrome DevTools Protocol.
+                let handler_handle = tokio::spawn(async move {
+                    while let Some(event) = handler.next().await {
+                        if event.is_err() {
+                            debug!("BrowserBackend: CDP handler event loop ended");
+                            break;
+                        }
+                    }
+                });
+
+                let page = browser
+                    .new_page("about:blank")
+                    .await
+                    .map_err(|e| format!("Failed to create browser page: {}", e))?;
+
+                info!("BrowserBackend: Headless Chrome launched successfully");
+
+                *guard = Some(BrowserState {
+                    browser,
+                    page,
+                    _handler_handle: handler_handle,
+                });
+            }
+
+            Ok(guard)
+        }
+
+        /// Execute a browser action. Lazily initializes the browser on first call.
+        pub async fn execute_action(
+            &self,
+            action: &BrowserAction,
+        ) -> Result<BrowserActionResult, String> {
+            let mut guard = self.ensure_initialized().await?;
+            let state = guard
+                .as_mut()
+                .ok_or_else(|| "Browser state unexpectedly None after initialization".to_string())?;
+
+            match action {
+                BrowserAction::Navigate { url } => {
+                    Self::action_navigate(&mut state.page, url).await
+                }
+                BrowserAction::Click { selector } => {
+                    Self::action_click(&mut state.page, selector).await
+                }
+                BrowserAction::TypeText { selector, text } => {
+                    Self::action_type_text(&mut state.page, selector, text).await
+                }
+                BrowserAction::Screenshot => {
+                    Self::action_screenshot(&mut state.page).await
+                }
+                BrowserAction::ExtractText { selector } => {
+                    Self::action_extract_text(&mut state.page, selector).await
+                }
+                BrowserAction::WaitFor {
+                    selector,
+                    timeout_ms,
+                } => Self::action_wait_for(&mut state.page, selector, *timeout_ms).await,
+            }
+        }
+
+        /// Execute a screenshot action and return the raw PNG bytes as well.
+        /// Used by BrowserTool to provide multimodal image data.
+        pub async fn execute_screenshot_raw(&self) -> Result<(BrowserActionResult, Vec<u8>), String> {
+            let mut guard = self.ensure_initialized().await?;
+            let state = guard
+                .as_mut()
+                .ok_or_else(|| "Browser state unexpectedly None after initialization".to_string())?;
+
+            let page = &mut state.page;
+
+            let screenshot_bytes = page
+                .screenshot(
+                    ScreenshotParams::builder()
+                        .format(CaptureScreenshotFormat::Png)
+                        .full_page(false)
+                        .build(),
+                )
+                .await
+                .map_err(|e| format!("Screenshot failed: {}", e))?;
+
+            let url = page
+                .url()
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "unknown".to_string());
+            let title = page
+                .evaluate("document.title")
+                .await
+                .ok()
+                .and_then(|v| v.into_value::<String>().ok())
+                .unwrap_or_else(|| "untitled".to_string());
+
+            let size = screenshot_bytes.len();
+            let result = BrowserActionResult {
+                success: true,
+                output: Some(format!(
+                    "Screenshot captured ({} bytes, PNG format)",
+                    size
+                )),
+                current_url: Some(url),
+                page_title: Some(title),
+            };
+
+            Ok((result, screenshot_bytes))
+        }
+
+        /// Shut down the browser process.
+        pub async fn cleanup(&self) {
+            let mut guard = self.state.lock().await;
+            if let Some(mut state) = guard.take() {
+                info!("BrowserBackend: Shutting down browser...");
+                if let Err(e) = state.browser.close().await {
+                    warn!("BrowserBackend: Error closing browser: {}", e);
+                }
+                info!("BrowserBackend: Browser shut down");
+            }
+        }
+
+        // ── Action Implementations ──────────────────────────────────────
+
+        /// Navigate to a URL and wait for the page to load.
+        async fn action_navigate(
+            page: &mut chromiumoxide::Page,
+            url: &str,
+        ) -> Result<BrowserActionResult, String> {
+            debug!("BrowserBackend: Navigating to {}", url);
+
+            page.goto(url)
+                .await
+                .map_err(|e| format!("Navigation to '{}' failed: {}", url, e))?;
+
+            // Get page metadata after navigation
+            let current_url = page
+                .url()
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| url.to_string());
+            let page_title = page
+                .evaluate("document.title")
+                .await
+                .ok()
+                .and_then(|v| v.into_value::<String>().ok());
+
+            // Extract a brief text summary of the page content
+            let body_text = page
+                .evaluate("document.body ? document.body.innerText.substring(0, 500) : ''")
+                .await
+                .ok()
+                .and_then(|v| v.into_value::<String>().ok())
+                .unwrap_or_default();
+
+            let output = format!(
+                "Navigated to {}\nTitle: {}\nContent preview:\n{}",
+                current_url,
+                page_title.as_deref().unwrap_or("(no title)"),
+                if body_text.is_empty() {
+                    "(empty page)"
+                } else {
+                    &body_text
+                }
+            );
+
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(output),
+                current_url: Some(current_url),
+                page_title,
+            })
+        }
+
+        /// Click an element matching a CSS selector.
+        async fn action_click(
+            page: &mut chromiumoxide::Page,
+            selector: &str,
+        ) -> Result<BrowserActionResult, String> {
+            debug!("BrowserBackend: Clicking element '{}'", selector);
+
+            let element = page
+                .find_element(selector)
+                .await
+                .map_err(|e| format!("Element '{}' not found: {}", selector, e))?;
+
+            element
+                .click()
+                .await
+                .map_err(|e| format!("Click on '{}' failed: {}", selector, e))?;
+
+            // Brief pause to allow any navigation/JS to settle
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let current_url = page.url().await.ok().flatten();
+            let page_title = page
+                .evaluate("document.title")
+                .await
+                .ok()
+                .and_then(|v| v.into_value::<String>().ok());
+
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(format!("Clicked element matching '{}'", selector)),
+                current_url,
+                page_title,
+            })
+        }
+
+        /// Type text into an input element.
+        async fn action_type_text(
+            page: &mut chromiumoxide::Page,
+            selector: &str,
+            text: &str,
+        ) -> Result<BrowserActionResult, String> {
+            debug!(
+                "BrowserBackend: Typing into '{}': '{}'",
+                selector,
+                if text.len() > 20 {
+                    format!("{}...", &text[..20])
+                } else {
+                    text.to_string()
+                }
+            );
+
+            let element = page
+                .find_element(selector)
+                .await
+                .map_err(|e| format!("Input element '{}' not found: {}", selector, e))?;
+
+            // Click to focus, then type
+            element
+                .click()
+                .await
+                .map_err(|e| format!("Failed to focus input '{}': {}", selector, e))?;
+
+            element
+                .type_str(text)
+                .await
+                .map_err(|e| format!("Failed to type into '{}': {}", selector, e))?;
+
+            let current_url = page.url().await.ok().flatten();
+            let page_title = page
+                .evaluate("document.title")
+                .await
+                .ok()
+                .and_then(|v| v.into_value::<String>().ok());
+
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(format!(
+                    "Typed {} characters into '{}'",
+                    text.len(),
+                    selector
+                )),
+                current_url,
+                page_title,
+            })
+        }
+
+        /// Take a screenshot of the current viewport.
+        async fn action_screenshot(
+            page: &mut chromiumoxide::Page,
+        ) -> Result<BrowserActionResult, String> {
+            debug!("BrowserBackend: Taking screenshot");
+
+            let screenshot_bytes = page
+                .screenshot(
+                    ScreenshotParams::builder()
+                        .format(CaptureScreenshotFormat::Png)
+                        .full_page(false)
+                        .build(),
+                )
+                .await
+                .map_err(|e| format!("Screenshot failed: {}", e))?;
+
+            let current_url = page.url().await.ok().flatten();
+            let page_title = page
+                .evaluate("document.title")
+                .await
+                .ok()
+                .and_then(|v| v.into_value::<String>().ok());
+
+            let size = screenshot_bytes.len();
+            let base64_data = base64::engine::general_purpose::STANDARD.encode(&screenshot_bytes);
+
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(format!(
+                    "Screenshot captured ({} bytes, PNG, base64 length: {})",
+                    size,
+                    base64_data.len()
+                )),
+                current_url,
+                page_title,
+            })
+        }
+
+        /// Extract text content from elements matching a CSS selector.
+        async fn action_extract_text(
+            page: &mut chromiumoxide::Page,
+            selector: &str,
+        ) -> Result<BrowserActionResult, String> {
+            debug!("BrowserBackend: Extracting text from '{}'", selector);
+
+            let elements = page
+                .find_elements(selector)
+                .await
+                .map_err(|e| format!("Elements '{}' not found: {}", selector, e))?;
+
+            if elements.is_empty() {
+                return Err(format!(
+                    "No elements found matching selector '{}'",
+                    selector
+                ));
+            }
+
+            let mut texts = Vec::new();
+            for element in &elements {
+                if let Ok(text) = element.inner_text().await {
+                    if let Some(t) = text {
+                        texts.push(t);
+                    }
+                }
+            }
+
+            let current_url = page.url().await.ok().flatten();
+            let page_title = page
+                .evaluate("document.title")
+                .await
+                .ok()
+                .and_then(|v| v.into_value::<String>().ok());
+
+            let combined_text = texts.join("\n---\n");
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(format!(
+                    "Extracted text from {} element(s) matching '{}':\n{}",
+                    elements.len(),
+                    selector,
+                    combined_text
+                )),
+                current_url,
+                page_title,
+            })
+        }
+
+        /// Wait for an element matching a CSS selector to appear.
+        async fn action_wait_for(
+            page: &mut chromiumoxide::Page,
+            selector: &str,
+            timeout_ms: u64,
+        ) -> Result<BrowserActionResult, String> {
+            debug!(
+                "BrowserBackend: Waiting for '{}' (timeout: {}ms)",
+                selector, timeout_ms
+            );
+
+            let timeout = Duration::from_millis(timeout_ms);
+            let poll_interval = Duration::from_millis(100);
+            let start = std::time::Instant::now();
+
+            loop {
+                // Try to find the element
+                match page.find_element(selector).await {
+                    Ok(_element) => {
+                        let elapsed = start.elapsed().as_millis();
+                        let current_url = page.url().await.ok().flatten();
+                        let page_title = page
+                            .evaluate("document.title")
+                            .await
+                            .ok()
+                            .and_then(|v| v.into_value::<String>().ok());
+
+                        return Ok(BrowserActionResult {
+                            success: true,
+                            output: Some(format!(
+                                "Element '{}' found after {}ms",
+                                selector, elapsed
+                            )),
+                            current_url,
+                            page_title,
+                        });
+                    }
+                    Err(_) => {
+                        if start.elapsed() >= timeout {
+                            return Err(format!(
+                                "Timeout waiting for element '{}' after {}ms",
+                                selector, timeout_ms
+                            ));
+                        }
+                        tokio::time::sleep(poll_interval).await;
+                    }
+                }
+            }
+        }
+    }
+
+    impl Drop for BrowserBackend {
+        fn drop(&mut self) {
+            // We cannot do async cleanup in Drop, but the browser process
+            // should terminate when the Browser handle is dropped by
+            // chromiumoxide's own cleanup logic.
+            debug!("BrowserBackend: Dropping (browser process will be cleaned up)");
+        }
+    }
+}
+
+// ============================================================================
 // BrowserTool (unconditional struct, feature-gated internals)
 // ============================================================================
 
@@ -95,6 +578,9 @@ pub struct BrowserActionResult {
 pub struct BrowserTool {
     /// Whether the tool has been lazily initialized.
     _initialized: std::sync::atomic::AtomicBool,
+    /// The browser backend (only present when feature "browser" is enabled).
+    #[cfg(feature = "browser")]
+    backend: backend::BrowserBackend,
 }
 
 impl BrowserTool {
@@ -102,6 +588,8 @@ impl BrowserTool {
     pub fn new() -> Self {
         Self {
             _initialized: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(feature = "browser")]
+            backend: backend::BrowserBackend::new(),
         }
     }
 
@@ -183,6 +671,18 @@ impl BrowserTool {
             )),
         }
     }
+
+    /// Shut down the browser backend (if initialized).
+    ///
+    /// This is a graceful cleanup method. If the browser feature is not
+    /// enabled, this is a no-op.
+    #[allow(dead_code)]
+    pub async fn cleanup(&self) {
+        #[cfg(feature = "browser")]
+        {
+            self.backend.cleanup().await;
+        }
+    }
 }
 
 impl Default for BrowserTool {
@@ -252,13 +752,36 @@ impl Tool for BrowserTool {
         // Feature-gated execution
         #[cfg(feature = "browser")]
         {
-            // When the browser feature is enabled, this would delegate to
-            // chromiumoxide or similar. For now, return a placeholder.
-            let _ = action;
-            return ToolResult::err(
-                "Browser feature is enabled but the browser backend is not yet implemented."
-                    .to_string(),
-            );
+            // For screenshot actions, use the raw variant to get base64 image data
+            if matches!(action, BrowserAction::Screenshot) {
+                match self.backend.execute_screenshot_raw().await {
+                    Ok((result, png_bytes)) => {
+                        let base64_data =
+                            base64::Engine::encode(
+                                &base64::engine::general_purpose::STANDARD,
+                                &png_bytes,
+                            );
+                        let output = serde_json::to_string_pretty(&result)
+                            .unwrap_or_else(|_| format!("{:?}", result));
+                        return ToolResult::ok_with_image(
+                            output,
+                            "image/png".to_string(),
+                            base64_data,
+                        );
+                    }
+                    Err(e) => return ToolResult::err(e),
+                }
+            }
+
+            // For all other actions, use the standard execute path
+            match self.backend.execute_action(&action).await {
+                Ok(result) => {
+                    let output = serde_json::to_string_pretty(&result)
+                        .unwrap_or_else(|_| format!("{:?}", result));
+                    return ToolResult::ok(output);
+                }
+                Err(e) => return ToolResult::err(e),
+            }
         }
 
         #[cfg(not(feature = "browser"))]
@@ -492,8 +1015,19 @@ mod tests {
         });
         let result = tool.execute(&ctx, args).await;
         // Without the browser feature, it should return an error
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("browser"));
+        // With the browser feature, it will try to launch Chrome (and likely fail in CI)
+        // Either way, the test should not panic
+        #[cfg(not(feature = "browser"))]
+        {
+            assert!(!result.success);
+            assert!(result.error.unwrap().contains("browser"));
+        }
+        #[cfg(feature = "browser")]
+        {
+            // When browser feature is enabled but no Chrome is available,
+            // it should return an error (not panic)
+            let _ = result;
+        }
     }
 
     #[tokio::test]
@@ -566,5 +1100,292 @@ mod tests {
             .filter_map(|v| v.as_str())
             .collect();
         assert!(required_list.contains(&"action"));
+    }
+
+    // ── BrowserActionResult construction tests ───────────────────────
+
+    #[test]
+    fn test_browser_action_result_success() {
+        let result = BrowserActionResult {
+            success: true,
+            output: Some("Navigated successfully".to_string()),
+            current_url: Some("https://example.com".to_string()),
+            page_title: Some("Example Domain".to_string()),
+        };
+        assert!(result.success);
+        assert_eq!(result.output.as_deref(), Some("Navigated successfully"));
+        assert_eq!(result.current_url.as_deref(), Some("https://example.com"));
+        assert_eq!(result.page_title.as_deref(), Some("Example Domain"));
+    }
+
+    #[test]
+    fn test_browser_action_result_failure() {
+        let result = BrowserActionResult {
+            success: false,
+            output: None,
+            current_url: None,
+            page_title: None,
+        };
+        assert!(!result.success);
+        assert!(result.output.is_none());
+        assert!(result.current_url.is_none());
+        assert!(result.page_title.is_none());
+    }
+
+    // ── BrowserAction variant tests ──────────────────────────────────
+
+    #[test]
+    fn test_browser_action_click_serde() {
+        let action = BrowserAction::Click {
+            selector: "#btn".to_string(),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("\"action\":\"click\""));
+        assert!(json.contains("\"selector\":\"#btn\""));
+
+        let parsed: BrowserAction = serde_json::from_str(&json).unwrap();
+        match parsed {
+            BrowserAction::Click { selector } => assert_eq!(selector, "#btn"),
+            _ => panic!("Expected Click"),
+        }
+    }
+
+    #[test]
+    fn test_browser_action_type_text_serde() {
+        let action = BrowserAction::TypeText {
+            selector: "input#search".to_string(),
+            text: "hello world".to_string(),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("\"action\":\"type_text\""));
+
+        let parsed: BrowserAction = serde_json::from_str(&json).unwrap();
+        match parsed {
+            BrowserAction::TypeText { selector, text } => {
+                assert_eq!(selector, "input#search");
+                assert_eq!(text, "hello world");
+            }
+            _ => panic!("Expected TypeText"),
+        }
+    }
+
+    #[test]
+    fn test_browser_action_extract_text_serde() {
+        let action = BrowserAction::ExtractText {
+            selector: ".content p".to_string(),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("\"action\":\"extract_text\""));
+
+        let parsed: BrowserAction = serde_json::from_str(&json).unwrap();
+        match parsed {
+            BrowserAction::ExtractText { selector } => assert_eq!(selector, ".content p"),
+            _ => panic!("Expected ExtractText"),
+        }
+    }
+
+    #[test]
+    fn test_browser_action_wait_for_serde() {
+        let action = BrowserAction::WaitFor {
+            selector: ".loaded".to_string(),
+            timeout_ms: 3000,
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("\"action\":\"wait_for\""));
+        assert!(json.contains("\"timeout_ms\":3000"));
+
+        let parsed: BrowserAction = serde_json::from_str(&json).unwrap();
+        match parsed {
+            BrowserAction::WaitFor {
+                selector,
+                timeout_ms,
+            } => {
+                assert_eq!(selector, ".loaded");
+                assert_eq!(timeout_ms, 3000);
+            }
+            _ => panic!("Expected WaitFor"),
+        }
+    }
+
+    #[test]
+    fn test_browser_action_wait_for_serde_default_timeout() {
+        // Deserialize with missing timeout_ms to test default
+        let json = r#"{"action":"wait_for","selector":".ready"}"#;
+        let parsed: BrowserAction = serde_json::from_str(json).unwrap();
+        match parsed {
+            BrowserAction::WaitFor {
+                selector,
+                timeout_ms,
+            } => {
+                assert_eq!(selector, ".ready");
+                assert_eq!(timeout_ms, 5000); // default
+            }
+            _ => panic!("Expected WaitFor"),
+        }
+    }
+
+    // ── Parse edge cases ─────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_extract_text_missing_selector() {
+        let args = serde_json::json!({"action": "extract_text"});
+        let result = BrowserTool::parse_action(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing 'selector'"));
+    }
+
+    #[test]
+    fn test_parse_wait_for_missing_selector() {
+        let args = serde_json::json!({"action": "wait_for"});
+        let result = BrowserTool::parse_action(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing 'selector'"));
+    }
+
+    #[test]
+    fn test_parse_type_text_missing_selector() {
+        let args = serde_json::json!({
+            "action": "type_text",
+            "text": "hello"
+        });
+        let result = BrowserTool::parse_action(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing 'selector'"));
+    }
+
+    #[test]
+    fn test_parse_action_with_extra_fields() {
+        // Extra fields should be ignored gracefully
+        let args = serde_json::json!({
+            "action": "navigate",
+            "url": "https://example.com",
+            "extra_field": "should be ignored"
+        });
+        let action = BrowserTool::parse_action(&args).unwrap();
+        match action {
+            BrowserAction::Navigate { url } => assert_eq!(url, "https://example.com"),
+            _ => panic!("Expected Navigate"),
+        }
+    }
+
+    #[test]
+    fn test_parse_action_null_value() {
+        let args = serde_json::json!(null);
+        let result = BrowserTool::parse_action(&args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_action_non_string_action() {
+        let args = serde_json::json!({"action": 123});
+        let result = BrowserTool::parse_action(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing required 'action'"));
+    }
+
+    // ── Cleanup test ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_cleanup_noop_when_not_initialized() {
+        let tool = BrowserTool::new();
+        // Cleanup should be a no-op when browser is not initialized
+        tool.cleanup().await;
+        // No panic = success
+    }
+
+    // ── Execute all action types without browser feature ─────────────
+
+    #[tokio::test]
+    async fn test_execute_click_without_feature() {
+        let tool = BrowserTool::new();
+        let ctx = make_ctx();
+        let result = tool
+            .execute(
+                &ctx,
+                serde_json::json!({"action": "click", "selector": "#btn"}),
+            )
+            .await;
+        #[cfg(not(feature = "browser"))]
+        {
+            assert!(!result.success);
+            assert!(result.error.as_ref().unwrap().contains("click"));
+            assert!(result.error.unwrap().contains("browser"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_type_text_without_feature() {
+        let tool = BrowserTool::new();
+        let ctx = make_ctx();
+        let result = tool
+            .execute(
+                &ctx,
+                serde_json::json!({
+                    "action": "type_text",
+                    "selector": "#input",
+                    "text": "hello"
+                }),
+            )
+            .await;
+        #[cfg(not(feature = "browser"))]
+        {
+            assert!(!result.success);
+            assert!(result.error.as_ref().unwrap().contains("type_text"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_screenshot_without_feature() {
+        let tool = BrowserTool::new();
+        let ctx = make_ctx();
+        let result = tool
+            .execute(&ctx, serde_json::json!({"action": "screenshot"}))
+            .await;
+        #[cfg(not(feature = "browser"))]
+        {
+            assert!(!result.success);
+            assert!(result.error.as_ref().unwrap().contains("screenshot"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_extract_text_without_feature() {
+        let tool = BrowserTool::new();
+        let ctx = make_ctx();
+        let result = tool
+            .execute(
+                &ctx,
+                serde_json::json!({
+                    "action": "extract_text",
+                    "selector": ".content"
+                }),
+            )
+            .await;
+        #[cfg(not(feature = "browser"))]
+        {
+            assert!(!result.success);
+            assert!(result.error.as_ref().unwrap().contains("extract_text"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_wait_for_without_feature() {
+        let tool = BrowserTool::new();
+        let ctx = make_ctx();
+        let result = tool
+            .execute(
+                &ctx,
+                serde_json::json!({
+                    "action": "wait_for",
+                    "selector": ".ready",
+                    "timeout_ms": 1000
+                }),
+            )
+            .await;
+        #[cfg(not(feature = "browser"))]
+        {
+            assert!(!result.success);
+            assert!(result.error.as_ref().unwrap().contains("wait_for"));
+        }
     }
 }
