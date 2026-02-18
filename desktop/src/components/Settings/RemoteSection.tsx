@@ -29,7 +29,6 @@ export function RemoteSection() {
     telegramConfig,
     remoteSessions,
     auditLog,
-    loading,
     saving,
     error,
     fetchGatewayStatus,

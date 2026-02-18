@@ -179,40 +179,51 @@ impl SessionBridge {
 
     /// Load session mappings from database on startup.
     pub async fn load_mappings_from_db(&self) -> Result<(), RemoteError> {
-        let conn = self.db.get_connection().map_err(|e| {
-            RemoteError::ConfigError(format!("Failed to get database connection: {}", e))
-        })?;
+        // Collect all DB results into a Vec before any .await point.
+        // rusqlite types (Connection, Statement, MappedRows) are not Send/Sync,
+        // so they must be dropped before crossing an await boundary.
+        let collected: Vec<RemoteSessionMapping> = {
+            let conn = self.db.get_connection().map_err(|e| {
+                RemoteError::ConfigError(format!("Failed to get database connection: {}", e))
+            })?;
 
-        let mut stmt = conn
-            .prepare(
-                "SELECT chat_id, user_id, adapter_type, local_session_id, session_type, created_at
-                 FROM remote_session_mappings",
-            )
-            .map_err(|e| RemoteError::ConfigError(format!("Failed to prepare query: {}", e)))?;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT chat_id, user_id, adapter_type, local_session_id, session_type, created_at
+                     FROM remote_session_mappings",
+                )
+                .map_err(|e| {
+                    RemoteError::ConfigError(format!("Failed to prepare query: {}", e))
+                })?;
 
-        let mappings = stmt
-            .query_map([], |row| {
-                let session_type_json: String = row.get(4)?;
-                let session_type: super::types::SessionType =
-                    serde_json::from_str(&session_type_json)
-                        .unwrap_or(super::types::SessionType::ClaudeCode);
+            let mappings = stmt
+                .query_map([], |row| {
+                    let session_type_json: String = row.get(4)?;
+                    let session_type: super::types::SessionType =
+                        serde_json::from_str(&session_type_json)
+                            .unwrap_or(super::types::SessionType::ClaudeCode);
 
-                let adapter_type_name: Option<String> = row.get(2).ok();
+                    let adapter_type_name: Option<String> = row.get(2).ok();
 
-                Ok(RemoteSessionMapping {
-                    chat_id: row.get(0)?,
-                    user_id: row.get(1)?,
-                    local_session_id: row.get(3)?,
-                    session_type,
-                    created_at: row.get(5)?,
-                    adapter_type_name,
-                    username: None, // Not stored in current schema
+                    Ok(RemoteSessionMapping {
+                        chat_id: row.get(0)?,
+                        user_id: row.get(1)?,
+                        local_session_id: row.get(3)?,
+                        session_type,
+                        created_at: row.get(5)?,
+                        adapter_type_name,
+                        username: None, // Not stored in current schema
+                    })
                 })
-            })
-            .map_err(|e| RemoteError::ConfigError(format!("Failed to query mappings: {}", e)))?;
+                .map_err(|e| {
+                    RemoteError::ConfigError(format!("Failed to query mappings: {}", e))
+                })?;
+
+            mappings.flatten().collect()
+        }; // conn, stmt, and MappedRows dropped here
 
         let mut sessions = self.sessions.write().await;
-        for mapping in mappings.flatten() {
+        for mapping in collected {
             sessions.insert(mapping.chat_id, mapping);
         }
 
