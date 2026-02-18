@@ -174,9 +174,37 @@ export interface PluginRegistry {
 }
 
 /** A marketplace plugin enriched with local status */
-export interface MarketplacePlugin extends RegistryEntry {
+export interface MarketplacePlugin {
+  name: string;
+  version: string;
+  description: string;
+  author: string | null;
+  repository: string | null;
+  license: string | null;
+  keywords: string[];
+  category: string | null;
+  marketplace_name: string;
+  source_spec: string;
   installed: boolean;
   enabled: boolean;
+}
+
+/** Marketplace source type */
+export interface MarketplaceSourceType {
+  type: 'github' | 'git_url' | 'local_path';
+  repo?: string;
+  url?: string;
+  path?: string;
+}
+
+/** Marketplace info for UI listing */
+export interface MarketplaceInfo {
+  name: string;
+  source_display: string;
+  enabled: boolean;
+  plugin_count: number;
+  description: string | null;
+  is_official: boolean;
 }
 
 /** Progress update during plugin installation */

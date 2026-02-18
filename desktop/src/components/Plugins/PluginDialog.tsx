@@ -23,6 +23,7 @@ import { getPluginSourceLabel } from '../../types/plugin';
 import type { PluginInfo, PluginDetail } from '../../types/plugin';
 import { MarketplaceView } from './MarketplaceView';
 import { InstallFromUrlDialog } from './InstallFromUrlDialog';
+import { AddMarketplaceDialog } from './AddMarketplaceDialog';
 
 // ============================================================================
 // PluginListItem
@@ -566,6 +567,7 @@ export function PluginDialog() {
         </Dialog.Content>
       </Dialog.Portal>
       <InstallFromUrlDialog />
+      <AddMarketplaceDialog />
     </Dialog.Root>
   );
 }

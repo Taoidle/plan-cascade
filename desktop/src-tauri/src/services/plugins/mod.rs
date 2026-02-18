@@ -17,5 +17,6 @@ pub mod lifecycle;
 pub mod settings;
 pub mod registry;
 pub mod installer;
+pub mod marketplace;
 
 pub use models::*;

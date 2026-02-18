@@ -6,7 +6,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { PluginInfo, PluginDetail, MarketplacePlugin } from '../types/plugin';
+import type { PluginInfo, PluginDetail, MarketplacePlugin, MarketplaceInfo } from '../types/plugin';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -153,6 +153,101 @@ export async function uninstallPlugin(
     return await invoke<CommandResponse<boolean>>('uninstall_plugin', {
       name,
     });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * List all configured marketplaces.
+ */
+export async function listMarketplaces(): Promise<CommandResponse<MarketplaceInfo[]>> {
+  try {
+    return await invoke<CommandResponse<MarketplaceInfo[]>>('list_marketplaces');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Add a new marketplace source.
+ */
+export async function addMarketplace(
+  source: string
+): Promise<CommandResponse<MarketplaceInfo>> {
+  try {
+    return await invoke<CommandResponse<MarketplaceInfo>>('add_marketplace', {
+      source,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Remove a marketplace source.
+ */
+export async function removeMarketplace(
+  name: string
+): Promise<CommandResponse<boolean>> {
+  try {
+    return await invoke<CommandResponse<boolean>>('remove_marketplace', {
+      name,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Toggle a marketplace's enabled/disabled state.
+ */
+export async function toggleMarketplace(
+  name: string,
+  enabled: boolean
+): Promise<CommandResponse<boolean>> {
+  try {
+    return await invoke<CommandResponse<boolean>>('toggle_marketplace', {
+      name,
+      enabled,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Install a plugin from a specific marketplace.
+ */
+export async function installMarketplacePlugin(
+  pluginName: string,
+  marketplaceName: string
+): Promise<CommandResponse<PluginInfo>> {
+  try {
+    return await invoke<CommandResponse<PluginInfo>>(
+      'install_marketplace_plugin',
+      { pluginName, marketplaceName }
+    );
   } catch (error) {
     return {
       success: false,

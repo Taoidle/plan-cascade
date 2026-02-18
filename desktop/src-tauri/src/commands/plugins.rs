@@ -11,8 +11,10 @@ use tauri::{AppHandle, State};
 use crate::models::response::CommandResponse;
 use crate::services::plugins::installer;
 use crate::services::plugins::manager::PluginManager;
+use crate::services::plugins::marketplace;
 use crate::services::plugins::models::*;
 use crate::services::plugins::registry;
+use crate::services::plugins::settings as plugin_settings;
 
 // ============================================================================
 // Plugin State
@@ -246,38 +248,80 @@ pub async fn install_plugin(
     }
 }
 
-/// Fetch marketplace plugins from the registry.
+/// Fetch marketplace plugins from all configured marketplaces.
 ///
-/// Fetches the remote registry and enriches each entry with local
-/// install/enable status from the PluginManager.
+/// Fetches from all enabled marketplace sources and aggregates results.
+/// Each plugin is enriched with local install/enable status.
 #[tauri::command]
 pub async fn fetch_marketplace(
     registry_url: Option<String>,
     state: State<'_, PluginState>,
 ) -> Result<CommandResponse<Vec<MarketplacePlugin>>, String> {
-    let reg = registry::fetch_registry(registry_url.as_deref()).await;
-
+    let settings = plugin_settings::load_plugin_settings();
     let installed_plugins = state
         .with_manager(|m| m.list_plugins())
         .await
         .unwrap_or_default();
 
-    let marketplace: Vec<MarketplacePlugin> = reg
-        .plugins
-        .into_iter()
-        .map(|entry| {
-            let local = installed_plugins
-                .iter()
-                .find(|p| p.name == entry.name);
-            MarketplacePlugin {
-                installed: local.is_some(),
-                enabled: local.map_or(false, |p| p.enabled),
-                entry,
-            }
-        })
-        .collect();
+    // Fetch from all configured marketplaces
+    let manifests = marketplace::fetch_all_marketplaces(&settings.marketplaces).await;
 
-    Ok(CommandResponse::ok(marketplace))
+    let mut all_plugins: Vec<MarketplacePlugin> = Vec::new();
+
+    for (marketplace_name, manifest) in &manifests {
+        let marketplace_config = settings
+            .marketplaces
+            .iter()
+            .find(|m| &m.name == marketplace_name);
+
+        for entry in &manifest.plugins {
+            let local = installed_plugins.iter().find(|p| p.name == entry.name);
+
+            let source_spec = marketplace_config
+                .and_then(|cfg| marketplace::resolve_install_source(entry, cfg).ok())
+                .map(|s| s.to_spec_string())
+                .unwrap_or_default();
+
+            all_plugins.push(MarketplacePlugin {
+                name: entry.name.clone(),
+                version: entry.version.clone().unwrap_or_default(),
+                description: entry.description.clone().unwrap_or_default(),
+                author: entry.author_string(),
+                repository: entry.repository.clone(),
+                license: entry.license.clone(),
+                keywords: entry.keywords.clone(),
+                category: entry.category.clone(),
+                marketplace_name: marketplace_name.clone(),
+                source_spec,
+                installed: local.is_some(),
+                enabled: local.is_some_and(|p| p.enabled),
+            });
+        }
+    }
+
+    // If no marketplace plugins found, fall back to legacy registry
+    if all_plugins.is_empty() {
+        let reg = registry::fetch_registry(registry_url.as_deref()).await;
+        for entry in reg.plugins {
+            let local = installed_plugins.iter().find(|p| p.name == entry.name);
+            all_plugins.push(MarketplacePlugin {
+                name: entry.name.clone(),
+                version: entry.version.clone(),
+                description: entry.description.clone(),
+                author: entry.author.clone(),
+                repository: entry.repository.clone(),
+                license: entry.license.clone(),
+                keywords: entry.keywords.clone(),
+                category: entry.category.clone(),
+                marketplace_name: "legacy-registry".to_string(),
+                source_spec: format!("git:{}", entry.git_url),
+                installed: local.is_some(),
+                enabled: local.is_some_and(|p| p.enabled),
+            });
+        }
+    }
+
+    Ok(CommandResponse::ok(all_plugins))
 }
 
 /// Install a plugin from a git URL.
@@ -360,6 +404,210 @@ pub async fn uninstall_plugin(
         .await;
 
     Ok(CommandResponse::ok(true))
+}
+
+// ============================================================================
+// Marketplace Management Commands
+// ============================================================================
+
+/// List all configured marketplaces with status.
+#[tauri::command]
+pub async fn list_marketplaces(
+    _state: State<'_, PluginState>,
+) -> Result<CommandResponse<Vec<MarketplaceInfo>>, String> {
+    let settings = plugin_settings::load_plugin_settings();
+
+    let mut infos = Vec::new();
+    for config in &settings.marketplaces {
+        infos.push(MarketplaceInfo {
+            name: config.name.clone(),
+            source_display: config.source.display(),
+            enabled: config.enabled,
+            plugin_count: 0, // Will be populated by frontend after fetch
+            description: None,
+            is_official: config.name == "claude-plugins-official",
+        });
+    }
+
+    Ok(CommandResponse::ok(infos))
+}
+
+/// Add a new marketplace source.
+///
+/// Auto-detects source type from the input string:
+/// - "owner/repo" → GitHub
+/// - "https://..." or "git@..." → Git URL
+/// - Path → Local
+///
+/// Validates by fetching marketplace.json before saving.
+#[tauri::command]
+pub async fn add_marketplace(
+    source: String,
+    _state: State<'_, PluginState>,
+) -> Result<CommandResponse<MarketplaceInfo>, String> {
+    let trimmed = source.trim();
+
+    // Auto-detect source type
+    let (source_type, name) = if trimmed.starts_with("https://")
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("git@")
+    {
+        // Git URL
+        let name = trimmed
+            .rsplit('/')
+            .next()
+            .unwrap_or("custom")
+            .trim_end_matches(".git")
+            .to_string();
+        (MarketplaceSourceType::GitUrl { url: trimmed.to_string() }, name)
+    } else if trimmed.contains('/') && !trimmed.contains(' ') && !std::path::Path::new(trimmed).exists() {
+        // GitHub shorthand (owner/repo)
+        let name = trimmed
+            .rsplit('/')
+            .next()
+            .unwrap_or("custom")
+            .to_string();
+        (
+            MarketplaceSourceType::Github {
+                repo: trimmed.to_string(),
+            },
+            name,
+        )
+    } else {
+        // Local path
+        let name = std::path::Path::new(trimmed)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("local")
+            .to_string();
+        (MarketplaceSourceType::LocalPath { path: trimmed.to_string() }, name)
+    };
+
+    let config = MarketplaceConfig {
+        name: name.clone(),
+        source: source_type.clone(),
+        enabled: true,
+    };
+
+    // Validate by fetching the manifest
+    if let Err(e) = marketplace::fetch_marketplace_manifest(&config).await {
+        return Ok(CommandResponse::err(format!(
+            "Could not find a valid marketplace.json: {}",
+            e
+        )));
+    }
+
+    // Save to settings
+    if let Err(e) = plugin_settings::add_marketplace(config.clone()) {
+        return Ok(CommandResponse::err(e));
+    }
+
+    Ok(CommandResponse::ok(MarketplaceInfo {
+        name,
+        source_display: source_type.display(),
+        enabled: true,
+        plugin_count: 0,
+        description: None,
+        is_official: false,
+    }))
+}
+
+/// Remove a marketplace source.
+///
+/// Cannot remove the official marketplace.
+#[tauri::command]
+pub async fn remove_marketplace(
+    name: String,
+    _state: State<'_, PluginState>,
+) -> Result<CommandResponse<bool>, String> {
+    if let Err(e) = plugin_settings::remove_marketplace(&name) {
+        return Ok(CommandResponse::err(e));
+    }
+
+    marketplace::remove_cached_manifest(&name);
+    Ok(CommandResponse::ok(true))
+}
+
+/// Toggle a marketplace's enabled/disabled state.
+#[tauri::command]
+pub async fn toggle_marketplace(
+    name: String,
+    enabled: bool,
+    _state: State<'_, PluginState>,
+) -> Result<CommandResponse<bool>, String> {
+    if let Err(e) = plugin_settings::toggle_marketplace(&name, enabled) {
+        return Ok(CommandResponse::err(e));
+    }
+    Ok(CommandResponse::ok(true))
+}
+
+/// Install a plugin from a specific marketplace.
+///
+/// Finds the plugin entry in the specified marketplace, resolves the source,
+/// and installs it.
+#[tauri::command]
+pub async fn install_marketplace_plugin(
+    plugin_name: String,
+    marketplace_name: String,
+    app: AppHandle,
+    state: State<'_, PluginState>,
+) -> Result<CommandResponse<PluginInfo>, String> {
+    let settings = plugin_settings::load_plugin_settings();
+
+    // Find the marketplace config
+    let marketplace_config = match settings
+        .marketplaces
+        .iter()
+        .find(|m| m.name == marketplace_name)
+    {
+        Some(c) => c.clone(),
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Marketplace '{}' not found",
+                marketplace_name
+            )))
+        }
+    };
+
+    // Fetch the marketplace manifest to find the plugin entry
+    let manifest = match marketplace::fetch_marketplace_manifest(&marketplace_config).await {
+        Ok(m) => m,
+        Err(e) => return Ok(CommandResponse::err(format!("Failed to fetch marketplace: {}", e))),
+    };
+
+    let entry = match manifest.plugins.iter().find(|p| p.name == plugin_name) {
+        Some(e) => e.clone(),
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Plugin '{}' not found in marketplace '{}'",
+                plugin_name, marketplace_name
+            )))
+        }
+    };
+
+    // Install
+    let manifest = match installer::install_from_marketplace(&entry, &marketplace_config, &app)
+        .await
+    {
+        Ok(m) => m,
+        Err(e) => return Ok(CommandResponse::err(e)),
+    };
+
+    // Refresh plugin manager
+    let result = state
+        .with_manager_mut(|m| {
+            m.refresh_plugins();
+            m.get_plugin(&manifest.name).map(|p| p.to_info())
+        })
+        .await;
+
+    match result {
+        Ok(Some(info)) => Ok(CommandResponse::ok(info)),
+        Ok(None) => Ok(CommandResponse::err(
+            "Plugin installed but not found after refresh".to_string(),
+        )),
+        Err(e) => Ok(CommandResponse::err(e)),
+    }
 }
 
 /// Recursively copy a directory.

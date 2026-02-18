@@ -482,15 +482,59 @@ pub struct PluginRegistry {
 }
 
 /// A marketplace plugin enriched with local install/enable status.
+///
+/// Used by the frontend to display plugins from all marketplace sources.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketplacePlugin {
-    /// Registry entry data
-    #[serde(flatten)]
-    pub entry: RegistryEntry,
-    /// Whether this plugin is installed locally
+    /// Plugin name
+    pub name: String,
+    /// Semantic version
+    #[serde(default)]
+    pub version: String,
+    /// Description
+    #[serde(default)]
+    pub description: String,
+    /// Author name
+    #[serde(default)]
+    pub author: Option<String>,
+    /// Repository URL
+    #[serde(default)]
+    pub repository: Option<String>,
+    /// License
+    #[serde(default)]
+    pub license: Option<String>,
+    /// Keywords
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// Category
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Which marketplace this plugin came from
+    pub marketplace_name: String,
+    /// Serialized source spec for installation
+    #[serde(default)]
+    pub source_spec: String,
+    /// Whether installed locally
     pub installed: bool,
-    /// Whether this plugin is currently enabled
+    /// Whether currently enabled
     pub enabled: bool,
+}
+
+/// Marketplace info for UI listing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplaceInfo {
+    /// Marketplace name
+    pub name: String,
+    /// Human-readable source (e.g. "github:anthropics/claude-plugins-official")
+    pub source_display: String,
+    /// Whether enabled
+    pub enabled: bool,
+    /// Number of plugins in this marketplace
+    pub plugin_count: usize,
+    /// Description from manifest metadata
+    pub description: Option<String>,
+    /// Whether this is the official marketplace
+    pub is_official: bool,
 }
 
 /// Progress update during plugin installation.
@@ -506,12 +550,160 @@ pub struct InstallProgress {
     pub progress: f64,
 }
 
-/// Persistent plugin settings (enabled/disabled state).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Persistent plugin settings (enabled/disabled state + marketplace configs).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginSettings {
     /// List of plugin names that are disabled
     #[serde(default)]
     pub disabled_plugins: Vec<String>,
+    /// Configured marketplace sources
+    #[serde(default = "default_marketplaces")]
+    pub marketplaces: Vec<MarketplaceConfig>,
+}
+
+impl Default for PluginSettings {
+    fn default() -> Self {
+        Self {
+            disabled_plugins: vec![],
+            marketplaces: default_marketplaces(),
+        }
+    }
+}
+
+/// Returns the default marketplace list (official Claude plugins marketplace).
+pub fn default_marketplaces() -> Vec<MarketplaceConfig> {
+    vec![MarketplaceConfig {
+        name: "claude-plugins-official".to_string(),
+        source: MarketplaceSourceType::Github {
+            repo: "anthropics/claude-plugins-official".to_string(),
+        },
+        enabled: true,
+    }]
+}
+
+// ============================================================================
+// Marketplace Source Types
+// ============================================================================
+
+/// How to find a marketplace repository.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MarketplaceSourceType {
+    /// GitHub repository shorthand (e.g. "anthropics/claude-plugins-official")
+    Github { repo: String },
+    /// Full git URL (e.g. "https://gitlab.com/org/plugins.git")
+    GitUrl { url: String },
+    /// Local filesystem path
+    LocalPath { path: String },
+}
+
+impl MarketplaceSourceType {
+    /// Human-readable display string for the source.
+    pub fn display(&self) -> String {
+        match self {
+            Self::Github { repo } => format!("github:{}", repo),
+            Self::GitUrl { url } => url.clone(),
+            Self::LocalPath { path } => format!("local:{}", path),
+        }
+    }
+}
+
+/// A configured marketplace source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplaceConfig {
+    /// Unique name for this marketplace
+    pub name: String,
+    /// Source location
+    pub source: MarketplaceSourceType,
+    /// Whether this marketplace is enabled
+    pub enabled: bool,
+}
+
+// ============================================================================
+// Marketplace Manifest (Claude Code marketplace.json format)
+// ============================================================================
+
+/// Parsed `.claude-plugin/marketplace.json` from a marketplace repository.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplaceManifest {
+    /// Marketplace name
+    pub name: String,
+    /// Marketplace owner
+    #[serde(default)]
+    pub owner: Option<MarketplaceOwner>,
+    /// Marketplace metadata
+    #[serde(default)]
+    pub metadata: Option<MarketplaceMetadata>,
+    /// Plugin entries
+    #[serde(default)]
+    pub plugins: Vec<MarketplacePluginEntry>,
+}
+
+/// Marketplace owner info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplaceOwner {
+    pub name: String,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+/// Marketplace metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplaceMetadata {
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    /// Root directory for relative plugin paths
+    #[serde(default)]
+    pub plugin_root: Option<String>,
+}
+
+/// A plugin entry within a marketplace.json.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplacePluginEntry {
+    /// Plugin name
+    pub name: String,
+    /// Plugin source (flexible: string path or object with repo/url/etc.)
+    #[serde(default)]
+    pub source: Option<serde_json::Value>,
+    /// Human-readable description
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Semantic version
+    #[serde(default)]
+    pub version: Option<String>,
+    /// Author (string or object)
+    #[serde(default)]
+    pub author: Option<serde_json::Value>,
+    /// Category
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Keywords for search
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// Plugin homepage URL
+    #[serde(default)]
+    pub homepage: Option<String>,
+    /// Repository URL
+    #[serde(default)]
+    pub repository: Option<String>,
+    /// License identifier
+    #[serde(default)]
+    pub license: Option<String>,
+}
+
+impl MarketplacePluginEntry {
+    /// Extract author as a plain string (handles both string and object formats).
+    pub fn author_string(&self) -> Option<String> {
+        match &self.author {
+            Some(serde_json::Value::String(s)) => Some(s.clone()),
+            Some(serde_json::Value::Object(map)) => {
+                map.get("name").and_then(|v| v.as_str()).map(|s| s.to_string())
+            }
+            _ => None,
+        }
+    }
 }
 
 // ============================================================================

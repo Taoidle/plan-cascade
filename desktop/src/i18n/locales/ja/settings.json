@@ -568,7 +568,21 @@
     "stars": "スター",
     "downloads": "ダウンロード",
     "alreadyInstalled": "インストール済み",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "marketplaces": "マーケットプレイスソース",
+    "addMarketplace": "マーケットプレイスを追加",
+    "removeMarketplace": "削除",
+    "officialMarketplace": "公式",
+    "customMarketplace": "カスタム",
+    "marketplaceSource": "ソース",
+    "addMarketplaceDesc": "GitHubリポジトリ（owner/repo）、Git URL、またはローカルパスを入力してください",
+    "addMarketplacePlaceholder": "例: anthropics/claude-plugins-official",
+    "marketplaceAdded": "マーケットプレイス \"{{name}}\" を追加しました",
+    "marketplaceRemoved": "マーケットプレイス \"{{name}}\" を削除しました",
+    "cannotRemoveOfficial": "公式マーケットプレイスは削除できません",
+    "fetchingMarketplace": "マーケットプレイスを取得中...",
+    "invalidMarketplace": "有効な marketplace.json が見つかりません",
+    "pluginFrom": "{{marketplace}} から"
   },
 
   "security": {

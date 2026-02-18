@@ -568,7 +568,21 @@
     "stars": "stars",
     "downloads": "downloads",
     "alreadyInstalled": "Already installed",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "marketplaces": "Marketplaces",
+    "addMarketplace": "Add Marketplace",
+    "removeMarketplace": "Remove",
+    "officialMarketplace": "Official",
+    "customMarketplace": "Custom",
+    "marketplaceSource": "Source",
+    "addMarketplaceDesc": "Enter a GitHub repository (owner/repo), Git URL, or local path",
+    "addMarketplacePlaceholder": "e.g. anthropics/claude-plugins-official",
+    "marketplaceAdded": "Marketplace \"{{name}}\" added",
+    "marketplaceRemoved": "Marketplace \"{{name}}\" removed",
+    "cannotRemoveOfficial": "Cannot remove the official marketplace",
+    "fetchingMarketplace": "Fetching marketplace...",
+    "invalidMarketplace": "Could not find a valid marketplace.json",
+    "pluginFrom": "from {{marketplace}}"
   },
 
   "security": {

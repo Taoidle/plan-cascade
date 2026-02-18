@@ -1,14 +1,14 @@
 /**
  * MarketplaceView Component
  *
- * Browse and search plugins from the remote registry.
- * Displays plugin cards in a responsive grid with category filtering.
+ * Browse and search plugins from configured marketplace sources.
+ * Displays plugin cards in a responsive grid with category and marketplace filtering.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
-import { MagnifyingGlassIcon, ReloadIcon } from '@radix-ui/react-icons';
+import { MagnifyingGlassIcon, ReloadIcon, PlusIcon } from '@radix-ui/react-icons';
 import { usePluginStore } from '../../store/plugins';
 import { PluginMarketplaceCard } from './PluginMarketplaceCard';
 
@@ -21,11 +21,13 @@ export function MarketplaceView() {
   const installing = usePluginStore((s) => s.installing);
   const uninstalling = usePluginStore((s) => s.uninstalling);
   const loadMarketplace = usePluginStore((s) => s.loadMarketplace);
-  const installFromGit = usePluginStore((s) => s.installFromGit);
+  const installFromMarketplace = usePluginStore((s) => s.installFromMarketplace);
   const uninstallPlugin = usePluginStore((s) => s.uninstallPlugin);
+  const openAddMarketplaceDialog = usePluginStore((s) => s.openAddMarketplaceDialog);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(null);
 
   // Load marketplace on mount
   useEffect(() => {
@@ -43,12 +45,25 @@ export function MarketplaceView() {
     return Array.from(cats).sort();
   }, [marketplacePlugins]);
 
+  // Extract unique marketplace sources
+  const marketplaceSources = useMemo(() => {
+    const sources = new Set<string>();
+    marketplacePlugins.forEach((p) => {
+      if (p.marketplace_name) sources.add(p.marketplace_name);
+    });
+    return Array.from(sources).sort();
+  }, [marketplacePlugins]);
+
   // Filter plugins
   const filteredPlugins = useMemo(() => {
     let result = marketplacePlugins;
 
     if (selectedCategory) {
       result = result.filter((p) => p.category === selectedCategory);
+    }
+
+    if (selectedMarketplace) {
+      result = result.filter((p) => p.marketplace_name === selectedMarketplace);
     }
 
     if (searchQuery.trim()) {
@@ -63,7 +78,7 @@ export function MarketplaceView() {
     }
 
     return result;
-  }, [marketplacePlugins, searchQuery, selectedCategory]);
+  }, [marketplacePlugins, searchQuery, selectedCategory, selectedMarketplace]);
 
   // Loading state
   if (marketplaceLoading && marketplacePlugins.length === 0) {
@@ -90,7 +105,7 @@ export function MarketplaceView() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Search & Category Filter */}
+      {/* Search & Actions */}
       <div className="p-3 space-y-2">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -111,6 +126,19 @@ export function MarketplaceView() {
             />
           </div>
           <button
+            onClick={openAddMarketplaceDialog}
+            className={clsx(
+              'inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs',
+              'text-gray-500 dark:text-gray-400',
+              'hover:bg-gray-100 dark:hover:bg-gray-800',
+              'transition-colors'
+            )}
+            title={t('plugins.addMarketplace')}
+          >
+            <PlusIcon className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{t('plugins.addMarketplace')}</span>
+          </button>
+          <button
             onClick={() => loadMarketplace()}
             disabled={marketplaceLoading}
             className={clsx(
@@ -124,6 +152,39 @@ export function MarketplaceView() {
             <ReloadIcon className={clsx('w-3.5 h-3.5', marketplaceLoading && 'animate-spin')} />
           </button>
         </div>
+
+        {/* Marketplace source filter (only if multiple sources) */}
+        {marketplaceSources.length > 1 && (
+          <div className="flex flex-wrap gap-1">
+            <button
+              onClick={() => setSelectedMarketplace(null)}
+              className={clsx(
+                'px-2 py-0.5 rounded-full text-2xs font-medium transition-colors',
+                !selectedMarketplace
+                  ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+              )}
+            >
+              {t('plugins.allCategories')}
+            </button>
+            {marketplaceSources.map((source) => (
+              <button
+                key={source}
+                onClick={() => setSelectedMarketplace(source === selectedMarketplace ? null : source)}
+                className={clsx(
+                  'px-2 py-0.5 rounded-full text-2xs font-medium transition-colors',
+                  source === selectedMarketplace
+                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                )}
+              >
+                {source === 'claude-plugins-official'
+                  ? t('plugins.officialMarketplace')
+                  : source}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Category filter */}
         {categories.length > 0 && (
@@ -177,9 +238,9 @@ export function MarketplaceView() {
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
             {filteredPlugins.map((plugin) => (
               <PluginMarketplaceCard
-                key={plugin.name}
+                key={`${plugin.marketplace_name}:${plugin.name}`}
                 plugin={plugin}
-                onInstall={() => installFromGit(plugin.git_url)}
+                onInstall={() => installFromMarketplace(plugin.name, plugin.marketplace_name)}
                 onUninstall={() => uninstallPlugin(plugin.name)}
                 installing={installing}
                 uninstalling={uninstalling === plugin.name}
@@ -188,6 +249,15 @@ export function MarketplaceView() {
           </div>
         )}
       </div>
+
+      {/* Footer: marketplace count */}
+      {marketplacePlugins.length > 0 && (
+        <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
+          <p className="text-2xs text-gray-400 dark:text-gray-500">
+            {filteredPlugins.length} / {marketplacePlugins.length} {t('plugins.marketplace').toLowerCase()}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

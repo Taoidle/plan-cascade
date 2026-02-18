@@ -249,6 +249,11 @@ fn main() {
             plan_cascade_desktop::commands::plugins::fetch_marketplace,
             plan_cascade_desktop::commands::plugins::install_plugin_from_git,
             plan_cascade_desktop::commands::plugins::uninstall_plugin,
+            plan_cascade_desktop::commands::plugins::list_marketplaces,
+            plan_cascade_desktop::commands::plugins::add_marketplace,
+            plan_cascade_desktop::commands::plugins::remove_marketplace,
+            plan_cascade_desktop::commands::plugins::toggle_marketplace,
+            plan_cascade_desktop::commands::plugins::install_marketplace_plugin,
             // LSP enrichment commands
             plan_cascade_desktop::commands::lsp::detect_lsp_servers,
             plan_cascade_desktop::commands::lsp::get_lsp_status,

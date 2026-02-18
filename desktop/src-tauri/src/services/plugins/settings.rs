@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use crate::services::plugins::models::PluginSettings;
+use crate::services::plugins::models::{MarketplaceConfig, PluginSettings};
 
 /// Get the path to the plugin settings file.
 ///
@@ -57,6 +57,50 @@ pub fn save_plugin_settings(settings: &PluginSettings) -> Result<(), String> {
     Ok(())
 }
 
+/// Add a marketplace to settings.
+pub fn add_marketplace(config: MarketplaceConfig) -> Result<(), String> {
+    let mut settings = load_plugin_settings();
+
+    // Check for duplicate name
+    if settings.marketplaces.iter().any(|m| m.name == config.name) {
+        return Err(format!("Marketplace '{}' already exists", config.name));
+    }
+
+    settings.marketplaces.push(config);
+    save_plugin_settings(&settings)
+}
+
+/// Remove a marketplace from settings by name.
+///
+/// Cannot remove the official marketplace.
+pub fn remove_marketplace(name: &str) -> Result<(), String> {
+    if name == "claude-plugins-official" {
+        return Err("Cannot remove the official marketplace".to_string());
+    }
+
+    let mut settings = load_plugin_settings();
+    let initial_len = settings.marketplaces.len();
+    settings.marketplaces.retain(|m| m.name != name);
+
+    if settings.marketplaces.len() == initial_len {
+        return Err(format!("Marketplace '{}' not found", name));
+    }
+
+    save_plugin_settings(&settings)
+}
+
+/// Toggle a marketplace's enabled state.
+pub fn toggle_marketplace(name: &str, enabled: bool) -> Result<(), String> {
+    let mut settings = load_plugin_settings();
+
+    if let Some(marketplace) = settings.marketplaces.iter_mut().find(|m| m.name == name) {
+        marketplace.enabled = enabled;
+        save_plugin_settings(&settings)
+    } else {
+        Err(format!("Marketplace '{}' not found", name))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,9 +118,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("plugin-settings.json");
 
-        let settings = PluginSettings {
-            disabled_plugins: vec!["plugin-a".to_string(), "plugin-b".to_string()],
-        };
+        let mut settings = PluginSettings::default();
+        settings.disabled_plugins = vec!["plugin-a".to_string(), "plugin-b".to_string()];
 
         let content = serde_json::to_string_pretty(&settings).unwrap();
         std::fs::write(&path, &content).unwrap();
@@ -86,5 +129,18 @@ mod tests {
         assert_eq!(loaded.disabled_plugins.len(), 2);
         assert!(loaded.disabled_plugins.contains(&"plugin-a".to_string()));
         assert!(loaded.disabled_plugins.contains(&"plugin-b".to_string()));
+        // Should have default marketplace
+        assert!(!loaded.marketplaces.is_empty());
+    }
+
+    #[test]
+    fn test_backward_compat_no_marketplaces() {
+        // Settings from old format without marketplaces field
+        let json = r#"{"disabled_plugins": ["old-plugin"]}"#;
+        let settings: PluginSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.disabled_plugins.len(), 1);
+        // Should get default marketplaces
+        assert!(!settings.marketplaces.is_empty());
+        assert_eq!(settings.marketplaces[0].name, "claude-plugins-official");
     }
 }

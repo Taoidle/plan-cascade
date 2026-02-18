@@ -6,7 +6,7 @@
  */
 
 import { create } from 'zustand';
-import type { PluginInfo, PluginDetail, MarketplacePlugin, InstallProgress } from '../types/plugin';
+import type { PluginInfo, PluginDetail, MarketplacePlugin, MarketplaceInfo, InstallProgress } from '../types/plugin';
 import {
   listPlugins,
   togglePlugin as togglePluginApi,
@@ -15,6 +15,11 @@ import {
   fetchMarketplace as fetchMarketplaceApi,
   installPluginFromGit as installPluginFromGitApi,
   uninstallPlugin as uninstallPluginApi,
+  listMarketplaces as listMarketplacesApi,
+  addMarketplace as addMarketplaceApi,
+  removeMarketplace as removeMarketplaceApi,
+  toggleMarketplace as toggleMarketplaceApi,
+  installMarketplacePlugin as installMarketplacePluginApi,
 } from '../lib/pluginApi';
 
 // ============================================================================
@@ -30,6 +35,12 @@ interface PluginState {
   marketplacePlugins: MarketplacePlugin[];
   marketplaceLoading: boolean;
   marketplaceError: string | null;
+
+  // Marketplace sources
+  marketplaces: MarketplaceInfo[];
+  marketplacesLoading: boolean;
+  addingMarketplace: boolean;
+  addMarketplaceDialogOpen: boolean;
 
   // Install
   installing: boolean;
@@ -70,10 +81,17 @@ interface PluginState {
   setActiveTab: (tab: 'installed' | 'marketplace') => void;
   loadMarketplace: () => Promise<void>;
   installFromGit: (gitUrl: string) => Promise<void>;
+  installFromMarketplace: (pluginName: string, marketplaceName: string) => Promise<void>;
   uninstallPlugin: (name: string) => Promise<void>;
   openInstallDialog: () => void;
   closeInstallDialog: () => void;
   setInstallProgress: (progress: InstallProgress | null) => void;
+  loadMarketplaces: () => Promise<void>;
+  addMarketplace: (source: string) => Promise<void>;
+  removeMarketplace: (name: string) => Promise<void>;
+  toggleMarketplaceSource: (name: string, enabled: boolean) => Promise<void>;
+  openAddMarketplaceDialog: () => void;
+  closeAddMarketplaceDialog: () => void;
   reset: () => void;
 }
 
@@ -87,6 +105,10 @@ const defaultState = {
   marketplacePlugins: [] as MarketplacePlugin[],
   marketplaceLoading: false,
   marketplaceError: null as string | null,
+  marketplaces: [] as MarketplaceInfo[],
+  marketplacesLoading: false,
+  addingMarketplace: false,
+  addMarketplaceDialogOpen: false,
   installing: false,
   installProgress: null as InstallProgress | null,
   uninstalling: null as string | null,
@@ -296,11 +318,130 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
     }
   },
 
+  installFromMarketplace: async (pluginName: string, marketplaceName: string) => {
+    set({ installing: true, installProgress: null });
+    try {
+      const response = await installMarketplacePluginApi(pluginName, marketplaceName);
+      if (response.success && response.data) {
+        set({ installing: false, installProgress: null });
+        get().showToast(`Plugin "${response.data.name}" installed successfully`, 'success');
+        await get().loadPlugins();
+        if (get().marketplacePlugins.length > 0) {
+          await get().loadMarketplace();
+        }
+      } else {
+        set({ installing: false, installProgress: null });
+        get().showToast(response.error || 'Installation failed', 'error');
+      }
+    } catch (error) {
+      set({ installing: false, installProgress: null });
+      get().showToast(
+        error instanceof Error ? error.message : String(error),
+        'error'
+      );
+    }
+  },
+
   openInstallDialog: () => set({ installDialogOpen: true }),
 
   closeInstallDialog: () => set({ installDialogOpen: false, installProgress: null }),
 
   setInstallProgress: (progress: InstallProgress | null) => set({ installProgress: progress }),
+
+  loadMarketplaces: async () => {
+    set({ marketplacesLoading: true });
+    try {
+      const response = await listMarketplacesApi();
+      if (response.success && response.data) {
+        set({ marketplaces: response.data, marketplacesLoading: false });
+      } else {
+        set({ marketplacesLoading: false });
+      }
+    } catch {
+      set({ marketplacesLoading: false });
+    }
+  },
+
+  addMarketplace: async (source: string) => {
+    set({ addingMarketplace: true });
+    try {
+      const response = await addMarketplaceApi(source);
+      if (response.success && response.data) {
+        set((state) => ({
+          addingMarketplace: false,
+          addMarketplaceDialogOpen: false,
+          marketplaces: [...state.marketplaces, response.data!],
+        }));
+        get().showToast(`Marketplace "${response.data.name}" added`, 'success');
+        // Refresh marketplace plugins
+        await get().loadMarketplace();
+      } else {
+        set({ addingMarketplace: false });
+        get().showToast(response.error || 'Failed to add marketplace', 'error');
+      }
+    } catch (error) {
+      set({ addingMarketplace: false });
+      get().showToast(
+        error instanceof Error ? error.message : String(error),
+        'error'
+      );
+    }
+  },
+
+  removeMarketplace: async (name: string) => {
+    try {
+      const response = await removeMarketplaceApi(name);
+      if (response.success) {
+        set((state) => ({
+          marketplaces: state.marketplaces.filter((m) => m.name !== name),
+        }));
+        get().showToast(`Marketplace "${name}" removed`, 'success');
+        await get().loadMarketplace();
+      } else {
+        get().showToast(response.error || 'Failed to remove marketplace', 'error');
+      }
+    } catch (error) {
+      get().showToast(
+        error instanceof Error ? error.message : String(error),
+        'error'
+      );
+    }
+  },
+
+  toggleMarketplaceSource: async (name: string, enabled: boolean) => {
+    // Optimistic update
+    set((state) => ({
+      marketplaces: state.marketplaces.map((m) =>
+        m.name === name ? { ...m, enabled } : m
+      ),
+    }));
+
+    try {
+      const response = await toggleMarketplaceApi(name, enabled);
+      if (!response.success) {
+        // Revert
+        set((state) => ({
+          marketplaces: state.marketplaces.map((m) =>
+            m.name === name ? { ...m, enabled: !enabled } : m
+          ),
+        }));
+        get().showToast(response.error || 'Failed to toggle marketplace', 'error');
+      } else {
+        await get().loadMarketplace();
+      }
+    } catch {
+      // Revert
+      set((state) => ({
+        marketplaces: state.marketplaces.map((m) =>
+          m.name === name ? { ...m, enabled: !enabled } : m
+        ),
+      }));
+    }
+  },
+
+  openAddMarketplaceDialog: () => set({ addMarketplaceDialogOpen: true }),
+
+  closeAddMarketplaceDialog: () => set({ addMarketplaceDialogOpen: false }),
 
   reset: () => set(defaultState),
 }));

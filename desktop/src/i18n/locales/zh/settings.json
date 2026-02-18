@@ -568,7 +568,21 @@
     "stars": "星标",
     "downloads": "下载",
     "alreadyInstalled": "已安装",
-    "cancel": "取消"
+    "cancel": "取消",
+    "marketplaces": "插件市场源",
+    "addMarketplace": "添加市场源",
+    "removeMarketplace": "移除",
+    "officialMarketplace": "官方",
+    "customMarketplace": "自定义",
+    "marketplaceSource": "来源",
+    "addMarketplaceDesc": "输入 GitHub 仓库（owner/repo）、Git URL 或本地路径",
+    "addMarketplacePlaceholder": "例如 anthropics/claude-plugins-official",
+    "marketplaceAdded": "市场源 \"{{name}}\" 已添加",
+    "marketplaceRemoved": "市场源 \"{{name}}\" 已移除",
+    "cannotRemoveOfficial": "无法移除官方市场源",
+    "fetchingMarketplace": "正在获取市场源...",
+    "invalidMarketplace": "未找到有效的 marketplace.json",
+    "pluginFrom": "来自 {{marketplace}}"
   },
 
   "security": {
