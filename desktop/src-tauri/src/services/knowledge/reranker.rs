@@ -7,10 +7,14 @@
 //! - `LlmReranker`: uses keyword-overlap scoring to reorder results
 //!   (In production, this would use an LlmProvider for scoring)
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
+use crate::services::llm::provider::LlmProvider;
+use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::utils::error::AppResult;
 
 /// A search result to be reranked.
@@ -47,18 +51,28 @@ impl Reranker for NoopReranker {
 
 /// LLM-based reranker that scores relevance of each result against the query.
 ///
-/// This implementation uses keyword overlap scoring as a lightweight proxy
-/// for LLM-based relevance scoring. In production, this would call an
-/// LlmProvider to score each result.
-pub struct LlmReranker;
+/// When an `LlmProvider` is supplied, sends a batch scoring prompt to the LLM
+/// for semantic relevance assessment. Falls back to keyword-overlap scoring
+/// when no provider is available or the LLM call fails.
+pub struct LlmReranker {
+    provider: Option<Arc<dyn LlmProvider>>,
+}
 
 impl LlmReranker {
+    /// Create a new LLM reranker without a provider (keyword-overlap only).
     pub fn new() -> Self {
-        Self
+        Self { provider: None }
+    }
+
+    /// Create a new LLM reranker with the given provider.
+    pub fn with_provider(provider: Arc<dyn LlmProvider>) -> Self {
+        Self {
+            provider: Some(provider),
+        }
     }
 
     /// Score relevance of a chunk against a query using keyword overlap.
-    fn score_relevance(query: &str, chunk_text: &str) -> f32 {
+    fn score_relevance_heuristic(query: &str, chunk_text: &str) -> f32 {
         let query_words: std::collections::HashSet<String> = query
             .to_lowercase()
             .split_whitespace()
@@ -79,6 +93,56 @@ impl LlmReranker {
         let score = overlap / query_words.len() as f32;
         score.min(1.0)
     }
+
+    /// Build a batch relevance scoring prompt.
+    fn build_rerank_prompt(query: &str, results: &[SearchResult]) -> String {
+        let mut prompt = format!(
+            r#"You are a relevance scoring engine. Score how relevant each document chunk is to the query.
+
+Query: "{}"
+
+For each chunk below, output a JSON array of scores (0.0 to 1.0):
+"#,
+            query
+        );
+
+        for (i, result) in results.iter().enumerate() {
+            // Truncate to avoid overly long prompts
+            let text: String = result.chunk_text.chars().take(500).collect();
+            prompt.push_str(&format!("\nChunk {}: \"{}\"\n", i, text));
+        }
+
+        prompt.push_str(
+            r#"
+Respond with ONLY a JSON array of numbers, one per chunk:
+[0.85, 0.42, ...]"#,
+        );
+
+        prompt
+    }
+
+    /// Parse the LLM response into a vector of scores.
+    fn parse_scores(response: &str, expected_count: usize) -> Option<Vec<f32>> {
+        // Find the JSON array in the response
+        let start = response.find('[')?;
+        let end = response.rfind(']')?;
+        let json_str = &response[start..=end];
+        let scores: Vec<f32> = serde_json::from_str(json_str).ok()?;
+
+        if scores.len() == expected_count {
+            Some(scores)
+        } else {
+            None
+        }
+    }
+
+    /// Apply heuristic-based reranking (keyword overlap).
+    fn rerank_heuristic(query: &str, results: &mut [SearchResult]) {
+        for result in results.iter_mut() {
+            let relevance = Self::score_relevance_heuristic(query, &result.chunk_text);
+            result.score = (result.score + relevance) / 2.0;
+        }
+    }
 }
 
 impl Default for LlmReranker {
@@ -90,16 +154,50 @@ impl Default for LlmReranker {
 #[async_trait]
 impl Reranker for LlmReranker {
     async fn rerank(&self, query: &str, mut results: Vec<SearchResult>) -> AppResult<Vec<SearchResult>> {
-        // Score each result against the query
-        for result in &mut results {
-            let relevance = Self::score_relevance(query, &result.chunk_text);
-            // Combine original score with relevance score
-            result.score = (result.score + relevance) / 2.0;
+        if results.is_empty() {
+            return Ok(results);
         }
 
-        // Sort by score descending
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        // Attempt LLM-based reranking when provider is available
+        if let Some(provider) = &self.provider {
+            let prompt = Self::build_rerank_prompt(query, &results);
+            let messages = vec![Message::user(prompt)];
+            let request_options = LlmRequestOptions {
+                temperature_override: Some(0.0),
+                ..Default::default()
+            };
 
+            match provider
+                .send_message(messages, None, vec![], request_options)
+                .await
+            {
+                Ok(response) => {
+                    if let Some(content) = &response.content {
+                        if let Some(scores) = Self::parse_scores(content, results.len()) {
+                            for (result, llm_score) in results.iter_mut().zip(scores.iter()) {
+                                // Blend original vector score with LLM relevance score
+                                result.score = (result.score + llm_score) / 2.0;
+                            }
+
+                            results.sort_by(|a, b| {
+                                b.score
+                                    .partial_cmp(&a.score)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                            return Ok(results);
+                        }
+                    }
+                    tracing::warn!("Failed to parse LLM reranking response, falling back to heuristic");
+                }
+                Err(e) => {
+                    tracing::warn!("LLM reranking call failed, falling back to heuristic: {}", e);
+                }
+            }
+        }
+
+        // Fallback: keyword-overlap heuristic
+        Self::rerank_heuristic(query, &mut results);
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
         Ok(results)
     }
 }
@@ -178,25 +276,25 @@ mod tests {
 
     #[test]
     fn score_relevance_full_overlap() {
-        let score = LlmReranker::score_relevance("hello world", "hello world foo");
+        let score = LlmReranker::score_relevance_heuristic("hello world", "hello world foo");
         assert!(score > 0.9, "Full overlap should score high: {}", score);
     }
 
     #[test]
     fn score_relevance_no_overlap() {
-        let score = LlmReranker::score_relevance("hello world", "foo bar baz");
+        let score = LlmReranker::score_relevance_heuristic("hello world", "foo bar baz");
         assert!(score < 0.01, "No overlap should score near zero: {}", score);
     }
 
     #[test]
     fn score_relevance_partial_overlap() {
-        let score = LlmReranker::score_relevance("hello world", "hello foo bar");
+        let score = LlmReranker::score_relevance_heuristic("hello world", "hello foo bar");
         assert!(score > 0.0 && score < 1.0, "Partial overlap: {}", score);
     }
 
     #[test]
     fn score_relevance_empty_query() {
-        let score = LlmReranker::score_relevance("", "some text");
+        let score = LlmReranker::score_relevance_heuristic("", "some text");
         assert_eq!(score, 0.0);
     }
 }

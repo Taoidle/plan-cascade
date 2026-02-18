@@ -13,9 +13,12 @@
 //! let chunks = chunker.chunk(&doc)?;
 //! ```
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
+use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::utils::error::{AppError, AppResult};
 
 // ---------------------------------------------------------------------------
@@ -428,29 +431,59 @@ impl Chunker for TokenChunker {
 /// similarity between consecutive sentence groups drops below `threshold`,
 /// a chunk boundary is introduced.
 ///
-/// This chunker uses a simplified sentence-level approach:
-/// 1. Split text into sentences
-/// 2. Compute a lightweight hash-based "embedding" for each sentence
-/// 3. Compare consecutive sentences; when similarity drops below threshold,
-///    start a new chunk
-///
-/// For production use with real embeddings, pass an EmbeddingService.
+/// When an `EmbeddingService` is provided, uses real TF-IDF embeddings
+/// trained on the document's sentences. Falls back to a lightweight
+/// hash-based pseudo-embedding otherwise.
 pub struct SemanticChunker {
     threshold: f32,
     min_sentences: usize,
+    embedding_service: Option<Arc<EmbeddingService>>,
 }
 
 impl SemanticChunker {
+    /// Create a new SemanticChunker with hash-based fallback embeddings.
     pub fn new(threshold: f32, min_sentences: usize) -> Self {
         Self {
             threshold: threshold.clamp(0.0, 1.0),
             min_sentences: min_sentences.max(1),
+            embedding_service: None,
         }
     }
 
-    /// Simple hash-based pseudo-embedding for testing.
-    /// In production, this would use EmbeddingService.
-    fn sentence_embedding(sentence: &str) -> Vec<f32> {
+    /// Create a SemanticChunker that uses a real EmbeddingService.
+    pub fn with_embedding_service(
+        threshold: f32,
+        min_sentences: usize,
+        service: Arc<EmbeddingService>,
+    ) -> Self {
+        Self {
+            threshold: threshold.clamp(0.0, 1.0),
+            min_sentences: min_sentences.max(1),
+            embedding_service: Some(service),
+        }
+    }
+
+    /// Compute embeddings for all sentences.
+    ///
+    /// If an EmbeddingService is available, builds vocabulary from the
+    /// sentences and produces TF-IDF embeddings. Otherwise, uses hash-based
+    /// pseudo-embeddings as a lightweight fallback.
+    fn compute_embeddings(&self, sentences: &[(usize, &str)]) -> Vec<Vec<f32>> {
+        if let Some(service) = &self.embedding_service {
+            let texts: Vec<&str> = sentences.iter().map(|(_, s)| *s).collect();
+            // Build vocabulary from this document's sentences, then embed
+            service.build_vocabulary(&texts);
+            texts.iter().map(|s| service.embed_text(s)).collect()
+        } else {
+            sentences
+                .iter()
+                .map(|(_, s)| Self::hash_embedding(s))
+                .collect()
+        }
+    }
+
+    /// Hash-based pseudo-embedding for when no EmbeddingService is available.
+    fn hash_embedding(sentence: &str) -> Vec<f32> {
         let words: Vec<&str> = sentence.split_whitespace().collect();
         let dim = 32;
         let mut vec = vec![0.0f32; dim];
@@ -511,11 +544,8 @@ impl Chunker for SemanticChunker {
             }]);
         }
 
-        // Compute embeddings for each sentence
-        let embeddings: Vec<Vec<f32>> = sentences
-            .iter()
-            .map(|(_, s)| Self::sentence_embedding(s))
-            .collect();
+        // Compute embeddings for each sentence (real or hash-based)
+        let embeddings: Vec<Vec<f32>> = self.compute_embeddings(&sentences);
 
         // Detect boundaries
         let mut chunks = Vec::new();

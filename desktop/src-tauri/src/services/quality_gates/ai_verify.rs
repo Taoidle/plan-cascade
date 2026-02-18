@@ -8,8 +8,12 @@
 //!
 //! Constructs a prompt with the git diff and asks the LLM to identify skeleton code.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
+use crate::services::llm::provider::LlmProvider;
+use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::services::quality_gates::pipeline::{GatePhase, PipelineGateResult};
 
 /// A single skeleton code finding.
@@ -142,6 +146,39 @@ Git diff to analyze:
                 )
             }
         }
+    }
+
+    /// Run the gate with an optional LLM provider.
+    ///
+    /// If a provider is available, sends the diff to the LLM for analysis.
+    /// Falls back to heuristic-based detection when no provider is given or
+    /// the LLM call fails.
+    pub async fn run(&self, provider: Option<Arc<dyn LlmProvider>>) -> PipelineGateResult {
+        if let Some(provider) = provider {
+            let prompt = self.build_prompt();
+            let messages = vec![Message::user(prompt)];
+            let request_options = LlmRequestOptions {
+                temperature_override: Some(0.0),
+                ..Default::default()
+            };
+
+            match provider
+                .send_message(messages, None, vec![], request_options)
+                .await
+            {
+                Ok(response) => {
+                    if let Some(content) = &response.content {
+                        return self.parse_response(content);
+                    }
+                    // Empty response: fall through to heuristic
+                }
+                Err(e) => {
+                    tracing::warn!("AI verification LLM call failed, falling back to heuristic: {}", e);
+                }
+            }
+        }
+
+        self.run_heuristic()
     }
 
     /// Run the gate without an LLM (heuristic-based skeleton detection).

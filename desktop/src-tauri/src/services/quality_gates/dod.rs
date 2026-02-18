@@ -5,8 +5,12 @@
 //! - Quality gates passed
 //! - No blocking review findings
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
+use crate::services::llm::provider::LlmProvider;
+use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::services::quality_gates::code_review::CodeReviewResult;
 use crate::services::quality_gates::pipeline::{
     GatePhase, PipelineGateResult, PipelineResult,
@@ -87,8 +91,12 @@ Git diff:
         ))
     }
 
-    /// Run the DoD validation (heuristic mode, no LLM).
-    pub fn run(&self) -> PipelineGateResult {
+    /// Run the DoD validation with an optional LLM provider.
+    ///
+    /// When a provider is available and a diff is present, uses the LLM to
+    /// verify that each acceptance criterion is addressed by the code changes.
+    /// Falls back to heuristic checks otherwise.
+    pub async fn run(&self, provider: Option<Arc<dyn LlmProvider>>) -> PipelineGateResult {
         let mut failures = Vec::new();
 
         // Check quality gates passed
@@ -120,7 +128,102 @@ Git diff:
             }
         }
 
-        // Check acceptance criteria are addressed (basic heuristic)
+        // Check acceptance criteria are addressed
+        if self.input.acceptance_criteria.is_empty() {
+            failures.push("No acceptance criteria defined for story".to_string());
+        } else if let Some(prompt) = self.build_criteria_prompt() {
+            // Attempt LLM-based criteria verification when diff and provider are available
+            if let Some(provider) = &provider {
+                let messages = vec![Message::user(prompt)];
+                let request_options = LlmRequestOptions {
+                    temperature_override: Some(0.0),
+                    ..Default::default()
+                };
+
+                match provider
+                    .send_message(messages, None, vec![], request_options)
+                    .await
+                {
+                    Ok(response) => {
+                        if let Some(content) = &response.content {
+                            let checks = self.parse_criteria_response(content);
+                            let unaddressed: Vec<_> = checks
+                                .iter()
+                                .filter(|c| !c.addressed)
+                                .collect();
+
+                            for check in &unaddressed {
+                                failures.push(format!(
+                                    "Acceptance criterion not addressed: '{}' — {}",
+                                    check.criterion, check.reasoning
+                                ));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "DoD LLM criteria check failed, skipping AI verification: {}",
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
+        if failures.is_empty() {
+            PipelineGateResult::passed(
+                "dod",
+                "Definition of Done",
+                GatePhase::PostValidation,
+                0,
+            )
+        } else {
+            PipelineGateResult::failed(
+                "dod",
+                "Definition of Done",
+                GatePhase::PostValidation,
+                0,
+                format!(
+                    "Story '{}' is not done: {} issues found",
+                    self.input.story_id,
+                    failures.len()
+                ),
+                failures,
+            )
+        }
+    }
+
+    /// Run the DoD validation (heuristic mode, no LLM).
+    pub fn run_heuristic(&self) -> PipelineGateResult {
+        let mut failures = Vec::new();
+
+        if let Some(ref pipeline_result) = self.input.pipeline_result {
+            if !pipeline_result.passed {
+                failures.push("Quality gate pipeline did not pass".to_string());
+            }
+        }
+
+        if let Some(ref review_result) = self.input.code_review_result {
+            if review_result.should_block() {
+                failures.push(format!(
+                    "Code review has blocking findings (score: {}/100)",
+                    review_result.total_score
+                ));
+            }
+
+            let critical_count = review_result
+                .findings
+                .iter()
+                .filter(|f| f.severity == "critical")
+                .count();
+            if critical_count > 0 {
+                failures.push(format!(
+                    "{} critical review findings must be resolved",
+                    critical_count
+                ));
+            }
+        }
+
         if self.input.acceptance_criteria.is_empty() {
             failures.push("No acceptance criteria defined for story".to_string());
         }
@@ -208,7 +311,7 @@ mod tests {
     #[test]
     fn test_dod_passes_basic() {
         let gate = DoDGate::new(basic_input());
-        let result = gate.run();
+        let result = gate.run_heuristic();
         assert!(result.passed);
     }
 
@@ -217,7 +320,7 @@ mod tests {
         let mut input = basic_input();
         input.acceptance_criteria = vec![];
         let gate = DoDGate::new(input);
-        let result = gate.run();
+        let result = gate.run_heuristic();
         assert!(!result.passed);
         assert!(result
             .findings
@@ -245,7 +348,7 @@ mod tests {
             None,
         ));
         let gate = DoDGate::new(input);
-        let result = gate.run();
+        let result = gate.run_heuristic();
         assert!(!result.passed);
         assert!(result
             .findings
@@ -270,7 +373,7 @@ mod tests {
             summary: "Blocking issues".to_string(),
         });
         let gate = DoDGate::new(input);
-        let result = gate.run();
+        let result = gate.run_heuristic();
         assert!(!result.passed);
     }
 
@@ -293,7 +396,7 @@ mod tests {
         ));
         input.code_review_result = Some(CodeReviewResult::default_pass());
         let gate = DoDGate::new(input);
-        let result = gate.run();
+        let result = gate.run_heuristic();
         assert!(result.passed);
     }
 

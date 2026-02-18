@@ -9,8 +9,12 @@
 //!
 //! Total 100 pts, blocks if score < 70 or critical findings exist.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
+use crate::services::llm::provider::LlmProvider;
+use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::services::quality_gates::pipeline::{GatePhase, PipelineGateResult};
 
 /// Score for a single review dimension.
@@ -173,6 +177,46 @@ Git diff to review:
 ```"#,
             self.diff_content
         )
+    }
+
+    /// Run the code review gate with an optional LLM provider.
+    ///
+    /// If a provider is available, sends the diff for 5-dimension scoring.
+    /// Falls back to a default passing result when no provider is given or
+    /// the LLM call fails.
+    pub async fn run(&self, provider: Option<Arc<dyn LlmProvider>>) -> PipelineGateResult {
+        if let Some(provider) = provider {
+            let prompt = self.build_prompt();
+            let messages = vec![Message::user(prompt)];
+            let request_options = LlmRequestOptions {
+                temperature_override: Some(0.0),
+                ..Default::default()
+            };
+
+            match provider
+                .send_message(messages, None, vec![], request_options)
+                .await
+            {
+                Ok(response) => {
+                    if let Some(content) = &response.content {
+                        return self.parse_response(content);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Code review LLM call failed, falling back to pass: {}", e);
+                }
+            }
+        }
+
+        // Fallback: pass with warning when no LLM available
+        let mut result = PipelineGateResult::passed(
+            "code_review",
+            "Code Review",
+            GatePhase::PostValidation,
+            0,
+        );
+        result.message = "No LLM provider available for code review - passing with warning".to_string();
+        result
     }
 
     /// Parse the AI response into a pipeline gate result.

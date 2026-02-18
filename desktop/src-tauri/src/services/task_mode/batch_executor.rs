@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
+use crate::services::llm::provider::LlmProvider;
+use crate::services::quality_gates::ai_verify::AiVerificationGate;
+use crate::services::quality_gates::code_review::CodeReviewGate;
 use crate::services::quality_gates::format::FormatGate;
 use crate::services::quality_gates::pipeline::{
     GatePhase, GatePipeline, PipelineConfig, PipelineGateResult, PipelineResult,
@@ -517,6 +520,8 @@ pub struct BatchExecutor {
     cancellation_token: CancellationToken,
     /// Current execution state
     state: Arc<RwLock<BatchExecutionState>>,
+    /// Optional LLM provider for AI quality gates (verification, code review)
+    llm_provider: Option<Arc<dyn LlmProvider>>,
 }
 
 /// Internal execution state.
@@ -554,7 +559,14 @@ impl BatchExecutor {
                 total_batches: 0,
                 agent_assignments: HashMap::new(),
             })),
+            llm_provider: None,
         }
+    }
+
+    /// Set the LLM provider for AI-powered quality gates (verification, code review).
+    pub fn with_llm_provider(mut self, provider: Arc<dyn LlmProvider>) -> Self {
+        self.llm_provider = Some(provider);
+        self
     }
 
     /// Calculate execution batches.
@@ -813,6 +825,7 @@ impl BatchExecutor {
                 let state_ref = self.state.clone();
                 let resolver_config = agent_resolver.config().clone();
                 let se = story_executor.clone();
+                let provider = self.llm_provider.clone();
 
                 emit(TaskModeProgressEvent::story_started(
                     &sid,
@@ -837,6 +850,7 @@ impl BatchExecutor {
                         cancel_token,
                         state_ref,
                         resolver_config,
+                        provider,
                         emit,
                         se,
                     )
@@ -891,6 +905,7 @@ impl BatchExecutor {
         cancel_token: CancellationToken,
         state: Arc<RwLock<BatchExecutionState>>,
         agents_config: crate::services::task_mode::agent_resolver::AgentsConfig,
+        llm_provider: Option<Arc<dyn LlmProvider>>,
         emit: impl Fn(TaskModeProgressEvent) + Send + Sync,
         story_executor: E,
     ) where
@@ -992,6 +1007,47 @@ impl BatchExecutor {
                     Box::pin(async move { gate.run().await })
                 }),
             );
+
+            // Obtain git diff for AI quality gates
+            let diff_content = {
+                let diff_output = tokio::process::Command::new("git")
+                    .args(["diff", "HEAD"])
+                    .current_dir(project_path)
+                    .output()
+                    .await;
+                match diff_output {
+                    Ok(output) if output.status.success() => {
+                        String::from_utf8_lossy(&output.stdout).to_string()
+                    }
+                    _ => String::new(),
+                }
+            };
+
+            // Register AI Verification gate (PostValidation phase)
+            if !diff_content.is_empty() {
+                let verify_diff = diff_content.clone();
+                let verify_provider = llm_provider.clone();
+                pipeline.register_gate(
+                    "ai_verify",
+                    Box::new(move || {
+                        let gate = AiVerificationGate::new(verify_diff.clone());
+                        let provider = verify_provider.clone();
+                        Box::pin(async move { gate.run(provider).await })
+                    }),
+                );
+
+                // Register Code Review gate (PostValidation phase)
+                let review_diff = diff_content;
+                let review_provider = llm_provider.clone();
+                pipeline.register_gate(
+                    "code_review",
+                    Box::new(move || {
+                        let gate = CodeReviewGate::new(review_diff.clone());
+                        let provider = review_provider.clone();
+                        Box::pin(async move { gate.run(provider).await })
+                    }),
+                );
+            }
 
             let gate_result = pipeline.execute().await;
 
