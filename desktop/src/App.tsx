@@ -28,6 +28,7 @@ import { Breadcrumb } from './components/shared/Breadcrumb';
 import { ContextualActions } from './components/shared/ContextualActions';
 import { ShortcutOverlay } from './components/shared/ShortcutOverlay';
 import { RecoveryPrompt } from './components/shared/RecoveryPrompt';
+import { ToastProvider } from './components/shared/Toast';
 import { useGlobalCommands } from './hooks/useGlobalCommands';
 import { ShortcutsHelpDialog } from './components/ClaudeCodeMode/KeyboardShortcuts';
 import { useModeStore } from './store/mode';
@@ -233,9 +234,11 @@ function AppContent() {
 
 export function App() {
   return (
-    <GlobalCommandPaletteProvider>
-      <AppContent />
-    </GlobalCommandPaletteProvider>
+    <ToastProvider>
+      <GlobalCommandPaletteProvider>
+        <AppContent />
+      </GlobalCommandPaletteProvider>
+    </ToastProvider>
   );
 }
 

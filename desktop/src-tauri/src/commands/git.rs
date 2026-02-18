@@ -739,6 +739,101 @@ pub async fn git_review_diff(
     }
 }
 
+/// Resolve a conflict in a file using LLM.
+///
+/// Reads the file content with conflict markers and asks the LLM to resolve.
+#[tauri::command]
+pub async fn git_resolve_conflict_ai(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    file_path: String,
+) -> Result<CommandResponse<String>, String> {
+    let path = PathBuf::from(&repo_path);
+    let full_path = path.join(&file_path);
+
+    // Read the file with conflict markers
+    let content = match std::fs::read_to_string(&full_path) {
+        Ok(c) => c,
+        Err(e) => return Ok(CommandResponse::err(format!("Failed to read file: {}", e))),
+    };
+
+    let assist = state.llm_assist.read().await;
+    match assist.as_ref() {
+        Some(llm) => match llm.suggest_conflict_resolution(&content).await {
+            Ok(resolved) => Ok(CommandResponse::ok(resolved)),
+            Err(e) => Ok(CommandResponse::err(e.to_string())),
+        },
+        None => Ok(CommandResponse::err(
+            "LLM provider not configured for git operations".to_string(),
+        )),
+    }
+}
+
+/// Summarize a commit using LLM.
+///
+/// Gets the diff and message for a specific commit SHA and summarizes it.
+#[tauri::command]
+pub async fn git_summarize_commit(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    sha: String,
+) -> Result<CommandResponse<String>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+
+    // Get the commit's diff using git show
+    let diff_text = match service.diff_for_commit(&path, &sha) {
+        Ok(d) => diff_output_to_text(&d),
+        Err(_) => String::new(),
+    };
+
+    // Get commit message from log
+    let commit_message = match service.log(&path, 1, false) {
+        Ok(commits) => {
+            commits
+                .iter()
+                .find(|c| c.sha == sha || c.short_sha == sha)
+                .map(|c| c.message.clone())
+                .unwrap_or_default()
+        }
+        Err(_) => String::new(),
+    };
+
+    if commit_message.is_empty() && diff_text.is_empty() {
+        return Ok(CommandResponse::err(
+            "Could not retrieve commit information".to_string(),
+        ));
+    }
+
+    let assist = state.llm_assist.read().await;
+    match assist.as_ref() {
+        Some(llm) => {
+            let messages = vec![commit_message];
+            let diff_ref = if diff_text.is_empty() {
+                None
+            } else {
+                Some(diff_text.as_str())
+            };
+            match llm.summarize_changes(&messages, diff_ref).await {
+                Ok(summary) => Ok(CommandResponse::ok(summary)),
+                Err(e) => Ok(CommandResponse::err(e.to_string())),
+            }
+        }
+        None => Ok(CommandResponse::err(
+            "LLM provider not configured for git operations".to_string(),
+        )),
+    }
+}
+
+/// Check if LLM provider is configured for git operations.
+#[tauri::command]
+pub async fn git_check_llm_available(
+    state: tauri::State<'_, GitState>,
+) -> Result<CommandResponse<bool>, String> {
+    let assist = state.llm_assist.read().await;
+    Ok(CommandResponse::ok(assist.is_some()))
+}
+
 // ===========================================================================
 // Helpers
 // ===========================================================================

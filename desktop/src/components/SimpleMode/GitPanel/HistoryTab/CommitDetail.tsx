@@ -5,14 +5,18 @@
  * Shows when a commit is selected in the graph.
  * Displays full commit info, file changes with +/- stats,
  * and can show diffs via EnhancedDiffViewer.
+ * Includes AI Summary feature (feature-005).
  *
  * Feature-003: Commit History Graph with SVG Visualization
+ * Feature-005: AI Commit Summary
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { clsx } from 'clsx';
 import type { CommitNode, DiffOutput, FileDiff } from '../../../../types/git';
 import { EnhancedDiffViewer } from '../../../ClaudeCodeMode/EnhancedDiffViewer';
+import { useGitAI } from '../../../../hooks/useGitAI';
+import { useToast } from '../../../shared/Toast';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -90,6 +94,37 @@ function fileDiffToContents(fileDiff: FileDiff): { oldContent: string; newConten
 }
 
 // ---------------------------------------------------------------------------
+// Spinner
+// ---------------------------------------------------------------------------
+
+function Spinner({ className }: { className?: string }) {
+  return (
+    <svg className={clsx('animate-spin', className)} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Skeleton
+// ---------------------------------------------------------------------------
+
+function SummarySkeleton() {
+  return (
+    <div className="space-y-2 animate-pulse">
+      <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-3/4" />
+      <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-full" />
+      <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-5/6" />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // CommitDetail Component
 // ---------------------------------------------------------------------------
 
@@ -101,6 +136,15 @@ export function CommitDetail({
 }: CommitDetailProps) {
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // AI Summary state
+  const { isAvailable, isSummarizing, summarizeCommit, unavailableReason } = useGitAI();
+  const { showToast } = useToast();
+
+  // Cache summaries per commit SHA to avoid repeated calls
+  const summaryCache = useRef<Map<string, string>>(new Map());
+  const [currentSummary, setCurrentSummary] = useState<string | null>(null);
+  const [showSummary, setShowSummary] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Copy SHA to clipboard
@@ -116,6 +160,32 @@ export function CommitDetail({
       // Clipboard API might fail in some contexts
     }
   }, [commit]);
+
+  // ---------------------------------------------------------------------------
+  // AI Summary
+  // ---------------------------------------------------------------------------
+
+  const handleSummarize = useCallback(async () => {
+    if (!commit || !repoPath || !isAvailable) return;
+
+    // Check cache first
+    const cached = summaryCache.current.get(commit.sha);
+    if (cached) {
+      setCurrentSummary(cached);
+      setShowSummary(true);
+      return;
+    }
+
+    const result = await summarizeCommit(repoPath, commit.sha);
+    if (result) {
+      summaryCache.current.set(commit.sha, result);
+      setCurrentSummary(result);
+      setShowSummary(true);
+      showToast('AI summary generated', 'success');
+    } else {
+      showToast('Failed to generate summary', 'error');
+    }
+  }, [commit, repoPath, isAvailable, summarizeCommit, showToast]);
 
   // ---------------------------------------------------------------------------
   // File change status icon
@@ -157,6 +227,7 @@ export function CommitDetail({
   if (!commit) return null;
 
   const isMerge = commit.parents.length > 1;
+  const canSummarize = isAvailable && !isSummarizing;
 
   return (
     <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 max-h-[40vh] overflow-y-auto">
@@ -257,28 +328,72 @@ export function CommitDetail({
           </pre>
         </div>
 
-        {/* AI Summary placeholder (feature-005) */}
+        {/* AI Summary section */}
         <div className="pt-1">
-          <button
-            disabled
-            className={clsx(
-              'flex items-center gap-1.5 px-2 py-1 text-xs rounded-md',
-              'bg-gray-100 dark:bg-gray-800',
-              'text-gray-400 dark:text-gray-500',
-              'cursor-not-allowed opacity-60'
-            )}
-            title="Coming in feature-005"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-              />
-            </svg>
-            AI Summary
-          </button>
+          {!showSummary ? (
+            <button
+              onClick={handleSummarize}
+              disabled={!canSummarize}
+              className={clsx(
+                'flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors',
+                canSummarize
+                  ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 border border-purple-200 dark:border-purple-700'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-60'
+              )}
+              title={
+                !isAvailable
+                  ? unavailableReason
+                  : isSummarizing
+                    ? 'Summarizing...'
+                    : 'Generate AI summary of this commit'
+              }
+            >
+              {isSummarizing ? (
+                <Spinner className="w-3.5 h-3.5" />
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+                  />
+                </svg>
+              )}
+              {isSummarizing ? 'Summarizing...' : 'AI Summary'}
+            </button>
+          ) : (
+            <div className="rounded-md border border-purple-200 dark:border-purple-800/50 bg-purple-50 dark:bg-purple-900/10 p-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-2xs font-medium text-purple-700 dark:text-purple-400 flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+                    />
+                  </svg>
+                  AI Summary
+                </span>
+                <button
+                  onClick={() => setShowSummary(false)}
+                  className="p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              {isSummarizing ? (
+                <SummarySkeleton />
+              ) : (
+                <pre className="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap font-sans leading-relaxed">
+                  {currentSummary}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

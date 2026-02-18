@@ -11,3 +11,4 @@ export { useGlobalCommands } from './useGlobalCommands';
 export { useGitStatus } from './useGitStatus';
 export { useGitBranches } from './useGitBranches';
 export { useGitMergeState } from './useGitMergeState';
+export { useGitAI } from './useGitAI';

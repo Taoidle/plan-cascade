@@ -289,6 +289,9 @@ pub use commands::{
     git_resolve_file_and_stage,
     git_generate_commit_message,
     git_review_diff,
+    git_resolve_conflict_ai,
+    git_summarize_commit,
+    git_check_llm_available,
     GitState,
     // Analytics commands
     AnalyticsState,
