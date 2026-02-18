@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/core"]
+resolver = "2"
+
 [package]
 name = "plan-cascade-desktop"
 version = "0.1.0"
@@ -19,6 +23,9 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Workspace crates
+plan-cascade-core = { path = "crates/core" }
+
 # Tauri
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"

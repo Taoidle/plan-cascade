@@ -8,7 +8,7 @@
 //! Each builder follows the standard Rust builder pattern:
 //! 1. Create with `::new()` or `::default()`
 //! 2. Chain `.field(value)` calls
-//! 3. Call `.build()` which validates and returns `AppResult<Config>`
+//! 3. Call `.build()` which validates and returns `CoreResult<Config>`
 //!
 //! Validation happens at build time, catching configuration errors
 //! before they cause runtime failures.
@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::utils::error::{AppError, AppResult};
+use crate::error::{CoreError, CoreResult};
 
 // ============================================================================
 // SessionStateKey
@@ -58,10 +58,10 @@ impl SessionStateKey {
     /// Validate and create a session state key.
     ///
     /// Returns an error if the key doesn't start with a valid prefix.
-    pub fn new(key: impl Into<String>) -> AppResult<Self> {
+    pub fn new(key: impl Into<String>) -> CoreResult<Self> {
         let key = key.into();
         if key.is_empty() {
-            return Err(AppError::validation("Session state key cannot be empty"));
+            return Err(CoreError::validation("Session state key cannot be empty"));
         }
         if SESSION_KEY_PREFIXES.iter().any(|p| key.starts_with(p)) {
             // Validate that there's something after the prefix
@@ -73,14 +73,14 @@ impl SessionStateKey {
                 &key[5..]
             };
             if after_prefix.is_empty() {
-                return Err(AppError::validation(format!(
+                return Err(CoreError::validation(format!(
                     "Session state key must have a name after the prefix. Got: '{}'",
                     key
                 )));
             }
             Ok(Self(key))
         } else {
-            Err(AppError::validation(format!(
+            Err(CoreError::validation(format!(
                 "Session state key must start with 'user:', 'app:', or 'temp:'. Got: '{}'",
                 key
             )))
@@ -88,28 +88,28 @@ impl SessionStateKey {
     }
 
     /// Create a user-scoped key.
-    pub fn user(name: impl Into<String>) -> AppResult<Self> {
+    pub fn user(name: impl Into<String>) -> CoreResult<Self> {
         let name = name.into();
         if name.is_empty() {
-            return Err(AppError::validation("Key name cannot be empty"));
+            return Err(CoreError::validation("Key name cannot be empty"));
         }
         Ok(Self(format!("user:{}", name)))
     }
 
     /// Create an app-scoped key.
-    pub fn app(name: impl Into<String>) -> AppResult<Self> {
+    pub fn app(name: impl Into<String>) -> CoreResult<Self> {
         let name = name.into();
         if name.is_empty() {
-            return Err(AppError::validation("Key name cannot be empty"));
+            return Err(CoreError::validation("Key name cannot be empty"));
         }
         Ok(Self(format!("app:{}", name)))
     }
 
     /// Create a temp-scoped key.
-    pub fn temp(name: impl Into<String>) -> AppResult<Self> {
+    pub fn temp(name: impl Into<String>) -> CoreResult<Self> {
         let name = name.into();
         if name.is_empty() {
-            return Err(AppError::validation("Key name cannot be empty"));
+            return Err(CoreError::validation("Key name cannot be empty"));
         }
         Ok(Self(format!("temp:{}", name)))
     }
@@ -287,7 +287,7 @@ impl AgentConfigBuilder {
     }
 
     /// Build and validate the configuration.
-    pub fn build(self) -> AppResult<BuiltAgentConfig> {
+    pub fn build(self) -> CoreResult<BuiltAgentConfig> {
         let max_iterations = self.max_iterations.unwrap_or(50);
         let max_total_tokens = self.max_total_tokens.unwrap_or(1_000_000);
         let streaming = self.streaming.unwrap_or(true);
@@ -295,19 +295,19 @@ impl AgentConfigBuilder {
 
         // Validation
         if max_iterations == 0 {
-            return Err(AppError::validation("max_iterations must be > 0"));
+            return Err(CoreError::validation("max_iterations must be > 0"));
         }
         if max_iterations > 10_000 {
-            return Err(AppError::validation(
+            return Err(CoreError::validation(
                 "max_iterations must be <= 10000",
             ));
         }
         if max_total_tokens == 0 {
-            return Err(AppError::validation("max_total_tokens must be > 0"));
+            return Err(CoreError::validation("max_total_tokens must be > 0"));
         }
         if let Some(t) = self.temperature {
             if !(0.0..=2.0).contains(&t) {
-                return Err(AppError::validation(
+                return Err(CoreError::validation(
                     "temperature must be between 0.0 and 2.0",
                 ));
             }
@@ -395,23 +395,23 @@ impl ExecutionConfigBuilder {
     }
 
     /// Build and validate the configuration.
-    pub fn build(self) -> AppResult<BuiltExecutionConfig> {
+    pub fn build(self) -> CoreResult<BuiltExecutionConfig> {
         let session_id = self
             .session_id
-            .ok_or_else(|| AppError::validation("session_id is required"))?;
+            .ok_or_else(|| CoreError::validation("session_id is required"))?;
         let project_root = self
             .project_root
-            .ok_or_else(|| AppError::validation("project_root is required"))?;
+            .ok_or_else(|| CoreError::validation("project_root is required"))?;
 
         if session_id.is_empty() {
-            return Err(AppError::validation("session_id cannot be empty"));
+            return Err(CoreError::validation("session_id cannot be empty"));
         }
 
         let max_iterations = self.max_iterations.unwrap_or(50);
         let max_total_tokens = self.max_total_tokens.unwrap_or(1_000_000);
 
         if max_iterations == 0 {
-            return Err(AppError::validation("max_iterations must be > 0"));
+            return Err(CoreError::validation("max_iterations must be > 0"));
         }
 
         Ok(BuiltExecutionConfig {
@@ -486,9 +486,9 @@ impl QualityGateConfigBuilder {
     }
 
     /// Build and validate the configuration.
-    pub fn build(self) -> AppResult<BuiltQualityGateConfig> {
+    pub fn build(self) -> CoreResult<BuiltQualityGateConfig> {
         if self.gates.is_empty() {
-            return Err(AppError::validation(
+            return Err(CoreError::validation(
                 "At least one quality gate must be specified",
             ));
         }
@@ -497,7 +497,7 @@ impl QualityGateConfigBuilder {
         let mut seen = std::collections::HashSet::new();
         for gate in &self.gates {
             if !seen.insert(gate.as_str()) {
-                return Err(AppError::validation(format!(
+                return Err(CoreError::validation(format!(
                     "Duplicate quality gate: '{}'",
                     gate
                 )));
@@ -506,7 +506,7 @@ impl QualityGateConfigBuilder {
 
         let timeout = self.timeout_secs.unwrap_or(300);
         if timeout == 0 {
-            return Err(AppError::validation("timeout_secs must be > 0"));
+            return Err(CoreError::validation("timeout_secs must be > 0"));
         }
 
         Ok(BuiltQualityGateConfig {
@@ -525,7 +525,7 @@ impl QualityGateConfigBuilder {
 mod tests {
     use super::*;
 
-    // ── SessionStateKey tests ────────────────────────────────────────
+    // -- SessionStateKey tests --
 
     #[test]
     fn test_session_state_key_valid_prefixes() {
@@ -622,7 +622,7 @@ mod tests {
         assert_eq!(map.get(&key2), Some(&Value::Bool(false)));
     }
 
-    // ── SessionState tests ───────────────────────────────────────────
+    // -- SessionState tests --
 
     #[test]
     fn test_session_state_basic_operations() {
@@ -684,7 +684,7 @@ mod tests {
         assert_eq!(temp_keys.len(), 1);
     }
 
-    // ── AgentConfigBuilder tests ─────────────────────────────────────
+    // -- AgentConfigBuilder tests --
 
     #[test]
     fn test_agent_config_builder_defaults() {
@@ -741,7 +741,7 @@ mod tests {
         assert!(AgentConfigBuilder::new().temperature(2.0).build().is_ok());
     }
 
-    // ── ExecutionConfigBuilder tests ─────────────────────────────────
+    // -- ExecutionConfigBuilder tests --
 
     #[test]
     fn test_execution_config_builder_valid() {
@@ -811,7 +811,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── QualityGateConfigBuilder tests ───────────────────────────────
+    // -- QualityGateConfigBuilder tests --
 
     #[test]
     fn test_quality_gate_config_builder_basic() {
@@ -879,7 +879,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── BuiltAgentConfig serialization tests ─────────────────────────
+    // -- BuiltAgentConfig serialization tests --
 
     #[test]
     fn test_built_agent_config_serialization() {

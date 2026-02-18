@@ -1,52 +1,56 @@
 //! Core Traits Module
 //!
-//! Defines the foundational trait hierarchy for the Plan Cascade Desktop backend
-//! architecture. These traits represent the intended crate boundaries of a future
-//! workspace restructuring:
+//! Re-exports foundational types from the `plan-cascade-core` workspace crate
+//! and provides adapter/bridge modules that depend on application-level types.
 //!
-//! - `ExecutionContext` - Immutable, shared context for all execution scopes
-//! - `ToolContext` - Extends ExecutionContext for tool-level execution
-//! - `OrchestratorContext` - Extends ExecutionContext for orchestrator-level control
+//! ## Extracted to `plan-cascade-core` crate
 //!
-//! Also includes:
-//! - Unified `ToolDefinition`/`ToolExecutable`/`UnifiedTool` traits
-//! - `EventActions` for immutable event + side-effect actions pattern
-//! - `ContextCompactor` trait for pluggable context compaction
-//! - Builder patterns for configuration structs
+//! The following modules now live in the standalone core crate:
+//! - `context` - ExecutionContext trait, ToolContext, OrchestratorContext
+//! - `tool_trait` - ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry
+//! - `builders` - AgentConfigBuilder, ExecutionConfigBuilder, QualityGateConfigBuilder, SessionState
+//! - `error` - CoreError, CoreResult
 //!
-//! Module organization mirrors intended crate boundaries:
-//! - `core/` = core crate (traits, error types, context hierarchy)
-//! - Tools, LLM, orchestrator etc. would be separate crates importing from core.
+//! ## Remaining in main crate (cross-service dependencies)
+//!
+//! - `adapter` - Bridges core traits with existing Tool/ToolRegistry/ToolExecutionContext
+//! - `compaction` - Pluggable context compaction (depends on llm::types::Message)
+//! - `event_actions` - Event + Actions pattern (depends on agent_composer::types::AgentEvent)
 
+// ── Modules that remain in this crate (cross-service dependencies) ─────
 pub mod adapter;
-pub mod builders;
 pub mod compaction;
-pub mod context;
 pub mod event_actions;
-pub mod tool_trait;
 
-// ── Context Hierarchy ────────────────────────────────────────────────
-pub use context::{ExecutionContext, OrchestratorContext, ToolContext};
+// ── Re-exports from plan-cascade-core c────────────────────────────────
+// These provide backward compatibility so that `crate::services::core::*`
+// continues to work across the codebase without changing every import.
 
-// ── Unified Tool Trait ───────────────────────────────────────────────
-pub use tool_trait::{ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry};
+// Context hierarchy
+pub use plan_cascade_core::context;
+pub use plan_cascade_core::context::{ExecutionContext, OrchestratorContext, ToolContext};
 
-// ── Adapters (Core <-> Existing Layer Bridge) ────────────────────────
-pub use adapter::{ToolAdapter, UnifiedToolAdapter};
+// Unified tool traits
+pub use plan_cascade_core::tool_trait;
+pub use plan_cascade_core::tool_trait::{ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry};
 
-// ── Event + Actions ──────────────────────────────────────────────────
+// Adapters (Core <-> Existing Layer Bridge)
+pub use adapter::{import_legacy_tools, ToolAdapter, UnifiedToolAdapter};
+
+// Event + Actions
 pub use event_actions::{
     AgentEventWithActions, CheckpointRequest, EventActions, QualityGateActionResult,
 };
 
-// ── Pluggable Compaction ─────────────────────────────────────────────
+// Pluggable Compaction
 pub use compaction::{
     CompactionConfig, CompactionResult, CompactionStrategy, ContextCompactor,
     LlmSummaryCompactor, SlidingWindowCompactor,
 };
 
-// ── Builder Pattern & Session State ──────────────────────────────────
-pub use builders::{
+// Builder Pattern & Session State
+pub use plan_cascade_core::builders;
+pub use plan_cascade_core::builders::{
     AgentConfigBuilder, BuiltAgentConfig, BuiltExecutionConfig, BuiltQualityGateConfig,
     ExecutionConfigBuilder, QualityGateConfigBuilder, SessionState, SessionStateKey,
 };

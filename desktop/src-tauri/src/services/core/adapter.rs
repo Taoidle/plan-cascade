@@ -18,8 +18,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::services::core::context::ToolContext;
-use crate::services::core::tool_trait::{ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry};
+use plan_cascade_core::context::ToolContext;
+use plan_cascade_core::tool_trait::{ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry};
+use plan_cascade_core::error::{CoreError, CoreResult};
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext, ToolRegistry};
 use crate::services::llm::types::ParameterSchema;
@@ -53,7 +54,23 @@ pub fn value_to_parameter_schema(value: &Value) -> ParameterSchema {
     })
 }
 
-/// Convert a `ToolResult` (old system) to `AppResult<Value>` (new system).
+/// Convert a `ToolResult` (old system) to `CoreResult<Value>` (new system).
+///
+/// Maps successful results to `Ok(Value::String(...))` and errors to
+/// `Err(CoreError::Command(...))`.
+pub fn tool_result_to_core_result(result: ToolResult) -> CoreResult<Value> {
+    if result.success {
+        Ok(Value::String(
+            result.output.unwrap_or_default(),
+        ))
+    } else {
+        Err(CoreError::command(
+            result.error.unwrap_or_else(|| "Unknown tool error".to_string()),
+        ))
+    }
+}
+
+/// Convert a `ToolResult` (old system) to `AppResult<Value>` (app-level).
 ///
 /// Maps successful results to `Ok(Value::String(...))` and errors to
 /// `Err(AppError::Command(...))`.
@@ -69,7 +86,23 @@ pub fn tool_result_to_app_result(result: ToolResult) -> AppResult<Value> {
     }
 }
 
-/// Convert an `AppResult<Value>` (new system) to a `ToolResult` (old system).
+/// Convert a `CoreResult<Value>` (new system) to a `ToolResult` (old system).
+///
+/// Maps `Ok(Value)` to a successful `ToolResult` and `Err(CoreError)` to an error `ToolResult`.
+pub fn core_result_to_tool_result(result: CoreResult<Value>) -> ToolResult {
+    match result {
+        Ok(value) => {
+            let output = match value {
+                Value::String(s) => s,
+                other => other.to_string(),
+            };
+            ToolResult::ok(output)
+        }
+        Err(err) => ToolResult::err(err.to_string()),
+    }
+}
+
+/// Convert an `AppResult<Value>` (app-level) to a `ToolResult` (old system).
 ///
 /// Maps `Ok(Value)` to a successful `ToolResult` and `Err(AppError)` to an error `ToolResult`.
 pub fn app_result_to_tool_result(result: AppResult<Value>) -> ToolResult {
@@ -105,7 +138,7 @@ pub fn tool_execution_context_to_tool_context(ctx: &ToolExecutionContext) -> Too
 /// references that don't exist in the new context system. The project_root is
 /// used as the working directory, and all optional services are set to None.
 pub fn tool_context_to_tool_execution_context(ctx: &ToolContext) -> ToolExecutionContext {
-    use crate::services::core::context::ExecutionContext;
+    use plan_cascade_core::context::ExecutionContext;
 
     let project_root = ctx.project_root().to_path_buf();
     ToolExecutionContext {
@@ -176,10 +209,10 @@ impl ToolDefinitionTrait for ToolAdapter {
 
 #[async_trait]
 impl ToolExecutable for ToolAdapter {
-    async fn execute(&self, ctx: &ToolContext, args: Value) -> AppResult<Value> {
+    async fn execute(&self, ctx: &ToolContext, args: Value) -> CoreResult<Value> {
         let legacy_ctx = tool_context_to_tool_execution_context(ctx);
         let result = self.inner.execute(&legacy_ctx, args).await;
-        tool_result_to_app_result(result)
+        tool_result_to_core_result(result)
     }
 }
 
@@ -234,7 +267,7 @@ impl Tool for UnifiedToolAdapter {
     async fn execute(&self, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         let new_ctx = tool_execution_context_to_tool_context(ctx);
         let result = self.inner.execute(&new_ctx, args).await;
-        app_result_to_tool_result(result)
+        core_result_to_tool_result(result)
     }
 }
 
@@ -242,17 +275,19 @@ impl Tool for UnifiedToolAdapter {
 // Registry Import
 // ============================================================================
 
-impl UnifiedToolRegistry {
-    /// Import all tools from an existing `ToolRegistry` by wrapping each in a `ToolAdapter`.
-    ///
-    /// This allows bulk migration of existing tools to the new registry system.
-    /// Tools are registered in their original order.
-    pub fn import_from_legacy(&mut self, legacy: &ToolRegistry) {
-        for name in legacy.names() {
-            if let Some(tool) = legacy.get(&name) {
-                let adapter = Arc::new(ToolAdapter::new(tool)) as Arc<dyn UnifiedTool>;
-                self.register(adapter);
-            }
+/// Import all tools from an existing `ToolRegistry` into a `UnifiedToolRegistry`
+/// by wrapping each in a `ToolAdapter`.
+///
+/// This allows bulk migration of existing tools to the new registry system.
+/// Tools are registered in their original order.
+///
+/// This is a free function rather than an inherent method because
+/// `UnifiedToolRegistry` is defined in the `plan-cascade-core` crate.
+pub fn import_legacy_tools(registry: &mut UnifiedToolRegistry, legacy: &ToolRegistry) {
+    for name in legacy.names() {
+        if let Some(tool) = legacy.get(&name) {
+            let adapter = Arc::new(ToolAdapter::new(tool)) as Arc<dyn UnifiedTool>;
+            registry.register(adapter);
         }
     }
 }
@@ -265,7 +300,7 @@ impl UnifiedToolRegistry {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use crate::services::core::context::ExecutionContext;
+    use plan_cascade_core::context::ExecutionContext;
 
     // ── Mock Old Tool ──────────────────────────────────────────────────
 
@@ -380,7 +415,7 @@ mod tests {
 
     #[async_trait]
     impl ToolExecutable for MockNewTool {
-        async fn execute(&self, _ctx: &ToolContext, args: Value) -> AppResult<Value> {
+        async fn execute(&self, _ctx: &ToolContext, args: Value) -> CoreResult<Value> {
             let input = args
                 .get("input")
                 .and_then(|v| v.as_str())
@@ -407,8 +442,8 @@ mod tests {
 
     #[async_trait]
     impl ToolExecutable for FailingNewTool {
-        async fn execute(&self, _ctx: &ToolContext, _args: Value) -> AppResult<Value> {
-            Err(AppError::command("new tool failed"))
+        async fn execute(&self, _ctx: &ToolContext, _args: Value) -> CoreResult<Value> {
+            Err(CoreError::command("new tool failed"))
         }
     }
 
@@ -655,7 +690,7 @@ mod tests {
     fn test_import_from_legacy_empty() {
         let legacy = ToolRegistry::new();
         let mut unified = UnifiedToolRegistry::new();
-        unified.import_from_legacy(&legacy);
+        import_legacy_tools(&mut unified, &legacy);
         assert!(unified.is_empty());
     }
 
@@ -667,7 +702,7 @@ mod tests {
         legacy.register(Arc::new(MockOldTool::new("Grep", "Search files")));
 
         let mut unified = UnifiedToolRegistry::new();
-        unified.import_from_legacy(&legacy);
+        import_legacy_tools(&mut unified, &legacy);
 
         assert_eq!(unified.len(), 3);
         assert!(unified.contains("Read"));
@@ -682,7 +717,7 @@ mod tests {
         legacy.register(Arc::new(MockOldTool::new("Write", "Write files")));
 
         let mut unified = UnifiedToolRegistry::new();
-        unified.import_from_legacy(&legacy);
+        import_legacy_tools(&mut unified, &legacy);
 
         let names = unified.names();
         assert_eq!(names, vec!["Read", "Write"]);
@@ -694,7 +729,7 @@ mod tests {
         legacy.register(Arc::new(MockOldTool::new("Echo", "Echoes")));
 
         let mut unified = UnifiedToolRegistry::new();
-        unified.import_from_legacy(&legacy);
+        import_legacy_tools(&mut unified, &legacy);
 
         let ctx = make_tool_context();
         let result = unified

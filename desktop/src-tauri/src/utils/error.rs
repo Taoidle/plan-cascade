@@ -105,6 +105,25 @@ impl From<AppError> for String {
     }
 }
 
+/// Convert CoreError (from plan-cascade-core crate) to AppError.
+///
+/// This allows `?` operator to work seamlessly when calling core-crate
+/// functions from application code that returns `AppResult`.
+impl From<plan_cascade_core::CoreError> for AppError {
+    fn from(err: plan_cascade_core::CoreError) -> Self {
+        match err {
+            plan_cascade_core::CoreError::Config(msg) => AppError::Config(msg),
+            plan_cascade_core::CoreError::Io(e) => AppError::Io(e),
+            plan_cascade_core::CoreError::Serialization(e) => AppError::Serialization(e),
+            plan_cascade_core::CoreError::Command(msg) => AppError::Command(msg),
+            plan_cascade_core::CoreError::Validation(msg) => AppError::Validation(msg),
+            plan_cascade_core::CoreError::NotFound(msg) => AppError::NotFound(msg),
+            plan_cascade_core::CoreError::Parse(msg) => AppError::Parse(msg),
+            plan_cascade_core::CoreError::Internal(msg) => AppError::Internal(msg),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
