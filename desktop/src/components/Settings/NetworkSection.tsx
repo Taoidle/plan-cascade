@@ -36,6 +36,14 @@ const EMBEDDING_PROVIDERS = [
   { id: 'embedding_ollama', defaultStrategy: 'no_proxy' as ProxyStrategy },
 ];
 
+const WEBHOOK_PROVIDERS = [
+  { id: 'webhook_slack', defaultStrategy: 'use_global' as ProxyStrategy },
+  { id: 'webhook_feishu', defaultStrategy: 'no_proxy' as ProxyStrategy },
+  { id: 'webhook_telegram', defaultStrategy: 'use_global' as ProxyStrategy },
+  { id: 'webhook_discord', defaultStrategy: 'use_global' as ProxyStrategy },
+  { id: 'webhook_custom', defaultStrategy: 'use_global' as ProxyStrategy },
+];
+
 const CLAUDE_CODE_PROVIDER = {
   id: 'claude_code',
   defaultStrategy: 'use_global' as ProxyStrategy,
@@ -452,6 +460,24 @@ export function NetworkSection() {
               onStrategyChange={handleStrategyChange}
               t={t}
             />
+          </div>
+        </div>
+
+        {/* Webhook Providers */}
+        <div>
+          <h4 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">
+            {t('network.providerProxy.webhookProviders', 'Webhook Channels')}
+          </h4>
+          <div className="space-y-2">
+            {WEBHOOK_PROVIDERS.map(({ id }) => (
+              <ProviderStrategyRow
+                key={id}
+                providerId={id}
+                strategy={providerStrategies[id]}
+                onStrategyChange={handleStrategyChange}
+                t={t}
+              />
+            ))}
           </div>
         </div>
       </div>

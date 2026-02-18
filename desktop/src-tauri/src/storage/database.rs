@@ -715,6 +715,53 @@ impl Database {
             [],
         )?;
 
+        // ====================================================================
+        // Webhook Notification System tables
+        // ====================================================================
+
+        // Webhook channel configurations
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS webhook_channels (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                channel_type TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                url TEXT NOT NULL,
+                scope_type TEXT NOT NULL DEFAULT 'global',
+                scope_sessions TEXT,
+                events TEXT NOT NULL,
+                template TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        // Webhook delivery history (for audit and retry)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS webhook_deliveries (
+                id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL,
+                status_code INTEGER,
+                response_body TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_attempt_at TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (channel_id) REFERENCES webhook_channels(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        // Index for delivery retry queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status
+             ON webhook_deliveries(status, last_attempt_at)",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -1223,6 +1270,362 @@ impl Database {
             last_checked,
             created_at,
             updated_at,
+        })
+    }
+
+    // ========================================================================
+    // Webhook Operations
+    // ========================================================================
+
+    /// Insert a new webhook channel configuration.
+    pub fn insert_webhook_channel(
+        &self,
+        config: &crate::services::webhook::types::WebhookChannelConfig,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+
+        let scope_type = match &config.scope {
+            crate::services::webhook::types::WebhookScope::Global => "global",
+            crate::services::webhook::types::WebhookScope::Sessions(_) => "sessions",
+        };
+        let scope_sessions = match &config.scope {
+            crate::services::webhook::types::WebhookScope::Global => None,
+            crate::services::webhook::types::WebhookScope::Sessions(ids) => {
+                Some(serde_json::to_string(ids).unwrap_or_default())
+            }
+        };
+        let events_json = serde_json::to_string(&config.events).unwrap_or_default();
+
+        conn.execute(
+            "INSERT INTO webhook_channels (id, name, channel_type, enabled, url, scope_type, scope_sessions, events, template, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                config.id,
+                config.name,
+                config.channel_type.to_string(),
+                config.enabled as i32,
+                config.url,
+                scope_type,
+                scope_sessions,
+                events_json,
+                config.template,
+                config.created_at,
+                config.updated_at,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get a webhook channel by ID.
+    pub fn get_webhook_channel(
+        &self,
+        id: &str,
+    ) -> AppResult<Option<crate::services::webhook::types::WebhookChannelConfig>> {
+        let conn = self.get_connection()?;
+
+        let result = conn.query_row(
+            "SELECT id, name, channel_type, enabled, url, scope_type, scope_sessions, events, template, created_at, updated_at
+             FROM webhook_channels WHERE id = ?1",
+            params![id],
+            |row| Self::row_to_webhook_channel(row),
+        );
+
+        match result {
+            Ok(config) => Ok(Some(config)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// List all webhook channels.
+    pub fn list_webhook_channels(
+        &self,
+    ) -> AppResult<Vec<crate::services::webhook::types::WebhookChannelConfig>> {
+        let conn = self.get_connection()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, name, channel_type, enabled, url, scope_type, scope_sessions, events, template, created_at, updated_at
+             FROM webhook_channels ORDER BY created_at DESC",
+        )?;
+
+        let channels = stmt
+            .query_map([], |row| Self::row_to_webhook_channel(row))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(channels)
+    }
+
+    /// Update a webhook channel configuration.
+    pub fn update_webhook_channel(
+        &self,
+        config: &crate::services::webhook::types::WebhookChannelConfig,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+
+        let scope_type = match &config.scope {
+            crate::services::webhook::types::WebhookScope::Global => "global",
+            crate::services::webhook::types::WebhookScope::Sessions(_) => "sessions",
+        };
+        let scope_sessions = match &config.scope {
+            crate::services::webhook::types::WebhookScope::Global => None,
+            crate::services::webhook::types::WebhookScope::Sessions(ids) => {
+                Some(serde_json::to_string(ids).unwrap_or_default())
+            }
+        };
+        let events_json = serde_json::to_string(&config.events).unwrap_or_default();
+
+        conn.execute(
+            "UPDATE webhook_channels SET name = ?2, channel_type = ?3, enabled = ?4, url = ?5,
+             scope_type = ?6, scope_sessions = ?7, events = ?8, template = ?9, updated_at = ?10
+             WHERE id = ?1",
+            params![
+                config.id,
+                config.name,
+                config.channel_type.to_string(),
+                config.enabled as i32,
+                config.url,
+                scope_type,
+                scope_sessions,
+                events_json,
+                config.template,
+                config.updated_at,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Delete a webhook channel by ID. Deliveries are cascade-deleted.
+    pub fn delete_webhook_channel(&self, id: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        // Enable foreign keys for cascade delete
+        conn.execute_batch("PRAGMA foreign_keys = ON")?;
+        conn.execute("DELETE FROM webhook_channels WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Insert a webhook delivery record.
+    pub fn insert_webhook_delivery(
+        &self,
+        delivery: &crate::services::webhook::types::WebhookDelivery,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+
+        let payload_json = serde_json::to_string(&delivery.payload).unwrap_or_default();
+
+        conn.execute(
+            "INSERT INTO webhook_deliveries (id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                delivery.id,
+                delivery.channel_id,
+                delivery.event_type.to_string(),
+                payload_json,
+                delivery.status.to_string(),
+                delivery.status_code,
+                delivery.response_body,
+                delivery.attempts,
+                delivery.last_attempt_at,
+                delivery.created_at,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// List webhook deliveries with optional channel_id filter and pagination.
+    pub fn list_webhook_deliveries(
+        &self,
+        channel_id: Option<&str>,
+        limit: u32,
+        offset: u32,
+    ) -> AppResult<Vec<crate::services::webhook::types::WebhookDelivery>> {
+        let conn = self.get_connection()?;
+
+        match channel_id {
+            Some(cid) => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at
+                     FROM webhook_deliveries WHERE channel_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+                )?;
+                let deliveries = stmt
+                    .query_map(params![cid, limit, offset], |row| {
+                        Self::row_to_webhook_delivery(row)
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                Ok(deliveries)
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at
+                     FROM webhook_deliveries ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+                )?;
+                let deliveries = stmt
+                    .query_map(params![limit, offset], |row| {
+                        Self::row_to_webhook_delivery(row)
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                Ok(deliveries)
+            }
+        }
+    }
+
+    /// Get failed deliveries eligible for retry (attempts < max_attempts).
+    pub fn get_failed_deliveries(
+        &self,
+        max_attempts: u32,
+    ) -> AppResult<Vec<crate::services::webhook::types::WebhookDelivery>> {
+        let conn = self.get_connection()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at
+             FROM webhook_deliveries
+             WHERE status = 'failed' AND attempts < ?1
+             ORDER BY last_attempt_at ASC",
+        )?;
+
+        let deliveries = stmt
+            .query_map(params![max_attempts], |row| {
+                Self::row_to_webhook_delivery(row)
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(deliveries)
+    }
+
+    /// Update a webhook delivery status.
+    pub fn update_webhook_delivery_status(
+        &self,
+        delivery: &crate::services::webhook::types::WebhookDelivery,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+
+        conn.execute(
+            "UPDATE webhook_deliveries SET status = ?2, status_code = ?3, response_body = ?4, attempts = ?5, last_attempt_at = ?6
+             WHERE id = ?1",
+            params![
+                delivery.id,
+                delivery.status.to_string(),
+                delivery.status_code,
+                delivery.response_body,
+                delivery.attempts,
+                delivery.last_attempt_at,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get a single delivery by ID.
+    pub fn get_webhook_delivery(
+        &self,
+        id: &str,
+    ) -> AppResult<Option<crate::services::webhook::types::WebhookDelivery>> {
+        let conn = self.get_connection()?;
+
+        let result = conn.query_row(
+            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at
+             FROM webhook_deliveries WHERE id = ?1",
+            params![id],
+            |row| Self::row_to_webhook_delivery(row),
+        );
+
+        match result {
+            Ok(delivery) => Ok(Some(delivery)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// Helper to convert a database row to WebhookChannelConfig.
+    fn row_to_webhook_channel(
+        row: &rusqlite::Row,
+    ) -> rusqlite::Result<crate::services::webhook::types::WebhookChannelConfig> {
+        let id: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let channel_type_str: String = row.get(2)?;
+        let enabled: i32 = row.get(3)?;
+        let url: String = row.get(4)?;
+        let scope_type: String = row.get(5)?;
+        let scope_sessions_json: Option<String> = row.get(6)?;
+        let events_json: String = row.get(7)?;
+        let template: Option<String> = row.get(8)?;
+        let created_at: String = row.get(9)?;
+        let updated_at: String = row.get(10)?;
+
+        let channel_type = crate::services::webhook::types::WebhookChannelType::from_str_value(
+            &channel_type_str,
+        )
+        .unwrap_or(crate::services::webhook::types::WebhookChannelType::Custom);
+
+        let scope = match scope_type.as_str() {
+            "sessions" => {
+                let ids: Vec<String> = scope_sessions_json
+                    .and_then(|json| serde_json::from_str(&json).ok())
+                    .unwrap_or_default();
+                crate::services::webhook::types::WebhookScope::Sessions(ids)
+            }
+            _ => crate::services::webhook::types::WebhookScope::Global,
+        };
+
+        let events: Vec<crate::services::webhook::types::WebhookEventType> =
+            serde_json::from_str(&events_json).unwrap_or_default();
+
+        Ok(crate::services::webhook::types::WebhookChannelConfig {
+            id,
+            name,
+            channel_type,
+            enabled: enabled != 0,
+            url,
+            secret: None, // Never loaded from DB, only from Keyring
+            scope,
+            events,
+            template,
+            created_at,
+            updated_at,
+        })
+    }
+
+    /// Helper to convert a database row to WebhookDelivery.
+    fn row_to_webhook_delivery(
+        row: &rusqlite::Row,
+    ) -> rusqlite::Result<crate::services::webhook::types::WebhookDelivery> {
+        let id: String = row.get(0)?;
+        let channel_id: String = row.get(1)?;
+        let event_type_str: String = row.get(2)?;
+        let payload_json: String = row.get(3)?;
+        let status_str: String = row.get(4)?;
+        let status_code: Option<u16> = row.get(5)?;
+        let response_body: Option<String> = row.get(6)?;
+        let attempts: u32 = row.get(7)?;
+        let last_attempt_at: String = row.get::<_, String>(8).unwrap_or_default();
+        let created_at: String = row.get(9)?;
+
+        let event_type: crate::services::webhook::types::WebhookEventType =
+            serde_json::from_str(&format!("\"{}\"", event_type_str))
+                .unwrap_or(crate::services::webhook::types::WebhookEventType::TaskComplete);
+
+        let payload: crate::services::webhook::types::WebhookPayload =
+            serde_json::from_str(&payload_json).unwrap_or_default();
+
+        let status = crate::services::webhook::types::DeliveryStatus::from_str_value(&status_str);
+
+        Ok(crate::services::webhook::types::WebhookDelivery {
+            id,
+            channel_id,
+            event_type,
+            payload,
+            status,
+            status_code,
+            response_body,
+            attempts,
+            last_attempt_at,
+            created_at,
         })
     }
 }
@@ -1904,5 +2307,343 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(count, 1, "guardrail_rules should still exist after double init");
+    }
+
+    // =========================================================================
+    // Webhook Notification System schema tests
+    // =========================================================================
+
+    #[test]
+    fn test_webhook_channels_table_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_channels'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "webhook_channels table should exist");
+    }
+
+    #[test]
+    fn test_webhook_deliveries_table_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_deliveries'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "webhook_deliveries table should exist");
+    }
+
+    #[test]
+    fn test_webhook_deliveries_status_index_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='webhook_deliveries'"
+        ).unwrap();
+        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(indexes.contains(&"idx_webhook_deliveries_status".to_string()));
+    }
+
+    #[test]
+    fn test_webhook_channel_crud() {
+        use crate::services::webhook::types::*;
+
+        let db = create_test_db().unwrap();
+
+        let config = WebhookChannelConfig {
+            id: "ch-001".to_string(),
+            name: "Test Slack".to_string(),
+            channel_type: WebhookChannelType::Slack,
+            enabled: true,
+            url: "https://hooks.slack.com/test".to_string(),
+            secret: None,
+            scope: WebhookScope::Global,
+            events: vec![WebhookEventType::TaskComplete, WebhookEventType::TaskFailed],
+            template: None,
+            created_at: "2026-02-18T12:00:00Z".to_string(),
+            updated_at: "2026-02-18T12:00:00Z".to_string(),
+        };
+
+        // Insert
+        db.insert_webhook_channel(&config).unwrap();
+
+        // Get by ID
+        let loaded = db.get_webhook_channel("ch-001").unwrap().unwrap();
+        assert_eq!(loaded.name, "Test Slack");
+        assert!(loaded.enabled);
+        assert_eq!(loaded.events.len(), 2);
+        assert!(matches!(loaded.scope, WebhookScope::Global));
+
+        // List
+        let all = db.list_webhook_channels().unwrap();
+        assert_eq!(all.len(), 1);
+
+        // Update
+        let mut updated = loaded;
+        updated.name = "Updated Slack".to_string();
+        updated.enabled = false;
+        updated.updated_at = "2026-02-18T13:00:00Z".to_string();
+        db.update_webhook_channel(&updated).unwrap();
+
+        let loaded = db.get_webhook_channel("ch-001").unwrap().unwrap();
+        assert_eq!(loaded.name, "Updated Slack");
+        assert!(!loaded.enabled);
+
+        // Delete
+        db.delete_webhook_channel("ch-001").unwrap();
+        let loaded = db.get_webhook_channel("ch-001").unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn test_webhook_channel_scope_sessions() {
+        use crate::services::webhook::types::*;
+
+        let db = create_test_db().unwrap();
+
+        let config = WebhookChannelConfig {
+            id: "ch-002".to_string(),
+            name: "Session Scoped".to_string(),
+            channel_type: WebhookChannelType::Custom,
+            enabled: true,
+            url: "https://example.com/webhook".to_string(),
+            secret: None,
+            scope: WebhookScope::Sessions(vec!["s1".to_string(), "s2".to_string()]),
+            events: vec![WebhookEventType::TaskComplete],
+            template: Some("custom template".to_string()),
+            created_at: "2026-02-18T12:00:00Z".to_string(),
+            updated_at: "2026-02-18T12:00:00Z".to_string(),
+        };
+
+        db.insert_webhook_channel(&config).unwrap();
+
+        let loaded = db.get_webhook_channel("ch-002").unwrap().unwrap();
+        match &loaded.scope {
+            WebhookScope::Sessions(ids) => {
+                assert_eq!(ids.len(), 2);
+                assert!(ids.contains(&"s1".to_string()));
+                assert!(ids.contains(&"s2".to_string()));
+            }
+            _ => panic!("Expected Sessions scope"),
+        }
+        assert_eq!(loaded.template, Some("custom template".to_string()));
+    }
+
+    #[test]
+    fn test_webhook_delivery_crud() {
+        use crate::services::webhook::types::*;
+
+        let db = create_test_db().unwrap();
+
+        // First create a channel
+        let channel = WebhookChannelConfig {
+            id: "ch-001".to_string(),
+            name: "Test".to_string(),
+            channel_type: WebhookChannelType::Slack,
+            enabled: true,
+            url: "https://hooks.slack.com/test".to_string(),
+            secret: None,
+            scope: WebhookScope::Global,
+            events: vec![WebhookEventType::TaskComplete],
+            template: None,
+            created_at: "2026-02-18T12:00:00Z".to_string(),
+            updated_at: "2026-02-18T12:00:00Z".to_string(),
+        };
+        db.insert_webhook_channel(&channel).unwrap();
+
+        // Insert delivery
+        let payload = WebhookPayload {
+            event_type: WebhookEventType::TaskComplete,
+            summary: "Test delivery".to_string(),
+            timestamp: "2026-02-18T12:00:00Z".to_string(),
+            ..Default::default()
+        };
+        let delivery = WebhookDelivery::new(&channel, &payload);
+        let delivery_id = delivery.id.clone();
+
+        db.insert_webhook_delivery(&delivery).unwrap();
+
+        // Get by ID
+        let loaded = db.get_webhook_delivery(&delivery_id).unwrap().unwrap();
+        assert_eq!(loaded.channel_id, "ch-001");
+        assert_eq!(loaded.status, DeliveryStatus::Pending);
+
+        // List with pagination
+        let all = db.list_webhook_deliveries(None, 10, 0).unwrap();
+        assert_eq!(all.len(), 1);
+
+        // List filtered by channel
+        let filtered = db.list_webhook_deliveries(Some("ch-001"), 10, 0).unwrap();
+        assert_eq!(filtered.len(), 1);
+
+        let empty = db.list_webhook_deliveries(Some("ch-999"), 10, 0).unwrap();
+        assert_eq!(empty.len(), 0);
+    }
+
+    #[test]
+    fn test_webhook_delivery_pagination() {
+        use crate::services::webhook::types::*;
+
+        let db = create_test_db().unwrap();
+
+        let channel = WebhookChannelConfig {
+            id: "ch-001".to_string(),
+            name: "Test".to_string(),
+            channel_type: WebhookChannelType::Slack,
+            enabled: true,
+            url: "https://hooks.slack.com/test".to_string(),
+            secret: None,
+            scope: WebhookScope::Global,
+            events: vec![WebhookEventType::TaskComplete],
+            template: None,
+            created_at: "2026-02-18T12:00:00Z".to_string(),
+            updated_at: "2026-02-18T12:00:00Z".to_string(),
+        };
+        db.insert_webhook_channel(&channel).unwrap();
+
+        // Insert 5 deliveries
+        for i in 0..5 {
+            let payload = WebhookPayload {
+                event_type: WebhookEventType::TaskComplete,
+                summary: format!("Delivery {}", i),
+                timestamp: "2026-02-18T12:00:00Z".to_string(),
+                ..Default::default()
+            };
+            let delivery = WebhookDelivery::new(&channel, &payload);
+            db.insert_webhook_delivery(&delivery).unwrap();
+        }
+
+        // Get first page
+        let page1 = db.list_webhook_deliveries(None, 2, 0).unwrap();
+        assert_eq!(page1.len(), 2);
+
+        // Get second page
+        let page2 = db.list_webhook_deliveries(None, 2, 2).unwrap();
+        assert_eq!(page2.len(), 2);
+
+        // Get third page
+        let page3 = db.list_webhook_deliveries(None, 2, 4).unwrap();
+        assert_eq!(page3.len(), 1);
+    }
+
+    #[test]
+    fn test_webhook_delivery_cascade_delete() {
+        use crate::services::webhook::types::*;
+
+        let db = create_test_db().unwrap();
+
+        // Enable foreign keys explicitly
+        {
+            let conn = db.get_connection().unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        }
+
+        let channel = WebhookChannelConfig {
+            id: "ch-cascade".to_string(),
+            name: "Cascade Test".to_string(),
+            channel_type: WebhookChannelType::Custom,
+            enabled: true,
+            url: "https://example.com/webhook".to_string(),
+            secret: None,
+            scope: WebhookScope::Global,
+            events: vec![WebhookEventType::TaskComplete],
+            template: None,
+            created_at: "2026-02-18T12:00:00Z".to_string(),
+            updated_at: "2026-02-18T12:00:00Z".to_string(),
+        };
+        db.insert_webhook_channel(&channel).unwrap();
+
+        // Insert deliveries
+        for _ in 0..3 {
+            let payload = WebhookPayload::default();
+            let delivery = WebhookDelivery::new(&channel, &payload);
+            db.insert_webhook_delivery(&delivery).unwrap();
+        }
+
+        // Verify deliveries exist
+        let deliveries = db.list_webhook_deliveries(Some("ch-cascade"), 10, 0).unwrap();
+        assert_eq!(deliveries.len(), 3);
+
+        // Delete channel — deliveries should cascade
+        db.delete_webhook_channel("ch-cascade").unwrap();
+
+        let deliveries = db.list_webhook_deliveries(Some("ch-cascade"), 10, 0).unwrap();
+        assert_eq!(deliveries.len(), 0);
+    }
+
+    #[test]
+    fn test_webhook_failed_deliveries_query() {
+        use crate::services::webhook::types::*;
+
+        let db = create_test_db().unwrap();
+
+        let channel = WebhookChannelConfig {
+            id: "ch-001".to_string(),
+            name: "Test".to_string(),
+            channel_type: WebhookChannelType::Slack,
+            enabled: true,
+            url: "https://hooks.slack.com/test".to_string(),
+            secret: None,
+            scope: WebhookScope::Global,
+            events: vec![WebhookEventType::TaskComplete],
+            template: None,
+            created_at: "2026-02-18T12:00:00Z".to_string(),
+            updated_at: "2026-02-18T12:00:00Z".to_string(),
+        };
+        db.insert_webhook_channel(&channel).unwrap();
+
+        // Insert a failed delivery with 1 attempt
+        let payload = WebhookPayload::default();
+        let mut delivery = WebhookDelivery::new(&channel, &payload);
+        delivery.status = DeliveryStatus::Failed;
+        delivery.attempts = 1;
+        db.insert_webhook_delivery(&delivery).unwrap();
+
+        // Insert a successful delivery
+        let mut delivery2 = WebhookDelivery::new(&channel, &payload);
+        delivery2.status = DeliveryStatus::Success;
+        delivery2.attempts = 1;
+        db.insert_webhook_delivery(&delivery2).unwrap();
+
+        // Only failed ones with attempts < 3
+        let failed = db.get_failed_deliveries(3).unwrap();
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].status, DeliveryStatus::Failed);
+
+        // With max_attempts=1, failed delivery should not appear (attempts >= max)
+        let failed = db.get_failed_deliveries(1).unwrap();
+        assert_eq!(failed.len(), 0);
+    }
+
+    #[test]
+    fn test_webhook_schema_idempotent() {
+        let db = create_test_db().unwrap();
+        db.init_schema().unwrap(); // second call
+
+        let conn = db.get_connection().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_channels'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "webhook_channels should still exist after double init");
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_deliveries'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "webhook_deliveries should still exist after double init");
     }
 }

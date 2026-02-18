@@ -12,7 +12,8 @@
     "lsp": "LSP 服务器",
     "plugins": "插件",
     "security": "安全",
-    "network": "网络"
+    "network": "网络",
+    "notifications": "通知"
   },
 
   "general": {
@@ -629,6 +630,7 @@
       "useGlobal": "使用全局",
       "noProxy": "无代理",
       "custom": "自定义",
+      "webhookProviders": "Webhook 通道",
       "localNote": "本地 — 无需代理",
       "customConfig": "{{provider}} 自定义代理"
     },
@@ -646,7 +648,66 @@
       "embedding_qwen": "通义千问嵌入",
       "embedding_glm": "智谱AI嵌入",
       "embedding_ollama": "Ollama 嵌入",
-      "embedding_tfidf": "TF-IDF"
+      "embedding_tfidf": "TF-IDF",
+      "webhook_slack": "Webhook: Slack",
+      "webhook_feishu": "Webhook: 飞书",
+      "webhook_telegram": "Webhook: Telegram",
+      "webhook_discord": "Webhook: Discord",
+      "webhook_custom": "Webhook: 自定义"
+    }
+  },
+
+  "webhook": {
+    "title": "通知",
+    "description": "配置 Webhook 通道，在任务完成或失败时接收通知。",
+    "dismiss": "关闭",
+    "loading": "加载中...",
+    "channels": "Webhook 通道",
+    "add": "添加",
+    "noChannels": "尚未配置 Webhook 通道。",
+    "test": "测试",
+    "edit": "编辑",
+    "delete": "删除",
+    "testSuccess": "测试成功",
+    "testFailed": "测试失败",
+    "editChannel": "编辑通道",
+    "addChannel": "添加通道",
+    "saving": "保存中...",
+    "update": "更新",
+    "create": "创建",
+    "cancel": "取消",
+    "retry": "重试",
+    "eventsLabel": "个事件",
+    "deliveryHistory": "投递历史",
+    "noDeliveries": "暂无投递记录。",
+
+    "scope": {
+      "global": "全局",
+      "sessions": "个会话",
+      "specificSessions": "指定会话"
+    },
+
+    "events": {
+      "taskComplete": "任务完成",
+      "taskFailed": "任务失败",
+      "taskCancelled": "任务取消",
+      "storyComplete": "故事完成",
+      "prdComplete": "PRD 完成",
+      "progressMilestone": "进度里程碑"
+    },
+
+    "form": {
+      "name": "名称",
+      "channelType": "通道类型",
+      "url": "Webhook URL",
+      "secret": "密钥 / 令牌",
+      "secretPlaceholder": "留空以保留当前值",
+      "secretOptional": "可选",
+      "scope": "作用域",
+      "events": "事件",
+      "template": "自定义模板",
+      "optional": "可选",
+      "sessionIds": "以逗号分隔的会话 ID"
     }
   }
 }
