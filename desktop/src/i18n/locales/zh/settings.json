@@ -728,7 +728,16 @@
       "stopped": "已停止",
       "connectedSince": "连接时间",
       "commandsProcessed": "已处理命令",
-      "activeSessions": "活跃会话"
+      "activeSessions": "活跃会话",
+      "reconnecting": "正在重连...",
+      "reconnectAttempt": "重连尝试 {{current}}/{{max}}",
+      "reconnectFailed": "{{max}} 次尝试后重连失败",
+      "reconnectSuccess": "重连成功",
+      "autoStartSuccess": "网关已在启动时自动开启",
+      "autoStartFailed": "网关自动启动失败：{{error}}",
+      "autoStartDisabled": "自动启动已禁用",
+      "connectionLost": "连接已断开",
+      "connectionError": "连接错误：{{error}}"
     },
 
     "config": {
@@ -762,7 +771,11 @@
     "sessions": {
       "title": "活跃远程会话",
       "none": "暂无活跃的远程会话。",
-      "disconnect": "断开连接"
+      "disconnect": "断开连接",
+      "source": "来自 {{adapter}} @{{username}}",
+      "sourceNoUser": "来自 {{adapter}}",
+      "remoteSession": "远程会话",
+      "createdBy": "由 {{source}} 创建"
     },
 
     "audit": {
@@ -773,6 +786,25 @@
       "command": "命令",
       "status": "状态",
       "viewAll": "查看所有条目"
+    },
+
+    "errors": {
+      "notEnabled": "远程网关未启用",
+      "noActiveSession": "此聊天没有活跃会话",
+      "sessionNotFound": "未找到会话：{{id}}",
+      "sendFailed": "发送消息失败：{{error}}",
+      "executionFailed": "执行失败：{{error}}",
+      "unauthorized": "未授权访问",
+      "configError": "配置错误：{{error}}",
+      "adapterDisconnected": "适配器已断开连接。正在尝试重连...",
+      "maxReconnectExceeded": "已超过最大重连次数。请手动重启网关。"
+    },
+
+    "webhookIntegration": {
+      "remoteTaskComplete": "任务执行成功（{{source}}）",
+      "remoteTaskFailed": "任务执行失败（{{source}}）",
+      "webhookDispatched": "已为远程命令发送 Webhook 通知",
+      "webhookDispatchFailed": "发送 Webhook 通知失败"
     }
   }
 }

@@ -469,6 +469,50 @@
     }
   },
 
+  "lsp": {
+    "title": "LSP言語サーバー",
+    "description": "言語サーバーの検出とセマンティックエンリッチメントを設定し、コードインテリジェンスを強化します。",
+    "dismiss": "閉じる",
+
+    "servers": {
+      "title": "検出されたサーバー",
+      "detectButton": "サーバーを検出",
+      "detecting": "検出中...",
+      "summary": "{{total}} 件中 {{detected}} 件のサーバーを検出",
+      "colLanguage": "言語",
+      "colServer": "サーバー",
+      "colStatus": "ステータス",
+      "colInfo": "情報",
+      "detected": "検出済み",
+      "notFound": "未検出",
+      "version": "v{{version}}"
+    },
+
+    "enrichment": {
+      "title": "エンリッチメント設定",
+      "autoEnrich": "インデックス後に自動エンリッチ",
+      "autoEnrichHelp": "Tree-sitterインデックスの完了後に自動的にLSPエンリッチメントを実行します。型情報、相互参照、コールグラフを追加します。",
+      "manualTitle": "手動エンリッチメント",
+      "enrichButton": "エンリッチメントを実行",
+      "enriching": "エンリッチ中...",
+      "noWorkspace": "先にワークスペースを開いてください",
+      "noServers": "サーバーが検出されていません — 先に検出を実行してください"
+    },
+
+    "report": {
+      "title": "前回のエンリッチメントレポート",
+      "languages": "言語",
+      "symbols": "エンリッチ済みシンボル",
+      "references": "発見された参照",
+      "duration": "所要時間"
+    },
+
+    "info": {
+      "title": "LSPエンリッチメントについて",
+      "description": "LSPエンリッチメントはオプション機能で、検出された言語サーバーからの型情報、相互参照、コールグラフによりTree-sitterインデックスを強化します。インデックス後の後処理パスとして実行されます。"
+    }
+  },
+
   "plugins": {
     "title": "プラグイン",
     "description": "Claude Code互換のプラグイン。スキル、コマンド、フックを含みます。",
@@ -684,7 +728,16 @@
       "stopped": "停止中",
       "connectedSince": "接続時刻",
       "commandsProcessed": "処理済みコマンド",
-      "activeSessions": "アクティブセッション"
+      "activeSessions": "アクティブセッション",
+      "reconnecting": "再接続中...",
+      "reconnectAttempt": "再接続試行 {{current}}/{{max}}",
+      "reconnectFailed": "{{max}} 回の試行後、再接続に失敗しました",
+      "reconnectSuccess": "再接続に成功しました",
+      "autoStartSuccess": "起動時にゲートウェイが自動開始されました",
+      "autoStartFailed": "ゲートウェイの自動開始に失敗しました：{{error}}",
+      "autoStartDisabled": "自動開始は無効です",
+      "connectionLost": "接続が切断されました",
+      "connectionError": "接続エラー：{{error}}"
     },
 
     "config": {
@@ -718,7 +771,11 @@
     "sessions": {
       "title": "アクティブなリモートセッション",
       "none": "アクティブなリモートセッションはありません。",
-      "disconnect": "切断"
+      "disconnect": "切断",
+      "source": "{{adapter}} @{{username}} 経由",
+      "sourceNoUser": "{{adapter}} 経由",
+      "remoteSession": "リモートセッション",
+      "createdBy": "{{source}} により作成"
     },
 
     "audit": {
@@ -729,6 +786,25 @@
       "command": "コマンド",
       "status": "ステータス",
       "viewAll": "すべてのエントリを表示"
+    },
+
+    "errors": {
+      "notEnabled": "リモートゲートウェイが有効になっていません",
+      "noActiveSession": "このチャットにアクティブなセッションがありません",
+      "sessionNotFound": "セッションが見つかりません：{{id}}",
+      "sendFailed": "メッセージの送信に失敗しました：{{error}}",
+      "executionFailed": "実行に失敗しました：{{error}}",
+      "unauthorized": "未認証のアクセス",
+      "configError": "設定エラー：{{error}}",
+      "adapterDisconnected": "アダプターが切断されました。再接続を試みています...",
+      "maxReconnectExceeded": "最大再接続回数を超えました。ゲートウェイを手動で再起動してください。"
+    },
+
+    "webhookIntegration": {
+      "remoteTaskComplete": "タスクが正常に完了しました（{{source}}）",
+      "remoteTaskFailed": "タスクが失敗しました（{{source}}）",
+      "webhookDispatched": "リモートコマンドのWebhook通知を送信しました",
+      "webhookDispatchFailed": "Webhook通知の送信に失敗しました"
     }
   }
 }

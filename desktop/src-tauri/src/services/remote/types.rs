@@ -136,6 +136,15 @@ pub struct GatewayStatus {
     pub total_commands_processed: u64,
     pub last_command_at: Option<String>,
     pub error: Option<String>,
+    /// Number of reconnect attempts since last successful connection
+    #[serde(default)]
+    pub reconnect_attempts: u32,
+    /// Timestamp of the last connection error
+    #[serde(default)]
+    pub last_error_at: Option<String>,
+    /// Whether the gateway is currently attempting to reconnect
+    #[serde(default)]
+    pub reconnecting: bool,
 }
 
 impl Default for GatewayStatus {
@@ -148,7 +157,43 @@ impl Default for GatewayStatus {
             total_commands_processed: 0,
             last_command_at: None,
             error: None,
+            reconnect_attempts: 0,
+            last_error_at: None,
+            reconnecting: false,
         }
+    }
+}
+
+/// Configuration for reconnect behavior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReconnectConfig {
+    /// Maximum number of reconnect attempts before giving up (default: 5)
+    pub max_attempts: u32,
+    /// Base delay in milliseconds for exponential backoff (default: 1000)
+    pub base_delay_ms: u64,
+    /// Maximum delay in milliseconds (default: 30000)
+    pub max_delay_ms: u64,
+}
+
+impl Default for ReconnectConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 5,
+            base_delay_ms: 1000,
+            max_delay_ms: 30000,
+        }
+    }
+}
+
+impl ReconnectConfig {
+    /// Calculate the delay for a given reconnect attempt using exponential backoff.
+    ///
+    /// Formula: `min(2^attempt * base_delay_ms, max_delay_ms)`
+    pub fn delay_for_attempt(&self, attempt: u32) -> u64 {
+        let delay = self
+            .base_delay_ms
+            .saturating_mul(2u64.saturating_pow(attempt));
+        delay.min(self.max_delay_ms)
     }
 }
 
@@ -160,6 +205,12 @@ pub struct RemoteSessionMapping {
     pub local_session_id: Option<String>,
     pub session_type: SessionType,
     pub created_at: String,
+    /// Adapter type that created this session (e.g., "Telegram")
+    #[serde(default)]
+    pub adapter_type_name: Option<String>,
+    /// Username of the remote user who created this session (e.g., "@testuser")
+    #[serde(default)]
+    pub username: Option<String>,
 }
 
 /// Session type for remote-created sessions
@@ -381,6 +432,9 @@ mod tests {
         assert_eq!(status.total_commands_processed, 0);
         assert!(status.last_command_at.is_none());
         assert!(status.error.is_none());
+        assert_eq!(status.reconnect_attempts, 0);
+        assert!(status.last_error_at.is_none());
+        assert!(!status.reconnecting);
     }
 
     #[test]
@@ -393,12 +447,85 @@ mod tests {
             total_commands_processed: 47,
             last_command_at: Some("2026-02-18T14:35:00Z".to_string()),
             error: None,
+            reconnect_attempts: 0,
+            last_error_at: None,
+            reconnecting: false,
         };
         let json = serde_json::to_string(&status).unwrap();
         let parsed: GatewayStatus = serde_json::from_str(&json).unwrap();
         assert!(parsed.running);
         assert_eq!(parsed.active_remote_sessions, 2);
         assert_eq!(parsed.total_commands_processed, 47);
+    }
+
+    #[test]
+    fn test_gateway_status_backward_compat() {
+        // Old JSON without reconnect fields should deserialize with defaults
+        let old_json = r#"{
+            "running": true,
+            "adapter_type": "Telegram",
+            "connected_since": null,
+            "active_remote_sessions": 0,
+            "total_commands_processed": 0,
+            "last_command_at": null,
+            "error": null
+        }"#;
+        let parsed: GatewayStatus = serde_json::from_str(old_json).unwrap();
+        assert_eq!(parsed.reconnect_attempts, 0);
+        assert!(parsed.last_error_at.is_none());
+        assert!(!parsed.reconnecting);
+    }
+
+    #[test]
+    fn test_reconnect_config_default() {
+        let config = ReconnectConfig::default();
+        assert_eq!(config.max_attempts, 5);
+        assert_eq!(config.base_delay_ms, 1000);
+        assert_eq!(config.max_delay_ms, 30000);
+    }
+
+    #[test]
+    fn test_reconnect_config_delay_calculation() {
+        let config = ReconnectConfig::default();
+
+        // attempt 0: 2^0 * 1000 = 1000ms
+        assert_eq!(config.delay_for_attempt(0), 1000);
+        // attempt 1: 2^1 * 1000 = 2000ms
+        assert_eq!(config.delay_for_attempt(1), 2000);
+        // attempt 2: 2^2 * 1000 = 4000ms
+        assert_eq!(config.delay_for_attempt(2), 4000);
+        // attempt 3: 2^3 * 1000 = 8000ms
+        assert_eq!(config.delay_for_attempt(3), 8000);
+        // attempt 4: 2^4 * 1000 = 16000ms
+        assert_eq!(config.delay_for_attempt(4), 16000);
+        // attempt 5: 2^5 * 1000 = 32000ms -> capped at 30000
+        assert_eq!(config.delay_for_attempt(5), 30000);
+        // attempt 10: capped at 30000
+        assert_eq!(config.delay_for_attempt(10), 30000);
+    }
+
+    #[test]
+    fn test_reconnect_config_custom() {
+        let config = ReconnectConfig {
+            max_attempts: 3,
+            base_delay_ms: 500,
+            max_delay_ms: 5000,
+        };
+        assert_eq!(config.delay_for_attempt(0), 500);
+        assert_eq!(config.delay_for_attempt(1), 1000);
+        assert_eq!(config.delay_for_attempt(2), 2000);
+        assert_eq!(config.delay_for_attempt(3), 4000);
+        assert_eq!(config.delay_for_attempt(4), 5000); // capped
+    }
+
+    #[test]
+    fn test_reconnect_config_serialize() {
+        let config = ReconnectConfig::default();
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: ReconnectConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.max_attempts, 5);
+        assert_eq!(parsed.base_delay_ms, 1000);
+        assert_eq!(parsed.max_delay_ms, 30000);
     }
 
     #[test]
@@ -440,6 +567,8 @@ mod tests {
             local_session_id: Some("session-abc-123".to_string()),
             session_type: SessionType::ClaudeCode,
             created_at: "2026-02-18T14:30:00Z".to_string(),
+            adapter_type_name: Some("Telegram".to_string()),
+            username: Some("testuser".to_string()),
         };
         let json = serde_json::to_string(&mapping).unwrap();
         let parsed: RemoteSessionMapping = serde_json::from_str(&json).unwrap();
@@ -449,6 +578,41 @@ mod tests {
             parsed.local_session_id,
             Some("session-abc-123".to_string())
         );
+    }
+
+    #[test]
+    fn test_remote_session_mapping_with_source_info() {
+        let mapping = RemoteSessionMapping {
+            chat_id: 123456789,
+            user_id: 111222333,
+            local_session_id: Some("session-abc-123".to_string()),
+            session_type: SessionType::ClaudeCode,
+            created_at: "2026-02-18T14:30:00Z".to_string(),
+            adapter_type_name: Some("Telegram".to_string()),
+            username: Some("testuser".to_string()),
+        };
+        let json = serde_json::to_string(&mapping).unwrap();
+        assert!(json.contains("Telegram"));
+        assert!(json.contains("testuser"));
+        let parsed: RemoteSessionMapping = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.adapter_type_name, Some("Telegram".to_string()));
+        assert_eq!(parsed.username, Some("testuser".to_string()));
+    }
+
+    #[test]
+    fn test_remote_session_mapping_backward_compat() {
+        // Old JSON without adapter_type_name and username should deserialize with None defaults
+        let old_json = r#"{
+            "chat_id": 123,
+            "user_id": 456,
+            "local_session_id": "sess-1",
+            "session_type": "ClaudeCode",
+            "created_at": "2026-02-18T12:00:00Z"
+        }"#;
+        let parsed: RemoteSessionMapping = serde_json::from_str(old_json).unwrap();
+        assert_eq!(parsed.chat_id, 123);
+        assert!(parsed.adapter_type_name.is_none());
+        assert!(parsed.username.is_none());
     }
 
     #[test]

@@ -728,7 +728,16 @@
       "stopped": "Stopped",
       "connectedSince": "Connected Since",
       "commandsProcessed": "Commands Processed",
-      "activeSessions": "Active Sessions"
+      "activeSessions": "Active Sessions",
+      "reconnecting": "Reconnecting...",
+      "reconnectAttempt": "Reconnect attempt {{current}} of {{max}}",
+      "reconnectFailed": "Reconnect failed after {{max}} attempts",
+      "reconnectSuccess": "Reconnected successfully",
+      "autoStartSuccess": "Gateway auto-started on launch",
+      "autoStartFailed": "Gateway auto-start failed: {{error}}",
+      "autoStartDisabled": "Auto-start is disabled",
+      "connectionLost": "Connection lost",
+      "connectionError": "Connection error: {{error}}"
     },
 
     "config": {
@@ -762,7 +771,11 @@
     "sessions": {
       "title": "Active Remote Sessions",
       "none": "No active remote sessions.",
-      "disconnect": "Disconnect"
+      "disconnect": "Disconnect",
+      "source": "via {{adapter}} @{{username}}",
+      "sourceNoUser": "via {{adapter}}",
+      "remoteSession": "Remote Session",
+      "createdBy": "Created by {{source}}"
     },
 
     "audit": {
@@ -773,6 +786,25 @@
       "command": "Command",
       "status": "Status",
       "viewAll": "View all entries"
+    },
+
+    "errors": {
+      "notEnabled": "Remote gateway is not enabled",
+      "noActiveSession": "No active session for this chat",
+      "sessionNotFound": "Session not found: {{id}}",
+      "sendFailed": "Failed to send message: {{error}}",
+      "executionFailed": "Execution failed: {{error}}",
+      "unauthorized": "Unauthorized access",
+      "configError": "Configuration error: {{error}}",
+      "adapterDisconnected": "Adapter disconnected. Attempting to reconnect...",
+      "maxReconnectExceeded": "Maximum reconnect attempts exceeded. Please restart the gateway manually."
+    },
+
+    "webhookIntegration": {
+      "remoteTaskComplete": "Task completed successfully ({{source}})",
+      "remoteTaskFailed": "Task failed ({{source}})",
+      "webhookDispatched": "Webhook notification sent for remote command",
+      "webhookDispatchFailed": "Failed to send webhook notification"
     }
   }
 }

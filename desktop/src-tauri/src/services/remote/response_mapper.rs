@@ -153,6 +153,8 @@ mod tests {
             local_session_id: Some("sess-abc".to_string()),
             session_type: SessionType::ClaudeCode,
             created_at: "2026-02-18T14:30:00Z".to_string(),
+            adapter_type_name: Some("Telegram".to_string()),
+            username: Some("testuser".to_string()),
         }];
         let formatted = ResponseMapper::format_session_list(&mappings);
         assert!(formatted.contains("123"));
@@ -167,6 +169,8 @@ mod tests {
             local_session_id: Some("sess-abc".to_string()),
             session_type: SessionType::ClaudeCode,
             created_at: "2026-02-18T14:30:00Z".to_string(),
+            adapter_type_name: None,
+            username: None,
         };
         let gateway = GatewayStatus {
             running: true,

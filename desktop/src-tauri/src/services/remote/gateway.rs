@@ -2,7 +2,8 @@
 //!
 //! Manages the adapter lifecycle, processes incoming messages via CommandRouter,
 //! and coordinates with SessionBridge. Implements the 5-layer security model
-//! and audit logging.
+//! and audit logging. Dispatches webhook notifications when remote commands
+//! trigger task completions.
 
 use super::adapters::telegram::TelegramAdapter;
 use super::adapters::RemoteAdapter;
@@ -10,10 +11,13 @@ use super::command_router::{CommandRouter, HELP_TEXT};
 use super::response_mapper::ResponseMapper;
 use super::session_bridge::SessionBridge;
 use super::types::{
-    GatewayStatus, IncomingRemoteMessage, RemoteCommand, RemoteError, RemoteGatewayConfig,
-    TelegramAdapterConfig,
+    GatewayStatus, IncomingRemoteMessage, ReconnectConfig, RemoteCommand, RemoteError,
+    RemoteGatewayConfig, TelegramAdapterConfig,
 };
 use crate::services::proxy::ProxyConfig;
+use crate::services::webhook::integration::format_remote_source;
+use crate::services::webhook::types::{WebhookEventType, WebhookPayload};
+use crate::services::webhook::WebhookService;
 use crate::storage::Database;
 use rusqlite::params;
 use std::collections::HashSet;
@@ -27,11 +31,14 @@ pub struct RemoteGatewayService {
     pub(crate) telegram_config: RwLock<Option<TelegramAdapterConfig>>,
     pub(crate) adapter: Arc<RwLock<Option<Box<dyn RemoteAdapter>>>>,
     pub(crate) session_bridge: Arc<SessionBridge>,
+    pub(crate) webhook_service: Option<Arc<WebhookService>>,
     pub(crate) status: Arc<RwLock<GatewayStatus>>,
     pub(crate) cancel_token: CancellationToken,
     pub(crate) db: Arc<Database>,
     /// Chats that have authenticated with password (Layer 4)
     pub(crate) authenticated_chats: Arc<RwLock<HashSet<i64>>>,
+    /// Configuration for reconnect behavior with exponential backoff.
+    pub(crate) reconnect_config: ReconnectConfig,
 }
 
 impl RemoteGatewayService {
@@ -47,11 +54,23 @@ impl RemoteGatewayService {
             telegram_config: RwLock::new(telegram_config),
             adapter: Arc::new(RwLock::new(None)),
             session_bridge,
+            webhook_service: None,
             status: Arc::new(RwLock::new(GatewayStatus::default())),
             cancel_token: CancellationToken::new(),
             db,
             authenticated_chats: Arc::new(RwLock::new(HashSet::new())),
+            reconnect_config: ReconnectConfig::default(),
         }
+    }
+
+    /// Set a custom reconnect configuration.
+    pub fn set_reconnect_config(&mut self, config: ReconnectConfig) {
+        self.reconnect_config = config;
+    }
+
+    /// Set the webhook service for dispatching notifications on remote command completion.
+    pub fn set_webhook_service(&mut self, webhook_service: Arc<WebhookService>) {
+        self.webhook_service = Some(webhook_service);
     }
 
     /// Get current gateway status.
@@ -99,6 +118,7 @@ impl RemoteGatewayService {
         let require_password = telegram_config.require_password;
         let access_password = telegram_config.access_password.clone();
         let authenticated_chats = self.authenticated_chats.clone();
+        let webhook_service = self.webhook_service.clone();
 
         tokio::spawn(async move {
             loop {
@@ -113,6 +133,7 @@ impl RemoteGatewayService {
                             require_password,
                             access_password.as_deref(),
                             &authenticated_chats,
+                            webhook_service.as_ref(),
                         ).await;
                     }
                     _ = cancel.cancelled() => {
@@ -141,6 +162,7 @@ impl RemoteGatewayService {
         require_password: bool,
         access_password: Option<&str>,
         authenticated_chats: &RwLock<HashSet<i64>>,
+        webhook_service: Option<&Arc<WebhookService>>,
     ) {
         // Update stats
         {
@@ -210,6 +232,16 @@ impl RemoteGatewayService {
         let command = CommandRouter::parse(&msg.text);
         let command_type = Self::command_type_name(&command);
 
+        // Build remote source identifier for webhook notifications
+        let remote_source = format_remote_source(
+            &msg.adapter_type.to_string(),
+            msg.username.as_deref(),
+        );
+
+        // Track whether this is a task-producing command for webhook dispatch
+        let mut should_dispatch_webhook = false;
+        let mut webhook_event_type = WebhookEventType::TaskComplete;
+
         // Process command through SessionBridge
         let response = match command {
             RemoteCommand::NewSession {
@@ -218,12 +250,14 @@ impl RemoteGatewayService {
                 model,
             } => {
                 match bridge
-                    .create_session(
+                    .create_session_with_source(
                         msg.chat_id,
                         msg.user_id,
                         &project_path,
                         provider.as_deref(),
                         model.as_deref(),
+                        Some(&msg.adapter_type.to_string()),
+                        msg.username.as_deref(),
                     )
                     .await
                 {
@@ -235,11 +269,21 @@ impl RemoteGatewayService {
             }
             RemoteCommand::SendMessage { content } => {
                 match bridge.send_message(msg.chat_id, &content).await {
-                    Ok(resp) => ResponseMapper::format_response(&resp),
+                    Ok(resp) => {
+                        // Task completed via remote command -- dispatch webhook
+                        should_dispatch_webhook = true;
+                        webhook_event_type = WebhookEventType::TaskComplete;
+                        ResponseMapper::format_response(&resp)
+                    }
                     Err(RemoteError::NoActiveSession) => {
                         "No active session. Use /new <path> to create one.".to_string()
                     }
-                    Err(e) => ResponseMapper::format_error(&e),
+                    Err(e) => {
+                        // Task failed via remote command -- dispatch webhook
+                        should_dispatch_webhook = true;
+                        webhook_event_type = WebhookEventType::TaskFailed;
+                        ResponseMapper::format_error(&e)
+                    }
                 }
             }
             RemoteCommand::ListSessions => bridge.list_sessions_text(msg.chat_id).await,
@@ -272,6 +316,54 @@ impl RemoteGatewayService {
 
         // Write audit log
         Self::write_audit_log(db, msg, command_type, result_status, None);
+
+        // Dispatch webhook notification for task-producing commands
+        if should_dispatch_webhook {
+            if let Some(webhook_svc) = webhook_service {
+                let session_id = bridge
+                    .get_active_session_id(msg.chat_id)
+                    .await
+                    .unwrap_or_default();
+
+                let summary = match webhook_event_type {
+                    WebhookEventType::TaskComplete => {
+                        format!("Task completed successfully ({})", remote_source)
+                    }
+                    WebhookEventType::TaskFailed => {
+                        format!("Task failed ({})", remote_source)
+                    }
+                    _ => response.clone(),
+                };
+
+                let payload = WebhookPayload {
+                    event_type: webhook_event_type,
+                    session_id: if session_id.is_empty() {
+                        None
+                    } else {
+                        Some(session_id)
+                    },
+                    session_name: None,
+                    project_path: None,
+                    summary,
+                    details: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    duration_ms: None,
+                    token_usage: None,
+                    remote_source: Some(remote_source.clone()),
+                };
+
+                let svc = webhook_svc.clone();
+                tokio::spawn(async move {
+                    let deliveries = svc.dispatch(payload).await;
+                    if !deliveries.is_empty() {
+                        tracing::debug!(
+                            "Webhook dispatched {} deliveries for remote command",
+                            deliveries.len()
+                        );
+                    }
+                });
+            }
+        }
     }
 
     /// Get the command type name for audit logging.
@@ -320,6 +412,68 @@ impl RemoteGatewayService {
         }
     }
 
+    /// Record a connection error in the gateway status and attempt reconnect.
+    ///
+    /// Returns `true` if a reconnect was attempted and succeeded, `false` otherwise.
+    pub async fn record_connection_error(&self, error: &str) -> bool {
+        let should_reconnect = {
+            let mut status = self.status.write().await;
+            status.error = Some(error.to_string());
+            status.last_error_at = Some(chrono::Utc::now().to_rfc3339());
+            status.reconnect_attempts += 1;
+
+            let attempt = status.reconnect_attempts;
+            if attempt <= self.reconnect_config.max_attempts {
+                status.reconnecting = true;
+                tracing::warn!(
+                    "Connection error (attempt {}/{}): {}",
+                    attempt,
+                    self.reconnect_config.max_attempts,
+                    error
+                );
+                Some(attempt)
+            } else {
+                status.reconnecting = false;
+                tracing::error!(
+                    "Max reconnect attempts ({}) exceeded. Giving up.",
+                    self.reconnect_config.max_attempts
+                );
+                None
+            }
+        };
+
+        if let Some(attempt) = should_reconnect {
+            let delay = self.reconnect_config.delay_for_attempt(attempt - 1);
+            tracing::info!("Waiting {}ms before reconnect attempt {}...", delay, attempt);
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+
+            match self.start(None).await {
+                Ok(()) => {
+                    let mut status = self.status.write().await;
+                    status.reconnect_attempts = 0;
+                    status.reconnecting = false;
+                    status.error = None;
+                    tracing::info!("Reconnected successfully after {} attempt(s)", attempt);
+                    true
+                }
+                Err(e) => {
+                    tracing::warn!("Reconnect attempt {} failed: {}", attempt, e);
+                    false
+                }
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Reset reconnect state (e.g., after a successful manual start).
+    pub async fn reset_reconnect_state(&self) {
+        let mut status = self.status.write().await;
+        status.reconnect_attempts = 0;
+        status.last_error_at = None;
+        status.reconnecting = false;
+    }
+
     /// Stop the gateway gracefully.
     pub async fn stop(&self) -> Result<(), RemoteError> {
         self.cancel_token.cancel();
@@ -329,6 +483,9 @@ impl RemoteGatewayService {
         let mut status = self.status.write().await;
         status.running = false;
         status.connected_since = None;
+        // Reset reconnect state on clean stop
+        status.reconnect_attempts = 0;
+        status.reconnecting = false;
         Ok(())
     }
 
@@ -364,6 +521,7 @@ impl RemoteGatewayService {
 mod tests {
     use super::*;
     use crate::services::remote::types::{IncomingRemoteMessage, RemoteAdapterType, RemoteCommand};
+    use crate::services::webhook::integration::format_remote_source;
 
     #[test]
     fn test_command_type_name() {
@@ -478,6 +636,22 @@ mod tests {
         let status = gateway.get_status().await;
         assert!(!status.running);
         assert_eq!(status.total_commands_processed, 0);
+        assert!(gateway.webhook_service.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_gateway_with_webhook_service() {
+        let db = Arc::new(Database::new_in_memory().unwrap());
+        let bridge = Arc::new(SessionBridge::new(db.clone()));
+        let config = RemoteGatewayConfig::default();
+
+        let mut gateway = RemoteGatewayService::new(config, None, bridge, db.clone());
+        assert!(gateway.webhook_service.is_none());
+
+        let keyring = Arc::new(crate::storage::KeyringService::new());
+        let webhook_svc = Arc::new(WebhookService::new(db, keyring, |_| None));
+        gateway.set_webhook_service(webhook_svc);
+        assert!(gateway.webhook_service.is_some());
     }
 
     #[tokio::test]
@@ -597,5 +771,175 @@ mod tests {
 
         // Chat 456 is still not authenticated
         assert!(!authenticated.read().await.contains(&456));
+    }
+
+    #[test]
+    fn test_remote_source_formatting_in_gateway() {
+        let source = format_remote_source("Telegram", Some("testuser"));
+        assert_eq!(source, "via Telegram @testuser");
+
+        let source_no_user = format_remote_source("Telegram", None);
+        assert_eq!(source_no_user, "via Telegram");
+    }
+
+    #[tokio::test]
+    async fn test_gateway_reconnect_config_default() {
+        let db = Arc::new(Database::new_in_memory().unwrap());
+        let bridge = Arc::new(SessionBridge::new(db.clone()));
+        let config = RemoteGatewayConfig::default();
+
+        let gateway = RemoteGatewayService::new(config, None, bridge, db);
+        assert_eq!(gateway.reconnect_config.max_attempts, 5);
+        assert_eq!(gateway.reconnect_config.base_delay_ms, 1000);
+        assert_eq!(gateway.reconnect_config.max_delay_ms, 30000);
+    }
+
+    #[tokio::test]
+    async fn test_gateway_set_reconnect_config() {
+        let db = Arc::new(Database::new_in_memory().unwrap());
+        let bridge = Arc::new(SessionBridge::new(db.clone()));
+        let config = RemoteGatewayConfig::default();
+
+        let mut gateway = RemoteGatewayService::new(config, None, bridge, db);
+        gateway.set_reconnect_config(ReconnectConfig {
+            max_attempts: 3,
+            base_delay_ms: 500,
+            max_delay_ms: 5000,
+        });
+        assert_eq!(gateway.reconnect_config.max_attempts, 3);
+        assert_eq!(gateway.reconnect_config.base_delay_ms, 500);
+        assert_eq!(gateway.reconnect_config.max_delay_ms, 5000);
+    }
+
+    #[tokio::test]
+    async fn test_gateway_reconnect_state_tracking() {
+        let db = Arc::new(Database::new_in_memory().unwrap());
+        let bridge = Arc::new(SessionBridge::new(db.clone()));
+        let config = RemoteGatewayConfig::default();
+
+        let gateway = RemoteGatewayService::new(config, None, bridge, db);
+
+        // Simulate connection error by directly updating status
+        {
+            let mut status = gateway.status.write().await;
+            status.reconnect_attempts = 2;
+            status.last_error_at = Some("2026-02-18T15:00:00Z".to_string());
+            status.reconnecting = true;
+            status.error = Some("Connection lost".to_string());
+        }
+
+        let status = gateway.get_status().await;
+        assert_eq!(status.reconnect_attempts, 2);
+        assert!(status.last_error_at.is_some());
+        assert!(status.reconnecting);
+        assert_eq!(status.error, Some("Connection lost".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_gateway_reset_reconnect_state() {
+        let db = Arc::new(Database::new_in_memory().unwrap());
+        let bridge = Arc::new(SessionBridge::new(db.clone()));
+        let config = RemoteGatewayConfig::default();
+
+        let gateway = RemoteGatewayService::new(config, None, bridge, db);
+
+        // Simulate some reconnect state
+        {
+            let mut status = gateway.status.write().await;
+            status.reconnect_attempts = 3;
+            status.last_error_at = Some("2026-02-18T15:00:00Z".to_string());
+            status.reconnecting = true;
+        }
+
+        // Reset
+        gateway.reset_reconnect_state().await;
+
+        let status = gateway.get_status().await;
+        assert_eq!(status.reconnect_attempts, 0);
+        assert!(status.last_error_at.is_none());
+        assert!(!status.reconnecting);
+    }
+
+    #[tokio::test]
+    async fn test_gateway_stop_resets_reconnect_state() {
+        let db = Arc::new(Database::new_in_memory().unwrap());
+        let bridge = Arc::new(SessionBridge::new(db.clone()));
+        let config = RemoteGatewayConfig::default();
+
+        let gateway = RemoteGatewayService::new(config, None, bridge, db);
+
+        // Set running and reconnect state
+        {
+            let mut status = gateway.status.write().await;
+            status.running = true;
+            status.reconnect_attempts = 2;
+            status.reconnecting = true;
+        }
+
+        gateway.stop().await.unwrap();
+
+        let status = gateway.get_status().await;
+        assert!(!status.running);
+        assert_eq!(status.reconnect_attempts, 0);
+        assert!(!status.reconnecting);
+    }
+
+    #[tokio::test]
+    async fn test_gateway_record_connection_error_increments_attempts() {
+        let db = Arc::new(Database::new_in_memory().unwrap());
+        let bridge = Arc::new(SessionBridge::new(db.clone()));
+        let config = RemoteGatewayConfig {
+            enabled: false, // Keep disabled so start() fails fast in reconnect
+            ..Default::default()
+        };
+
+        let mut gateway = RemoteGatewayService::new(config, None, bridge, db);
+        // Use fast backoff for test
+        gateway.set_reconnect_config(ReconnectConfig {
+            max_attempts: 2,
+            base_delay_ms: 1, // 1ms for fast tests
+            max_delay_ms: 10,
+        });
+
+        // First error
+        let reconnected = gateway.record_connection_error("test error 1").await;
+        assert!(!reconnected); // start() fails because not enabled
+
+        let status = gateway.get_status().await;
+        // After failed reconnect, attempts stays at 1
+        assert_eq!(status.reconnect_attempts, 1);
+        assert!(status.error.is_some());
+        assert!(status.last_error_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_gateway_record_connection_error_max_attempts() {
+        let db = Arc::new(Database::new_in_memory().unwrap());
+        let bridge = Arc::new(SessionBridge::new(db.clone()));
+        let config = RemoteGatewayConfig {
+            enabled: false,
+            ..Default::default()
+        };
+
+        let mut gateway = RemoteGatewayService::new(config, None, bridge, db);
+        gateway.set_reconnect_config(ReconnectConfig {
+            max_attempts: 2,
+            base_delay_ms: 1,
+            max_delay_ms: 10,
+        });
+
+        // Manually set attempts to max
+        {
+            let mut status = gateway.status.write().await;
+            status.reconnect_attempts = 2;
+        }
+
+        // Next error should exceed max, returning false without attempting reconnect
+        let reconnected = gateway.record_connection_error("final error").await;
+        assert!(!reconnected);
+
+        let status = gateway.get_status().await;
+        assert_eq!(status.reconnect_attempts, 3); // incremented past max
+        assert!(!status.reconnecting); // gave up
     }
 }
