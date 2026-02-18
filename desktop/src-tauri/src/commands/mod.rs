@@ -37,6 +37,7 @@ pub mod webhook;
 pub mod worktree;
 pub mod knowledge;
 pub mod artifacts;
+pub mod pipeline_execution;
 
 pub use agent_composer::*;
 pub use agents::*;
@@ -72,3 +73,4 @@ pub use webhook::*;
 pub use worktree::*;
 pub use knowledge::*;
 pub use artifacts::*;
+pub use pipeline_execution::*;

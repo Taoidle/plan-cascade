@@ -57,6 +57,12 @@ pub struct GraphNode {
     /// Optional UI position for visual layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<NodePosition>,
+    /// If true, execution will pause before this node (creating a checkpoint).
+    #[serde(default)]
+    pub interrupt_before: bool,
+    /// If true, execution will pause after this node (creating a checkpoint).
+    #[serde(default)]
+    pub interrupt_after: bool,
 }
 
 /// UI position for a graph node (x, y coordinates).
@@ -186,6 +192,8 @@ mod tests {
                 id: "node-a".to_string(),
                 agent_step: sample_llm_step("agent-a"),
                 position: Some(NodePosition { x: 100.0, y: 200.0 }),
+                interrupt_before: false,
+                interrupt_after: false,
             },
         );
         nodes.insert(
@@ -194,6 +202,8 @@ mod tests {
                 id: "node-b".to_string(),
                 agent_step: sample_llm_step("agent-b"),
                 position: None,
+                interrupt_before: false,
+                interrupt_after: false,
             },
         );
 
@@ -225,6 +235,8 @@ mod tests {
             id: "n1".to_string(),
             agent_step: sample_llm_step("my-agent"),
             position: Some(NodePosition { x: 50.0, y: 75.0 }),
+            interrupt_before: false,
+            interrupt_after: false,
         };
 
         let json = serde_json::to_string(&node).unwrap();

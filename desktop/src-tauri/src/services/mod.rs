@@ -40,6 +40,7 @@ pub mod webhook;
 pub mod worktree;
 pub mod knowledge;
 pub mod artifacts;
+pub mod graph_workflow;
 
 pub use agent::AgentService;
 pub use agent_executor::{AgentEvent, AgentExecutor, ExecutionHandle, ExecutorConfig, ToolFilter};

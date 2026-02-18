@@ -254,6 +254,8 @@ mod tests {
                     config: AgentConfig::default(),
                 }),
                 position: None,
+                interrupt_before: false,
+                interrupt_after: false,
             },
         );
         nodes.insert(
@@ -268,6 +270,8 @@ mod tests {
                     config: AgentConfig::default(),
                 }),
                 position: None,
+                interrupt_before: false,
+                interrupt_after: false,
             },
         );
 

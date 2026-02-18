@@ -13,5 +13,6 @@ pub mod models;
 pub mod loader;
 pub mod dispatcher;
 pub mod manager;
+pub mod lifecycle;
 
 pub use models::*;
