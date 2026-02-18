@@ -137,6 +137,16 @@ export type {
   TaskModeState,
 } from './taskMode';
 
+export { useExecutionReportStore } from './executionReport';
+export type {
+  ReportSummary,
+  RadarDimension,
+  TimelineEntry,
+  AgentPerformance,
+  ExecutionReportModel,
+  ExecutionReportState,
+} from './executionReport';
+
 export { useKnowledgeStore } from './knowledge';
 export type { KnowledgeState } from './knowledge';
 

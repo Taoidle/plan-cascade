@@ -21,6 +21,7 @@ pub mod web_fetch;
 pub mod web_search;
 pub mod notebook_edit;
 pub mod codebase_search;
+pub mod browser;
 
 pub use read::ReadTool;
 pub use write::WriteTool;
@@ -36,3 +37,4 @@ pub use web_fetch::WebFetchTool;
 pub use web_search::WebSearchTool;
 pub use notebook_edit::NotebookEditTool;
 pub use codebase_search::CodebaseSearchTool;
+pub use browser::BrowserTool;
