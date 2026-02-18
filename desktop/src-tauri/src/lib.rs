@@ -233,6 +233,15 @@ pub use commands::{
     list_evaluation_runs,
     get_evaluation_reports,
     delete_evaluation_run,
+    // Webhook commands
+    list_webhook_channels,
+    create_webhook_channel,
+    update_webhook_channel,
+    delete_webhook_channel,
+    test_webhook_channel,
+    get_webhook_deliveries,
+    retry_webhook_delivery,
+    WebhookState,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,

@@ -31,6 +31,7 @@ pub mod spec_interview;
 pub mod standalone;
 pub mod strategy;
 pub mod timeline;
+pub mod webhook;
 pub mod worktree;
 
 pub use agent_composer::*;
@@ -61,4 +62,5 @@ pub use spec_interview::*;
 pub use standalone::*;
 pub use strategy::*;
 pub use timeline::*;
+pub use webhook::*;
 pub use worktree::*;

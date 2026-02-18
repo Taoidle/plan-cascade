@@ -95,6 +95,9 @@ tempfile = "3"
 # SHA-256 hashing for file checksums
 sha2 = "0.10"
 
+# HMAC computation for webhook signing (Feishu, Custom)
+hmac = "0.12"
+
 # Diff calculation
 similar = "2"
 

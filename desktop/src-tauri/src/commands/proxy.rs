@@ -39,6 +39,11 @@ const PROVIDER_IDS: &[&str] = &[
     "embedding_qwen",
     "embedding_glm",
     "embedding_ollama",
+    "webhook_slack",
+    "webhook_feishu",
+    "webhook_telegram",
+    "webhook_discord",
+    "webhook_custom",
 ];
 
 /// Settings DB key prefix for per-provider proxy strategy.
@@ -412,6 +417,11 @@ pub fn resolve_provider_proxy(
 fn default_strategy_for(provider: &str) -> ProxyStrategy {
     match provider {
         "anthropic" | "openai" | "claude_code" | "embedding_openai" => ProxyStrategy::UseGlobal,
+        // Webhook channels: international services default to global proxy
+        "webhook_slack" | "webhook_discord" | "webhook_telegram" | "webhook_custom" => {
+            ProxyStrategy::UseGlobal
+        }
+        // Feishu is a domestic service; no proxy by default
         _ => ProxyStrategy::NoProxy,
     }
 }

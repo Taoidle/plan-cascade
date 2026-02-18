@@ -12,7 +12,8 @@
     "lsp": "LSP Servers",
     "plugins": "Plugins",
     "security": "Security",
-    "network": "Network"
+    "network": "Network",
+    "notifications": "Notifications"
   },
 
   "general": {
@@ -626,6 +627,7 @@
       "llmProviders": "LLM Providers",
       "embeddingProviders": "Embedding Providers",
       "claudeCode": "Claude Code",
+      "webhookProviders": "Webhook Channels",
       "useGlobal": "Use Global",
       "noProxy": "No Proxy",
       "custom": "Custom",
@@ -646,7 +648,66 @@
       "embedding_qwen": "Qwen Embedding",
       "embedding_glm": "GLM Embedding",
       "embedding_ollama": "Ollama Embedding",
-      "embedding_tfidf": "TF-IDF"
+      "embedding_tfidf": "TF-IDF",
+      "webhook_slack": "Webhook: Slack",
+      "webhook_feishu": "Webhook: Feishu",
+      "webhook_telegram": "Webhook: Telegram",
+      "webhook_discord": "Webhook: Discord",
+      "webhook_custom": "Webhook: Custom"
+    }
+  },
+
+  "webhook": {
+    "title": "Notifications",
+    "description": "Configure webhook channels to receive notifications when tasks complete or fail.",
+    "dismiss": "Dismiss",
+    "loading": "Loading...",
+    "channels": "Webhook Channels",
+    "add": "Add",
+    "noChannels": "No webhook channels configured.",
+    "test": "Test",
+    "edit": "Edit",
+    "delete": "Delete",
+    "testSuccess": "Test successful",
+    "testFailed": "Test failed",
+    "editChannel": "Edit Channel",
+    "addChannel": "Add Channel",
+    "saving": "Saving...",
+    "update": "Update",
+    "create": "Create",
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "eventsLabel": "events",
+    "deliveryHistory": "Delivery History",
+    "noDeliveries": "No delivery history yet.",
+
+    "scope": {
+      "global": "Global",
+      "sessions": "sessions",
+      "specificSessions": "Specific Sessions"
+    },
+
+    "events": {
+      "taskComplete": "Task Complete",
+      "taskFailed": "Task Failed",
+      "taskCancelled": "Task Cancelled",
+      "storyComplete": "Story Complete",
+      "prdComplete": "PRD Complete",
+      "progressMilestone": "Progress Milestone"
+    },
+
+    "form": {
+      "name": "Name",
+      "channelType": "Channel Type",
+      "url": "Webhook URL",
+      "secret": "Secret / Token",
+      "secretPlaceholder": "Leave empty to keep current",
+      "secretOptional": "Optional",
+      "scope": "Scope",
+      "events": "Events",
+      "template": "Custom Template",
+      "optional": "optional",
+      "sessionIds": "Comma-separated session IDs"
     }
   }
 }

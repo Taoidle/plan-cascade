@@ -11,6 +11,7 @@ use plan_cascade_desktop::commands::plugins::PluginState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
 use plan_cascade_desktop::commands::standalone::StandaloneState;
+use plan_cascade_desktop::commands::webhook::WebhookState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
 use plan_cascade_desktop::state::AppState;
 
@@ -31,6 +32,7 @@ fn main() {
         .manage(LspState::new())
         .manage(PluginState::new())
         .manage(GuardrailState::new())
+        .manage(WebhookState::new_empty())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -257,6 +259,14 @@ fn main() {
             plan_cascade_desktop::commands::proxy::get_provider_proxy_strategy,
             plan_cascade_desktop::commands::proxy::set_provider_proxy_strategy,
             plan_cascade_desktop::commands::proxy::test_proxy,
+            // Webhook commands
+            plan_cascade_desktop::commands::webhook::list_webhook_channels,
+            plan_cascade_desktop::commands::webhook::create_webhook_channel,
+            plan_cascade_desktop::commands::webhook::update_webhook_channel,
+            plan_cascade_desktop::commands::webhook::delete_webhook_channel,
+            plan_cascade_desktop::commands::webhook::test_webhook_channel,
+            plan_cascade_desktop::commands::webhook::get_webhook_deliveries,
+            plan_cascade_desktop::commands::webhook::retry_webhook_delivery,
             // Evaluation commands
             plan_cascade_desktop::commands::evaluation::list_evaluators,
             plan_cascade_desktop::commands::evaluation::create_evaluator,

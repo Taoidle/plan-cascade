@@ -12,7 +12,8 @@
     "lsp": "LSPサーバー",
     "plugins": "プラグイン",
     "security": "セキュリティ",
-    "network": "ネットワーク"
+    "network": "ネットワーク",
+    "notifications": "通知"
   },
 
   "general": {
@@ -585,6 +586,7 @@
       "useGlobal": "グローバルを使用",
       "noProxy": "プロキシなし",
       "custom": "カスタム",
+      "webhookProviders": "Webhookチャンネル",
       "localNote": "ローカル — プロキシ不要",
       "customConfig": "{{provider}} カスタムプロキシ"
     },
@@ -602,7 +604,66 @@
       "embedding_qwen": "Qwen エンベディング",
       "embedding_glm": "GLM エンベディング",
       "embedding_ollama": "Ollama エンベディング",
-      "embedding_tfidf": "TF-IDF"
+      "embedding_tfidf": "TF-IDF",
+      "webhook_slack": "Webhook: Slack",
+      "webhook_feishu": "Webhook: Feishu",
+      "webhook_telegram": "Webhook: Telegram",
+      "webhook_discord": "Webhook: Discord",
+      "webhook_custom": "Webhook: カスタム"
+    }
+  },
+
+  "webhook": {
+    "title": "通知",
+    "description": "タスクの完了や失敗時に通知を受け取るWebhookチャンネルを設定します。",
+    "dismiss": "閉じる",
+    "loading": "読み込み中...",
+    "channels": "Webhookチャンネル",
+    "add": "追加",
+    "noChannels": "Webhookチャンネルが設定されていません。",
+    "test": "テスト",
+    "edit": "編集",
+    "delete": "削除",
+    "testSuccess": "テスト成功",
+    "testFailed": "テスト失敗",
+    "editChannel": "チャンネルを編集",
+    "addChannel": "チャンネルを追加",
+    "saving": "保存中...",
+    "update": "更新",
+    "create": "作成",
+    "cancel": "キャンセル",
+    "retry": "リトライ",
+    "eventsLabel": "イベント",
+    "deliveryHistory": "配信履歴",
+    "noDeliveries": "配信履歴はまだありません。",
+
+    "scope": {
+      "global": "グローバル",
+      "sessions": "セッション",
+      "specificSessions": "特定のセッション"
+    },
+
+    "events": {
+      "taskComplete": "タスク完了",
+      "taskFailed": "タスク失敗",
+      "taskCancelled": "タスクキャンセル",
+      "storyComplete": "ストーリー完了",
+      "prdComplete": "PRD完了",
+      "progressMilestone": "進捗マイルストーン"
+    },
+
+    "form": {
+      "name": "名前",
+      "channelType": "チャンネルタイプ",
+      "url": "Webhook URL",
+      "secret": "シークレット / トークン",
+      "secretPlaceholder": "現在の値を保持する場合は空欄",
+      "secretOptional": "オプション",
+      "scope": "スコープ",
+      "events": "イベント",
+      "template": "カスタムテンプレート",
+      "optional": "オプション",
+      "sessionIds": "カンマ区切りのセッションID"
     }
   }
 }
