@@ -8,3 +8,4 @@
 
 export { useAutoSave } from './useAutoSave';
 export { useGlobalCommands } from './useGlobalCommands';
+export { useGitStatus } from './useGitStatus';

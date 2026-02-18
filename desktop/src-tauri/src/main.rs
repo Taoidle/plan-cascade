@@ -328,6 +328,7 @@ fn main() {
             plan_cascade_desktop::commands::git::git_full_status,
             plan_cascade_desktop::commands::git::git_stage_files,
             plan_cascade_desktop::commands::git::git_unstage_files,
+            plan_cascade_desktop::commands::git::git_stage_hunk,
             plan_cascade_desktop::commands::git::git_commit,
             plan_cascade_desktop::commands::git::git_amend_commit,
             plan_cascade_desktop::commands::git::git_discard_changes,

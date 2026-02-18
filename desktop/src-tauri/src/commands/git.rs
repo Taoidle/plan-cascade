@@ -114,6 +114,23 @@ pub async fn git_unstage_files(
     }
 }
 
+/// Stage or unstage a specific hunk from a file's diff.
+#[tauri::command]
+pub async fn git_stage_hunk(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    file_path: String,
+    hunk_index: usize,
+    reverse: bool,
+) -> Result<CommandResponse<()>, String> {
+    let service = state.service.read().await;
+    let path = PathBuf::from(&repo_path);
+    match service.stage_hunk(&path, &file_path, hunk_index, reverse) {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
 // ===========================================================================
 // Commit Commands
 // ===========================================================================
