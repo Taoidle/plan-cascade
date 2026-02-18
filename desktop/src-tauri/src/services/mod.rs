@@ -39,6 +39,7 @@ pub mod tools;
 pub mod remote;
 pub mod webhook;
 pub mod worktree;
+pub mod git;
 pub mod knowledge;
 pub mod artifacts;
 pub mod graph_workflow;
@@ -66,3 +67,4 @@ pub use strategy::{
 };
 pub use sync::{start_default_watches, FileWatcherService, WatchTarget, WatcherConfig};
 pub use worktree::{GitOps, PlanningConfigService, WorktreeManager};
+pub use git::{GitService, GitLlmAssist, GitWatcher};

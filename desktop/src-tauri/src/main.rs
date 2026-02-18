@@ -17,6 +17,7 @@ use plan_cascade_desktop::commands::standalone::StandaloneState;
 use plan_cascade_desktop::commands::knowledge::KnowledgeState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
+use plan_cascade_desktop::commands::git::GitState;
 use plan_cascade_desktop::state::AppState;
 
 use tauri::Manager;
@@ -41,6 +42,7 @@ fn main() {
         .manage(TaskModeState::new())
         .manage(ExecutionRegistry::new())
         .manage(KnowledgeState::new())
+        .manage(GitState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -322,6 +324,35 @@ fn main() {
             plan_cascade_desktop::commands::knowledge::rag_query,
             plan_cascade_desktop::commands::knowledge::rag_list_collections,
             plan_cascade_desktop::commands::knowledge::rag_delete_collection,
+            // Git Source Control commands
+            plan_cascade_desktop::commands::git::git_full_status,
+            plan_cascade_desktop::commands::git::git_stage_files,
+            plan_cascade_desktop::commands::git::git_unstage_files,
+            plan_cascade_desktop::commands::git::git_commit,
+            plan_cascade_desktop::commands::git::git_amend_commit,
+            plan_cascade_desktop::commands::git::git_discard_changes,
+            plan_cascade_desktop::commands::git::git_diff_staged,
+            plan_cascade_desktop::commands::git::git_diff_unstaged,
+            plan_cascade_desktop::commands::git::git_diff_file,
+            plan_cascade_desktop::commands::git::git_log,
+            plan_cascade_desktop::commands::git::git_log_graph,
+            plan_cascade_desktop::commands::git::git_list_branches,
+            plan_cascade_desktop::commands::git::git_create_branch,
+            plan_cascade_desktop::commands::git::git_delete_branch,
+            plan_cascade_desktop::commands::git::git_checkout_branch,
+            plan_cascade_desktop::commands::git::git_list_stashes,
+            plan_cascade_desktop::commands::git::git_stash_save,
+            plan_cascade_desktop::commands::git::git_stash_pop,
+            plan_cascade_desktop::commands::git::git_stash_drop,
+            plan_cascade_desktop::commands::git::git_get_merge_state,
+            plan_cascade_desktop::commands::git::git_get_conflict_files,
+            plan_cascade_desktop::commands::git::git_resolve_conflict,
+            plan_cascade_desktop::commands::git::git_fetch,
+            plan_cascade_desktop::commands::git::git_pull,
+            plan_cascade_desktop::commands::git::git_push,
+            plan_cascade_desktop::commands::git::git_get_remotes,
+            plan_cascade_desktop::commands::git::git_generate_commit_message,
+            plan_cascade_desktop::commands::git::git_review_diff,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
