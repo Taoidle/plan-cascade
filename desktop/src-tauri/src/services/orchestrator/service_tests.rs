@@ -16,6 +16,7 @@ fn test_config() -> OrchestratorConfig {
         analysis_profile: AnalysisProfile::default(),
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
+        project_id: None,
     }
 }
 
@@ -497,6 +498,7 @@ fn test_architecture_baseline_keeps_seed_files_ahead_of_observed_noise() {
         analysis_profile: AnalysisProfile::default(),
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
+        project_id: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let mut ledger = AnalysisLedger::default();
@@ -566,6 +568,7 @@ fn test_baseline_steps_cover_required_tool_families() {
         analysis_profile: AnalysisProfile::default(),
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
+        project_id: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let ledger = AnalysisLedger::default();
@@ -993,6 +996,7 @@ fn test_reliable_provider_no_fallback_instructions() {
         analysis_profile: AnalysisProfile::default(),
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
+        project_id: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions();
@@ -1024,6 +1028,7 @@ fn test_unreliable_provider_gets_fallback_instructions() {
         analysis_profile: AnalysisProfile::default(),
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
+        project_id: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions();
@@ -1060,6 +1065,7 @@ fn test_user_override_disables_fallback_for_unreliable() {
         analysis_profile: AnalysisProfile::default(),
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
+        project_id: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions();
@@ -1090,6 +1096,7 @@ fn test_none_provider_gets_fallback_instructions() {
         analysis_profile: AnalysisProfile::default(),
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
+        project_id: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions();
@@ -1213,6 +1220,7 @@ fn test_sub_agent_spawner_uses_compaction_enabled() {
         analysis_profile: AnalysisProfile::default(),
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
+        project_id: None,
     };
     assert!(spawner_config.enable_compaction);
     assert_eq!(spawner_config.max_total_tokens, 384_000);
