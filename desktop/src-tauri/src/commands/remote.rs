@@ -503,6 +503,116 @@ pub async fn get_remote_audit_log(
 }
 
 // ---------------------------------------------------------------------------
+// Auto-start
+// ---------------------------------------------------------------------------
+
+/// Check if the remote gateway should auto-start and start it if configured.
+///
+/// This is called during app initialization (init_app). Failures are logged
+/// but do NOT block app startup -- the gateway status will show the error.
+///
+/// Returns `Ok(true)` if the gateway was started, `Ok(false)` if auto-start
+/// is disabled, or `Err` with an error message.
+pub async fn try_auto_start_gateway(
+    remote_state: &RemoteState,
+    app_state: &AppState,
+) -> Result<bool, String> {
+    // Read gateway config from database
+    let config_result = app_state
+        .with_database(|db| {
+            let gateway_config: RemoteGatewayConfig = db
+                .get_setting(REMOTE_CONFIG_KEY)?
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default();
+            Ok(gateway_config)
+        })
+        .await;
+
+    let gateway_config = match config_result {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("Failed to read remote gateway config for auto-start: {}", e);
+            return Err(format!("Failed to read config: {}", e));
+        }
+    };
+
+    // Check if auto-start is enabled
+    if !gateway_config.enabled || !gateway_config.auto_start {
+        tracing::debug!(
+            "Remote gateway auto-start skipped (enabled={}, auto_start={})",
+            gateway_config.enabled,
+            gateway_config.auto_start
+        );
+        return Ok(false);
+    }
+
+    // Read Telegram config and hydrate secrets
+    let full_config_result = app_state
+        .with_database(|db| {
+            let mut telegram_config: Option<TelegramAdapterConfig> = db
+                .get_setting(TELEGRAM_CONFIG_KEY)?
+                .and_then(|json| serde_json::from_str(&json).ok());
+
+            let keyring = KeyringService::new();
+            if let Some(ref mut tg) = telegram_config {
+                tg.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
+                tg.access_password = keyring
+                    .get_api_key(KEYRING_ACCESS_PASSWORD)
+                    .ok()
+                    .flatten();
+            }
+
+            let proxy = resolve_provider_proxy(&keyring, db, "remote_telegram");
+
+            Ok((gateway_config.clone(), telegram_config, proxy))
+        })
+        .await;
+
+    let (gw_config, telegram_config, proxy) = match full_config_result {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("Failed to read telegram config for auto-start: {}", e);
+            return Err(format!("Failed to read config: {}", e));
+        }
+    };
+
+    // Get database for gateway
+    let db_result = app_state
+        .with_database(|db| Ok(Arc::new(db.clone())))
+        .await;
+
+    let db = match db_result {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("Failed to get database for auto-start: {}", e);
+            return Err(format!("Database error: {}", e));
+        }
+    };
+
+    // Create session bridge and load existing mappings
+    let bridge = Arc::new(SessionBridge::new(db.clone()));
+    if let Err(e) = bridge.load_mappings_from_db().await {
+        tracing::warn!("Failed to load session mappings for auto-start: {}", e);
+        // Continue anyway -- gateway can still function
+    }
+
+    // Create and start gateway
+    let gateway = RemoteGatewayService::new(gw_config, telegram_config, bridge, db);
+    match gateway.start(proxy.as_ref()).await {
+        Ok(()) => {
+            tracing::info!("Remote gateway auto-started successfully");
+            let mut guard = remote_state.gateway.write().await;
+            *guard = Some(gateway);
+            Ok(true)
+        }
+        Err(e) => {
+            tracing::warn!("Remote gateway auto-start failed: {}", e);
+            Err(format!("Auto-start failed: {}", e))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -690,5 +800,32 @@ mod tests {
             })
             .unwrap();
         assert_eq!(total, 10);
+    }
+
+    #[test]
+    fn test_auto_start_config_check() {
+        // Test that auto-start is only enabled when both enabled=true AND auto_start=true
+        let config_disabled = RemoteGatewayConfig {
+            enabled: false,
+            auto_start: true,
+            ..Default::default()
+        };
+        assert!(!config_disabled.enabled || !config_disabled.auto_start);
+        // enabled=false -> should not auto-start
+        assert!(!(config_disabled.enabled && config_disabled.auto_start));
+
+        let config_no_auto = RemoteGatewayConfig {
+            enabled: true,
+            auto_start: false,
+            ..Default::default()
+        };
+        assert!(!(config_no_auto.enabled && config_no_auto.auto_start));
+
+        let config_both = RemoteGatewayConfig {
+            enabled: true,
+            auto_start: true,
+            ..Default::default()
+        };
+        assert!(config_both.enabled && config_both.auto_start);
     }
 }

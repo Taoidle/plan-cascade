@@ -128,6 +128,9 @@ impl SessionBridge {
     }
 
     /// Create a new session for a remote chat.
+    ///
+    /// The `adapter_type_name` and `username` are stored with the mapping
+    /// so the frontend can display the remote source (e.g., "via Telegram @user").
     pub async fn create_session(
         &self,
         chat_id: i64,
@@ -135,6 +138,20 @@ impl SessionBridge {
         _project_path: &str,
         _provider: Option<&str>,
         _model: Option<&str>,
+    ) -> Result<String, RemoteError> {
+        self.create_session_with_source(chat_id, user_id, _project_path, _provider, _model, None, None).await
+    }
+
+    /// Create a new session with remote source tracking.
+    pub async fn create_session_with_source(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+        _project_path: &str,
+        _provider: Option<&str>,
+        _model: Option<&str>,
+        adapter_type_name: Option<&str>,
+        username: Option<&str>,
     ) -> Result<String, RemoteError> {
         use super::types::{RemoteSessionMapping, SessionType};
 
@@ -145,9 +162,19 @@ impl SessionBridge {
             local_session_id: Some(session_id.clone()),
             session_type: SessionType::ClaudeCode,
             created_at: chrono::Utc::now().to_rfc3339(),
+            adapter_type_name: adapter_type_name.map(|s| s.to_string()),
+            username: username.map(|s| s.to_string()),
         };
         self.sessions.write().await.insert(chat_id, mapping);
         Ok(session_id)
+    }
+
+    /// Get the active local session ID for a given chat.
+    pub async fn get_active_session_id(&self, chat_id: i64) -> Option<String> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .get(&chat_id)
+            .and_then(|m| m.local_session_id.clone())
     }
 
     /// Load session mappings from database on startup.
@@ -170,12 +197,16 @@ impl SessionBridge {
                     serde_json::from_str(&session_type_json)
                         .unwrap_or(super::types::SessionType::ClaudeCode);
 
+                let adapter_type_name: Option<String> = row.get(2).ok();
+
                 Ok(RemoteSessionMapping {
                     chat_id: row.get(0)?,
                     user_id: row.get(1)?,
                     local_session_id: row.get(3)?,
                     session_type,
                     created_at: row.get(5)?,
+                    adapter_type_name,
+                    username: None, // Not stored in current schema
                 })
             })
             .map_err(|e| RemoteError::ConfigError(format!("Failed to query mappings: {}", e)))?;

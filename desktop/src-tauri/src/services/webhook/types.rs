@@ -120,6 +120,10 @@ pub struct WebhookPayload {
     pub timestamp: String,
     pub duration_ms: Option<u64>,
     pub token_usage: Option<TokenUsageSummary>,
+    /// Source identifier when the event was triggered by a remote session.
+    /// Format: "via <adapter_type> @<username>" (e.g., "via Telegram @user").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_source: Option<String>,
 }
 
 impl Default for WebhookPayload {
@@ -134,6 +138,7 @@ impl Default for WebhookPayload {
             timestamp: chrono::Utc::now().to_rfc3339(),
             duration_ms: None,
             token_usage: None,
+            remote_source: None,
         }
     }
 }
@@ -330,6 +335,7 @@ mod tests {
                 input_tokens: Some(100),
                 output_tokens: Some(200),
             }),
+            remote_source: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         let parsed: WebhookPayload = serde_json::from_str(&json).unwrap();
@@ -430,5 +436,34 @@ mod tests {
         assert!(payload.summary.is_empty());
         assert!(payload.session_id.is_none());
         assert!(!payload.timestamp.is_empty());
+        assert!(payload.remote_source.is_none());
+    }
+
+    #[test]
+    fn test_webhook_payload_with_remote_source() {
+        let payload = WebhookPayload {
+            event_type: WebhookEventType::TaskComplete,
+            session_id: Some("remote-session-1".to_string()),
+            summary: "Task completed successfully".to_string(),
+            remote_source: Some("via Telegram @user".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("remote_source"));
+        assert!(json.contains("via Telegram @user"));
+
+        let parsed: WebhookPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed.remote_source,
+            Some("via Telegram @user".to_string())
+        );
+    }
+
+    #[test]
+    fn test_webhook_payload_remote_source_skipped_when_none() {
+        let payload = WebhookPayload::default();
+        let json = serde_json::to_string(&payload).unwrap();
+        // remote_source should be omitted when None
+        assert!(!json.contains("remote_source"));
     }
 }
