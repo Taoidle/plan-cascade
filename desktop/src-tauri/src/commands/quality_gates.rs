@@ -12,7 +12,8 @@ use crate::models::quality_gates::{
 };
 use crate::models::response::CommandResponse;
 use crate::services::quality_gates::{
-    detect_project_type, get_default_gates, QualityGateRunner, QualityGatesStore, ValidatorRegistry,
+    detect_project_type, get_default_gates, GateCache, QualityGateRunner, QualityGatesStore,
+    ValidatorRegistry,
 };
 use crate::state::AppState;
 use crate::utils::error::{AppError, AppResult};
@@ -21,6 +22,7 @@ use crate::utils::error::{AppError, AppResult};
 pub struct QualityGatesState {
     store: Arc<RwLock<Option<QualityGatesStore>>>,
     registry: Arc<ValidatorRegistry>,
+    cache: Arc<RwLock<Option<Arc<GateCache>>>>,
 }
 
 impl QualityGatesState {
@@ -28,10 +30,11 @@ impl QualityGatesState {
         Self {
             store: Arc::new(RwLock::new(None)),
             registry: Arc::new(ValidatorRegistry::new()),
+            cache: Arc::new(RwLock::new(None)),
         }
     }
 
-    /// Initialize the quality gates store
+    /// Initialize the quality gates store and cache
     pub async fn initialize(&self, app_state: &AppState) -> AppResult<()> {
         let mut store_lock = self.store.write().await;
         if store_lock.is_some() {
@@ -40,8 +43,13 @@ impl QualityGatesState {
 
         // Get database pool from app state
         let pool = app_state.with_database(|db| Ok(db.pool().clone())).await?;
-        let store = QualityGatesStore::new(pool)?;
+        let store = QualityGatesStore::new(pool.clone())?;
         *store_lock = Some(store);
+
+        // Initialize the gate cache using the same database pool
+        let mut cache_lock = self.cache.write().await;
+        let gate_cache = GateCache::new(pool)?;
+        *cache_lock = Some(Arc::new(gate_cache));
 
         Ok(())
     }
@@ -61,6 +69,12 @@ impl QualityGatesState {
     /// Get the validator registry
     pub fn registry(&self) -> &ValidatorRegistry {
         &self.registry
+    }
+
+    /// Get access to the gate cache as an Arc (if initialized)
+    pub async fn get_cache(&self) -> Option<Arc<GateCache>> {
+        let guard = self.cache.read().await;
+        guard.clone()
     }
 }
 

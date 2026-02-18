@@ -6,8 +6,9 @@
 //! - State channels with reducer support (Overwrite, Append, Sum)
 //! - Cycle detection (max 100 iterations)
 //! - Human review interrupt points
+//! - Checkpointer integration for pause/resume and crash recovery
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -17,6 +18,7 @@ use serde_json::Value;
 use super::graph_types::{Edge, GraphWorkflow, Reducer};
 use super::registry::ComposerRegistry;
 use super::types::{Agent, AgentContext, AgentEvent, AgentEventStream, AgentStep};
+use crate::services::graph_workflow::checkpointer::{Checkpointer, GraphCheckpoint, Interrupt};
 use crate::utils::error::{AppError, AppResult};
 
 /// Maximum number of node traversals before cycle detection triggers.
@@ -37,12 +39,31 @@ impl Agent for GraphWorkflow {
     }
 
     async fn run(&self, ctx: AgentContext) -> AppResult<AgentEventStream> {
-        // Clone what we need for the async stream
+        // Default run without checkpointer
+        self.run_with_checkpointer(ctx, None, uuid::Uuid::new_v4().to_string())
+            .await
+    }
+}
+
+impl GraphWorkflow {
+    /// Run the graph workflow with an optional checkpointer for pause/resume support.
+    ///
+    /// When a checkpointer is provided:
+    /// - Nodes with `interrupt_before = true` will save a checkpoint and emit
+    ///   `HumanReviewRequired` before execution, pausing the workflow.
+    /// - After each node completes, a checkpoint is saved with the current graph state.
+    /// - Nodes with `interrupt_after = true` will save a checkpoint and emit
+    ///   `HumanReviewRequired` after execution, pausing the workflow.
+    pub async fn run_with_checkpointer(
+        &self,
+        ctx: AgentContext,
+        checkpointer: Option<Arc<dyn Checkpointer + Send + Sync>>,
+        thread_id: String,
+    ) -> AppResult<AgentEventStream> {
         let workflow = self.clone();
-        let ctx = ctx;
 
         let stream = futures_util::stream::unfold(
-            GraphExecutionState::new(workflow, ctx),
+            GraphExecutionState::new(workflow, ctx, checkpointer, thread_id),
             |mut state| async move {
                 // If we have buffered events, emit them first
                 if let Some(event) = state.pending_events.pop_front() {
@@ -89,10 +110,19 @@ struct GraphExecutionState {
     visited_count: usize,
     done: bool,
     pending_events: std::collections::VecDeque<AgentEvent>,
+    /// Optional checkpointer for persisting execution state at interrupt points.
+    checkpointer: Option<Arc<dyn Checkpointer + Send + Sync>>,
+    /// Thread identifier grouping related checkpoints for this execution.
+    thread_id: String,
 }
 
 impl GraphExecutionState {
-    fn new(workflow: GraphWorkflow, ctx: AgentContext) -> Self {
+    fn new(
+        workflow: GraphWorkflow,
+        ctx: AgentContext,
+        checkpointer: Option<Arc<dyn Checkpointer + Send + Sync>>,
+        thread_id: String,
+    ) -> Self {
         // Initialize graph state from schema defaults
         let mut graph_state = HashMap::new();
         for (key, channel) in &workflow.state_schema.channels {
@@ -111,6 +141,33 @@ impl GraphExecutionState {
             visited_count: 0,
             done: false,
             pending_events: std::collections::VecDeque::new(),
+            checkpointer,
+            thread_id,
+        }
+    }
+
+    /// Restore execution state from a checkpoint.
+    ///
+    /// Reconstructs a `GraphExecutionState` from a `GraphCheckpoint`, allowing
+    /// a previously paused or interrupted workflow to resume from where it left off.
+    /// The checkpoint's `step` field becomes the next node to execute, and the
+    /// checkpoint's `state` replaces the graph state.
+    fn from_checkpoint(
+        workflow: GraphWorkflow,
+        ctx: AgentContext,
+        checkpoint: &GraphCheckpoint,
+        checkpointer: Option<Arc<dyn Checkpointer + Send + Sync>>,
+    ) -> Self {
+        Self {
+            workflow,
+            ctx,
+            current_node: Some(checkpoint.step.clone()),
+            graph_state: checkpoint.state.clone(),
+            visited_count: 0,
+            done: false,
+            pending_events: std::collections::VecDeque::new(),
+            checkpointer,
+            thread_id: checkpoint.thread_id.clone(),
         }
     }
 }
@@ -118,6 +175,32 @@ impl GraphExecutionState {
 // ============================================================================
 // Node Execution
 // ============================================================================
+
+/// Save a checkpoint via the checkpointer, if present.
+///
+/// This is a helper that constructs a `GraphCheckpoint` from the current
+/// execution state and persists it. Errors from the checkpointer are logged
+/// but do not abort the workflow (best-effort persistence).
+async fn save_checkpoint(
+    state: &GraphExecutionState,
+    step: &str,
+    interrupt: Option<Interrupt>,
+) {
+    if let Some(ref checkpointer) = state.checkpointer {
+        let next_nodes: Vec<String> = state.current_node.iter().cloned().collect();
+        let checkpoint = GraphCheckpoint::new(
+            &state.thread_id,
+            state.graph_state.clone(),
+            step,
+            next_nodes,
+            interrupt,
+        );
+        if let Err(e) = checkpointer.save(checkpoint).await {
+            // Log but do not fail the workflow
+            tracing::warn!("Failed to save checkpoint at step '{}': {}", step, e);
+        }
+    }
+}
 
 /// Execute the next node in the graph.
 async fn execute_next_node(state: &mut GraphExecutionState) -> AppResult<()> {
@@ -155,7 +238,30 @@ async fn execute_next_node(state: &mut GraphExecutionState) -> AppResult<()> {
         })?
         .clone();
 
-    // Check for human review node
+    // ── interrupt_before: save checkpoint and pause ──────────────────────
+    if node.interrupt_before {
+        // Set current_node back so resume picks up this node
+        state.current_node = Some(node_id.clone());
+        save_checkpoint(
+            state,
+            &node_id,
+            Some(Interrupt::Before {
+                node_id: node_id.clone(),
+            }),
+        )
+        .await;
+        state.pending_events.push_back(AgentEvent::HumanReviewRequired {
+            node_id: node_id.clone(),
+            context: format!(
+                "Interrupt before node '{}': human review required",
+                node_id
+            ),
+        });
+        state.done = true;
+        return Ok(());
+    }
+
+    // Check for human review node (legacy __human_review sentinel)
     if is_human_review_node(&node.agent_step) {
         state.pending_events.push_back(AgentEvent::HumanReviewRequired {
             node_id: node_id.clone(),
@@ -224,17 +330,46 @@ async fn execute_next_node(state: &mut GraphExecutionState) -> AppResult<()> {
 
     match next_node {
         Some(next) => {
-            state.current_node = Some(next);
+            state.current_node = Some(next.clone());
         }
         None => {
             // No outgoing edge: workflow is done
-            state.done = true;
-            state.pending_events.push_back(AgentEvent::Done {
-                output: Some(
-                    serde_json::to_string(&state.graph_state).unwrap_or_default(),
-                ),
-            });
+            state.current_node = None;
         }
+    }
+
+    // ── Post-completion checkpoint: save current graph state ─────────────
+    save_checkpoint(state, &node_id, None).await;
+
+    // ── interrupt_after: save checkpoint and pause ───────────────────────
+    if node.interrupt_after {
+        save_checkpoint(
+            state,
+            &node_id,
+            Some(Interrupt::After {
+                node_id: node_id.clone(),
+            }),
+        )
+        .await;
+        state.pending_events.push_back(AgentEvent::HumanReviewRequired {
+            node_id: node_id.clone(),
+            context: format!(
+                "Interrupt after node '{}': human review required",
+                node_id
+            ),
+        });
+        state.done = true;
+        return Ok(());
+    }
+
+    // If no next node, mark workflow as done
+    if state.current_node.is_none() {
+        state.done = true;
+        state.pending_events.push_back(AgentEvent::Done {
+            output: Some(
+                serde_json::to_string(&state.graph_state).unwrap_or_default(),
+            ),
+        });
     }
 
     Ok(())
@@ -475,6 +610,7 @@ mod tests {
             input: AgentInput::Text("test".to_string()),
             shared_state: Arc::new(RwLock::new(HashMap::new())),
             config: AgentConfig::default(),
+            orchestrator_ctx: None,
         }
     }
 

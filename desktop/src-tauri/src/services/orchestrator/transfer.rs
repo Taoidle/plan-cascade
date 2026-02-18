@@ -511,6 +511,7 @@ mod tests {
             input: AgentInput::Text("test".to_string()),
             shared_state: Arc::new(RwLock::new(HashMap::new())),
             config: AgentConfig::default(),
+            orchestrator_ctx: None,
         };
 
         let result = handler

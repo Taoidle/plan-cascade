@@ -162,7 +162,7 @@ fn canonical_providers() -> &'static [&'static str] {
     &["anthropic", "openai", "deepseek", "glm", "qwen", "minimax", "ollama"]
 }
 
-fn get_api_key_with_aliases(
+pub(crate) fn get_api_key_with_aliases(
     keyring: &KeyringService,
     canonical_provider: &str,
 ) -> Result<Option<String>, String> {

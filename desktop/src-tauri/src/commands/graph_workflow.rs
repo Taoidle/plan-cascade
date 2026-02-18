@@ -203,6 +203,122 @@ pub async fn update_graph_workflow(
     }
 }
 
+/// Export a graph workflow in the specified format (json or mermaid).
+#[tauri::command]
+pub async fn export_graph_workflow(
+    state: State<'_, AppState>,
+    id: String,
+    format: String,
+) -> Result<CommandResponse<String>, String> {
+    let result = state
+        .with_database(|db| {
+            let conn = db.pool().get().map_err(|e| {
+                AppError::database(format!("Failed to get connection: {}", e))
+            })?;
+
+            ensure_graph_workflows_table(&conn)?;
+
+            let wf_result = conn.query_row(
+                "SELECT definition FROM graph_workflows WHERE id = ?1",
+                rusqlite::params![id],
+                |row| {
+                    let json: String = row.get(0)?;
+                    Ok(json)
+                },
+            );
+
+            match wf_result {
+                Ok(json) => {
+                    let workflow: GraphWorkflow = serde_json::from_str(&json)
+                        .map_err(|e| AppError::parse(format!("Failed to parse workflow: {}", e)))?;
+
+                    match format.as_str() {
+                        "json" => {
+                            let pretty = serde_json::to_string_pretty(&workflow)
+                                .map_err(|e| AppError::parse(format!("Failed to serialize workflow: {}", e)))?;
+                            Ok(pretty)
+                        }
+                        "mermaid" => {
+                            Ok(generate_mermaid(&workflow))
+                        }
+                        _ => Err(AppError::validation(format!(
+                            "Unsupported export format: {}. Supported: json, mermaid",
+                            format
+                        ))),
+                    }
+                }
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    Err(AppError::not_found(format!(
+                        "Graph workflow not found: {}",
+                        id
+                    )))
+                }
+                Err(e) => Err(AppError::database(e.to_string())),
+            }
+        })
+        .await;
+
+    match result {
+        Ok(exported) => Ok(CommandResponse::ok(exported)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Generate a Mermaid flowchart from a GraphWorkflow.
+fn generate_mermaid(workflow: &GraphWorkflow) -> String {
+    use crate::services::agent_composer::graph_types::Edge;
+
+    let mut lines = Vec::new();
+    lines.push("graph TD".to_string());
+
+    // Emit nodes sorted by ID for deterministic output
+    let mut node_ids: Vec<&String> = workflow.nodes.keys().collect();
+    node_ids.sort();
+    for node_id in node_ids {
+        if let Some(node) = workflow.nodes.get(node_id) {
+            let node_name = get_agent_step_name(&node.agent_step);
+            lines.push(format!("  {}[\"{}\"]", node_id, node_name));
+        }
+    }
+
+    // Emit edges
+    for edge in &workflow.edges {
+        match edge {
+            Edge::Direct { from, to } => {
+                lines.push(format!("  {} --> {}", from, to));
+            }
+            Edge::Conditional {
+                from,
+                condition: _,
+                branches,
+                default_branch: _,
+            } => {
+                // Sort branch keys for deterministic output
+                let mut branch_keys: Vec<&String> = branches.keys().collect();
+                branch_keys.sort();
+                for key in branch_keys {
+                    if let Some(target) = branches.get(key) {
+                        lines.push(format!("  {} -->|{}| {}", from, key, target));
+                    }
+                }
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Extract the name from an AgentStep variant.
+fn get_agent_step_name(step: &crate::services::agent_composer::types::AgentStep) -> String {
+    use crate::services::agent_composer::types::AgentStep;
+    match step {
+        AgentStep::LlmStep(config) => config.name.clone(),
+        AgentStep::SequentialStep { name, .. } => name.clone(),
+        AgentStep::ParallelStep { name, .. } => name.clone(),
+        AgentStep::ConditionalStep { name, .. } => name.clone(),
+    }
+}
+
 /// Delete a graph workflow.
 #[tauri::command]
 pub async fn delete_graph_workflow(
@@ -371,5 +487,145 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_generate_mermaid_direct_edges() {
+        let workflow = sample_workflow();
+        let mermaid = generate_mermaid(&workflow);
+
+        assert!(mermaid.starts_with("graph TD"));
+        assert!(mermaid.contains("a[\"agent-a\"]"));
+        assert!(mermaid.contains("b[\"agent-b\"]"));
+        assert!(mermaid.contains("a --> b"));
+    }
+
+    #[test]
+    fn test_generate_mermaid_conditional_edges() {
+        let mut nodes = HashMap::new();
+        nodes.insert(
+            "router".to_string(),
+            GraphNode {
+                id: "router".to_string(),
+                agent_step: AgentStep::LlmStep(LlmStepConfig {
+                    name: "Router Agent".to_string(),
+                    instruction: None,
+                    model: None,
+                    tools: None,
+                    config: AgentConfig::default(),
+                }),
+                position: None,
+                interrupt_before: false,
+                interrupt_after: false,
+            },
+        );
+        nodes.insert(
+            "yes_node".to_string(),
+            GraphNode {
+                id: "yes_node".to_string(),
+                agent_step: AgentStep::LlmStep(LlmStepConfig {
+                    name: "Yes Handler".to_string(),
+                    instruction: None,
+                    model: None,
+                    tools: None,
+                    config: AgentConfig::default(),
+                }),
+                position: None,
+                interrupt_before: false,
+                interrupt_after: false,
+            },
+        );
+        nodes.insert(
+            "no_node".to_string(),
+            GraphNode {
+                id: "no_node".to_string(),
+                agent_step: AgentStep::LlmStep(LlmStepConfig {
+                    name: "No Handler".to_string(),
+                    instruction: None,
+                    model: None,
+                    tools: None,
+                    config: AgentConfig::default(),
+                }),
+                position: None,
+                interrupt_before: false,
+                interrupt_after: false,
+            },
+        );
+
+        let mut branches = HashMap::new();
+        branches.insert("yes".to_string(), "yes_node".to_string());
+        branches.insert("no".to_string(), "no_node".to_string());
+
+        let workflow = GraphWorkflow {
+            name: "Conditional Flow".to_string(),
+            description: None,
+            nodes,
+            edges: vec![Edge::Conditional {
+                from: "router".to_string(),
+                condition: ConditionConfig {
+                    condition_key: "decision".to_string(),
+                },
+                branches,
+                default_branch: None,
+            }],
+            entry_node: "router".to_string(),
+            state_schema: StateSchema::default(),
+        };
+
+        let mermaid = generate_mermaid(&workflow);
+
+        assert!(mermaid.starts_with("graph TD"));
+        assert!(mermaid.contains("router[\"Router Agent\"]"));
+        assert!(mermaid.contains("yes_node[\"Yes Handler\"]"));
+        assert!(mermaid.contains("no_node[\"No Handler\"]"));
+        assert!(mermaid.contains("router -->|no| no_node"));
+        assert!(mermaid.contains("router -->|yes| yes_node"));
+    }
+
+    #[test]
+    fn test_generate_mermaid_empty_workflow() {
+        let workflow = GraphWorkflow {
+            name: "Empty".to_string(),
+            description: None,
+            nodes: HashMap::new(),
+            edges: vec![],
+            entry_node: String::new(),
+            state_schema: StateSchema::default(),
+        };
+
+        let mermaid = generate_mermaid(&workflow);
+        assert_eq!(mermaid, "graph TD");
+    }
+
+    #[test]
+    fn test_get_agent_step_name_variants() {
+        let llm = AgentStep::LlmStep(LlmStepConfig {
+            name: "llm-agent".to_string(),
+            instruction: None,
+            model: None,
+            tools: None,
+            config: AgentConfig::default(),
+        });
+        assert_eq!(get_agent_step_name(&llm), "llm-agent");
+
+        let seq = AgentStep::SequentialStep {
+            name: "seq-step".to_string(),
+            steps: vec![],
+        };
+        assert_eq!(get_agent_step_name(&seq), "seq-step");
+
+        let par = AgentStep::ParallelStep {
+            name: "par-step".to_string(),
+            steps: vec![],
+        };
+        assert_eq!(get_agent_step_name(&par), "par-step");
+
+        let cond = AgentStep::ConditionalStep {
+            name: "cond-step".to_string(),
+            condition_key: "key".to_string(),
+            branches: HashMap::new(),
+            default_branch: None,
+        };
+        assert_eq!(get_agent_step_name(&cond), "cond-step");
     }
 }

@@ -2971,6 +2971,7 @@ impl OrchestratorService {
             input: AgentInput::Text(format!("Transfer to agent '{}'", target_agent)),
             shared_state: Arc::new(tokio::sync::RwLock::new(shared_state)),
             config: AgentConfig::default(),
+            orchestrator_ctx: None,
         };
 
         // Invoke handle_transfer with the target agent name

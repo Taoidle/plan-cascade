@@ -323,6 +323,7 @@ mod tests {
             input: AgentInput::Text("test input".to_string()),
             shared_state: Arc::new(RwLock::new(HashMap::new())),
             config: AgentConfig::default(),
+            orchestrator_ctx: None,
         }
     }
 

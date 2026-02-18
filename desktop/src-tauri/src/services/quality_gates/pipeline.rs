@@ -11,10 +11,12 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::models::quality_gates::GateStatus;
+use crate::services::quality_gates::cache::{GateCache, GateCacheKey};
 use crate::utils::error::AppResult;
 
 // ============================================================================
@@ -333,6 +335,8 @@ pub struct GatePipeline {
     config: PipelineConfig,
     /// Registered gate executors by gate_id
     gates: HashMap<String, GateExecutor>,
+    /// Optional gate cache for skipping unchanged gates
+    cache: Option<Arc<GateCache>>,
 }
 
 impl GatePipeline {
@@ -341,7 +345,14 @@ impl GatePipeline {
         Self {
             config,
             gates: HashMap::new(),
+            cache: None,
         }
+    }
+
+    /// Set an optional gate cache via builder pattern.
+    pub fn with_cache(mut self, cache: Arc<GateCache>) -> Self {
+        self.cache = Some(cache);
+        self
     }
 
     /// Register a gate executor.
@@ -402,37 +413,164 @@ impl GatePipeline {
             return PipelinePhaseResult::new(phase, phase_config.mode, Vec::new());
         }
 
+        // Compute git hashes once per phase if cache is available
+        let git_hashes = if self.cache.is_some() {
+            resolve_git_hashes(&self.config.project_path).await
+        } else {
+            None
+        };
+
         match phase {
             GatePhase::PreValidation => {
                 // Sequential execution for pre-validation (formatting)
                 for gate_id in &gate_ids {
                     if let Some(executor) = self.gates.get(gate_id) {
-                        let result = executor().await;
+                        let result = self
+                            .execute_or_use_cache(gate_id, executor, &git_hashes)
+                            .await;
                         gate_results.push(result);
                     }
                 }
             }
             GatePhase::Validation | GatePhase::PostValidation => {
                 // Parallel execution for validation and post-validation
-                let mut futures = Vec::new();
-                for gate_id in &gate_ids {
-                    if let Some(executor) = self.gates.get(gate_id) {
-                        futures.push(executor());
-                    }
-                }
+                // When cache is present, check each gate individually first
+                if let (Some(cache), Some((ref commit, ref tree))) = (&self.cache, &git_hashes) {
+                    let mut to_execute = Vec::new();
+                    let mut to_execute_ids = Vec::new();
 
-                let results = futures_util::future::join_all(futures).await;
-                gate_results.extend(results);
+                    for gate_id in &gate_ids {
+                        let cache_key = GateCacheKey {
+                            gate_id: gate_id.clone(),
+                            commit_hash: commit.clone(),
+                            tree_hash: tree.clone(),
+                        };
+
+                        match cache.get(&cache_key) {
+                            Ok(Some(cached_result)) => {
+                                gate_results.push(cached_result);
+                            }
+                            _ => {
+                                if let Some(executor) = self.gates.get(gate_id) {
+                                    to_execute.push(executor());
+                                    to_execute_ids.push(gate_id.clone());
+                                }
+                            }
+                        }
+                    }
+
+                    if !to_execute.is_empty() {
+                        let results = futures_util::future::join_all(to_execute).await;
+                        for (gate_id, result) in to_execute_ids.iter().zip(results.into_iter()) {
+                            // Store in cache
+                            let cache_key = GateCacheKey {
+                                gate_id: gate_id.clone(),
+                                commit_hash: commit.clone(),
+                                tree_hash: tree.clone(),
+                            };
+                            let _ = cache.put(&cache_key, &result);
+                            gate_results.push(result);
+                        }
+                    }
+                } else {
+                    // No cache: execute all in parallel as before
+                    let mut futures = Vec::new();
+                    for gate_id in &gate_ids {
+                        if let Some(executor) = self.gates.get(gate_id) {
+                            futures.push(executor());
+                        }
+                    }
+
+                    let results = futures_util::future::join_all(futures).await;
+                    gate_results.extend(results);
+                }
             }
         }
 
         PipelinePhaseResult::new(phase, phase_config.mode, gate_results)
     }
 
+    /// Execute a single gate, checking cache first if available.
+    async fn execute_or_use_cache(
+        &self,
+        gate_id: &str,
+        executor: &GateExecutor,
+        git_hashes: &Option<(String, String)>,
+    ) -> PipelineGateResult {
+        if let (Some(cache), Some((commit, tree))) = (&self.cache, git_hashes) {
+            let cache_key = GateCacheKey {
+                gate_id: gate_id.to_string(),
+                commit_hash: commit.clone(),
+                tree_hash: tree.clone(),
+            };
+
+            // Check cache
+            if let Ok(Some(cached_result)) = cache.get(&cache_key) {
+                return cached_result;
+            }
+
+            // Execute gate and store result
+            let result = executor().await;
+            let _ = cache.put(&cache_key, &result);
+            result
+        } else {
+            // No cache: execute directly
+            executor().await
+        }
+    }
+
     /// Get the pipeline configuration.
     pub fn config(&self) -> &PipelineConfig {
         &self.config
     }
+}
+
+// ============================================================================
+// Git Hash Helpers
+// ============================================================================
+
+/// Resolve the current git commit hash and working tree hash for a project path.
+///
+/// Returns `Some((commit_hash, tree_hash))` on success, or `None` if the path
+/// is not a git repo or the commands fail.
+async fn resolve_git_hashes(project_path: &PathBuf) -> Option<(String, String)> {
+    use tokio::process::Command;
+
+    let commit_output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(project_path)
+        .output()
+        .await
+        .ok()?;
+
+    if !commit_output.status.success() {
+        return None;
+    }
+
+    let commit_hash = String::from_utf8_lossy(&commit_output.stdout)
+        .trim()
+        .to_string();
+
+    let tree_output = Command::new("git")
+        .arg("write-tree")
+        .current_dir(project_path)
+        .output()
+        .await
+        .ok()?;
+
+    if !tree_output.status.success() {
+        return None;
+    }
+
+    let tree_hash = String::from_utf8_lossy(&tree_output.stdout)
+        .trim()
+        .to_string();
+
+    if commit_hash.is_empty() || tree_hash.is_empty() {
+        return None;
+    }
+
+    Some((commit_hash, tree_hash))
 }
 
 // ============================================================================

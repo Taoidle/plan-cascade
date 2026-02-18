@@ -20,7 +20,7 @@ pub use detector::*;
 pub use runner::*;
 pub use validators::*;
 pub use ai_verify::AiVerificationGate;
-pub use cache::GateCache;
+pub use cache::{GateCache, GateCacheKey};
 pub use code_review::{CodeReviewGate, CodeReviewResult};
 pub use dod::{DoDGate, DoDInput};
 pub use dor::{DoRGate, StoryForValidation};

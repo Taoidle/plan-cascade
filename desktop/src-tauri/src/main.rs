@@ -273,6 +273,7 @@ fn main() {
             plan_cascade_desktop::commands::graph_workflow::create_graph_workflow,
             plan_cascade_desktop::commands::graph_workflow::update_graph_workflow,
             plan_cascade_desktop::commands::graph_workflow::delete_graph_workflow,
+            plan_cascade_desktop::commands::graph_workflow::export_graph_workflow,
             // Proxy commands
             plan_cascade_desktop::commands::proxy::get_proxy_config,
             plan_cascade_desktop::commands::proxy::set_proxy_config,

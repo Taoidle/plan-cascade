@@ -3736,6 +3736,7 @@ async fn test_transfer_handler_missing_agent_returns_error() {
         input: AgentInput::Text("test".to_string()),
         shared_state: Arc::new(RwLock::new(HashMap::new())),
         config: AgentConfig::default(),
+        orchestrator_ctx: None,
     };
 
     let result = handler

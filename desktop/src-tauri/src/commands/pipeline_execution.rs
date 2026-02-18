@@ -10,15 +10,24 @@
 //! - `cancel_pipeline_execution` - Cancel a running pipeline
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tauri::State;
 use tokio::sync::RwLock;
 
+use crate::commands::standalone::{normalize_provider_name, StandaloneState};
 use crate::models::response::CommandResponse;
-use crate::utils::error::{AppError, AppResult};
+use crate::services::agent_composer::{AgentConfig, AgentContext, AgentInput};
+use crate::services::llm::{
+    AnthropicProvider, DeepSeekProvider, GlmProvider, LlmProvider, MinimaxProvider,
+    OllamaProvider, OpenAIProvider, ProviderConfig, ProviderType, QwenProvider,
+};
+use crate::services::orchestrator::hooks::AgenticHooks;
+use crate::services::tools::ToolExecutor;
+use crate::storage::KeyringService;
+use crate::utils::error::AppError;
 
 // ============================================================================
 // Execution Status
@@ -407,6 +416,148 @@ async fn stream_agent_events(
 }
 
 // ============================================================================
+// Provider and Context Helpers
+// ============================================================================
+
+/// Create an `Arc<dyn LlmProvider>` from a `ProviderConfig`.
+///
+/// Uses the same factory pattern as `OrchestratorService::new()`.
+fn create_llm_provider(config: &ProviderConfig) -> Arc<dyn LlmProvider> {
+    match config.provider {
+        ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config.clone())),
+        ProviderType::OpenAI => Arc::new(OpenAIProvider::new(config.clone())),
+        ProviderType::DeepSeek => Arc::new(DeepSeekProvider::new(config.clone())),
+        ProviderType::Glm => Arc::new(GlmProvider::new(config.clone())),
+        ProviderType::Qwen => Arc::new(QwenProvider::new(config.clone())),
+        ProviderType::Minimax => Arc::new(MinimaxProvider::new(config.clone())),
+        ProviderType::Ollama => Arc::new(OllamaProvider::new(config.clone())),
+    }
+}
+
+/// Resolve the LLM `ProviderConfig` from the app's default settings and keyring.
+///
+/// Uses `StandaloneState` for the working directory (project_root) and
+/// `AppState` settings for the default provider/model. Retrieves the API key
+/// from the OS keyring via `KeyringService`.
+///
+/// Returns `(ProviderConfig, PathBuf)` on success where `PathBuf` is the project root.
+async fn resolve_provider_config(
+    app_state: &crate::state::AppState,
+    standalone_state: &StandaloneState,
+) -> Result<(ProviderConfig, PathBuf), String> {
+    // Get the default provider and model from app settings
+    let app_config = app_state
+        .get_config()
+        .await
+        .map_err(|e| format!("Failed to load app config: {}", e))?;
+
+    let canonical_provider = normalize_provider_name(&app_config.default_provider)
+        .ok_or_else(|| {
+            format!(
+                "Unknown provider in settings: {}",
+                app_config.default_provider
+            )
+        })?;
+
+    let provider_type = match canonical_provider {
+        "anthropic" => ProviderType::Anthropic,
+        "openai" => ProviderType::OpenAI,
+        "deepseek" => ProviderType::DeepSeek,
+        "glm" => ProviderType::Glm,
+        "qwen" => ProviderType::Qwen,
+        "minimax" => ProviderType::Minimax,
+        "ollama" => ProviderType::Ollama,
+        _ => return Err(format!("Unsupported provider: {}", canonical_provider)),
+    };
+
+    // Retrieve API key from OS keyring (not required for Ollama)
+    let keyring = KeyringService::new();
+    let api_key =
+        crate::commands::standalone::get_api_key_with_aliases(&keyring, canonical_provider);
+    let api_key = match api_key {
+        Ok(key) => key,
+        Err(e) => return Err(format!("Failed to get API key: {}", e)),
+    };
+
+    if provider_type != ProviderType::Ollama && api_key.is_none() {
+        return Err(format!(
+            "API key not configured for provider '{}'. \
+             Configure it in Settings before running a pipeline.",
+            canonical_provider
+        ));
+    }
+
+    // Resolve proxy
+    let proxy = app_state
+        .with_database(|db| {
+            Ok(crate::commands::proxy::resolve_provider_proxy(
+                &keyring,
+                db,
+                canonical_provider,
+            ))
+        })
+        .await
+        .unwrap_or(None);
+
+    let project_root = standalone_state.working_directory.read().await.clone();
+
+    let config = ProviderConfig {
+        provider: provider_type,
+        api_key,
+        base_url: None,
+        model: app_config.default_model.clone(),
+        proxy,
+        ..Default::default()
+    };
+
+    Ok((config, project_root))
+}
+
+/// Build an `AgentContext` suitable for pipeline / graph workflow execution.
+///
+/// Creates an `OrchestratorContext` from the core crate's context hierarchy
+/// and attaches it to the `AgentContext`, enabling tool contexts with shared
+/// memory access during tool invocations.
+fn build_agent_context(
+    execution_id: &str,
+    project_root: PathBuf,
+    provider: Arc<dyn LlmProvider>,
+    input: Option<String>,
+) -> AgentContext {
+    let tool_executor = Arc::new(ToolExecutor::new(&project_root));
+    let hooks = Arc::new(AgenticHooks::new());
+    let shared_state = Arc::new(RwLock::new(HashMap::new()));
+
+    let agent_input = match input {
+        Some(text) if !text.is_empty() => AgentInput::Text(text),
+        _ => AgentInput::default(),
+    };
+
+    // Create an OrchestratorContext from the core crate to provide
+    // session state management, memory store, and execution control.
+    let orchestrator_ctx = Arc::new(
+        plan_cascade_core::context::OrchestratorContext::new(
+            execution_id,
+            project_root.clone(),
+            "pipeline-agent",
+        ),
+    );
+
+    AgentContext {
+        session_id: execution_id.to_string(),
+        project_root,
+        provider,
+        tool_executor,
+        plugin_manager: None,
+        hooks,
+        input: agent_input,
+        shared_state,
+        config: AgentConfig::default(),
+        orchestrator_ctx: Some(orchestrator_ctx),
+    }
+}
+
+// ============================================================================
 // Tauri Commands
 // ============================================================================
 
@@ -414,11 +565,13 @@ async fn stream_agent_events(
 ///
 /// Looks up the pipeline definition from the database, registers the execution
 /// in the ExecutionRegistry, and spawns an async task to run the pipeline.
+/// Obtains the active LLM provider from `StandaloneState` + app settings.
 /// Returns the execution ID immediately for status tracking.
 #[tauri::command]
 pub async fn execute_agent_pipeline(
     app: tauri::AppHandle,
     state: State<'_, crate::state::AppState>,
+    standalone_state: State<'_, StandaloneState>,
     registry: State<'_, ExecutionRegistry>,
     pipeline_id: String,
     input: Option<String>,
@@ -459,6 +612,28 @@ pub async fn execute_agent_pipeline(
         Ok(p) => p,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
+
+    // Resolve the LLM provider from app settings + keyring
+    let (provider_config, project_root) =
+        match resolve_provider_config(&state, &standalone_state).await {
+            Ok(result) => result,
+            Err(e) => {
+                // Register + immediately fail so the frontend can observe the failure
+                let execution_id = registry.register(&pipeline_id).await;
+                let mut executions = registry.executions.write().await;
+                if let Some(exec_state) = executions.get_mut(&execution_id) {
+                    exec_state.mark_failed(&e);
+                }
+                let _ = emit_pipeline_event(
+                    &app,
+                    &execution_id,
+                    PipelineEventPayload::error(&execution_id, &e),
+                );
+                return Ok(CommandResponse::ok(execution_id));
+            }
+        };
+
+    let provider = create_llm_provider(&provider_config);
 
     // Register execution in the registry
     let execution_id = registry.register(&pipeline_id).await;
@@ -527,29 +702,67 @@ pub async fn execute_agent_pipeline(
             }
         }
 
-        // Pipeline agent execution requires a full AgentContext with LLM provider,
-        // tool executor, and hooks. When an LLM provider is configured and
-        // available (future work: wire AppState's configured provider into context),
-        // the agent.run(ctx) call will produce an AgentEventStream that we forward
-        // to the frontend via stream_agent_events.
-        //
-        // For now, the pipeline has been validated (built successfully from
-        // the definition). Mark as completed.
-        // TODO: Wire LLM provider from AppState into AgentContext and call:
-        //   let stream = agent.run(ctx).await;
-        //   stream_agent_events(&app_handle, &exec_id, stream, &registry_executions, cancel_token).await;
-        {
-            let mut executions = registry_executions.write().await;
-            if let Some(state) = executions.get_mut(&exec_id) {
-                state.mark_completed();
-            }
-        }
+        // Build the AgentContext and run the pipeline agent
+        let ctx = build_agent_context(&exec_id, project_root, provider, user_input);
 
-        let _ = emit_pipeline_event(
+        let stream = match agent.run(ctx).await {
+            Ok(s) => s,
+            Err(e) => {
+                let err_msg = format!("Pipeline agent.run() failed: {}", e);
+                {
+                    let mut executions = registry_executions.write().await;
+                    if let Some(state) = executions.get_mut(&exec_id) {
+                        state.mark_failed(&err_msg);
+                    }
+                }
+                let _ = emit_pipeline_event(
+                    &app_handle,
+                    &exec_id,
+                    PipelineEventPayload::error(&exec_id, &err_msg),
+                );
+                return;
+            }
+        };
+
+        // Stream agent events to the frontend, updating the registry along the way
+        let result = stream_agent_events(
             &app_handle,
             &exec_id,
-            PipelineEventPayload::status(&exec_id, "completed", None),
-        );
+            stream,
+            &registry_executions,
+            cancel_token,
+        )
+        .await;
+
+        // Mark completed or failed based on stream outcome
+        match result {
+            Ok(()) => {
+                let mut executions = registry_executions.write().await;
+                if let Some(state) = executions.get_mut(&exec_id) {
+                    if state.is_active() {
+                        state.mark_completed();
+                    }
+                }
+                let _ = emit_pipeline_event(
+                    &app_handle,
+                    &exec_id,
+                    PipelineEventPayload::status(&exec_id, "completed", None),
+                );
+            }
+            Err(e) => {
+                let mut executions = registry_executions.write().await;
+                if let Some(state) = executions.get_mut(&exec_id) {
+                    if state.is_active() {
+                        state.mark_failed(&e);
+                    }
+                }
+                let _ = emit_pipeline_event(
+                    &app_handle,
+                    &exec_id,
+                    PipelineEventPayload::error(&exec_id, &e),
+                );
+            }
+        }
     });
 
     Ok(CommandResponse::ok(execution_id))
@@ -559,11 +772,13 @@ pub async fn execute_agent_pipeline(
 ///
 /// Looks up the workflow definition from the database, registers the execution
 /// in the ExecutionRegistry, and spawns an async task to run the workflow.
+/// Obtains the active LLM provider from `StandaloneState` + app settings.
 /// Returns the execution ID immediately for status tracking.
 #[tauri::command]
 pub async fn execute_graph_workflow_run(
     app: tauri::AppHandle,
     state: State<'_, crate::state::AppState>,
+    standalone_state: State<'_, StandaloneState>,
     registry: State<'_, ExecutionRegistry>,
     workflow_id: String,
     input: Option<String>,
@@ -605,6 +820,28 @@ pub async fn execute_graph_workflow_run(
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
+    // Resolve the LLM provider from app settings + keyring
+    let (provider_config, project_root) =
+        match resolve_provider_config(&state, &standalone_state).await {
+            Ok(result) => result,
+            Err(e) => {
+                // Register + immediately fail so the frontend can observe the failure
+                let execution_id = registry.register(&workflow_id).await;
+                let mut executions = registry.executions.write().await;
+                if let Some(exec_state) = executions.get_mut(&execution_id) {
+                    exec_state.mark_failed(&e);
+                }
+                let _ = emit_pipeline_event(
+                    &app,
+                    &execution_id,
+                    PipelineEventPayload::error(&execution_id, &e),
+                );
+                return Ok(CommandResponse::ok(execution_id));
+            }
+        };
+
+    let provider = create_llm_provider(&provider_config);
+
     // Register execution in the registry
     let execution_id = registry.register(&workflow_id).await;
 
@@ -613,6 +850,7 @@ pub async fn execute_graph_workflow_run(
     let registry_executions = registry.executions.clone();
     let registry_tokens = registry.cancellation_tokens.clone();
     let app_handle = app.clone();
+    let user_input = input;
 
     // Spawn async task to execute the workflow
     tokio::spawn(async move {
@@ -653,32 +891,78 @@ pub async fn execute_graph_workflow_run(
             }
         }
 
-        // GraphWorkflow implements the Agent trait directly (see graph_workflow.rs).
-        // Execution requires a full AgentContext with LLM provider, tool executor,
-        // and hooks. When wired up, the call pattern is:
-        //   let ctx = build_agent_context(/* provider, tools, hooks */);
-        //   let stream = workflow.run(ctx).await;
-        //   stream_agent_events(&app_handle, &exec_id, stream, &registry_executions, cancel_token).await;
-        //
-        // The stream_agent_events helper will:
-        // - Forward GraphNodeStarted/GraphNodeCompleted events to update step progress
-        // - Forward all AgentEvents (TextDelta, ToolCall, etc.) to the frontend
-        // - Respect cancellation via the Notify mechanism
-        //
-        // For now, the workflow definition has been validated. Mark as completed.
-        // TODO: Wire LLM provider from AppState into AgentContext
-        {
-            let mut executions = registry_executions.write().await;
-            if let Some(state) = executions.get_mut(&exec_id) {
-                state.mark_completed();
-            }
-        }
+        // Build the AgentContext and run the graph workflow with an InMemoryCheckpointer
+        // for interrupt_before / interrupt_after pause/resume support within the session.
+        let ctx = build_agent_context(&exec_id, project_root, provider, user_input);
 
-        let _ = emit_pipeline_event(
+        let checkpointer: Arc<
+            dyn crate::services::graph_workflow::checkpointer::Checkpointer + Send + Sync,
+        > = Arc::new(
+            crate::services::graph_workflow::checkpointer::InMemoryCheckpointer::new(),
+        );
+        let thread_id = exec_id.clone();
+
+        let stream = match workflow
+            .run_with_checkpointer(ctx, Some(checkpointer), thread_id)
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                let err_msg = format!("Workflow run_with_checkpointer() failed: {}", e);
+                {
+                    let mut executions = registry_executions.write().await;
+                    if let Some(state) = executions.get_mut(&exec_id) {
+                        state.mark_failed(&err_msg);
+                    }
+                }
+                let _ = emit_pipeline_event(
+                    &app_handle,
+                    &exec_id,
+                    PipelineEventPayload::error(&exec_id, &err_msg),
+                );
+                return;
+            }
+        };
+
+        // Stream agent events to the frontend, updating the registry along the way
+        let result = stream_agent_events(
             &app_handle,
             &exec_id,
-            PipelineEventPayload::status(&exec_id, "completed", None),
-        );
+            stream,
+            &registry_executions,
+            cancel_token,
+        )
+        .await;
+
+        // Mark completed or failed based on stream outcome
+        match result {
+            Ok(()) => {
+                let mut executions = registry_executions.write().await;
+                if let Some(state) = executions.get_mut(&exec_id) {
+                    if state.is_active() {
+                        state.mark_completed();
+                    }
+                }
+                let _ = emit_pipeline_event(
+                    &app_handle,
+                    &exec_id,
+                    PipelineEventPayload::status(&exec_id, "completed", None),
+                );
+            }
+            Err(e) => {
+                let mut executions = registry_executions.write().await;
+                if let Some(state) = executions.get_mut(&exec_id) {
+                    if state.is_active() {
+                        state.mark_failed(&e);
+                    }
+                }
+                let _ = emit_pipeline_event(
+                    &app_handle,
+                    &exec_id,
+                    PipelineEventPayload::error(&exec_id, &e),
+                );
+            }
+        }
     });
 
     Ok(CommandResponse::ok(execution_id))

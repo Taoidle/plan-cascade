@@ -21,6 +21,8 @@ use crate::services::plugins::manager::PluginManager;
 use crate::services::tools::ToolExecutor;
 use crate::utils::error::AppResult;
 
+use plan_cascade_core::context::{OrchestratorContext, ToolContext};
+
 // ============================================================================
 // Agent Event Stream
 // ============================================================================
@@ -86,6 +88,27 @@ pub struct AgentContext {
     pub shared_state: Arc<RwLock<HashMap<String, Value>>>,
     /// Agent-specific configuration.
     pub config: AgentConfig,
+    /// Optional orchestrator context from the core crate's context hierarchy.
+    ///
+    /// When present, provides session state management, memory store, and
+    /// execution control. Used to create `ToolContext` instances for tool
+    /// invocations, giving tools read-only memory access.
+    pub orchestrator_ctx: Option<Arc<OrchestratorContext>>,
+}
+
+impl AgentContext {
+    /// Create a `ToolContext` for the given tool call, delegating to the
+    /// orchestrator context if present.
+    ///
+    /// Returns `None` if `orchestrator_ctx` is `None`. When available, the
+    /// returned `ToolContext` shares the orchestrator's memory store, giving
+    /// tools read-only access to memory entries set via
+    /// `OrchestratorContext::set_memory()`.
+    pub fn create_tool_context(&self, tool_call_id: &str) -> Option<ToolContext> {
+        self.orchestrator_ctx
+            .as_ref()
+            .map(|ctx| ctx.create_tool_context(tool_call_id))
+    }
 }
 
 // ============================================================================
@@ -695,5 +718,205 @@ mod tests {
         assert_eq!(info.pipeline_id, "p-1");
         assert_eq!(info.name, "My Pipeline");
         assert_eq!(info.step_count, 2);
+    }
+
+    // ========================================================================
+    // Story 003: Context Hierarchy Integration Tests
+    // ========================================================================
+
+    #[test]
+    fn test_agent_context_create_tool_context_returns_none_without_orchestrator() {
+        // When orchestrator_ctx is None, create_tool_context should return None
+        let ctx = AgentContext {
+            session_id: "test".to_string(),
+            project_root: PathBuf::from("/tmp"),
+            provider: Arc::new(MockProvider::new()),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(
+                &PathBuf::from("/tmp"),
+            )),
+            plugin_manager: None,
+            hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
+            input: AgentInput::Text("test".to_string()),
+            shared_state: Arc::new(RwLock::new(HashMap::new())),
+            config: AgentConfig::default(),
+            orchestrator_ctx: None,
+        };
+
+        assert!(ctx.create_tool_context("tc-1").is_none());
+    }
+
+    #[test]
+    fn test_agent_context_create_tool_context_with_orchestrator() {
+        // When orchestrator_ctx is present, create_tool_context should return Some(ToolContext)
+        let orch_ctx = Arc::new(OrchestratorContext::new("sess-1", "/project", "test-agent"));
+
+        let ctx = AgentContext {
+            session_id: "sess-1".to_string(),
+            project_root: PathBuf::from("/project"),
+            provider: Arc::new(MockProvider::new()),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(
+                &PathBuf::from("/project"),
+            )),
+            plugin_manager: None,
+            hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
+            input: AgentInput::Text("test".to_string()),
+            shared_state: Arc::new(RwLock::new(HashMap::new())),
+            config: AgentConfig::default(),
+            orchestrator_ctx: Some(orch_ctx),
+        };
+
+        let tool_ctx = ctx.create_tool_context("tc-42");
+        assert!(tool_ctx.is_some());
+
+        let tool_ctx = tool_ctx.unwrap();
+        use plan_cascade_core::context::ExecutionContext;
+        assert_eq!(tool_ctx.session_id(), "sess-1");
+        assert_eq!(tool_ctx.tool_call_id(), "tc-42");
+    }
+
+    #[test]
+    fn test_agent_context_tool_context_memory_access() {
+        // Verify that create_tool_context returns a ToolContext whose
+        // search_memory() can find entries set via orchestrator_ctx.set_memory()
+        let orch_ctx = Arc::new(OrchestratorContext::new("sess-1", "/project", "agent"));
+
+        // Write memory entries via orchestrator context
+        orch_ctx
+            .set_memory("file:main.rs", serde_json::json!("content of main.rs"))
+            .unwrap();
+        orch_ctx
+            .set_memory("file:lib.rs", serde_json::json!("content of lib.rs"))
+            .unwrap();
+        orch_ctx
+            .set_memory("meta:version", serde_json::json!("2.0"))
+            .unwrap();
+
+        let ctx = AgentContext {
+            session_id: "sess-1".to_string(),
+            project_root: PathBuf::from("/project"),
+            provider: Arc::new(MockProvider::new()),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(
+                &PathBuf::from("/project"),
+            )),
+            plugin_manager: None,
+            hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
+            input: AgentInput::Text("test".to_string()),
+            shared_state: Arc::new(RwLock::new(HashMap::new())),
+            config: AgentConfig::default(),
+            orchestrator_ctx: Some(orch_ctx.clone()),
+        };
+
+        // Create a tool context and search memory
+        let tool_ctx = ctx.create_tool_context("tc-100").unwrap();
+
+        // Should find entries matching "file:"
+        let file_results = tool_ctx.search_memory("file:");
+        assert_eq!(file_results.len(), 2);
+
+        // Should find entries matching "meta:"
+        let meta_results = tool_ctx.search_memory("meta:");
+        assert_eq!(meta_results.len(), 1);
+        assert_eq!(meta_results[0].0, "meta:version");
+        assert_eq!(meta_results[0].1, serde_json::json!("2.0"));
+
+        // Should return empty for non-matching patterns
+        let no_results = tool_ctx.search_memory("nonexistent");
+        assert!(no_results.is_empty());
+
+        // Adding memory after tool context creation should still be visible
+        // (because they share the same Arc<RwLock<HashMap>>)
+        orch_ctx
+            .set_memory("file:new.rs", serde_json::json!("new file"))
+            .unwrap();
+        let updated_results = tool_ctx.search_memory("file:");
+        assert_eq!(updated_results.len(), 3);
+    }
+
+    #[test]
+    fn test_agent_context_clone_with_orchestrator_ctx() {
+        // Verify that Clone derive on AgentContext still works with Arc<OrchestratorContext>
+        let orch_ctx = Arc::new(OrchestratorContext::new("sess-1", "/project", "agent"));
+        orch_ctx
+            .set_memory("key", serde_json::json!("value"))
+            .unwrap();
+
+        let ctx = AgentContext {
+            session_id: "sess-1".to_string(),
+            project_root: PathBuf::from("/project"),
+            provider: Arc::new(MockProvider::new()),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(
+                &PathBuf::from("/project"),
+            )),
+            plugin_manager: None,
+            hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
+            input: AgentInput::Text("test".to_string()),
+            shared_state: Arc::new(RwLock::new(HashMap::new())),
+            config: AgentConfig::default(),
+            orchestrator_ctx: Some(orch_ctx),
+        };
+
+        let cloned = ctx.clone();
+        assert!(cloned.orchestrator_ctx.is_some());
+
+        // The cloned context should share the same orchestrator context (Arc)
+        let tool_ctx = cloned.create_tool_context("tc-clone").unwrap();
+        let results = tool_ctx.search_memory("key");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, serde_json::json!("value"));
+    }
+
+    /// Minimal mock LLM provider for context integration tests.
+    /// Only used in the tests above -- never actually called.
+    struct MockProvider {
+        config: crate::services::llm::ProviderConfig,
+    }
+
+    impl MockProvider {
+        fn new() -> Self {
+            Self {
+                config: crate::services::llm::ProviderConfig::default(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl crate::services::llm::LlmProvider for MockProvider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+        fn model(&self) -> &str {
+            "mock-model"
+        }
+        fn supports_thinking(&self) -> bool {
+            false
+        }
+        fn supports_tools(&self) -> bool {
+            false
+        }
+        async fn send_message(
+            &self,
+            _: Vec<crate::services::llm::Message>,
+            _: Option<String>,
+            _: Vec<crate::services::llm::ToolDefinition>,
+            _: crate::services::llm::LlmRequestOptions,
+        ) -> crate::services::llm::LlmResult<crate::services::llm::LlmResponse> {
+            unimplemented!()
+        }
+        async fn stream_message(
+            &self,
+            _: Vec<crate::services::llm::Message>,
+            _: Option<String>,
+            _: Vec<crate::services::llm::ToolDefinition>,
+            _: tokio::sync::mpsc::Sender<crate::services::streaming::UnifiedStreamEvent>,
+            _: crate::services::llm::LlmRequestOptions,
+        ) -> crate::services::llm::LlmResult<crate::services::llm::LlmResponse> {
+            unimplemented!()
+        }
+        async fn health_check(&self) -> crate::services::llm::LlmResult<()> {
+            Ok(())
+        }
+        fn config(&self) -> &crate::services::llm::ProviderConfig {
+            &self.config
+        }
     }
 }
