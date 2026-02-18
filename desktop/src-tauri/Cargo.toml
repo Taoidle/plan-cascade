@@ -148,6 +148,11 @@ tree-sitter-typescript = "0.23"
 tree-sitter-go = "0.23"
 tree-sitter-java = "0.23"
 
+# Browser automation (optional, behind "browser" feature flag)
+# ADR-002: Use chromiumoxide for CDP-native, async headless Chrome
+chromiumoxide = { version = "0.7", optional = true, default-features = true }
+futures = { version = "0.3", optional = true }
+
 [dev-dependencies]
 # Testing
 tempfile = "3"
@@ -157,7 +162,7 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 # Optional browser automation support. Adds chromiumoxide dependency.
 # Enable with: cargo build --features browser
-browser = []
+browser = ["dep:chromiumoxide", "dep:futures"]
 
 [profile.release]
 panic = "abort"
