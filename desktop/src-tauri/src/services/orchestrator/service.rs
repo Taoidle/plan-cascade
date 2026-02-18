@@ -41,6 +41,10 @@ use crate::services::llm::{
     OpenAIProvider, ProviderConfig, ProviderType, QwenProvider, ToolCallMode, ToolCallReliability,
     ToolDefinition, UsageStats,
 };
+use crate::services::core::compaction::{
+    CompactionConfig, CompactionResult, ContextCompactor, LlmSummaryCompactor,
+    SlidingWindowCompactor,
+};
 use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::services::tools::{
@@ -93,6 +97,11 @@ pub struct OrchestratorConfig {
     /// knowledge from the project's collections is injected into the system prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    /// Configuration for pluggable context compaction (ADR-F006).
+    /// Controls strategy selection, thresholds, and head/tail preservation counts.
+    /// When omitted, defaults are used and the compactor is selected based on provider reliability.
+    #[serde(default)]
+    pub compaction_config: CompactionConfig,
 }
 
 fn default_max_iterations() -> u32 {
@@ -297,6 +306,11 @@ pub struct OrchestratorService {
     config: OrchestratorConfig,
     provider: Arc<dyn LlmProvider>,
     tool_executor: ToolExecutor,
+    /// Pluggable context compactor (ADR-F006).
+    /// Selected at construction time based on provider reliability:
+    /// - Reliable (Anthropic, OpenAI) -> LlmSummaryCompactor
+    /// - Unreliable/None (Ollama, Qwen, DeepSeek, GLM) -> SlidingWindowCompactor
+    compactor: Box<dyn ContextCompactor>,
     cancellation_token: CancellationToken,
     /// Database pool for session persistence
     db_pool: Option<Pool<SqliteConnectionManager>>,
@@ -488,6 +502,134 @@ impl AnalysisPhasePolicy {
                     required_tools: vec!["Read", "Grep"],
                 },
             },
+        }
+    }
+}
+
+/// Build a pluggable compactor based on provider reliability (ADR-F006).
+///
+/// - **Reliable** providers (Anthropic, OpenAI) get `LlmSummaryCompactor` whose
+///   `SummarizeFn` closure captures the provider `Arc` and calls it for summarization.
+/// - **Unreliable / None** providers (Ollama, Qwen, DeepSeek, GLM) get
+///   `SlidingWindowCompactor` which is deterministic and makes no LLM calls.
+fn build_compactor(
+    provider: &Arc<dyn LlmProvider>,
+) -> Box<dyn ContextCompactor> {
+    match provider.tool_call_reliability() {
+        ToolCallReliability::Reliable => {
+            let provider_clone = Arc::clone(provider);
+            Box::new(LlmSummaryCompactor::new(move |messages_to_summarize| {
+                let provider = Arc::clone(&provider_clone);
+                Box::pin(async move {
+                    // Build a compaction prompt from the messages to summarize
+                    let mut conversation_snippets: Vec<String> = Vec::new();
+                    let mut tool_names: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
+                    let mut file_paths: Vec<String> = Vec::new();
+
+                    for msg in &messages_to_summarize {
+                        for content in &msg.content {
+                            match content {
+                                MessageContent::Text { text } => {
+                                    let snippet = if text.len() > 500 {
+                                        format!("{}...", &text[..500])
+                                    } else {
+                                        text.clone()
+                                    };
+                                    conversation_snippets.push(snippet);
+                                }
+                                MessageContent::ToolUse { name, .. } => {
+                                    tool_names.insert(name.clone());
+                                }
+                                MessageContent::ToolResult { content, .. } => {
+                                    for line in content.lines().take(5) {
+                                        let trimmed = line.trim();
+                                        if (trimmed.contains('/') || trimmed.contains('\\'))
+                                            && trimmed.len() < 200
+                                        {
+                                            let path = trimmed
+                                                .split_whitespace()
+                                                .next()
+                                                .unwrap_or(trimmed);
+                                            if !file_paths.contains(&path.to_string()) {
+                                                file_paths.push(path.to_string());
+                                            }
+                                        }
+                                    }
+                                    let snippet = if content.len() > 500 {
+                                        format!("{}...", &content[..500])
+                                    } else {
+                                        content.clone()
+                                    };
+                                    conversation_snippets.push(snippet);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    let snippets_summary = conversation_snippets
+                        .iter()
+                        .take(20)
+                        .map(|s| format!("- {}", s))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    let tool_names_str = if tool_names.is_empty() {
+                        "none".to_string()
+                    } else {
+                        let mut sorted: Vec<String> = tool_names.into_iter().collect();
+                        sorted.sort();
+                        sorted.join(", ")
+                    };
+
+                    let files_str = if file_paths.is_empty() {
+                        "none".to_string()
+                    } else {
+                        file_paths
+                            .iter()
+                            .take(20)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+
+                    let compaction_prompt = format!(
+                        "Summarize the following conversation history concisely in under 800 words. \
+                         Focus on: what was asked, what tools were used, what was discovered, and what decisions were made.\n\n\
+                         Tools used: {}\n\
+                         Files touched: {}\n\n\
+                         Conversation excerpts:\n{}\n\n\
+                         Provide a clear, structured summary that preserves the key context needed to continue the task.",
+                        tool_names_str, files_str, snippets_summary,
+                    );
+
+                    let summary_messages = vec![Message::user(compaction_prompt)];
+                    let response = provider
+                        .send_message(
+                            summary_messages,
+                            None,
+                            Vec::new(),
+                            LlmRequestOptions::default(),
+                        )
+                        .await
+                        .map_err(|e| {
+                            plan_cascade_core::error::CoreError::internal(format!(
+                                "LLM summarization failed: {}",
+                                e
+                            ))
+                        })?;
+
+                    Ok(response
+                        .content
+                        .unwrap_or_else(|| {
+                            "Previous conversation context was compacted.".to_string()
+                        }))
+                })
+            }))
+        }
+        ToolCallReliability::Unreliable | ToolCallReliability::None => {
+            Box::new(SlidingWindowCompactor::new())
         }
     }
 }

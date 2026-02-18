@@ -44,7 +44,8 @@ pub mod artifacts;
 pub mod graph_workflow;
 
 pub use agent::AgentService;
-pub use agent_executor::{AgentEvent, AgentExecutor, ExecutionHandle, ExecutorConfig, ToolFilter};
+pub use agent_composer::types::AgentEvent;
+pub use agent_executor::{AgentExecutor, ExecutionHandle, ExecutorConfig, ToolFilter};
 pub use context::{ContextError, ContextFilter, ContextFilterConfig, ContextTag, StoryContext};
 pub use dependency::{Batch, DependencyAnalyzer, DependencyError};
 pub use design::{

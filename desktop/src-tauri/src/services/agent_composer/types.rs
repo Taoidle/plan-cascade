@@ -158,6 +158,10 @@ impl AgentInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
+    /// Execution started (lifecycle event from executor).
+    Started {
+        run_id: String,
+    },
     /// Text content delta from the model.
     TextDelta {
         content: String,
@@ -166,11 +170,23 @@ pub enum AgentEvent {
     ToolCall {
         name: String,
         args: String,
+        /// Optional tool-call identifier (used by executor-style callers).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        /// Optional structured input (used by executor-style callers).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<serde_json::Value>,
     },
     /// Result of a tool call.
     ToolResult {
         name: String,
         result: String,
+        /// Optional tool-call identifier (used by executor-style callers).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        /// Whether this result represents an error.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        is_error: Option<bool>,
     },
     /// Thinking/reasoning content delta.
     ThinkingDelta {
@@ -227,6 +243,28 @@ pub enum AgentEvent {
     Actions {
         /// The EventActions bundle to be applied by the orchestrator.
         actions: crate::services::core::event_actions::EventActions,
+    },
+    /// Execution completed successfully (lifecycle event from executor).
+    Completed {
+        run_id: String,
+        output: String,
+        duration_ms: u64,
+    },
+    /// Execution failed (lifecycle event from executor).
+    Failed {
+        run_id: String,
+        error: String,
+        duration_ms: u64,
+    },
+    /// Execution was cancelled (lifecycle event from executor).
+    Cancelled {
+        run_id: String,
+        duration_ms: u64,
+    },
+    /// Token usage update (lifecycle event from executor).
+    Usage {
+        input_tokens: u32,
+        output_tokens: u32,
     },
     /// Agent execution completed successfully with optional output.
     Done {
@@ -464,6 +502,8 @@ mod tests {
         let event = AgentEvent::ToolCall {
             name: "read_file".to_string(),
             args: r#"{"path":"/foo/bar"}"#.to_string(),
+            id: None,
+            input: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"type\":\"tool_call\""));
@@ -686,6 +726,239 @@ mod tests {
             }
             _ => panic!("Expected RichContent"),
         }
+    }
+
+    // ========================================================================
+    // Story 001: Unified AgentEvent — serde roundtrip tests for new variants
+    // ========================================================================
+
+    #[test]
+    fn test_agent_event_started_roundtrip() {
+        let event = AgentEvent::Started {
+            run_id: "run-abc".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"started\""));
+        assert!(json.contains("\"run_id\":\"run-abc\""));
+
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::Started { run_id } => assert_eq!(run_id, "run-abc"),
+            _ => panic!("Expected Started"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_completed_roundtrip() {
+        let event = AgentEvent::Completed {
+            run_id: "run-123".to_string(),
+            output: "final output".to_string(),
+            duration_ms: 4200,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"completed\""));
+        assert!(json.contains("\"run_id\":\"run-123\""));
+        assert!(json.contains("\"duration_ms\":4200"));
+
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::Completed {
+                run_id,
+                output,
+                duration_ms,
+            } => {
+                assert_eq!(run_id, "run-123");
+                assert_eq!(output, "final output");
+                assert_eq!(duration_ms, 4200);
+            }
+            _ => panic!("Expected Completed"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_failed_roundtrip() {
+        let event = AgentEvent::Failed {
+            run_id: "run-456".to_string(),
+            error: "something went wrong".to_string(),
+            duration_ms: 1500,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"failed\""));
+        assert!(json.contains("\"error\":\"something went wrong\""));
+
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::Failed {
+                run_id,
+                error,
+                duration_ms,
+            } => {
+                assert_eq!(run_id, "run-456");
+                assert_eq!(error, "something went wrong");
+                assert_eq!(duration_ms, 1500);
+            }
+            _ => panic!("Expected Failed"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_cancelled_roundtrip() {
+        let event = AgentEvent::Cancelled {
+            run_id: "run-789".to_string(),
+            duration_ms: 300,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"cancelled\""));
+        assert!(json.contains("\"run_id\":\"run-789\""));
+        assert!(json.contains("\"duration_ms\":300"));
+
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::Cancelled {
+                run_id,
+                duration_ms,
+            } => {
+                assert_eq!(run_id, "run-789");
+                assert_eq!(duration_ms, 300);
+            }
+            _ => panic!("Expected Cancelled"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_usage_roundtrip() {
+        let event = AgentEvent::Usage {
+            input_tokens: 1500,
+            output_tokens: 350,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"usage\""));
+        assert!(json.contains("\"input_tokens\":1500"));
+        assert!(json.contains("\"output_tokens\":350"));
+
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+            } => {
+                assert_eq!(input_tokens, 1500);
+                assert_eq!(output_tokens, 350);
+            }
+            _ => panic!("Expected Usage"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_tool_call_with_optional_fields() {
+        // ToolCall with all fields populated
+        let event = AgentEvent::ToolCall {
+            name: "read_file".to_string(),
+            args: r#"{"path":"/foo"}"#.to_string(),
+            id: Some("tc-1".to_string()),
+            input: Some(serde_json::json!({"path": "/foo"})),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"id\":\"tc-1\""));
+        assert!(json.contains("\"input\":{"));
+
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::ToolCall {
+                name, args, id, input,
+            } => {
+                assert_eq!(name, "read_file");
+                assert!(args.contains("/foo"));
+                assert_eq!(id, Some("tc-1".to_string()));
+                assert!(input.is_some());
+            }
+            _ => panic!("Expected ToolCall"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_tool_call_without_optional_fields() {
+        // ToolCall with only required fields (backward compat)
+        let json = r#"{"type":"tool_call","name":"grep","args":"{\"pattern\":\"test\"}"}"#;
+        let parsed: AgentEvent = serde_json::from_str(json).unwrap();
+        match parsed {
+            AgentEvent::ToolCall {
+                name, args, id, input,
+            } => {
+                assert_eq!(name, "grep");
+                assert!(args.contains("test"));
+                assert!(id.is_none());
+                assert!(input.is_none());
+            }
+            _ => panic!("Expected ToolCall"),
+        }
+
+        // Round-trip: optional fields should be omitted when None
+        let event = AgentEvent::ToolCall {
+            name: "grep".to_string(),
+            args: "{}".to_string(),
+            id: None,
+            input: None,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("\"id\""));
+        assert!(!json.contains("\"input\""));
+    }
+
+    #[test]
+    fn test_agent_event_tool_result_with_optional_fields() {
+        // ToolResult with all fields populated
+        let event = AgentEvent::ToolResult {
+            name: "read_file".to_string(),
+            result: "file contents".to_string(),
+            id: Some("tr-1".to_string()),
+            is_error: Some(false),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"id\":\"tr-1\""));
+        assert!(json.contains("\"is_error\":false"));
+
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::ToolResult {
+                name, result, id, is_error,
+            } => {
+                assert_eq!(name, "read_file");
+                assert_eq!(result, "file contents");
+                assert_eq!(id, Some("tr-1".to_string()));
+                assert_eq!(is_error, Some(false));
+            }
+            _ => panic!("Expected ToolResult"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_tool_result_without_optional_fields() {
+        // ToolResult with only required fields (backward compat)
+        let json = r#"{"type":"tool_result","name":"grep","result":"found 3 matches"}"#;
+        let parsed: AgentEvent = serde_json::from_str(json).unwrap();
+        match parsed {
+            AgentEvent::ToolResult {
+                name, result, id, is_error,
+            } => {
+                assert_eq!(name, "grep");
+                assert_eq!(result, "found 3 matches");
+                assert!(id.is_none());
+                assert!(is_error.is_none());
+            }
+            _ => panic!("Expected ToolResult"),
+        }
+
+        // Round-trip: optional fields should be omitted when None
+        let event = AgentEvent::ToolResult {
+            name: "grep".to_string(),
+            result: "ok".to_string(),
+            id: None,
+            is_error: None,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("\"id\""));
+        assert!(!json.contains("\"is_error\""));
     }
 
     #[test]

@@ -2216,6 +2216,7 @@ impl OrchestratorService {
                 analysis_limits: self.config.analysis_limits.clone(),
                 analysis_session_id: self.config.analysis_session_id.clone(),
                 project_id: self.config.project_id.clone(),
+                compaction_config: CompactionConfig::default(),
             };
             let phase_agent =
                 OrchestratorService::new_sub_agent(phase_config, self.cancellation_token.clone());

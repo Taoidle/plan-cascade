@@ -81,14 +81,24 @@ export interface AgentPipelineInfo {
   updated_at: string | null;
 }
 
-/** Events emitted during agent execution */
+/** Events emitted during agent execution (unified enum — story-001) */
 export type AgentEvent =
+  | { type: 'started'; run_id: string }
   | { type: 'text_delta'; content: string }
-  | { type: 'tool_call'; name: string; args: string }
-  | { type: 'tool_result'; name: string; result: string }
+  | { type: 'tool_call'; name: string; args: string; id?: string; input?: unknown }
+  | { type: 'tool_result'; name: string; result: string; id?: string; is_error?: boolean }
   | { type: 'thinking_delta'; content: string }
   | { type: 'state_update'; key: string; value: unknown }
   | { type: 'agent_transfer'; target: string; message: string }
+  | { type: 'graph_node_started'; node_id: string }
+  | { type: 'graph_node_completed'; node_id: string; output?: string | null }
+  | { type: 'human_review_required'; node_id: string; context: string }
+  | { type: 'rich_content'; component_type: string; data: unknown; surface_id?: string }
+  | { type: 'actions'; actions: unknown }
+  | { type: 'completed'; run_id: string; output: string; duration_ms: number }
+  | { type: 'failed'; run_id: string; error: string; duration_ms: number }
+  | { type: 'cancelled'; run_id: string; duration_ms: number }
+  | { type: 'usage'; input_tokens: number; output_tokens: number }
   | { type: 'done'; output: string | null };
 
 /** Standard Tauri command response wrapper */

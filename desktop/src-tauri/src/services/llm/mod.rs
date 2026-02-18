@@ -1,28 +1,43 @@
-//! LLM Provider Module
+//! LLM Provider Module (re-export shim)
 //!
-//! Provides a unified interface for interacting with multiple LLM providers:
-//! - Anthropic Claude
-//! - OpenAI (GPT-4, o1, o3)
-//! - DeepSeek
-//! - Ollama (local inference)
+//! This module re-exports from the `plan-cascade-llm` workspace crate.
+//! All types and implementations now live in `crates/llm/`.
 
-pub mod anthropic;
-pub mod deepseek;
-pub mod glm;
-pub mod minimax;
-pub mod ollama;
-pub mod openai;
-pub mod provider;
-pub mod qwen;
-pub mod types;
+pub mod anthropic {
+    pub use plan_cascade_llm::anthropic::*;
+}
+pub mod deepseek {
+    pub use plan_cascade_llm::deepseek::*;
+}
+pub mod glm {
+    pub use plan_cascade_llm::glm::*;
+}
+pub mod minimax {
+    pub use plan_cascade_llm::minimax::*;
+}
+pub mod ollama {
+    pub use plan_cascade_llm::ollama::*;
+}
+pub mod openai {
+    pub use plan_cascade_llm::openai::*;
+}
+pub mod provider {
+    pub use plan_cascade_llm::provider::*;
+}
+pub mod qwen {
+    pub use plan_cascade_llm::qwen::*;
+}
+pub mod types {
+    pub use plan_cascade_llm::types::*;
+}
 
-// Re-export main types
-pub use anthropic::AnthropicProvider;
-pub use deepseek::DeepSeekProvider;
-pub use glm::GlmProvider;
-pub use minimax::MinimaxProvider;
-pub use ollama::OllamaProvider;
-pub use openai::OpenAIProvider;
-pub use provider::LlmProvider;
-pub use qwen::QwenProvider;
-pub use types::*;
+// Re-export main types (backward-compatible with the original mod.rs)
+pub use plan_cascade_llm::AnthropicProvider;
+pub use plan_cascade_llm::DeepSeekProvider;
+pub use plan_cascade_llm::GlmProvider;
+pub use plan_cascade_llm::LlmProvider;
+pub use plan_cascade_llm::MinimaxProvider;
+pub use plan_cascade_llm::OllamaProvider;
+pub use plan_cascade_llm::OpenAIProvider;
+pub use plan_cascade_llm::QwenProvider;
+pub use plan_cascade_llm::types::*;

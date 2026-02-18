@@ -1,21 +1,17 @@
-//! Provider-Specific Stream Adapters
+//! Provider-Specific Stream Adapters (re-export shim)
 //!
-//! Each adapter handles the unique streaming format of its provider.
+//! LLM-specific adapters are now in `plan-cascade-llm::streaming_adapters`.
+//! ClaudeCodeAdapter remains local (it's a CLI adapter, not an LLM API adapter).
 
-pub mod claude_api;
+// ClaudeCodeAdapter stays in the main crate
 pub mod claude_code;
-pub mod deepseek;
-pub mod glm;
-pub mod minimax;
-pub mod ollama;
-pub mod openai;
-pub mod qwen;
-
-pub use claude_api::ClaudeApiAdapter;
 pub use claude_code::ClaudeCodeAdapter;
-pub use deepseek::DeepSeekAdapter;
-pub use glm::GlmAdapter;
-pub use minimax::MinimaxAdapter;
-pub use ollama::OllamaAdapter;
-pub use openai::OpenAIAdapter;
-pub use qwen::QwenAdapter;
+
+// Re-export LLM provider adapters from the llm crate
+pub use plan_cascade_llm::streaming_adapters::ClaudeApiAdapter;
+pub use plan_cascade_llm::streaming_adapters::DeepSeekAdapter;
+pub use plan_cascade_llm::streaming_adapters::GlmAdapter;
+pub use plan_cascade_llm::streaming_adapters::MinimaxAdapter;
+pub use plan_cascade_llm::streaming_adapters::OllamaAdapter;
+pub use plan_cascade_llm::streaming_adapters::OpenAIAdapter;
+pub use plan_cascade_llm::streaming_adapters::QwenAdapter;

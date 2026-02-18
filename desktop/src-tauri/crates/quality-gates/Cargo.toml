@@ -1,0 +1,35 @@
+[package]
+name = "plan-cascade-quality-gates"
+version = "0.1.0"
+description = "Quality gate pipeline types, project detection, and validators for Plan Cascade Desktop"
+authors = ["Plan Cascade Team"]
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+# Workspace crates
+plan-cascade-core = { path = "../core" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["process"] }
+futures-util = "0.3"
+
+# Error handling
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+
+# Timestamps
+chrono = { version = "0.4", features = ["serde"] }
+
+# TOML parsing for Cargo.toml and pyproject.toml
+toml = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"

@@ -17,6 +17,7 @@ fn test_config() -> OrchestratorConfig {
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: CompactionConfig::default(),
     }
 }
 
@@ -499,6 +500,7 @@ fn test_architecture_baseline_keeps_seed_files_ahead_of_observed_noise() {
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
     let mut ledger = AnalysisLedger::default();
@@ -569,6 +571,7 @@ fn test_baseline_steps_cover_required_tool_families() {
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
     let ledger = AnalysisLedger::default();
@@ -997,6 +1000,7 @@ fn test_reliable_provider_no_fallback_instructions() {
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions();
@@ -1029,6 +1033,7 @@ fn test_unreliable_provider_gets_fallback_instructions() {
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions();
@@ -1066,6 +1071,7 @@ fn test_user_override_disables_fallback_for_unreliable() {
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions();
@@ -1097,6 +1103,7 @@ fn test_none_provider_gets_fallback_instructions() {
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions();
@@ -1221,6 +1228,7 @@ fn test_sub_agent_spawner_uses_compaction_enabled() {
         analysis_limits: AnalysisLimits::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: CompactionConfig::default(),
     };
     assert!(spawner_config.enable_compaction);
     assert_eq!(spawner_config.max_total_tokens, 384_000);
@@ -3813,4 +3821,218 @@ fn test_orchestrator_with_composer_registry() {
     // We can verify indirectly via provider_info still working.
     let info = orchestrator.provider_info();
     assert_eq!(info.name, "anthropic");
+}
+
+// =============================================================================
+// Story-006: Pluggable ContextCompactor tests
+// =============================================================================
+
+#[test]
+fn test_ollama_provider_gets_sliding_window_compactor() {
+    // ADR-F006: Ollama (Unreliable reliability) should get SlidingWindowCompactor
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Ollama,
+            model: "llama3".to_string(),
+            base_url: Some("http://localhost:11434".to_string()),
+            ..Default::default()
+        },
+        ..test_config()
+    };
+    let orchestrator = OrchestratorService::new(config);
+    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
+}
+
+#[test]
+fn test_anthropic_provider_gets_llm_summary_compactor() {
+    // ADR-F006: Anthropic (Reliable) should get LlmSummaryCompactor
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: Some("test-key".to_string()),
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            ..Default::default()
+        },
+        ..test_config()
+    };
+    let orchestrator = OrchestratorService::new(config);
+    assert_eq!(orchestrator.compactor.name(), "LlmSummaryCompactor");
+}
+
+#[test]
+fn test_openai_provider_gets_llm_summary_compactor() {
+    // ADR-F006: OpenAI (Reliable) should get LlmSummaryCompactor
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::OpenAI,
+            api_key: Some("test-key".to_string()),
+            model: "gpt-4".to_string(),
+            ..Default::default()
+        },
+        ..test_config()
+    };
+    let orchestrator = OrchestratorService::new(config);
+    assert_eq!(orchestrator.compactor.name(), "LlmSummaryCompactor");
+}
+
+#[test]
+fn test_qwen_provider_gets_sliding_window_compactor() {
+    // ADR-F006: Qwen (Unreliable) should get SlidingWindowCompactor
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Qwen,
+            api_key: Some("test-key".to_string()),
+            model: "qwen-plus".to_string(),
+            base_url: Some("http://localhost:8080".to_string()),
+            ..Default::default()
+        },
+        ..test_config()
+    };
+    let orchestrator = OrchestratorService::new(config);
+    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
+}
+
+#[test]
+fn test_deepseek_provider_gets_sliding_window_compactor() {
+    // ADR-F006: DeepSeek (Unreliable) should get SlidingWindowCompactor
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::DeepSeek,
+            api_key: Some("test-key".to_string()),
+            model: "deepseek-chat".to_string(),
+            ..Default::default()
+        },
+        ..test_config()
+    };
+    let orchestrator = OrchestratorService::new(config);
+    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
+}
+
+#[test]
+fn test_glm_provider_gets_sliding_window_compactor() {
+    // ADR-F006: GLM (Unreliable) should get SlidingWindowCompactor
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Glm,
+            api_key: Some("test-key".to_string()),
+            model: "glm-4".to_string(),
+            ..Default::default()
+        },
+        ..test_config()
+    };
+    let orchestrator = OrchestratorService::new(config);
+    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
+}
+
+#[test]
+fn test_compaction_config_on_orchestrator_config() {
+    // ADR-F006: OrchestratorConfig should have compaction_config field
+    let config = test_config();
+    assert!(config.compaction_config.enabled, "Default compaction should be enabled");
+    assert_eq!(config.compaction_config.max_messages, 50);
+    assert_eq!(config.compaction_config.preserve_head, 2);
+    assert_eq!(config.compaction_config.preserve_tail, 6);
+}
+
+#[test]
+fn test_custom_compaction_config_values_respected() {
+    // ADR-F006: Custom CompactionConfig values should be stored on the config
+    let custom_config = CompactionConfig {
+        max_messages: 30,
+        preserve_head: 3,
+        preserve_tail: 4,
+        enabled: true,
+        ..Default::default()
+    };
+    let config = OrchestratorConfig {
+        compaction_config: custom_config.clone(),
+        ..test_config()
+    };
+    assert_eq!(config.compaction_config.max_messages, 30);
+    assert_eq!(config.compaction_config.preserve_head, 3);
+    assert_eq!(config.compaction_config.preserve_tail, 4);
+}
+
+#[test]
+fn test_compaction_config_serde_defaults_in_orchestrator_config() {
+    // ADR-F006: When deserializing OrchestratorConfig without compaction_config,
+    // serde should use CompactionConfig::default()
+    let json = r#"{
+        "provider": {
+            "provider": "anthropic",
+            "api_key": "test-key",
+            "model": "claude-3-5-sonnet-20241022"
+        },
+        "project_root": "/tmp/test"
+    }"#;
+    let config: OrchestratorConfig = serde_json::from_str(json).unwrap();
+    assert!(config.compaction_config.enabled);
+    assert_eq!(config.compaction_config.max_messages, 50);
+    assert_eq!(
+        config.compaction_config.strategy,
+        crate::services::core::compaction::CompactionStrategy::LlmSummary,
+    );
+}
+
+#[test]
+fn test_compaction_config_serde_explicit_override_in_orchestrator_config() {
+    // ADR-F006: Explicit compaction_config values should override defaults
+    let json = r#"{
+        "provider": {
+            "provider": "anthropic",
+            "api_key": "test-key",
+            "model": "claude-3-5-sonnet-20241022"
+        },
+        "project_root": "/tmp/test",
+        "compaction_config": {
+            "strategy": "sliding_window",
+            "max_messages": 25,
+            "preserve_head": 4,
+            "preserve_tail": 8,
+            "enabled": false
+        }
+    }"#;
+    let config: OrchestratorConfig = serde_json::from_str(json).unwrap();
+    assert!(!config.compaction_config.enabled);
+    assert_eq!(config.compaction_config.max_messages, 25);
+    assert_eq!(config.compaction_config.preserve_head, 4);
+    assert_eq!(config.compaction_config.preserve_tail, 8);
+    assert_eq!(
+        config.compaction_config.strategy,
+        crate::services::core::compaction::CompactionStrategy::SlidingWindow,
+    );
+}
+
+#[test]
+fn test_sub_agent_gets_compactor_based_on_provider() {
+    // ADR-F006: Sub-agents created via new_sub_agent should also get the
+    // correct compactor based on provider reliability
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Qwen,
+            api_key: Some("test-key".to_string()),
+            model: "qwen-plus".to_string(),
+            base_url: Some("http://localhost:8080".to_string()),
+            ..Default::default()
+        },
+        ..test_config()
+    };
+    let sub_agent = OrchestratorService::new_sub_agent(config, CancellationToken::new());
+    assert_eq!(sub_agent.compactor.name(), "SlidingWindowCompactor");
+}
+
+#[test]
+fn test_minimax_provider_gets_sliding_window_compactor() {
+    // ADR-F006: Minimax (Unreliable) should get SlidingWindowCompactor
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Minimax,
+            api_key: Some("test-key".to_string()),
+            model: "minimax-test".to_string(),
+            ..Default::default()
+        },
+        ..test_config()
+    };
+    let orchestrator = OrchestratorService::new(config);
+    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
 }

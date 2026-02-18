@@ -45,7 +45,7 @@ use serde_json::Value;
 ///
 /// // Attach to an event
 /// let event_with_actions = AgentEventWithActions {
-///     event: AgentEvent::ToolResult { name: "lint".into(), result: "ok".into() },
+///     event: AgentEvent::ToolResult { name: "lint".into(), result: "ok".into(), id: None, is_error: None },
 ///     actions: Some(actions),
 /// };
 /// ```
@@ -494,6 +494,8 @@ mod tests {
         let event = AgentEvent::ToolResult {
             name: "lint".to_string(),
             result: "ok".to_string(),
+            id: None,
+            is_error: None,
         };
         let actions = EventActions::none()
             .with_quality_gate("lint", true, None)

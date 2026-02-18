@@ -613,6 +613,7 @@ pub async fn check_provider_health(
         analysis_limits: Default::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config);
@@ -1090,6 +1091,7 @@ pub async fn execute_standalone(
         analysis_limits: Default::default(),
         analysis_session_id,
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config);
@@ -1313,6 +1315,7 @@ pub async fn execute_standalone_with_session(
         analysis_limits: Default::default(),
         analysis_session_id: Some(session_id.clone()),
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     // Get database pool for session persistence
@@ -1471,6 +1474,7 @@ pub async fn get_standalone_status(
         analysis_limits: Default::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1546,6 +1550,7 @@ pub async fn get_standalone_progress(
         analysis_limits: Default::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1602,6 +1607,7 @@ pub async fn resume_standalone_execution(
         analysis_limits: Default::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let temp_orchestrator = OrchestratorService::new(temp_config).with_database(pool.clone());
@@ -1707,6 +1713,7 @@ pub async fn resume_standalone_execution(
         analysis_limits: Default::default(),
         analysis_session_id: Some(request.session_id.clone()),
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
@@ -1789,6 +1796,7 @@ pub async fn get_standalone_session(
         analysis_limits: Default::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1847,6 +1855,7 @@ pub async fn list_standalone_sessions(
         analysis_limits: Default::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1897,6 +1906,7 @@ pub async fn delete_standalone_session(
         analysis_limits: Default::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1947,6 +1957,7 @@ pub async fn cleanup_standalone_sessions(
         analysis_limits: Default::default(),
         analysis_session_id: None,
         project_id: None,
+        compaction_config: Default::default(),
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);

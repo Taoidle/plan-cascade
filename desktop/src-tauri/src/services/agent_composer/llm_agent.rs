@@ -101,6 +101,8 @@ pub fn convert_stream_event(event: &UnifiedStreamEvent) -> Option<AgentEvent> {
         } => Some(AgentEvent::ToolCall {
             name: tool_name.clone(),
             args: arguments.clone().unwrap_or_default(),
+            id: None,
+            input: None,
         }),
         UnifiedStreamEvent::ToolComplete {
             tool_name,
@@ -109,6 +111,8 @@ pub fn convert_stream_event(event: &UnifiedStreamEvent) -> Option<AgentEvent> {
         } => Some(AgentEvent::ToolCall {
             name: tool_name.clone(),
             args: arguments.clone(),
+            id: None,
+            input: None,
         }),
         UnifiedStreamEvent::ToolResult {
             tool_id: _,
@@ -125,6 +129,8 @@ pub fn convert_stream_event(event: &UnifiedStreamEvent) -> Option<AgentEvent> {
             Some(AgentEvent::ToolResult {
                 name: String::new(), // tool name not available in ToolResult event
                 result: result_str,
+                id: None,
+                is_error: error.as_ref().map(|_| true),
             })
         }
         UnifiedStreamEvent::Complete { .. } => Some(AgentEvent::Done { output: None }),
@@ -178,6 +184,7 @@ impl Agent for LlmAgent {
             analysis_limits: Default::default(),
             analysis_session_id: None,
             project_id: None,
+            compaction_config: Default::default(),
         };
 
         // Create the OrchestratorService
@@ -282,7 +289,7 @@ mod tests {
         let result = convert_stream_event(&event);
         assert!(result.is_some());
         match result.unwrap() {
-            AgentEvent::ToolCall { name, args } => {
+            AgentEvent::ToolCall { name, args, .. } => {
                 assert_eq!(name, "read_file");
                 assert!(args.contains("/foo"));
             }
@@ -300,7 +307,7 @@ mod tests {
         let result = convert_stream_event(&event);
         assert!(result.is_some());
         match result.unwrap() {
-            AgentEvent::ToolCall { name, args } => {
+            AgentEvent::ToolCall { name, args, .. } => {
                 assert_eq!(name, "grep");
                 assert!(args.contains("test"));
             }

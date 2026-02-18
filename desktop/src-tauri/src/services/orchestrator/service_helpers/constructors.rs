@@ -57,6 +57,7 @@ reports the index is unavailable.\n\n";
             analysis_limits: AnalysisLimits::default(),
             analysis_session_id: None,
             project_id: None,
+            compaction_config: CompactionConfig::default(),
         };
 
         // Give each sub-agent a fresh read cache. Sub-agents have their own conversation
@@ -102,11 +103,13 @@ impl OrchestratorService {
         };
 
         let tool_executor = ToolExecutor::new(&config.project_root);
+        let compactor = build_compactor(&provider);
 
         Self {
             config,
             provider,
             tool_executor,
+            compactor,
             cancellation_token: CancellationToken::new(),
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -141,11 +144,13 @@ impl OrchestratorService {
         };
 
         let tool_executor = ToolExecutor::new(&config.project_root);
+        let compactor = build_compactor(&provider);
 
         Self {
             config,
             provider,
             tool_executor,
+            compactor,
             cancellation_token,
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -209,10 +214,13 @@ impl OrchestratorService {
             tool_executor.set_hnsw_index(Arc::clone(hnsw));
         }
 
+        let compactor = build_compactor(&provider);
+
         Self {
             config,
             provider,
             tool_executor,
+            compactor,
             cancellation_token,
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),

@@ -1,0 +1,53 @@
+[package]
+name = "plan-cascade-llm"
+version = "0.1.0"
+description = "LLM provider abstraction and implementations for Plan Cascade Desktop"
+authors = ["Plan Cascade Team"]
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+# Workspace crates
+plan-cascade-core = { path = "../core" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["sync"] }
+tokio-stream = "0.1"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
+
+# Ollama native SDK
+ollama-rs = { version = "0.3", features = ["stream"] }
+schemars = "1"
+
+# ZhipuAI (GLM) official SDK
+zai-rs = "0.1"
+
+# Async trait support
+async-trait = "0.1"
+
+# DashScope SDK for Qwen
+async-dashscope = "0.12"
+
+# Exponential backoff (used by DashScope SDK)
+backoff = "0.4"
+
+# Anthropic SDK types (used by MiniMax provider)
+anthropic-async = "0.4"
+
+# Streaming support
+futures-util = "0.3"
+
+# URL parsing
+url = "2"
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

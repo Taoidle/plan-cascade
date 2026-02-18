@@ -1634,6 +1634,8 @@ mod tests {
         let event = AgentEvent::ToolCall {
             name: "read_file".to_string(),
             args: r#"{"path": "/tmp/test.rs"}"#.to_string(),
+            id: None,
+            input: None,
         };
         let event_json = serde_json::to_value(&event).unwrap();
         let payload = PipelineEventPayload::agent_event("exec-stream-2", event_json);

@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use crate::models::agent::{Agent, AgentRun};
 use crate::services::agent::AgentService;
+use crate::services::agent_composer::types::AgentEvent;
 use crate::services::llm::{
     LlmError, LlmProvider, LlmRequestOptions, LlmResult, Message, ToolDefinition,
 };
@@ -40,47 +41,8 @@ impl Default for ExecutorConfig {
     }
 }
 
-/// Event emitted during agent execution
-#[derive(Debug, Clone)]
-pub enum AgentEvent {
-    /// Execution started
-    Started { run_id: String },
-    /// Text content being streamed
-    ContentDelta { delta: String },
-    /// Thinking/reasoning content (if available)
-    ThinkingDelta { delta: String },
-    /// A tool is being called
-    ToolCall {
-        id: String,
-        name: String,
-        input: serde_json::Value,
-    },
-    /// Tool call completed
-    ToolResult {
-        id: String,
-        result: String,
-        is_error: bool,
-    },
-    /// Execution completed successfully
-    Completed {
-        run_id: String,
-        output: String,
-        duration_ms: u64,
-    },
-    /// Execution failed
-    Failed {
-        run_id: String,
-        error: String,
-        duration_ms: u64,
-    },
-    /// Execution was cancelled
-    Cancelled { run_id: String, duration_ms: u64 },
-    /// Token usage update
-    Usage {
-        input_tokens: u32,
-        output_tokens: u32,
-    },
-}
+// AgentEvent is now imported from crate::services::agent_composer::types::AgentEvent
+// (unified enum — see story-001)
 
 /// Handle to a running agent execution
 #[derive(Debug)]
@@ -404,17 +366,18 @@ impl AgentExecutor {
                     match event {
                         Some(UnifiedStreamEvent::TextDelta { content }) => {
                             accumulated_content.push_str(&content);
-                            let _ = tx.send(AgentEvent::ContentDelta { delta: content }).await;
+                            let _ = tx.send(AgentEvent::TextDelta { content }).await;
                         }
                         Some(UnifiedStreamEvent::ThinkingDelta { content, .. }) => {
                             accumulated_thinking.push_str(&content);
-                            let _ = tx.send(AgentEvent::ThinkingDelta { delta: content }).await;
+                            let _ = tx.send(AgentEvent::ThinkingDelta { content }).await;
                         }
                         Some(UnifiedStreamEvent::ToolStart { tool_id, tool_name, .. }) => {
                             let _ = tx.send(AgentEvent::ToolCall {
-                                id: tool_id,
                                 name: tool_name,
-                                input: serde_json::Value::Null,
+                                args: String::new(),
+                                id: Some(tool_id),
+                                input: Some(serde_json::Value::Null),
                             }).await;
                         }
                         Some(UnifiedStreamEvent::Usage { input_tokens: it, output_tokens: ot, .. }) => {

@@ -241,8 +241,14 @@ pub async fn export_graph_workflow(
                         "mermaid" => {
                             Ok(generate_mermaid(&workflow))
                         }
+                        "typescript" => {
+                            Ok(crate::services::agent_composer::codegen::generate_typescript(&workflow))
+                        }
+                        "rust" => {
+                            Ok(crate::services::agent_composer::codegen::generate_rust(&workflow))
+                        }
                         _ => Err(AppError::validation(format!(
-                            "Unsupported export format: {}. Supported: json, mermaid",
+                            "Unsupported export format: {}. Supported: json, mermaid, typescript, rust",
                             format
                         ))),
                     }

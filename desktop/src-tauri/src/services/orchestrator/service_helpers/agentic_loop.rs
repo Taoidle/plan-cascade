@@ -688,27 +688,37 @@ impl OrchestratorService {
                             .await;
                     }
                 } else {
-                    // Provider-aware compaction: Reliable -> LLM summary,
-                    // Unreliable/None -> prefix-stable deletion.
-                    match self.provider.tool_call_reliability() {
-                        ToolCallReliability::Reliable => {
-                            self.compact_messages(&mut messages, &tx).await;
+                    // ADR-F006: Delegate to pluggable compactor trait.
+                    // Compactor was selected at construction time based on provider reliability.
+                    match self.compactor.compact(&messages, &self.config.compaction_config).await {
+                        Ok(result) if result.messages_removed > 0 => {
+                            let removed_count = result.messages_removed;
+                            let preserved_count = result.messages_preserved;
+                            let compaction_tokens = result.compaction_tokens;
+                            messages = result.messages;
+
+                            // ADR-004: Clear dedup cache after compaction
+                            self.tool_executor.clear_read_cache();
+                            self.tool_executor.clear_task_cache();
+
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ContextCompaction {
+                                    messages_compacted: removed_count,
+                                    messages_preserved: preserved_count,
+                                    compaction_tokens,
+                                })
+                                .await;
+
+                            eprintln!(
+                                "[compaction] {} compacted {} messages, preserved {}, tokens {}",
+                                self.compactor.name(), removed_count, preserved_count, compaction_tokens,
+                            );
                         }
-                        ToolCallReliability::Unreliable | ToolCallReliability::None => {
-                            let before = messages.len();
-                            if Self::compact_messages_prefix_stable(&mut messages) {
-                                // ADR-004: Clear dedup cache after prefix-stable compaction
-                                self.tool_executor.clear_read_cache();
-                                self.tool_executor.clear_task_cache();
-                                let removed_count = before - messages.len();
-                                let _ = tx
-                                    .send(UnifiedStreamEvent::ContextCompaction {
-                                        messages_compacted: removed_count,
-                                        messages_preserved: messages.len(),
-                                        compaction_tokens: 0,
-                                    })
-                                    .await;
-                            }
+                        Err(e) => {
+                            eprintln!("[compaction] {} failed: {}", self.compactor.name(), e);
+                        }
+                        _ => {
+                            // No compaction needed (too few messages or disabled)
                         }
                     }
                 }
@@ -1472,11 +1482,8 @@ impl OrchestratorService {
             // Hook: on_after_llm
             self.hooks.fire_on_after_llm(&hook_ctx, response.content.clone()).await;
 
-            // Check for context compaction before processing tool calls.
-            // Strategy selection: Reliable providers (Anthropic, OpenAI) use
-            // LLM-summary compaction; Unreliable/None providers (Ollama, Qwen,
-            // DeepSeek, GLM) use prefix-stable sliding-window deletion to avoid
-            // an extra LLM call and preserve KV-cache prefix stability.
+            // Check for context compaction before processing tool calls (ADR-F006).
+            // Delegates to pluggable compactor selected at construction time.
             if self.should_compact(last_input_tokens, false) {
                 // Hook: on_compaction - notify hooks before compaction
                 {
@@ -1494,25 +1501,36 @@ impl OrchestratorService {
                         .collect();
                     self.hooks.fire_on_compaction(&hook_ctx, compaction_snippets).await;
                 }
-                match self.provider.tool_call_reliability() {
-                    ToolCallReliability::Reliable => {
-                        self.compact_messages(&mut messages, &tx).await;
+                // ADR-F006: Delegate to pluggable compactor trait.
+                match self.compactor.compact(&messages, &self.config.compaction_config).await {
+                    Ok(result) if result.messages_removed > 0 => {
+                        let removed_count = result.messages_removed;
+                        let preserved_count = result.messages_preserved;
+                        let compaction_tokens = result.compaction_tokens;
+                        messages = result.messages;
+
+                        // ADR-004: Clear dedup cache after compaction
+                        self.tool_executor.clear_read_cache();
+                        self.tool_executor.clear_task_cache();
+
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ContextCompaction {
+                                messages_compacted: removed_count,
+                                messages_preserved: preserved_count,
+                                compaction_tokens,
+                            })
+                            .await;
+
+                        eprintln!(
+                            "[compaction] {} compacted {} messages, preserved {}, tokens {}",
+                            self.compactor.name(), removed_count, preserved_count, compaction_tokens,
+                        );
                     }
-                    ToolCallReliability::Unreliable | ToolCallReliability::None => {
-                        let removed = messages.len();
-                        if Self::compact_messages_prefix_stable(&mut messages) {
-                            // ADR-004: Clear dedup cache after prefix-stable compaction
-                            self.tool_executor.clear_read_cache();
-                            self.tool_executor.clear_task_cache();
-                            let removed_count = removed - messages.len();
-                            let _ = tx
-                                .send(UnifiedStreamEvent::ContextCompaction {
-                                    messages_compacted: removed_count,
-                                    messages_preserved: messages.len(),
-                                    compaction_tokens: 0,
-                                })
-                                .await;
-                        }
+                    Err(e) => {
+                        eprintln!("[compaction] {} failed: {}", self.compactor.name(), e);
+                    }
+                    _ => {
+                        // No compaction needed (too few messages or disabled)
                     }
                 }
             }
@@ -3009,14 +3027,14 @@ impl OrchestratorService {
                                         thinking_id: None,
                                     })
                                 }
-                                AgentEvent::ToolCall { name, args } => {
+                                AgentEvent::ToolCall { name, args, .. } => {
                                     Some(UnifiedStreamEvent::ToolStart {
                                         tool_id: format!("transfer:{}:{}", target_agent, name),
                                         tool_name: name,
                                         arguments: Some(args),
                                     })
                                 }
-                                AgentEvent::ToolResult { name, result } => {
+                                AgentEvent::ToolResult { name, result, .. } => {
                                     Some(UnifiedStreamEvent::ToolResult {
                                         tool_id: format!("transfer:{}:{}", target_agent, name),
                                         result: Some(result),

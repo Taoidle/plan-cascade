@@ -1,11 +1,9 @@
 //! Unified Streaming Abstraction Layer
 //!
-//! Provides a common interface for processing real-time LLM responses from multiple providers:
-//! - Claude Code CLI (stream-json format)
-//! - Claude API (SSE format)
-//! - OpenAI API (SSE with reasoning_content)
-//! - DeepSeek API (SSE with <think> tags)
-//! - Ollama (JSON with model-dependent thinking)
+//! Core types (UnifiedStreamEvent, AdapterError, StreamAdapter) are defined in
+//! `plan-cascade-core::streaming`. Provider-specific adapters are in
+//! `plan-cascade-llm::streaming_adapters`. This module re-exports both and
+//! provides the AdapterFactory and streaming service.
 
 pub mod adapter;
 pub mod adapters;
@@ -13,8 +11,8 @@ pub mod factory;
 pub mod service;
 pub mod unified;
 
-// Re-export main types
-pub use adapter::StreamAdapter;
+// Re-export main types (from core, for backward compatibility)
+pub use plan_cascade_core::streaming::StreamAdapter;
+pub use plan_cascade_core::streaming::{AdapterError, UnifiedStreamEvent};
 pub use factory::AdapterFactory;
 pub use service::UnifiedStreamingService;
-pub use unified::{AdapterError, UnifiedStreamEvent};

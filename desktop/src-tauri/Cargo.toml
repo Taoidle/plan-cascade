@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/core"]
+members = [".", "crates/core", "crates/llm", "crates/tools", "crates/quality-gates"]
 resolver = "2"
 
 [package]
@@ -25,6 +25,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # Workspace crates
 plan-cascade-core = { path = "crates/core" }
+plan-cascade-llm = { path = "crates/llm" }
+plan-cascade-tools = { path = "crates/tools" }
+plan-cascade-quality-gates = { path = "crates/quality-gates" }
 
 # Tauri
 tauri = { version = "2", features = [] }

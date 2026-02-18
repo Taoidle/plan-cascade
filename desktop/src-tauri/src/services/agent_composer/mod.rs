@@ -10,6 +10,7 @@
 //! - **ConditionalAgent**: Routes to branches based on shared state
 //! - **ComposerRegistry**: Named agent storage with pipeline construction
 
+pub mod codegen;
 pub mod conditional;
 pub mod eval_types;
 pub mod evaluation;
