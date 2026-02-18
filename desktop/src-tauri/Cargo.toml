@@ -155,6 +155,9 @@ tempfile = "3"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# Optional browser automation support. Adds chromiumoxide dependency.
+# Enable with: cargo build --features browser
+browser = []
 
 [profile.release]
 panic = "abort"

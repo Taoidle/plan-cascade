@@ -30,7 +30,9 @@ import {
 } from '@radix-ui/react-icons';
 import { useTaskModeStore } from '../../store/taskMode';
 import type { TaskStory, TaskModeSessionStatus } from '../../store/taskMode';
+import { useExecutionReportStore } from '../../store/executionReport';
 import { QualityGatesSummary } from './QualityGateResults';
+import { ExecutionReport } from '../ExecutionReport';
 
 // ============================================================================
 // Phase indicator
@@ -206,6 +208,7 @@ export function TaskModePanel() {
 
   const {
     isTaskMode,
+    sessionId,
     sessionStatus,
     prd,
     currentBatch,
@@ -244,6 +247,20 @@ export function TaskModePanel() {
       }
     }
   }, [sessionStatus, report, fetchReport]);
+
+  // Generate detailed execution report visualization when report arrives
+  const { generateReport: generateDetailedReport } = useExecutionReportStore();
+  useEffect(() => {
+    if (report && prd && sessionId) {
+      generateDetailedReport({
+        sessionId,
+        prd,
+        executionReport: report,
+        qualityGateResults,
+        storyStatuses,
+      });
+    }
+  }, [report, prd, sessionId, qualityGateResults, storyStatuses, generateDetailedReport]);
 
   const handleApprove = useCallback(() => {
     if (prd) {
@@ -573,6 +590,9 @@ export function TaskModePanel() {
                 <QualityGatesSummary results={qualityGateResults} />
               </div>
             )}
+
+            {/* Detailed Execution Report Visualization */}
+            <ExecutionReport />
 
             {/* Exit button */}
             <button

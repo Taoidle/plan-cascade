@@ -177,6 +177,22 @@ pub enum AgentEvent {
         node_id: String,
         context: String,
     },
+    /// Rich content for dynamic UI rendering.
+    ///
+    /// Agents can emit structured data that the frontend renders as
+    /// tables, charts, diffs, or action buttons. The `surface_id`
+    /// enables replacing previously rendered content (update-in-place).
+    RichContent {
+        /// Component type: "table", "chart", "diff", "action_buttons", etc.
+        component_type: String,
+        /// Structured JSON payload consumed by the frontend renderer.
+        data: Value,
+        /// Optional surface identifier for update/replace semantics.
+        /// When present, the frontend replaces the existing surface
+        /// with this ID instead of appending a new element.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        surface_id: Option<String>,
+    },
     /// Agent execution completed successfully with optional output.
     Done {
         output: Option<String>,
@@ -523,6 +539,118 @@ mod tests {
         let json = serde_json::to_string(&step).unwrap();
         assert!(json.contains("conditional_step"));
         assert!(json.contains("should_proceed"));
+    }
+
+    #[test]
+    fn test_agent_event_rich_content_serialization() {
+        let event = AgentEvent::RichContent {
+            component_type: "table".to_string(),
+            data: serde_json::json!({
+                "columns": ["Name", "Status"],
+                "rows": [["story-1", "completed"], ["story-2", "running"]]
+            }),
+            surface_id: Some("progress-table".to_string()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"rich_content\""));
+        assert!(json.contains("\"component_type\":\"table\""));
+        assert!(json.contains("\"surface_id\":\"progress-table\""));
+
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::RichContent {
+                component_type,
+                data,
+                surface_id,
+            } => {
+                assert_eq!(component_type, "table");
+                assert!(data.get("columns").is_some());
+                assert_eq!(surface_id, Some("progress-table".to_string()));
+            }
+            _ => panic!("Expected RichContent"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_rich_content_without_surface_id() {
+        let event = AgentEvent::RichContent {
+            component_type: "chart".to_string(),
+            data: serde_json::json!({"progress": 75}),
+            surface_id: None,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"rich_content\""));
+        assert!(json.contains("\"component_type\":\"chart\""));
+        // surface_id should be omitted when None
+        assert!(!json.contains("surface_id"));
+
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::RichContent {
+                component_type,
+                surface_id,
+                ..
+            } => {
+                assert_eq!(component_type, "chart");
+                assert!(surface_id.is_none());
+            }
+            _ => panic!("Expected RichContent"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_rich_content_diff_type() {
+        let event = AgentEvent::RichContent {
+            component_type: "diff".to_string(),
+            data: serde_json::json!({
+                "old": "fn foo() {}",
+                "new": "fn foo() -> i32 { 42 }",
+                "file": "src/main.rs"
+            }),
+            surface_id: None,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::RichContent {
+                component_type,
+                data,
+                ..
+            } => {
+                assert_eq!(component_type, "diff");
+                assert_eq!(data["file"], "src/main.rs");
+            }
+            _ => panic!("Expected RichContent"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_rich_content_action_buttons() {
+        let event = AgentEvent::RichContent {
+            component_type: "action_buttons".to_string(),
+            data: serde_json::json!({
+                "actions": [
+                    {"id": "approve", "label": "Approve", "variant": "primary"},
+                    {"id": "retry", "label": "Retry", "variant": "secondary"},
+                    {"id": "skip", "label": "Skip", "variant": "ghost"}
+                ]
+            }),
+            surface_id: Some("review-actions".to_string()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AgentEvent::RichContent {
+                component_type,
+                data,
+                ..
+            } => {
+                assert_eq!(component_type, "action_buttons");
+                let actions = data["actions"].as_array().unwrap();
+                assert_eq!(actions.len(), 3);
+            }
+            _ => panic!("Expected RichContent"),
+        }
     }
 
     #[test]
