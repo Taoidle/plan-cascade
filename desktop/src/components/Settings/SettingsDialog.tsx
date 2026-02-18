@@ -24,13 +24,14 @@ import { GuardrailSection } from './GuardrailSection';
 import { LspSection } from './LspSection';
 import { PluginSection } from './PluginSection';
 import { NetworkSection } from './NetworkSection';
+import { RemoteSection } from './RemoteSection';
 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-type SettingsTab = 'general' | 'llm' | 'embedding' | 'lsp' | 'network' | 'plugins' | 'security' | 'agents' | 'quality' | 'phases' | 'import-export';
+type SettingsTab = 'general' | 'llm' | 'embedding' | 'lsp' | 'network' | 'remote' | 'plugins' | 'security' | 'agents' | 'quality' | 'phases' | 'import-export';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { t } = useTranslation('settings');
@@ -43,6 +44,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     { id: 'embedding', label: t('tabs.embedding') },
     { id: 'lsp', label: t('tabs.lsp') },
     { id: 'network', label: t('tabs.network') },
+    { id: 'remote', label: t('tabs.remote', 'Remote') },
     { id: 'plugins', label: t('tabs.plugins', 'Plugins') },
     { id: 'security', label: t('tabs.security') },
     { id: 'agents', label: t('tabs.agents') },
@@ -145,6 +147,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </Tabs.Content>
               <Tabs.Content value="network" className="outline-none">
                 <NetworkSection />
+              </Tabs.Content>
+              <Tabs.Content value="remote" className="outline-none">
+                <RemoteSection />
               </Tabs.Content>
               <Tabs.Content value="plugins" className="outline-none">
                 <PluginSection />

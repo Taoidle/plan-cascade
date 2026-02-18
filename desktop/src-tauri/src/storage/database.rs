@@ -44,6 +44,7 @@ pub struct CheckpointRow {
 pub type DbPool = Pool<SqliteConnectionManager>;
 
 /// Database service for managing SQLite operations
+#[derive(Clone)]
 pub struct Database {
     pool: DbPool,
 }
@@ -712,6 +713,49 @@ impl Database {
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_guardrail_trigger_log_name
              ON guardrail_trigger_log(guardrail_name)",
+            [],
+        )?;
+
+        // ====================================================================
+        // Feature-002 (Phase 2): Remote Session Control tables
+        // ====================================================================
+
+        // Remote session mappings (chat_id -> local session)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS remote_session_mappings (
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                adapter_type TEXT NOT NULL,
+                local_session_id TEXT,
+                session_type TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (adapter_type, chat_id)
+            )",
+            [],
+        )?;
+
+        // Remote command audit log
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS remote_audit_log (
+                id TEXT PRIMARY KEY,
+                adapter_type TEXT NOT NULL,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                command_text TEXT NOT NULL,
+                command_type TEXT NOT NULL,
+                result_status TEXT NOT NULL,
+                error_message TEXT,
+                created_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        // Index for audit log queries (ordered by most recent)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_remote_audit_created
+             ON remote_audit_log(created_at DESC)",
             [],
         )?;
 
@@ -1904,5 +1948,185 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(count, 1, "guardrail_rules should still exist after double init");
+    }
+
+    // =========================================================================
+    // Feature-002 (Phase 2): Remote Session Control schema tests
+    // =========================================================================
+
+    #[test]
+    fn test_remote_session_mappings_table_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='remote_session_mappings'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "remote_session_mappings table should exist");
+    }
+
+    #[test]
+    fn test_remote_session_mappings_crud() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert a mapping
+        conn.execute(
+            "INSERT INTO remote_session_mappings (chat_id, user_id, adapter_type, local_session_id, session_type, created_at, updated_at)
+             VALUES (123456789, 111222333, 'telegram', 'session-abc-123', '{\"ClaudeCode\"}', '2026-02-18T14:30:00Z', '2026-02-18T14:30:00Z')",
+            [],
+        ).unwrap();
+
+        // Query it back
+        let (chat_id, session_id): (i64, String) = conn.query_row(
+            "SELECT chat_id, local_session_id FROM remote_session_mappings WHERE chat_id = 123456789",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(chat_id, 123456789);
+        assert_eq!(session_id, "session-abc-123");
+    }
+
+    #[test]
+    fn test_remote_session_mappings_primary_key() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert first mapping
+        conn.execute(
+            "INSERT INTO remote_session_mappings (chat_id, user_id, adapter_type, local_session_id, session_type, created_at, updated_at)
+             VALUES (123, 456, 'telegram', 'sess-1', 'ClaudeCode', '2026-02-18T14:30:00Z', '2026-02-18T14:30:00Z')",
+            [],
+        ).unwrap();
+
+        // Duplicate (adapter_type, chat_id) should fail
+        let result = conn.execute(
+            "INSERT INTO remote_session_mappings (chat_id, user_id, adapter_type, local_session_id, session_type, created_at, updated_at)
+             VALUES (123, 789, 'telegram', 'sess-2', 'ClaudeCode', '2026-02-18T14:31:00Z', '2026-02-18T14:31:00Z')",
+            [],
+        );
+        assert!(result.is_err(), "Duplicate PRIMARY KEY (adapter_type, chat_id) should be rejected");
+
+        // Different adapter_type with same chat_id should succeed
+        conn.execute(
+            "INSERT INTO remote_session_mappings (chat_id, user_id, adapter_type, local_session_id, session_type, created_at, updated_at)
+             VALUES (123, 456, 'slack', 'sess-3', 'ClaudeCode', '2026-02-18T14:32:00Z', '2026-02-18T14:32:00Z')",
+            [],
+        ).unwrap();
+    }
+
+    #[test]
+    fn test_remote_audit_log_table_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='remote_audit_log'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "remote_audit_log table should exist");
+    }
+
+    #[test]
+    fn test_remote_audit_log_crud() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert an audit entry
+        conn.execute(
+            "INSERT INTO remote_audit_log (id, adapter_type, chat_id, user_id, username, command_text, command_type, result_status, error_message, created_at)
+             VALUES ('audit-001', 'telegram', 123456789, 111222333, 'testuser', '/new ~/projects/myapp', 'NewSession', 'success', NULL, '2026-02-18T14:30:00Z')",
+            [],
+        ).unwrap();
+
+        // Query it back
+        let (id, command_type, result_status): (String, String, String) = conn.query_row(
+            "SELECT id, command_type, result_status FROM remote_audit_log WHERE id = 'audit-001'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(id, "audit-001");
+        assert_eq!(command_type, "NewSession");
+        assert_eq!(result_status, "success");
+
+        // Insert an error entry
+        conn.execute(
+            "INSERT INTO remote_audit_log (id, adapter_type, chat_id, user_id, username, command_text, command_type, result_status, error_message, created_at)
+             VALUES ('audit-002', 'telegram', 123456789, 111222333, 'testuser', '/new ~/secret', 'NewSession', 'error', 'Unauthorized path', '2026-02-18T14:31:00Z')",
+            [],
+        ).unwrap();
+
+        let error_msg: Option<String> = conn.query_row(
+            "SELECT error_message FROM remote_audit_log WHERE id = 'audit-002'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(error_msg, Some("Unauthorized path".to_string()));
+    }
+
+    #[test]
+    fn test_remote_audit_log_index_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='remote_audit_log'"
+        ).unwrap();
+        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(indexes.contains(&"idx_remote_audit_created".to_string()),
+            "idx_remote_audit_created index should exist");
+    }
+
+    #[test]
+    fn test_remote_audit_log_pagination() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        // Insert 5 entries
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO remote_audit_log (id, adapter_type, chat_id, user_id, command_text, command_type, result_status, created_at)
+                 VALUES (?1, 'telegram', 123, 456, '/status', 'Status', 'success', ?2)",
+                params![format!("audit-{}", i), format!("2026-02-18T14:3{}:00Z", i)],
+            ).unwrap();
+        }
+
+        // Query with limit and offset
+        let mut stmt = conn.prepare(
+            "SELECT id FROM remote_audit_log ORDER BY created_at DESC LIMIT 2 OFFSET 1"
+        ).unwrap();
+        let ids: Vec<String> = stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn test_remote_schema_idempotent() {
+        let db = create_test_db().unwrap();
+        db.init_schema().unwrap(); // second call
+
+        let conn = db.get_connection().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='remote_session_mappings'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "remote_session_mappings should still exist after double init");
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='remote_audit_log'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "remote_audit_log should still exist after double init");
     }
 }

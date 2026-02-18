@@ -12,7 +12,8 @@
     "lsp": "LSP Servers",
     "plugins": "Plugins",
     "security": "Security",
-    "network": "Network"
+    "network": "Network",
+    "remote": "Remote"
   },
 
   "general": {
@@ -646,7 +647,71 @@
       "embedding_qwen": "Qwen Embedding",
       "embedding_glm": "GLM Embedding",
       "embedding_ollama": "Ollama Embedding",
-      "embedding_tfidf": "TF-IDF"
+      "embedding_tfidf": "TF-IDF",
+      "remote_telegram": "Telegram Remote"
+    }
+  },
+
+  "remote": {
+    "title": "Remote Control",
+    "save": "Save",
+    "saving": "Saving...",
+    "saveSuccess": "Configuration saved",
+    "dismiss": "Dismiss",
+
+    "gateway": {
+      "title": "Gateway Status",
+      "start": "Start",
+      "stop": "Stop",
+      "running": "Running",
+      "stopped": "Stopped",
+      "connectedSince": "Connected Since",
+      "commandsProcessed": "Commands Processed",
+      "activeSessions": "Active Sessions"
+    },
+
+    "config": {
+      "title": "Gateway Configuration",
+      "enabled": "Enable Remote Control",
+      "autoStart": "Auto-start on launch"
+    },
+
+    "telegram": {
+      "title": "Telegram Bot Configuration",
+      "botToken": "Bot Token",
+      "botTokenPlaceholder": "Enter bot token...",
+      "tokenSet": "Set",
+      "autoStart": "Auto-start",
+      "allowedChatIds": "Allowed Chat IDs",
+      "chatIdPlaceholder": "Chat ID...",
+      "chatIdHint": "Leave empty to allow all chats.",
+      "allowedUserIds": "Allowed User IDs",
+      "userIdPlaceholder": "User ID...",
+      "userIdHint": "Leave empty to allow all users.",
+      "passwordProtection": "Require Password",
+      "accessPassword": "Access Password",
+      "accessPasswordPlaceholder": "Set access password...",
+      "streamingMode": "Streaming Mode",
+      "modeWaitForComplete": "Wait for Complete",
+      "modePeriodicUpdate": "Periodic Update",
+      "modeLiveEdit": "Live Edit",
+      "allowedPaths": "Allowed Project Paths"
+    },
+
+    "sessions": {
+      "title": "Active Remote Sessions",
+      "none": "No active remote sessions.",
+      "disconnect": "Disconnect"
+    },
+
+    "audit": {
+      "title": "Audit Log",
+      "none": "No audit log entries.",
+      "time": "Time",
+      "user": "User",
+      "command": "Command",
+      "status": "Status",
+      "viewAll": "View all entries"
     }
   }
 }

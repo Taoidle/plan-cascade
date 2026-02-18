@@ -12,7 +12,8 @@
     "lsp": "LSPサーバー",
     "plugins": "プラグイン",
     "security": "セキュリティ",
-    "network": "ネットワーク"
+    "network": "ネットワーク",
+    "remote": "リモート制御"
   },
 
   "general": {
@@ -602,7 +603,71 @@
       "embedding_qwen": "Qwen エンベディング",
       "embedding_glm": "GLM エンベディング",
       "embedding_ollama": "Ollama エンベディング",
-      "embedding_tfidf": "TF-IDF"
+      "embedding_tfidf": "TF-IDF",
+      "remote_telegram": "Telegramリモート"
+    }
+  },
+
+  "remote": {
+    "title": "リモート制御",
+    "save": "保存",
+    "saving": "保存中...",
+    "saveSuccess": "設定が保存されました",
+    "dismiss": "閉じる",
+
+    "gateway": {
+      "title": "ゲートウェイステータス",
+      "start": "開始",
+      "stop": "停止",
+      "running": "実行中",
+      "stopped": "停止中",
+      "connectedSince": "接続時刻",
+      "commandsProcessed": "処理済みコマンド",
+      "activeSessions": "アクティブセッション"
+    },
+
+    "config": {
+      "title": "ゲートウェイ設定",
+      "enabled": "リモート制御を有効にする",
+      "autoStart": "起動時に自動開始"
+    },
+
+    "telegram": {
+      "title": "Telegram Bot設定",
+      "botToken": "Botトークン",
+      "botTokenPlaceholder": "Botトークンを入力...",
+      "tokenSet": "設定済み",
+      "autoStart": "自動開始",
+      "allowedChatIds": "許可されたChat ID",
+      "chatIdPlaceholder": "Chat ID...",
+      "chatIdHint": "空にするとすべてのチャットを許可します。",
+      "allowedUserIds": "許可されたUser ID",
+      "userIdPlaceholder": "User ID...",
+      "userIdHint": "空にするとすべてのユーザーを許可します。",
+      "passwordProtection": "パスワードが必要",
+      "accessPassword": "アクセスパスワード",
+      "accessPasswordPlaceholder": "アクセスパスワードを設定...",
+      "streamingMode": "ストリーミングモード",
+      "modeWaitForComplete": "完了まで待機",
+      "modePeriodicUpdate": "定期的な更新",
+      "modeLiveEdit": "ライブ編集",
+      "allowedPaths": "許可されたプロジェクトパス"
+    },
+
+    "sessions": {
+      "title": "アクティブなリモートセッション",
+      "none": "アクティブなリモートセッションはありません。",
+      "disconnect": "切断"
+    },
+
+    "audit": {
+      "title": "監査ログ",
+      "none": "監査ログのエントリはありません。",
+      "time": "時刻",
+      "user": "ユーザー",
+      "command": "コマンド",
+      "status": "ステータス",
+      "viewAll": "すべてのエントリを表示"
     }
   }
 }

@@ -39,6 +39,7 @@ const PROVIDER_IDS: &[&str] = &[
     "embedding_qwen",
     "embedding_glm",
     "embedding_ollama",
+    "remote_telegram",
 ];
 
 /// Settings DB key prefix for per-provider proxy strategy.
@@ -411,7 +412,9 @@ pub fn resolve_provider_proxy(
 /// - Claude Code: use_global
 fn default_strategy_for(provider: &str) -> ProxyStrategy {
     match provider {
-        "anthropic" | "openai" | "claude_code" | "embedding_openai" => ProxyStrategy::UseGlobal,
+        "anthropic" | "openai" | "claude_code" | "embedding_openai" | "remote_telegram" => {
+            ProxyStrategy::UseGlobal
+        }
         _ => ProxyStrategy::NoProxy,
     }
 }
