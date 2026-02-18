@@ -151,6 +151,15 @@ impl GitService {
         Ok(parse_unified_diff(&output))
     }
 
+    /// Get diff for a specific commit (show changes introduced by the commit).
+    pub fn diff_for_commit(&self, repo_path: &Path, sha: &str) -> AppResult<DiffOutput> {
+        let output = self
+            .git
+            .execute(repo_path, &["diff-tree", "-p", "--no-commit-id", sha])?
+            .into_result()?;
+        Ok(parse_unified_diff(&output))
+    }
+
     // -----------------------------------------------------------------------
     // Log
     // -----------------------------------------------------------------------

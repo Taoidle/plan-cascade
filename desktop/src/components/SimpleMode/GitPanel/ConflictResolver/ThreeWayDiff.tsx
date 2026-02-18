@@ -7,12 +7,16 @@
  * - THEIRS (right): Merging branch content, read-only
  *
  * Feature-004: Branches Tab & Merge Conflict Resolution
+ * Feature-005: AI-Powered Conflict Resolution
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
-import type { ConflictRegion, CommandResponse } from '../../../../types/git';
+import type { CommandResponse } from '../../../../lib/tauri';
+import type { ConflictRegion } from '../../../../types/git';
+import { useGitAI } from '../../../../hooks/useGitAI';
+import { useToast } from '../../../shared/Toast';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,7 +31,7 @@ interface ThreeWayDiffProps {
 interface RegionResolution {
   regionIndex: number;
   content: string;
-  method: 'ours' | 'theirs' | 'both' | 'manual';
+  method: 'ours' | 'theirs' | 'both' | 'manual' | 'ai';
 }
 
 // ---------------------------------------------------------------------------
@@ -86,32 +90,59 @@ function buildResolvedContent(
 }
 
 // ---------------------------------------------------------------------------
+// Spinner
+// ---------------------------------------------------------------------------
+
+function Spinner({ className }: { className?: string }) {
+  return (
+    <svg className={clsx('animate-spin', className)} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // RegionActions
 // ---------------------------------------------------------------------------
 
 function RegionActions({
   regionIndex,
-  region,
   resolution,
+  isAIAvailable,
+  isAIResolving,
   onAcceptOurs,
   onAcceptTheirs,
   onAcceptBoth,
   onManualEdit,
+  onAIResolve,
 }: {
   regionIndex: number;
   region: ConflictRegion;
   resolution: RegionResolution | undefined;
+  isAIAvailable: boolean;
+  isAIResolving: boolean;
   onAcceptOurs: (idx: number) => void;
   onAcceptTheirs: (idx: number) => void;
   onAcceptBoth: (idx: number) => void;
   onManualEdit: (idx: number) => void;
+  onAIResolve: (idx: number) => void;
 }) {
   return (
     <div className="flex items-center gap-1 py-1">
       <span className="text-2xs font-medium text-gray-500 dark:text-gray-400 mr-1">
         Region {regionIndex + 1}
         {resolution && (
-          <span className="ml-1 text-green-600 dark:text-green-400">
+          <span className={clsx(
+            'ml-1',
+            resolution.method === 'ai'
+              ? 'text-purple-600 dark:text-purple-400'
+              : 'text-green-600 dark:text-green-400'
+          )}>
             ({resolution.method})
           </span>
         )}
@@ -160,12 +191,38 @@ function RegionActions({
       >
         Manual Edit
       </button>
-      {/* AI Resolve placeholder */}
+      {/* AI Resolve button */}
       <button
-        disabled
-        className="px-2 py-0.5 text-2xs rounded bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-600 cursor-not-allowed"
-        title="AI Resolve (coming in feature-005)"
+        onClick={() => onAIResolve(regionIndex)}
+        disabled={!isAIAvailable || isAIResolving}
+        className={clsx(
+          'px-2 py-0.5 text-2xs rounded transition-colors flex items-center gap-1',
+          resolution?.method === 'ai'
+            ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium'
+            : isAIAvailable && !isAIResolving
+              ? 'bg-gray-100 dark:bg-gray-800 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+              : 'bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+        )}
+        title={
+          !isAIAvailable
+            ? 'Configure LLM provider in settings'
+            : isAIResolving
+              ? 'Resolving...'
+              : 'AI Resolve'
+        }
       >
+        {isAIResolving ? (
+          <Spinner className="w-3 h-3" />
+        ) : (
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+            />
+          </svg>
+        )}
         AI Resolve
       </button>
     </div>
@@ -180,7 +237,6 @@ function CodePanel({
   title,
   titleColor,
   content,
-  regions,
   side,
 }: {
   title: string;
@@ -281,7 +337,13 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
   const [editingRegion, setEditingRegion] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isResolving, setIsResolving] = useState(false);
+  const [isAIResolvingAll, setIsAIResolvingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { isAvailable, resolveConflictAI, resolvingFiles } = useGitAI();
+  const { showToast } = useToast();
+
+  const isFileAIResolving = resolvingFiles.has(filePath) || isAIResolvingAll;
 
   // Load file content and parse conflicts
   useEffect(() => {
@@ -410,6 +472,50 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
     [regions, resolutions]
   );
 
+  // AI Resolve for a single region
+  const handleAIResolve = useCallback(
+    async (idx: number) => {
+      if (!isAvailable) return;
+      const result = await resolveConflictAI(repoPath, filePath);
+      if (result) {
+        // The AI resolves the entire file at once. We apply it to the first
+        // unresolved region or the requested region.
+        setResolutions((prev) => {
+          const next = new Map(prev);
+          next.set(idx, { regionIndex: idx, content: result, method: 'ai' });
+          return next;
+        });
+        showToast(`AI resolved region ${idx + 1}`, 'success');
+      } else {
+        showToast('Failed to resolve conflict with AI', 'error');
+      }
+    },
+    [isAvailable, resolveConflictAI, repoPath, filePath, showToast]
+  );
+
+  // AI Resolve All
+  const handleAIResolveAll = useCallback(async () => {
+    if (!isAvailable) return;
+    setIsAIResolvingAll(true);
+    const result = await resolveConflictAI(repoPath, filePath);
+    if (result) {
+      // Apply AI resolution to all unresolved regions
+      setResolutions((prev) => {
+        const next = new Map(prev);
+        for (let i = 0; i < regions.length; i++) {
+          if (!next.has(i)) {
+            next.set(i, { regionIndex: i, content: result, method: 'ai' });
+          }
+        }
+        return next;
+      });
+      showToast('AI resolved all conflict regions', 'success');
+    } else {
+      showToast('Failed to resolve conflicts with AI', 'error');
+    }
+    setIsAIResolvingAll(false);
+  }, [isAvailable, resolveConflictAI, repoPath, filePath, regions.length, showToast]);
+
   const handleOutputChange = useCallback(
     (content: string) => {
       setEditableOutput(content);
@@ -472,10 +578,53 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
     );
   }
 
+  const unresolvedCount = regions.length - resolutions.size;
+
   return (
     <div className="flex flex-col h-full">
       {/* Region action bars */}
       <div className="shrink-0 px-3 py-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-gray-600 dark:text-gray-400">
+            {regions.length} conflict region{regions.length !== 1 ? 's' : ''}
+            {unresolvedCount > 0 && ` (${unresolvedCount} unresolved)`}
+          </span>
+          {/* AI Resolve All button */}
+          {isAvailable && unresolvedCount > 0 && (
+            <button
+              onClick={handleAIResolveAll}
+              disabled={isAIResolvingAll}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1 text-xs rounded-md transition-colors',
+                isAIResolvingAll
+                  ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-500 dark:text-purple-400 cursor-wait'
+                  : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 border border-purple-200 dark:border-purple-700'
+              )}
+            >
+              {isAIResolvingAll ? (
+                <>
+                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Resolving All...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+                    />
+                  </svg>
+                  AI Resolve All
+                </>
+              )}
+            </button>
+          )}
+        </div>
         <div className="flex flex-wrap gap-2">
           {regions.map((region, idx) => (
             <RegionActions
@@ -483,10 +632,13 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
               regionIndex={idx}
               region={region}
               resolution={resolutions.get(idx)}
+              isAIAvailable={isAvailable}
+              isAIResolving={isFileAIResolving}
               onAcceptOurs={handleAcceptOurs}
               onAcceptTheirs={handleAcceptTheirs}
               onAcceptBoth={handleAcceptBoth}
               onManualEdit={handleManualEdit}
+              onAIResolve={handleAIResolve}
             />
           ))}
         </div>
