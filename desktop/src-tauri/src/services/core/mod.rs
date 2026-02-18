@@ -18,6 +18,7 @@
 //! - `core/` = core crate (traits, error types, context hierarchy)
 //! - Tools, LLM, orchestrator etc. would be separate crates importing from core.
 
+pub mod adapter;
 pub mod builders;
 pub mod compaction;
 pub mod context;
@@ -29,6 +30,9 @@ pub use context::{ExecutionContext, OrchestratorContext, ToolContext};
 
 // ── Unified Tool Trait ───────────────────────────────────────────────
 pub use tool_trait::{ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry};
+
+// ── Adapters (Core <-> Existing Layer Bridge) ────────────────────────
+pub use adapter::{ToolAdapter, UnifiedToolAdapter};
 
 // ── Event + Actions ──────────────────────────────────────────────────
 pub use event_actions::{
