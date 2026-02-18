@@ -117,3 +117,22 @@ export type {
 
 export { useEmbeddingStore } from './embedding';
 export type { EmbeddingState } from './embedding';
+
+export { useTaskModeStore } from './taskMode';
+export type {
+  ExecutionMode as TaskExecutionMode,
+  RiskLevel,
+  Benefit,
+  TaskModeSessionStatus,
+  StrategyAnalysis as TaskStrategyAnalysis,
+  TaskStory,
+  TaskPrd,
+  TaskModeSession,
+  BatchExecutionProgress,
+  TaskExecutionStatus,
+  ExecutionReport as TaskExecutionReport,
+  StoryQualityGateResults,
+  GateResult,
+  DimensionScore,
+  TaskModeState,
+} from './taskMode';

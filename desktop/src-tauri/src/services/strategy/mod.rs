@@ -13,5 +13,8 @@
 pub mod analyzer;
 pub mod classifier;
 
-pub use analyzer::{DimensionScores, ExecutionStrategy, StrategyAnalyzer, StrategyDecision};
+pub use analyzer::{
+    analyze_task_for_mode, Benefit, DimensionScores, ExecutionMode, ExecutionStrategy, RiskLevel,
+    StrategyAnalysis, StrategyAnalyzer, StrategyDecision,
+};
 pub use classifier::{Intent, IntentClassifier, IntentResult};

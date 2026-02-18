@@ -1,0 +1,106 @@
+{
+  "title": "Task Mode",
+
+  "switcher": {
+    "suggested": "Task Mode suggested",
+    "confidence": "Confidence: {{confidence}}%",
+    "reason": "{{reasoning}}",
+    "accept": "Enter Task Mode",
+    "dismiss": "Dismiss",
+    "chatMode": "Chat Mode",
+    "taskMode": "Task Mode",
+    "analyzing": "Analyzing task..."
+  },
+
+  "panel": {
+    "title": "Task Mode",
+    "phase": {
+      "initialized": "Ready",
+      "generatingPrd": "Generating PRD...",
+      "reviewingPrd": "Review PRD",
+      "executing": "Executing",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "prd": {
+      "title": "PRD: {{title}}",
+      "description": "Review and approve the generated PRD before execution begins.",
+      "stories": "Stories ({{count}})",
+      "noStories": "No stories generated yet.",
+      "priority": "Priority",
+      "dependencies": "Dependencies",
+      "acceptanceCriteria": "Acceptance Criteria",
+      "noDependencies": "None",
+      "approve": "Approve & Execute",
+      "regenerate": "Regenerate",
+      "generate": "Generate PRD",
+      "editStory": "Edit Story"
+    },
+    "execution": {
+      "title": "Execution Progress",
+      "batch": "Batch {{current}} of {{total}}",
+      "storiesCompleted": "{{completed}} / {{total}} stories completed",
+      "storiesFailed": "{{count}} failed",
+      "cancel": "Cancel Execution",
+      "cancelling": "Cancelling..."
+    },
+    "storyStatus": {
+      "pending": "Pending",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "report": {
+      "title": "Execution Report",
+      "totalStories": "Total Stories",
+      "completed": "Completed",
+      "failed": "Failed",
+      "duration": "Duration",
+      "success": "Success",
+      "durationValue": "{{seconds}}s",
+      "exitTaskMode": "Exit Task Mode",
+      "viewReport": "View Report"
+    },
+    "exit": "Exit Task Mode",
+    "error": "Error: {{message}}"
+  },
+
+  "qualityGates": {
+    "title": "Quality Gates",
+    "phase": {
+      "preValidation": "Pre-Validation",
+      "validation": "Validation",
+      "postValidation": "Post-Validation"
+    },
+    "gate": {
+      "format": "Format",
+      "typeCheck": "TypeCheck",
+      "test": "Test",
+      "lint": "Lint",
+      "aiVerify": "AI Verify",
+      "codeReview": "Code Review",
+      "dor": "Definition of Ready",
+      "dod": "Definition of Done"
+    },
+    "status": {
+      "pending": "Pending",
+      "running": "Running",
+      "passed": "Passed",
+      "failed": "Failed",
+      "skipped": "Skipped"
+    },
+    "codeReview": {
+      "title": "Code Review Scores",
+      "totalScore": "Total: {{score}} / 100",
+      "dimensions": {
+        "codeQuality": "Code Quality",
+        "namingClarity": "Naming & Clarity",
+        "complexity": "Complexity",
+        "patternAdherence": "Pattern Adherence",
+        "security": "Security"
+      }
+    },
+    "noResults": "No quality gate results available."
+  }
+}
