@@ -56,6 +56,7 @@ reports the index is unavailable.\n\n";
             analysis_profile: AnalysisProfile::default(),
             analysis_limits: AnalysisLimits::default(),
             analysis_session_id: None,
+            project_id: None,
         };
 
         // Give each sub-agent a fresh read cache. Sub-agents have their own conversation
@@ -115,6 +116,9 @@ impl OrchestratorService {
             hooks: crate::services::orchestrator::hooks::build_default_hooks(),
             selected_skills: None,
             loaded_memories: None,
+            knowledge_context: None,
+            knowledge_context_config: KnowledgeContextConfig::default(),
+            cached_knowledge_block: Mutex::new(None),
         }
     }
 
@@ -150,6 +154,9 @@ impl OrchestratorService {
             hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
             selected_skills: None,
             loaded_memories: None,
+            knowledge_context: None,
+            knowledge_context_config: KnowledgeContextConfig::default(),
+            cached_knowledge_block: Mutex::new(None),
         }
     }
 
@@ -213,6 +220,9 @@ impl OrchestratorService {
             hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
             selected_skills: None,
             loaded_memories: None,
+            knowledge_context: None,
+            knowledge_context_config: KnowledgeContextConfig::default(),
+            cached_knowledge_block: Mutex::new(None),
         }
     }
 
@@ -288,6 +298,66 @@ impl OrchestratorService {
         );
         self.loaded_memories = Some(loaded_memories);
         self
+    }
+
+    /// Set the knowledge context provider for RAG-based context injection.
+    ///
+    /// When configured, the orchestrator queries project knowledge collections
+    /// at the start of execution and injects relevant context into the system prompt.
+    pub fn with_knowledge_context(
+        mut self,
+        provider: Arc<crate::services::knowledge::context_provider::KnowledgeContextProvider>,
+        config: crate::services::knowledge::context_provider::KnowledgeContextConfig,
+    ) -> Self {
+        self.knowledge_context = Some(provider);
+        self.knowledge_context_config = config;
+        self
+    }
+
+    /// Populate the cached knowledge context block by querying the provider.
+    ///
+    /// This is called at the beginning of execution (once per session/message).
+    /// The cached block is then injected into every system prompt during the
+    /// agentic loop without re-querying the knowledge base.
+    pub(super) async fn populate_knowledge_context(&self, user_query: &str) {
+        let provider = match &self.knowledge_context {
+            Some(p) => p,
+            None => return,
+        };
+
+        if !self.knowledge_context_config.enabled {
+            return;
+        }
+
+        // Derive project_id from config or project_root
+        let project_id = self
+            .config
+            .project_id
+            .clone()
+            .unwrap_or_else(|| {
+                self.config
+                    .project_root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "default".to_string())
+            });
+
+        match provider
+            .query_for_context(&project_id, user_query, &self.knowledge_context_config)
+            .await
+        {
+            Ok(chunks) => {
+                if !chunks.is_empty() {
+                    let block =
+                        crate::services::knowledge::context_provider::KnowledgeContextProvider::format_context_block(&chunks);
+                    let mut cached = self.cached_knowledge_block.lock().unwrap();
+                    *cached = Some(block);
+                }
+            }
+            Err(e) => {
+                eprintln!("[knowledge] Failed to query knowledge context: {}", e);
+            }
+        }
     }
 
     /// Register guardrail-related lifecycle hooks.

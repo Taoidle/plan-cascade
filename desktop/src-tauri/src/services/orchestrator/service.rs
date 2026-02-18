@@ -48,6 +48,7 @@ use crate::services::tools::{
     format_tool_result, get_basic_tool_definitions, get_tool_definitions, merge_system_prompts,
     parse_tool_calls, ParsedToolCall, TaskContext, TaskExecutionResult, TaskSpawner, ToolExecutor,
 };
+use crate::services::knowledge::context_provider::{KnowledgeContextConfig, KnowledgeContextProvider};
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::paths::ensure_plan_cascade_dir;
 
@@ -86,6 +87,11 @@ pub struct OrchestratorConfig {
     /// Cache reuse is limited to the same analysis session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub analysis_session_id: Option<String>,
+    /// Optional project identifier for knowledge context retrieval.
+    /// When set and a KnowledgeContextProvider is configured, relevant
+    /// knowledge from the project's collections is injected into the system prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
 }
 
 fn default_max_iterations() -> u32 {
@@ -310,6 +316,15 @@ pub struct OrchestratorService {
     /// Shared loaded memories from memory hooks for system prompt injection.
     /// Populated by `on_session_start` hook.
     loaded_memories: Option<Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>>>,
+    /// Optional knowledge context provider for injecting RAG context into system prompts.
+    /// When present and enabled, queries project knowledge collections before each LLM call
+    /// and appends relevant context to the system prompt.
+    knowledge_context: Option<Arc<KnowledgeContextProvider>>,
+    /// Configuration for knowledge context auto-retrieval.
+    knowledge_context_config: KnowledgeContextConfig,
+    /// Cached knowledge context block, populated at the start of execution.
+    /// This avoids re-querying the knowledge base on every LLM call iteration.
+    cached_knowledge_block: Mutex<Option<String>>,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances

@@ -1220,6 +1220,9 @@ impl OrchestratorService {
         let reliability = self.provider.tool_call_reliability();
         // For None reliability (Ollama), don't pass tools to API at all
         let use_prompt_fallback = matches!(reliability, ToolCallReliability::None);
+        // Clone user_message before moving it into messages, so we can use it
+        // later for knowledge context population.
+        let user_message_for_knowledge = user_message.clone();
         let mut messages = vec![Message::user(user_message)];
         let mut total_usage = UsageStats::default();
         let mut iterations = 0;
@@ -1278,6 +1281,9 @@ impl OrchestratorService {
                 }
             }
         }
+
+        // Populate knowledge context from RAG pipeline (if configured)
+        self.populate_knowledge_context(&user_message_for_knowledge).await;
 
         loop {
             // Check for cancellation
@@ -2553,6 +2559,14 @@ impl OrchestratorService {
             }
         }
         drop(detected_lang);
+
+        // Inject cached knowledge context (populated by populate_knowledge_context)
+        if let Ok(cached) = self.cached_knowledge_block.lock() {
+            if let Some(ref block) = *cached {
+                prompt.push_str("\n\n");
+                prompt.push_str(block);
+            }
+        }
 
         // Determine effective fallback mode:
         // 1. User override from ProviderConfig.fallback_tool_format_mode (highest priority)

@@ -177,6 +177,7 @@ impl Agent for LlmAgent {
             analysis_profile: Default::default(),
             analysis_limits: Default::default(),
             analysis_session_id: None,
+            project_id: None,
         };
 
         // Create the OrchestratorService

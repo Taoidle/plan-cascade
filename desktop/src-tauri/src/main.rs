@@ -13,6 +13,7 @@ use plan_cascade_desktop::commands::remote::RemoteState;
 use plan_cascade_desktop::commands::task_mode::TaskModeState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
 use plan_cascade_desktop::commands::standalone::StandaloneState;
+use plan_cascade_desktop::commands::knowledge::KnowledgeState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
 use plan_cascade_desktop::state::AppState;
@@ -37,6 +38,7 @@ fn main() {
         .manage(WebhookState::new_empty())
         .manage(RemoteState::new())
         .manage(TaskModeState::new())
+        .manage(KnowledgeState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -299,6 +301,11 @@ fn main() {
             plan_cascade_desktop::commands::evaluation::list_evaluation_runs,
             plan_cascade_desktop::commands::evaluation::get_evaluation_reports,
             plan_cascade_desktop::commands::evaluation::delete_evaluation_run,
+            // Knowledge commands
+            plan_cascade_desktop::commands::knowledge::rag_ingest_documents,
+            plan_cascade_desktop::commands::knowledge::rag_query,
+            plan_cascade_desktop::commands::knowledge::rag_list_collections,
+            plan_cascade_desktop::commands::knowledge::rag_delete_collection,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

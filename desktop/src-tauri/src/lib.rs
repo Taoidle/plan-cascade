@@ -242,6 +242,12 @@ pub use commands::{
     get_webhook_deliveries,
     retry_webhook_delivery,
     WebhookState,
+    // Knowledge commands
+    rag_ingest_documents,
+    rag_query,
+    rag_list_collections,
+    rag_delete_collection,
+    KnowledgeState,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,
