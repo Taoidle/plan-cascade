@@ -20,7 +20,7 @@ use tauri::State;
 use crate::models::response::CommandResponse;
 use crate::services::orchestrator::embedding_provider::{
     EmbeddingProvider, EmbeddingProviderCapability, EmbeddingProviderConfig,
-    EmbeddingProviderType,
+    EmbeddingProviderType, PersistedEmbeddingConfig, EMBEDDING_CONFIG_SETTING_KEY,
 };
 use crate::state::AppState;
 use crate::storage::KeyringService;
@@ -153,9 +153,6 @@ fn validate_embedding_keyring_provider(provider: &str) -> Option<&'static str> {
         .copied()
 }
 
-/// Database setting key for persisted embedding config.
-const EMBEDDING_CONFIG_SETTING_KEY: &str = "embedding_config";
-
 /// Build an `EmbeddingConfigResponse` from an `EmbeddingProviderConfig` and
 /// an optional fallback provider type.
 fn config_to_response(
@@ -178,20 +175,6 @@ fn config_to_response(
                 .unwrap_or_else(|| fp.to_string())
         }),
     }
-}
-
-/// Persisted form of the embedding config (no secrets).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedEmbeddingConfig {
-    provider: EmbeddingProviderType,
-    model: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    base_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    dimension: Option<usize>,
-    batch_size: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fallback_provider: Option<EmbeddingProviderType>,
 }
 
 // ---------------------------------------------------------------------------
@@ -513,20 +496,59 @@ pub async fn check_embedding_provider_health(
                 }),
             }
         }
-        _ => {
-            // For cloud providers (Qwen, GLM, OpenAI) that are not yet fully
-            // implemented as EmbeddingProvider instances, we perform a basic
-            // validation: config is valid and API key is present. A full health
-            // check will be available once the provider implementations land.
-            CommandResponse::ok(EmbeddingHealthResponse {
-                healthy: true,
-                message: format!(
-                    "{} configuration is valid and API key is present. \
-                     Full connectivity check will be available once the provider is implemented.",
-                    capability.display_name
-                ),
-                latency_ms: Some(start.elapsed().as_millis() as u32),
-            })
+        EmbeddingProviderType::Qwen => {
+            let provider =
+                crate::services::orchestrator::embedding_provider_qwen::QwenEmbeddingProvider::new(
+                    &config,
+                );
+            match provider.health_check().await {
+                Ok(()) => CommandResponse::ok(EmbeddingHealthResponse {
+                    healthy: true,
+                    message: "Qwen embedding provider is healthy".to_string(),
+                    latency_ms: Some(start.elapsed().as_millis() as u32),
+                }),
+                Err(e) => CommandResponse::ok(EmbeddingHealthResponse {
+                    healthy: false,
+                    message: format!("Qwen health check failed: {}", e),
+                    latency_ms: Some(start.elapsed().as_millis() as u32),
+                }),
+            }
+        }
+        EmbeddingProviderType::Glm => {
+            let provider =
+                crate::services::orchestrator::embedding_provider_glm::GlmEmbeddingProvider::new(
+                    &config,
+                );
+            match provider.health_check().await {
+                Ok(()) => CommandResponse::ok(EmbeddingHealthResponse {
+                    healthy: true,
+                    message: "GLM embedding provider is healthy".to_string(),
+                    latency_ms: Some(start.elapsed().as_millis() as u32),
+                }),
+                Err(e) => CommandResponse::ok(EmbeddingHealthResponse {
+                    healthy: false,
+                    message: format!("GLM health check failed: {}", e),
+                    latency_ms: Some(start.elapsed().as_millis() as u32),
+                }),
+            }
+        }
+        EmbeddingProviderType::OpenAI => {
+            let provider =
+                crate::services::orchestrator::embedding_provider_openai::OpenAIEmbeddingProvider::new(
+                    &config,
+                );
+            match provider.health_check().await {
+                Ok(()) => CommandResponse::ok(EmbeddingHealthResponse {
+                    healthy: true,
+                    message: "OpenAI embedding provider is healthy".to_string(),
+                    latency_ms: Some(start.elapsed().as_millis() as u32),
+                }),
+                Err(e) => CommandResponse::ok(EmbeddingHealthResponse {
+                    healthy: false,
+                    message: format!("OpenAI health check failed: {}", e),
+                    latency_ms: Some(start.elapsed().as_millis() as u32),
+                }),
+            }
         }
     }
 }

@@ -13,6 +13,7 @@ pub mod embedding_manager;
 pub mod embedding_provider;
 pub mod embedding_provider_glm;
 pub mod embedding_provider_ollama;
+pub mod embedding_provider_openai;
 pub mod embedding_provider_qwen;
 pub mod embedding_provider_tfidf;
 pub mod embedding_service;

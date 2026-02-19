@@ -372,6 +372,31 @@ impl EmbeddingProviderConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Persisted embedding config (shared between commands and index_manager)
+// ---------------------------------------------------------------------------
+
+/// Persisted form of the embedding config (no secrets).
+///
+/// Stored in the `settings` table under key `embedding_config`. Used by
+/// both `commands::embedding` (to save user configuration) and
+/// `IndexManager` (to read it when building providers for indexing).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedEmbeddingConfig {
+    pub provider: EmbeddingProviderType,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimension: Option<usize>,
+    pub batch_size: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_provider: Option<EmbeddingProviderType>,
+}
+
+/// Database setting key for persisted embedding config.
+pub const EMBEDDING_CONFIG_SETTING_KEY: &str = "embedding_config";
+
+// ---------------------------------------------------------------------------
 // Provider capability metadata
 // ---------------------------------------------------------------------------
 

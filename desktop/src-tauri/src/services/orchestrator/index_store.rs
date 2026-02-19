@@ -1298,6 +1298,29 @@ impl IndexStore {
         Ok(rows)
     }
 
+    /// Read a value from the `settings` table by key.
+    ///
+    /// This mirrors `Database::get_setting` but operates on the `IndexStore`'s
+    /// own pool, so callers that only have an `IndexStore` reference (e.g.
+    /// `IndexManager`) do not need a separate `Database` handle.
+    pub fn get_setting(&self, key: &str) -> AppResult<Option<String>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        );
+
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(format!(
+                "Failed to read setting '{}': {}",
+                key, e
+            ))),
+        }
+    }
+
     fn get_connection(
         &self,
     ) -> AppResult<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>> {

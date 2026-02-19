@@ -30,6 +30,7 @@ use super::embedding_provider::{
 };
 use super::embedding_provider_glm::GlmEmbeddingProvider;
 use super::embedding_provider_ollama::OllamaEmbeddingProvider;
+use super::embedding_provider_openai::OpenAIEmbeddingProvider;
 use super::embedding_provider_qwen::QwenEmbeddingProvider;
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::EmbeddingService;
@@ -211,13 +212,10 @@ impl EmbeddingManager {
                 let provider = GlmEmbeddingProvider::new(config);
                 Ok(Box::new(provider))
             }
-            other => Err(EmbeddingError::InvalidConfig {
-                message: format!(
-                    "provider type '{}' is not yet supported by EmbeddingManager factory. \
-                     Supported: tfidf, ollama, qwen, glm",
-                    other
-                ),
-            }),
+            EmbeddingProviderType::OpenAI => {
+                let provider = OpenAIEmbeddingProvider::new(config);
+                Ok(Box::new(provider))
+            }
         }
     }
 
@@ -732,7 +730,7 @@ mod tests {
     }
 
     #[test]
-    fn from_config_rejects_unsupported_provider() {
+    fn from_config_creates_openai_manager() {
         let mut config_primary = EmbeddingProviderConfig::new(EmbeddingProviderType::OpenAI);
         config_primary.api_key = Some("sk-test".to_string());
         let config = EmbeddingManagerConfig {
@@ -741,13 +739,11 @@ mod tests {
             cache_enabled: false,
             cache_max_entries: 0,
         };
-        let result = EmbeddingManager::from_config(config);
-        assert!(result.is_err());
-        match result {
-            Err(EmbeddingError::InvalidConfig { .. }) => {} // expected
-            Err(other) => panic!("expected InvalidConfig, got: {}", other),
-            Ok(_) => panic!("expected error but got Ok"),
-        }
+        let manager = EmbeddingManager::from_config(config);
+        assert!(manager.is_ok());
+
+        let m = manager.unwrap();
+        assert_eq!(m.provider_type(), EmbeddingProviderType::OpenAI);
     }
 
     #[test]
