@@ -72,15 +72,28 @@ export function useGitAI(): UseGitAIReturn {
   const [lastError, setLastError] = useState<string | null>(null);
 
   const backend = useSettingsStore((s) => s.backend);
+  const provider = useSettingsStore((s) => s.provider);
+  const model = useSettingsStore((s) => s.model);
   const apiKey = useSettingsStore((s) => s.apiKey);
   const isMountedRef = useRef(true);
 
-  // Check LLM availability when backend/apiKey changes
+  // Configure LLM provider and check availability when settings change
   useEffect(() => {
     isMountedRef.current = true;
-    const checkAvailability = async () => {
+    const configureAndCheck = async () => {
       setIsCheckingAvailability(true);
       try {
+        // Use provider field if set, otherwise fall back to backend
+        const providerName = provider || backend;
+        if (providerName && providerName !== 'claude-code') {
+          // Configure the LLM provider on the backend GitState
+          await invoke<CommandResponse<boolean>>('git_configure_llm', {
+            provider: providerName,
+            model: model || '',
+            apiKey: apiKey || '',
+          });
+        }
+        // Now check availability
         const res = await invoke<CommandResponse<boolean>>('git_check_llm_available', {});
         if (isMountedRef.current) {
           setIsAvailable(res.success && res.data === true);
@@ -96,11 +109,11 @@ export function useGitAI(): UseGitAIReturn {
       }
     };
 
-    checkAvailability();
+    configureAndCheck();
     return () => {
       isMountedRef.current = false;
     };
-  }, [backend, apiKey]);
+  }, [backend, provider, model, apiKey]);
 
   const unavailableReason = isCheckingAvailability
     ? 'Checking LLM availability...'

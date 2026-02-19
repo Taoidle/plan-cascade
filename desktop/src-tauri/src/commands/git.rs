@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::commands::standalone::normalize_provider_name;
 use crate::models::response::CommandResponse;
 use crate::services::git::conflict;
 use crate::services::git::graph::compute_graph_layout;
@@ -15,7 +16,10 @@ use crate::services::git::llm_assist::GitLlmAssist;
 use crate::services::git::service::GitService;
 use crate::services::git::types::*;
 use crate::services::git::watcher::GitWatcher;
-use crate::services::llm::LlmProvider;
+use crate::services::llm::{
+    AnthropicProvider, DeepSeekProvider, GlmProvider, LlmProvider, MinimaxProvider,
+    OllamaProvider, OpenAIProvider, ProviderConfig, ProviderType, QwenProvider,
+};
 
 /// State for the git service, managed by Tauri.
 pub struct GitState {
@@ -832,6 +836,83 @@ pub async fn git_check_llm_available(
 ) -> Result<CommandResponse<bool>, String> {
     let assist = state.llm_assist.read().await;
     Ok(CommandResponse::ok(assist.is_some()))
+}
+
+/// Configure the LLM provider for git operations at runtime.
+///
+/// Accepts provider name, model, and API key from the frontend,
+/// creates the appropriate LlmProvider, and sets it on GitState.
+#[tauri::command]
+pub async fn git_configure_llm(
+    state: tauri::State<'_, GitState>,
+    provider: String,
+    model: String,
+    api_key: String,
+) -> Result<CommandResponse<bool>, String> {
+    // Normalize provider name (e.g. "claude" -> "anthropic")
+    let canonical = match normalize_provider_name(&provider) {
+        Some(c) => c,
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                provider
+            )));
+        }
+    };
+
+    // Map to ProviderType
+    let provider_type = match canonical {
+        "anthropic" => ProviderType::Anthropic,
+        "openai" => ProviderType::OpenAI,
+        "deepseek" => ProviderType::DeepSeek,
+        "glm" => ProviderType::Glm,
+        "qwen" => ProviderType::Qwen,
+        "minimax" => ProviderType::Minimax,
+        "ollama" => ProviderType::Ollama,
+        _ => {
+            return Ok(CommandResponse::err(format!(
+                "Unsupported provider: {}",
+                canonical
+            )));
+        }
+    };
+
+    // Ollama doesn't require an API key; others do
+    let api_key_opt = if api_key.is_empty() {
+        None
+    } else {
+        Some(api_key)
+    };
+
+    if provider_type != ProviderType::Ollama && api_key_opt.is_none() {
+        return Ok(CommandResponse::err(format!(
+            "API key required for provider '{}'",
+            canonical
+        )));
+    }
+
+    let config = ProviderConfig {
+        provider: provider_type,
+        api_key: api_key_opt,
+        base_url: None,
+        model,
+        ..Default::default()
+    };
+
+    // Create provider using the same factory pattern as pipeline_execution
+    let llm_provider: Arc<dyn LlmProvider> = match config.provider {
+        ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config)),
+        ProviderType::OpenAI => Arc::new(OpenAIProvider::new(config)),
+        ProviderType::DeepSeek => Arc::new(DeepSeekProvider::new(config)),
+        ProviderType::Glm => Arc::new(GlmProvider::new(config)),
+        ProviderType::Qwen => Arc::new(QwenProvider::new(config)),
+        ProviderType::Minimax => Arc::new(MinimaxProvider::new(config)),
+        ProviderType::Ollama => Arc::new(OllamaProvider::new(config)),
+    };
+
+    state.set_llm_provider(llm_provider).await;
+
+    Ok(CommandResponse::ok(true))
 }
 
 // ===========================================================================

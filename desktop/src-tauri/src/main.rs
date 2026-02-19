@@ -365,6 +365,7 @@ fn main() {
             plan_cascade_desktop::commands::git::git_resolve_conflict_ai,
             plan_cascade_desktop::commands::git::git_summarize_commit,
             plan_cascade_desktop::commands::git::git_check_llm_available,
+            plan_cascade_desktop::commands::git::git_configure_llm,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

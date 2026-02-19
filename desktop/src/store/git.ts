@@ -148,10 +148,10 @@ function getRepoPath(): string | null {
 
 async function invokeGit<T>(command: string, args: Record<string, unknown>): Promise<T> {
   const response = await invoke<CommandResponse<T>>(command, args);
-  if (!response.success || response.data === null) {
+  if (!response.success) {
     throw new Error(response.error || `${command} failed`);
   }
-  return response.data;
+  return response.data as T;
 }
 
 // ============================================================================
