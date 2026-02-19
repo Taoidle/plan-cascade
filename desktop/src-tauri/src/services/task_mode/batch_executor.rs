@@ -17,9 +17,11 @@ use tokio_util::sync::CancellationToken;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::quality_gates::ai_verify::AiVerificationGate;
 use crate::services::quality_gates::code_review::CodeReviewGate;
+use crate::services::quality_gates::dod::{DoDGate, DoDInput};
+use crate::services::quality_gates::dor::{DoRGate, StoryForValidation};
 use crate::services::quality_gates::format::FormatGate;
 use crate::services::quality_gates::pipeline::{
-    GatePhase, GatePipeline, PipelineConfig, PipelineGateResult, PipelineResult,
+    GateMode, GatePhase, GatePipeline, PipelineConfig, PipelineGateResult, PipelineResult,
 };
 use crate::services::quality_gates::validation::ValidationGate;
 use crate::services::task_mode::agent_resolver::{
@@ -72,6 +74,12 @@ pub struct ExecutionConfig {
     /// Whether retry is enabled
     #[serde(default = "default_retry_enabled")]
     pub retry_enabled: bool,
+    /// DoR gate mode (Soft = warning only, Hard = blocking)
+    #[serde(default = "default_dor_mode")]
+    pub dor_mode: GateMode,
+    /// DoD gate mode (Soft = warning only, Hard = blocking)
+    #[serde(default = "default_dod_mode")]
+    pub dod_mode: GateMode,
 }
 
 fn default_max_parallel() -> usize {
@@ -86,12 +94,22 @@ fn default_retry_enabled() -> bool {
     true
 }
 
+fn default_dor_mode() -> GateMode {
+    GateMode::Hard
+}
+
+fn default_dod_mode() -> GateMode {
+    GateMode::Soft
+}
+
 impl Default for ExecutionConfig {
     fn default() -> Self {
         Self {
             max_parallel: default_max_parallel(),
             max_retries: default_max_retries(),
             retry_enabled: default_retry_enabled(),
+            dor_mode: default_dor_mode(),
+            dod_mode: default_dod_mode(),
         }
     }
 }
@@ -843,6 +861,8 @@ impl BatchExecutor {
                 let pp = project_path.clone();
                 let max_retries = self.config.max_retries;
                 let retry_enabled = self.config.retry_enabled;
+                let dor_mode = self.config.dor_mode;
+                let dod_mode = self.config.dod_mode;
                 let cancel_token = self.cancellation_token.clone();
                 let state_ref = self.state.clone();
                 let resolver_config = agent_resolver.config().clone();
@@ -869,6 +889,8 @@ impl BatchExecutor {
                         &pp,
                         max_retries,
                         retry_enabled,
+                        dor_mode,
+                        dod_mode,
                         cancel_token,
                         state_ref,
                         resolver_config,
@@ -910,11 +932,20 @@ impl BatchExecutor {
         Ok(result)
     }
 
-    /// Execute a single story with retry logic and quality gates.
+    /// Execute a single story with retry logic, DoR/DoD gates, and quality gates.
+    ///
+    /// Execution flow per attempt:
+    /// 1. **DoR pre-flight** -- validates story readiness (title, description,
+    ///    acceptance criteria, dependencies resolved). Hard mode failure skips
+    ///    execution. Soft mode logs a warning.
+    /// 2. **Story execution** -- via the provided `story_executor` callback.
+    /// 3. **Quality gate pipeline** -- format, typecheck, test, lint, AI verify, code review.
+    /// 4. **DoD post-validation** -- validates acceptance criteria addressed,
+    ///    pipeline passed, no blocking review findings. Hard mode failure triggers
+    ///    retry. Soft mode adds warning to gate results.
     ///
     /// On failure, retries up to `max_retries` times with a different agent
-    /// (resolved via the Retry phase). The `story_executor` callback handles
-    /// actual story execution (e.g., invoking the orchestrator/LLM agent).
+    /// (resolved via the Retry phase).
     async fn execute_story_with_retry<E>(
         session_id: &str,
         batch_index: usize,
@@ -924,6 +955,8 @@ impl BatchExecutor {
         project_path: &std::path::Path,
         max_retries: u32,
         retry_enabled: bool,
+        dor_mode: GateMode,
+        dod_mode: GateMode,
         cancel_token: CancellationToken,
         state: Arc<RwLock<BatchExecutionState>>,
         agents_config: crate::services::task_mode::agent_resolver::AgentsConfig,
@@ -941,6 +974,79 @@ impl BatchExecutor {
         let mut last_gate_results: Option<Vec<PipelineGateResult>> = None;
         let mut last_error = String::new();
         let mut previous_agent = String::new();
+
+        // ================================================================
+        // DoR Pre-Flight Check (runs once before the retry loop)
+        // ================================================================
+        let completed_ids = {
+            let s = state.read().await;
+            s.story_states
+                .iter()
+                .filter(|(_, st)| st.is_completed())
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let story_for_validation = StoryForValidation {
+            id: story.id.clone(),
+            title: story.title.clone(),
+            description: story.description.clone(),
+            acceptance_criteria: story.acceptance_criteria.clone(),
+            dependencies: story.dependencies.clone(),
+        };
+
+        let dor_result = DoRGate::new(story_for_validation, completed_ids).run();
+
+        if !dor_result.passed {
+            match dor_mode {
+                GateMode::Hard => {
+                    // DoR hard failure -- skip execution entirely
+                    let failure_reason = format!(
+                        "DoR pre-flight failed: {}",
+                        dor_result.message
+                    );
+                    tracing::error!(
+                        story_id = %story_id,
+                        findings = ?dor_result.findings,
+                        "DoR hard failure -- skipping story execution"
+                    );
+
+                    {
+                        let mut s = state.write().await;
+                        s.story_states.insert(
+                            story_id.to_string(),
+                            StoryExecutionState::Failed {
+                                reason: failure_reason.clone(),
+                                attempts: 0,
+                                last_agent: current_agent.clone(),
+                            },
+                        );
+                    }
+
+                    emit(TaskModeProgressEvent::story_failed(
+                        session_id,
+                        batch_index,
+                        total_batches,
+                        story_id,
+                        &current_agent,
+                        &failure_reason,
+                        Some(vec![dor_result]),
+                        0.0,
+                    ));
+                    return;
+                }
+                GateMode::Soft => {
+                    tracing::warn!(
+                        story_id = %story_id,
+                        findings = ?dor_result.findings,
+                        "DoR soft warning -- proceeding with execution"
+                    );
+                }
+            }
+        }
+
+        // Keep the DoR result for inclusion in gate_results events
+        let dor_gate_result = dor_result;
 
         for attempt in 1..=max_attempts {
             // Check cancellation
@@ -1001,8 +1107,8 @@ impl BatchExecutor {
                 if attempt < max_attempts {
                     let resolver = AgentResolver::new(agents_config.clone());
                     let story_info = StoryInfo {
-                        title: story_id.to_string(),
-                        description: String::new(),
+                        title: story.title.clone(),
+                        description: story.description.clone(),
                         agent: None,
                     };
                     let retry_assignment =
@@ -1021,12 +1127,19 @@ impl BatchExecutor {
             let pipeline_config = PipelineConfig::new(project_path.to_path_buf());
             let mut pipeline = GatePipeline::new(pipeline_config);
 
-            // Register FormatGate for automated code formatting validation
+            // Register FormatGate for automated code formatting validation.
+            // If the pipeline has a cache, share it with FormatGate so that
+            // after successful formatting the cache is invalidated (preventing
+            // stale results for subsequent typecheck/test/lint gates).
             let format_path = project_path.to_path_buf();
+            let format_cache = pipeline.cache().cloned();
             pipeline.register_gate(
                 "format",
                 Box::new(move || {
-                    let gate = FormatGate::new(format_path.clone());
+                    let mut gate = FormatGate::new(format_path.clone());
+                    if let Some(ref cache) = format_cache {
+                        gate = gate.with_cache(Arc::clone(cache));
+                    }
                     Box::pin(async move { gate.run().await })
                 }),
             );
@@ -1046,7 +1159,7 @@ impl BatchExecutor {
             );
 
             // Obtain git diff for AI quality gates
-            let diff_content = {
+            let (diff_content, diff_warning): (String, Option<PipelineGateResult>) = {
                 let diff_output = tokio::process::Command::new("git")
                     .args(["diff", "HEAD"])
                     .current_dir(project_path)
@@ -1054,9 +1167,54 @@ impl BatchExecutor {
                     .await;
                 match diff_output {
                     Ok(output) if output.status.success() => {
-                        String::from_utf8_lossy(&output.stdout).to_string()
+                        (String::from_utf8_lossy(&output.stdout).to_string(), None)
                     }
-                    _ => String::new(),
+                    Ok(output) => {
+                        let stderr =
+                            String::from_utf8_lossy(&output.stderr).to_string();
+                        let exit_code = output
+                            .status
+                            .code()
+                            .map_or("unknown".to_string(), |c| c.to_string());
+                        let reason =
+                            format!("Git diff failed: exit code {}", exit_code);
+                        tracing::warn!(
+                            story_id = %story_id,
+                            exit_code = %exit_code,
+                            stderr = %stderr,
+                            "git diff HEAD failed; AI gates will be skipped"
+                        );
+                        let warning = PipelineGateResult::warning(
+                            "git_diff_warning",
+                            "Git Diff",
+                            GatePhase::PostValidation,
+                            &reason,
+                            vec![format!(
+                                "AI gates (ai_verify, code_review) skipped due to diff failure: {}",
+                                stderr.trim()
+                            )],
+                        );
+                        (String::new(), Some(warning))
+                    }
+                    Err(e) => {
+                        let reason = format!("Git diff failed: {}", e);
+                        tracing::warn!(
+                            story_id = %story_id,
+                            error = %e,
+                            "git diff HEAD execution error; AI gates will be skipped"
+                        );
+                        let warning = PipelineGateResult::warning(
+                            "git_diff_warning",
+                            "Git Diff",
+                            GatePhase::PostValidation,
+                            &reason,
+                            vec![format!(
+                                "AI gates (ai_verify, code_review) skipped due to diff failure: {}",
+                                e
+                            )],
+                        );
+                        (String::new(), Some(warning))
+                    }
                 }
             };
 
@@ -1074,7 +1232,7 @@ impl BatchExecutor {
                 );
 
                 // Register Code Review gate (PostValidation phase)
-                let review_diff = diff_content;
+                let review_diff = diff_content.clone();
                 let review_provider = llm_provider.clone();
                 pipeline.register_gate(
                     "code_review",
@@ -1090,14 +1248,90 @@ impl BatchExecutor {
 
             match gate_result {
                 Ok(pipeline_result) => {
-                    let gate_results: Vec<PipelineGateResult> = pipeline_result
-                        .phase_results
-                        .iter()
-                        .flat_map(|pr| pr.gate_results.clone())
-                        .collect();
+                    // Collect all gate results: DoR + pipeline gates + diff warning
+                    let mut gate_results: Vec<PipelineGateResult> =
+                        vec![dor_gate_result.clone()];
+                    gate_results.extend(
+                        pipeline_result
+                            .phase_results
+                            .iter()
+                            .flat_map(|pr| pr.gate_results.clone()),
+                    );
+
+                    // Append diff-failure warning so the UI can display it
+                    if let Some(ref warning) = diff_warning {
+                        gate_results.push(warning.clone());
+                    }
 
                     if pipeline_result.passed {
-                        // Story completed successfully
+                        // ============================================
+                        // DoD Post-Validation
+                        // ============================================
+                        let dod_input = DoDInput {
+                            story_id: story_id.to_string(),
+                            acceptance_criteria: story.acceptance_criteria.clone(),
+                            pipeline_result: Some(pipeline_result.clone()),
+                            code_review_result: None,
+                            diff_content: if diff_content.is_empty() {
+                                None
+                            } else {
+                                Some(diff_content.clone())
+                            },
+                        };
+
+                        let dod_gate = DoDGate::new(dod_input);
+                        let dod_result = dod_gate.run(llm_provider.clone()).await;
+
+                        gate_results.push(dod_result.clone());
+
+                        if !dod_result.passed {
+                            match dod_mode {
+                                GateMode::Hard => {
+                                    // DoD hard failure -- trigger retry flow
+                                    last_error = format!(
+                                        "DoD post-validation failed: {}",
+                                        dod_result.message
+                                    );
+                                    tracing::warn!(
+                                        story_id = %story_id,
+                                        findings = ?dod_result.findings,
+                                        "DoD hard failure -- triggering retry"
+                                    );
+                                    last_gate_results = Some(gate_results);
+
+                                    if attempt < max_attempts {
+                                        let resolver =
+                                            AgentResolver::new(agents_config.clone());
+                                        let story_info = StoryInfo {
+                                            title: story.title.clone(),
+                                            description: story.description.clone(),
+                                            agent: None,
+                                        };
+                                        let retry_assignment = resolver
+                                            .resolve(&story_info, ExecutionPhase::Retry);
+                                        current_agent =
+                                            retry_assignment.agent_name.clone();
+
+                                        let mut s = state.write().await;
+                                        s.agent_assignments.insert(
+                                            story_id.to_string(),
+                                            retry_assignment,
+                                        );
+                                    }
+                                    continue;
+                                }
+                                GateMode::Soft => {
+                                    // DoD soft failure -- log warning, still complete
+                                    tracing::warn!(
+                                        story_id = %story_id,
+                                        findings = ?dod_result.findings,
+                                        "DoD soft warning -- story marked as completed with warnings"
+                                    );
+                                }
+                            }
+                        }
+
+                        // Story completed successfully (or DoD soft warning)
                         let duration_ms = story_start.elapsed().as_millis() as u64;
                         {
                             let mut s = state.write().await;
@@ -1122,7 +1356,7 @@ impl BatchExecutor {
                         ));
                         return;
                     } else {
-                        // Gates failed
+                        // Pipeline gates failed
                         last_error = format!(
                             "Quality gates failed: {}",
                             pipeline_result
@@ -1136,8 +1370,8 @@ impl BatchExecutor {
                         if attempt < max_attempts {
                             let resolver = AgentResolver::new(agents_config.clone());
                             let story_info = StoryInfo {
-                                title: story_id.to_string(),
-                                description: String::new(),
+                                title: story.title.clone(),
+                                description: story.description.clone(),
                                 agent: None,
                             };
                             let retry_assignment =
@@ -1957,5 +2191,527 @@ mod tests {
         };
 
         assert!(ctx.story_context.is_none());
+    }
+
+    // ========================================================================
+    // Retry StoryInfo Preservation Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_retry_story_info_preserves_original_title_and_description() {
+        use crate::services::task_mode::agent_resolver::{
+            AgentDefinition, AgentOverrides, AgentsConfig, PhaseConfig, ResolutionLevel,
+        };
+
+        // Create an AgentsConfig where the Retry phase has a story_type_override
+        // mapping "bugfix" to a specialized agent. This lets us verify that the
+        // retry path correctly passes the original title (which infers Bugfix)
+        // instead of the story_id (which would infer Feature/default).
+        let mut agents = HashMap::new();
+        agents.insert(
+            "default-agent".to_string(),
+            AgentDefinition {
+                name: "default-agent".to_string(),
+                description: "Default agent".to_string(),
+                available: true,
+                suitable_phases: vec![
+                    ExecutionPhase::Implementation,
+                    ExecutionPhase::Retry,
+                ],
+            },
+        );
+        agents.insert(
+            "bugfix-retry-agent".to_string(),
+            AgentDefinition {
+                name: "bugfix-retry-agent".to_string(),
+                description: "Specialized bugfix retry agent".to_string(),
+                available: true,
+                suitable_phases: vec![ExecutionPhase::Retry],
+            },
+        );
+
+        let mut phase_defaults = HashMap::new();
+        phase_defaults.insert(
+            ExecutionPhase::Implementation.to_string(),
+            PhaseConfig {
+                default_agent: Some("default-agent".to_string()),
+                fallback_chain: vec![],
+                story_type_overrides: HashMap::new(),
+            },
+        );
+        phase_defaults.insert(
+            ExecutionPhase::Retry.to_string(),
+            PhaseConfig {
+                default_agent: Some("default-agent".to_string()),
+                fallback_chain: vec![],
+                story_type_overrides: {
+                    let mut m = HashMap::new();
+                    // Only "bugfix" stories get the specialized agent on retry
+                    m.insert("bugfix".to_string(), "bugfix-retry-agent".to_string());
+                    m
+                },
+            },
+        );
+
+        let config = AgentsConfig {
+            default_agent: "default-agent".to_string(),
+            agents,
+            phase_defaults,
+            overrides: AgentOverrides::default(),
+        };
+
+        let resolver = AgentResolver::new(config);
+
+        // Create a story with a bugfix title. The key insight: "Fix authentication bug"
+        // infers StoryType::Bugfix, but "story-bugfix" (the ID) would NOT reliably
+        // contain bug/fix keywords. The old code used story_id.to_string() which
+        // lost the original title, causing incorrect agent selection.
+        let bugfix_story = ExecutableStory {
+            id: "story-bugfix".to_string(),
+            title: "Fix authentication bug in login flow".to_string(),
+            description: "Users cannot login due to a token validation defect".to_string(),
+            dependencies: vec![],
+            acceptance_criteria: vec![
+                "Login works correctly".to_string(),
+                "Token validation handles edge cases".to_string(),
+            ],
+            agent: None,
+        };
+
+        let stories = vec![bugfix_story];
+        let token = CancellationToken::new();
+        let mut exec_config = ExecutionConfig::default();
+        exec_config.retry_enabled = true;
+        exec_config.max_retries = 2;
+        let executor = BatchExecutor::new(stories, exec_config, token);
+
+        // Mock executor: fail on first attempt, succeed on second
+        let attempt_counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+        let failing_then_succeeding = move |_ctx: StoryExecutionContext| -> Pin<
+            Box<dyn Future<Output = StoryExecutionOutcome> + Send>,
+        > {
+            let counter = counter_clone.clone();
+            Box::pin(async move {
+                let attempt =
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                if attempt == 1 {
+                    StoryExecutionOutcome {
+                        success: false,
+                        error: Some("Simulated failure for retry test".to_string()),
+                    }
+                } else {
+                    StoryExecutionOutcome {
+                        success: true,
+                        error: None,
+                    }
+                }
+            })
+        };
+
+        let emit = |_: TaskModeProgressEvent| {};
+
+        let result = executor
+            .execute(
+                "retry-test-session",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                failing_then_succeeding,
+            )
+            .await
+            .unwrap();
+
+        // The story should ultimately succeed (failed first, succeeded on retry)
+        assert!(result.success, "Story should succeed after retry");
+        assert_eq!(result.completed, 1);
+        assert_eq!(result.failed, 0);
+
+        // Verify the retry agent assignment used the bugfix-specific agent,
+        // which proves the original title ("Fix authentication bug...") was
+        // correctly passed to AgentResolver (not the story_id "story-bugfix").
+        let assignment = result
+            .agent_assignments
+            .get("story-bugfix")
+            .expect("story-bugfix should have an agent assignment");
+
+        // After retry, the assignment should be the bugfix-retry-agent
+        // resolved via StoryTypeInference (because the title contains "Fix" and "bug")
+        assert_eq!(
+            assignment.agent_name, "bugfix-retry-agent",
+            "Retry should use bugfix-retry-agent resolved from original story title, \
+             not default-agent from a generic story_id string. Got: {}",
+            assignment.agent_name,
+        );
+        assert_eq!(
+            assignment.resolution_level,
+            ResolutionLevel::StoryTypeInference,
+            "Resolution should be via StoryTypeInference, proving the original title was used",
+        );
+    }
+
+    // ========================================================================
+    // DoR / DoD Integration Tests
+    // ========================================================================
+
+    #[test]
+    fn test_execution_config_dor_dod_modes_default() {
+        let config = ExecutionConfig::default();
+        assert_eq!(config.dor_mode, GateMode::Hard);
+        assert_eq!(config.dod_mode, GateMode::Soft);
+    }
+
+    #[test]
+    fn test_execution_config_dor_dod_serialization() {
+        let config = ExecutionConfig::default();
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"dorMode\""));
+        assert!(json.contains("\"dodMode\""));
+    }
+
+    #[test]
+    fn test_execution_config_dor_dod_deserialization() {
+        let json = r#"{
+            "maxParallel": 4,
+            "maxRetries": 2,
+            "retryEnabled": true,
+            "dorMode": "soft",
+            "dodMode": "hard"
+        }"#;
+        let config: ExecutionConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.dor_mode, GateMode::Soft);
+        assert_eq!(config.dod_mode, GateMode::Hard);
+    }
+
+    #[test]
+    fn test_execution_config_dor_dod_deserialization_defaults_when_missing() {
+        let json = r#"{"maxParallel": 2, "maxRetries": 1, "retryEnabled": false}"#;
+        let config: ExecutionConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.dor_mode, GateMode::Hard);
+        assert_eq!(config.dod_mode, GateMode::Soft);
+    }
+
+    /// Story with insufficient acceptance criteria (only 1, DoR requires at least 2).
+    fn story_failing_dor(id: &str) -> ExecutableStory {
+        ExecutableStory {
+            id: id.to_string(),
+            title: "".to_string(),
+            description: "".to_string(),
+            dependencies: vec![],
+            acceptance_criteria: vec!["Only one".to_string()],
+            agent: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dor_hard_failure_skips_story_execution() {
+        let stories = vec![story_failing_dor("s1")];
+
+        let config = ExecutionConfig {
+            dor_mode: GateMode::Hard,
+            dod_mode: GateMode::Soft,
+            ..Default::default()
+        };
+
+        let token = CancellationToken::new();
+        let executor = BatchExecutor::new(stories, config, token);
+        let resolver = AgentResolver::with_defaults();
+
+        let executor_called = Arc::new(tokio::sync::Mutex::new(false));
+        let executor_called_clone = executor_called.clone();
+        let se = move |_ctx: StoryExecutionContext| -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>> {
+            let called = executor_called_clone.clone();
+            Box::pin(async move {
+                *called.lock().await = true;
+                StoryExecutionOutcome { success: true, error: None }
+            })
+        };
+
+        let events = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        let emit = move |event: TaskModeProgressEvent| {
+            if let Ok(mut evts) = events_clone.try_lock() {
+                evts.push(event);
+            }
+        };
+
+        let result = executor
+            .execute("test-dor-hard", &resolver, std::path::PathBuf::from("/tmp"), emit, se)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.completed, 0);
+
+        assert!(
+            !*executor_called.lock().await,
+            "Story executor should not be called when DoR hard-fails"
+        );
+
+        let s1_state = result.story_results.get("s1").unwrap();
+        match s1_state {
+            StoryExecutionState::Failed { reason, attempts, .. } => {
+                assert!(reason.contains("DoR"), "Failure reason should mention DoR: {}", reason);
+                assert_eq!(*attempts, 0, "No execution attempts should have been made");
+            }
+            other => panic!("Expected Failed state, got: {:?}", other),
+        }
+
+        let emitted = events.lock().await;
+        let failed_events: Vec<_> = emitted
+            .iter()
+            .filter(|e| e.event_type == "story_failed")
+            .collect();
+        assert_eq!(failed_events.len(), 1);
+        let gate_results = failed_events[0]
+            .gate_results
+            .as_ref()
+            .expect("gate_results should be present");
+        assert!(
+            gate_results.iter().any(|g| g.gate_id == "dor"),
+            "gate_results should include DoR result"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dor_soft_failure_continues_execution() {
+        let stories = vec![story_failing_dor("s1")];
+
+        let config = ExecutionConfig {
+            dor_mode: GateMode::Soft,
+            dod_mode: GateMode::Soft,
+            ..Default::default()
+        };
+
+        let token = CancellationToken::new();
+        let executor = BatchExecutor::new(stories, config, token);
+        let resolver = AgentResolver::with_defaults();
+
+        let executor_called = Arc::new(tokio::sync::Mutex::new(false));
+        let executor_called_clone = executor_called.clone();
+        let se = move |_ctx: StoryExecutionContext| -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>> {
+            let called = executor_called_clone.clone();
+            Box::pin(async move {
+                *called.lock().await = true;
+                StoryExecutionOutcome { success: true, error: None }
+            })
+        };
+
+        let events = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        let emit = move |event: TaskModeProgressEvent| {
+            if let Ok(mut evts) = events_clone.try_lock() {
+                evts.push(event);
+            }
+        };
+
+        let result = executor
+            .execute("test-dor-soft", &resolver, std::path::PathBuf::from("/tmp"), emit, se)
+            .await
+            .unwrap();
+
+        assert!(
+            *executor_called.lock().await,
+            "Story executor should be called when DoR is in Soft mode"
+        );
+
+        let emitted = events.lock().await;
+        let terminal_events: Vec<_> = emitted
+            .iter()
+            .filter(|e| e.event_type == "story_completed" || e.event_type == "story_failed")
+            .collect();
+        assert!(!terminal_events.is_empty(), "Should have a terminal event");
+
+        if let Some(gate_results) = &terminal_events[0].gate_results {
+            assert!(
+                gate_results.iter().any(|g| g.gate_id == "dor"),
+                "gate_results should include DoR result even in soft mode"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dor_passes_for_valid_story() {
+        let stories = vec![story("s1", vec![])];
+
+        let config = ExecutionConfig {
+            dor_mode: GateMode::Hard,
+            dod_mode: GateMode::Soft,
+            ..Default::default()
+        };
+
+        let token = CancellationToken::new();
+        let executor = BatchExecutor::new(stories, config, token);
+        let resolver = AgentResolver::with_defaults();
+
+        let executor_called = Arc::new(tokio::sync::Mutex::new(false));
+        let executor_called_clone = executor_called.clone();
+        let se = move |_ctx: StoryExecutionContext| -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>> {
+            let called = executor_called_clone.clone();
+            Box::pin(async move {
+                *called.lock().await = true;
+                StoryExecutionOutcome { success: true, error: None }
+            })
+        };
+
+        let emit = |_: TaskModeProgressEvent| {};
+
+        let _result = executor
+            .execute("test-dor-pass", &resolver, std::path::PathBuf::from("/tmp"), emit, se)
+            .await
+            .unwrap();
+
+        assert!(
+            *executor_called.lock().await,
+            "Story executor should be called when DoR passes"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dor_checks_dependency_resolution() {
+        let stories = vec![story("s1", vec![]), story("s2", vec!["s1"])];
+
+        let config = ExecutionConfig {
+            dor_mode: GateMode::Hard,
+            dod_mode: GateMode::Soft,
+            ..Default::default()
+        };
+
+        let token = CancellationToken::new();
+        let executor = BatchExecutor::new(stories, config, token);
+        let resolver = AgentResolver::with_defaults();
+
+        let emit = |_: TaskModeProgressEvent| {};
+
+        let result = executor
+            .execute(
+                "test-dor-deps",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                mock_story_executor(),
+            )
+            .await
+            .unwrap();
+
+        let s2_state = result.story_results.get("s2").unwrap();
+        assert!(
+            !matches!(s2_state, StoryExecutionState::Failed { reason, .. } if reason.contains("DoR")),
+            "s2 should not fail due to DoR dependency check. State: {:?}",
+            s2_state,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dod_results_included_in_gate_results_event() {
+        let stories = vec![story("s1", vec![])];
+
+        let config = ExecutionConfig {
+            dor_mode: GateMode::Soft,
+            dod_mode: GateMode::Soft,
+            ..Default::default()
+        };
+
+        let token = CancellationToken::new();
+        let executor = BatchExecutor::new(stories, config, token);
+        let resolver = AgentResolver::with_defaults();
+
+        let events = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        let emit = move |event: TaskModeProgressEvent| {
+            if let Ok(mut evts) = events_clone.try_lock() {
+                evts.push(event);
+            }
+        };
+
+        let _result = executor
+            .execute(
+                "test-dod-results",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                mock_story_executor(),
+            )
+            .await
+            .unwrap();
+
+        let emitted = events.lock().await;
+        let terminal_events: Vec<_> = emitted
+            .iter()
+            .filter(|e| e.event_type == "story_completed" || e.event_type == "story_failed")
+            .collect();
+
+        for event in &terminal_events {
+            if event.event_type == "story_completed" {
+                let gate_results = event
+                    .gate_results
+                    .as_ref()
+                    .expect("gate_results must be present");
+                assert!(
+                    gate_results.iter().any(|g| g.gate_id == "dor"),
+                    "gate_results should include DoR result"
+                );
+                assert!(
+                    gate_results.iter().any(|g| g.gate_id == "dod"),
+                    "gate_results should include DoD result"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_dor_gate_standalone_validation() {
+        use crate::services::quality_gates::dor::{DoRGate, StoryForValidation};
+
+        let story_v = StoryForValidation {
+            id: "s1".to_string(),
+            title: "Implement feature".to_string(),
+            description: "Build the auth module".to_string(),
+            acceptance_criteria: vec![
+                "Users can log in".to_string(),
+                "Sessions persist".to_string(),
+            ],
+            dependencies: vec![],
+        };
+        let result = DoRGate::new(story_v, vec![]).run();
+        assert!(result.passed, "Valid story should pass DoR");
+        assert_eq!(result.gate_id, "dor");
+
+        let bad_story = StoryForValidation {
+            id: "s2".to_string(),
+            title: "".to_string(),
+            description: "Some desc".to_string(),
+            acceptance_criteria: vec!["AC1".to_string(), "AC2".to_string()],
+            dependencies: vec![],
+        };
+        let result = DoRGate::new(bad_story, vec![]).run();
+        assert!(!result.passed, "Story with empty title should fail DoR");
+    }
+
+    #[test]
+    fn test_dod_gate_standalone_heuristic() {
+        use crate::services::quality_gates::dod::{DoDGate, DoDInput};
+
+        let input = DoDInput {
+            story_id: "s1".to_string(),
+            acceptance_criteria: vec!["Feature works".to_string(), "Tests pass".to_string()],
+            pipeline_result: None,
+            code_review_result: None,
+            diff_content: None,
+        };
+        let result = DoDGate::new(input).run_heuristic();
+        assert!(result.passed, "DoD should pass when pipeline is None and AC are present");
+        assert_eq!(result.gate_id, "dod");
+
+        let input_no_ac = DoDInput {
+            story_id: "s2".to_string(),
+            acceptance_criteria: vec![],
+            pipeline_result: None,
+            code_review_result: None,
+            diff_content: None,
+        };
+        let result = DoDGate::new(input_no_ac).run_heuristic();
+        assert!(!result.passed, "DoD should fail when no acceptance criteria");
     }
 }

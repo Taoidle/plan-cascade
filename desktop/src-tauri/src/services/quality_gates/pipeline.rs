@@ -136,6 +136,30 @@ impl PipelineGateResult {
             findings: Vec::new(),
         }
     }
+
+    /// Create a warning result (uses Skipped status with descriptive message and findings).
+    ///
+    /// This conveys warning semantics without adding a new GateStatus variant.
+    /// The `passed` field is `true` so the pipeline is not blocked, but `findings`
+    /// carries detail strings the UI can surface to the user.
+    pub fn warning(
+        gate_id: &str,
+        gate_name: &str,
+        phase: GatePhase,
+        reason: &str,
+        findings: Vec<String>,
+    ) -> Self {
+        Self {
+            gate_id: gate_id.to_string(),
+            gate_name: gate_name.to_string(),
+            phase,
+            passed: true,
+            status: GateStatus::Skipped,
+            duration_ms: 0,
+            message: reason.to_string(),
+            findings,
+        }
+    }
 }
 
 // ============================================================================
@@ -523,6 +547,11 @@ impl GatePipeline {
     pub fn config(&self) -> &PipelineConfig {
         &self.config
     }
+
+    /// Get a reference to the optional gate cache.
+    pub fn cache(&self) -> Option<&Arc<GateCache>> {
+        self.cache.as_ref()
+    }
 }
 
 // ============================================================================
@@ -832,5 +861,44 @@ mod tests {
         let result = PipelinePhaseResult::new(GatePhase::PreValidation, GateMode::Soft, gate_results);
         assert!(!result.passed);
         assert!(!result.is_hard_fail()); // Soft mode, so not a hard fail
+    }
+
+    #[test]
+    fn test_warning_result_fields() {
+        let result = PipelineGateResult::warning(
+            "git_diff_warning",
+            "Git Diff",
+            GatePhase::PostValidation,
+            "Git diff failed: exit code 128",
+            vec!["fatal: not a git repository".to_string()],
+        );
+
+        assert_eq!(result.gate_id, "git_diff_warning");
+        assert_eq!(result.gate_name, "Git Diff");
+        assert_eq!(result.phase, GatePhase::PostValidation);
+        assert!(result.passed, "warning result should not block the pipeline");
+        assert_eq!(result.status, GateStatus::Skipped);
+        assert_eq!(result.duration_ms, 0);
+        assert_eq!(result.message, "Git diff failed: exit code 128");
+        assert_eq!(result.findings.len(), 1);
+        assert_eq!(result.findings[0], "fatal: not a git repository");
+    }
+
+    #[test]
+    fn test_warning_result_does_not_block_pipeline_phase() {
+        let gate_results = vec![PipelineGateResult::warning(
+            "git_diff_warning",
+            "Git Diff",
+            GatePhase::PostValidation,
+            "Git diff failed",
+            vec!["error detail".to_string()],
+        )];
+        let result =
+            PipelinePhaseResult::new(GatePhase::PostValidation, GateMode::Hard, gate_results);
+        assert!(result.passed, "warning should count as passed");
+        assert!(
+            !result.is_hard_fail(),
+            "warning should not cause a hard fail"
+        );
     }
 }

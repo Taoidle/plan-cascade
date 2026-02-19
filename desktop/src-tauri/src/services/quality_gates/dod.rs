@@ -274,14 +274,14 @@ Git diff:
             }
         }
 
-        // Fallback: mark all as addressed
+        // Fallback: mark all as NOT addressed (fail-safe)
         self.input
             .acceptance_criteria
             .iter()
             .map(|c| CriterionCheck {
                 criterion: c.clone(),
-                addressed: true,
-                reasoning: "Unable to verify - assuming addressed".to_string(),
+                addressed: false,
+                reasoning: "Unable to verify - verification failed due to unparseable LLM response".to_string(),
             })
             .collect()
     }
@@ -436,7 +436,93 @@ mod tests {
         let gate = DoDGate::new(basic_input());
         let checks = gate.parse_criteria_response("invalid response");
         assert_eq!(checks.len(), 2);
-        // All should be marked as addressed in fallback
-        assert!(checks.iter().all(|c| c.addressed));
+        // All should be marked as NOT addressed in fallback (fail-safe)
+        assert!(checks.iter().all(|c| !c.addressed));
+        assert!(checks.iter().all(|c| c.reasoning.contains("unparseable LLM response")));
+    }
+
+    /// Mock LLM provider that returns a fixed (unparseable) response for testing.
+    struct MockUnparseableProvider;
+
+    #[async_trait::async_trait]
+    impl LlmProvider for MockUnparseableProvider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+        fn model(&self) -> &str {
+            "mock-model"
+        }
+        fn supports_thinking(&self) -> bool {
+            false
+        }
+        fn supports_tools(&self) -> bool {
+            false
+        }
+        async fn send_message(
+            &self,
+            _messages: Vec<Message>,
+            _system: Option<String>,
+            _tools: Vec<crate::services::llm::types::ToolDefinition>,
+            _request_options: LlmRequestOptions,
+        ) -> crate::services::llm::types::LlmResult<crate::services::llm::types::LlmResponse> {
+            Ok(crate::services::llm::types::LlmResponse {
+                content: Some("This is not valid JSON at all".to_string()),
+                thinking: None,
+                tool_calls: vec![],
+                stop_reason: crate::services::llm::types::StopReason::EndTurn,
+                usage: crate::services::llm::types::UsageStats {
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    thinking_tokens: None,
+                    cache_read_tokens: None,
+                    cache_creation_tokens: None,
+                },
+                model: "mock-model".to_string(),
+            })
+        }
+        async fn stream_message(
+            &self,
+            _messages: Vec<Message>,
+            _system: Option<String>,
+            _tools: Vec<crate::services::llm::types::ToolDefinition>,
+            _tx: tokio::sync::mpsc::Sender<crate::services::streaming::UnifiedStreamEvent>,
+            _request_options: LlmRequestOptions,
+        ) -> crate::services::llm::types::LlmResult<crate::services::llm::types::LlmResponse> {
+            unimplemented!()
+        }
+        async fn health_check(&self) -> crate::services::llm::types::LlmResult<()> {
+            Ok(())
+        }
+        fn config(&self) -> &crate::services::llm::types::ProviderConfig {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_unparseable_response_causes_dod_failure() {
+        let mut input = basic_input();
+        input.diff_content = Some("+fn main() {}".to_string());
+
+        let gate = DoDGate::new(input);
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockUnparseableProvider);
+        let result = gate.run(Some(provider)).await;
+
+        // The DoD gate should fail because the unparseable response causes
+        // all criteria to be marked as not addressed
+        assert!(!result.passed, "DoD gate should fail when LLM response is unparseable");
+        assert!(
+            result.findings.iter().any(|f| f.contains("not addressed")),
+            "Failures should mention unaddressed criteria, got: {:?}",
+            result.findings
+        );
+        // Both criteria should be reported as unaddressed
+        assert!(
+            result.findings.iter().any(|f| f.contains("Feature X works")),
+            "Should report 'Feature X works' as unaddressed"
+        );
+        assert!(
+            result.findings.iter().any(|f| f.contains("Tests pass")),
+            "Should report 'Tests pass' as unaddressed"
+        );
     }
 }
