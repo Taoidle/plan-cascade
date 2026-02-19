@@ -3,6 +3,7 @@
 //! Contains all Tauri command handlers that can be called from the frontend.
 //! These are the IPC entry points for the application.
 
+pub mod a2a;
 pub mod agent_composer;
 pub mod agents;
 pub mod evaluation;
@@ -39,7 +40,9 @@ pub mod git;
 pub mod knowledge;
 pub mod artifacts;
 pub mod pipeline_execution;
+pub mod browser;
 
+pub use a2a::*;
 pub use agent_composer::*;
 pub use agents::*;
 pub use evaluation::*;
@@ -76,3 +79,4 @@ pub use git::*;
 pub use knowledge::*;
 pub use artifacts::*;
 pub use pipeline_execution::*;
+pub use browser::*;

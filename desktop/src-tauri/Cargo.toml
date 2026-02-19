@@ -45,6 +45,9 @@ tokio-util = "0.7"
 # HTTP client (kept for future external API calls, not for sidecar)
 reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
 
+# Byte buffer types (shared with reqwest for streaming)
+bytes = "1"
+
 # Ollama native SDK
 ollama-rs = { version = "0.3", features = ["stream"] }
 tokio-stream = "0.1"

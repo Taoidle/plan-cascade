@@ -317,6 +317,7 @@
     "addSequential": "+ 顺序",
     "addParallel": "+ 并行",
     "addConditional": "+ 条件",
+    "addRemoteAgent": "+ 远程代理",
     "emptyPipeline": "在上方添加代理步骤来构建流水线",
     "list": {
       "title": "已保存的流水线",

@@ -3,6 +3,7 @@
 //! Business logic services for the application.
 //! Services handle the core functionality and are called by commands.
 
+pub mod a2a;
 pub mod agent;
 pub mod agent_composer;
 pub mod agent_executor;

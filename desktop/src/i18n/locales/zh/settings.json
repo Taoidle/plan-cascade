@@ -14,7 +14,8 @@
     "security": "安全",
     "network": "网络",
     "notifications": "通知",
-    "remote": "远程控制"
+    "remote": "远程控制",
+    "a2a": "A2A 代理"
   },
 
   "general": {
@@ -845,5 +846,23 @@
       "webhookDispatched": "已为远程命令发送 Webhook 通知",
       "webhookDispatchFailed": "发送 Webhook 通知失败"
     }
+  },
+
+  "a2a": {
+    "title": "远程 A2A 代理",
+    "description": "通过 Agent-to-Agent（A2A）协议发现和注册远程代理。注册的代理可用于 Agent Composer 管道。",
+    "addAgent": "添加远程代理",
+    "urlPlaceholder": "https://agent.example.com",
+    "discover": "发现",
+    "discovering": "发现中...",
+    "register": "注册",
+    "registering": "注册中...",
+    "remove": "移除",
+    "registeredAgents": "已注册代理",
+    "noAgents": "暂无已注册的远程代理。请在上方输入 URL 以发现并注册代理。",
+    "loading": "正在加载远程代理...",
+    "dismiss": "关闭",
+    "registerSuccess": "代理 \"{{name}}\" 注册成功",
+    "removeSuccess": "代理 \"{{name}}\" 已移除"
   }
 }

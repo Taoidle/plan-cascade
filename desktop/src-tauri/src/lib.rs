@@ -293,6 +293,11 @@ pub use commands::{
     git_summarize_commit,
     git_check_llm_available,
     GitState,
+    // A2A Remote Agent commands
+    discover_a2a_agent,
+    list_a2a_agents,
+    register_a2a_agent,
+    remove_a2a_agent,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,

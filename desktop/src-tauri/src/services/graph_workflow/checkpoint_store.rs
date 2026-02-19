@@ -14,7 +14,6 @@ use serde_json::Value;
 use super::checkpointer::{Checkpointer, GraphCheckpoint, Interrupt};
 use crate::utils::error::{AppError, AppResult};
 
-// Placeholder - full implementation in story-003
 /// SQLite-backed checkpoint storage for production use.
 pub struct SqliteCheckpointer {
     pool: Arc<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>,
@@ -565,6 +564,82 @@ mod tests {
                 assert!(data.is_some());
             }
             _ => panic!("Expected Dynamic interrupt"),
+        }
+    }
+
+    /// Verifies that checkpoints persist across SqliteCheckpointer recreation.
+    /// This simulates the scenario where the application restarts but the
+    /// underlying database file (or in-memory pool) persists.
+    #[tokio::test]
+    async fn test_sqlite_checkpoint_persists_across_recreation() {
+        let pool = create_test_pool();
+
+        // Create first checkpointer and save a checkpoint
+        {
+            let cp_store = SqliteCheckpointer::new(pool.clone()).unwrap();
+
+            let mut state = HashMap::new();
+            state.insert("workflow_step".to_string(), serde_json::json!("analyze"));
+            state.insert("iteration".to_string(), serde_json::json!(3));
+
+            let checkpoint = GraphCheckpoint {
+                id: "persist-cp-1".to_string(),
+                thread_id: "persist-thread".to_string(),
+                state,
+                step: "analysis-node".to_string(),
+                pending_nodes: vec!["review-node".to_string(), "output-node".to_string()],
+                interrupt: Some(Interrupt::Before {
+                    node_id: "review-node".to_string(),
+                }),
+                created_at: "2026-02-01T12:00:00Z".to_string(),
+            };
+
+            cp_store.save(checkpoint).await.unwrap();
+        }
+        // First checkpointer is dropped here, simulating process exit
+
+        // Create a second checkpointer with the same pool (simulating restart)
+        {
+            let cp_store2 = SqliteCheckpointer::new(pool.clone()).unwrap();
+
+            // Load by thread_id - should find the checkpoint saved by the first instance
+            let loaded = cp_store2.load("persist-thread").await.unwrap();
+            assert!(loaded.is_some(), "Checkpoint should survive checkpointer recreation");
+            let loaded = loaded.unwrap();
+
+            assert_eq!(loaded.id, "persist-cp-1");
+            assert_eq!(loaded.thread_id, "persist-thread");
+            assert_eq!(loaded.step, "analysis-node");
+            assert_eq!(
+                loaded.state.get("workflow_step"),
+                Some(&serde_json::json!("analyze"))
+            );
+            assert_eq!(
+                loaded.state.get("iteration"),
+                Some(&serde_json::json!(3))
+            );
+            assert_eq!(
+                loaded.pending_nodes,
+                vec!["review-node".to_string(), "output-node".to_string()]
+            );
+            assert!(loaded.interrupt.is_some());
+            match loaded.interrupt.unwrap() {
+                Interrupt::Before { node_id } => {
+                    assert_eq!(node_id, "review-node");
+                }
+                _ => panic!("Expected Before interrupt"),
+            }
+
+            // Load by checkpoint_id - should also work
+            let loaded_by_id = cp_store2.load_by_id("persist-cp-1").await.unwrap();
+            assert!(
+                loaded_by_id.is_some(),
+                "Checkpoint should be loadable by ID after recreation"
+            );
+
+            // List should also work
+            let list = cp_store2.list("persist-thread").await.unwrap();
+            assert_eq!(list.len(), 1);
         }
     }
 }

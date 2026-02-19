@@ -378,14 +378,14 @@ pub struct ToolExecutor {
 }
 
 impl ToolExecutor {
-    /// Build a ToolRegistry populated with all 14 tool implementations.
+    /// Build a ToolRegistry populated with all 15 tool implementations.
     ///
     /// Public static version for use by definitions.rs without needing a ToolExecutor instance.
     pub fn build_registry_static() -> super::trait_def::ToolRegistry {
         Self::build_registry()
     }
 
-    /// Build a ToolRegistry populated with all 14 tool implementations.
+    /// Build a ToolRegistry populated with all 15 tool implementations.
     fn build_registry() -> super::trait_def::ToolRegistry {
         use super::impls::*;
         let mut registry = super::trait_def::ToolRegistry::new();
@@ -403,6 +403,9 @@ impl ToolExecutor {
         registry.register(Arc::new(WebSearchTool::new()));
         registry.register(Arc::new(NotebookEditTool::new()));
         registry.register(Arc::new(CodebaseSearchTool::new()));
+        // BrowserTool is always registered (unconditional). Runtime detection
+        // and graceful degradation handle the case when no browser is available.
+        registry.register(Arc::new(BrowserTool::new()));
         registry
     }
 

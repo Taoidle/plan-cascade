@@ -812,6 +812,32 @@ impl Database {
             [],
         )?;
 
+        // ====================================================================
+        // A2A Remote Agents: registered remote agents for pipeline integration
+        // ====================================================================
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS remote_agents (
+                id TEXT PRIMARY KEY,
+                base_url TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                capabilities TEXT NOT NULL DEFAULT '[]',
+                endpoint TEXT NOT NULL,
+                version TEXT NOT NULL,
+                auth_required INTEGER NOT NULL DEFAULT 0,
+                supported_inputs TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_remote_agents_base_url
+             ON remote_agents(base_url)",
+            [],
+        )?;
+
         Ok(())
     }
 

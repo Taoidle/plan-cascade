@@ -8,7 +8,7 @@
  * - Execution runner for real-time events
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useAgentComposerStore } from '../../store/agentComposer';
@@ -16,7 +16,9 @@ import { AgentNode } from './AgentNode';
 import { AgentPipelineList } from './AgentPipelineList';
 import { AgentPipelineRunner } from './AgentPipelineRunner';
 import { createLlmStep } from '../../types/agentComposer';
+import { listA2aAgents } from '../../lib/a2aApi';
 import type { AgentStep } from '../../types/agentComposer';
+import type { RegisteredRemoteAgent } from '../../lib/a2aApi';
 
 export function AgentComposer() {
   const { t } = useTranslation('expertMode');
@@ -35,6 +37,14 @@ export function AgentComposer() {
   } = useAgentComposerStore();
 
   const [showRunner, setShowRunner] = useState(false);
+  const [remoteAgents, setRemoteAgents] = useState<RegisteredRemoteAgent[]>([]);
+  const [showRemoteDropdown, setShowRemoteDropdown] = useState(false);
+
+  useEffect(() => {
+    listA2aAgents()
+      .then(setRemoteAgents)
+      .catch(() => setRemoteAgents([]));
+  }, []);
 
   const handleAddStep = (type: string) => {
     let step: AgentStep;
@@ -69,6 +79,15 @@ export function AgentComposer() {
         return;
     }
     addStep(step);
+  };
+
+  const handleAddRemoteAgent = (agent: RegisteredRemoteAgent) => {
+    const step: AgentStep = createLlmStep(agent.name);
+    if (step.step_type === 'llm_step') {
+      step.instruction = `[Remote A2A Agent] Endpoint: ${agent.endpoint}\nDescription: ${agent.description}\nCapabilities: ${agent.capabilities.join(', ')}`;
+    }
+    addStep(step);
+    setShowRemoteDropdown(false);
   };
 
   return (
@@ -196,6 +215,45 @@ export function AgentComposer() {
                     color="amber"
                     onClick={() => handleAddStep('conditional')}
                   />
+                  {/* Remote A2A Agent dropdown */}
+                  {remoteAgents.length > 0 && (
+                    <div className="relative">
+                      <AddStepButton
+                        label={t('agentComposer.addRemoteAgent', 'Remote Agent')}
+                        color="teal"
+                        onClick={() => setShowRemoteDropdown(!showRemoteDropdown)}
+                      />
+                      {showRemoteDropdown && (
+                        <div
+                          className={clsx(
+                            'absolute top-full left-0 mt-1 z-10 w-64',
+                            'bg-white dark:bg-gray-800 rounded-lg shadow-lg border',
+                            'border-gray-200 dark:border-gray-700',
+                            'max-h-48 overflow-auto'
+                          )}
+                        >
+                          {remoteAgents.map((agent) => (
+                            <button
+                              key={agent.id}
+                              onClick={() => handleAddRemoteAgent(agent)}
+                              className={clsx(
+                                'w-full text-left px-3 py-2 text-xs',
+                                'hover:bg-gray-100 dark:hover:bg-gray-700',
+                                'border-b border-gray-100 dark:border-gray-700 last:border-b-0'
+                              )}
+                            >
+                              <div className="font-medium text-gray-900 dark:text-white">
+                                {agent.name}
+                              </div>
+                              <div className="text-gray-500 dark:text-gray-400 truncate">
+                                {agent.description}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Agent nodes */}
@@ -279,6 +337,7 @@ function AddStepButton({ label, color, onClick }: AddStepButtonProps) {
     green: 'border-green-300 dark:border-green-700 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20',
     purple: 'border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20',
     amber: 'border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20',
+    teal: 'border-teal-300 dark:border-teal-700 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20',
   };
 
   return (

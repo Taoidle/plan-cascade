@@ -366,6 +366,14 @@ fn main() {
             plan_cascade_desktop::commands::git::git_summarize_commit,
             plan_cascade_desktop::commands::git::git_check_llm_available,
             plan_cascade_desktop::commands::git::git_configure_llm,
+            // Browser Automation commands
+            plan_cascade_desktop::commands::browser::execute_browser_action,
+            plan_cascade_desktop::commands::browser::get_browser_status,
+            // A2A Remote Agent commands
+            plan_cascade_desktop::commands::a2a::discover_a2a_agent,
+            plan_cascade_desktop::commands::a2a::list_a2a_agents,
+            plan_cascade_desktop::commands::a2a::register_a2a_agent,
+            plan_cascade_desktop::commands::a2a::remove_a2a_agent,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

@@ -14,4 +14,5 @@ export { ImportExportSection } from './ImportExportSection';
 export { EmbeddingSection } from './EmbeddingSection';
 export { GuardrailSection } from './GuardrailSection';
 export { LspSection } from './LspSection';
+export { A2aSection } from './A2aSection';
 export { SetupWizard } from './SetupWizard';

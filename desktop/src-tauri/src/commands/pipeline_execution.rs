@@ -558,6 +558,39 @@ fn build_agent_context(
 }
 
 // ============================================================================
+// Checkpointer Factory
+// ============================================================================
+
+/// Create a graph workflow checkpointer, preferring SqliteCheckpointer when
+/// a database pool is available, falling back to InMemoryCheckpointer otherwise.
+///
+/// This enables checkpoint persistence across application restarts when the
+/// database is initialized, while gracefully degrading to in-memory storage
+/// when it is not.
+fn create_checkpointer(
+    db_pool: Option<Arc<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>>,
+) -> Arc<dyn crate::services::graph_workflow::checkpointer::Checkpointer + Send + Sync> {
+    if let Some(pool) = db_pool {
+        match crate::services::graph_workflow::checkpoint_store::SqliteCheckpointer::new(pool) {
+            Ok(sqlite_cp) => {
+                tracing::info!("Using SqliteCheckpointer for persistent graph workflow checkpoints");
+                return Arc::new(sqlite_cp);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to create SqliteCheckpointer, falling back to InMemoryCheckpointer: {}",
+                    e
+                );
+            }
+        }
+    } else {
+        tracing::info!("No database pool available, using InMemoryCheckpointer");
+    }
+
+    Arc::new(crate::services::graph_workflow::checkpointer::InMemoryCheckpointer::new())
+}
+
+// ============================================================================
 // Tauri Commands
 // ============================================================================
 
@@ -845,6 +878,13 @@ pub async fn execute_graph_workflow_run(
     // Register execution in the registry
     let execution_id = registry.register(&workflow_id).await;
 
+    // Extract the database pool before spawning, so it can be moved into the task.
+    // The pool is cheap to clone (Arc-based internally).
+    let db_pool: Option<Arc<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>> = state
+        .with_database(|db| Ok(Arc::new(db.pool().clone())))
+        .await
+        .ok();
+
     // Clone what we need for the spawned task
     let exec_id = execution_id.clone();
     let registry_executions = registry.executions.clone();
@@ -891,15 +931,12 @@ pub async fn execute_graph_workflow_run(
             }
         }
 
-        // Build the AgentContext and run the graph workflow with an InMemoryCheckpointer
-        // for interrupt_before / interrupt_after pause/resume support within the session.
+        // Build the AgentContext and create a checkpointer.
+        // Uses SqliteCheckpointer for persistent pause/resume across restarts
+        // when a database pool is available, otherwise falls back to InMemoryCheckpointer.
         let ctx = build_agent_context(&exec_id, project_root, provider, user_input);
 
-        let checkpointer: Arc<
-            dyn crate::services::graph_workflow::checkpointer::Checkpointer + Send + Sync,
-        > = Arc::new(
-            crate::services::graph_workflow::checkpointer::InMemoryCheckpointer::new(),
-        );
+        let checkpointer = create_checkpointer(db_pool);
         let thread_id = exec_id.clone();
 
         let stream = match workflow
@@ -1856,5 +1893,127 @@ mod tests {
                 .unwrap_or(false)
         };
         assert!(is_cancelled);
+    }
+
+    // ========================================================================
+    // Story 003: SqliteCheckpointer upgrade tests
+    // ========================================================================
+
+    #[test]
+    fn test_create_checkpointer_with_database_pool_returns_sqlite() {
+        // When a valid database pool is provided, create_checkpointer should
+        // return a SqliteCheckpointer (verified by successful checkpoint operations).
+        let db = crate::storage::Database::new_in_memory().unwrap();
+        let pool = Arc::new(db.pool().clone());
+
+        let checkpointer = super::create_checkpointer(Some(pool));
+
+        // Verify it works by saving and loading a checkpoint
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            use crate::services::graph_workflow::checkpointer::{Checkpointer, GraphCheckpoint};
+
+            let mut state = std::collections::HashMap::new();
+            state.insert("key".to_string(), serde_json::json!("value"));
+
+            let cp = GraphCheckpoint {
+                id: "test-cp-1".to_string(),
+                thread_id: "test-thread".to_string(),
+                state,
+                step: "node-a".to_string(),
+                pending_nodes: vec!["node-b".to_string()],
+                interrupt: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            };
+
+            checkpointer.save(cp).await.unwrap();
+
+            let loaded = checkpointer.load("test-thread").await.unwrap();
+            assert!(loaded.is_some());
+            let loaded = loaded.unwrap();
+            assert_eq!(loaded.id, "test-cp-1");
+            assert_eq!(loaded.state.get("key"), Some(&serde_json::json!("value")));
+        });
+    }
+
+    #[test]
+    fn test_create_checkpointer_without_pool_returns_in_memory() {
+        // When no database pool is provided, create_checkpointer should
+        // fall back to InMemoryCheckpointer.
+        let checkpointer = super::create_checkpointer(None);
+
+        // Verify it works (InMemoryCheckpointer)
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            use crate::services::graph_workflow::checkpointer::{Checkpointer, GraphCheckpoint};
+
+            let cp = GraphCheckpoint {
+                id: "mem-cp-1".to_string(),
+                thread_id: "mem-thread".to_string(),
+                state: std::collections::HashMap::new(),
+                step: "node-a".to_string(),
+                pending_nodes: vec![],
+                interrupt: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            };
+
+            checkpointer.save(cp).await.unwrap();
+
+            let loaded = checkpointer.load("mem-thread").await.unwrap();
+            assert!(loaded.is_some());
+            assert_eq!(loaded.unwrap().id, "mem-cp-1");
+        });
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_checkpointer_persists_across_recreation_in_pipeline() {
+        // Simulates what happens during app restart: checkpoints saved with one
+        // SqliteCheckpointer instance should be retrievable from a new instance
+        // created with the same database pool.
+        use crate::services::graph_workflow::checkpointer::{Checkpointer, GraphCheckpoint};
+
+        let db = crate::storage::Database::new_in_memory().unwrap();
+        let pool = Arc::new(db.pool().clone());
+
+        // First "session": create checkpointer, save checkpoint
+        let cp1 = super::create_checkpointer(Some(pool.clone()));
+        let checkpoint = GraphCheckpoint {
+            id: "restart-cp".to_string(),
+            thread_id: "restart-thread".to_string(),
+            state: {
+                let mut s = std::collections::HashMap::new();
+                s.insert("progress".to_string(), serde_json::json!(50));
+                s
+            },
+            step: "processing-node".to_string(),
+            pending_nodes: vec!["final-node".to_string()],
+            interrupt: Some(crate::services::graph_workflow::checkpointer::Interrupt::Before {
+                node_id: "final-node".to_string(),
+            }),
+            created_at: "2026-02-19T10:00:00Z".to_string(),
+        };
+        cp1.save(checkpoint).await.unwrap();
+
+        // Drop the first checkpointer (simulates end of first session)
+        drop(cp1);
+
+        // Second "session": create a new checkpointer with the same pool
+        let cp2 = super::create_checkpointer(Some(pool));
+
+        // The checkpoint should still be accessible
+        let loaded = cp2.load("restart-thread").await.unwrap();
+        assert!(
+            loaded.is_some(),
+            "Checkpoint should persist across checkpointer recreation"
+        );
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.id, "restart-cp");
+        assert_eq!(loaded.step, "processing-node");
+        assert_eq!(
+            loaded.state.get("progress"),
+            Some(&serde_json::json!(50))
+        );
+        assert_eq!(loaded.pending_nodes, vec!["final-node"]);
+        assert!(loaded.interrupt.is_some());
     }
 }

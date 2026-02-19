@@ -51,6 +51,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         web_search_tool(),
         notebook_edit_tool(),
         codebase_search_tool(),
+        browser_tool(),
     ]
 }
 
@@ -69,6 +70,7 @@ pub fn get_basic_tool_definitions() -> Vec<ToolDefinition> {
         web_search_tool(),
         notebook_edit_tool(),
         codebase_search_tool(),
+        browser_tool(),
     ]
 }
 
@@ -449,6 +451,47 @@ pub fn codebase_search_tool() -> ToolDefinition {
     }
 }
 
+/// Browser automation tool definition
+fn browser_tool() -> ToolDefinition {
+    let mut properties = HashMap::new();
+    properties.insert(
+        "action".to_string(),
+        ParameterSchema::string(Some(
+            "The browser action: navigate, click, type_text, screenshot, extract_text, wait_for",
+        )),
+    );
+    properties.insert(
+        "url".to_string(),
+        ParameterSchema::string(Some("URL to navigate to (for 'navigate' action)")),
+    );
+    properties.insert(
+        "selector".to_string(),
+        ParameterSchema::string(Some(
+            "CSS selector for the target element (for click, type_text, extract_text, wait_for)",
+        )),
+    );
+    properties.insert(
+        "text".to_string(),
+        ParameterSchema::string(Some("Text to type (for 'type_text' action)")),
+    );
+    properties.insert(
+        "timeout_ms".to_string(),
+        ParameterSchema::integer(Some("Max wait time in ms (for 'wait_for', default: 5000)")),
+    );
+
+    ToolDefinition {
+        name: "Browser".to_string(),
+        description: "Headless browser automation tool. Supports actions: navigate(url), click(selector), \
+         type_text(selector, text), screenshot(), extract_text(selector), wait_for(selector, timeout_ms). \
+         Uses runtime detection to find Chrome/Chromium. Returns a helpful error if no browser is available.".to_string(),
+        input_schema: ParameterSchema::object(
+            Some("Browser automation parameters"),
+            properties,
+            vec!["action".to_string()],
+        ),
+    }
+}
+
 /// NotebookEdit tool definition
 fn notebook_edit_tool() -> ToolDefinition {
     let mut properties = HashMap::new();
@@ -493,7 +536,7 @@ mod tests {
     #[test]
     fn test_get_tool_definitions() {
         let tools = get_tool_definitions();
-        assert_eq!(tools.len(), 14);
+        assert_eq!(tools.len(), 15);
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"Read"));
@@ -507,16 +550,18 @@ mod tests {
         assert!(names.contains(&"Analyze"));
         assert!(names.contains(&"Task"));
         assert!(names.contains(&"CodebaseSearch"));
+        assert!(names.contains(&"Browser"));
     }
 
     #[test]
     fn test_get_basic_tool_definitions() {
         let tools = get_basic_tool_definitions();
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 13);
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(!names.contains(&"Task"));
         assert!(names.contains(&"CodebaseSearch"));
+        assert!(names.contains(&"Browser"));
     }
 
     #[test]

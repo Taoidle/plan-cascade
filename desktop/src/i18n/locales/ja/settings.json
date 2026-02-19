@@ -14,7 +14,8 @@
     "security": "セキュリティ",
     "network": "ネットワーク",
     "notifications": "通知",
-    "remote": "リモート制御"
+    "remote": "リモート制御",
+    "a2a": "A2Aエージェント"
   },
 
   "general": {
@@ -845,5 +846,23 @@
       "webhookDispatched": "リモートコマンドのWebhook通知を送信しました",
       "webhookDispatchFailed": "Webhook通知の送信に失敗しました"
     }
+  },
+
+  "a2a": {
+    "title": "リモートA2Aエージェント",
+    "description": "Agent-to-Agent（A2A）プロトコルを使用してリモートエージェントを検出・登録します。登録されたエージェントはAgent Composerパイプラインで使用できます。",
+    "addAgent": "リモートエージェントを追加",
+    "urlPlaceholder": "https://agent.example.com",
+    "discover": "検出",
+    "discovering": "検出中...",
+    "register": "登録",
+    "registering": "登録中...",
+    "remove": "削除",
+    "registeredAgents": "登録済みエージェント",
+    "noAgents": "登録されたリモートエージェントはありません。上のURLを入力して検出・登録してください。",
+    "loading": "リモートエージェントを読み込み中...",
+    "dismiss": "閉じる",
+    "registerSuccess": "エージェント \"{{name}}\" を登録しました",
+    "removeSuccess": "エージェント \"{{name}}\" を削除しました"
   }
 }

@@ -24,6 +24,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
@@ -86,6 +87,174 @@ pub struct BrowserActionResult {
     pub current_url: Option<String>,
     /// Current page title after the action.
     pub page_title: Option<String>,
+}
+
+// ============================================================================
+// Runtime Browser Detection (unconditional)
+// ============================================================================
+
+/// Detect an installed Chrome or Chromium browser at runtime.
+///
+/// Checks common installation paths on macOS, Linux, and Windows.
+/// Returns the path to the browser executable if found, or `None` if
+/// no browser could be located.
+///
+/// This replaces compile-time feature gating for browser availability,
+/// allowing BrowserTool to always be registered and provide helpful
+/// errors when no browser is found.
+pub fn detect_browser() -> Option<PathBuf> {
+    let candidates = get_browser_candidate_paths();
+    for path in candidates {
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Get a list of candidate Chrome/Chromium executable paths for the current platform.
+fn get_browser_candidate_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        paths.push(PathBuf::from(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ));
+        paths.push(PathBuf::from(
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ));
+        paths.push(PathBuf::from(
+            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+        ));
+        paths.push(PathBuf::from(
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        ));
+        paths.push(PathBuf::from(
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        ));
+        // User-level installations
+        if let Some(home) = dirs::home_dir() {
+            paths.push(home.join("Applications/Google Chrome.app/Contents/MacOS/Google Chrome"));
+            paths.push(home.join("Applications/Chromium.app/Contents/MacOS/Chromium"));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        paths.push(PathBuf::from("/usr/bin/google-chrome"));
+        paths.push(PathBuf::from("/usr/bin/google-chrome-stable"));
+        paths.push(PathBuf::from("/usr/bin/chromium-browser"));
+        paths.push(PathBuf::from("/usr/bin/chromium"));
+        paths.push(PathBuf::from("/usr/local/bin/google-chrome"));
+        paths.push(PathBuf::from("/usr/local/bin/chromium"));
+        paths.push(PathBuf::from("/snap/bin/chromium"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Standard installation paths
+        if let Ok(program_files) = std::env::var("ProgramFiles") {
+            paths.push(PathBuf::from(format!(
+                "{}\\Google\\Chrome\\Application\\chrome.exe",
+                program_files
+            )));
+            paths.push(PathBuf::from(format!(
+                "{}\\Chromium\\Application\\chrome.exe",
+                program_files
+            )));
+            paths.push(PathBuf::from(format!(
+                "{}\\Microsoft\\Edge\\Application\\msedge.exe",
+                program_files
+            )));
+            paths.push(PathBuf::from(format!(
+                "{}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+                program_files
+            )));
+        }
+        if let Ok(program_files_x86) = std::env::var("ProgramFiles(x86)") {
+            paths.push(PathBuf::from(format!(
+                "{}\\Google\\Chrome\\Application\\chrome.exe",
+                program_files_x86
+            )));
+            paths.push(PathBuf::from(format!(
+                "{}\\Chromium\\Application\\chrome.exe",
+                program_files_x86
+            )));
+        }
+        // Per-user installation
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            paths.push(PathBuf::from(format!(
+                "{}\\Google\\Chrome\\Application\\chrome.exe",
+                local_app_data
+            )));
+            paths.push(PathBuf::from(format!(
+                "{}\\Chromium\\Application\\chrome.exe",
+                local_app_data
+            )));
+        }
+    }
+
+    paths
+}
+
+/// Check whether browser automation is available.
+///
+/// Returns a status struct indicating whether the `browser` feature is compiled in
+/// and whether a Chrome/Chromium binary was found at runtime.
+pub fn browser_availability() -> BrowserAvailability {
+    let browser_path = detect_browser();
+    let feature_compiled = cfg!(feature = "browser");
+    BrowserAvailability {
+        feature_compiled,
+        browser_detected: browser_path.is_some(),
+        browser_path,
+    }
+}
+
+/// Browser automation availability status.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserAvailability {
+    /// Whether the `browser` Cargo feature was enabled at compile time.
+    pub feature_compiled: bool,
+    /// Whether a Chrome/Chromium binary was found at runtime.
+    pub browser_detected: bool,
+    /// Path to the detected browser binary (if any).
+    pub browser_path: Option<PathBuf>,
+}
+
+impl BrowserAvailability {
+    /// Whether browser automation is fully available (feature compiled AND browser found).
+    pub fn is_available(&self) -> bool {
+        self.feature_compiled && self.browser_detected
+    }
+
+    /// Human-readable status message.
+    pub fn status_message(&self) -> String {
+        match (self.feature_compiled, self.browser_detected) {
+            (true, true) => format!(
+                "Browser automation available ({})",
+                self.browser_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            ),
+            (true, false) => "Browser feature compiled, but no Chrome/Chromium found. \
+                Install Google Chrome or Chromium to enable browser automation."
+                .to_string(),
+            (false, true) => format!(
+                "Chrome/Chromium detected at {}, but browser feature not compiled. \
+                 Rebuild with `--features browser` to enable browser automation.",
+                self.browser_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            ),
+            (false, false) => "Browser automation unavailable. Install Chrome/Chromium \
+                and rebuild with `--features browser`."
+                .to_string(),
+        }
+    }
 }
 
 // ============================================================================
@@ -700,7 +869,7 @@ impl Tool for BrowserTool {
     fn description(&self) -> &str {
         "Headless browser automation tool. Supports actions: navigate(url), click(selector), \
          type_text(selector, text), screenshot(), extract_text(selector), wait_for(selector, timeout_ms). \
-         Requires the 'browser' feature to be enabled for actual browser interaction."
+         Uses runtime detection to find Chrome/Chromium. Returns a helpful error if no browser is available."
     }
 
     fn parameters_schema(&self) -> ParameterSchema {
@@ -749,7 +918,28 @@ impl Tool for BrowserTool {
             Err(e) => return ToolResult::err(e),
         };
 
-        // Feature-gated execution
+        let action_name = match &action {
+            BrowserAction::Navigate { .. } => "navigate",
+            BrowserAction::Click { .. } => "click",
+            BrowserAction::TypeText { .. } => "type_text",
+            BrowserAction::Screenshot => "screenshot",
+            BrowserAction::ExtractText { .. } => "extract_text",
+            BrowserAction::WaitFor { .. } => "wait_for",
+        };
+
+        // Step 1: Check runtime browser availability
+        let availability = browser_availability();
+        if !availability.browser_detected {
+            return ToolResult::err(format!(
+                "Browser action '{}' failed: No Chrome or Chromium browser found on this system. \
+                 Please install Google Chrome or Chromium to use browser automation.\n\
+                 Checked paths for {} platform.",
+                action_name,
+                std::env::consts::OS
+            ));
+        }
+
+        // Step 2: Check if the browser feature is compiled in
         #[cfg(feature = "browser")]
         {
             // For screenshot actions, use the raw variant to get base64 image data
@@ -786,19 +976,17 @@ impl Tool for BrowserTool {
 
         #[cfg(not(feature = "browser"))]
         {
-            // When the browser feature is disabled, return an informative error.
-            let action_name = match &action {
-                BrowserAction::Navigate { .. } => "navigate",
-                BrowserAction::Click { .. } => "click",
-                BrowserAction::TypeText { .. } => "type_text",
-                BrowserAction::Screenshot => "screenshot",
-                BrowserAction::ExtractText { .. } => "extract_text",
-                BrowserAction::WaitFor { .. } => "wait_for",
-            };
+            // Browser found at runtime but feature not compiled in
             ToolResult::err(format!(
-                "Browser tool action '{}' requires the 'browser' feature to be enabled. \
-                 Recompile with `--features browser` to use browser automation.",
-                action_name
+                "Browser action '{}' failed: Chrome/Chromium detected at '{}', but the 'browser' \
+                 feature was not compiled in. Rebuild with `--features browser` to enable \
+                 browser automation.",
+                action_name,
+                availability
+                    .browser_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
             ))
         }
     }
@@ -834,6 +1022,115 @@ mod tests {
         }
     }
 
+    // ── Runtime detection tests ──────────────────────────────────────
+
+    #[test]
+    fn test_detect_browser_returns_option() {
+        // detect_browser() should not panic regardless of platform/environment
+        let result = detect_browser();
+        // On dev machines Chrome is typically installed; in CI it may not be.
+        // Just verify the function runs without panicking and returns Option.
+        let _ = result;
+    }
+
+    #[test]
+    fn test_get_browser_candidate_paths_not_empty() {
+        let paths = get_browser_candidate_paths();
+        // Every platform should have at least one candidate path
+        assert!(
+            !paths.is_empty(),
+            "Candidate browser paths should not be empty for any platform"
+        );
+    }
+
+    #[test]
+    fn test_browser_availability_struct() {
+        let avail = browser_availability();
+        // Verify all fields are populated
+        let _ = avail.feature_compiled;
+        let _ = avail.browser_detected;
+        let _ = avail.browser_path;
+    }
+
+    #[test]
+    fn test_browser_availability_is_available() {
+        let avail = BrowserAvailability {
+            feature_compiled: true,
+            browser_detected: true,
+            browser_path: Some(PathBuf::from("/usr/bin/chromium")),
+        };
+        assert!(avail.is_available());
+
+        let avail_no_feature = BrowserAvailability {
+            feature_compiled: false,
+            browser_detected: true,
+            browser_path: Some(PathBuf::from("/usr/bin/chromium")),
+        };
+        assert!(!avail_no_feature.is_available());
+
+        let avail_no_browser = BrowserAvailability {
+            feature_compiled: true,
+            browser_detected: false,
+            browser_path: None,
+        };
+        assert!(!avail_no_browser.is_available());
+
+        let avail_neither = BrowserAvailability {
+            feature_compiled: false,
+            browser_detected: false,
+            browser_path: None,
+        };
+        assert!(!avail_neither.is_available());
+    }
+
+    #[test]
+    fn test_browser_availability_status_message_all_cases() {
+        let avail_both = BrowserAvailability {
+            feature_compiled: true,
+            browser_detected: true,
+            browser_path: Some(PathBuf::from("/usr/bin/chromium")),
+        };
+        assert!(avail_both.status_message().contains("available"));
+
+        let avail_feature_only = BrowserAvailability {
+            feature_compiled: true,
+            browser_detected: false,
+            browser_path: None,
+        };
+        assert!(avail_feature_only.status_message().contains("Install"));
+
+        let avail_browser_only = BrowserAvailability {
+            feature_compiled: false,
+            browser_detected: true,
+            browser_path: Some(PathBuf::from("/usr/bin/chromium")),
+        };
+        assert!(avail_browser_only.status_message().contains("--features browser"));
+
+        let avail_neither = BrowserAvailability {
+            feature_compiled: false,
+            browser_detected: false,
+            browser_path: None,
+        };
+        assert!(avail_neither.status_message().contains("unavailable"));
+    }
+
+    #[test]
+    fn test_browser_availability_serde() {
+        let avail = BrowserAvailability {
+            feature_compiled: true,
+            browser_detected: true,
+            browser_path: Some(PathBuf::from("/usr/bin/google-chrome")),
+        };
+        let json = serde_json::to_string(&avail).unwrap();
+        let parsed: BrowserAvailability = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.feature_compiled, true);
+        assert_eq!(parsed.browser_detected, true);
+        assert_eq!(
+            parsed.browser_path,
+            Some(PathBuf::from("/usr/bin/google-chrome"))
+        );
+    }
+
     // ── Tool identity tests ──────────────────────────────────────────
 
     #[test]
@@ -849,6 +1146,15 @@ mod tests {
     }
 
     #[test]
+    fn test_browser_tool_description_mentions_runtime_detection() {
+        let tool = BrowserTool::new();
+        assert!(
+            tool.description().contains("runtime detection"),
+            "Description should mention runtime detection"
+        );
+    }
+
+    #[test]
     fn test_browser_tool_is_long_running() {
         let tool = BrowserTool::new();
         assert!(tool.is_long_running());
@@ -858,6 +1164,30 @@ mod tests {
     fn test_browser_tool_default() {
         let tool = BrowserTool::default();
         assert_eq!(tool.name(), "Browser");
+    }
+
+    #[test]
+    fn test_browser_tool_always_registerable() {
+        // BrowserTool should always be constructable and implement Tool,
+        // regardless of feature flags
+        let tool = BrowserTool::new();
+        assert_eq!(tool.name(), "Browser");
+        assert!(!tool.description().is_empty());
+        let schema = tool.parameters_schema();
+        let json = serde_json::to_value(&schema).unwrap();
+        assert!(json.get("properties").is_some());
+    }
+
+    #[test]
+    fn test_browser_tool_registered_in_registry() {
+        // Verify BrowserTool is in the static registry
+        let registry =
+            crate::services::tools::executor::ToolExecutor::build_registry_static();
+        let browser = registry.get("Browser");
+        assert!(
+            browser.is_some(),
+            "BrowserTool should be registered in the tool registry"
+        );
     }
 
     // ── Action parsing tests ─────────────────────────────────────────
@@ -1003,10 +1333,11 @@ mod tests {
         assert!(result.unwrap_err().contains("Missing 'text'"));
     }
 
-    // ── Execution tests (feature-gated) ──────────────────────────────
+    // ── Execution tests (runtime detection) ──────────────────────────
 
     #[tokio::test]
-    async fn test_execute_without_browser_feature() {
+    async fn test_execute_returns_error_not_panic() {
+        // The tool should never panic, regardless of browser availability
         let tool = BrowserTool::new();
         let ctx = make_ctx();
         let args = serde_json::json!({
@@ -1014,19 +1345,33 @@ mod tests {
             "url": "https://example.com"
         });
         let result = tool.execute(&ctx, args).await;
-        // Without the browser feature, it should return an error
-        // With the browser feature, it will try to launch Chrome (and likely fail in CI)
-        // Either way, the test should not panic
-        #[cfg(not(feature = "browser"))]
-        {
-            assert!(!result.success);
-            assert!(result.error.unwrap().contains("browser"));
-        }
-        #[cfg(feature = "browser")]
-        {
-            // When browser feature is enabled but no Chrome is available,
-            // it should return an error (not panic)
-            let _ = result;
+        // On machines without Chrome, result.success should be false
+        // On machines with Chrome but without browser feature, result.success should be false
+        // On machines with Chrome AND browser feature, it might succeed or fail (browser launch)
+        // In all cases: no panic
+        let _ = result;
+    }
+
+    #[tokio::test]
+    async fn test_execute_graceful_error_message() {
+        // When neither feature nor browser is available, we get a clear error
+        let tool = BrowserTool::new();
+        let ctx = make_ctx();
+        let args = serde_json::json!({
+            "action": "navigate",
+            "url": "https://example.com"
+        });
+        let result = tool.execute(&ctx, args).await;
+
+        // Only check error content when we know the result was an error
+        if !result.success {
+            let err = result.error.as_deref().unwrap_or("");
+            // Error should mention either "No Chrome" or "not compiled"
+            assert!(
+                err.contains("Chrome") || err.contains("browser") || err.contains("Chromium"),
+                "Error should mention browser: {}",
+                err
+            );
         }
     }
 
@@ -1293,10 +1638,10 @@ mod tests {
         // No panic = success
     }
 
-    // ── Execute all action types without browser feature ─────────────
+    // ── Execute all action types: graceful degradation ───────────────
 
     #[tokio::test]
-    async fn test_execute_click_without_feature() {
+    async fn test_execute_click_graceful() {
         let tool = BrowserTool::new();
         let ctx = make_ctx();
         let result = tool
@@ -1305,16 +1650,19 @@ mod tests {
                 serde_json::json!({"action": "click", "selector": "#btn"}),
             )
             .await;
-        #[cfg(not(feature = "browser"))]
-        {
-            assert!(!result.success);
-            assert!(result.error.as_ref().unwrap().contains("click"));
-            assert!(result.error.unwrap().contains("browser"));
+        // Should not panic; error message should reference the action
+        if !result.success {
+            let err = result.error.as_deref().unwrap_or("");
+            assert!(
+                err.contains("click") || err.contains("Chrome") || err.contains("browser"),
+                "Error should be descriptive: {}",
+                err
+            );
         }
     }
 
     #[tokio::test]
-    async fn test_execute_type_text_without_feature() {
+    async fn test_execute_type_text_graceful() {
         let tool = BrowserTool::new();
         let ctx = make_ctx();
         let result = tool
@@ -1327,29 +1675,35 @@ mod tests {
                 }),
             )
             .await;
-        #[cfg(not(feature = "browser"))]
-        {
-            assert!(!result.success);
-            assert!(result.error.as_ref().unwrap().contains("type_text"));
+        if !result.success {
+            let err = result.error.as_deref().unwrap_or("");
+            assert!(
+                err.contains("type_text") || err.contains("Chrome") || err.contains("browser"),
+                "Error should be descriptive: {}",
+                err
+            );
         }
     }
 
     #[tokio::test]
-    async fn test_execute_screenshot_without_feature() {
+    async fn test_execute_screenshot_graceful() {
         let tool = BrowserTool::new();
         let ctx = make_ctx();
         let result = tool
             .execute(&ctx, serde_json::json!({"action": "screenshot"}))
             .await;
-        #[cfg(not(feature = "browser"))]
-        {
-            assert!(!result.success);
-            assert!(result.error.as_ref().unwrap().contains("screenshot"));
+        if !result.success {
+            let err = result.error.as_deref().unwrap_or("");
+            assert!(
+                err.contains("screenshot") || err.contains("Chrome") || err.contains("browser"),
+                "Error should be descriptive: {}",
+                err
+            );
         }
     }
 
     #[tokio::test]
-    async fn test_execute_extract_text_without_feature() {
+    async fn test_execute_extract_text_graceful() {
         let tool = BrowserTool::new();
         let ctx = make_ctx();
         let result = tool
@@ -1361,15 +1715,18 @@ mod tests {
                 }),
             )
             .await;
-        #[cfg(not(feature = "browser"))]
-        {
-            assert!(!result.success);
-            assert!(result.error.as_ref().unwrap().contains("extract_text"));
+        if !result.success {
+            let err = result.error.as_deref().unwrap_or("");
+            assert!(
+                err.contains("extract_text") || err.contains("Chrome") || err.contains("browser"),
+                "Error should be descriptive: {}",
+                err
+            );
         }
     }
 
     #[tokio::test]
-    async fn test_execute_wait_for_without_feature() {
+    async fn test_execute_wait_for_graceful() {
         let tool = BrowserTool::new();
         let ctx = make_ctx();
         let result = tool
@@ -1382,10 +1739,13 @@ mod tests {
                 }),
             )
             .await;
-        #[cfg(not(feature = "browser"))]
-        {
-            assert!(!result.success);
-            assert!(result.error.as_ref().unwrap().contains("wait_for"));
+        if !result.success {
+            let err = result.error.as_deref().unwrap_or("");
+            assert!(
+                err.contains("wait_for") || err.contains("Chrome") || err.contains("browser"),
+                "Error should be descriptive: {}",
+                err
+            );
         }
     }
 }

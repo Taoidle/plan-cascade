@@ -38,3 +38,4 @@ pub use web_search::WebSearchTool;
 pub use notebook_edit::NotebookEditTool;
 pub use codebase_search::CodebaseSearchTool;
 pub use browser::BrowserTool;
+pub use browser::{detect_browser, browser_availability, BrowserAvailability, BrowserAction, BrowserActionResult};

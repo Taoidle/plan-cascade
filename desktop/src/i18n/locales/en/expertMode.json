@@ -317,6 +317,7 @@
     "addSequential": "+ Sequential",
     "addParallel": "+ Parallel",
     "addConditional": "+ Conditional",
+    "addRemoteAgent": "+ Remote Agent",
     "emptyPipeline": "Add agent steps above to build your pipeline",
     "list": {
       "title": "Saved Pipelines",

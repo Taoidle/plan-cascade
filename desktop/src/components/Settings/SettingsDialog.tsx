@@ -26,13 +26,14 @@ import { PluginSection } from './PluginSection';
 import { NetworkSection } from './NetworkSection';
 import { WebhookSection } from './WebhookSection';
 import { RemoteSection } from './RemoteSection';
+import { A2aSection } from './A2aSection';
 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-type SettingsTab = 'general' | 'llm' | 'embedding' | 'lsp' | 'network' | 'notifications' | 'remote' | 'plugins' | 'security' | 'agents' | 'quality' | 'phases' | 'import-export';
+type SettingsTab = 'general' | 'llm' | 'embedding' | 'lsp' | 'network' | 'notifications' | 'remote' | 'plugins' | 'security' | 'agents' | 'quality' | 'phases' | 'a2a' | 'import-export';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { t } = useTranslation('settings');
@@ -52,6 +53,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     { id: 'agents', label: t('tabs.agents') },
     { id: 'quality', label: t('tabs.quality') },
     { id: 'phases', label: t('tabs.phases') },
+    { id: 'a2a', label: t('tabs.a2a', 'A2A Agents') },
     { id: 'import-export', label: t('tabs.importExport') },
   ];
 
@@ -170,6 +172,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </Tabs.Content>
               <Tabs.Content value="phases" className="outline-none">
                 <PhaseAgentSection />
+              </Tabs.Content>
+              <Tabs.Content value="a2a" className="outline-none">
+                <A2aSection />
               </Tabs.Content>
               <Tabs.Content value="import-export" className="outline-none">
                 <ImportExportSection />

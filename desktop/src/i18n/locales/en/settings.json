@@ -14,7 +14,8 @@
     "security": "Security",
     "network": "Network",
     "notifications": "Notifications",
-    "remote": "Remote"
+    "remote": "Remote",
+    "a2a": "A2A Agents"
   },
 
   "general": {
@@ -845,5 +846,23 @@
       "webhookDispatched": "Webhook notification sent for remote command",
       "webhookDispatchFailed": "Failed to send webhook notification"
     }
+  },
+
+  "a2a": {
+    "title": "Remote A2A Agents",
+    "description": "Discover and register remote agents via the Agent-to-Agent (A2A) protocol. Registered agents can be used in Agent Composer pipelines.",
+    "addAgent": "Add Remote Agent",
+    "urlPlaceholder": "https://agent.example.com",
+    "discover": "Discover",
+    "discovering": "Discovering...",
+    "register": "Register",
+    "registering": "Registering...",
+    "remove": "Remove",
+    "registeredAgents": "Registered Agents",
+    "noAgents": "No remote agents registered. Enter a URL above to discover and register one.",
+    "loading": "Loading remote agents...",
+    "dismiss": "Dismiss",
+    "registerSuccess": "Agent \"{{name}}\" registered successfully",
+    "removeSuccess": "Agent \"{{name}}\" removed"
   }
 }

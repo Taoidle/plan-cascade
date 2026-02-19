@@ -317,6 +317,7 @@
     "addSequential": "+ 順次",
     "addParallel": "+ 並列",
     "addConditional": "+ 条件分岐",
+    "addRemoteAgent": "+ リモートエージェント",
     "emptyPipeline": "上のボタンでエージェントステップを追加してパイプラインを構築",
     "list": {
       "title": "保存済みパイプライン",
