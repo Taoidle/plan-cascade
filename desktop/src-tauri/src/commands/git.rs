@@ -10,6 +10,8 @@ use tokio::sync::RwLock;
 
 use crate::commands::standalone::normalize_provider_name;
 use crate::models::response::CommandResponse;
+use crate::state::AppState;
+use crate::storage::KeyringService;
 use crate::services::git::conflict;
 use crate::services::git::graph::compute_graph_layout;
 use crate::services::git::llm_assist::GitLlmAssist;
@@ -791,15 +793,12 @@ pub async fn git_summarize_commit(
         Err(_) => String::new(),
     };
 
-    // Get commit message from log
-    let commit_message = match service.log(&path, 1, false) {
-        Ok(commits) => {
-            commits
-                .iter()
-                .find(|c| c.sha == sha || c.short_sha == sha)
-                .map(|c| c.message.clone())
-                .unwrap_or_default()
-        }
+    // Get commit message for the specific SHA using git log -1 <sha>
+    let commit_message = match service.git_ops().execute(
+        &path,
+        &["log", "-1", "--format=%s%n%n%b", &sha],
+    ) {
+        Ok(output) => output.into_result().unwrap_or_default().trim().to_string(),
         Err(_) => String::new(),
     };
 
@@ -842,12 +841,16 @@ pub async fn git_check_llm_available(
 ///
 /// Accepts provider name, model, and API key from the frontend,
 /// creates the appropriate LlmProvider, and sets it on GitState.
+/// Also resolves base_url and proxy settings from the database to
+/// match the same configuration used by chat/pipeline execution.
 #[tauri::command]
 pub async fn git_configure_llm(
     state: tauri::State<'_, GitState>,
+    app_state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
     api_key: String,
+    base_url: Option<String>,
 ) -> Result<CommandResponse<bool>, String> {
     // Normalize provider name (e.g. "claude" -> "anthropic")
     let canonical = match normalize_provider_name(&provider) {
@@ -891,11 +894,58 @@ pub async fn git_configure_llm(
         )));
     }
 
+    // Fall back to a sensible default model when the frontend sends an empty string
+    // (e.g. user selected "Provider Default" in the model dropdown).
+    let resolved_model = if model.trim().is_empty() {
+        match provider_type {
+            ProviderType::Anthropic => "claude-3-5-sonnet-20241022".to_string(),
+            ProviderType::OpenAI => "gpt-4o".to_string(),
+            ProviderType::DeepSeek => "deepseek-chat".to_string(),
+            ProviderType::Glm => "glm-4.7".to_string(),
+            ProviderType::Qwen => "qwen3-plus".to_string(),
+            ProviderType::Minimax => "MiniMax-M2.5".to_string(),
+            ProviderType::Ollama => "llama3.2".to_string(),
+        }
+    } else {
+        model
+    };
+
+    // Resolve base_url: frontend-provided (from zustand endpoint settings) takes priority,
+    // then database, then None (provider default).
+    let frontend_base_url = base_url.filter(|u| !u.is_empty());
+    let resolved_base_url = if frontend_base_url.is_some() {
+        frontend_base_url
+    } else {
+        app_state
+            .with_database(|db| {
+                let key = format!("provider_{}_base_url", canonical);
+                db.get_setting(&key)
+            })
+            .await
+            .ok()
+            .flatten()
+            .filter(|u| !u.is_empty())
+    };
+
+    // Resolve proxy for this provider (same as execute_standalone / pipeline_execution)
+    let keyring = KeyringService::new();
+    let proxy = app_state
+        .with_database(|db| {
+            Ok(crate::commands::proxy::resolve_provider_proxy(
+                &keyring,
+                db,
+                canonical,
+            ))
+        })
+        .await
+        .unwrap_or(None);
+
     let config = ProviderConfig {
         provider: provider_type,
         api_key: api_key_opt,
-        base_url: None,
-        model,
+        base_url: resolved_base_url,
+        model: resolved_model,
+        proxy,
         ..Default::default()
     };
 

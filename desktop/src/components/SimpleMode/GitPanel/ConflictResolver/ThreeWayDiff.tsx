@@ -481,17 +481,17 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
     async (idx: number) => {
       if (!isAvailable) return;
       const result = await resolveConflictAI(repoPath, filePath);
-      if (result) {
+      if (result.data) {
         // The AI resolves the entire file at once. We apply it to the first
         // unresolved region or the requested region.
         setResolutions((prev) => {
           const next = new Map(prev);
-          next.set(idx, { regionIndex: idx, content: result, method: 'ai' });
+          next.set(idx, { regionIndex: idx, content: result.data!, method: 'ai' });
           return next;
         });
         showToast(t('threeWayDiff.aiResolvedRegion', { index: idx + 1 }), 'success');
       } else {
-        showToast(t('threeWayDiff.aiResolveFailed'), 'error');
+        showToast(result.error || t('threeWayDiff.aiResolveFailed'), 'error');
       }
     },
     [isAvailable, resolveConflictAI, repoPath, filePath, showToast]
@@ -502,20 +502,20 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
     if (!isAvailable) return;
     setIsAIResolvingAll(true);
     const result = await resolveConflictAI(repoPath, filePath);
-    if (result) {
+    if (result.data) {
       // Apply AI resolution to all unresolved regions
       setResolutions((prev) => {
         const next = new Map(prev);
         for (let i = 0; i < regions.length; i++) {
           if (!next.has(i)) {
-            next.set(i, { regionIndex: i, content: result, method: 'ai' });
+            next.set(i, { regionIndex: i, content: result.data!, method: 'ai' });
           }
         }
         return next;
       });
       showToast(t('threeWayDiff.aiResolvedAll'), 'success');
     } else {
-      showToast(t('threeWayDiff.aiResolveAllFailed'), 'error');
+      showToast(result.error || t('threeWayDiff.aiResolveAllFailed'), 'error');
     }
     setIsAIResolvingAll(false);
   }, [isAvailable, resolveConflictAI, repoPath, filePath, regions.length, showToast]);

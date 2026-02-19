@@ -89,12 +89,12 @@ export function CommitBox() {
 
   const handleGenerateMessage = useCallback(async () => {
     if (!canGenerate || !workspacePath) return;
-    const message = await generateCommitMessage(workspacePath);
-    if (message) {
-      setCommitMessage(message);
+    const result = await generateCommitMessage(workspacePath);
+    if (result.data) {
+      setCommitMessage(result.data);
       showToast(t('commitBox.aiMessageGenerated'), 'success');
     } else {
-      showToast(t('commitBox.aiMessageFailed'), 'error');
+      showToast(result.error || t('commitBox.aiMessageFailed'), 'error');
     }
   }, [canGenerate, workspacePath, generateCommitMessage, setCommitMessage, showToast]);
 

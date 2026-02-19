@@ -235,6 +235,8 @@ export function LLMBackendSection() {
       setApiKeyStatuses(currentStatuses);
       setApiKeyInputs((prev) => ({ ...prev, [canonicalProvider]: apiKey.trim() }));
       setLocalProviderApiKey(canonicalProvider, apiKey.trim());
+      // Sync to zustand store so useGitAI re-evaluates LLM availability
+      useSettingsStore.getState().setApiKey(apiKey.trim());
       setKeyMessage({ provider: canonicalProvider, type: 'success', message: t('llm.apiKey.saveSuccess') });
       await fetchApiKeyStatuses();
     } catch (error) {
@@ -267,6 +269,8 @@ export function LLMBackendSection() {
       setApiKeyStatuses(currentStatuses);
       setApiKeyInputs((prev) => ({ ...prev, [canonicalProvider]: '' }));
       setLocalProviderApiKey(canonicalProvider, '');
+      // Sync to zustand store so useGitAI re-evaluates LLM availability
+      useSettingsStore.getState().setApiKey('');
       setKeyMessage({ provider: canonicalProvider, type: 'success', message: t('llm.apiKey.removeSuccess') });
       await fetchApiKeyStatuses();
     } catch (error) {

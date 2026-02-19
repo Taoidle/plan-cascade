@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { CommandResponse } from '../lib/tauri';
 import { useSettingsStore } from '../store/settings';
+import { getLocalProviderApiKey, normalizeProvider, DEFAULT_MODEL_BY_PROVIDER } from '../lib/providers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +25,12 @@ export interface ReviewNote {
   text: string;
 }
 
+/** Result returned by AI operations — always carries the error string when data is null. */
+export interface AIResult<T = string> {
+  data: T | null;
+  error: string | null;
+}
+
 interface UseGitAIReturn {
   /** Whether an LLM provider is configured and available */
   isAvailable: boolean;
@@ -33,22 +40,22 @@ interface UseGitAIReturn {
   unavailableReason: string;
 
   /** Generate a commit message from staged changes */
-  generateCommitMessage: (repoPath: string) => Promise<string | null>;
+  generateCommitMessage: (repoPath: string) => Promise<AIResult>;
   /** Whether commit message generation is in progress */
   isGeneratingCommit: boolean;
 
   /** Review staged diff */
-  reviewDiff: (repoPath: string) => Promise<string | null>;
+  reviewDiff: (repoPath: string) => Promise<AIResult>;
   /** Whether review is in progress */
   isReviewing: boolean;
 
   /** Resolve a conflict file with AI */
-  resolveConflictAI: (repoPath: string, filePath: string) => Promise<string | null>;
+  resolveConflictAI: (repoPath: string, filePath: string) => Promise<AIResult>;
   /** Files currently being resolved by AI */
   resolvingFiles: Set<string>;
 
   /** Summarize a commit */
-  summarizeCommit: (repoPath: string, sha: string) => Promise<string | null>;
+  summarizeCommit: (repoPath: string, sha: string) => Promise<AIResult>;
   /** Whether summarization is in progress */
   isSummarizing: boolean;
 
@@ -75,6 +82,8 @@ export function useGitAI(): UseGitAIReturn {
   const provider = useSettingsStore((s) => s.provider);
   const model = useSettingsStore((s) => s.model);
   const apiKey = useSettingsStore((s) => s.apiKey);
+  const minimaxEndpoint = useSettingsStore((s) => s.minimaxEndpoint);
+  const glmEndpoint = useSettingsStore((s) => s.glmEndpoint);
   const isMountedRef = useRef(true);
 
   // Configure LLM provider and check availability when settings change
@@ -85,20 +94,66 @@ export function useGitAI(): UseGitAIReturn {
       try {
         // Use provider field if set, otherwise fall back to backend
         const providerName = provider || backend;
+        // Only configure if the resolved provider is a direct-API provider
+        // (claude-code uses subprocess CLI, not a direct LLM API)
         if (providerName && providerName !== 'claude-code') {
+          const canonicalProvider = normalizeProvider(providerName);
+
+          // Resolve API key per-provider: localStorage cache → OS keyring
+          // NOTE: We intentionally skip the zustand apiKey for resolution because
+          // it is a single global value and may not match the current provider.
+          // It remains in the dependency array to trigger re-runs when changed.
+          let resolvedApiKey = getLocalProviderApiKey(canonicalProvider);
+
+          if (!resolvedApiKey) {
+            try {
+              const keyResult = await invoke<CommandResponse<string | null>>('get_provider_api_key', {
+                provider: canonicalProvider,
+              });
+              if (keyResult.success && typeof keyResult.data === 'string' && keyResult.data.trim()) {
+                resolvedApiKey = keyResult.data.trim();
+              }
+            } catch {
+              // Keyring may not be available
+            }
+          }
+
+          // Resolve model: use store value, or fall back to provider default
+          const resolvedModel = model || DEFAULT_MODEL_BY_PROVIDER[canonicalProvider] || '';
+
+          // Resolve provider-specific base_url from zustand endpoint settings
+          // (MiniMax China / GLM Coding have different API endpoints)
+          let resolvedBaseUrl: string | undefined;
+          if (canonicalProvider === 'minimax' && minimaxEndpoint === 'china') {
+            resolvedBaseUrl = 'https://api.minimaxi.com/v1/chat/completions';
+          } else if (canonicalProvider === 'glm' && glmEndpoint === 'coding') {
+            resolvedBaseUrl = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions';
+          }
+
           // Configure the LLM provider on the backend GitState
-          await invoke<CommandResponse<boolean>>('git_configure_llm', {
+          const configResult = await invoke<CommandResponse<boolean>>('git_configure_llm', {
             provider: providerName,
-            model: model || '',
-            apiKey: apiKey || '',
+            model: resolvedModel,
+            apiKey: resolvedApiKey,
+            baseUrl: resolvedBaseUrl,
           });
+
+          if (!configResult.success) {
+            console.warn('[GitAI] git_configure_llm failed:', configResult.error,
+              { provider: providerName, model: resolvedModel, hasKey: !!resolvedApiKey });
+          }
         }
         // Now check availability
         const res = await invoke<CommandResponse<boolean>>('git_check_llm_available', {});
         if (isMountedRef.current) {
-          setIsAvailable(res.success && res.data === true);
+          const available = res.success && res.data === true;
+          setIsAvailable(available);
+          if (!available) {
+            console.warn('[GitAI] LLM not available:', { backend, provider, success: res.success, data: res.data });
+          }
         }
-      } catch {
+      } catch (e) {
+        console.warn('[GitAI] configureAndCheck exception:', e);
         if (isMountedRef.current) {
           setIsAvailable(false);
         }
@@ -113,7 +168,7 @@ export function useGitAI(): UseGitAIReturn {
     return () => {
       isMountedRef.current = false;
     };
-  }, [backend, provider, model, apiKey]);
+  }, [backend, provider, model, apiKey, minimaxEndpoint, glmEndpoint]);
 
   const unavailableReason = isCheckingAvailability
     ? 'Checking LLM availability...'
@@ -124,7 +179,7 @@ export function useGitAI(): UseGitAIReturn {
   const clearError = useCallback(() => setLastError(null), []);
 
   // Generate commit message
-  const generateCommitMessage = useCallback(async (repoPath: string): Promise<string | null> => {
+  const generateCommitMessage = useCallback(async (repoPath: string): Promise<AIResult> => {
     setIsGeneratingCommit(true);
     setLastError(null);
     try {
@@ -132,21 +187,24 @@ export function useGitAI(): UseGitAIReturn {
         repoPath,
       });
       if (res.success && res.data) {
-        return res.data;
+        return { data: res.data, error: null };
       }
-      setLastError(res.error || 'Failed to generate commit message');
-      return null;
+      const error = res.error || 'Failed to generate commit message';
+      console.warn('[GitAI] generateCommitMessage failed:', error);
+      setLastError(error);
+      return { data: null, error };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[GitAI] generateCommitMessage exception:', msg);
       setLastError(msg);
-      return null;
+      return { data: null, error: msg };
     } finally {
       setIsGeneratingCommit(false);
     }
   }, []);
 
   // Review staged diff
-  const reviewDiff = useCallback(async (repoPath: string): Promise<string | null> => {
+  const reviewDiff = useCallback(async (repoPath: string): Promise<AIResult> => {
     setIsReviewing(true);
     setLastError(null);
     try {
@@ -154,14 +212,17 @@ export function useGitAI(): UseGitAIReturn {
         repoPath,
       });
       if (res.success && res.data) {
-        return res.data;
+        return { data: res.data, error: null };
       }
-      setLastError(res.error || 'Failed to review changes');
-      return null;
+      const error = res.error || 'Failed to review changes';
+      console.warn('[GitAI] reviewDiff failed:', error);
+      setLastError(error);
+      return { data: null, error };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[GitAI] reviewDiff exception:', msg);
       setLastError(msg);
-      return null;
+      return { data: null, error: msg };
     } finally {
       setIsReviewing(false);
     }
@@ -169,7 +230,7 @@ export function useGitAI(): UseGitAIReturn {
 
   // Resolve conflict with AI
   const resolveConflictAI = useCallback(
-    async (repoPath: string, filePath: string): Promise<string | null> => {
+    async (repoPath: string, filePath: string): Promise<AIResult> => {
       setResolvingFiles((prev) => new Set(prev).add(filePath));
       setLastError(null);
       try {
@@ -178,14 +239,17 @@ export function useGitAI(): UseGitAIReturn {
           filePath,
         });
         if (res.success && res.data) {
-          return res.data;
+          return { data: res.data, error: null };
         }
-        setLastError(res.error || 'Failed to resolve conflict');
-        return null;
+        const error = res.error || 'Failed to resolve conflict';
+        console.warn('[GitAI] resolveConflictAI failed:', error);
+        setLastError(error);
+        return { data: null, error };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        console.warn('[GitAI] resolveConflictAI exception:', msg);
         setLastError(msg);
-        return null;
+        return { data: null, error: msg };
       } finally {
         setResolvingFiles((prev) => {
           const next = new Set(prev);
@@ -199,7 +263,7 @@ export function useGitAI(): UseGitAIReturn {
 
   // Summarize commit
   const summarizeCommit = useCallback(
-    async (repoPath: string, sha: string): Promise<string | null> => {
+    async (repoPath: string, sha: string): Promise<AIResult> => {
       setIsSummarizing(true);
       setLastError(null);
       try {
@@ -208,14 +272,17 @@ export function useGitAI(): UseGitAIReturn {
           sha,
         });
         if (res.success && res.data) {
-          return res.data;
+          return { data: res.data, error: null };
         }
-        setLastError(res.error || 'Failed to summarize commit');
-        return null;
+        const error = res.error || 'Failed to summarize commit';
+        console.warn('[GitAI] summarizeCommit failed:', error);
+        setLastError(error);
+        return { data: null, error };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        console.warn('[GitAI] summarizeCommit exception:', msg);
         setLastError(msg);
-        return null;
+        return { data: null, error: msg };
       } finally {
         setIsSummarizing(false);
       }

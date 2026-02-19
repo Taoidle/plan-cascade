@@ -179,13 +179,13 @@ export function CommitDetail({
     }
 
     const result = await summarizeCommit(repoPath, commit.sha);
-    if (result) {
-      summaryCache.current.set(commit.sha, result);
-      setCurrentSummary(result);
+    if (result.data) {
+      summaryCache.current.set(commit.sha, result.data);
+      setCurrentSummary(result.data);
       setShowSummary(true);
       showToast(t('commitDetail.aiSummaryGenerated'), 'success');
     } else {
-      showToast(t('commitDetail.aiSummaryFailed'), 'error');
+      showToast(result.error || t('commitDetail.aiSummaryFailed'), 'error');
     }
   }, [commit, repoPath, isAvailable, summarizeCommit, showToast]);
 

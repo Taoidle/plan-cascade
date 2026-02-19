@@ -147,11 +147,11 @@ export function StagingArea() {
   const handleAIReview = useCallback(async () => {
     if (!workspacePath || !isAvailable) return;
     const result = await reviewDiff(workspacePath);
-    if (result) {
-      setReviewText(result);
+    if (result.data) {
+      setReviewText(result.data);
       showToast(t('stagingArea.aiReviewComplete'), 'success');
     } else {
-      showToast(t('stagingArea.aiReviewFailed'), 'error');
+      showToast(result.error || t('stagingArea.aiReviewFailed'), 'error');
     }
   }, [workspacePath, isAvailable, reviewDiff, showToast]);
 

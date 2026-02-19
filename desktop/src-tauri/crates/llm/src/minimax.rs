@@ -318,6 +318,89 @@ impl MinimaxProvider {
             model: response.model.clone(),
         }
     }
+
+    /// Parse a non-streaming response from raw JSON Value.
+    /// Handles `thinking` content blocks that the anthropic-async crate doesn't support.
+    fn parse_response_from_value(&self, raw: &serde_json::Value) -> LlmResponse {
+        let mut content = None;
+        let mut thinking = None;
+        let mut tool_calls = Vec::new();
+
+        if let Some(blocks) = raw.get("content").and_then(|c| c.as_array()) {
+            for block in blocks {
+                let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                match block_type {
+                    "text" => {
+                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                            content = Some(text.to_string());
+                        }
+                    }
+                    "thinking" => {
+                        if let Some(text) = block.get("thinking").and_then(|t| t.as_str()) {
+                            thinking = Some(text.to_string());
+                        }
+                    }
+                    "tool_use" => {
+                        let id = block
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let name = block
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let input = block
+                            .get("input")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Object(Default::default()));
+                        tool_calls.push(ToolCall { id, name, arguments: input });
+                    }
+                    other => {
+                        tracing::debug!("MiniMax: skipping unknown content block type: {}", other);
+                    }
+                }
+            }
+        }
+
+        let stop_reason = raw
+            .get("stop_reason")
+            .and_then(|r| r.as_str())
+            .map(StopReason::from)
+            .unwrap_or(StopReason::EndTurn);
+
+        let usage = raw.get("usage").map(|u| {
+            UsageStats {
+                input_tokens: u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                output_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                thinking_tokens: None,
+                cache_read_tokens: u
+                    .get("cache_read_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32),
+                cache_creation_tokens: u
+                    .get("cache_creation_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32),
+            }
+        }).unwrap_or_default();
+
+        let model = raw
+            .get("model")
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        LlmResponse {
+            content,
+            thinking,
+            tool_calls,
+            stop_reason,
+            usage,
+            model,
+        }
+    }
 }
 
 #[async_trait]
@@ -417,12 +500,15 @@ impl LlmProvider for MinimaxProvider {
             return Err(parse_http_error(status, &body_text, "minimax"));
         }
 
-        let api_response: anthropic_async::types::MessagesCreateResponse =
+        // Parse as serde_json::Value first to handle `thinking` content blocks
+        // that the anthropic-async crate's ContentBlock enum doesn't support.
+        // MiniMax M2.5 returns thinking blocks in non-streaming responses.
+        let raw: serde_json::Value =
             serde_json::from_str(&body_text).map_err(|e| LlmError::ParseError {
                 message: format!("Failed to parse response: {}", e),
             })?;
 
-        Ok(self.parse_response(&api_response))
+        Ok(self.parse_response_from_value(&raw))
     }
 
     async fn stream_message(
