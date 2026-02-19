@@ -583,6 +583,7 @@ impl ToolExecutor {
             hnsw_index: self.hnsw_index.clone(),
             task_dedup_cache: Arc::clone(&self.task_dedup_cache),
             task_context: None, // Set by callers who have TaskContext
+            core_context: None, // Set by callers who have OrchestratorContext
         }
     }
 

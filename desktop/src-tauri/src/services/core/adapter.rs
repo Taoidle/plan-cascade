@@ -156,6 +156,7 @@ pub fn tool_context_to_tool_execution_context(ctx: &ToolContext) -> ToolExecutio
         hnsw_index: None,
         task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
         task_context: None,
+        core_context: None,
     }
 }
 
@@ -467,6 +468,7 @@ mod tests {
             hnsw_index: None,
             task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
             task_context: None,
+            core_context: None,
         }
     }
 

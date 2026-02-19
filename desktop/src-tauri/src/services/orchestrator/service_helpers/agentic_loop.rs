@@ -2979,6 +2979,22 @@ impl OrchestratorService {
         // Build AgentContext from the orchestrator's current state
         let shared_state = event_actions_state.clone();
 
+        // Create an OrchestratorContext for the transferred agent sharing
+        // the memory store from the current event_actions_state.
+        let transfer_orch_ctx = {
+            let initial_state: std::collections::HashMap<String, serde_json::Value> =
+                event_actions_state.iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+            Arc::new(
+                plan_cascade_core::context::OrchestratorContext::new(
+                    session_id,
+                    &self.config.project_root,
+                    target_agent,
+                ).with_initial_state(initial_state)
+            )
+        };
+
         let agent_ctx = AgentContext {
             session_id: session_id.to_string(),
             project_root: self.config.project_root.clone(),
@@ -2989,7 +3005,7 @@ impl OrchestratorService {
             input: AgentInput::Text(format!("Transfer to agent '{}'", target_agent)),
             shared_state: Arc::new(tokio::sync::RwLock::new(shared_state)),
             config: AgentConfig::default(),
-            orchestrator_ctx: None,
+            orchestrator_ctx: Some(transfer_orch_ctx),
         };
 
         // Invoke handle_transfer with the target agent name
@@ -3043,6 +3059,16 @@ impl OrchestratorService {
                                 }
                                 AgentEvent::Done { output: _ } => {
                                     // Transfer agent completed; no separate event needed
+                                    None
+                                }
+                                AgentEvent::AgentTransfer { target, message } => {
+                                    // Sub-agent requests nested transfer — log it.
+                                    // Nested transfers are not re-dispatched here;
+                                    // they are handled by TransferHandler's chain/depth logic.
+                                    tracing::info!(
+                                        "[transfer] Sub-agent requests nested transfer to '{}': {}",
+                                        target, message
+                                    );
                                     None
                                 }
                                 _ => None,

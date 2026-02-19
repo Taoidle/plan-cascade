@@ -249,6 +249,14 @@ impl OrchestratorContext {
         let store = self.memory_store.read().ok()?;
         store.get(key).cloned()
     }
+
+    /// Pre-populate session state (for transfers that carry prior state).
+    pub fn with_initial_state(self, state: HashMap<String, Value>) -> Self {
+        if let Ok(mut guard) = self.session_state.try_write() {
+            *guard = state;
+        }
+        self
+    }
 }
 
 impl ExecutionContext for OrchestratorContext {

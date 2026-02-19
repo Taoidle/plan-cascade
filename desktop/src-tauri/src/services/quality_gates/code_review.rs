@@ -208,15 +208,15 @@ Git diff to review:
             }
         }
 
-        // Fallback: pass with warning when no LLM available
-        let mut result = PipelineGateResult::passed(
+        // Fallback: return warning when no LLM available (not a "pass")
+        tracing::warn!("Code review gate skipped: no LLM provider available");
+        PipelineGateResult::warning(
             "code_review",
             "Code Review",
             GatePhase::PostValidation,
-            0,
-        );
-        result.message = "No LLM provider available for code review - passing with warning".to_string();
-        result
+            "No LLM provider available for code review — gate skipped",
+            vec!["Code review requires an LLM provider. Configure one in Settings to enable AI code review.".to_string()],
+        )
     }
 
     /// Parse the AI response into a pipeline gate result.

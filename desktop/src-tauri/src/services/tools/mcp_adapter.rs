@@ -315,6 +315,7 @@ for line in sys.stdin:
             hnsw_index: None,
             task_dedup_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
             task_context: None,
+            core_context: None,
         };
 
         let result = adapter

@@ -31,6 +31,19 @@ use crate::storage::KeyringService;
 // Types
 // ============================================================================
 
+/// Execution mode for story execution in Task Mode.
+///
+/// Determines whether stories are executed via external CLI tools
+/// or directly via the built-in LLM API through OrchestratorService.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StoryExecutionMode {
+    /// Use external CLI tools (claude, codex, aider)
+    Cli,
+    /// Use direct LLM API via OrchestratorService
+    Llm,
+}
+
 /// Task mode session status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -470,6 +483,80 @@ async fn resolve_llm_provider(
     Ok(prd_generator::create_provider(config))
 }
 
+/// Resolve a ProviderConfig from frontend parameters and OS keyring.
+///
+/// Same as `resolve_llm_provider` but returns the raw config instead of
+/// an instantiated provider. Used by `execute_story_via_llm()` to create
+/// OrchestratorService instances.
+async fn resolve_provider_config(
+    provider_name: &str,
+    model: &str,
+    app_state: &tauri::State<'_, AppState>,
+) -> Result<crate::services::llm::types::ProviderConfig, String> {
+    use crate::commands::standalone::normalize_provider_name;
+    use crate::services::llm::types::{ProviderConfig, ProviderType};
+
+    let canonical = normalize_provider_name(provider_name)
+        .ok_or_else(|| format!("Unknown provider: {}", provider_name))?;
+
+    let provider_type = match canonical {
+        "anthropic" => ProviderType::Anthropic,
+        "openai" => ProviderType::OpenAI,
+        "deepseek" => ProviderType::DeepSeek,
+        "glm" => ProviderType::Glm,
+        "qwen" => ProviderType::Qwen,
+        "minimax" => ProviderType::Minimax,
+        "ollama" => ProviderType::Ollama,
+        _ => return Err(format!("Unsupported provider: {}", canonical)),
+    };
+
+    let api_key = {
+        let keyring = KeyringService::new();
+        keyring.get_api_key(canonical).ok().flatten()
+    };
+
+    if provider_type != ProviderType::Ollama && api_key.is_none() {
+        return Err(format!(
+            "API key not configured for provider '{}'.",
+            canonical
+        ));
+    }
+
+    let mut resolved_base_url: Option<String> = None;
+    {
+        let key = format!("provider_{}_base_url", canonical);
+        if let Ok(Some(db_url)) = app_state
+            .with_database(|db| db.get_setting(&key))
+            .await
+        {
+            if !db_url.is_empty() {
+                resolved_base_url = Some(db_url);
+            }
+        }
+    }
+
+    let proxy = {
+        let keyring = KeyringService::new();
+        app_state
+            .with_database(|db| {
+                Ok(crate::commands::proxy::resolve_provider_proxy(
+                    &keyring, db, canonical,
+                ))
+            })
+            .await
+            .unwrap_or(None)
+    };
+
+    Ok(ProviderConfig {
+        provider: provider_type,
+        api_key,
+        base_url: resolved_base_url,
+        model: model.to_string(),
+        proxy,
+        ..Default::default()
+    })
+}
+
 /// Approve a task PRD and trigger batch execution.
 ///
 /// Validates the PRD structure, spawns execution as a background tokio task,
@@ -481,6 +568,10 @@ pub async fn approve_task_prd(
     session_id: String,
     prd: TaskPrd,
     state: tauri::State<'_, TaskModeState>,
+    app_state: tauri::State<'_, AppState>,
+    provider: Option<String>,
+    model: Option<String>,
+    execution_mode: Option<StoryExecutionMode>,
 ) -> Result<CommandResponse<bool>, String> {
     let mut session_guard = state.session.write().await;
     let session = match session_guard.as_mut() {
@@ -542,6 +633,42 @@ pub async fn approve_task_prd(
             let app_handle = app.clone();
             let stories_for_exec = stories.clone();
 
+            // Resolve LLM provider config if provider/model specified
+            let provider_config: Option<crate::services::llm::types::ProviderConfig> =
+                if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
+                    match resolve_provider_config(prov, mdl, &app_state).await {
+                        Ok(cfg) => Some(cfg),
+                        Err(e) => {
+                            eprintln!("[approve_task_prd] LLM provider config resolution failed: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
+            // Determine execution mode:
+            // - If explicitly specified, use that
+            // - If LLM provider config available, default to Llm
+            // - Otherwise default to Cli
+            let mode = execution_mode.unwrap_or_else(|| {
+                if provider_config.is_some() {
+                    StoryExecutionMode::Llm
+                } else {
+                    StoryExecutionMode::Cli
+                }
+            });
+
+            // Resolve database pool for OrchestratorService (if using LLM mode)
+            let db_pool = if matches!(mode, StoryExecutionMode::Llm) {
+                app_state
+                    .with_database(|db| Ok(db.pool().clone()))
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+
             // Spawn background tokio task for batch execution
             tokio::spawn(async move {
                 let executor = BatchExecutor::new(
@@ -562,9 +689,14 @@ pub async fn approve_task_prd(
                 let project_path = std::env::current_dir()
                     .unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-                // Create story executor that delegates to the orchestrator service.
-                // Each story is sent to the LLM agent for code generation and execution.
-                let story_executor = build_story_executor(app_handle.clone());
+                // Create story executor that delegates to the appropriate backend.
+                // In CLI mode, spawns external CLI tools. In LLM mode, uses OrchestratorService.
+                let story_executor = build_story_executor(
+                    app_handle.clone(),
+                    mode,
+                    provider_config,
+                    db_pool,
+                );
 
                 let result = executor
                     .execute(&sid, &resolver, project_path, emit, story_executor)
@@ -1055,15 +1187,15 @@ fn load_story_context(project_path: &std::path::Path, story_id: &str) -> Option<
     })
 }
 
-/// Build a story executor callback that runs each story through a CLI agent.
+/// Build a story executor callback that runs each story through CLI or LLM.
 ///
-/// The returned callback creates an execution prompt from the story context
-/// and spawns a `claude` CLI process (or other configured agent) for code
-/// generation. The process runs in the project directory with the story
-/// prompt piped to stdin. If the agent binary is not available, execution
-/// fails (which triggers retry with a different agent if retry is enabled).
+/// In CLI mode, spawns external CLI tools (claude, codex, aider).
+/// In LLM mode, uses OrchestratorService for direct LLM API execution.
 fn build_story_executor(
     app_handle: tauri::AppHandle,
+    mode: StoryExecutionMode,
+    provider_config: Option<crate::services::llm::types::ProviderConfig>,
+    db_pool: Option<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>,
 ) -> impl Fn(StoryExecutionContext) -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>>
        + Send
        + Sync
@@ -1071,13 +1203,17 @@ fn build_story_executor(
        + 'static {
     move |ctx: StoryExecutionContext| -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>> {
         let app = app_handle.clone();
+        let mode = mode.clone();
+        let provider_config = provider_config.clone();
+        let db_pool = db_pool.clone();
         Box::pin(async move {
             eprintln!(
-                "[INFO] Executing story '{}' (attempt {}) with agent '{}' in {}",
+                "[INFO] Executing story '{}' (attempt {}) with agent '{}' in {} [mode: {:?}]",
                 ctx.story_id,
                 ctx.attempt,
                 ctx.agent_name,
-                ctx.project_path.display()
+                ctx.project_path.display(),
+                mode,
             );
 
             // Emit story execution event for frontend tracking
@@ -1109,8 +1245,22 @@ fn build_story_executor(
             // Build execution prompt from story context
             let prompt = build_story_prompt(&ctx);
 
-            // Spawn agent CLI process to execute the story
-            execute_story_via_agent(&ctx.agent_name, &prompt, &ctx.project_path).await
+            match mode {
+                StoryExecutionMode::Cli => {
+                    // Spawn agent CLI process to execute the story
+                    execute_story_via_agent(&ctx.agent_name, &prompt, &ctx.project_path).await
+                }
+                StoryExecutionMode::Llm => {
+                    // Execute via OrchestratorService using direct LLM API
+                    execute_story_via_llm(
+                        provider_config.as_ref(),
+                        &prompt,
+                        &ctx.project_path,
+                        db_pool.as_ref(),
+                    )
+                    .await
+                }
+            }
         })
     }
 }
@@ -1195,6 +1345,100 @@ async fn execute_story_via_agent(
                 success: false,
                 error: Some(error_msg),
             }
+        }
+    }
+}
+
+/// Execute a story via the OrchestratorService using direct LLM API.
+///
+/// Creates a fresh OrchestratorService instance for each story execution,
+/// runs the full agentic loop (tool use, code generation, etc.), and
+/// maps the result to StoryExecutionOutcome.
+async fn execute_story_via_llm(
+    provider_config: Option<&crate::services::llm::types::ProviderConfig>,
+    prompt: &str,
+    project_path: &std::path::Path,
+    db_pool: Option<&r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>,
+) -> StoryExecutionOutcome {
+    use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
+    use crate::services::streaming::UnifiedStreamEvent;
+
+    let provider_config = match provider_config {
+        Some(cfg) => cfg.clone(),
+        None => {
+            return StoryExecutionOutcome {
+                success: false,
+                error: Some("No LLM provider config available for story execution".to_string()),
+            };
+        }
+    };
+
+    let analysis_artifacts_root = if let Some(local_data_dir) = dirs::data_local_dir() {
+        local_data_dir.join("plan-cascade").join("analysis-runs")
+    } else {
+        std::env::temp_dir().join("plan-cascade").join("analysis-runs")
+    };
+
+    let config = OrchestratorConfig {
+        provider: provider_config,
+        system_prompt: Some(
+            "You are an expert software engineer executing a story task. \
+             Use the provided tools to implement the required changes. \
+             Read relevant files, make code changes, and run tests to verify."
+                .to_string(),
+        ),
+        max_iterations: 50,
+        max_total_tokens: 1_000_000,
+        project_root: project_path.to_path_buf(),
+        analysis_artifacts_root,
+        streaming: true,
+        enable_compaction: true,
+        analysis_profile: Default::default(),
+        analysis_limits: Default::default(),
+        analysis_session_id: None,
+        project_id: None,
+        compaction_config: Default::default(),
+    };
+
+    let mut orchestrator = OrchestratorService::new(config);
+
+    // Wire database pool for CodebaseSearch if available
+    if let Some(pool) = db_pool {
+        orchestrator = orchestrator.with_database(pool.clone());
+    }
+
+    // Create channel for event collection (events are discarded for story execution)
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<UnifiedStreamEvent>(256);
+
+    // Drain events in background to prevent channel backpressure
+    tokio::spawn(async move {
+        while rx.recv().await.is_some() {
+            // Events are discarded — story execution doesn't stream to frontend
+        }
+    });
+
+    eprintln!(
+        "[INFO] Executing story via LLM in {}",
+        project_path.display()
+    );
+
+    // Run the full agentic loop
+    let result = orchestrator.execute(prompt.to_string(), tx).await;
+
+    if result.success {
+        eprintln!("[INFO] LLM story execution completed successfully");
+        StoryExecutionOutcome {
+            success: true,
+            error: None,
+        }
+    } else {
+        let error_msg = result
+            .error
+            .unwrap_or_else(|| "LLM execution failed with no error details".to_string());
+        eprintln!("[WARN] LLM story execution failed: {}", error_msg);
+        StoryExecutionOutcome {
+            success: false,
+            error: Some(error_msg),
         }
     }
 }

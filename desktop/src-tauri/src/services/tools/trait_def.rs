@@ -69,6 +69,11 @@ pub struct ToolExecutionContext {
     /// Optional TaskContext for sub-agent spawning.
     /// When None, the Task tool returns a depth-limit error.
     pub task_context: Option<Arc<TaskContext>>,
+
+    /// Optional core-layer context providing memory access.
+    /// When set, tools can read from the shared memory store
+    /// via `core_context.search_memory(pattern)`.
+    pub core_context: Option<plan_cascade_core::context::ToolContext>,
 }
 
 impl ToolExecutionContext {
@@ -453,6 +458,7 @@ mod tests {
             hnsw_index: None,
             task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
             task_context: None,
+            core_context: None,
         }
     }
 
