@@ -298,6 +298,13 @@ pub use commands::{
     list_a2a_agents,
     register_a2a_agent,
     remove_a2a_agent,
+    // Artifact commands
+    artifact_save,
+    artifact_load,
+    artifact_list,
+    artifact_versions,
+    artifact_delete,
+    ArtifactState,
     // Analytics commands
     AnalyticsState,
     ClaudeCodeState,

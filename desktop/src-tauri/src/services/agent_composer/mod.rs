@@ -17,6 +17,7 @@ pub mod evaluation;
 pub mod graph_types;
 pub mod graph_workflow;
 pub mod llm_agent;
+pub mod loop_agent;
 pub mod parallel;
 pub mod registry;
 pub mod sequential;
@@ -31,6 +32,7 @@ pub use llm_agent::{LlmAgent, convert_stream_event};
 pub use sequential::SequentialAgent;
 pub use parallel::ParallelAgent;
 pub use conditional::ConditionalAgent;
+pub use loop_agent::LoopAgent;
 pub use registry::{AgentInfo, ComposerRegistry};
 
 // Re-export graph workflow types

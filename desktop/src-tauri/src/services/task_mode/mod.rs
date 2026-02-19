@@ -15,6 +15,6 @@ pub use agent_resolver::{
 };
 pub use batch_executor::{
     BatchExecutionProgress, BatchExecutionResult, BatchExecutor, ExecutableStory, ExecutionBatch,
-    ExecutionConfig, RetryContext, StoryExecutionContext, StoryExecutionOutcome,
+    ExecutionConfig, RetryContext, StoryContext, StoryExecutionContext, StoryExecutionOutcome,
     StoryExecutionState, TaskModeProgressEvent, TASK_MODE_EVENT_CHANNEL, calculate_batches,
 };

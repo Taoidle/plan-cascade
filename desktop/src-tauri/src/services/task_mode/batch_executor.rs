@@ -21,6 +21,7 @@ use crate::services::quality_gates::format::FormatGate;
 use crate::services::quality_gates::pipeline::{
     GatePhase, GatePipeline, PipelineConfig, PipelineGateResult, PipelineResult,
 };
+use crate::services::quality_gates::validation::ValidationGate;
 use crate::services::task_mode::agent_resolver::{
     AgentAssignment, AgentResolver, ExecutionPhase, StoryInfo,
 };
@@ -111,6 +112,25 @@ pub struct RetryContext {
     pub previous_agent: String,
 }
 
+/// Story-specific context extracted from design_doc.json story_mappings.
+///
+/// When a design document exists in the project root, it may contain a
+/// `story_mappings` section that maps story IDs to relevant files,
+/// components, design decisions, and additional context. This struct
+/// carries that mapping for injection into the agent execution prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryContext {
+    /// Files relevant to this story's implementation
+    pub relevant_files: Vec<String>,
+    /// Components involved in this story
+    pub components: Vec<String>,
+    /// Design decisions (ADRs, architectural choices) related to this story
+    pub design_decisions: Vec<String>,
+    /// Free-form additional context
+    pub additional_context: Option<String>,
+}
+
 /// Context passed to the story executor callback for each execution attempt.
 #[derive(Debug, Clone)]
 pub struct StoryExecutionContext {
@@ -130,6 +150,8 @@ pub struct StoryExecutionContext {
     pub attempt: u32,
     /// Retry context from previous failed attempt (None on first attempt)
     pub retry_context: Option<RetryContext>,
+    /// Story-specific context from design_doc.json story_mappings (if available)
+    pub story_context: Option<StoryContext>,
 }
 
 /// Outcome returned by the story executor callback.
@@ -965,6 +987,7 @@ impl BatchExecutor {
                 project_path: project_path.to_path_buf(),
                 attempt,
                 retry_context,
+                story_context: None,
             };
 
             // Execute story via the provided executor callback
@@ -1006,6 +1029,20 @@ impl BatchExecutor {
                     let gate = FormatGate::new(format_path.clone());
                     Box::pin(async move { gate.run().await })
                 }),
+            );
+
+            // Register ValidationGate executors for typecheck, test, and lint
+            pipeline.register_gate(
+                "typecheck",
+                ValidationGate::create_executor("typecheck", project_path.to_path_buf()),
+            );
+            pipeline.register_gate(
+                "test",
+                ValidationGate::create_executor("test", project_path.to_path_buf()),
+            );
+            pipeline.register_gate(
+                "lint",
+                ValidationGate::create_executor("lint", project_path.to_path_buf()),
             );
 
             // Obtain git diff for AI quality gates
@@ -1835,5 +1872,90 @@ mod tests {
             assert!(event.agent_name.is_some(), "agent_name required");
             assert!(event.gate_results.is_some(), "gate_results required");
         }
+    }
+
+    // ========================================================================
+    // StoryContext Tests
+    // ========================================================================
+
+    #[test]
+    fn test_story_context_serialization_roundtrip() {
+        let ctx = StoryContext {
+            relevant_files: vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
+            components: vec!["AppCore".to_string()],
+            design_decisions: vec!["ADR-001: Use Tauri".to_string()],
+            additional_context: Some("Desktop-only feature".to_string()),
+        };
+
+        let json = serde_json::to_string(&ctx).unwrap();
+        let deserialized: StoryContext = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.relevant_files, ctx.relevant_files);
+        assert_eq!(deserialized.components, ctx.components);
+        assert_eq!(deserialized.design_decisions, ctx.design_decisions);
+        assert_eq!(deserialized.additional_context, ctx.additional_context);
+    }
+
+    #[test]
+    fn test_story_context_camel_case_serialization() {
+        let ctx = StoryContext {
+            relevant_files: vec![],
+            components: vec![],
+            design_decisions: vec![],
+            additional_context: None,
+        };
+
+        let json = serde_json::to_string(&ctx).unwrap();
+        assert!(json.contains("\"relevantFiles\""));
+        assert!(json.contains("\"designDecisions\""));
+        assert!(json.contains("\"additionalContext\""));
+        // Should NOT contain snake_case keys
+        assert!(!json.contains("\"relevant_files\""));
+        assert!(!json.contains("\"design_decisions\""));
+        assert!(!json.contains("\"additional_context\""));
+    }
+
+    #[test]
+    fn test_story_execution_context_with_story_context() {
+        let story_ctx = StoryContext {
+            relevant_files: vec!["src/foo.rs".to_string()],
+            components: vec!["FooService".to_string()],
+            design_decisions: vec![],
+            additional_context: None,
+        };
+
+        let ctx = StoryExecutionContext {
+            story_id: "s1".to_string(),
+            story_title: "Test".to_string(),
+            story_description: "Desc".to_string(),
+            acceptance_criteria: vec![],
+            agent_name: "claude".to_string(),
+            project_path: std::path::PathBuf::from("/tmp"),
+            attempt: 1,
+            retry_context: None,
+            story_context: Some(story_ctx),
+        };
+
+        assert!(ctx.story_context.is_some());
+        let sc = ctx.story_context.unwrap();
+        assert_eq!(sc.relevant_files, vec!["src/foo.rs"]);
+        assert_eq!(sc.components, vec!["FooService"]);
+    }
+
+    #[test]
+    fn test_story_execution_context_without_story_context() {
+        let ctx = StoryExecutionContext {
+            story_id: "s1".to_string(),
+            story_title: "Test".to_string(),
+            story_description: "Desc".to_string(),
+            acceptance_criteria: vec![],
+            agent_name: "claude".to_string(),
+            project_path: std::path::PathBuf::from("/tmp"),
+            attempt: 1,
+            retry_context: None,
+            story_context: None,
+        };
+
+        assert!(ctx.story_context.is_none());
     }
 }

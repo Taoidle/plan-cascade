@@ -18,8 +18,8 @@ use crate::models::CommandResponse;
 use crate::services::strategy::analyzer::{analyze_task_for_mode, StrategyAnalysis};
 use crate::services::task_mode::batch_executor::{
     BatchExecutionProgress, BatchExecutionResult, BatchExecutor, ExecutableStory, ExecutionBatch,
-    ExecutionConfig, StoryExecutionContext, StoryExecutionOutcome, TaskModeProgressEvent,
-    TASK_MODE_EVENT_CHANNEL,
+    ExecutionConfig, StoryContext, StoryExecutionContext, StoryExecutionOutcome,
+    StoryExecutionState, TaskModeProgressEvent, TASK_MODE_EVENT_CHANNEL,
 };
 use crate::services::task_mode::agent_resolver::AgentResolver;
 use crate::services::task_mode::prd_generator;
@@ -103,6 +103,60 @@ pub struct TaskModeSession {
     pub created_at: String,
 }
 
+/// A quality dimension score for a single story (e.g., correctness, readability).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityDimensionScore {
+    /// Story ID this score belongs to
+    pub story_id: String,
+    /// Quality dimension name (e.g., "correctness", "readability")
+    pub dimension: String,
+    /// Achieved score
+    pub score: f64,
+    /// Maximum possible score
+    pub max_score: f64,
+}
+
+/// A timeline entry representing one story's execution span.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineEntry {
+    /// Story ID
+    pub story_id: String,
+    /// Story title
+    pub story_title: String,
+    /// Batch index (0-based) this story belonged to
+    pub batch_index: usize,
+    /// Agent that executed the story
+    pub agent: String,
+    /// Execution duration in milliseconds
+    pub duration_ms: u64,
+    /// Start offset from overall execution start in milliseconds
+    pub start_offset_ms: u64,
+    /// Final status ("completed", "failed", "cancelled")
+    pub status: String,
+    /// Summary of quality gate result (if gates were run)
+    pub gate_result: Option<String>,
+}
+
+/// Aggregated performance metrics for a single agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPerformanceEntry {
+    /// Agent name
+    pub agent_name: String,
+    /// Number of stories assigned to this agent
+    pub stories_assigned: usize,
+    /// Number of stories completed successfully by this agent
+    pub stories_completed: usize,
+    /// Success rate (0.0 - 1.0)
+    pub success_rate: f64,
+    /// Average duration in milliseconds for completed stories
+    pub average_duration_ms: u64,
+    /// Average quality score across all quality dimensions (if available)
+    pub average_quality_score: Option<f64>,
+}
+
 /// Execution report after task mode completes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,6 +175,12 @@ pub struct ExecutionReport {
     pub agent_assignments: HashMap<String, String>,
     /// Overall success
     pub success: bool,
+    /// Per-story quality dimension scores (empty when no gate results available)
+    pub quality_scores: Vec<QualityDimensionScore>,
+    /// Timeline entries for waterfall visualization
+    pub timeline: Vec<TimelineEntry>,
+    /// Aggregated per-agent performance metrics
+    pub agent_performance: Vec<AgentPerformanceEntry>,
 }
 
 /// Current task execution status for the frontend.
@@ -637,6 +697,30 @@ pub async fn get_task_execution_report(
         return Ok(CommandResponse::err("Execution has not finished yet"));
     }
 
+    // Build a story title lookup from the PRD (if available)
+    let story_title_map: HashMap<String, String> = session
+        .prd
+        .as_ref()
+        .map(|prd| {
+            prd.stories
+                .iter()
+                .map(|s| (s.id.clone(), s.title.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Build a story-to-batch-index lookup from the PRD batches
+    let story_batch_map: HashMap<String, usize> = session
+        .prd
+        .as_ref()
+        .map(|prd| {
+            prd.batches
+                .iter()
+                .flat_map(|b| b.story_ids.iter().map(move |sid| (sid.clone(), b.index)))
+                .collect()
+        })
+        .unwrap_or_default();
+
     // Try to get the real execution result
     let exec_result = state.execution_result.read().await;
     if let Some(ref result) = *exec_result {
@@ -646,6 +730,204 @@ pub async fn get_task_execution_report(
             .map(|(id, a)| (id.clone(), a.agent_name.clone()))
             .collect();
 
+        // --- Build timeline entries ---
+        let mut timeline = Vec::new();
+        // Estimate start_offset_ms per batch: sum durations of prior batches.
+        // First, collect max duration per batch from completed stories.
+        let mut batch_max_durations: HashMap<usize, u64> = HashMap::new();
+        for (story_id, state) in &result.story_results {
+            let batch_idx = story_batch_map.get(story_id).copied().unwrap_or(0);
+            if let StoryExecutionState::Completed { duration_ms, .. } = state {
+                let entry = batch_max_durations.entry(batch_idx).or_insert(0);
+                if *duration_ms > *entry {
+                    *entry = *duration_ms;
+                }
+            }
+        }
+        // Compute cumulative start offsets per batch index
+        let max_batch_idx = story_batch_map.values().copied().max().unwrap_or(0);
+        let mut batch_start_offsets: Vec<u64> = vec![0; max_batch_idx + 1];
+        for i in 1..=max_batch_idx {
+            batch_start_offsets[i] =
+                batch_start_offsets[i - 1] + batch_max_durations.get(&(i - 1)).copied().unwrap_or(0);
+        }
+
+        for (story_id, story_state) in &result.story_results {
+            let batch_idx = story_batch_map.get(story_id).copied().unwrap_or(0);
+            let start_offset_ms = batch_start_offsets
+                .get(batch_idx)
+                .copied()
+                .unwrap_or(0);
+            let story_title = story_title_map
+                .get(story_id)
+                .cloned()
+                .unwrap_or_else(|| story_id.clone());
+
+            match story_state {
+                StoryExecutionState::Completed {
+                    agent,
+                    duration_ms,
+                    gate_result,
+                } => {
+                    let gate_summary = gate_result.as_ref().map(|pr| {
+                        if pr.passed {
+                            "passed".to_string()
+                        } else {
+                            format!(
+                                "failed ({})",
+                                pr.short_circuit_phase
+                                    .map(|p| p.to_string())
+                                    .unwrap_or_else(|| "validation".to_string())
+                            )
+                        }
+                    });
+                    timeline.push(TimelineEntry {
+                        story_id: story_id.clone(),
+                        story_title,
+                        batch_index: batch_idx,
+                        agent: agent.clone(),
+                        duration_ms: *duration_ms,
+                        start_offset_ms,
+                        status: "completed".to_string(),
+                        gate_result: gate_summary,
+                    });
+                }
+                StoryExecutionState::Failed {
+                    last_agent,
+                    ..
+                } => {
+                    timeline.push(TimelineEntry {
+                        story_id: story_id.clone(),
+                        story_title,
+                        batch_index: batch_idx,
+                        agent: last_agent.clone(),
+                        duration_ms: 0,
+                        start_offset_ms,
+                        status: "failed".to_string(),
+                        gate_result: None,
+                    });
+                }
+                StoryExecutionState::Cancelled => {
+                    timeline.push(TimelineEntry {
+                        story_id: story_id.clone(),
+                        story_title,
+                        batch_index: batch_idx,
+                        agent: agent_assignments
+                            .get(story_id)
+                            .cloned()
+                            .unwrap_or_default(),
+                        duration_ms: 0,
+                        start_offset_ms,
+                        status: "cancelled".to_string(),
+                        gate_result: None,
+                    });
+                }
+                _ => {} // Pending/Running shouldn't appear in final results
+            }
+        }
+        // Sort timeline by batch_index then story_id for deterministic output
+        timeline.sort_by(|a, b| {
+            a.batch_index
+                .cmp(&b.batch_index)
+                .then_with(|| a.story_id.cmp(&b.story_id))
+        });
+
+        // --- Build agent performance ---
+        // Tracks: (assigned, completed, durations_vec)
+        let mut agent_stats: HashMap<String, (usize, usize, Vec<u64>)> = HashMap::new();
+        for (story_id, assignment) in &result.agent_assignments {
+            let entry = agent_stats
+                .entry(assignment.agent_name.clone())
+                .or_insert((0, 0, Vec::new()));
+            entry.0 += 1; // assigned
+            if let Some(story_state) = result.story_results.get(story_id) {
+                if let StoryExecutionState::Completed { duration_ms, .. } = story_state {
+                    entry.1 += 1; // completed
+                    entry.2.push(*duration_ms);
+                }
+            }
+        }
+        let agent_performance: Vec<AgentPerformanceEntry> = agent_stats
+            .into_iter()
+            .map(|(agent_name, (assigned, completed, durations))| {
+                let success_rate = if assigned > 0 {
+                    completed as f64 / assigned as f64
+                } else {
+                    0.0
+                };
+                let average_duration_ms = if !durations.is_empty() {
+                    durations.iter().sum::<u64>() / durations.len() as u64
+                } else {
+                    0
+                };
+                AgentPerformanceEntry {
+                    agent_name,
+                    stories_assigned: assigned,
+                    stories_completed: completed,
+                    success_rate,
+                    average_duration_ms,
+                    average_quality_score: None, // populated below if quality scores exist
+                }
+            })
+            .collect();
+
+        // --- Build quality scores ---
+        let quality_dimensions = [
+            "correctness",
+            "readability",
+            "maintainability",
+            "test_coverage",
+            "security",
+        ];
+        let mut quality_scores = Vec::new();
+        for (story_id, story_state) in &result.story_results {
+            if let StoryExecutionState::Completed {
+                gate_result: Some(pipeline_result),
+                ..
+            } = story_state
+            {
+                // Extract quality dimension scores from gate results.
+                // Each gate that passed gets 100, failed gets 0. We map gate IDs
+                // to quality dimensions where possible, and generate default
+                // dimension scores based on overall pass/fail.
+                let gate_results: Vec<_> = pipeline_result
+                    .phase_results
+                    .iter()
+                    .flat_map(|pr| pr.gate_results.iter())
+                    .collect();
+
+                for dim in &quality_dimensions {
+                    let score = compute_quality_dimension_score(dim, &gate_results, pipeline_result.passed);
+                    quality_scores.push(QualityDimensionScore {
+                        story_id: story_id.clone(),
+                        dimension: dim.to_string(),
+                        score,
+                        max_score: 100.0,
+                    });
+                }
+            }
+        }
+
+        // Compute average quality score per agent
+        let mut agent_performance = agent_performance;
+        for entry in &mut agent_performance {
+            let agent_story_scores: Vec<f64> = quality_scores
+                .iter()
+                .filter(|qs| {
+                    result
+                        .agent_assignments
+                        .get(&qs.story_id)
+                        .map(|a| a.agent_name == entry.agent_name)
+                        .unwrap_or(false)
+                })
+                .map(|qs| qs.score)
+                .collect();
+            if !agent_story_scores.is_empty() {
+                let avg = agent_story_scores.iter().sum::<f64>() / agent_story_scores.len() as f64;
+                entry.average_quality_score = Some(avg);
+            }
+        }
+
         return Ok(CommandResponse::ok(ExecutionReport {
             session_id: session.session_id.clone(),
             total_stories: result.total_stories,
@@ -654,10 +936,13 @@ pub async fn get_task_execution_report(
             total_duration_ms: result.total_duration_ms,
             agent_assignments,
             success: result.success,
+            quality_scores,
+            timeline,
+            agent_performance,
         }));
     }
 
-    // Fallback to progress-based report
+    // Fallback to progress-based report (no BatchExecutionResult available)
     let progress = session.progress.clone().unwrap_or(BatchExecutionProgress {
         current_batch: 0,
         total_batches: 0,
@@ -676,6 +961,9 @@ pub async fn get_task_execution_report(
         total_duration_ms: 0,
         agent_assignments: HashMap::new(),
         success: session.status == TaskModeStatus::Completed,
+        quality_scores: Vec::new(),
+        timeline: Vec::new(),
+        agent_performance: Vec::new(),
     }))
 }
 
@@ -717,6 +1005,55 @@ pub async fn exit_task_mode(
 // ============================================================================
 // Story Executor
 // ============================================================================
+
+/// Load story-specific context from the project's design_doc.json.
+///
+/// Reads `design_doc.json` from the project root and extracts the story
+/// mapping for the given `story_id` from the `story_mappings` section.
+/// Returns `None` gracefully when the file does not exist, cannot be parsed,
+/// or the story ID is not present in the mappings.
+fn load_story_context(project_path: &std::path::Path, story_id: &str) -> Option<StoryContext> {
+    let design_doc_path = project_path.join("design_doc.json");
+    let content = std::fs::read_to_string(&design_doc_path).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let mappings = doc.get("story_mappings")?.as_object()?;
+    let mapping = mappings.get(story_id)?;
+
+    Some(StoryContext {
+        relevant_files: mapping
+            .get("files")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        components: mapping
+            .get("components")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        design_decisions: mapping
+            .get("decisions")
+            .or_else(|| mapping.get("design_decisions"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        additional_context: mapping
+            .get("additional_context")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+    })
+}
 
 /// Build a story executor callback that runs each story through a CLI agent.
 ///
@@ -761,6 +1098,12 @@ fn build_story_executor(
                         progress_pct: 0.0,
                     },
                 );
+            }
+
+            // Load story-specific context from design_doc.json if available
+            let mut ctx = ctx;
+            if ctx.story_context.is_none() {
+                ctx.story_context = load_story_context(&ctx.project_path, &ctx.story_id);
             }
 
             // Build execution prompt from story context
@@ -879,6 +1222,31 @@ fn build_story_prompt(ctx: &StoryExecutionContext) -> String {
         ctx.story_title, ctx.story_id, ctx.story_description, criteria,
     );
 
+    if let Some(ref story_ctx) = ctx.story_context {
+        prompt.push_str("\n\n## Relevant Context\n");
+        if !story_ctx.relevant_files.is_empty() {
+            prompt.push_str("\n### Relevant Files\n");
+            for f in &story_ctx.relevant_files {
+                prompt.push_str(&format!("- {}\n", f));
+            }
+        }
+        if !story_ctx.components.is_empty() {
+            prompt.push_str("\n### Components\n");
+            for c in &story_ctx.components {
+                prompt.push_str(&format!("- {}\n", c));
+            }
+        }
+        if !story_ctx.design_decisions.is_empty() {
+            prompt.push_str("\n### Design Decisions\n");
+            for d in &story_ctx.design_decisions {
+                prompt.push_str(&format!("- {}\n", d));
+            }
+        }
+        if let Some(ref extra) = story_ctx.additional_context {
+            prompt.push_str(&format!("\n### Additional Context\n{}\n", extra));
+        }
+    }
+
     if let Some(ref retry) = ctx.retry_context {
         prompt.push_str(&format!(
             "\n\n## Retry Context (Attempt {})\n\
@@ -890,6 +1258,48 @@ fn build_story_prompt(ctx: &StoryExecutionContext) -> String {
     }
 
     prompt
+}
+
+// ============================================================================
+// Quality Score Helpers
+// ============================================================================
+
+/// Compute a quality dimension score from gate results.
+///
+/// Maps quality dimensions to relevant gates where possible:
+/// - "correctness" -> overall pipeline pass/fail
+/// - "readability" -> "code_review" gate result
+/// - "maintainability" -> "code_review" gate result
+/// - "test_coverage" -> "ai_verify" gate result
+/// - "security" -> "ai_verify" gate result
+///
+/// When a specific gate is found, the score is 100 if passed, 0 if failed.
+/// When no relevant gate is found, falls back to 80 if the overall pipeline
+/// passed, or 20 if it failed (partial credit for completing execution).
+fn compute_quality_dimension_score(
+    dimension: &str,
+    gate_results: &[&crate::services::quality_gates::pipeline::PipelineGateResult],
+    overall_passed: bool,
+) -> f64 {
+    let relevant_gate_id = match dimension {
+        "correctness" => None, // based on overall pass/fail
+        "readability" | "maintainability" => Some("code_review"),
+        "test_coverage" | "security" => Some("ai_verify"),
+        _ => None,
+    };
+
+    if let Some(gate_id) = relevant_gate_id {
+        if let Some(gate) = gate_results.iter().find(|g| g.gate_id == gate_id) {
+            return if gate.passed { 100.0 } else { 0.0 };
+        }
+    }
+
+    // Fallback: derive from overall pipeline result
+    if overall_passed {
+        80.0
+    } else {
+        20.0
+    }
 }
 
 // ============================================================================
@@ -972,11 +1382,238 @@ mod tests {
             total_duration_ms: 10000,
             agent_assignments: HashMap::new(),
             success: false,
+            quality_scores: vec![QualityDimensionScore {
+                story_id: "s1".to_string(),
+                dimension: "correctness".to_string(),
+                score: 80.0,
+                max_score: 100.0,
+            }],
+            timeline: vec![TimelineEntry {
+                story_id: "s1".to_string(),
+                story_title: "Story 1".to_string(),
+                batch_index: 0,
+                agent: "claude-sonnet".to_string(),
+                duration_ms: 5000,
+                start_offset_ms: 0,
+                status: "completed".to_string(),
+                gate_result: Some("passed".to_string()),
+            }],
+            agent_performance: vec![AgentPerformanceEntry {
+                agent_name: "claude-sonnet".to_string(),
+                stories_assigned: 3,
+                stories_completed: 2,
+                success_rate: 0.666,
+                average_duration_ms: 4500,
+                average_quality_score: Some(85.0),
+            }],
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("\"storiesCompleted\""));
         assert!(json.contains("\"totalDurationMs\""));
         assert!(json.contains("\"agentAssignments\""));
+        assert!(json.contains("\"qualityScores\""));
+        assert!(json.contains("\"timeline\""));
+        assert!(json.contains("\"agentPerformance\""));
+    }
+
+    #[test]
+    fn test_quality_dimension_score_serialization() {
+        let score = QualityDimensionScore {
+            story_id: "story-001".to_string(),
+            dimension: "correctness".to_string(),
+            score: 95.0,
+            max_score: 100.0,
+        };
+        let json = serde_json::to_string(&score).unwrap();
+        assert!(json.contains("\"storyId\""));
+        assert!(json.contains("\"dimension\""));
+        assert!(json.contains("\"score\""));
+        assert!(json.contains("\"maxScore\""));
+        // Verify exact camelCase field names
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["storyId"], "story-001");
+        assert_eq!(parsed["maxScore"], 100.0);
+    }
+
+    #[test]
+    fn test_timeline_entry_serialization() {
+        let entry = TimelineEntry {
+            story_id: "story-002".to_string(),
+            story_title: "Implement Auth".to_string(),
+            batch_index: 1,
+            agent: "claude-sonnet".to_string(),
+            duration_ms: 8500,
+            start_offset_ms: 3000,
+            status: "completed".to_string(),
+            gate_result: Some("passed".to_string()),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"storyId\""));
+        assert!(json.contains("\"storyTitle\""));
+        assert!(json.contains("\"batchIndex\""));
+        assert!(json.contains("\"durationMs\""));
+        assert!(json.contains("\"startOffsetMs\""));
+        assert!(json.contains("\"gateResult\""));
+        // Verify exact camelCase field names
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["storyId"], "story-002");
+        assert_eq!(parsed["batchIndex"], 1);
+        assert_eq!(parsed["durationMs"], 8500);
+        assert_eq!(parsed["startOffsetMs"], 3000);
+    }
+
+    #[test]
+    fn test_agent_performance_entry_serialization() {
+        let entry = AgentPerformanceEntry {
+            agent_name: "claude-sonnet".to_string(),
+            stories_assigned: 5,
+            stories_completed: 4,
+            success_rate: 0.8,
+            average_duration_ms: 6000,
+            average_quality_score: Some(87.5),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"agentName\""));
+        assert!(json.contains("\"storiesAssigned\""));
+        assert!(json.contains("\"storiesCompleted\""));
+        assert!(json.contains("\"successRate\""));
+        assert!(json.contains("\"averageDurationMs\""));
+        assert!(json.contains("\"averageQualityScore\""));
+        // Verify exact camelCase field names
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["agentName"], "claude-sonnet");
+        assert_eq!(parsed["storiesAssigned"], 5);
+        assert_eq!(parsed["averageDurationMs"], 6000);
+    }
+
+    #[test]
+    fn test_agent_performance_entry_null_quality_score() {
+        let entry = AgentPerformanceEntry {
+            agent_name: "codex".to_string(),
+            stories_assigned: 2,
+            stories_completed: 0,
+            success_rate: 0.0,
+            average_duration_ms: 0,
+            average_quality_score: None,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["averageQualityScore"].is_null());
+    }
+
+    #[test]
+    fn test_execution_report_empty_enriched_fields() {
+        // Simulates the fallback report with empty new fields
+        let report = ExecutionReport {
+            session_id: "test-fallback".to_string(),
+            total_stories: 3,
+            stories_completed: 0,
+            stories_failed: 0,
+            total_duration_ms: 0,
+            agent_assignments: HashMap::new(),
+            success: false,
+            quality_scores: Vec::new(),
+            timeline: Vec::new(),
+            agent_performance: Vec::new(),
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["qualityScores"].as_array().unwrap().len(), 0);
+        assert_eq!(parsed["timeline"].as_array().unwrap().len(), 0);
+        assert_eq!(parsed["agentPerformance"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_timeline_entry_with_null_gate_result() {
+        let entry = TimelineEntry {
+            story_id: "s1".to_string(),
+            story_title: "Story".to_string(),
+            batch_index: 0,
+            agent: "agent".to_string(),
+            duration_ms: 0,
+            start_offset_ms: 0,
+            status: "failed".to_string(),
+            gate_result: None,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["gateResult"].is_null());
+    }
+
+    #[test]
+    fn test_quality_dimension_score_roundtrip() {
+        let score = QualityDimensionScore {
+            story_id: "s1".to_string(),
+            dimension: "security".to_string(),
+            score: 100.0,
+            max_score: 100.0,
+        };
+        let json = serde_json::to_string(&score).unwrap();
+        let deserialized: QualityDimensionScore = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.story_id, "s1");
+        assert_eq!(deserialized.dimension, "security");
+        assert_eq!(deserialized.score, 100.0);
+        assert_eq!(deserialized.max_score, 100.0);
+    }
+
+    #[test]
+    fn test_compute_quality_dimension_score_helper() {
+        use crate::services::quality_gates::pipeline::{GatePhase, PipelineGateResult};
+
+        // Test with matching code_review gate that passed
+        let gate = PipelineGateResult::passed(
+            "code_review",
+            "Code Review",
+            GatePhase::PostValidation,
+            100,
+        );
+        let results = vec![&gate];
+        assert_eq!(
+            compute_quality_dimension_score("readability", &results, true),
+            100.0
+        );
+        assert_eq!(
+            compute_quality_dimension_score("maintainability", &results, true),
+            100.0
+        );
+
+        // Test with matching ai_verify gate that passed
+        let gate2 = PipelineGateResult::passed(
+            "ai_verify",
+            "AI Verify",
+            GatePhase::PostValidation,
+            50,
+        );
+        let results2 = vec![&gate2];
+        assert_eq!(
+            compute_quality_dimension_score("test_coverage", &results2, true),
+            100.0
+        );
+        assert_eq!(
+            compute_quality_dimension_score("security", &results2, true),
+            100.0
+        );
+
+        // Test correctness (uses overall pass/fail, no gate mapping)
+        assert_eq!(
+            compute_quality_dimension_score("correctness", &results, true),
+            80.0
+        );
+        assert_eq!(
+            compute_quality_dimension_score("correctness", &results, false),
+            20.0
+        );
+
+        // Test fallback when no relevant gate found
+        let empty: Vec<&PipelineGateResult> = vec![];
+        assert_eq!(
+            compute_quality_dimension_score("readability", &empty, true),
+            80.0
+        );
+        assert_eq!(
+            compute_quality_dimension_score("readability", &empty, false),
+            20.0
+        );
     }
 
     #[test]
@@ -1000,5 +1637,243 @@ mod tests {
         let state = test_state();
         let session = state.session.read().await;
         assert!(session.is_none());
+    }
+
+    // ========================================================================
+    // StoryContext & load_story_context Tests
+    // ========================================================================
+
+    /// Helper to create a StoryExecutionContext for prompt tests.
+    fn make_story_ctx(story_context: Option<StoryContext>) -> StoryExecutionContext {
+        StoryExecutionContext {
+            story_id: "story-001".to_string(),
+            story_title: "Add Login Feature".to_string(),
+            story_description: "Implement user login with OAuth".to_string(),
+            acceptance_criteria: vec![
+                "Users can log in".to_string(),
+                "OAuth tokens are stored securely".to_string(),
+            ],
+            agent_name: "claude-sonnet".to_string(),
+            project_path: std::path::PathBuf::from("/tmp/test-project"),
+            attempt: 1,
+            retry_context: None,
+            story_context,
+        }
+    }
+
+    #[test]
+    fn test_load_story_context_with_valid_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let design_doc = serde_json::json!({
+            "story_mappings": {
+                "story-001": {
+                    "files": ["src/auth.rs", "src/oauth.rs"],
+                    "components": ["AuthService", "OAuthProvider"],
+                    "decisions": ["ADR-001: Use OAuth2"],
+                    "additional_context": "Requires HTTPS in production"
+                }
+            }
+        });
+        std::fs::write(
+            tmp.path().join("design_doc.json"),
+            serde_json::to_string_pretty(&design_doc).unwrap(),
+        )
+        .unwrap();
+
+        let ctx = load_story_context(tmp.path(), "story-001");
+        assert!(ctx.is_some());
+        let ctx = ctx.unwrap();
+        assert_eq!(ctx.relevant_files, vec!["src/auth.rs", "src/oauth.rs"]);
+        assert_eq!(ctx.components, vec!["AuthService", "OAuthProvider"]);
+        assert_eq!(ctx.design_decisions, vec!["ADR-001: Use OAuth2"]);
+        assert_eq!(
+            ctx.additional_context.as_deref(),
+            Some("Requires HTTPS in production")
+        );
+    }
+
+    #[test]
+    fn test_load_story_context_with_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No design_doc.json created
+        let ctx = load_story_context(tmp.path(), "story-001");
+        assert!(ctx.is_none());
+    }
+
+    #[test]
+    fn test_load_story_context_with_missing_story() {
+        let tmp = tempfile::tempdir().unwrap();
+        let design_doc = serde_json::json!({
+            "story_mappings": {
+                "story-999": {
+                    "files": ["src/other.rs"],
+                    "components": [],
+                    "decisions": []
+                }
+            }
+        });
+        std::fs::write(
+            tmp.path().join("design_doc.json"),
+            serde_json::to_string_pretty(&design_doc).unwrap(),
+        )
+        .unwrap();
+
+        let ctx = load_story_context(tmp.path(), "story-001");
+        assert!(ctx.is_none());
+    }
+
+    #[test]
+    fn test_load_story_context_with_design_decisions_field() {
+        // Test fallback: "design_decisions" instead of "decisions"
+        let tmp = tempfile::tempdir().unwrap();
+        let design_doc = serde_json::json!({
+            "story_mappings": {
+                "story-002": {
+                    "files": [],
+                    "components": [],
+                    "design_decisions": ["ADR-F002: Retry with repair"]
+                }
+            }
+        });
+        std::fs::write(
+            tmp.path().join("design_doc.json"),
+            serde_json::to_string_pretty(&design_doc).unwrap(),
+        )
+        .unwrap();
+
+        let ctx = load_story_context(tmp.path(), "story-002");
+        assert!(ctx.is_some());
+        let ctx = ctx.unwrap();
+        assert_eq!(
+            ctx.design_decisions,
+            vec!["ADR-F002: Retry with repair"]
+        );
+    }
+
+    #[test]
+    fn test_load_story_context_with_invalid_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("design_doc.json"), "not valid json {{{")
+            .unwrap();
+
+        let ctx = load_story_context(tmp.path(), "story-001");
+        assert!(ctx.is_none());
+    }
+
+    #[test]
+    fn test_load_story_context_with_no_story_mappings_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let design_doc = serde_json::json!({
+            "title": "Design Doc",
+            "components": []
+        });
+        std::fs::write(
+            tmp.path().join("design_doc.json"),
+            serde_json::to_string_pretty(&design_doc).unwrap(),
+        )
+        .unwrap();
+
+        let ctx = load_story_context(tmp.path(), "story-001");
+        assert!(ctx.is_none());
+    }
+
+    #[test]
+    fn test_build_story_prompt_without_context() {
+        let ctx = make_story_ctx(None);
+        let prompt = build_story_prompt(&ctx);
+
+        assert!(prompt.contains("Add Login Feature"));
+        assert!(prompt.contains("story-001"));
+        assert!(prompt.contains("Implement user login with OAuth"));
+        assert!(prompt.contains("1. Users can log in"));
+        assert!(prompt.contains("2. OAuth tokens are stored securely"));
+        // Should NOT contain context section
+        assert!(!prompt.contains("## Relevant Context"));
+    }
+
+    #[test]
+    fn test_build_story_prompt_with_context() {
+        let story_ctx = StoryContext {
+            relevant_files: vec!["src/auth.rs".to_string(), "src/oauth.rs".to_string()],
+            components: vec!["AuthService".to_string()],
+            design_decisions: vec!["ADR-001: Use OAuth2".to_string()],
+            additional_context: Some("Must support Google and GitHub".to_string()),
+        };
+        let ctx = make_story_ctx(Some(story_ctx));
+        let prompt = build_story_prompt(&ctx);
+
+        // Standard prompt parts
+        assert!(prompt.contains("Add Login Feature"));
+        assert!(prompt.contains("story-001"));
+
+        // Context section
+        assert!(prompt.contains("## Relevant Context"));
+        assert!(prompt.contains("### Relevant Files"));
+        assert!(prompt.contains("- src/auth.rs"));
+        assert!(prompt.contains("- src/oauth.rs"));
+        assert!(prompt.contains("### Components"));
+        assert!(prompt.contains("- AuthService"));
+        assert!(prompt.contains("### Design Decisions"));
+        assert!(prompt.contains("- ADR-001: Use OAuth2"));
+        assert!(prompt.contains("### Additional Context"));
+        assert!(prompt.contains("Must support Google and GitHub"));
+    }
+
+    #[test]
+    fn test_build_story_prompt_with_partial_context() {
+        // Only relevant_files, no components/decisions/additional
+        let story_ctx = StoryContext {
+            relevant_files: vec!["src/main.rs".to_string()],
+            components: vec![],
+            design_decisions: vec![],
+            additional_context: None,
+        };
+        let ctx = make_story_ctx(Some(story_ctx));
+        let prompt = build_story_prompt(&ctx);
+
+        assert!(prompt.contains("## Relevant Context"));
+        assert!(prompt.contains("### Relevant Files"));
+        assert!(prompt.contains("- src/main.rs"));
+        // Empty sections should be omitted
+        assert!(!prompt.contains("### Components"));
+        assert!(!prompt.contains("### Design Decisions"));
+        assert!(!prompt.contains("### Additional Context"));
+    }
+
+    #[test]
+    fn test_story_context_serialization_roundtrip() {
+        let ctx = StoryContext {
+            relevant_files: vec!["src/lib.rs".to_string(), "tests/test.rs".to_string()],
+            components: vec!["Parser".to_string(), "Lexer".to_string()],
+            design_decisions: vec!["ADR-003: Use tree-sitter".to_string()],
+            additional_context: Some("Performance-critical path".to_string()),
+        };
+        let json = serde_json::to_string(&ctx).unwrap();
+        let deserialized: StoryContext = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.relevant_files, ctx.relevant_files);
+        assert_eq!(deserialized.components, ctx.components);
+        assert_eq!(deserialized.design_decisions, ctx.design_decisions);
+        assert_eq!(deserialized.additional_context, ctx.additional_context);
+
+        // Verify camelCase serialization
+        assert!(json.contains("\"relevantFiles\""));
+        assert!(json.contains("\"designDecisions\""));
+        assert!(json.contains("\"additionalContext\""));
+    }
+
+    #[test]
+    fn test_story_context_serialization_with_none_additional() {
+        let ctx = StoryContext {
+            relevant_files: vec![],
+            components: vec![],
+            design_decisions: vec![],
+            additional_context: None,
+        };
+        let json = serde_json::to_string(&ctx).unwrap();
+        let deserialized: StoryContext = serde_json::from_str(&json).unwrap();
+
+        assert!(deserialized.relevant_files.is_empty());
+        assert!(deserialized.additional_context.is_none());
     }
 }

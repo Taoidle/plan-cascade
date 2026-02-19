@@ -211,6 +211,19 @@ fn write_typescript_agent_definition(out: &mut String, node_id: &str, step: &Age
             writeln!(out, "  branches: [{}],", branch_strs.join(", ")).unwrap();
             writeln!(out, "}});").unwrap();
         }
+        AgentStep::LoopStep {
+            name,
+            condition_key,
+            max_iterations,
+            step: _,
+        } => {
+            writeln!(out, "const {} = new AgentNode({{", var_name).unwrap();
+            writeln!(out, "  name: \"{}\",", name).unwrap();
+            writeln!(out, "  type: \"loop\",").unwrap();
+            writeln!(out, "  conditionKey: \"{}\",", condition_key).unwrap();
+            writeln!(out, "  maxIterations: {},", max_iterations).unwrap();
+            writeln!(out, "}});").unwrap();
+        }
     }
 }
 
@@ -531,6 +544,24 @@ fn write_rust_agent_step(out: &mut String, step: &AgentStep, indent: &str) {
             writeln!(out, "{}    default_branch: None,", indent).unwrap();
             writeln!(out, "{}}},", indent).unwrap();
         }
+        AgentStep::LoopStep {
+            name,
+            condition_key,
+            max_iterations,
+            step: _,
+        } => {
+            writeln!(out, "{}agent_step: AgentStep::LoopStep {{", indent).unwrap();
+            writeln!(out, "{}    name: \"{}\".to_string(),", indent, name).unwrap();
+            writeln!(
+                out,
+                "{}    condition_key: \"{}\".to_string(),",
+                indent, condition_key
+            )
+            .unwrap();
+            writeln!(out, "{}    max_iterations: {},", indent, max_iterations).unwrap();
+            writeln!(out, "{}    step: Box::new(/* sub-step */),", indent).unwrap();
+            writeln!(out, "{}}},", indent).unwrap();
+        }
     }
 }
 
@@ -641,6 +672,7 @@ fn steps_summary(steps: &[AgentStep]) -> String {
                 AgentStep::SequentialStep { name, .. } => name.clone(),
                 AgentStep::ParallelStep { name, .. } => name.clone(),
                 AgentStep::ConditionalStep { name, .. } => name.clone(),
+                AgentStep::LoopStep { name, .. } => name.clone(),
             };
             format!("\"{}\"", name)
         })

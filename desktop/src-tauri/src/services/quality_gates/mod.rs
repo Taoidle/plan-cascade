@@ -15,6 +15,7 @@ pub mod dod;
 pub mod dor;
 pub mod format;
 pub mod pipeline;
+pub mod validation;
 
 pub use detector::*;
 pub use runner::*;
@@ -25,6 +26,7 @@ pub use code_review::{CodeReviewGate, CodeReviewResult};
 pub use dod::{DoDGate, DoDInput};
 pub use dor::{DoRGate, StoryForValidation};
 pub use format::FormatGate;
+pub use validation::ValidationGate;
 pub use pipeline::{
     GateMode, GatePhase, GatePipeline, PipelineConfig, PipelineGateResult, PipelinePhaseResult,
     PipelineResult,

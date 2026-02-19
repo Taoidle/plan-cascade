@@ -322,6 +322,7 @@ fn get_agent_step_name(step: &crate::services::agent_composer::types::AgentStep)
         AgentStep::SequentialStep { name, .. } => name.clone(),
         AgentStep::ParallelStep { name, .. } => name.clone(),
         AgentStep::ConditionalStep { name, .. } => name.clone(),
+        AgentStep::LoopStep { name, .. } => name.clone(),
     }
 }
 

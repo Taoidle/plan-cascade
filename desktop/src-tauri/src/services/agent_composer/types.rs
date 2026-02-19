@@ -380,6 +380,22 @@ pub enum AgentStep {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         default_branch: Option<Box<AgentStep>>,
     },
+    /// A loop step that repeatedly executes a sub-step until a condition is met.
+    LoopStep {
+        name: String,
+        /// The shared_state key to evaluate for loop continuation.
+        /// If the value is falsy (false, 0, "", null) the loop stops.
+        condition_key: String,
+        /// Maximum number of iterations before forced termination.
+        #[serde(default = "default_loop_max_iterations")]
+        max_iterations: u32,
+        /// The sub-step to execute on each iteration.
+        step: Box<AgentStep>,
+    },
+}
+
+fn default_loop_max_iterations() -> u32 {
+    10
 }
 
 /// Configuration for an LLM agent step.

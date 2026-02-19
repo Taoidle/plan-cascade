@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use plan_cascade_desktop::commands::analytics::AnalyticsState;
+use plan_cascade_desktop::commands::artifacts::ArtifactState;
 use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
 use plan_cascade_desktop::commands::guardrails::GuardrailState;
 use plan_cascade_desktop::commands::lsp::LspState;
@@ -42,6 +43,7 @@ fn main() {
         .manage(TaskModeState::new())
         .manage(ExecutionRegistry::new())
         .manage(KnowledgeState::new())
+        .manage(ArtifactState::new())
         .manage(GitState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
@@ -374,6 +376,12 @@ fn main() {
             plan_cascade_desktop::commands::a2a::list_a2a_agents,
             plan_cascade_desktop::commands::a2a::register_a2a_agent,
             plan_cascade_desktop::commands::a2a::remove_a2a_agent,
+            // Artifact commands
+            plan_cascade_desktop::commands::artifacts::artifact_save,
+            plan_cascade_desktop::commands::artifacts::artifact_load,
+            plan_cascade_desktop::commands::artifacts::artifact_list,
+            plan_cascade_desktop::commands::artifacts::artifact_versions,
+            plan_cascade_desktop::commands::artifacts::artifact_delete,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

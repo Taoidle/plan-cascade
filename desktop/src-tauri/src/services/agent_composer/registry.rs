@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::conditional::{ConditionalAgent, ConditionFn};
 use super::llm_agent::LlmAgent;
+use super::loop_agent::{LoopAgent, build_loop_condition};
 use super::parallel::ParallelAgent;
 use super::sequential::SequentialAgent;
 use super::types::{Agent, AgentPipeline, AgentStep, LlmStepConfig};
@@ -168,6 +169,18 @@ impl ComposerRegistry {
                 }
 
                 Ok(Arc::new(cond_agent))
+            }
+            AgentStep::LoopStep {
+                name,
+                condition_key,
+                max_iterations,
+                step,
+            } => {
+                let sub_agent = self.build_step(step)?;
+                let condition = build_loop_condition(condition_key.clone());
+                let loop_agent = LoopAgent::new(name.clone(), sub_agent, condition)
+                    .with_max_iterations(*max_iterations);
+                Ok(Arc::new(loop_agent))
             }
         }
     }
