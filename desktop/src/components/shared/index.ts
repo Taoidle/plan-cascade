@@ -20,7 +20,6 @@ export {
   type GlobalCommandPaletteContext,
 } from './CommandPalette';
 
-export { Breadcrumb } from './Breadcrumb';
 export { ContextualActions } from './ContextualActions';
 export { ShortcutOverlay } from './ShortcutOverlay';
 export { FeatureTour } from './FeatureTour';

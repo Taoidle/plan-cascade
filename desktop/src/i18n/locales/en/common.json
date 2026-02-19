@@ -41,6 +41,11 @@
     "disconnected": "Disconnected"
   },
 
+  "iconRail": {
+    "searchTooltip": "Search commands",
+    "settingsTooltip": "Settings"
+  },
+
   "modeSwitch": {
     "label": "Select Mode",
     "simple": {

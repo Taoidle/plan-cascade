@@ -18,6 +18,7 @@ interface GeneralSectionProps {
 
 export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
   const { t } = useTranslation('settings');
+  const { t: tCommon } = useTranslation();
   const { t: tWizard } = useTranslation('wizard');
   const {
     defaultMode,
@@ -307,6 +308,14 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
               {tWizard('settings.replayTour')}
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* Version Info */}
+      <section className="pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+          <span>{tCommon('appName')}</span>
+          <span>{tCommon('version')}</span>
         </div>
       </section>
     </div>

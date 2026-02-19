@@ -41,6 +41,11 @@
     "disconnected": "切断済み"
   },
 
+  "iconRail": {
+    "searchTooltip": "コマンドを検索",
+    "settingsTooltip": "設定"
+  },
+
   "modeSwitch": {
     "label": "モードを選択",
     "simple": {
@@ -62,6 +67,14 @@
     "analytics": {
       "name": "アナリティクス",
       "description": "使用量、コスト、API分析の追跡"
+    },
+    "knowledge": {
+      "name": "ナレッジ",
+      "description": "プロジェクトナレッジベースとRAG検索"
+    },
+    "artifacts": {
+      "name": "アーティファクト",
+      "description": "バージョン管理されたアーティファクトの閲覧と管理"
     }
   },
 

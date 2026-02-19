@@ -41,6 +41,11 @@
     "disconnected": "已断开"
   },
 
+  "iconRail": {
+    "searchTooltip": "搜索命令",
+    "settingsTooltip": "设置"
+  },
+
   "modeSwitch": {
     "label": "选择模式",
     "simple": {

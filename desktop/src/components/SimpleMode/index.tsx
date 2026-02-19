@@ -22,6 +22,7 @@ import { useExecutionStore, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { deriveConversationTurns } from '../../lib/conversationUtils';
 import { StreamingOutput, GlobalProgressBar, ErrorState, ProjectSelector, IndexStatus } from '../shared';
+import { ContextualActions } from '../shared/ContextualActions';
 
 type WorkflowMode = 'chat' | 'task';
 
@@ -39,6 +40,9 @@ export function SimpleMode() {
     apiError,
     start,
     sendFollowUp,
+    pause,
+    resume,
+    cancel,
     reset,
     initialize,
     cleanup,
@@ -154,6 +158,14 @@ export function SimpleMode() {
         </div>
 
         <div className="flex items-center gap-2">
+          <ContextualActions
+            className="hidden lg:flex"
+            onPauseExecution={pause}
+            onResumeExecution={resume}
+            onCancelExecution={cancel}
+            onResetExecution={reset}
+          />
+
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className={clsx(

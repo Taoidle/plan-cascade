@@ -228,9 +228,9 @@ export function AnimatedModeContent({ children, mode }: AnimatedModeContentProps
     if (!isTransitioning) return 'opacity-100 translate-x-0';
     switch (transitionDirection) {
       case 'left':
-        return 'animate-in fade-in-0 slide-in-from-right-4 duration-200 ease-out';
+        return 'animate-in fade-in-0 slide-in-from-bottom-2 duration-200 ease-out';
       case 'right':
-        return 'animate-in fade-in-0 slide-in-from-left-4 duration-200 ease-out';
+        return 'animate-in fade-in-0 slide-in-from-top-2 duration-200 ease-out';
       default:
         return 'animate-in fade-in-0 duration-200 ease-out';
     }
