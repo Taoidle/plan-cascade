@@ -8,6 +8,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import type { BranchInfo, RemoteBranchInfo, CommandResponse } from '../../../../types/git';
@@ -88,17 +89,18 @@ function CollapsibleSection({
 // ---------------------------------------------------------------------------
 
 function AheadBehindBadge({ ahead, behind }: { ahead: number; behind: number }) {
+  const { t } = useTranslation('git');
   if (ahead === 0 && behind === 0) return null;
 
   return (
     <span className="flex items-center gap-1 text-2xs font-mono text-gray-500 dark:text-gray-400">
       {ahead > 0 && (
-        <span className="text-green-600 dark:text-green-400" title={`${ahead} ahead`}>
+        <span className="text-green-600 dark:text-green-400" title={t('branchList.ahead', { count: ahead })}>
           {'\u2191'}{ahead}
         </span>
       )}
       {behind > 0 && (
-        <span className="text-orange-600 dark:text-orange-400" title={`${behind} behind`}>
+        <span className="text-orange-600 dark:text-orange-400" title={t('branchList.behind', { count: behind })}>
           {'\u2193'}{behind}
         </span>
       )}
@@ -121,6 +123,7 @@ function BranchRow({
   onRefresh: () => Promise<void>;
   onMenuOpen: (branch: BranchInfo, e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation('git');
   const [checkingOut, setCheckingOut] = useState(false);
 
   const handleCheckout = useCallback(
@@ -153,7 +156,7 @@ function BranchRow({
       {/* Current branch indicator */}
       <span className="w-2 shrink-0">
         {branch.is_head && (
-          <span className="inline-block w-2 h-2 rounded-full bg-green-500" title="Current branch" />
+          <span className="inline-block w-2 h-2 rounded-full bg-green-500" title={t('branchList.currentBranch')} />
         )}
       </span>
 
@@ -182,7 +185,7 @@ function BranchRow({
             onClick={handleCheckout}
             disabled={checkingOut}
             className="p-1 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-            title="Checkout"
+            title={t('branchList.checkout')}
           >
             {checkingOut ? (
               <div className="w-3.5 h-3.5 border border-gray-400 border-t-transparent rounded-full animate-spin" />
@@ -200,7 +203,7 @@ function BranchRow({
             onMenuOpen(branch, e);
           }}
           className="p-1 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-          title="More actions"
+          title={t('branchList.moreActions')}
         >
           <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
             <circle cx="12" cy="5" r="1.5" />
@@ -254,6 +257,7 @@ function BranchContextMenu({
   onDelete: (branch: BranchInfo) => void;
   onRename: (branch: BranchInfo) => void;
 }) {
+  const { t } = useTranslation('git');
   const [loading, setLoading] = useState(false);
 
   const handlePush = useCallback(async () => {
@@ -288,7 +292,7 @@ function BranchContextMenu({
 
   const items = [
     {
-      label: `Merge into ${currentBranch?.name || 'current'}`,
+      label: t('branchList.mergeInto', { branch: currentBranch?.name || 'current' }),
       action: () => {
         onMerge(menu.branch.name);
         onClose();
@@ -297,20 +301,20 @@ function BranchContextMenu({
       show: true,
     },
     {
-      label: 'Push',
+      label: t('branchList.push'),
       action: handlePush,
       disabled: loading,
       show: menu.branch.is_head || !!menu.branch.upstream,
     },
     {
-      label: 'Pull',
+      label: t('branchList.pull'),
       action: handlePull,
       disabled: loading || !menu.branch.is_head,
       show: menu.branch.is_head,
     },
     { label: 'divider', action: () => {}, disabled: false, show: true },
     {
-      label: 'Rename',
+      label: t('branchList.rename'),
       action: () => {
         onRename(menu.branch);
         onClose();
@@ -319,7 +323,7 @@ function BranchContextMenu({
       show: true,
     },
     {
-      label: 'Delete',
+      label: t('branchList.delete'),
       action: () => {
         onDelete(menu.branch);
         onClose();
@@ -388,6 +392,7 @@ export function BranchList({
   onDelete,
   onRename,
 }: BranchListProps) {
+  const { t } = useTranslation('git');
   const [menu, setMenu] = useState<BranchMenuState | null>(null);
   const [isFetching, setIsFetching] = useState(false);
 
@@ -423,7 +428,7 @@ export function BranchList({
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
       {/* Local Branches */}
-      <CollapsibleSection title="Local" count={localBranches.length}>
+      <CollapsibleSection title={t('branchList.local')} count={localBranches.length}>
         <div>
           {sortedLocal.map((branch) => (
             <BranchRow
@@ -436,7 +441,7 @@ export function BranchList({
           ))}
           {localBranches.length === 0 && (
             <div className="px-3 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-              No local branches
+              {t('branchList.noLocalBranches')}
             </div>
           )}
         </div>
@@ -444,7 +449,7 @@ export function BranchList({
 
       {/* Remote Branches */}
       <CollapsibleSection
-        title="Remote"
+        title={t('branchList.remote')}
         count={remoteBranches.length}
         defaultOpen={false}
         actions={
@@ -456,12 +461,12 @@ export function BranchList({
               'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
               isFetching && 'opacity-50 cursor-not-allowed'
             )}
-            title="Fetch all remotes"
+            title={t('branchList.fetchAll')}
           >
             {isFetching ? (
               <div className="inline-block w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin" />
             ) : (
-              'Fetch'
+              t('branchList.fetch')
             )}
           </button>
         }
@@ -472,7 +477,7 @@ export function BranchList({
           ))}
           {remoteBranches.length === 0 && (
             <div className="px-3 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-              No remote branches
+              {t('branchList.noRemoteBranches')}
             </div>
           )}
         </div>

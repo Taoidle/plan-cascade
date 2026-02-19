@@ -12,6 +12,7 @@
  */
 
 import { useRef, useMemo, useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { GraphLayout, CommitNode } from '../../../../types/git';
 import CommitRow from './CommitRow';
 import {
@@ -72,6 +73,7 @@ export function CommitGraph({
   headSha,
   searchQuery,
 }: CommitGraphProps) {
+  const { t } = useTranslation('git');
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
@@ -220,7 +222,7 @@ export function CommitGraph({
   if (totalRows === 0) {
     return (
       <div className="flex items-center justify-center py-12 text-sm text-gray-500 dark:text-gray-400">
-        No commits to display
+        {t('historyTab.noCommitsToDisplay')}
       </div>
     );
   }

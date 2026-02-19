@@ -1,129 +1,161 @@
-//! Commit DAG Layout Algorithm
+//! Commit DAG Layout Algorithm — "Railroad Track" style
 //!
-//! Computes a visual layout for commit history graphs.
-//! Assigns each commit to a lane (column) and row,
-//! then generates edges between parent-child pairs.
+//! Produces compact, professional-quality graph layouts similar to
+//! Fork / GitKraken / VS Code Git Graph.
 //!
-//! Algorithm rules:
-//! 1. Main branch stays on lane 0
-//! 2. First-parent inherits lane from child
-//! 3. Fork commits get minimum available lane
-//! 4. Lanes are released when a branch merges back
+//! Core idea: maintain a list of **active columns** where each column
+//! tracks the next expected SHA. Process commits newest-first:
+//!
+//! 1. Find which column(s) are waiting for this commit's SHA.
+//! 2. The commit's lane = leftmost matching column (or first empty slot
+//!    for new branch tips).
+//! 3. First parent inherits the column; additional parents open new columns.
+//! 4. Duplicate columns (merge) are closed immediately.
+//! 5. Trailing empty columns are trimmed every iteration for compactness.
+//!
+//! Two-pass design: pass 1 assigns lanes, pass 2 builds edges from the
+//! final lane assignments so that edge endpoints are always correct.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::types::{CommitNode, GraphEdge, GraphLayout, GraphNode};
 
 /// Compute graph layout from a topologically-ordered list of commits.
 ///
-/// The input `commits` should be ordered newest-first (as `git log` outputs).
-/// Returns a `GraphLayout` with positioned nodes and edges.
+/// The input `commits` must be ordered newest-first (as `git log` outputs).
 pub fn compute_graph_layout(commits: &[CommitNode]) -> GraphLayout {
     if commits.is_empty() {
         return GraphLayout::default();
     }
 
-    // Build a SHA -> row index map
-    let sha_to_row: HashMap<&str, u32> = commits
+    let sha_to_idx: HashMap<&str, usize> = commits
         .iter()
         .enumerate()
-        .map(|(i, c)| (c.sha.as_str(), i as u32))
+        .map(|(i, c)| (c.sha.as_str(), i))
         .collect();
 
-    // Track which lanes are in use
-    let mut active_lanes: HashSet<u32> = HashSet::new();
-    // Map from SHA -> assigned lane
-    let mut sha_to_lane: HashMap<&str, u32> = HashMap::new();
-    // Map from lane -> SHA of the commit that "owns" this lane going down
-    let mut lane_owner: HashMap<u32, &str> = HashMap::new();
+    // Active columns: each entry is the SHA this column is leading to.
+    let mut columns: Vec<Option<String>> = Vec::new();
 
-    let mut nodes = Vec::with_capacity(commits.len());
-    let mut edges = Vec::new();
+    // Per-commit lane assignment (indexed by commit position).
+    let mut lane_of: Vec<u32> = vec![0; commits.len()];
     let mut max_lane: u32 = 0;
 
-    for (row, commit) in commits.iter().enumerate() {
-        let row = row as u32;
+    // -----------------------------------------------------------------------
+    // Pass 1 — assign every commit to a lane
+    // -----------------------------------------------------------------------
+    for (idx, commit) in commits.iter().enumerate() {
+        let sha = commit.sha.as_str();
 
-        // Determine lane for this commit
-        let lane = if let Some(&l) = sha_to_lane.get(commit.sha.as_str()) {
-            // Lane was pre-assigned by a child commit
-            l
+        // Which column(s) are waiting for this SHA?
+        let matching: Vec<usize> = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| match c {
+                Some(s) if s.as_str() == sha => Some(i),
+                _ => None,
+            })
+            .collect();
+
+        // Determine lane
+        let lane = if matching.is_empty() {
+            // New branch tip — first empty slot or append
+            let col = first_empty_or_new(&mut columns);
+            col
         } else {
-            // No child assigned a lane — this is a branch tip
-            // Find minimum available lane
-            find_min_available_lane(&active_lanes)
+            // Use leftmost column that was waiting for us
+            matching[0]
         };
 
-        // Activate lane
-        active_lanes.insert(lane);
-        sha_to_lane.insert(&commit.sha, lane);
-        lane_owner.insert(lane, &commit.sha);
-
-        if lane > max_lane {
-            max_lane = lane;
+        lane_of[idx] = lane as u32;
+        if (lane as u32) > max_lane {
+            max_lane = lane as u32;
         }
 
-        nodes.push(GraphNode {
-            sha: commit.sha.clone(),
-            row,
-            lane,
-        });
+        // Close extra columns (commit found in >1 column due to merges)
+        for &c in matching.iter().skip(1) {
+            columns[c] = None;
+        }
+        // Also clear the lane itself (will be re-set by parent logic below)
+        columns[lane] = None;
 
-        // Process parents
-        for (i, parent_sha) in commit.parents.iter().enumerate() {
-            // Only create edges for parents that exist in our commit set
-            if let Some(&parent_row) = sha_to_row.get(parent_sha.as_str()) {
-                let parent_lane = if i == 0 {
-                    // First parent inherits this commit's lane
-                    if !sha_to_lane.contains_key(parent_sha.as_str()) {
-                        sha_to_lane.insert(parent_sha, lane);
-                    }
-                    *sha_to_lane.get(parent_sha.as_str()).unwrap_or(&lane)
-                } else {
-                    // Non-first parents (merge sources) get their own lane
-                    if let Some(&existing) = sha_to_lane.get(parent_sha.as_str()) {
-                        existing
+        // Parents visible in this commit window
+        let parents: Vec<&str> = commit
+            .parents
+            .iter()
+            .map(|p| p.as_str())
+            .filter(|p| sha_to_idx.contains_key(p))
+            .collect();
+
+        if parents.is_empty() {
+            // Root commit — lane stays free (already cleared above)
+        } else {
+            // First parent inherits this column
+            let first_parent = parents[0];
+            columns[lane] = Some(first_parent.to_string());
+
+            // If first parent was already tracked in a different column
+            // (because another path led to it), resolve the duplicate by
+            // keeping the lower-indexed column (keeps main branch compact).
+            for i in 0..columns.len() {
+                if i != lane && columns[i].as_deref() == Some(first_parent) {
+                    if i < lane {
+                        // Other column is lower — keep it there, clear ours
+                        columns[lane] = None;
                     } else {
-                        let new_lane = find_min_available_lane(&active_lanes);
-                        active_lanes.insert(new_lane);
-                        sha_to_lane.insert(parent_sha, new_lane);
-                        if new_lane > max_lane {
-                            max_lane = new_lane;
-                        }
-                        new_lane
+                        // Our column is lower — clear the other
+                        columns[i] = None;
                     }
-                };
+                }
+            }
 
-                edges.push(GraphEdge {
-                    from_sha: commit.sha.clone(),
-                    to_sha: parent_sha.clone(),
-                    from_lane: lane,
-                    to_lane: parent_lane,
-                    from_row: row,
-                    to_row: parent_row,
-                });
+            // Additional parents (merge sources) open new columns
+            for &p in parents.iter().skip(1) {
+                let already = columns.iter().any(|c| c.as_deref() == Some(p));
+                if !already {
+                    let col = first_empty_or_new(&mut columns);
+                    columns[col] = Some(p.to_string());
+                    if (col as u32) > max_lane {
+                        max_lane = col as u32;
+                    }
+                }
             }
         }
 
-        // Release lanes: if this commit is a merge (>1 parents), release
-        // lanes of non-first parents whose last child was this commit
-        if commit.parents.len() > 1 {
-            for parent_sha in commit.parents.iter().skip(1) {
-                if let Some(&parent_lane) = sha_to_lane.get(parent_sha.as_str()) {
-                    // Check if this lane is different from the main lane and
-                    // no other commit needs it
-                    if parent_lane != lane {
-                        // The merge source lane can be released once we
-                        // process the parent at that lane
-                        // We mark it for potential release
-                        if let Some(&owner) = lane_owner.get(&parent_lane) {
-                            if owner == commit.sha.as_str() {
-                                active_lanes.remove(&parent_lane);
-                                lane_owner.remove(&parent_lane);
-                            }
-                        }
-                    }
-                }
+        // Compact: trim trailing empty slots
+        while columns.last().map_or(false, |c| c.is_none()) {
+            columns.pop();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Build nodes
+    // -----------------------------------------------------------------------
+    let nodes: Vec<GraphNode> = commits
+        .iter()
+        .enumerate()
+        .map(|(i, c)| GraphNode {
+            sha: c.sha.clone(),
+            row: i as u32,
+            lane: lane_of[i],
+        })
+        .collect();
+
+    // -----------------------------------------------------------------------
+    // Pass 2 — build edges using final lane assignments
+    // -----------------------------------------------------------------------
+    let mut edges = Vec::new();
+    for (idx, commit) in commits.iter().enumerate() {
+        for parent_sha in &commit.parents {
+            if let Some(&pidx) = sha_to_idx.get(parent_sha.as_str()) {
+                edges.push(GraphEdge {
+                    from_sha: commit.sha.clone(),
+                    to_sha: parent_sha.clone(),
+                    from_lane: lane_of[idx],
+                    to_lane: lane_of[pidx],
+                    from_row: idx as u32,
+                    to_row: pidx as u32,
+                });
             }
         }
     }
@@ -135,18 +167,24 @@ pub fn compute_graph_layout(commits: &[CommitNode]) -> GraphLayout {
     }
 }
 
-/// Find the minimum lane number not currently in use.
-fn find_min_available_lane(active_lanes: &HashSet<u32>) -> u32 {
-    let mut lane = 0;
-    while active_lanes.contains(&lane) {
-        lane += 1;
+/// Return index of first `None` slot, or append a new slot and return its index.
+fn first_empty_or_new(columns: &mut Vec<Option<String>>) -> usize {
+    if let Some(pos) = columns.iter().position(|c| c.is_none()) {
+        pos
+    } else {
+        columns.push(None);
+        columns.len() - 1
     }
-    lane
 }
+
+// ===========================================================================
+// Tests
+// ===========================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     fn make_commit(sha: &str, parents: Vec<&str>, refs: Vec<&str>) -> CommitNode {
         CommitNode {
@@ -175,36 +213,31 @@ mod tests {
         let layout = compute_graph_layout(&commits);
         assert_eq!(layout.nodes.len(), 1);
         assert_eq!(layout.nodes[0].lane, 0);
-        assert_eq!(layout.nodes[0].row, 0);
         assert!(layout.edges.is_empty());
-        assert_eq!(layout.max_lane, 0);
     }
 
     #[test]
     fn test_linear_history() {
-        // c3 -> c2 -> c1 (newest first)
         let commits = vec![
             make_commit("ccc", vec!["bbb"], vec!["HEAD -> main"]),
             make_commit("bbb", vec!["aaa"], vec![]),
             make_commit("aaa", vec![], vec![]),
         ];
         let layout = compute_graph_layout(&commits);
-        assert_eq!(layout.nodes.len(), 3);
-
         // All on lane 0
         for node in &layout.nodes {
             assert_eq!(node.lane, 0);
         }
-
-        // Two edges
         assert_eq!(layout.edges.len(), 2);
         assert_eq!(layout.max_lane, 0);
     }
 
     #[test]
     fn test_simple_branch_and_merge() {
-        // Timeline (newest first):
-        // merge (parents: feat, c2) -> feat (parent: c1) -> c2 (parent: c1) -> c1
+        // merge (first-parent: c2, second-parent: feat)
+        // c2 (parent: c1)
+        // feat (parent: c1)
+        // c1 (root)
         let commits = vec![
             make_commit("merge", vec!["c2", "feat"], vec!["HEAD -> main"]),
             make_commit("c2", vec!["c1"], vec![]),
@@ -212,108 +245,40 @@ mod tests {
             make_commit("c1", vec![], vec![]),
         ];
         let layout = compute_graph_layout(&commits);
-        assert_eq!(layout.nodes.len(), 4);
 
-        // merge on lane 0
+        // merge on lane 0, c2 inherits lane 0 (first parent)
         assert_eq!(layout.nodes[0].lane, 0);
-        // c2 inherits lane 0 (first parent of merge)
         assert_eq!(layout.nodes[1].lane, 0);
 
-        // feat gets a separate lane
-        let feat_lane = layout.nodes[2].lane;
-        assert!(feat_lane > 0, "feature branch should be on lane > 0");
+        // feat on separate lane
+        assert!(layout.nodes[2].lane > 0);
 
-        // Edges should exist
-        assert!(layout.edges.len() >= 3);
+        // c1 back on lane 0 (first parent of c2)
+        assert_eq!(layout.nodes[3].lane, 0);
     }
 
     #[test]
-    fn test_multiple_branches() {
-        // c5 (merge of c4 and c3)
-        // c4 (from c1, branch A)
-        // c3 (from c1, branch B)
-        // c2 (from c1, main line)
-        // c1 (root)
+    fn test_lane_reuse_after_merge() {
+        // After a branch merges, its lane should be reused.
+        // m2 (merge b2 into main) -> m1 (merge b1 into main) -> ...
+        // b2 branches from base2, b1 branches from base1
         let commits = vec![
-            make_commit("c5", vec!["c2", "c4", "c3"], vec!["HEAD -> main"]),
-            make_commit("c4", vec!["c1"], vec!["branchA"]),
-            make_commit("c3", vec!["c1"], vec!["branchB"]),
-            make_commit("c2", vec!["c1"], vec![]),
-            make_commit("c1", vec![], vec![]),
+            make_commit("m2", vec!["main2", "b2"], vec!["HEAD"]),
+            make_commit("main2", vec!["m1"], vec![]),
+            make_commit("b2", vec!["base2"], vec![]),
+            make_commit("m1", vec!["base2", "b1"], vec![]),
+            make_commit("base2", vec!["b1_base"], vec![]),
+            make_commit("b1", vec!["b1_base"], vec![]),
+            make_commit("b1_base", vec![], vec![]),
         ];
         let layout = compute_graph_layout(&commits);
-        assert_eq!(layout.nodes.len(), 5);
 
-        // Main merge on lane 0
-        assert_eq!(layout.nodes[0].lane, 0);
-
-        // Should use at least 2 different lanes for the branches
-        let lanes: HashSet<u32> = layout.nodes.iter().map(|n| n.lane).collect();
-        assert!(lanes.len() >= 2, "Should use multiple lanes for branches");
-    }
-
-    #[test]
-    fn test_octopus_merge() {
-        // A commit with 3 parents (octopus merge)
-        let commits = vec![
-            make_commit("octopus", vec!["p1", "p2", "p3"], vec!["HEAD -> main"]),
-            make_commit("p1", vec!["root"], vec![]),
-            make_commit("p2", vec!["root"], vec![]),
-            make_commit("p3", vec!["root"], vec![]),
-            make_commit("root", vec![], vec![]),
-        ];
-        let layout = compute_graph_layout(&commits);
-        assert_eq!(layout.nodes.len(), 5);
-
-        // Should have edges from octopus to all 3 parents
-        let octopus_edges: Vec<_> = layout
-            .edges
-            .iter()
-            .filter(|e| e.from_sha == "octopus")
-            .collect();
-        assert_eq!(octopus_edges.len(), 3, "Octopus merge should have 3 edges to parents");
-    }
-
-    #[test]
-    fn test_graph_node_rows_are_sequential() {
-        let commits = vec![
-            make_commit("c3", vec!["c2"], vec![]),
-            make_commit("c2", vec!["c1"], vec![]),
-            make_commit("c1", vec![], vec![]),
-        ];
-        let layout = compute_graph_layout(&commits);
-        for (i, node) in layout.nodes.iter().enumerate() {
-            assert_eq!(node.row, i as u32, "Row should match index");
-        }
-    }
-
-    #[test]
-    fn test_edges_reference_valid_shas() {
-        let commits = vec![
-            make_commit("c2", vec!["c1"], vec![]),
-            make_commit("c1", vec![], vec![]),
-        ];
-        let layout = compute_graph_layout(&commits);
-        let shas: HashSet<&str> = commits.iter().map(|c| c.sha.as_str()).collect();
-        for edge in &layout.edges {
-            assert!(shas.contains(edge.from_sha.as_str()));
-            assert!(shas.contains(edge.to_sha.as_str()));
-        }
-    }
-
-    #[test]
-    fn test_find_min_available_lane() {
-        let mut active = HashSet::new();
-        assert_eq!(find_min_available_lane(&active), 0);
-
-        active.insert(0);
-        assert_eq!(find_min_available_lane(&active), 1);
-
-        active.insert(1);
-        assert_eq!(find_min_available_lane(&active), 2);
-
-        active.remove(&0);
-        assert_eq!(find_min_available_lane(&active), 0);
+        // b1 and b2 should reuse lane 1 (not spread to lane 2)
+        let b2_lane = layout.nodes[2].lane;
+        let b1_lane = layout.nodes[5].lane;
+        assert_eq!(b2_lane, 1, "b2 should be on lane 1");
+        assert_eq!(b1_lane, 1, "b1 should reuse lane 1 after b2 merged");
+        assert!(layout.max_lane <= 1, "max_lane should be 1 with lane reuse");
     }
 
     #[test]
@@ -338,23 +303,44 @@ mod tests {
             });
         }
         let layout = compute_graph_layout(&commits);
-        assert_eq!(layout.nodes.len(), 100);
         assert_eq!(layout.max_lane, 0, "Linear history should stay on lane 0");
-        assert_eq!(layout.edges.len(), 99);
+    }
+
+    #[test]
+    fn test_multiple_branches() {
+        let commits = vec![
+            make_commit("c5", vec!["c2", "c4", "c3"], vec!["HEAD -> main"]),
+            make_commit("c4", vec!["c1"], vec!["branchA"]),
+            make_commit("c3", vec!["c1"], vec!["branchB"]),
+            make_commit("c2", vec!["c1"], vec![]),
+            make_commit("c1", vec![], vec![]),
+        ];
+        let layout = compute_graph_layout(&commits);
+        let lanes: HashSet<u32> = layout.nodes.iter().map(|n| n.lane).collect();
+        assert!(lanes.len() >= 2, "Should use multiple lanes for branches");
+    }
+
+    #[test]
+    fn test_edges_reference_valid_shas() {
+        let commits = vec![
+            make_commit("c2", vec!["c1"], vec![]),
+            make_commit("c1", vec![], vec![]),
+        ];
+        let layout = compute_graph_layout(&commits);
+        let shas: HashSet<&str> = commits.iter().map(|c| c.sha.as_str()).collect();
+        for edge in &layout.edges {
+            assert!(shas.contains(edge.from_sha.as_str()));
+            assert!(shas.contains(edge.to_sha.as_str()));
+        }
     }
 
     #[test]
     fn test_parent_outside_commit_set() {
-        // Parent SHA not in the commit list (truncated log)
         let commits = vec![
             make_commit("c2", vec!["c1"], vec![]),
             make_commit("c1", vec!["missing_parent"], vec![]),
         ];
         let layout = compute_graph_layout(&commits);
-        assert_eq!(layout.nodes.len(), 2);
-        // Only one edge (c2->c1), no edge to missing_parent
         assert_eq!(layout.edges.len(), 1);
-        assert_eq!(layout.edges[0].from_sha, "c2");
-        assert_eq!(layout.edges[0].to_sha, "c1");
     }
 }

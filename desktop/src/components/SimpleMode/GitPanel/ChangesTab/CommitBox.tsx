@@ -8,6 +8,7 @@
  */
 
 import { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitStore } from '../../../../store/git';
 import { useSettingsStore } from '../../../../store/settings';
@@ -53,6 +54,7 @@ function Spinner({ className }: { className?: string }) {
 // ---------------------------------------------------------------------------
 
 export function CommitBox() {
+  const { t } = useTranslation('git');
   const commitMessage = useGitStore((s) => s.commitMessage);
   const setCommitMessage = useGitStore((s) => s.setCommitMessage);
   const isAmend = useGitStore((s) => s.isAmend);
@@ -90,9 +92,9 @@ export function CommitBox() {
     const message = await generateCommitMessage(workspacePath);
     if (message) {
       setCommitMessage(message);
-      showToast('AI commit message generated', 'success');
+      showToast(t('commitBox.aiMessageGenerated'), 'success');
     } else {
-      showToast('Failed to generate commit message', 'error');
+      showToast(t('commitBox.aiMessageFailed'), 'error');
     }
   }, [canGenerate, workspacePath, generateCommitMessage, setCommitMessage, showToast]);
 
@@ -103,7 +105,7 @@ export function CommitBox() {
         value={commitMessage}
         onChange={(e) => setCommitMessage(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="feat: describe your changes (Cmd+Enter to commit)"
+        placeholder={t('commitBox.placeholder')}
         rows={3}
         className={clsx(
           'w-full text-xs px-2.5 py-2 rounded-md border resize-y min-h-[60px] max-h-[200px]',
@@ -127,7 +129,7 @@ export function CommitBox() {
               onChange={(e) => setIsAmend(e.target.checked)}
               className="w-3 h-3 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
             />
-            <span className="text-2xs text-gray-500 dark:text-gray-400">Amend</span>
+            <span className="text-2xs text-gray-500 dark:text-gray-400">{t('commitBox.amend')}</span>
           </label>
 
           {/* AI Generate button */}
@@ -145,10 +147,10 @@ export function CommitBox() {
               !isAvailable
                 ? unavailableReason
                 : stagedCount === 0
-                  ? 'Stage changes first to generate a message'
+                  ? t('commitBox.stageChangesFirst')
                   : isGeneratingCommit
-                    ? 'Generating...'
-                    : 'Generate AI commit message'
+                    ? t('commitBox.generating')
+                    : t('commitBox.generateAIMessage')
             }
           >
             {isGeneratingCommit ? (
@@ -156,7 +158,7 @@ export function CommitBox() {
             ) : (
               <SparkleIcon className="w-3 h-3" />
             )}
-            {isGeneratingCommit ? 'Generating...' : 'AI'}
+            {isGeneratingCommit ? t('commitBox.generating') : t('commitBox.ai')}
           </button>
         </div>
 
@@ -171,7 +173,7 @@ export function CommitBox() {
               : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
           )}
         >
-          {isAmend ? 'Amend' : 'Commit'}
+          {isAmend ? t('commitBox.amend') : t('commitBox.commit')}
           {stagedCount > 0 && (
             <span className="ml-1 opacity-75">({stagedCount})</span>
           )}

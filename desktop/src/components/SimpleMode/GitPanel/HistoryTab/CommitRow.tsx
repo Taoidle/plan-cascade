@@ -11,6 +11,7 @@
  */
 
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { CommitNode } from '../../../../types/git';
 import { ROW_HEIGHT } from './graphRenderer';
@@ -46,12 +47,12 @@ interface CommitRowProps {
  * Format an ISO-8601 date string as a relative time.
  * Returns strings like "just now", "2m ago", "3h ago", "5d ago", "2w ago", etc.
  */
-function formatRelativeTime(isoDate: string): string {
+function formatRelativeTime(isoDate: string): { key: string; count?: number } {
   const date = new Date(isoDate);
   const now = Date.now();
   const diffMs = now - date.getTime();
 
-  if (diffMs < 0) return 'in the future';
+  if (diffMs < 0) return { key: 'commitRow.inTheFuture' };
 
   const seconds = Math.floor(diffMs / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -61,13 +62,13 @@ function formatRelativeTime(isoDate: string): string {
   const months = Math.floor(days / 30);
   const years = Math.floor(days / 365);
 
-  if (seconds < 60) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  if (weeks < 5) return `${weeks}w ago`;
-  if (months < 12) return `${months}mo ago`;
-  return `${years}y ago`;
+  if (seconds < 60) return { key: 'commitRow.justNow' };
+  if (minutes < 60) return { key: 'commitRow.minutesAgo', count: minutes };
+  if (hours < 24) return { key: 'commitRow.hoursAgo', count: hours };
+  if (days < 7) return { key: 'commitRow.daysAgo', count: days };
+  if (weeks < 5) return { key: 'commitRow.weeksAgo', count: weeks };
+  if (months < 12) return { key: 'commitRow.monthsAgo', count: months };
+  return { key: 'commitRow.yearsAgo', count: years };
 }
 
 /**
@@ -167,9 +168,11 @@ export function CommitRow({
   onClick,
   onContextMenu,
 }: CommitRowProps) {
+  const { t } = useTranslation('git');
   const subject = useMemo(() => commitSubject(commit.message), [commit.message]);
   const { branches, tags } = useMemo(() => parseRefs(commit.refs), [commit.refs]);
-  const relativeTime = useMemo(() => formatRelativeTime(commit.date), [commit.date]);
+  const relativeTimeData = useMemo(() => formatRelativeTime(commit.date), [commit.date]);
+  const relativeTime = t(relativeTimeData.key, { count: relativeTimeData.count });
   const authorAbbr = useMemo(() => abbreviateAuthor(commit.author_name), [commit.author_name]);
 
   const highlightedSubject = useMemo(

@@ -20,6 +20,7 @@ import enAgents from './locales/en/agents.json';
 import enTaskMode from './locales/en/taskMode.json';
 import enKnowledge from './locales/en/knowledge.json';
 import enArtifacts from './locales/en/artifacts.json';
+import enGit from './locales/en/git.json';
 
 // Chinese translations
 import zhCommon from './locales/zh/common.json';
@@ -33,6 +34,7 @@ import zhAgents from './locales/zh/agents.json';
 import zhTaskMode from './locales/zh/taskMode.json';
 import zhKnowledge from './locales/zh/knowledge.json';
 import zhArtifacts from './locales/zh/artifacts.json';
+import zhGit from './locales/zh/git.json';
 
 // Japanese translations
 import jaCommon from './locales/ja/common.json';
@@ -44,6 +46,7 @@ import jaWizard from './locales/ja/wizard.json';
 import jaAnalytics from './locales/ja/analytics.json';
 import jaAgents from './locales/ja/agents.json';
 import jaTaskMode from './locales/ja/taskMode.json';
+import jaGit from './locales/ja/git.json';
 
 export const resources = {
   en: {
@@ -58,6 +61,7 @@ export const resources = {
     taskMode: enTaskMode,
     knowledge: enKnowledge,
     artifacts: enArtifacts,
+    git: enGit,
   },
   zh: {
     common: zhCommon,
@@ -71,6 +75,7 @@ export const resources = {
     taskMode: zhTaskMode,
     knowledge: zhKnowledge,
     artifacts: zhArtifacts,
+    git: zhGit,
   },
   ja: {
     common: jaCommon,
@@ -84,6 +89,7 @@ export const resources = {
     taskMode: jaTaskMode,
     knowledge: enKnowledge,
     artifacts: enArtifacts,
+    git: jaGit,
   },
 } as const;
 
@@ -103,7 +109,7 @@ i18n
     resources,
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics', 'agents', 'taskMode', 'knowledge', 'artifacts'],
+    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics', 'agents', 'taskMode', 'knowledge', 'artifacts', 'git'],
     interpolation: {
       escapeValue: false, // React already handles escaping
     },

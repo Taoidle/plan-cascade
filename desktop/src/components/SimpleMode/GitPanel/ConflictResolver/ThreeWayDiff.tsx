@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import type { CommandResponse } from '../../../../lib/tauri';
@@ -132,10 +133,11 @@ function RegionActions({
   onManualEdit: (idx: number) => void;
   onAIResolve: (idx: number) => void;
 }) {
+  const { t } = useTranslation('git');
   return (
     <div className="flex items-center gap-1 py-1">
       <span className="text-2xs font-medium text-gray-500 dark:text-gray-400 mr-1">
-        Region {regionIndex + 1}
+        {t('threeWayDiff.region', { index: regionIndex + 1 })}
         {resolution && (
           <span className={clsx(
             'ml-1',
@@ -156,7 +158,7 @@ function RegionActions({
             : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/20'
         )}
       >
-        Accept Ours
+        {t('threeWayDiff.acceptOurs')}
       </button>
       <button
         onClick={() => onAcceptTheirs(regionIndex)}
@@ -167,7 +169,7 @@ function RegionActions({
             : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
         )}
       >
-        Accept Theirs
+        {t('threeWayDiff.acceptTheirs')}
       </button>
       <button
         onClick={() => onAcceptBoth(regionIndex)}
@@ -178,7 +180,7 @@ function RegionActions({
             : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-amber-50 dark:hover:bg-amber-900/20'
         )}
       >
-        Accept Both
+        {t('threeWayDiff.acceptBoth')}
       </button>
       <button
         onClick={() => onManualEdit(regionIndex)}
@@ -189,7 +191,7 @@ function RegionActions({
             : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-green-50 dark:hover:bg-green-900/20'
         )}
       >
-        Manual Edit
+        {t('threeWayDiff.manualEdit')}
       </button>
       {/* AI Resolve button */}
       <button
@@ -205,10 +207,10 @@ function RegionActions({
         )}
         title={
           !isAIAvailable
-            ? 'Configure LLM provider in settings'
+            ? t('threeWayDiff.configureLlm')
             : isAIResolving
-              ? 'Resolving...'
-              : 'AI Resolve'
+              ? t('threeWayDiff.resolving')
+              : t('threeWayDiff.aiResolve')
         }
       >
         {isAIResolving ? (
@@ -223,7 +225,7 @@ function RegionActions({
             />
           </svg>
         )}
-        AI Resolve
+        {t('threeWayDiff.aiResolve')}
       </button>
     </div>
   );
@@ -287,6 +289,7 @@ function OutputPanel({
   onChange: (content: string) => void;
   isEditing: boolean;
 }) {
+  const { t } = useTranslation('git');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -298,7 +301,7 @@ function OutputPanel({
   return (
     <div className="flex flex-col h-full border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
       <div className="shrink-0 px-3 py-1.5 text-xs font-semibold border-b border-gray-200 dark:border-gray-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400">
-        OUTPUT (Resolved)
+        {t('threeWayDiff.outputResolved')}
       </div>
       <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-950">
         {isEditing ? (
@@ -331,6 +334,7 @@ function OutputPanel({
 // ---------------------------------------------------------------------------
 
 export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffProps) {
+  const { t } = useTranslation('git');
   const [fileContent, setFileContent] = useState('');
   const [regions, setRegions] = useState<ConflictRegion[]>([]);
   const [resolutions, setResolutions] = useState<Map<number, RegionResolution>>(new Map());
@@ -485,9 +489,9 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
           next.set(idx, { regionIndex: idx, content: result, method: 'ai' });
           return next;
         });
-        showToast(`AI resolved region ${idx + 1}`, 'success');
+        showToast(t('threeWayDiff.aiResolvedRegion', { index: idx + 1 }), 'success');
       } else {
-        showToast('Failed to resolve conflict with AI', 'error');
+        showToast(t('threeWayDiff.aiResolveFailed'), 'error');
       }
     },
     [isAvailable, resolveConflictAI, repoPath, filePath, showToast]
@@ -509,9 +513,9 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         }
         return next;
       });
-      showToast('AI resolved all conflict regions', 'success');
+      showToast(t('threeWayDiff.aiResolvedAll'), 'success');
     } else {
-      showToast('Failed to resolve conflicts with AI', 'error');
+      showToast(t('threeWayDiff.aiResolveAllFailed'), 'error');
     }
     setIsAIResolvingAll(false);
   }, [isAvailable, resolveConflictAI, repoPath, filePath, regions.length, showToast]);
@@ -548,7 +552,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
       if (res.success) {
         onResolved();
       } else {
-        setError(res.error || 'Failed to resolve file');
+        setError(res.error || t('threeWayDiff.resolveFailed'));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -563,7 +567,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
       <div className="flex items-center justify-center h-full">
         <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
           <div className="animate-spin h-4 w-4 border-2 border-gray-400 border-t-transparent rounded-full" />
-          Loading file...
+          {t('threeWayDiff.loadingFile')}
         </div>
       </div>
     );
@@ -573,7 +577,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
   if (regions.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-gray-500 dark:text-gray-400">
-        No conflict markers found in this file
+        {t('threeWayDiff.noConflictMarkers')}
       </div>
     );
   }
@@ -586,8 +590,8 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
       <div className="shrink-0 px-3 py-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-gray-600 dark:text-gray-400">
-            {regions.length} conflict region{regions.length !== 1 ? 's' : ''}
-            {unresolvedCount > 0 && ` (${unresolvedCount} unresolved)`}
+            {t('threeWayDiff.conflictRegion', { count: regions.length })}
+            {unresolvedCount > 0 && ` (${t('threeWayDiff.unresolved', { count: unresolvedCount })})`}
           </span>
           {/* AI Resolve All button */}
           {isAvailable && unresolvedCount > 0 && (
@@ -607,7 +611,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                  Resolving All...
+                  {t('threeWayDiff.resolvingAll')}
                 </>
               ) : (
                 <>
@@ -619,7 +623,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
                       d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
                     />
                   </svg>
-                  AI Resolve All
+                  {t('threeWayDiff.aiResolveAll')}
                 </>
               )}
             </button>
@@ -656,7 +660,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         {/* Ours (left) */}
         <div className="flex-1 min-w-0">
           <CodePanel
-            title="OURS (Current Branch)"
+            title={t('threeWayDiff.oursCurrentBranch')}
             titleColor="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"
             content={oursContent}
             regions={regions}
@@ -676,7 +680,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         {/* Theirs (right) */}
         <div className="flex-1 min-w-0">
           <CodePanel
-            title="THEIRS (Incoming Branch)"
+            title={t('threeWayDiff.theirsIncomingBranch')}
             titleColor="bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400"
             content={theirsContent}
             regions={regions}
@@ -691,7 +695,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
           <span className="font-mono">{filePath}</span>
           <span className="mx-2">-</span>
           <span>
-            {resolutions.size} of {regions.length} regions resolved
+            {t('threeWayDiff.regionsResolved', { resolved: resolutions.size, total: regions.length })}
           </span>
         </div>
         <button
@@ -704,7 +708,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
               : 'bg-green-400 cursor-not-allowed'
           )}
         >
-          {isResolving ? 'Resolving...' : 'Mark Resolved'}
+          {isResolving ? t('threeWayDiff.resolving') : t('threeWayDiff.markResolved')}
         </button>
       </div>
     </div>

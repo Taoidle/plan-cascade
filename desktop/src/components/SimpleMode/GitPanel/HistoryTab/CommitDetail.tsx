@@ -12,6 +12,7 @@
  */
 
 import { useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { CommitNode, DiffOutput, FileDiff } from '../../../../types/git';
 import { EnhancedDiffViewer } from '../../../ClaudeCodeMode/EnhancedDiffViewer';
@@ -134,6 +135,7 @@ export function CommitDetail({
   repoPath,
   onClose,
 }: CommitDetailProps) {
+  const { t } = useTranslation('git');
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -181,9 +183,9 @@ export function CommitDetail({
       summaryCache.current.set(commit.sha, result);
       setCurrentSummary(result);
       setShowSummary(true);
-      showToast('AI summary generated', 'success');
+      showToast(t('commitDetail.aiSummaryGenerated'), 'success');
     } else {
-      showToast('Failed to generate summary', 'error');
+      showToast(t('commitDetail.aiSummaryFailed'), 'error');
     }
   }, [commit, repoPath, isAvailable, summarizeCommit, showToast]);
 
@@ -235,18 +237,18 @@ export function CommitDetail({
       <div className="sticky top-0 z-10 flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700 backdrop-blur-sm">
         <div className="flex items-center gap-2">
           <h4 className="text-xs font-medium text-gray-800 dark:text-gray-200">
-            Commit Details
+            {t('commitDetail.title')}
           </h4>
           {isMerge && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">
-              Merge
+              {t('commitDetail.merge')}
             </span>
           )}
         </div>
         <button
           onClick={onClose}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"
-          title="Close"
+          title={t('commitDetail.close')}
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -258,7 +260,7 @@ export function CommitDetail({
       <div className="px-3 py-2 space-y-2">
         {/* SHA */}
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">SHA</span>
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('commitDetail.sha')}</span>
           <button
             onClick={copySha}
             className={clsx(
@@ -268,7 +270,7 @@ export function CommitDetail({
               'hover:bg-gray-200 dark:hover:bg-gray-700',
               'transition-colors'
             )}
-            title="Click to copy full SHA"
+            title={t('commitDetail.copySha')}
           >
             {commit.short_sha}
             {copied ? (
@@ -285,7 +287,7 @@ export function CommitDetail({
 
         {/* Author */}
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">Author</span>
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('commitDetail.author')}</span>
           <span className="text-xs text-gray-800 dark:text-gray-200">
             {commit.author_name}
           </span>
@@ -296,7 +298,7 @@ export function CommitDetail({
 
         {/* Date */}
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">Date</span>
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('commitDetail.date')}</span>
           <span className="text-xs text-gray-700 dark:text-gray-300">
             {formatFullDate(commit.date)}
           </span>
@@ -306,7 +308,7 @@ export function CommitDetail({
         {commit.parents.length > 0 && (
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">
-              {commit.parents.length > 1 ? 'Parents' : 'Parent'}
+              {commit.parents.length > 1 ? t('commitDetail.parents') : t('commitDetail.parent')}
             </span>
             <div className="flex items-center gap-1.5 flex-wrap">
               {commit.parents.map((parentSha) => (
@@ -344,8 +346,8 @@ export function CommitDetail({
                 !isAvailable
                   ? unavailableReason
                   : isSummarizing
-                    ? 'Summarizing...'
-                    : 'Generate AI summary of this commit'
+                    ? t('commitDetail.summarizing')
+                    : t('commitDetail.generateAiSummary')
               }
             >
               {isSummarizing ? (
@@ -360,7 +362,7 @@ export function CommitDetail({
                   />
                 </svg>
               )}
-              {isSummarizing ? 'Summarizing...' : 'AI Summary'}
+              {isSummarizing ? t('commitDetail.summarizing') : t('commitDetail.aiSummary')}
             </button>
           ) : (
             <div className="rounded-md border border-purple-200 dark:border-purple-800/50 bg-purple-50 dark:bg-purple-900/10 p-2.5">
@@ -374,7 +376,7 @@ export function CommitDetail({
                       d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
                     />
                   </svg>
-                  AI Summary
+                  {t('commitDetail.aiSummary')}
                 </span>
                 <button
                   onClick={() => setShowSummary(false)}
@@ -403,7 +405,7 @@ export function CommitDetail({
           {/* File changes header */}
           <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between">
             <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-              {diff.files.length} file{diff.files.length !== 1 ? 's' : ''} changed
+              {t('commitDetail.filesChanged', { count: diff.files.length })}
             </span>
             <div className="flex items-center gap-2 text-xs">
               <span className="text-green-600 dark:text-green-400">
@@ -497,7 +499,7 @@ export function CommitDetail({
       {/* No diff data */}
       {(!diff || diff.files.length === 0) && (
         <div className="px-3 py-4 text-center text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-gray-700">
-          No file changes available for this commit
+          {t('commitDetail.noFileChanges')}
         </div>
       )}
     </div>

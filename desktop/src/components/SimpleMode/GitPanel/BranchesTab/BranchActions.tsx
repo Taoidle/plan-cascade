@@ -8,6 +8,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import type { BranchInfo, CommandResponse } from '../../../../types/git';
@@ -105,6 +106,7 @@ function CreateBranchDialog({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { t } = useTranslation('git');
   const [name, setName] = useState('');
   const [base, setBase] = useState(() => {
     const current = branches.find((b) => b.is_head);
@@ -115,13 +117,13 @@ function CreateBranchDialog({
 
   const handleCreate = useCallback(async () => {
     if (!name.trim()) {
-      setError('Branch name is required');
+      setError(t('branchActions.branchNameRequired'));
       return;
     }
 
     // Validate branch name (basic)
     if (/\s/.test(name) || name.includes('..') || name.startsWith('-')) {
-      setError('Invalid branch name');
+      setError(t('branchActions.invalidBranchName'));
       return;
     }
 
@@ -156,18 +158,18 @@ function CreateBranchDialog({
   );
 
   return (
-    <DialogShell title="Create Branch" onClose={onClose}>
+    <DialogShell title={t('branchActions.createBranch')} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Branch name
+            {t('branchActions.branchNameLabel')}
           </label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="feature/my-branch"
+            placeholder={t('branchActions.branchNamePlaceholder')}
             className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
             autoFocus
           />
@@ -175,7 +177,7 @@ function CreateBranchDialog({
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Base branch
+            {t('branchActions.baseBranch')}
           </label>
           <select
             value={base}
@@ -184,7 +186,7 @@ function CreateBranchDialog({
           >
             {branches.map((b) => (
               <option key={b.name} value={b.name}>
-                {b.name}{b.is_head ? ' (current)' : ''}
+                {b.name}{b.is_head ? ` ${t('branchActions.current')}` : ''}
               </option>
             ))}
           </select>
@@ -199,7 +201,7 @@ function CreateBranchDialog({
             onClick={onClose}
             className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
-            Cancel
+            {t('branchActions.cancel')}
           </button>
           <button
             onClick={handleCreate}
@@ -211,7 +213,7 @@ function CreateBranchDialog({
                 : 'bg-blue-600 hover:bg-blue-700'
             )}
           >
-            {isCreating ? 'Creating...' : 'Create'}
+            {isCreating ? t('branchActions.creating') : t('branchActions.create')}
           </button>
         </div>
       </div>
@@ -234,6 +236,7 @@ function DeleteBranchDialog({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { t } = useTranslation('git');
   const [force, setForce] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -269,10 +272,10 @@ function DeleteBranchDialog({
   }, [branch, force, repoPath, onSuccess, isProtected, confirmMainDelete]);
 
   return (
-    <DialogShell title="Delete Branch" onClose={onClose}>
+    <DialogShell title={t('branchActions.deleteBranch')} onClose={onClose}>
       <div className="space-y-4">
         <p className="text-sm text-gray-700 dark:text-gray-300">
-          Are you sure you want to delete the branch{' '}
+          {t('branchActions.deleteConfirm')}{' '}
           <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-sm font-mono">
             {branch.name}
           </code>
@@ -282,11 +285,11 @@ function DeleteBranchDialog({
         {isProtected && (
           <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
             <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-              Warning: This is a protected branch ({branch.name})
+              {t('branchActions.protectedWarning')} ({branch.name})
             </p>
             {confirmMainDelete && (
               <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
-                Click Delete again to confirm deletion of this protected branch.
+                {t('branchActions.confirmDeleteAgain')}
               </p>
             )}
           </div>
@@ -299,7 +302,7 @@ function DeleteBranchDialog({
             onChange={(e) => setForce(e.target.checked)}
             className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
           />
-          Force delete (even if not fully merged)
+          {t('branchActions.forceDelete')}
         </label>
 
         {error && (
@@ -311,7 +314,7 @@ function DeleteBranchDialog({
             onClick={onClose}
             className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
-            Cancel
+            {t('branchActions.cancel')}
           </button>
           <button
             onClick={handleDelete}
@@ -323,7 +326,7 @@ function DeleteBranchDialog({
                 : 'bg-red-600 hover:bg-red-700'
             )}
           >
-            {isDeleting ? 'Deleting...' : confirmMainDelete && isProtected ? 'Confirm Delete' : 'Delete'}
+            {isDeleting ? t('branchActions.deleting') : confirmMainDelete && isProtected ? t('branchActions.confirmDelete') : t('branchActions.deleteBranch')}
           </button>
         </div>
       </div>
@@ -346,18 +349,19 @@ function RenameBranchDialog({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { t } = useTranslation('git');
   const [newName, setNewName] = useState(branch.name);
   const [isRenaming, setIsRenaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleRename = useCallback(async () => {
     if (!newName.trim() || newName.trim() === branch.name) {
-      setError('New name must be different from the current name');
+      setError(t('branchActions.newNameDifferent'));
       return;
     }
 
     if (/\s/.test(newName) || newName.includes('..') || newName.startsWith('-')) {
-      setError('Invalid branch name');
+      setError(t('branchActions.invalidBranchName'));
       return;
     }
 
@@ -392,11 +396,11 @@ function RenameBranchDialog({
   );
 
   return (
-    <DialogShell title="Rename Branch" onClose={onClose}>
+    <DialogShell title={t('branchActions.renameBranch')} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Current name
+            {t('branchActions.currentName')}
           </label>
           <input
             type="text"
@@ -408,14 +412,14 @@ function RenameBranchDialog({
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            New name
+            {t('branchActions.newName')}
           </label>
           <input
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="new-branch-name"
+            placeholder={t('branchActions.newNamePlaceholder')}
             className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
             autoFocus
           />
@@ -430,7 +434,7 @@ function RenameBranchDialog({
             onClick={onClose}
             className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
-            Cancel
+            {t('branchActions.cancel')}
           </button>
           <button
             onClick={handleRename}
@@ -442,7 +446,7 @@ function RenameBranchDialog({
                 : 'bg-blue-600 hover:bg-blue-700'
             )}
           >
-            {isRenaming ? 'Renaming...' : 'Rename'}
+            {isRenaming ? t('branchActions.renaming') : t('branchActions.rename')}
           </button>
         </div>
       </div>

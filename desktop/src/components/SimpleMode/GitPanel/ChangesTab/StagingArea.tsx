@@ -10,6 +10,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitStore } from '../../../../store/git';
 import { useSettingsStore } from '../../../../store/settings';
@@ -41,6 +42,7 @@ function CollapsibleSection({
   extraActions,
   children,
 }: SectionProps) {
+  const { t } = useTranslation('git');
   const [open, setOpen] = useState(defaultOpen);
 
   return (
@@ -80,7 +82,7 @@ function CollapsibleSection({
       {open && count > 0 && <div>{children}</div>}
       {open && count === 0 && (
         <div className="px-3 py-3 text-center text-2xs text-gray-400 dark:text-gray-500">
-          No files
+          {t('stagingArea.noFiles')}
         </div>
       )}
     </div>
@@ -109,6 +111,7 @@ function Spinner({ className }: { className?: string }) {
 // ============================================================================
 
 export function StagingArea() {
+  const { t } = useTranslation('git');
   const status = useGitStore((s) => s.status);
   const stageFiles = useGitStore((s) => s.stageFiles);
   const unstageFiles = useGitStore((s) => s.unstageFiles);
@@ -146,9 +149,9 @@ export function StagingArea() {
     const result = await reviewDiff(workspacePath);
     if (result) {
       setReviewText(result);
-      showToast('AI review complete', 'success');
+      showToast(t('stagingArea.aiReviewComplete'), 'success');
     } else {
-      showToast('Failed to generate AI review', 'error');
+      showToast(t('stagingArea.aiReviewFailed'), 'error');
     }
   }, [workspacePath, isAvailable, reviewDiff, showToast]);
 
@@ -160,7 +163,7 @@ export function StagingArea() {
     return (
       <div className="flex items-center justify-center py-8 text-sm text-gray-500 dark:text-gray-400">
         <div className="animate-spin h-4 w-4 border-2 border-gray-400 border-t-transparent rounded-full mr-2" />
-        Loading status...
+        {t('stagingArea.loadingStatus')}
       </div>
     );
   }
@@ -172,10 +175,10 @@ export function StagingArea() {
         <svg className="w-8 h-8 mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 13l4 4L19 7" />
         </svg>
-        <p>Working tree clean</p>
+        <p>{t('stagingArea.workingTreeClean')}</p>
         <p className="text-2xs text-gray-400 dark:text-gray-500 mt-1">
-          {status.branch && `on ${status.branch}`}
-          {status.upstream && ` tracking ${status.upstream}`}
+          {status.branch && t('stagingArea.onBranch', { branch: status.branch })}
+          {status.upstream && ` ${t('stagingArea.tracking', { upstream: status.upstream })}`}
         </p>
       </div>
     );
@@ -198,10 +201,10 @@ export function StagingArea() {
         !isAvailable
           ? unavailableReason
           : staged.length === 0
-            ? 'Stage changes first'
+            ? t('stagingArea.stageChangesFirstReview')
             : isReviewing
-              ? 'Reviewing...'
-              : 'AI Review staged changes'
+              ? t('stagingArea.reviewing')
+              : t('stagingArea.aiReviewStaged')
       }
     >
       {isReviewing ? (
@@ -216,7 +219,7 @@ export function StagingArea() {
           />
         </svg>
       )}
-      {isReviewing ? 'Reviewing...' : 'AI Review'}
+      {isReviewing ? t('stagingArea.reviewing') : t('stagingArea.aiReview')}
     </button>
   );
 
@@ -224,10 +227,10 @@ export function StagingArea() {
     <div>
       {/* Staged Changes */}
       <CollapsibleSection
-        title="Staged Changes"
+        title={t('stagingArea.stagedChanges')}
         count={staged.length}
         defaultOpen={true}
-        actionLabel="Unstage All"
+        actionLabel={t('stagingArea.unstageAll')}
         onAction={handleUnstageAll}
         extraActions={staged.length > 0 ? stagedExtraActions : undefined}
       >
@@ -243,10 +246,10 @@ export function StagingArea() {
 
       {/* Unstaged Changes */}
       <CollapsibleSection
-        title="Changes"
+        title={t('stagingArea.changes')}
         count={unstaged.length}
         defaultOpen={true}
-        actionLabel="Stage All"
+        actionLabel={t('stagingArea.stageAll')}
         onAction={handleStageAllUnstaged}
       >
         {unstaged.map((file) => (
@@ -256,10 +259,10 @@ export function StagingArea() {
 
       {/* Untracked Files */}
       <CollapsibleSection
-        title="Untracked"
+        title={t('stagingArea.untracked')}
         count={untracked.length}
         defaultOpen={true}
-        actionLabel="Stage All"
+        actionLabel={t('stagingArea.stageAll')}
         onAction={handleStageAllUntracked}
       >
         {untracked.map((file) => (

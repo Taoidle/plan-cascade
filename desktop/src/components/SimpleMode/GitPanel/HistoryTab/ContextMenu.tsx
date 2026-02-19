@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import type { CommandResponse } from '../../../../lib/tauri';
@@ -60,6 +61,7 @@ export function ContextMenu({
   onClose,
   onRefresh,
 }: ContextMenuProps) {
+  const { t } = useTranslation('git');
   const [dialogState, setDialogState] = useState<DialogState>({ type: 'none' });
   const menuRef = useRef<HTMLDivElement>(null);
   const branchInputRef = useRef<HTMLInputElement>(null);
@@ -106,17 +108,17 @@ export function ContextMenu({
     if (!commit) return;
     try {
       await navigator.clipboard.writeText(commit.sha);
-      setDialogState({ type: 'success', message: 'SHA copied to clipboard' });
+      setDialogState({ type: 'success', message: t('contextMenu.shaCopied') });
       setTimeout(onClose, 800);
     } catch {
-      setDialogState({ type: 'error', message: 'Failed to copy to clipboard' });
+      setDialogState({ type: 'error', message: t('contextMenu.copyFailed') });
     }
   }, [commit, onClose]);
 
   const handleCreateBranch = useCallback(async (name: string) => {
     if (!repoPath || !commit || !name.trim()) return;
 
-    setDialogState({ type: 'loading', action: 'Creating branch...' });
+    setDialogState({ type: 'loading', action: t('contextMenu.creatingBranch') });
 
     try {
       const result = await invoke<CommandResponse<void>>('git_create_branch', {
@@ -126,18 +128,18 @@ export function ContextMenu({
       });
 
       if (result.success) {
-        setDialogState({ type: 'success', message: `Branch "${name.trim()}" created` });
+        setDialogState({ type: 'success', message: t('contextMenu.branchCreated', { name: name.trim() }) });
         setTimeout(() => {
           onRefresh();
           onClose();
         }, 800);
       } else {
-        setDialogState({ type: 'error', message: result.error || 'Failed to create branch' });
+        setDialogState({ type: 'error', message: result.error || t('contextMenu.createBranchFailed') });
       }
     } catch (err) {
       setDialogState({
         type: 'error',
-        message: err instanceof Error ? err.message : 'Failed to create branch',
+        message: err instanceof Error ? err.message : t('contextMenu.createBranchFailed'),
       });
     }
   }, [repoPath, commit, onRefresh, onClose]);
@@ -145,7 +147,7 @@ export function ContextMenu({
   const handleCherryPick = useCallback(async () => {
     if (!repoPath || !commit) return;
 
-    setDialogState({ type: 'loading', action: 'Cherry-picking...' });
+    setDialogState({ type: 'loading', action: t('contextMenu.cherryPicking') });
 
     try {
       // Cherry-pick via git command (no dedicated Tauri command, use shell)
@@ -156,7 +158,7 @@ export function ContextMenu({
       const output = await cmd.execute();
 
       if (output.code === 0) {
-        setDialogState({ type: 'success', message: `Cherry-picked ${commit.short_sha}` });
+        setDialogState({ type: 'success', message: t('contextMenu.cherryPicked', { sha: commit.short_sha }) });
         setTimeout(() => {
           onRefresh();
           onClose();
@@ -164,13 +166,13 @@ export function ContextMenu({
       } else {
         setDialogState({
           type: 'error',
-          message: output.stderr || 'Cherry-pick failed (possible conflicts)',
+          message: output.stderr || t('contextMenu.cherryPickFailed'),
         });
       }
     } catch (err) {
       setDialogState({
         type: 'error',
-        message: err instanceof Error ? err.message : 'Cherry-pick failed',
+        message: err instanceof Error ? err.message : t('contextMenu.cherryPickFailed'),
       });
     }
   }, [repoPath, commit, onRefresh, onClose]);
@@ -178,7 +180,7 @@ export function ContextMenu({
   const handleRevert = useCallback(async () => {
     if (!repoPath || !commit) return;
 
-    setDialogState({ type: 'loading', action: 'Reverting...' });
+    setDialogState({ type: 'loading', action: t('contextMenu.reverting') });
 
     try {
       const { Command } = await import('@tauri-apps/plugin-shell');
@@ -188,7 +190,7 @@ export function ContextMenu({
       const output = await cmd.execute();
 
       if (output.code === 0) {
-        setDialogState({ type: 'success', message: `Reverted ${commit.short_sha}` });
+        setDialogState({ type: 'success', message: t('contextMenu.reverted', { sha: commit.short_sha }) });
         setTimeout(() => {
           onRefresh();
           onClose();
@@ -196,13 +198,13 @@ export function ContextMenu({
       } else {
         setDialogState({
           type: 'error',
-          message: output.stderr || 'Revert failed (possible conflicts)',
+          message: output.stderr || t('contextMenu.revertFailed'),
         });
       }
     } catch (err) {
       setDialogState({
         type: 'error',
-        message: err instanceof Error ? err.message : 'Revert failed',
+        message: err instanceof Error ? err.message : t('contextMenu.revertFailed'),
       });
     }
   }, [repoPath, commit, onRefresh, onClose]);
@@ -249,7 +251,7 @@ export function ContextMenu({
               <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
-              Copy SHA
+              {t('contextMenu.copySha')}
               <span className="ml-auto text-[10px] text-gray-400 font-mono">
                 {commit.short_sha}
               </span>
@@ -266,7 +268,7 @@ export function ContextMenu({
               <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
               </svg>
-              Create branch here
+              {t('contextMenu.createBranchHere')}
             </button>
 
             {/* Cherry-pick */}
@@ -277,7 +279,7 @@ export function ContextMenu({
               <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
               </svg>
-              Cherry-pick
+              {t('contextMenu.cherryPick')}
             </button>
 
             {/* Revert */}
@@ -288,7 +290,7 @@ export function ContextMenu({
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
               </svg>
-              Revert
+              {t('contextMenu.revert')}
             </button>
           </>
         )}
@@ -297,7 +299,7 @@ export function ContextMenu({
         {dialogState.type === 'create-branch' && (
           <div className="px-3 py-2 space-y-2">
             <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
-              Create branch at {commit.short_sha}
+              {t('contextMenu.createBranchAt', { sha: commit.short_sha })}
             </p>
             <input
               ref={branchInputRef}
@@ -314,7 +316,7 @@ export function ContextMenu({
                   setDialogState({ type: 'none' });
                 }
               }}
-              placeholder="Branch name"
+              placeholder={t('contextMenu.branchName')}
               className={clsx(
                 'w-full px-2 py-1.5 text-xs rounded-md',
                 'bg-white dark:bg-gray-900',
@@ -329,7 +331,7 @@ export function ContextMenu({
                 onClick={() => setDialogState({ type: 'none' })}
                 className="px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
               >
-                Cancel
+                {t('contextMenu.cancel')}
               </button>
               <button
                 onClick={() => handleCreateBranch(dialogState.branchName)}
@@ -342,7 +344,7 @@ export function ContextMenu({
                   'transition-colors'
                 )}
               >
-                Create
+                {t('contextMenu.create')}
               </button>
             </div>
           </div>
@@ -352,23 +354,23 @@ export function ContextMenu({
         {dialogState.type === 'cherry-pick-confirm' && (
           <div className="px-3 py-2 space-y-2">
             <p className="text-xs text-gray-700 dark:text-gray-300">
-              Cherry-pick commit <code className="font-mono bg-gray-100 dark:bg-gray-700 px-1 rounded">{commit.short_sha}</code> onto the current branch?
+              {t('contextMenu.cherryPickConfirm', { sha: commit.short_sha })}
             </p>
             <p className="text-[10px] text-gray-500 dark:text-gray-400">
-              This may cause conflicts if the changes don't apply cleanly.
+              {t('contextMenu.cherryPickWarning')}
             </p>
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setDialogState({ type: 'none' })}
                 className="px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
               >
-                Cancel
+                {t('contextMenu.cancel')}
               </button>
               <button
                 onClick={handleCherryPick}
                 className="px-2 py-1 text-xs rounded-md bg-blue-500 text-white hover:bg-blue-600 transition-colors"
               >
-                Cherry-pick
+                {t('contextMenu.cherryPick')}
               </button>
             </div>
           </div>
@@ -378,23 +380,23 @@ export function ContextMenu({
         {dialogState.type === 'revert-confirm' && (
           <div className="px-3 py-2 space-y-2">
             <p className="text-xs text-gray-700 dark:text-gray-300">
-              Revert commit <code className="font-mono bg-gray-100 dark:bg-gray-700 px-1 rounded">{commit.short_sha}</code>?
+              {t('contextMenu.revertConfirm', { sha: commit.short_sha })}
             </p>
             <p className="text-[10px] text-gray-500 dark:text-gray-400">
-              This will create a new commit that undoes the changes from this commit.
+              {t('contextMenu.revertWarning')}
             </p>
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setDialogState({ type: 'none' })}
                 className="px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
               >
-                Cancel
+                {t('contextMenu.cancel')}
               </button>
               <button
                 onClick={handleRevert}
                 className="px-2 py-1 text-xs rounded-md bg-red-500 text-white hover:bg-red-600 transition-colors"
               >
-                Revert
+                {t('contextMenu.revert')}
               </button>
             </div>
           </div>
@@ -426,7 +428,7 @@ export function ContextMenu({
               onClick={() => setDialogState({ type: 'none' })}
               className="px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
             >
-              Dismiss
+              {t('contextMenu.dismiss')}
             </button>
           </div>
         )}

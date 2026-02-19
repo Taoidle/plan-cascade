@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitStore } from '../../../../store/git';
 import { useSettingsStore } from '../../../../store/settings';
@@ -30,6 +31,7 @@ function ConflictFileRow({
   isSelected: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation('git');
   return (
     <button
       onClick={onClick}
@@ -59,7 +61,7 @@ function ConflictFileRow({
 
       {/* Conflict count */}
       <span className="shrink-0 text-2xs text-gray-500 dark:text-gray-400">
-        {file.conflict_count} {file.conflict_count === 1 ? 'conflict' : 'conflicts'}
+        {t('conflictResolver.conflict', { count: file.conflict_count })}
       </span>
     </button>
   );
@@ -70,6 +72,7 @@ function ConflictFileRow({
 // ---------------------------------------------------------------------------
 
 export function ConflictResolver() {
+  const { t } = useTranslation('git');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const {
     conflictFiles,
@@ -114,7 +117,7 @@ export function ConflictResolver() {
     try {
       const ok = await abortMerge(repoPath);
       if (!ok) {
-        setError('Failed to abort merge');
+        setError(t('conflictResolver.abortFailed'));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -130,7 +133,7 @@ export function ConflictResolver() {
     try {
       const ok = await completeMerge(repoPath);
       if (!ok) {
-        setError('Failed to complete merge. Ensure all conflicts are resolved and files are staged.');
+        setError(t('conflictResolver.completeFailed'));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -165,12 +168,12 @@ export function ConflictResolver() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-              Merge Conflict Resolution
+              {t('conflictResolver.title')}
             </h2>
           </div>
           {mergeSourceBranch && (
             <span className="text-sm text-gray-500 dark:text-gray-400">
-              Merging <code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono">{mergeSourceBranch}</code>
+              {t('conflictResolver.merging')} <code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono">{mergeSourceBranch}</code>
             </span>
           )}
         </div>
@@ -179,9 +182,9 @@ export function ConflictResolver() {
           {/* Progress */}
           <span className="text-sm text-gray-600 dark:text-gray-400">
             <span className={clsx(allResolved ? 'text-green-600 dark:text-green-400 font-medium' : '')}>
-              {resolvedCount} of {totalCount}
+              {resolvedCount} / {totalCount}
             </span>
-            {' '}conflicts resolved
+            {' '}{t('conflictResolver.conflictsResolved')}
           </span>
 
           {/* Abort */}
@@ -195,7 +198,7 @@ export function ConflictResolver() {
               isAborting && 'opacity-50 cursor-not-allowed'
             )}
           >
-            {isAborting ? 'Aborting...' : 'Abort Merge'}
+            {isAborting ? t('conflictResolver.aborting') : t('conflictResolver.abortMerge')}
           </button>
 
           {/* Complete */}
@@ -209,7 +212,7 @@ export function ConflictResolver() {
                 : 'bg-green-400 cursor-not-allowed'
             )}
           >
-            {isCompleting ? 'Completing...' : 'Complete Merge'}
+            {isCompleting ? t('conflictResolver.completing') : t('conflictResolver.completeMerge')}
           </button>
         </div>
       </div>
@@ -236,7 +239,7 @@ export function ConflictResolver() {
           ))}
           {conflictFiles.length === 0 && (
             <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-              No conflict files detected
+              {t('conflictResolver.noConflicts')}
             </div>
           )}
         </div>
@@ -251,7 +254,7 @@ export function ConflictResolver() {
             />
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-gray-500 dark:text-gray-400">
-              Select a file to resolve conflicts
+              {t('conflictResolver.selectFile')}
             </div>
           )}
         </div>

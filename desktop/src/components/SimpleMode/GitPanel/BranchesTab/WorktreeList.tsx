@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import type { Worktree, WorktreeStatus, CommandResponse } from '../../../../types/git';
@@ -24,17 +25,17 @@ interface WorktreeListProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function statusLabel(status: WorktreeStatus): string {
-  const labels: Record<WorktreeStatus, string> = {
-    creating: 'Creating',
-    active: 'Active',
-    in_progress: 'In Progress',
-    ready: 'Ready',
-    merging: 'Merging',
-    completed: 'Completed',
-    error: 'Error',
+function statusLabelKey(status: WorktreeStatus): string {
+  const keys: Record<WorktreeStatus, string> = {
+    creating: 'worktreeList.statusCreating',
+    active: 'worktreeList.statusActive',
+    in_progress: 'worktreeList.statusInProgress',
+    ready: 'worktreeList.statusReady',
+    merging: 'worktreeList.statusMerging',
+    completed: 'worktreeList.statusCompleted',
+    error: 'worktreeList.statusError',
   };
-  return labels[status] || status;
+  return keys[status] || status;
 }
 
 function statusColor(status: WorktreeStatus): string {
@@ -70,6 +71,7 @@ function ConfirmRemoveDialog({
   onConfirm: (force: boolean) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation('git');
   const [force, setForce] = useState(false);
 
   return (
@@ -77,10 +79,10 @@ function ConfirmRemoveDialog({
       <div className="absolute inset-0 bg-black/40 dark:bg-black/60" onClick={onCancel} />
       <div className="relative z-10 w-full max-w-sm mx-4 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-5">
         <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
-          Remove Worktree
+          {t('worktreeList.removeWorktree')}
         </h3>
         <p className="text-sm text-gray-700 dark:text-gray-300 mb-3">
-          Are you sure you want to remove the worktree{' '}
+          {t('worktreeList.removeConfirm')}{' '}
           <code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono">
             {worktree.name}
           </code>
@@ -94,7 +96,7 @@ function ConfirmRemoveDialog({
             onChange={(e) => setForce(e.target.checked)}
             className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
           />
-          Force remove (even with uncommitted changes)
+          {t('worktreeList.forceRemove')}
         </label>
 
         <div className="flex justify-end gap-2">
@@ -102,13 +104,13 @@ function ConfirmRemoveDialog({
             onClick={onCancel}
             className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
-            Cancel
+            {t('worktreeList.cancel')}
           </button>
           <button
             onClick={() => onConfirm(force)}
             className="px-3 py-1.5 text-sm rounded-lg font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
           >
-            Remove
+            {t('worktreeList.remove')}
           </button>
         </div>
       </div>
@@ -127,6 +129,7 @@ function WorktreeCard({
   worktree: Worktree;
   onRemove: (worktree: Worktree) => void;
 }) {
+  const { t } = useTranslation('git');
   const isTerminal = worktree.status === 'completed' || worktree.status === 'error';
 
   return (
@@ -149,7 +152,7 @@ function WorktreeCard({
               statusColor(worktree.status)
             )}
           >
-            {statusLabel(worktree.status)}
+            {t(statusLabelKey(worktree.status))}
           </span>
         </div>
 
@@ -158,7 +161,7 @@ function WorktreeCard({
             <button
               onClick={() => onRemove(worktree)}
               className="p-1 rounded text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-              title="Remove worktree"
+              title={t('worktreeList.removeWorktree')}
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -194,6 +197,7 @@ function WorktreeCard({
 // ---------------------------------------------------------------------------
 
 export function WorktreeList({ repoPath }: WorktreeListProps) {
+  const { t } = useTranslation('git');
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
@@ -255,7 +259,7 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
       <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-            Worktrees
+            {t('worktreeList.title')}
           </h4>
           <span className="text-2xs text-gray-400 dark:text-gray-500">
             ({activeWorktrees.length})
@@ -264,7 +268,7 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
         <button
           onClick={handleNewWorktree}
           className="p-1 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-          title="New Worktree"
+          title={t('worktreeList.newWorktree')}
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -285,7 +289,7 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
             <svg className="w-8 h-8 mb-2 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
             </svg>
-            <span>No active worktrees</span>
+            <span>{t('worktreeList.noActiveWorktrees')}</span>
           </div>
         )}
 

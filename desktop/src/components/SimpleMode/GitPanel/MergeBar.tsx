@@ -8,6 +8,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitStore } from '../../../store/git';
 import { useSettingsStore } from '../../../store/settings';
@@ -17,6 +18,7 @@ interface MergeBarProps {
 }
 
 export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
+  const { t } = useTranslation('git');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const { isInMerge, mergeState, mergeSourceBranch, conflictFiles, resolvedFiles, abortMerge } =
     useGitStore();
@@ -35,12 +37,12 @@ export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
   const totalCount = conflictFiles.length;
 
   const kindLabels: Record<string, string> = {
-    merging: 'Merge',
-    rebasing: 'Rebase',
-    cherry_picking: 'Cherry Pick',
-    reverting: 'Revert',
+    merging: t('mergeBar.merge'),
+    rebasing: t('mergeBar.rebase'),
+    cherry_picking: t('mergeBar.cherryPick'),
+    reverting: t('mergeBar.revert'),
   };
-  const kindLabel = kindLabels[mergeState.kind] || 'Merge';
+  const kindLabel = kindLabels[mergeState.kind] || t('mergeBar.merge');
 
   return (
     <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
@@ -59,7 +61,7 @@ export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
           />
         </svg>
         <span className="font-medium text-amber-700 dark:text-amber-400">
-          {kindLabel} in progress
+          {kindLabel} {t('mergeBar.inProgress')}
         </span>
         {mergeSourceBranch && (
           <span className="text-amber-600 dark:text-amber-500">
@@ -68,7 +70,7 @@ export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
         )}
         {totalCount > 0 && (
           <span className="text-xs text-amber-600 dark:text-amber-500">
-            {resolvedCount}/{totalCount} conflicts resolved
+            {t('mergeBar.conflictsResolved', { count: `${resolvedCount}/${totalCount}` })}
           </span>
         )}
       </div>
@@ -79,7 +81,7 @@ export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
             onClick={onOpenConflictResolver}
             className="px-2 py-1 text-xs rounded font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-800/30 transition-colors"
           >
-            Resolve Conflicts
+            {t('mergeBar.resolveConflicts')}
           </button>
         )}
         <button
@@ -91,7 +93,7 @@ export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
             isAborting && 'opacity-50 cursor-not-allowed'
           )}
         >
-          {isAborting ? 'Aborting...' : 'Abort'}
+          {isAborting ? t('mergeBar.aborting') : t('mergeBar.abort')}
         </button>
       </div>
     </div>

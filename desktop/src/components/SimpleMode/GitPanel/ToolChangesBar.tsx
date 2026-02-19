@@ -9,6 +9,7 @@
  */
 
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { StreamLine } from '../../../store/execution';
 import { useGitStore } from '../../../store/git';
@@ -77,6 +78,7 @@ function extractToolChanges(lines: StreamLine[], changedPaths: Set<string>): Too
 // ============================================================================
 
 export function ToolChangesBar({ streamingOutput }: ToolChangesBarProps) {
+  const { t } = useTranslation('git');
   const [expanded, setExpanded] = useState(false);
   const status = useGitStore((s) => s.status);
 
@@ -111,7 +113,7 @@ export function ToolChangesBar({ streamingOutput }: ToolChangesBarProps) {
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
           </svg>
-          Tool Changes
+          {t('toolChanges.title')}
           <span className="text-gray-400 dark:text-gray-500">({toolChanges.length})</span>
         </span>
         <svg
@@ -153,7 +155,7 @@ export function ToolChangesBar({ streamingOutput }: ToolChangesBarProps) {
                   {change.hasGitChange && (
                     <span
                       className="shrink-0 w-1.5 h-1.5 rounded-full bg-green-500"
-                      title="File appears in git status"
+                      title={t('toolChanges.fileInGitStatus')}
                     />
                   )}
                 </div>

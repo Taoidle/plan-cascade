@@ -8,10 +8,12 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitStore } from '../../../../store/git';
 
 export function StashBar() {
+  const { t } = useTranslation('git');
   const stashList = useGitStore((s) => s.stashList);
   const stashSave = useGitStore((s) => s.stashSave);
   const stashPop = useGitStore((s) => s.stashPop);
@@ -61,7 +63,7 @@ export function StashBar() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8" />
         </svg>
         <span className="text-2xs text-gray-500 dark:text-gray-400">
-          Stash
+          {t('stashBar.stash')}
           {stashList.length > 0 && (
             <span className="ml-1 font-medium text-gray-700 dark:text-gray-300">
               ({stashList.length})
@@ -82,7 +84,7 @@ export function StashBar() {
               : 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
           )}
         >
-          Stash
+          {t('stashBar.stash')}
         </button>
 
         {/* Pop button */}
@@ -96,7 +98,7 @@ export function StashBar() {
               : 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
           )}
         >
-          Pop
+          {t('stashBar.pop')}
         </button>
 
         {/* Dropdown toggle */}
@@ -134,7 +136,7 @@ export function StashBar() {
                   <button
                     onClick={() => handleDrop(entry.index)}
                     className="shrink-0 p-1 rounded text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                    title="Drop stash"
+                    title={t('stashBar.dropStash')}
                   >
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

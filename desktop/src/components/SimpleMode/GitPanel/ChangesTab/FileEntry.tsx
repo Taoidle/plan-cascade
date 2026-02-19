@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitStore, type FileStatus, type DiffOutput, type DiffHunk } from '../../../../store/git';
 import { EnhancedDiffViewer } from '../../../ClaudeCodeMode/EnhancedDiffViewer';
@@ -136,6 +137,7 @@ interface HunkViewProps {
 }
 
 function HunkView({ hunk, hunkIndex, filePath, isStaged, isOnlyHunk }: HunkViewProps) {
+  const { t } = useTranslation('git');
   const [isApplying, setIsApplying] = useState(false);
   const stageHunk = useGitStore((s) => s.stageHunk);
 
@@ -183,16 +185,16 @@ function HunkView({ hunk, hunkIndex, filePath, isStaged, isOnlyHunk }: HunkViewP
                 ? 'text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20'
                 : 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
             )}
-            title={isStaged ? 'Unstage this hunk' : 'Stage this hunk'}
+            title={isStaged ? t('fileEntry.unstageHunk') : t('fileEntry.stageHunk')}
           >
             {isApplying ? (
               <span className="flex items-center gap-1">
                 <span className="animate-spin h-2.5 w-2.5 border border-current border-t-transparent rounded-full" />
               </span>
             ) : isStaged ? (
-              'Unstage Hunk'
+              t('fileEntry.unstageHunk')
             ) : (
-              'Stage Hunk'
+              t('fileEntry.stageHunk')
             )}
           </button>
         </div>
@@ -216,6 +218,7 @@ function HunkView({ hunk, hunkIndex, filePath, isStaged, isOnlyHunk }: HunkViewP
 // ============================================================================
 
 export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
+  const { t } = useTranslation('git');
   const [expanded, setExpanded] = useState(false);
   const [diffData, setDiffData] = useState<DiffOutput | null>(null);
   const [loadingDiff, setLoadingDiff] = useState(false);
@@ -313,7 +316,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
         {/* Hunk count indicator */}
         {hasMultipleHunks && expanded && (
           <span className="text-2xs text-gray-400 dark:text-gray-500 shrink-0">
-            {hunks.length} hunks
+            {t('fileEntry.hunks', { count: hunks.length })}
           </span>
         )}
 
@@ -324,7 +327,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
             <button
               onClick={handleDiscard}
               className="p-1 rounded text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-              title="Discard changes"
+              title={t('fileEntry.discardChanges')}
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -341,7 +344,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
                 ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
                 : 'text-gray-400 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
             )}
-            title={isStaged ? 'Unstage file' : 'Stage file'}
+            title={isStaged ? t('fileEntry.unstageFile') : t('fileEntry.stageFile')}
           >
             {isStaged ? (
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -362,7 +365,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
           {loadingDiff && (
             <div className="flex items-center gap-2 py-3 justify-center text-xs text-gray-500 dark:text-gray-400">
               <div className="animate-spin h-3 w-3 border-2 border-gray-400 border-t-transparent rounded-full" />
-              <span>Loading diff...</span>
+              <span>{t('fileEntry.loadingDiff')}</span>
             </div>
           )}
 
@@ -401,7 +404,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
 
           {!loadingDiff && !diffData && (
             <div className="py-3 text-center text-xs text-gray-500 dark:text-gray-400">
-              No diff available
+              {t('fileEntry.noDiffAvailable')}
             </div>
           )}
         </div>

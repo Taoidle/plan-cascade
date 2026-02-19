@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 
 // ---------------------------------------------------------------------------
@@ -88,7 +89,7 @@ const SEVERITY_CONFIG = {
     ),
     bg: 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800/50',
     text: 'text-red-700 dark:text-red-400',
-    label: 'Issue',
+    labelKey: 'aiReviewPanel.issue',
   },
   warning: {
     icon: (
@@ -98,7 +99,7 @@ const SEVERITY_CONFIG = {
     ),
     bg: 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/50',
     text: 'text-amber-700 dark:text-amber-400',
-    label: 'Warning',
+    labelKey: 'aiReviewPanel.warning',
   },
   info: {
     icon: (
@@ -108,7 +109,7 @@ const SEVERITY_CONFIG = {
     ),
     bg: 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/50',
     text: 'text-blue-700 dark:text-blue-400',
-    label: 'Info',
+    labelKey: 'aiReviewPanel.info',
   },
 };
 
@@ -117,6 +118,7 @@ const SEVERITY_CONFIG = {
 // ---------------------------------------------------------------------------
 
 export function AIReviewPanel({ reviewText, onDismiss }: AIReviewPanelProps) {
+  const { t } = useTranslation('git');
   const allNotes = parseReviewNotes(reviewText);
   const [dismissedIds, setDismissedIds] = useState<Set<number>>(new Set());
 
@@ -139,13 +141,13 @@ export function AIReviewPanel({ reviewText, onDismiss }: AIReviewPanelProps) {
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
-            All review notes dismissed
+            {t('aiReviewPanel.allDismissed')}
           </div>
           <button
             onClick={onDismiss}
             className="text-2xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
           >
-            Close
+            {t('aiReviewPanel.close')}
           </button>
         </div>
       </div>
@@ -166,24 +168,24 @@ export function AIReviewPanel({ reviewText, onDismiss }: AIReviewPanelProps) {
                 d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
               />
             </svg>
-            AI Review
+            {t('aiReviewPanel.title')}
           </span>
           <div className="flex items-center gap-2 text-2xs">
             {errorCount > 0 && (
-              <span className="text-red-600 dark:text-red-400 font-medium">{errorCount} issue{errorCount !== 1 ? 's' : ''}</span>
+              <span className="text-red-600 dark:text-red-400 font-medium">{t('aiReviewPanel.issues', { count: errorCount })}</span>
             )}
             {warningCount > 0 && (
-              <span className="text-amber-600 dark:text-amber-400 font-medium">{warningCount} warning{warningCount !== 1 ? 's' : ''}</span>
+              <span className="text-amber-600 dark:text-amber-400 font-medium">{t('aiReviewPanel.warnings', { count: warningCount })}</span>
             )}
             {infoCount > 0 && (
-              <span className="text-blue-600 dark:text-blue-400 font-medium">{infoCount} note{infoCount !== 1 ? 's' : ''}</span>
+              <span className="text-blue-600 dark:text-blue-400 font-medium">{t('aiReviewPanel.notes', { count: infoCount })}</span>
             )}
           </div>
         </div>
         <button
           onClick={onDismiss}
           className="p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-          title="Dismiss review"
+          title={t('aiReviewPanel.dismissReview')}
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -208,7 +210,7 @@ export function AIReviewPanel({ reviewText, onDismiss }: AIReviewPanelProps) {
               <button
                 onClick={() => handleDismissNote(note.id)}
                 className="p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0"
-                title="Dismiss"
+                title={t('aiReviewPanel.dismiss')}
               >
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

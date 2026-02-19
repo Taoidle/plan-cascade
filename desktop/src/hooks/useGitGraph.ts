@@ -79,7 +79,7 @@ export function useGitGraph({
 
   // Use the git store for cached data
   const {
-    commits,
+    commitLog: commits,
     graphLayout,
     branches,
     setCommits,

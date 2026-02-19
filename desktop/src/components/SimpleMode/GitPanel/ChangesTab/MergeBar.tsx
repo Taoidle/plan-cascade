@@ -8,6 +8,7 @@
  */
 
 import { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import { useGitStore, type MergeState } from '../../../../store/git';
@@ -18,16 +19,16 @@ import type { CommandResponse } from '../../../../lib/tauri';
 // Helpers
 // ============================================================================
 
-function getMergeLabel(kind: MergeState['kind']): string {
+function getMergeLabelKey(kind: MergeState['kind']): string {
   switch (kind) {
     case 'merging':
-      return 'MERGING';
+      return 'mergeBar.merging';
     case 'rebasing':
-      return 'REBASING';
+      return 'mergeBar.rebasing';
     case 'cherry_picking':
-      return 'CHERRY-PICKING';
+      return 'mergeBar.cherryPicking';
     case 'reverting':
-      return 'REVERTING';
+      return 'mergeBar.reverting';
     default:
       return '';
   }
@@ -68,6 +69,7 @@ function getMergeTextColor(kind: MergeState['kind']): string {
 // ============================================================================
 
 export function MergeBar() {
+  const { t } = useTranslation('git');
   const mergeState = useGitStore((s) => s.mergeState);
   const refreshAll = useGitStore((s) => s.refreshAll);
   const setError = useGitStore((s) => s.setError);
@@ -141,7 +143,7 @@ export function MergeBar() {
     return null;
   }
 
-  const label = getMergeLabel(mergeState.kind);
+  const labelKey = getMergeLabelKey(mergeState.kind);
   const colorClass = getMergeColor(mergeState.kind);
   const textClass = getMergeTextColor(mergeState.kind);
 
@@ -149,10 +151,10 @@ export function MergeBar() {
     <div className={clsx('px-3 py-2 border-b', colorClass)}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className={clsx('text-xs font-bold', textClass)}>{label}</span>
+          <span className={clsx('text-xs font-bold', textClass)}>{t(labelKey)}</span>
           {mergeState.branch_name && (
             <span className={clsx('text-2xs', textClass)}>
-              {mergeState.branch_name} → HEAD
+              {mergeState.branch_name} {t('mergeBar.toHead')}
             </span>
           )}
         </div>
@@ -162,13 +164,13 @@ export function MergeBar() {
             onClick={handleAbort}
             className="text-2xs px-2 py-0.5 rounded font-medium text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
           >
-            Abort
+            {t('mergeBar.abort')}
           </button>
           <button
             onClick={handleContinue}
             className="text-2xs px-2 py-0.5 rounded font-medium text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
           >
-            Continue
+            {t('mergeBar.continue')}
           </button>
         </div>
       </div>

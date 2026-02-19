@@ -7,6 +7,7 @@
  */
 
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitStore } from '../../../store/git';
 import { useGitStatus } from '../../../hooks/useGitStatus';
@@ -38,6 +39,7 @@ interface GitPanelProps {
 // ============================================================================
 
 export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
+  const { t } = useTranslation('git');
   const selectedTab = useGitStore((s) => s.selectedTab);
   const status = useGitStore((s) => s.status);
   const commitLog = useGitStore((s) => s.commitLog);
@@ -53,11 +55,11 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
       (status?.untracked.length ?? 0);
 
     return [
-      { id: 'changes' as const, label: 'Changes', count: stagedCount },
-      { id: 'history' as const, label: 'History', count: commitLog.length },
-      { id: 'branches' as const, label: 'Branches', count: branches.length },
+      { id: 'changes' as const, label: t('tabs.changes'), count: stagedCount },
+      { id: 'history' as const, label: t('tabs.history'), count: commitLog.length },
+      { id: 'branches' as const, label: t('tabs.branches'), count: branches.length },
     ];
-  }, [status, commitLog.length, branches.length]);
+  }, [status, commitLog.length, branches.length, t]);
 
   return (
     <div

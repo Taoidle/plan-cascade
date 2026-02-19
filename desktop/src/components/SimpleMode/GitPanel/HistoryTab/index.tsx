@@ -9,27 +9,22 @@
  */
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitStore } from '../../../../store/git';
+import { useSettingsStore } from '../../../../store/settings';
 import { useGitGraph } from '../../../../hooks/useGitGraph';
 import CommitGraph from './CommitGraph';
 import CommitDetail from './CommitDetail';
 import ContextMenu, { type ContextMenuState } from './ContextMenu';
 
 // ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface HistoryTabProps {
-  /** Repository path */
-  repoPath: string | null;
-}
-
-// ---------------------------------------------------------------------------
 // HistoryTab Component
 // ---------------------------------------------------------------------------
 
-export function HistoryTab({ repoPath }: HistoryTabProps) {
+export function HistoryTab() {
+  const { t } = useTranslation('git');
+  const repoPath = useSettingsStore((s) => s.workspacePath);
   // Git graph data
   const {
     graphLayout,
@@ -283,7 +278,7 @@ export function HistoryTab({ repoPath }: HistoryTabProps) {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search commits..."
+            placeholder={t('historyTab.searchPlaceholder')}
             className={clsx(
               'w-full pl-7 pr-2 py-1.5 text-xs rounded-md',
               'bg-white dark:bg-gray-900',
@@ -324,11 +319,11 @@ export function HistoryTab({ repoPath }: HistoryTabProps) {
             'transition-colors'
           )}
         >
-          <option value="">All branches</option>
+          <option value="">{t('historyTab.allBranches')}</option>
           {branches.map((branch) => (
             <option key={branch.name} value={branch.name}>
               {branch.name}
-              {branch.is_head ? ' (HEAD)' : ''}
+              {branch.is_head ? ` ${t('historyTab.head')}` : ''}
             </option>
           ))}
         </select>
@@ -343,7 +338,7 @@ export function HistoryTab({ repoPath }: HistoryTabProps) {
             'disabled:opacity-50 disabled:cursor-not-allowed',
             'transition-colors'
           )}
-          title="Refresh"
+          title={t('historyTab.refresh')}
         >
           <svg
             className={clsx('w-3.5 h-3.5', isLoading && 'animate-spin')}
@@ -365,13 +360,13 @@ export function HistoryTab({ repoPath }: HistoryTabProps) {
       {compareSelection && (
         <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-purple-50 dark:bg-purple-900/20 border-b border-purple-200 dark:border-purple-800">
           <span className="text-xs text-purple-700 dark:text-purple-300">
-            Comparing {compareSelection.baseSha.slice(0, 7)} ... {compareSelection.compareSha.slice(0, 7)}
+            {t('historyTab.comparing', { base: compareSelection.baseSha.slice(0, 7), compare: compareSelection.compareSha.slice(0, 7) })}
           </span>
           <button
             onClick={() => setCompareSelection(null)}
             className="text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-200"
           >
-            Clear
+            {t('historyTab.clear')}
           </button>
         </div>
       )}
@@ -388,7 +383,7 @@ export function HistoryTab({ repoPath }: HistoryTabProps) {
         <div className="flex-1 flex items-center justify-center">
           <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
             <div className="animate-spin h-4 w-4 border-2 border-gray-400 border-t-transparent rounded-full" />
-            Loading commit history...
+            {t('historyTab.loadingHistory')}
           </div>
         </div>
       )}
@@ -411,7 +406,7 @@ export function HistoryTab({ repoPath }: HistoryTabProps) {
               />
             </svg>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              {searchQuery ? 'No commits match your search' : 'No commit history'}
+              {searchQuery ? t('historyTab.noMatchingCommits') : t('historyTab.noCommitHistory')}
             </p>
           </div>
         </div>
@@ -438,7 +433,7 @@ export function HistoryTab({ repoPath }: HistoryTabProps) {
         <div className="shrink-0 flex items-center justify-center py-2 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <div className="animate-spin h-3 w-3 border border-gray-400 border-t-transparent rounded-full" />
-            Loading more...
+            {t('historyTab.loadingMore')}
           </div>
         </div>
       )}

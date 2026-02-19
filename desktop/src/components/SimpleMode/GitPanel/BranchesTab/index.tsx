@@ -8,6 +8,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitBranches } from '../../../../hooks/useGitBranches';
 import { useGitStore } from '../../../../store/git';
@@ -18,6 +19,7 @@ import { WorktreeList } from './WorktreeList';
 import type { BranchInfo, MergeBranchResult } from '../../../../types/git';
 
 export function BranchesTab() {
+  const { t } = useTranslation('git');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const {
     localBranches,
@@ -80,7 +82,7 @@ export function BranchesTab() {
   if (!workspacePath) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-gray-500 dark:text-gray-400">
-        No workspace selected
+        {t('branchesTab.noWorkspace')}
       </div>
     );
   }
@@ -90,10 +92,10 @@ export function BranchesTab() {
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">Branches</h3>
+          <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">{t('branchesTab.title')}</h3>
           {currentBranch && (
             <span className="text-xs text-gray-500 dark:text-gray-400">
-              on <span className="font-medium text-gray-700 dark:text-gray-300">{currentBranch.name}</span>
+              {t('branchesTab.on')} <span className="font-medium text-gray-700 dark:text-gray-300">{currentBranch.name}</span>
             </span>
           )}
         </div>
@@ -101,7 +103,7 @@ export function BranchesTab() {
           <button
             onClick={handleCreate}
             className="p-1 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-            title="Create branch"
+            title={t('branchesTab.createBranch')}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -115,7 +117,7 @@ export function BranchesTab() {
               'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
               isLoading && 'opacity-50 cursor-not-allowed'
             )}
-            title="Refresh"
+            title={t('branchesTab.refresh')}
           >
             <svg
               className={clsx('w-4 h-4', isLoading && 'animate-spin')}
@@ -147,14 +149,14 @@ export function BranchesTab() {
           <div className="flex items-center justify-between">
             <span>
               {mergeResult.success
-                ? 'Merge completed successfully'
-                : mergeResult.error || 'Merge failed'}
+                ? t('branchesTab.mergeSuccess')
+                : mergeResult.error || t('branchesTab.mergeFailed')}
             </span>
             <button
               onClick={() => setMergeResult(null)}
               className="text-xs underline ml-2"
             >
-              Dismiss
+              {t('branchesTab.dismiss')}
             </button>
           </div>
         </div>
