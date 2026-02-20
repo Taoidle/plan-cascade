@@ -17,6 +17,37 @@ import type { FileAttachmentData } from '../types/attachment';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
+// ============================================================================
+// Streaming delta accumulator — throttles React state updates to ~20/sec
+// ============================================================================
+
+let pendingTextDelta = '';
+let pendingThinkingDelta = '';
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushPendingDeltas(get: () => ExecutionState) {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (pendingTextDelta) {
+    get().appendStreamLine(pendingTextDelta, 'text');
+    pendingTextDelta = '';
+  }
+  if (pendingThinkingDelta) {
+    get().appendStreamLine(pendingThinkingDelta, 'thinking');
+    pendingThinkingDelta = '';
+  }
+}
+
+function scheduleFlush(get: () => ExecutionState) {
+  if (flushTimer) return; // already scheduled
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushPendingDeltas(get);
+  }, 50);
+}
+
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
 export type Strategy = 'direct' | 'hybrid_auto' | 'hybrid_worktree' | 'mega_plan' | null;
@@ -886,6 +917,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       sessionUsageTotals: preserveSimpleConversation ? get().sessionUsageTotals : null,
     });
 
+    // Capture session identity for detecting backgrounding during async operations.
+    // When backgroundCurrentSession() runs, foreground startedAt resets to null.
+    const capturedStartedAt = get().startedAt;
+
     // Reset the tool-call filter for the new execution turn
     get().toolCallFilter.reset();
 
@@ -998,6 +1033,60 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         // Current standalone contract: command returns final execution result.
         if (isBackendStandaloneExecutionResult(result.data)) {
           const execution = result.data;
+
+          // --- Session-backgrounded guard ---
+          // If the user switched away while execute_standalone was in flight,
+          // this session now lives in backgroundSessions.  Route completion
+          // there instead of corrupting the current foreground session.
+          const sessionWasBackgrounded =
+            (standaloneSessionId && get().standaloneSessionId !== standaloneSessionId) ||
+            get().startedAt !== capturedStartedAt;
+
+          if (sessionWasBackgrounded && standaloneSessionId) {
+            const bgMatch = findBackgroundSessionByTaskId(get(), standaloneSessionId);
+            if (bgMatch) {
+              // Update standaloneTurns for conversation continuity
+              if (mode === 'simple') {
+                const bgAssistantResponse = execution.response?.trim() || '';
+                const bgStreamedText = collectAssistantTextSince(
+                  bgMatch.snapshot.streamingOutput, turnStartLineId
+                );
+                const bgAssistantText = bgAssistantResponse || bgStreamedText;
+                if (bgAssistantText) {
+                  const retentionLimit = getStandaloneContextTurnsLimit();
+                  set(updateBackgroundSessionByTaskId(get(), standaloneSessionId, (snap) => ({
+                    standaloneTurns: trimStandaloneTurns(
+                      [...snap.standaloneTurns, { user: description, assistant: bgAssistantText, createdAt: Date.now() }],
+                      retentionLimit
+                    ),
+                  })));
+                }
+              }
+
+              // Mark completed if streaming events haven't already
+              const bgAfter = findBackgroundSessionByTaskId(get(), standaloneSessionId);
+              if (bgAfter && bgAfter.snapshot.status === 'running') {
+                const succeeded = execution.success;
+                const duration = Date.now() - (bgAfter.snapshot.startedAt || Date.now());
+                const durationStr = duration >= 60000
+                  ? `${Math.floor(duration / 60000)}m ${Math.round((duration % 60000) / 1000)}s`
+                  : `${Math.round(duration / 1000)}s`;
+                set(appendToBackgroundSession(
+                  get(), standaloneSessionId,
+                  succeeded
+                    ? `Completed (${durationStr})`
+                    : `Execution finished with failures.${execution.error ? ` ${execution.error}` : ''}`,
+                  succeeded ? 'success' : 'error'
+                ));
+                set(updateBackgroundSessionByTaskId(get(), standaloneSessionId, () => ({
+                  status: (succeeded ? 'completed' : 'failed') as ExecutionStatus,
+                })));
+              }
+            }
+            return;
+          }
+          // --- End session-backgrounded guard ---
+
           const assistantResponse = execution.response?.trim() || '';
           const streamedAssistantText = collectAssistantTextSince(get().streamingOutput, turnStartLineId);
           const assistantTurnText = assistantResponse || streamedAssistantText;
@@ -1072,6 +1161,13 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           // and set the status.  Only fall back to setting status from the
           // invoke result if no streaming event did so.
           const finalizeFromInvoke = async () => {
+            // Guard: if session was backgrounded during the setTimeout delay,
+            // skip foreground modifications to avoid corrupting the active session.
+            const bgCheck =
+              (standaloneSessionId && get().standaloneSessionId !== standaloneSessionId) ||
+              get().startedAt !== capturedStartedAt;
+            if (bgCheck) return;
+
             if (get().status !== 'running') {
               // Stream event already finalized status. Persist completed runs
               // once the invoke() response has been reconciled.
@@ -1154,6 +1250,18 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
+      // Guard: if session was backgrounded, route error to background snapshot
+      const errSessionGone =
+        (nextStandaloneSessionId && get().standaloneSessionId !== nextStandaloneSessionId) ||
+        get().startedAt !== capturedStartedAt;
+      if (errSessionGone && nextStandaloneSessionId) {
+        set(appendToBackgroundSession(get(), nextStandaloneSessionId, `Error: ${errorMessage}`, 'error'));
+        set(updateBackgroundSessionByTaskId(get(), nextStandaloneSessionId, () => ({
+          status: 'failed' as ExecutionStatus,
+        })));
+        return;
+      }
+
       set({
         status: 'failed',
         isSubmitting: false,
@@ -1220,7 +1328,12 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
   pause: async () => {
     try {
-      // Note: Pause may not be implemented in standalone mode
+      const { standaloneSessionId } = get();
+      if (standaloneSessionId) {
+        await invoke<CommandResponse<boolean>>('pause_standalone_execution', {
+          sessionId: standaloneSessionId,
+        });
+      }
       set({ status: 'paused' });
       get().addLog('Execution paused');
     } catch (error) {
@@ -1232,7 +1345,12 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
   resume: async () => {
     try {
-      // Note: Resume may not be implemented in standalone mode
+      const { standaloneSessionId } = get();
+      if (standaloneSessionId) {
+        await invoke<CommandResponse<boolean>>('unpause_standalone_execution', {
+          sessionId: standaloneSessionId,
+        });
+      }
       set({ status: 'running' });
       get().addLog('Execution resumed');
     } catch (error) {
@@ -1244,9 +1362,17 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
   cancel: async () => {
     try {
-      // Cancel current session if running
-      const { taskId } = get();
-      if (taskId) {
+      // Cancel current session — use the correct backend command
+      const { taskId, standaloneSessionId } = get();
+      if (standaloneSessionId) {
+        try {
+          await invoke<CommandResponse<boolean>>('cancel_standalone_execution', {
+            sessionId: standaloneSessionId,
+          });
+        } catch {
+          // Session might already be finished
+        }
+      } else if (taskId) {
         try {
           await invoke<CommandResponse<boolean>>('cancel_execution', {
             session_id: taskId,
@@ -1277,8 +1403,27 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   reset: () => {
-    // Auto-save conversation to history before clearing
     const state = get();
+
+    // Auto-background running/paused session so backend events continue routing
+    if ((state.status === 'running' || state.status === 'paused')
+        && (state.taskId || state.standaloneSessionId)) {
+      get().backgroundCurrentSession();
+      // backgroundCurrentSession already resets foreground to idle;
+      // now apply remaining reset fields
+      const postBgState = get();
+      set({
+        ...initialState,
+        connectionStatus: postBgState.connectionStatus,
+        history: postBgState.history,
+        backgroundSessions: postBgState.backgroundSessions,
+        activeSessionId: postBgState.activeSessionId,
+        toolCallFilter: new ToolCallStreamFilter(),
+      });
+      return;
+    }
+
+    // Auto-save conversation to history before clearing
     if (state.isChatSession && state.streamingOutput.length > 0) {
       get().saveToHistory();
     }
@@ -1573,6 +1718,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       ...initialState,
       connectionStatus: get().connectionStatus,
       history: get().history,
+      backgroundSessions: get().backgroundSessions,
+      activeSessionId: get().activeSessionId,
       streamingOutput: lines,
       streamLineCounter: counter,
       isChatSession: isClaudeSession,
@@ -1654,8 +1801,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       // so streaming chunks form continuous prose instead of one-chunk-per-line
       if ((type === 'text' || type === 'thinking') && last && last.type === type) {
         const updated = { ...last, content: last.content + content };
+        const newLines = lines.slice();
+        newLines[newLines.length - 1] = updated;
         return {
-          streamingOutput: [...lines.slice(0, -1), updated],
+          streamingOutput: newLines,
         };
       }
 
@@ -2454,6 +2603,72 @@ function handleUnifiedExecutionEvent(
   get: () => ExecutionState,
   set: (partial: Partial<ExecutionState>) => void
 ) {
+  // Session isolation: route events from non-foreground sessions to
+  // their background snapshot instead of the foreground UI.
+  if (payload.session_id && !isForegroundSession(get(), payload.session_id)) {
+    const bgSessionId = payload.session_id;
+    switch (payload.type) {
+      case 'text_delta': {
+        const found = findBackgroundSessionByTaskId(get(), bgSessionId);
+        if (!found) return;
+        const filterResult = found.snapshot.toolCallFilter.processChunk(payload.content || '');
+        if (filterResult.output) {
+          const upd = appendToBackgroundSession(get(), bgSessionId, filterResult.output, 'text');
+          if (Object.keys(upd).length > 0) set(upd);
+        }
+        if (filterResult.toolIndicator) {
+          const upd = appendToBackgroundSession(get(), bgSessionId, filterResult.toolIndicator, 'tool');
+          if (Object.keys(upd).length > 0) set(upd);
+        }
+        break;
+      }
+      case 'tool_start':
+        if (payload.tool_name) {
+          set(appendToBackgroundSession(get(), bgSessionId, `[tool] ${payload.tool_name} started`, 'tool'));
+        }
+        break;
+      case 'tool_result': {
+        const isErr = !!payload.error;
+        set(appendToBackgroundSession(
+          get(), bgSessionId,
+          `[tool] ${payload.tool_id || ''} ${isErr ? 'failed' : 'completed'}`,
+          isErr ? 'error' : 'success'
+        ));
+        break;
+      }
+      case 'error':
+        if (payload.message) {
+          set(appendToBackgroundSession(get(), bgSessionId, payload.message, 'error'));
+          set(updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({
+            status: 'failed' as ExecutionStatus,
+          })));
+        }
+        break;
+      case 'complete': {
+        // Flush the per-session tool-call filter
+        const bgFound = findBackgroundSessionByTaskId(get(), bgSessionId);
+        if (bgFound) {
+          const bgFlushed = bgFound.snapshot.toolCallFilter.flush();
+          if (bgFlushed) {
+            set(appendToBackgroundSession(get(), bgSessionId, bgFlushed, 'text'));
+          }
+        }
+        // Mark background session as completed
+        const bgFoundAfter = findBackgroundSessionByTaskId(get(), bgSessionId);
+        if (bgFoundAfter) {
+          const nextStatus: ExecutionStatus = bgFoundAfter.snapshot.isChatSession ? 'idle' : 'completed';
+          set(updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({
+            status: nextStatus,
+          })));
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    return;
+  }
+
   const currentMode = useModeStore.getState().mode;
   const isSimpleMode = currentMode === 'simple';
   const showSubAgent = useSettingsStore.getState().showSubAgentEvents && !isSimpleMode;
@@ -3223,7 +3438,7 @@ function findBackgroundSessionByTaskId(
   sessionId: string
 ): { key: string; snapshot: SessionSnapshot } | undefined {
   for (const [key, snapshot] of Object.entries(state.backgroundSessions)) {
-    if (snapshot.taskId === sessionId) {
+    if (snapshot.taskId === sessionId || snapshot.standaloneSessionId === sessionId) {
       return { key, snapshot };
     }
   }
@@ -3289,8 +3504,8 @@ function appendToBackgroundSession(
  */
 function isForegroundSession(state: ExecutionState, sessionId: string | undefined): boolean {
   if (!sessionId) return true;           // no session_id → treat as foreground
-  const fg = state.taskId;
-  if (!fg) return true;                  // no foreground task → treat as foreground
+  const fg = state.taskId || state.standaloneSessionId;
+  if (!fg) return false;                 // no foreground task → discard stale events
   return fg === sessionId;
 }
 
@@ -3391,11 +3606,14 @@ async function setupTauriEventListeners(
       switch (streamEvent.type) {
         case 'text_delta': {
           const filterResult = get().toolCallFilter.processChunk(streamEvent.content);
-          if (filterResult.output) {
-            get().appendStreamLine(filterResult.output, 'text');
-          }
           if (filterResult.toolIndicator) {
+            // Flush accumulated text before appending tool indicator
+            flushPendingDeltas(get);
             get().appendStreamLine(filterResult.toolIndicator, 'tool');
+          }
+          if (filterResult.output) {
+            pendingTextDelta += filterResult.output;
+            scheduleFlush(get);
           }
           break;
         }
@@ -3408,11 +3626,13 @@ async function setupTauriEventListeners(
 
         case 'thinking_delta':
           if (useSettingsStore.getState().showReasoningOutput) {
-            get().appendStreamLine(streamEvent.content, 'thinking');
+            pendingThinkingDelta += streamEvent.content;
+            scheduleFlush(get);
           }
           break;
 
         case 'tool_start':
+          flushPendingDeltas(get);
           get().appendStreamLine(`[tool] ${streamEvent.tool_name} started`, 'tool');
           get().addLog(`Tool started: ${streamEvent.tool_name}`);
           break;
@@ -3427,6 +3647,7 @@ async function setupTauriEventListeners(
         }
 
         case 'error':
+          flushPendingDeltas(get);
           get().appendStreamLine(streamEvent.message, 'error');
           get().addExecutionError({
             severity: 'critical',
@@ -3451,6 +3672,7 @@ async function setupTauriEventListeners(
           break;
 
         case 'complete': {
+          flushPendingDeltas(get);
           // Flush any buffered content from the tool-call filter
           const ccFlushed = get().toolCallFilter.flush();
           if (ccFlushed) {

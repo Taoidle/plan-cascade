@@ -133,21 +133,33 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
 
   loadPlugins: async () => {
     set({ loading: true, error: null });
-    try {
-      const response = await listPlugins();
-      if (response.success && response.data) {
-        set({ plugins: response.data, loading: false });
-      } else {
-        set({
-          error: response.error || 'Failed to load plugins',
-          loading: false,
-        });
+    const maxRetries = 5;
+    const baseDelay = 500; // ms
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const response = await listPlugins();
+        if (response.success && response.data) {
+          set({ plugins: response.data, loading: false, error: null });
+          return;
+        }
+        const errMsg = response.error || 'Failed to load plugins';
+        // Retry if plugin system not yet initialized (race with init_app)
+        if (errMsg.includes('not initialized') && attempt < maxRetries - 1) {
+          await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt)));
+          continue;
+        }
+        set({ error: errMsg, loading: false });
+        return;
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        if (errMsg.includes('not initialized') && attempt < maxRetries - 1) {
+          await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt)));
+          continue;
+        }
+        set({ error: errMsg, loading: false });
+        return;
       }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : String(error),
-        loading: false,
-      });
     }
   },
 

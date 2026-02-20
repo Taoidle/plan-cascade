@@ -432,15 +432,28 @@ impl LlmProvider for GlmProvider {
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
-        // GLM API supports native function calling, but in practice
-        // models with thinking/reasoning may not emit native tool_calls reliably.
-        // Keep Unreliable to use prompt-based fallback which works consistently.
-        ToolCallReliability::Unreliable
+        let model = self.config.model.to_lowercase();
+        // GLM-5, GLM-4.7, GLM-4.6 are agentic models with reliable native
+        // function calling — treat them the same as Anthropic/OpenAI.
+        if model.starts_with("glm-5")
+            || model.starts_with("glm5")
+            || model.contains("4.7")
+            || model.contains("4.6")
+        {
+            ToolCallReliability::Reliable
+        } else {
+            // Older models (glm-4-flash, glm-4-plus, glm-4.5 etc.)
+            // may emit tool calls inconsistently.
+            ToolCallReliability::Unreliable
+        }
     }
 
     fn default_fallback_mode(&self) -> FallbackToolFormatMode {
-        if self.config.enable_thinking && self.model_supports_reasoning() {
-            // GLM thinking models: disable prompt-based fallback to avoid
+        if matches!(self.tool_call_reliability(), ToolCallReliability::Reliable) {
+            // Reliable models: no prompt-based fallback needed.
+            FallbackToolFormatMode::Off
+        } else if self.config.enable_thinking && self.model_supports_reasoning() {
+            // Unreliable thinking models: disable prompt-based fallback to avoid
             // dual-channel confusion between native tools API and prompt
             // instructions.
             FallbackToolFormatMode::Off
@@ -464,6 +477,9 @@ impl LlmProvider for GlmProvider {
             // glm-4.6v, glm-4.6v-flash, glm-4.6v-flashx: 32k context
             // glm-4.1v-thinking-flash/flashx: 32k context
             32_768
+        } else if model.starts_with("glm-5") || model.starts_with("glm5") {
+            // glm-5: 200k context, max output 128k
+            200_000
         } else if model.contains("4.7") || model.contains("4.6") {
             // glm-4.7, glm-4.6: 128k context, max output 131,072
             128_000

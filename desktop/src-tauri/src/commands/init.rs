@@ -44,24 +44,34 @@ pub async fn init_app(
     // Initialize all services
     match state.initialize().await {
         Ok(_) => {
-            // Initialize IndexManager with the database pool
+            // Initialize IndexManager with the database pool.
+            // Store in StandaloneState BEFORE calling ensure_indexed() so that
+            // get_index_status queries can immediately retrieve the manager and
+            // return the previous indexed state from SQLite (fixes status not
+            // showing after app restart).
             if let Ok(pool) = state.with_database(|db| Ok(db.pool().clone())).await {
                 let manager = IndexManager::new(pool);
                 manager.set_app_handle(app).await;
 
+                // Store immediately so frontend can query status
+                {
+                    let mut mgr_lock = standalone_state.index_manager.write().await;
+                    *mgr_lock = Some(manager);
+                }
+
                 // If a working directory is already set, trigger indexing
+                // via the stored reference
                 let working_dir = {
                     let wd = standalone_state.working_directory.read().await;
                     wd.to_string_lossy().to_string()
                 };
 
                 if !working_dir.is_empty() && working_dir != "." {
-                    manager.ensure_indexed(&working_dir).await;
+                    let mgr_lock = standalone_state.index_manager.read().await;
+                    if let Some(ref manager) = *mgr_lock {
+                        manager.ensure_indexed(&working_dir).await;
+                    }
                 }
-
-                // Store in StandaloneState
-                let mut mgr_lock = standalone_state.index_manager.write().await;
-                *mgr_lock = Some(manager);
             }
 
             // Initialize the plugin system (ADR-F003)

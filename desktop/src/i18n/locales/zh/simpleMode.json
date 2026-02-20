@@ -164,5 +164,40 @@
     "enabledCount": "{{count}} 个已启用",
     "marketplace": "插件市场",
     "installFromUrl": "从 URL 安装"
+  },
+
+  "workflowMode": {
+    "chat": "对话",
+    "task": "任务"
+  },
+
+  "output": {
+    "label": "输出",
+    "toggleTitle": "切换详细输出面板"
+  },
+
+  "emptyChat": {
+    "thinking": "思考中...",
+    "startConversation": "在右侧输入框中开始对话。"
+  },
+
+  "actions": {
+    "execute": "执行",
+    "executeTitle": "开始执行",
+    "pause": "暂停",
+    "pauseTitle": "暂停执行",
+    "cancel": "取消",
+    "cancelTitle": "取消执行",
+    "resume": "继续",
+    "resumeTitle": "继续执行",
+    "newTask": "新建任务",
+    "newTaskTitle": "重置并开始新任务",
+    "newChat": "新建对话",
+    "newChatTitle": "开始新的对话",
+    "export": "导出",
+    "exportTitle": "导出对话",
+    "refresh": "刷新",
+    "refreshProjectsTitle": "刷新项目列表",
+    "refreshAnalyticsTitle": "刷新分析数据"
   }
 }

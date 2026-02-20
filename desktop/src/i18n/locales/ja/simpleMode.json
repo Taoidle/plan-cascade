@@ -164,5 +164,40 @@
     "enabledCount": "{{count}} 個が有効",
     "marketplace": "マーケットプレイス",
     "installFromUrl": "URLからインストール"
+  },
+
+  "workflowMode": {
+    "chat": "チャット",
+    "task": "タスク"
+  },
+
+  "output": {
+    "label": "出力",
+    "toggleTitle": "詳細出力パネルの切替"
+  },
+
+  "emptyChat": {
+    "thinking": "考え中...",
+    "startConversation": "右の入力ボックスで会話を始めてください。"
+  },
+
+  "actions": {
+    "execute": "実行",
+    "executeTitle": "実行を開始",
+    "pause": "一時停止",
+    "pauseTitle": "実行を一時停止",
+    "cancel": "キャンセル",
+    "cancelTitle": "実行をキャンセル",
+    "resume": "再開",
+    "resumeTitle": "実行を再開",
+    "newTask": "新規タスク",
+    "newTaskTitle": "リセットして新しいタスクを開始",
+    "newChat": "新規チャット",
+    "newChatTitle": "新しい会話を開始",
+    "export": "エクスポート",
+    "exportTitle": "会話をエクスポート",
+    "refresh": "更新",
+    "refreshProjectsTitle": "プロジェクト一覧を更新",
+    "refreshAnalyticsTitle": "分析データを更新"
   }
 }

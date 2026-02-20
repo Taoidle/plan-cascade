@@ -82,32 +82,38 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Fetch initial status
-    invoke<CommandResponse<IndexStatusEvent>>('get_index_status', {
-      projectPath: workspacePath,
-    })
-      .then((response) => {
-        if (!cancelled && response.success && response.data) {
-          applyEvent(response.data);
-          // If status is idle, retry after delay (backend may not be ready yet)
-          if (response.data.status === 'idle') {
-            retryTimer = setTimeout(() => {
-              if (!cancelled) {
-                invoke<CommandResponse<IndexStatusEvent>>('get_index_status', {
-                  projectPath: workspacePath,
-                })
-                  .then((r) => {
-                    if (!cancelled && r.success && r.data) applyEvent(r.data);
-                  })
-                  .catch(() => {});
-              }
-            }, 2000);
-          }
-        }
+    // Fetch initial status with exponential-backoff retry when idle.
+    // The backend may still be running ensure_indexed() after restart,
+    // so a single retry is not enough.
+    let retryCount = 0;
+    const maxRetries = 5;
+
+    const fetchStatus = () => {
+      if (cancelled) return;
+      invoke<CommandResponse<IndexStatusEvent>>('get_index_status', {
+        projectPath: workspacePath,
       })
-      .catch(() => {
-        // Silently ignore - backend may not be ready yet
-      });
+        .then((response) => {
+          if (!cancelled && response.success && response.data) {
+            applyEvent(response.data);
+            // If status is idle and retries remain, schedule another attempt
+            if (response.data.status === 'idle' && retryCount < maxRetries) {
+              const delay = Math.min(1000 * Math.pow(2, retryCount), 8000);
+              retryCount++;
+              retryTimer = setTimeout(fetchStatus, delay);
+            }
+          }
+        })
+        .catch(() => {
+          // Backend may not be ready yet — retry with backoff
+          if (!cancelled && retryCount < maxRetries) {
+            const delay = Math.min(1000 * Math.pow(2, retryCount), 8000);
+            retryCount++;
+            retryTimer = setTimeout(fetchStatus, delay);
+          }
+        });
+    };
+    fetchStatus();
 
     // Listen for real-time progress events
     let unlisten: UnlistenFn | null = null;

@@ -560,6 +560,20 @@ impl OrchestratorService {
                 };
             }
 
+            // Wait while paused (sleep-poll until unpaused or cancelled)
+            while self.is_paused() {
+                if self.cancellation_token.is_cancelled() {
+                    return ExecutionResult {
+                        response: None,
+                        usage: total_usage,
+                        iterations,
+                        success: false,
+                        error: Some("Execution cancelled".to_string()),
+                    };
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+
             // Check iteration limit
             if iterations >= self.config.max_iterations {
                 // Recover last_assistant_text if available (story-004)
@@ -1367,6 +1381,20 @@ impl OrchestratorService {
                     success: false,
                     error: Some("Execution cancelled".to_string()),
                 };
+            }
+
+            // Wait while paused (sleep-poll until unpaused or cancelled)
+            while self.is_paused() {
+                if self.cancellation_token.is_cancelled() {
+                    return ExecutionResult {
+                        response: None,
+                        usage: total_usage,
+                        iterations,
+                        success: false,
+                        error: Some("Execution cancelled".to_string()),
+                    };
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             }
 
             // Check iteration limit

@@ -32,26 +32,51 @@ export function ImportExportSection() {
     setMessage(null);
 
     try {
-      // Export settings from store (v5.0 - Pure Rust backend)
+      // Export settings from store (v5.1 - complete settings)
       const settings = useSettingsStore.getState();
       const exportData = {
-        version: '5.0',
+        version: '5.1',
         exported_at: new Date().toISOString(),
         settings: {
+          // Backend
           backend: settings.backend,
           provider: settings.provider,
           model: settings.model,
           theme: settings.theme,
           default_mode: settings.defaultMode,
+          // Agents
           agents: settings.agents,
-          quality_gates: settings.qualityGates,
           agent_selection: settings.agentSelection,
           default_agent: settings.defaultAgent,
+          // Quality gates
+          quality_gates: settings.qualityGates,
+          // Execution
           max_parallel_stories: settings.maxParallelStories,
           max_iterations: settings.maxIterations,
           max_total_tokens: settings.maxTotalTokens,
           timeout_seconds: settings.timeoutSeconds,
           standalone_context_turns: settings.standaloneContextTurns,
+          // UI
+          language: settings.language,
+          show_line_numbers: settings.showLineNumbers,
+          max_file_attachment_size: settings.maxFileAttachmentSize,
+          enable_markdown_math: settings.enableMarkdownMath,
+          enable_code_block_copy: settings.enableCodeBlockCopy,
+          // Context & display
+          enable_context_compaction: settings.enableContextCompaction,
+          show_reasoning_output: settings.showReasoningOutput,
+          enable_thinking: settings.enableThinking,
+          show_sub_agent_events: settings.showSubAgentEvents,
+          // Endpoints
+          glm_endpoint: settings.glmEndpoint,
+          minimax_endpoint: settings.minimaxEndpoint,
+          qwen_endpoint: settings.qwenEndpoint,
+          // Search
+          search_provider: settings.searchProvider,
+          // Workspace
+          pinned_directories: settings.pinnedDirectories,
+          sidebar_collapsed: settings.sidebarCollapsed,
+          workspace_path: settings.workspacePath,
         },
       };
 
@@ -437,6 +462,64 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
     if (allowed.has(settings.standalone_context_turns)) {
       store.setStandaloneContextTurns(settings.standalone_context_turns as Parameters<typeof store.setStandaloneContextTurns>[0]);
     }
+  }
+
+  // UI settings
+  if (settings.language && ['en', 'zh', 'ja'].includes(settings.language as string)) {
+    store.setLanguage(settings.language as 'en' | 'zh' | 'ja');
+  }
+  if (typeof settings.show_line_numbers === 'boolean') {
+    store.setShowLineNumbers(settings.show_line_numbers);
+  }
+  if (typeof settings.max_file_attachment_size === 'number') {
+    store.setMaxFileAttachmentSize(settings.max_file_attachment_size);
+  }
+  if (typeof settings.enable_markdown_math === 'boolean') {
+    store.setEnableMarkdownMath(settings.enable_markdown_math);
+  }
+  if (typeof settings.enable_code_block_copy === 'boolean') {
+    store.setEnableCodeBlockCopy(settings.enable_code_block_copy);
+  }
+
+  // Context & display
+  if (typeof settings.enable_context_compaction === 'boolean') {
+    store.setEnableContextCompaction(settings.enable_context_compaction);
+  }
+  if (typeof settings.show_reasoning_output === 'boolean') {
+    store.setShowReasoningOutput(settings.show_reasoning_output);
+  }
+  if (typeof settings.enable_thinking === 'boolean') {
+    store.setEnableThinking(settings.enable_thinking);
+  }
+  if (typeof settings.show_sub_agent_events === 'boolean') {
+    store.setShowSubAgentEvents(settings.show_sub_agent_events);
+  }
+
+  // Endpoints
+  if (settings.glm_endpoint) {
+    store.setGlmEndpoint(settings.glm_endpoint as Parameters<typeof store.setGlmEndpoint>[0]);
+  }
+  if (settings.minimax_endpoint) {
+    store.setMinimaxEndpoint(settings.minimax_endpoint as Parameters<typeof store.setMinimaxEndpoint>[0]);
+  }
+  if (settings.qwen_endpoint) {
+    store.setQwenEndpoint(settings.qwen_endpoint as Parameters<typeof store.setQwenEndpoint>[0]);
+  }
+
+  // Search
+  if (settings.search_provider && ['tavily', 'brave', 'duckduckgo'].includes(settings.search_provider as string)) {
+    store.setSearchProvider(settings.search_provider as 'tavily' | 'brave' | 'duckduckgo');
+  }
+
+  // Workspace
+  if (Array.isArray(settings.pinned_directories)) {
+    useSettingsStore.setState({ pinnedDirectories: settings.pinned_directories as string[] });
+  }
+  if (typeof settings.sidebar_collapsed === 'boolean') {
+    useSettingsStore.setState({ sidebarCollapsed: settings.sidebar_collapsed });
+  }
+  if (typeof settings.workspace_path === 'string') {
+    store.setWorkspacePath(settings.workspace_path);
   }
 }
 

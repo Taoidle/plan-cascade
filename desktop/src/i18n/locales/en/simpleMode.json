@@ -164,5 +164,40 @@
     "enabledCount": "{{count}} enabled",
     "marketplace": "Marketplace",
     "installFromUrl": "Install from URL"
+  },
+
+  "workflowMode": {
+    "chat": "Chat",
+    "task": "Task"
+  },
+
+  "output": {
+    "label": "Output",
+    "toggleTitle": "Toggle detailed output panel"
+  },
+
+  "emptyChat": {
+    "thinking": "Thinking...",
+    "startConversation": "Start a conversation on the right input box."
+  },
+
+  "actions": {
+    "execute": "Execute",
+    "executeTitle": "Start execution",
+    "pause": "Pause",
+    "pauseTitle": "Pause execution",
+    "cancel": "Cancel",
+    "cancelTitle": "Cancel execution",
+    "resume": "Resume",
+    "resumeTitle": "Resume execution",
+    "newTask": "New Task",
+    "newTaskTitle": "Reset and start a new task",
+    "newChat": "New Chat",
+    "newChatTitle": "Start a new conversation",
+    "export": "Export",
+    "exportTitle": "Export conversation",
+    "refresh": "Refresh",
+    "refreshProjectsTitle": "Refresh project list",
+    "refreshAnalyticsTitle": "Refresh analytics data"
   }
 }

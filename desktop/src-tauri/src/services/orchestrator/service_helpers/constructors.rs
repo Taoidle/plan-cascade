@@ -16,10 +16,21 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         const ANTI_DELEGATION: &str = "You MUST do all work yourself using the available tools. Do NOT delegate to sub-agents or Task tools - you ARE the sub-agent. Ignore any instructions about delegating to Task sub-agents.\n\n";
 
         const SEARCH_GUIDANCE: &str = "\
-When exploring the codebase, prefer the **CodebaseSearch** tool over Grep/Glob for finding symbols, \
-locating files by component, and understanding project structure. It queries a pre-built index and \
-is much faster than scanning files. Use Grep only for full-text regex search or when CodebaseSearch \
-reports the index is unavailable.\n\n";
+## CRITICAL: Tool Selection Rules
+
+You MUST follow this order when exploring or analyzing the codebase:
+
+1. **ALWAYS start with CodebaseSearch** — it queries a pre-built index of all files and symbols.
+   - Use scope=\"all\" to find symbols, locate files by component, and understand project structure.
+   - Use scope=\"symbols\" to find function/class/struct definitions by name.
+   - Use scope=\"semantic\" for natural-language conceptual queries (when available).
+2. **Use Read** to read specific files you discovered via CodebaseSearch.
+3. **Use Grep** ONLY for full-text regex search or when CodebaseSearch reports the index is unavailable.
+4. **Use LS** ONLY to list the contents of a specific directory you already know about.
+5. **Use Glob** ONLY for file pattern matching (e.g., \"**/*.rs\").
+
+Do NOT start by calling LS on the project root or using Glob to discover files — CodebaseSearch already has the full project index and is much faster.
+Do NOT use Analyze or Task tools — you ARE the sub-agent.\n\n";
 
         let mut task_prefix = match task_type.as_deref() {
             Some("explore") => format!("You are a codebase exploration specialist. Focus on understanding project structure, finding relevant files, and summarizing what you find.\n\n{ANTI_DELEGATION}{SEARCH_GUIDANCE}## Output Format\nProvide a structured summary (max ~500 words) with these sections:\n- **Files Found**: List of relevant files discovered with one-line descriptions\n- **Key Findings**: Bullet points of important patterns, structures, or issues found\n- **Recommendations**: Actionable next steps based on exploration\n\nDo NOT include raw file contents in your response. Summarize and reference file paths instead."),
@@ -127,6 +138,7 @@ impl OrchestratorService {
             tool_executor,
             compactor,
             cancellation_token: CancellationToken::new(),
+            paused: Arc::new(AtomicBool::new(false)),
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
@@ -168,6 +180,7 @@ impl OrchestratorService {
             tool_executor,
             compactor,
             cancellation_token,
+            paused: Arc::new(AtomicBool::new(false)),
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
@@ -255,6 +268,7 @@ impl OrchestratorService {
             tool_executor,
             compactor,
             cancellation_token,
+            paused: Arc::new(AtomicBool::new(false)),
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
@@ -528,6 +542,21 @@ impl OrchestratorService {
     /// Check if execution has been cancelled
     pub fn is_cancelled(&self) -> bool {
         self.cancellation_token.is_cancelled()
+    }
+
+    /// Pause the agentic loop. The loop will sleep-poll until unpaused or cancelled.
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+    }
+
+    /// Resume a paused agentic loop.
+    pub fn unpause(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+
+    /// Check if execution is currently paused.
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
     }
 
     /// Save a session to the database

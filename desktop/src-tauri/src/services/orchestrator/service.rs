@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
@@ -136,15 +137,16 @@ fn default_analysis_artifacts_root() -> PathBuf {
 /// Compute a reasonable token budget for sub-agents based on the model's context window.
 ///
 /// Sub-agents do multiple iterations, each re-sending the full conversation. With compaction
-/// enabled, the effective budget can support more iterations. We use `context_window * 3`
-/// as the base budget, allowing ~10-15 iterations with compaction.
-/// Explore/analyze tasks get a higher multiplier since they read many files.
+/// enabled, the effective budget can support more iterations. We use `context_window * 8`
+/// as the base budget, allowing ~30-40 iterations with compaction.
+/// Explore/analyze tasks get a higher multiplier (15x) since they read many files and
+/// often exceed lower budgets with 128k-context models.
 fn sub_agent_token_budget(context_window: u32, task_type: Option<&str>) -> u32 {
     let multiplier = match task_type {
-        Some("explore") | Some("analyze") => 4,
-        _ => 3,
+        Some("explore") | Some("analyze") => 15,
+        _ => 8,
     };
-    (context_window * multiplier).clamp(20_000, 1_000_000)
+    (context_window * multiplier).clamp(20_000, 4_000_000)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -313,6 +315,8 @@ pub struct OrchestratorService {
     /// - Unreliable/None (Ollama, Qwen, DeepSeek, GLM) -> SlidingWindowCompactor
     compactor: Box<dyn ContextCompactor>,
     cancellation_token: CancellationToken,
+    /// Pause flag: when true, the agentic loop sleeps until unpaused or cancelled.
+    paused: Arc<AtomicBool>,
     /// Database pool for session persistence
     db_pool: Option<Pool<SqliteConnectionManager>>,
     /// Active sessions (in-memory cache)

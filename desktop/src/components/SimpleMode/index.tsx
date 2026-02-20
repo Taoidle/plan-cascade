@@ -191,7 +191,7 @@ export function SimpleMode() {
                   : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
               )}
             >
-              Chat
+              {t('workflowMode.chat', { defaultValue: 'Chat' })}
             </button>
             <button
               onClick={() => setWorkflowMode('task')}
@@ -202,7 +202,7 @@ export function SimpleMode() {
                   : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
               )}
             >
-              Task
+              {t('workflowMode.task', { defaultValue: 'Task' })}
             </button>
           </div>
 
@@ -220,9 +220,9 @@ export function SimpleMode() {
               'hover:bg-gray-100 dark:hover:bg-gray-800',
               showOutputPanel && 'bg-gray-100 dark:bg-gray-800'
             )}
-            title="Toggle detailed output panel"
+            title={t('output.toggleTitle', { defaultValue: 'Toggle detailed output panel' })}
           >
-            Output{detailLineCount > 0 ? ` (${detailLineCount})` : ''}
+            {t('output.label', { defaultValue: 'Output' })}{detailLineCount > 0 ? ` (${detailLineCount})` : ''}
           </button>
 
           <button
@@ -355,6 +355,7 @@ function ChatTranscript({
   lines: StreamLine[];
   status: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 }) {
+  const { t } = useTranslation('simpleMode');
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingLineId, setEditingLineId] = useState<number | null>(null);
 
@@ -448,7 +449,7 @@ function ChatTranscript({
   if (visibleLines.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
-        {status === 'running' ? 'Thinking...' : 'Start a conversation on the right input box.'}
+        {status === 'running' ? t('emptyChat.thinking', { defaultValue: 'Thinking...' }) : t('emptyChat.startConversation', { defaultValue: 'Start a conversation on the right input box.' })}
       </div>
     );
   }

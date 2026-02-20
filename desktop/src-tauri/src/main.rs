@@ -176,6 +176,8 @@ fn main() {
             // Session-based standalone commands
             plan_cascade_desktop::commands::standalone::execute_standalone_with_session,
             plan_cascade_desktop::commands::standalone::cancel_standalone_execution,
+            plan_cascade_desktop::commands::standalone::pause_standalone_execution,
+            plan_cascade_desktop::commands::standalone::unpause_standalone_execution,
             plan_cascade_desktop::commands::standalone::get_standalone_status,
             plan_cascade_desktop::commands::standalone::get_standalone_progress,
             plan_cascade_desktop::commands::standalone::resume_standalone_execution,

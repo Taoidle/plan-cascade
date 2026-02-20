@@ -303,6 +303,14 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
             name: "GLM (ZhipuAI)".to_string(),
             models: vec![
                 ModelInfo {
+                    id: "glm-5".to_string(),
+                    name: "GLM-5".to_string(),
+                    supports_thinking: true,
+                    supports_tools: true,
+                    context_window: 200_000,
+                    pricing: None,
+                },
+                ModelInfo {
                     id: "glm-4-flash-250414".to_string(),
                     name: "GLM-4 Flash".to_string(),
                     supports_thinking: false,
@@ -1069,6 +1077,11 @@ pub async fn execute_standalone(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
+    // Clone session_id before it's moved into orchestrator_config
+    let event_session_id = analysis_session_id
+        .clone()
+        .unwrap_or_default();
+
     let orchestrator_config = OrchestratorConfig {
         provider: config,
         system_prompt,
@@ -1114,7 +1127,20 @@ pub async fn execute_standalone(
     let app_clone = app.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            let _ = app_clone.emit("standalone-event", &event);
+            // Flatten session_id into the serialized UnifiedStreamEvent so the
+            // frontend's handleUnifiedExecutionEvent can route events to the
+            // correct foreground or background session.
+            let mut payload =
+                serde_json::to_value(&event).unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(obj) = payload.as_object_mut() {
+                if !event_session_id.is_empty() {
+                    obj.insert(
+                        "session_id".to_string(),
+                        serde_json::Value::String(event_session_id.clone()),
+                    );
+                }
+            }
+            let _ = app_clone.emit("standalone-event", &payload);
         }
     });
 
@@ -1430,6 +1456,40 @@ pub async fn cancel_standalone_execution(
 ) -> Result<CommandResponse<bool>, String> {
     if let Some(orchestrator) = standalone_state.get_orchestrator(&session_id).await {
         orchestrator.cancel();
+        Ok(CommandResponse::ok(true))
+    } else {
+        Ok(CommandResponse::err(format!(
+            "Session not found: {}",
+            session_id
+        )))
+    }
+}
+
+/// Pause a running standalone execution
+#[tauri::command]
+pub async fn pause_standalone_execution(
+    session_id: String,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<bool>, String> {
+    if let Some(orchestrator) = standalone_state.get_orchestrator(&session_id).await {
+        orchestrator.pause();
+        Ok(CommandResponse::ok(true))
+    } else {
+        Ok(CommandResponse::err(format!(
+            "Session not found: {}",
+            session_id
+        )))
+    }
+}
+
+/// Unpause a paused standalone execution
+#[tauri::command]
+pub async fn unpause_standalone_execution(
+    session_id: String,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<bool>, String> {
+    if let Some(orchestrator) = standalone_state.get_orchestrator(&session_id).await {
+        orchestrator.unpause();
         Ok(CommandResponse::ok(true))
     } else {
         Ok(CommandResponse::err(format!(

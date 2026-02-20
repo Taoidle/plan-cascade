@@ -179,11 +179,11 @@ function getActionsForContext(
       if (ctx.onStartExecution) {
         actions.push({
           id: 'start-execution',
-          label: 'Execute',
+          label: ctx.t('simpleMode:actions.execute', { defaultValue: 'Execute' }),
           icon: PlayIcon,
           onClick: ctx.onStartExecution,
           variant: 'primary',
-          title: 'Start execution',
+          title: ctx.t('simpleMode:actions.executeTitle', { defaultValue: 'Start execution' }),
         });
       }
     }
@@ -192,21 +192,21 @@ function getActionsForContext(
       if (ctx.onPauseExecution) {
         actions.push({
           id: 'pause-execution',
-          label: 'Pause',
+          label: ctx.t('simpleMode:actions.pause', { defaultValue: 'Pause' }),
           icon: StopIcon,
           onClick: ctx.onPauseExecution,
           variant: 'secondary',
-          title: 'Pause execution',
+          title: ctx.t('simpleMode:actions.pauseTitle', { defaultValue: 'Pause execution' }),
         });
       }
       if (ctx.onCancelExecution) {
         actions.push({
           id: 'cancel-execution',
-          label: 'Cancel',
+          label: ctx.t('simpleMode:actions.cancel', { defaultValue: 'Cancel' }),
           icon: StopIcon,
           onClick: ctx.onCancelExecution,
           variant: 'danger',
-          title: 'Cancel execution',
+          title: ctx.t('simpleMode:actions.cancelTitle', { defaultValue: 'Cancel execution' }),
         });
       }
     }
@@ -215,21 +215,21 @@ function getActionsForContext(
       if (ctx.onResumeExecution) {
         actions.push({
           id: 'resume-execution',
-          label: 'Resume',
+          label: ctx.t('simpleMode:actions.resume', { defaultValue: 'Resume' }),
           icon: PlayIcon,
           onClick: ctx.onResumeExecution,
           variant: 'primary',
-          title: 'Resume execution',
+          title: ctx.t('simpleMode:actions.resumeTitle', { defaultValue: 'Resume execution' }),
         });
       }
       if (ctx.onCancelExecution) {
         actions.push({
           id: 'cancel-execution',
-          label: 'Cancel',
+          label: ctx.t('simpleMode:actions.cancel', { defaultValue: 'Cancel' }),
           icon: StopIcon,
           onClick: ctx.onCancelExecution,
           variant: 'danger',
-          title: 'Cancel execution',
+          title: ctx.t('simpleMode:actions.cancelTitle', { defaultValue: 'Cancel execution' }),
         });
       }
     }
@@ -238,11 +238,11 @@ function getActionsForContext(
       if (ctx.onResetExecution) {
         actions.push({
           id: 'reset-execution',
-          label: 'New Task',
+          label: ctx.t('simpleMode:actions.newTask', { defaultValue: 'New Task' }),
           icon: ResetIcon,
           onClick: ctx.onResetExecution,
           variant: 'secondary',
-          title: 'Reset and start a new task',
+          title: ctx.t('simpleMode:actions.newTaskTitle', { defaultValue: 'Reset and start a new task' }),
         });
       }
     }
@@ -253,21 +253,21 @@ function getActionsForContext(
     if (ctx.onNewChat) {
       actions.push({
         id: 'new-chat',
-        label: 'New Chat',
+        label: ctx.t('simpleMode:actions.newChat', { defaultValue: 'New Chat' }),
         icon: PlusIcon,
         onClick: ctx.onNewChat,
         variant: 'primary',
-        title: 'Start a new conversation',
+        title: ctx.t('simpleMode:actions.newChatTitle', { defaultValue: 'Start a new conversation' }),
       });
     }
     if (ctx.onExportChat) {
       actions.push({
         id: 'export-chat',
-        label: 'Export',
+        label: ctx.t('simpleMode:actions.export', { defaultValue: 'Export' }),
         icon: DownloadIcon,
         onClick: ctx.onExportChat,
         variant: 'secondary',
-        title: 'Export conversation',
+        title: ctx.t('simpleMode:actions.exportTitle', { defaultValue: 'Export conversation' }),
       });
     }
   }
@@ -277,11 +277,11 @@ function getActionsForContext(
     if (ctx.onRefreshProjects) {
       actions.push({
         id: 'refresh-projects',
-        label: 'Refresh',
+        label: ctx.t('simpleMode:actions.refresh', { defaultValue: 'Refresh' }),
         icon: ResetIcon,
         onClick: ctx.onRefreshProjects,
         variant: 'secondary',
-        title: 'Refresh project list',
+        title: ctx.t('simpleMode:actions.refreshProjectsTitle', { defaultValue: 'Refresh project list' }),
       });
     }
   }
@@ -291,11 +291,11 @@ function getActionsForContext(
     if (ctx.onRefreshAnalytics) {
       actions.push({
         id: 'refresh-analytics',
-        label: 'Refresh',
+        label: ctx.t('simpleMode:actions.refresh', { defaultValue: 'Refresh' }),
         icon: ResetIcon,
         onClick: ctx.onRefreshAnalytics,
         variant: 'secondary',
-        title: 'Refresh analytics data',
+        title: ctx.t('simpleMode:actions.refreshAnalyticsTitle', { defaultValue: 'Refresh analytics data' }),
       });
     }
   }

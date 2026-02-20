@@ -8,7 +8,7 @@
  * Story 008: Real-time Execution Feedback
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo, memo } from 'react';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import {
@@ -151,7 +151,18 @@ export function StreamingOutput({
   const { streamingOutput, clearStreamingOutput, status } = useExecutionStore();
   const mode = useModeStore((state) => state.mode);
   const isSimpleMode = mode === 'simple';
-  const displayBlocks = buildDisplayBlocks(streamingOutput, isSimpleMode);
+  // Split display blocks into stable historical blocks and the active streaming
+  // block. Only the active block re-renders during streaming, preventing full
+  // MarkdownRenderer re-parses on every text delta.
+  const { historicalBlocks, activeBlock } = useMemo(() => {
+    const blocks = buildDisplayBlocks(streamingOutput, isSimpleMode);
+    if (blocks.length === 0) return { historicalBlocks: [] as DisplayBlock[], activeBlock: null as DisplayBlock | null };
+    const last = blocks[blocks.length - 1];
+    if (last.kind === 'line' && (last.line.type === 'text' || last.line.type === 'thinking')) {
+      return { historicalBlocks: blocks.slice(0, -1), activeBlock: last };
+    }
+    return { historicalBlocks: blocks, activeBlock: null as DisplayBlock | null };
+  }, [streamingOutput, isSimpleMode]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -217,7 +228,10 @@ export function StreamingOutput({
       setExportNotice((current) => (current?.text === text ? null : current));
     }, 3000);
   }, []);
-  const assistantReplies = collectAssistantReplies(streamingOutput);
+  const assistantReplies = useMemo(
+    () => collectAssistantReplies(streamingOutput),
+    [streamingOutput]
+  );
 
   const exportAll = useCallback(async () => {
     try {
@@ -463,46 +477,30 @@ export function StreamingOutput({
         )}
         style={isFillHeight ? undefined : { maxHeight }}
       >
-        {displayBlocks.map((block) => {
-          if (block.kind === 'group') {
-            return (
-              <EventGroupLine
-                key={block.groupId}
-                groupId={block.groupId}
-                kind={block.groupKind}
-                lines={block.lines}
-                compact={compact}
-              />
-            );
-          }
+        {/* Historical (stable) blocks — memoized, no re-render during streaming */}
+        <HistoricalBlockList blocks={historicalBlocks} compact={compact} />
 
-          const line = block.line;
-          // Text content: render as markdown (accumulated by appendStreamLine)
+        {/* Active streaming block — lightweight renderer during streaming */}
+        {activeBlock && activeBlock.kind === 'line' && (() => {
+          const line = activeBlock.line;
           if (line.type === 'text') {
+            // During streaming: use lightweight <pre> to avoid full markdown re-parse
+            // After completion: use full MarkdownRenderer for final formatting
+            if (status === 'running') {
+              return (
+                <div key={`active-${line.id}`} className="text-gray-200">
+                  <pre className={clsx('whitespace-pre-wrap break-words font-sans', compact ? 'text-xs' : 'text-sm')}>
+                    {line.content}
+                  </pre>
+                </div>
+              );
+            }
             return (
               <div key={line.id} className="text-gray-200">
                 <MarkdownRenderer content={line.content} className={compact ? 'text-xs' : 'text-sm'} />
               </div>
             );
           }
-
-          // User message in chat (info type): render as a styled user bubble
-          if (line.type === 'info') {
-            return (
-              <div key={line.id} className="my-4 flex justify-end">
-                <div
-                  className={clsx(
-                    'max-w-[80%] px-4 py-2 rounded-2xl rounded-br-sm',
-                    'bg-primary-600 text-white',
-                    compact ? 'text-xs' : 'text-sm'
-                  )}
-                >
-                  {line.content}
-                </div>
-              </div>
-            );
-          }
-
           if (line.type === 'thinking') {
             return (
               <div key={line.id} className="text-gray-500 italic font-mono text-xs whitespace-pre-wrap">
@@ -510,68 +508,9 @@ export function StreamingOutput({
               </div>
             );
           }
+          return null;
+        })()}
 
-          // Tool call: render as a compact card with tool name and arguments
-          if (line.type === 'tool') {
-            return <ToolCallLine key={line.id} content={line.content} compact={compact} />;
-          }
-
-          if (line.type === 'sub_agent') {
-            return <SubAgentLine key={line.id} content={line.content} compact={compact} />;
-          }
-
-          if (line.type === 'analysis') {
-            return <AnalysisLine key={line.id} content={line.content} compact={compact} />;
-          }
-
-          // Tool result: render as collapsible result
-          if (line.type === 'tool_result') {
-            return <ToolResultLine key={line.id} content={line.content} compact={compact} />;
-          }
-
-          // Success lines: render as completion banner
-          if (line.type === 'success') {
-            return (
-              <div
-                key={line.id}
-                className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-green-700/50 bg-green-950/30 text-green-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
-              >
-                <CheckCircledIcon className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>{line.content}</span>
-              </div>
-            );
-          }
-
-          // Error lines that look like completion failures
-          if (line.type === 'error' && line.content.startsWith('Execution finished')) {
-            return (
-              <div
-                key={line.id}
-                className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-red-700/50 bg-red-950/30 text-red-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
-              >
-                <CrossCircledIcon className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>{line.content}</span>
-              </div>
-            );
-          }
-
-          // Non-text lines: render terminal-style with prefix and color
-          const prefix = LINE_TYPE_PREFIX[line.type];
-          return (
-            <div
-              key={line.id}
-              className={clsx(
-                'leading-5 whitespace-pre-wrap break-all font-mono',
-                LINE_TYPE_COLORS[line.type]
-              )}
-            >
-              {prefix && (
-                <span className="text-gray-600 select-none">{prefix}</span>
-              )}
-              {line.content}
-            </div>
-          );
-        })}
         {/* Working indicator — visible while AI is processing */}
         {status === 'running' && <WorkingIndicator />}
 
@@ -672,6 +611,125 @@ function buildDisplayBlocks(lines: StreamLine[], compactMode: boolean): DisplayB
   return blocks;
 }
 
+/** Render a single DisplayBlock (non-group). Extracted for reuse in HistoricalBlockList. */
+function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
+  if (line.type === 'text') {
+    return (
+      <div key={line.id} className="text-gray-200">
+        <MarkdownRenderer content={line.content} className={compact ? 'text-xs' : 'text-sm'} />
+      </div>
+    );
+  }
+
+  if (line.type === 'info') {
+    return (
+      <div key={line.id} className="my-4 flex justify-end">
+        <div
+          className={clsx(
+            'max-w-[80%] px-4 py-2 rounded-2xl rounded-br-sm',
+            'bg-primary-600 text-white',
+            compact ? 'text-xs' : 'text-sm'
+          )}
+        >
+          {line.content}
+        </div>
+      </div>
+    );
+  }
+
+  if (line.type === 'thinking') {
+    return (
+      <div key={line.id} className="text-gray-500 italic font-mono text-xs whitespace-pre-wrap">
+        {line.content}
+      </div>
+    );
+  }
+
+  if (line.type === 'tool') {
+    return <ToolCallLine key={line.id} content={line.content} compact={compact} />;
+  }
+
+  if (line.type === 'sub_agent') {
+    return <SubAgentLine key={line.id} content={line.content} compact={compact} />;
+  }
+
+  if (line.type === 'analysis') {
+    return <AnalysisLine key={line.id} content={line.content} compact={compact} />;
+  }
+
+  if (line.type === 'tool_result') {
+    return <ToolResultLine key={line.id} content={line.content} compact={compact} />;
+  }
+
+  if (line.type === 'success') {
+    return (
+      <div
+        key={line.id}
+        className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-green-700/50 bg-green-950/30 text-green-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
+      >
+        <CheckCircledIcon className="w-3.5 h-3.5 flex-shrink-0" />
+        <span>{line.content}</span>
+      </div>
+    );
+  }
+
+  if (line.type === 'error' && line.content.startsWith('Execution finished')) {
+    return (
+      <div
+        key={line.id}
+        className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-red-700/50 bg-red-950/30 text-red-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
+      >
+        <CrossCircledIcon className="w-3.5 h-3.5 flex-shrink-0" />
+        <span>{line.content}</span>
+      </div>
+    );
+  }
+
+  const prefix = LINE_TYPE_PREFIX[line.type];
+  return (
+    <div
+      key={line.id}
+      className={clsx(
+        'leading-5 whitespace-pre-wrap break-all font-mono',
+        LINE_TYPE_COLORS[line.type]
+      )}
+    >
+      {prefix && (
+        <span className="text-gray-600 select-none">{prefix}</span>
+      )}
+      {line.content}
+    </div>
+  );
+}
+
+/** Memoized list of historical (completed) display blocks — skips re-render during active streaming */
+const HistoricalBlockList = memo(function HistoricalBlockList({
+  blocks,
+  compact,
+}: {
+  blocks: DisplayBlock[];
+  compact: boolean;
+}) {
+  return (
+    <>
+      {blocks.map((block) => {
+        if (block.kind === 'group') {
+          return (
+            <EventGroupLine
+              key={block.groupId}
+              groupId={block.groupId}
+              kind={block.groupKind}
+              lines={block.lines}
+              compact={compact}
+            />
+          );
+        }
+        return renderLineBlock(block.line, compact);
+      })}
+    </>
+  );
+});
+
 function EventGroupLine({
   groupId,
   kind,
@@ -685,9 +743,9 @@ function EventGroupLine({
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  const toolCalls = lines.filter((line) => line.type === 'tool').length;
-  const toolResults = lines.filter((line) => line.type === 'tool_result').length;
-  const analysisEvents = lines.filter((line) => line.type === 'analysis').length;
+  const toolCalls = useMemo(() => lines.filter((line) => line.type === 'tool').length, [lines]);
+  const toolResults = useMemo(() => lines.filter((line) => line.type === 'tool_result').length, [lines]);
+  const analysisEvents = useMemo(() => lines.filter((line) => line.type === 'analysis').length, [lines]);
 
   const title =
     kind === 'tool_activity'
@@ -781,7 +839,7 @@ function parseToolContent(content: string): { toolName: string; args: string } {
   return { toolName: 'Tool', args: content };
 }
 
-function ToolCallLine({ content, compact }: { content: string; compact: boolean }) {
+const ToolCallLine = memo(function ToolCallLine({ content, compact }: { content: string; compact: boolean }) {
   const { toolName, args } = parseToolContent(content);
 
   return (
@@ -804,7 +862,7 @@ function ToolCallLine({ content, compact }: { content: string; compact: boolean 
       </div>
     </div>
   );
-}
+});
 
 function parseSubAgentContent(content: string): {
   phase: 'start' | 'end' | 'update';
@@ -835,7 +893,7 @@ function parseSubAgentContent(content: string): {
   return { phase: 'update', details: content, success: null };
 }
 
-function SubAgentLine({ content, compact }: { content: string; compact: boolean }) {
+const SubAgentLine = memo(function SubAgentLine({ content, compact }: { content: string; compact: boolean }) {
   const parsed = parseSubAgentContent(content);
   const isStart = parsed.phase === 'start';
   const isEndSuccess = parsed.phase === 'end' && parsed.success === true;
@@ -880,7 +938,7 @@ function SubAgentLine({ content, compact }: { content: string; compact: boolean 
       </div>
     </div>
   );
-}
+});
 
 function parseAnalysisContent(content: string): {
   kind: 'phase_start' | 'phase_progress' | 'evidence' | 'phase_end' | 'validation' | 'generic';
@@ -916,7 +974,7 @@ function parseAnalysisContent(content: string): {
   return { kind: 'generic', phase: part2, status: part3, details };
 }
 
-function AnalysisLine({ content, compact }: { content: string; compact: boolean }) {
+const AnalysisLine = memo(function AnalysisLine({ content, compact }: { content: string; compact: boolean }) {
   const parsed = parseAnalysisContent(content);
   const isError = parsed.status === 'error' || /failed|warning|issue/i.test(parsed.details);
   const isDone = parsed.kind === 'phase_end' && !isError;
@@ -969,7 +1027,7 @@ function AnalysisLine({ content, compact }: { content: string; compact: boolean 
       </div>
     </div>
   );
-}
+});
 
 /** Parse tool result content from "[tool_result:id] content" or "[tool_error:id] content" */
 function parseToolResultContent(content: string): { toolId: string; result: string; isError: boolean } {
@@ -984,7 +1042,7 @@ function parseToolResultContent(content: string): { toolId: string; result: stri
   return { toolId: '', result: content, isError: false };
 }
 
-function ToolResultLine({ content, compact }: { content: string; compact: boolean }) {
+const ToolResultLine = memo(function ToolResultLine({ content, compact }: { content: string; compact: boolean }) {
   const { result, isError } = parseToolResultContent(content);
   const [expanded, setExpanded] = useState(false);
   const isLong = result.length > 200;
@@ -1028,7 +1086,7 @@ function ToolResultLine({ content, compact }: { content: string; compact: boolea
       </pre>
     </div>
   );
-}
+});
 
 // ============================================================================
 // Working Indicator (pulsing dots while AI is processing)

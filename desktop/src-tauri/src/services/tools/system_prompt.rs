@@ -358,11 +358,12 @@ pub fn merge_system_prompts(tool_prompt: &str, user_prompt: Option<&str>) -> Str
     }
 }
 
-/// Build a compact tool preference section for sub-agents.
+/// Build a tool selection guidance section for sub-agents.
 ///
 /// Sub-agents don't receive the full Decision Tree from the main agent's
-/// system prompt. This function provides a condensed version that guides
-/// the LLM to prefer CodebaseSearch over Grep when the index is available.
+/// system prompt. This function provides a condensed but directive version
+/// that instructs the LLM to use CodebaseSearch as the primary exploration
+/// tool when the index is available.
 pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool) -> String {
     if !has_index {
         // No index — CodebaseSearch won't work, so no special guidance needed.
@@ -370,38 +371,68 @@ pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool) -> Str
     }
 
     let mut lines = Vec::new();
-    lines.push("## Tool Preference / 工具选择偏好".to_string());
+    lines.push("## Tool Selection Rules / 工具选择规则".to_string());
     lines.push(String::new());
     lines.push(
-        "- **CodebaseSearch** (scope=\"all\"): Preferred for finding symbols, locating files, \
-         and understanding project structure. Queries the pre-built index — faster than scanning files."
+        "A pre-built codebase index is available. You MUST follow this priority order:"
             .to_string(),
     );
     lines.push(
-        "  优先使用 CodebaseSearch（scope=\"all\"）查找符号、定位文件和理解项目结构。它查询预构建索引，比扫描文件更快。"
+        "已有预构建的代码索引，你必须按以下优先级选择工具：".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "1. **CodebaseSearch** (scope=\"all\") — ALWAYS use FIRST for finding symbols, \
+         locating files, and understanding project structure. It is faster and more accurate \
+         than scanning files manually."
             .to_string(),
+    );
+    lines.push(
+        "   始终首先使用 CodebaseSearch（scope=\"all\"）查找符号、定位文件和理解项目结构。"
+            .to_string(),
+    );
+    lines.push(
+        "2. **CodebaseSearch** (scope=\"symbols\") — Use to find specific function, class, \
+         or struct definitions by name."
+            .to_string(),
+    );
+    lines.push(
+        "   使用 scope=\"symbols\" 按名称查找函数、类或结构体定义。".to_string(),
     );
 
     if has_semantic {
         lines.push(
-            "- **CodebaseSearch** (scope=\"semantic\"): Use for natural-language queries \
-             when you need conceptual/semantic matches."
+            "3. **CodebaseSearch** (scope=\"semantic\") — Use for natural-language conceptual \
+             queries when you need semantic matches."
                 .to_string(),
         );
         lines.push(
-            "  使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string(),
+            "   使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string(),
         );
     }
 
+    lines.push(String::new());
     lines.push(
-        "- **Grep**: Use only for full-text regex search or when CodebaseSearch reports index unavailable."
+        "Use **Read** after CodebaseSearch to read specific files you discovered."
             .to_string(),
     );
     lines.push(
-        "  仅在需要正则全文搜索或 CodebaseSearch 报告索引不可用时使用 Grep。".to_string(),
+        "使用 Read 读取通过 CodebaseSearch 发现的具体文件。".to_string(),
     );
-    lines.push("- **Glob**: Use for simple file pattern discovery (e.g., \"**/*.rs\").".to_string());
-    lines.push("  使用 Glob 进行简单的文件模式匹配。".to_string());
+    lines.push(
+        "Use **Grep** ONLY for full-text regex search or when CodebaseSearch reports index unavailable."
+            .to_string(),
+    );
+    lines.push(
+        "仅在需要正则全文搜索或 CodebaseSearch 报告索引不可用时使用 Grep。".to_string(),
+    );
+    lines.push(
+        "Do NOT start exploration with LS or Glob — CodebaseSearch already has the full project index."
+            .to_string(),
+    );
+    lines.push(
+        "不要用 LS 或 Glob 开始探索——CodebaseSearch 已有完整的项目索引。".to_string(),
+    );
 
     lines.join("\n")
 }

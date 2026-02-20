@@ -1120,32 +1120,36 @@ fn test_none_provider_gets_fallback_instructions() {
 
 #[test]
 fn test_sub_agent_token_budget_default() {
-    // 32k context * 3 = 96k
-    assert_eq!(sub_agent_token_budget(32_000, None), 96_000);
-    // 128k context * 3 = 384k
-    assert_eq!(sub_agent_token_budget(128_000, None), 384_000);
-    // 200k context * 3 = 600k (under cap)
-    assert_eq!(sub_agent_token_budget(200_000, None), 600_000);
-    // 500k context * 3 = 1.5M -> capped at 1M
-    assert_eq!(sub_agent_token_budget(500_000, None), 1_000_000);
-    // Small context -> minimum 20k
-    assert_eq!(sub_agent_token_budget(5_000, None), 20_000);
+    // 32k context * 8 = 256k
+    assert_eq!(sub_agent_token_budget(32_000, None), 256_000);
+    // 128k context * 8 = 1.024M
+    assert_eq!(sub_agent_token_budget(128_000, None), 1_024_000);
+    // 200k context * 8 = 1.6M (under cap)
+    assert_eq!(sub_agent_token_budget(200_000, None), 1_600_000);
+    // 500k context * 8 = 4M -> capped at 4M
+    assert_eq!(sub_agent_token_budget(500_000, None), 4_000_000);
+    // 600k context * 8 = 4.8M -> capped at 4M
+    assert_eq!(sub_agent_token_budget(600_000, None), 4_000_000);
+    // Small context: 5k * 8 = 40k (above minimum 20k)
+    assert_eq!(sub_agent_token_budget(5_000, None), 40_000);
+    // Very small context -> minimum 20k
+    assert_eq!(sub_agent_token_budget(2_000, None), 20_000);
 }
 
 #[test]
 fn test_sub_agent_token_budget_explore() {
-    // 128k context * 4 = 512k
-    assert_eq!(sub_agent_token_budget(128_000, Some("explore")), 512_000);
-    // 200k context * 4 = 800k
-    assert_eq!(sub_agent_token_budget(200_000, Some("explore")), 800_000);
-    // 300k context * 4 = 1.2M -> capped at 1M
-    assert_eq!(sub_agent_token_budget(300_000, Some("explore")), 1_000_000);
+    // 128k context * 15 = 1.92M
+    assert_eq!(sub_agent_token_budget(128_000, Some("explore")), 1_920_000);
+    // 200k context * 15 = 3M
+    assert_eq!(sub_agent_token_budget(200_000, Some("explore")), 3_000_000);
+    // 300k context * 15 = 4.5M -> capped at 4M
+    assert_eq!(sub_agent_token_budget(300_000, Some("explore")), 4_000_000);
 }
 
 #[test]
 fn test_sub_agent_token_budget_analyze() {
-    // analyze gets same multiplier as explore
-    assert_eq!(sub_agent_token_budget(128_000, Some("analyze")), 512_000);
+    // analyze gets same multiplier as explore (15x)
+    assert_eq!(sub_agent_token_budget(128_000, Some("analyze")), 1_920_000);
 }
 
 // --- Story-005: serde default verification tests ---
@@ -1231,7 +1235,7 @@ fn test_sub_agent_spawner_uses_compaction_enabled() {
         compaction_config: CompactionConfig::default(),
     };
     assert!(spawner_config.enable_compaction);
-    assert_eq!(spawner_config.max_total_tokens, 384_000);
+    assert_eq!(spawner_config.max_total_tokens, 512_000);
 }
 
 // --- Story-002 (tool result truncation): truncate_tool_output_for_context tests ---
