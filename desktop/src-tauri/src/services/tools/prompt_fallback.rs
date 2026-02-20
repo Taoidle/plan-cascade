@@ -100,6 +100,11 @@ IMPORTANT / 重要提示:
 {{"tool": "Grep", "arguments": {{"pattern": "fn main", "path": "src/"}}}}
 ```
 
+搜索符号和代码 (Search symbols and code with index):
+```tool_call
+{{"tool": "CodebaseSearch", "arguments": {{"query": "authenticate", "scope": "all"}}}}
+```
+
 When you receive a tool result, analyze it and decide whether to make more tool calls or provide your final response.
 收到工具结果后，分析结果并决定是否需要继续调用工具或给出最终回答。"#,
         tool_descriptions = tool_descriptions,
@@ -1336,6 +1341,15 @@ mod tests {
         assert!(instructions.contains("LS"));
         assert!(instructions.contains("Cwd"));
         assert!(instructions.contains("Available Tools"));
+        // CodebaseSearch example should be included
+        assert!(
+            instructions.contains("CodebaseSearch"),
+            "Should include CodebaseSearch example"
+        );
+        assert!(
+            instructions.contains("\"scope\": \"all\""),
+            "Should include scope=all in CodebaseSearch example"
+        );
     }
 
     #[test]

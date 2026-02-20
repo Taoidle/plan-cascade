@@ -358,6 +358,54 @@ pub fn merge_system_prompts(tool_prompt: &str, user_prompt: Option<&str>) -> Str
     }
 }
 
+/// Build a compact tool preference section for sub-agents.
+///
+/// Sub-agents don't receive the full Decision Tree from the main agent's
+/// system prompt. This function provides a condensed version that guides
+/// the LLM to prefer CodebaseSearch over Grep when the index is available.
+pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool) -> String {
+    if !has_index {
+        // No index — CodebaseSearch won't work, so no special guidance needed.
+        return String::new();
+    }
+
+    let mut lines = Vec::new();
+    lines.push("## Tool Preference / 工具选择偏好".to_string());
+    lines.push(String::new());
+    lines.push(
+        "- **CodebaseSearch** (scope=\"all\"): Preferred for finding symbols, locating files, \
+         and understanding project structure. Queries the pre-built index — faster than scanning files."
+            .to_string(),
+    );
+    lines.push(
+        "  优先使用 CodebaseSearch（scope=\"all\"）查找符号、定位文件和理解项目结构。它查询预构建索引，比扫描文件更快。"
+            .to_string(),
+    );
+
+    if has_semantic {
+        lines.push(
+            "- **CodebaseSearch** (scope=\"semantic\"): Use for natural-language queries \
+             when you need conceptual/semantic matches."
+                .to_string(),
+        );
+        lines.push(
+            "  使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string(),
+        );
+    }
+
+    lines.push(
+        "- **Grep**: Use only for full-text regex search or when CodebaseSearch reports index unavailable."
+            .to_string(),
+    );
+    lines.push(
+        "  仅在需要正则全文搜索或 CodebaseSearch 报告索引不可用时使用 Grep。".to_string(),
+    );
+    lines.push("- **Glob**: Use for simple file pattern discovery (e.g., \"**/*.rs\").".to_string());
+    lines.push("  使用 Glob 进行简单的文件模式匹配。".to_string());
+
+    lines.join("\n")
+}
+
 /// Build a skills injection section for the system prompt.
 ///
 /// Accepts matched skills and formats them into a section that can be appended
@@ -1057,6 +1105,68 @@ mod tests {
 
         assert!(!prompt.contains("## Project Memory"));
         assert!(prompt.contains("## Available Tools"));
+    }
+
+    // =========================================================================
+    // Sub-agent tool guidance tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_sub_agent_tool_guidance_with_index() {
+        let guidance = build_sub_agent_tool_guidance(true, false);
+
+        assert!(
+            guidance.contains("CodebaseSearch"),
+            "Should mention CodebaseSearch when index is available"
+        );
+        assert!(
+            guidance.contains("scope=\"all\""),
+            "Should recommend scope=all"
+        );
+        assert!(
+            guidance.contains("Grep"),
+            "Should mention Grep as fallback"
+        );
+        assert!(
+            guidance.contains("Glob"),
+            "Should mention Glob for file patterns"
+        );
+        // No semantic search
+        assert!(
+            !guidance.contains("semantic"),
+            "Should not mention semantic when no embeddings"
+        );
+    }
+
+    #[test]
+    fn test_build_sub_agent_tool_guidance_with_semantic() {
+        let guidance = build_sub_agent_tool_guidance(true, true);
+
+        assert!(
+            guidance.contains("scope=\"semantic\""),
+            "Should mention semantic scope when embeddings available"
+        );
+    }
+
+    #[test]
+    fn test_build_sub_agent_tool_guidance_without_index() {
+        let guidance = build_sub_agent_tool_guidance(false, false);
+
+        assert!(
+            guidance.is_empty(),
+            "Should return empty string when no index is available"
+        );
+    }
+
+    #[test]
+    fn test_build_sub_agent_tool_guidance_without_index_but_semantic() {
+        // Edge case: semantic without index — should still be empty
+        let guidance = build_sub_agent_tool_guidance(false, true);
+
+        assert!(
+            guidance.is_empty(),
+            "Should return empty string when no index, even with semantic flag"
+        );
     }
 
     #[test]

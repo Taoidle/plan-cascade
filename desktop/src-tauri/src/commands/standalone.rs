@@ -988,6 +988,7 @@ pub async fn execute_standalone(
     max_iterations: Option<u32>,
     app: AppHandle,
     app_state: State<'_, AppState>,
+    standalone_state: State<'_, StandaloneState>,
 ) -> Result<CommandResponse<ExecutionResult>, String> {
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&provider) {
@@ -1093,6 +1094,16 @@ pub async fn execute_standalone(
         }
         Err(e) => {
             eprintln!("[execute_standalone] Database not available, CodebaseSearch will be disabled: {}", e);
+        }
+    }
+
+    // Wire embedding service and EmbeddingManager from IndexManager for semantic CodebaseSearch
+    if let Some(ref manager) = *standalone_state.index_manager.read().await {
+        if let Some(emb_svc) = manager.get_embedding_service(&project_path).await {
+            orchestrator = orchestrator.with_embedding_service(emb_svc);
+        }
+        if let Some(emb_mgr) = manager.get_embedding_manager(&project_path).await {
+            orchestrator = orchestrator.with_embedding_manager(emb_mgr);
         }
     }
 

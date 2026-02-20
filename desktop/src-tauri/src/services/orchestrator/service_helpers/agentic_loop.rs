@@ -470,6 +470,15 @@ impl OrchestratorService {
                 if let Ok(summary) = store.get_project_summary(&project_path) {
                     if summary.total_files > 0 {
                         parts.push(build_project_summary(&summary));
+                        // Inject tool preference guidance so sub-agents prefer
+                        // CodebaseSearch over Grep when the index is available.
+                        let guidance = build_sub_agent_tool_guidance(
+                            summary.total_symbols > 0,
+                            summary.embedding_chunks > 0,
+                        );
+                        if !guidance.is_empty() {
+                            parts.push(guidance);
+                        }
                     }
                 }
             }

@@ -271,7 +271,9 @@ impl OrchestratorService {
     }
 
     /// Set the index store for project summary injection into the system prompt.
+    /// Also wires the store to the tool executor so CodebaseSearch works.
     pub fn with_index_store(mut self, store: Arc<IndexStore>) -> Self {
+        self.tool_executor.set_index_store(Arc::clone(&store));
         self.index_store = Some(store);
         self
     }
