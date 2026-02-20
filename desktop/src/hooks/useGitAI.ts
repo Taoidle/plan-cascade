@@ -84,6 +84,7 @@ export function useGitAI(): UseGitAIReturn {
   const apiKey = useSettingsStore((s) => s.apiKey);
   const minimaxEndpoint = useSettingsStore((s) => s.minimaxEndpoint);
   const glmEndpoint = useSettingsStore((s) => s.glmEndpoint);
+  const qwenEndpoint = useSettingsStore((s) => s.qwenEndpoint);
   const isMountedRef = useRef(true);
 
   // Configure LLM provider and check availability when settings change
@@ -122,12 +123,16 @@ export function useGitAI(): UseGitAIReturn {
           const resolvedModel = model || DEFAULT_MODEL_BY_PROVIDER[canonicalProvider] || '';
 
           // Resolve provider-specific base_url from zustand endpoint settings
-          // (MiniMax China / GLM Coding have different API endpoints)
+          // (MiniMax China / GLM Coding / Qwen regions have different API endpoints)
           let resolvedBaseUrl: string | undefined;
           if (canonicalProvider === 'minimax' && minimaxEndpoint === 'china') {
             resolvedBaseUrl = 'https://api.minimaxi.com/v1/chat/completions';
           } else if (canonicalProvider === 'glm' && glmEndpoint === 'coding') {
             resolvedBaseUrl = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions';
+          } else if (canonicalProvider === 'qwen' && qwenEndpoint === 'singapore') {
+            resolvedBaseUrl = 'https://dashscope-intl.aliyuncs.com/api/v1';
+          } else if (canonicalProvider === 'qwen' && qwenEndpoint === 'us') {
+            resolvedBaseUrl = 'https://dashscope-us.aliyuncs.com/api/v1';
           }
 
           // Configure the LLM provider on the backend GitState
@@ -168,7 +173,7 @@ export function useGitAI(): UseGitAIReturn {
     return () => {
       isMountedRef.current = false;
     };
-  }, [backend, provider, model, apiKey, minimaxEndpoint, glmEndpoint]);
+  }, [backend, provider, model, apiKey, minimaxEndpoint, glmEndpoint, qwenEndpoint]);
 
   const unavailableReason = isCheckingAvailability
     ? 'Checking LLM availability...'

@@ -133,6 +133,28 @@
       }
     },
 
+    "qwenEndpoint": {
+      "label": "API 区域",
+      "help": "请选择与您的通义千问 API 密钥区域匹配的端点。中国区密钥只能使用中国端点，国际区密钥使用新加坡或美国端点。",
+      "options": {
+        "china": {
+          "name": "中国（北京）",
+          "description": "适用于在中国平台 (dashscope.aliyuncs.com) 注册的 API 密钥。",
+          "url": "https://dashscope.aliyuncs.com/api/v1"
+        },
+        "singapore": {
+          "name": "国际版（新加坡）",
+          "description": "适用于在国际平台 (dashscope-intl.aliyuncs.com) 注册的 API 密钥。",
+          "url": "https://dashscope-intl.aliyuncs.com/api/v1"
+        },
+        "us": {
+          "name": "国际版（美国 - 弗吉尼亚）",
+          "description": "适用于在美国平台 (dashscope-us.aliyuncs.com) 注册的 API 密钥。",
+          "url": "https://dashscope-us.aliyuncs.com/api/v1"
+        }
+      }
+    },
+
     "minimaxEndpoint": {
       "label": "API 区域",
       "help": "请选择与您的 MiniMax API 密钥区域匹配的端点。中国区密钥只能使用中国端点，反之亦然。",
@@ -163,7 +185,7 @@
         "openai": "例如 gpt-4o",
         "deepseek": "例如 deepseek-coder",
         "glm": "例如 glm-4-flash-250414",
-        "qwen": "例如 qwen-plus",
+        "qwen": "例如 qwen3-max",
         "minimax": "例如 MiniMax-M2.5",
         "ollama": "例如 codellama:13b",
         "default": "模型名称"

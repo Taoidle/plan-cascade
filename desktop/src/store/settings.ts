@@ -14,6 +14,7 @@ export type Language = 'en' | 'zh' | 'ja';
 export type StandaloneContextTurns = 2 | 4 | 6 | 8 | 10 | 20 | 50 | 100 | 200 | 500 | -1;
 export type GlmEndpoint = 'standard' | 'coding';
 export type MinimaxEndpoint = 'international' | 'china';
+export type QwenEndpoint = 'china' | 'singapore' | 'us';
 
 interface Agent {
   name: string;
@@ -85,6 +86,9 @@ interface SettingsState {
   // MiniMax endpoint
   minimaxEndpoint: MinimaxEndpoint;
 
+  // Qwen endpoint
+  qwenEndpoint: QwenEndpoint;
+
   // Search provider settings
   searchProvider: 'tavily' | 'brave' | 'duckduckgo';
 
@@ -107,6 +111,7 @@ interface SettingsState {
   setMaxTotalTokens: (tokens: number) => void;
   setGlmEndpoint: (endpoint: GlmEndpoint) => void;
   setMinimaxEndpoint: (endpoint: MinimaxEndpoint) => void;
+  setQwenEndpoint: (endpoint: QwenEndpoint) => void;
   setSearchProvider: (provider: 'tavily' | 'brave' | 'duckduckgo') => void;
 
   // Chat UI actions
@@ -191,6 +196,9 @@ const defaultSettings = {
   // MiniMax endpoint
   minimaxEndpoint: 'international' as MinimaxEndpoint,
 
+  // Qwen endpoint
+  qwenEndpoint: 'china' as QwenEndpoint,
+
   // Search provider
   searchProvider: 'duckduckgo' as const,
 };
@@ -252,6 +260,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       setGlmEndpoint: (glmEndpoint) => set({ glmEndpoint }),
       setMinimaxEndpoint: (minimaxEndpoint) => set({ minimaxEndpoint }),
+      setQwenEndpoint: (qwenEndpoint) => set({ qwenEndpoint }),
       setSearchProvider: (searchProvider) => set({ searchProvider }),
 
       setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),

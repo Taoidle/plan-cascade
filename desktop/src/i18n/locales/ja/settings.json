@@ -133,6 +133,28 @@
       }
     },
 
+    "qwenEndpoint": {
+      "label": "APIリージョン",
+      "help": "Qwen APIキーのリージョンに合ったエンドポイントを選択してください。中国キーは中国エンドポイントのみ、国際キーはシンガポールまたは米国エンドポイントで使用可能です。",
+      "options": {
+        "china": {
+          "name": "中国（北京）",
+          "description": "中国プラットフォーム (dashscope.aliyuncs.com) で登録したAPIキー用。",
+          "url": "https://dashscope.aliyuncs.com/api/v1"
+        },
+        "singapore": {
+          "name": "国際版（シンガポール）",
+          "description": "国際プラットフォーム (dashscope-intl.aliyuncs.com) で登録したAPIキー用。",
+          "url": "https://dashscope-intl.aliyuncs.com/api/v1"
+        },
+        "us": {
+          "name": "国際版（米国 - バージニア）",
+          "description": "米国プラットフォーム (dashscope-us.aliyuncs.com) で登録したAPIキー用。",
+          "url": "https://dashscope-us.aliyuncs.com/api/v1"
+        }
+      }
+    },
+
     "minimaxEndpoint": {
       "label": "APIリージョン",
       "help": "MiniMax APIキーのリージョンに合ったエンドポイントを選択してください。中国キーは中国エンドポイントのみ、国際キーは国際エンドポイントのみ使用可能です。",
@@ -163,7 +185,7 @@
         "openai": "例: gpt-4o",
         "deepseek": "例: deepseek-coder",
         "glm": "例: glm-4-flash-250414",
-        "qwen": "例: qwen-plus",
+        "qwen": "例: qwen3-max",
         "minimax": "例: MiniMax-M2.5",
         "ollama": "例: codellama:13b",
         "default": "モデル名"

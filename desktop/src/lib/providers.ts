@@ -126,7 +126,7 @@ export const FALLBACK_MODELS_BY_PROVIDER: Record<string, string[]> = {
     'glm-4v-plus-0111',
     'glm-4v-flash',
   ],
-  qwen: ['qwen3-plus', 'qwq-plus', 'qwen-plus', 'qwen-turbo'],
+  qwen: ['qwen3-max', 'qwen3-plus', 'qwen3-coder', 'qwq-plus', 'qwen-max', 'qwen-plus', 'qwen-turbo'],
   minimax: ['MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
   ollama: ['llama3.2', 'deepseek-r1:14b', 'qwq:32b'],
 };

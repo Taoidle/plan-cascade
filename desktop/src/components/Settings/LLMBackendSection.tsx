@@ -9,7 +9,7 @@ import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import { CheckCircledIcon, CrossCircledIcon, EyeOpenIcon, EyeNoneIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
-import { useSettingsStore, type Backend, type StandaloneContextTurns, type GlmEndpoint, type MinimaxEndpoint } from '../../store/settings';
+import { useSettingsStore, type Backend, type StandaloneContextTurns, type GlmEndpoint, type MinimaxEndpoint, type QwenEndpoint } from '../../store/settings';
 import {
   BACKEND_OPTIONS,
   FALLBACK_MODELS_BY_PROVIDER,
@@ -70,6 +70,8 @@ export function LLMBackendSection() {
     setGlmEndpoint,
     minimaxEndpoint,
     setMinimaxEndpoint,
+    qwenEndpoint,
+    setQwenEndpoint,
   } = useSettingsStore();
   const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyStatus>(() => getLocalProviderApiKeyStatuses());
   const [apiKeyInputs, setApiKeyInputs] = useState<{ [provider: string]: string }>({});
@@ -619,6 +621,52 @@ export function LLMBackendSection() {
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {t('llm.glmEndpoint.help')}
+          </p>
+        </section>
+      )}
+
+      {/* Qwen Endpoint Selection (only when Qwen is selected) */}
+      {selectedProvider === 'qwen' && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+            {t('llm.qwenEndpoint.label')}
+          </h3>
+          <div className="space-y-2">
+            {(['china', 'singapore', 'us'] as QwenEndpoint[]).map((ep) => (
+              <label
+                key={ep}
+                className={clsx(
+                  'flex items-start gap-3 p-3 rounded-lg border cursor-pointer',
+                  'transition-colors',
+                  qwenEndpoint === ep
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                )}
+              >
+                <input
+                  type="radio"
+                  name="qwenEndpoint"
+                  value={ep}
+                  checked={qwenEndpoint === ep}
+                  onChange={() => setQwenEndpoint(ep)}
+                  className="mt-0.5 text-primary-600"
+                />
+                <div>
+                  <span className="font-medium text-gray-900 dark:text-white text-sm">
+                    {t(`llm.qwenEndpoint.options.${ep}.name`)}
+                  </span>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {t(`llm.qwenEndpoint.options.${ep}.description`)}
+                  </p>
+                  <code className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 block">
+                    {t(`llm.qwenEndpoint.options.${ep}.url`)}
+                  </code>
+                </div>
+              </label>
+            ))}
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {t('llm.qwenEndpoint.help')}
           </p>
         </section>
       )}

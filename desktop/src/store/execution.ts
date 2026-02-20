@@ -551,6 +551,8 @@ function resolveStandaloneProvider(
 
 const GLM_CODING_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions';
 const MINIMAX_CHINA_BASE_URL = 'https://api.minimaxi.com/v1/chat/completions';
+const QWEN_SINGAPORE_BASE_URL = 'https://dashscope-intl.aliyuncs.com/api/v1';
+const QWEN_US_BASE_URL = 'https://dashscope-us.aliyuncs.com/api/v1';
 
 /** Default model per provider, used when user selects "Provider default". */
 const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {
@@ -565,11 +567,12 @@ const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {
 
 /**
  * Resolve provider-specific base URL override from user settings.
- * GLM has standard/coding endpoints; MiniMax has international/china endpoints.
+ * GLM has standard/coding endpoints; MiniMax has international/china endpoints;
+ * Qwen has china/singapore/us endpoints.
  */
 function resolveProviderBaseUrl(
   provider: string,
-  settings: { glmEndpoint?: string; minimaxEndpoint?: string },
+  settings: { glmEndpoint?: string; minimaxEndpoint?: string; qwenEndpoint?: string },
 ): string | undefined {
   const normalized = normalizeProviderName(provider);
   if (normalized === 'glm' && settings.glmEndpoint === 'coding') {
@@ -577,6 +580,12 @@ function resolveProviderBaseUrl(
   }
   if (normalized === 'minimax' && settings.minimaxEndpoint === 'china') {
     return MINIMAX_CHINA_BASE_URL;
+  }
+  if (normalized === 'qwen' && settings.qwenEndpoint === 'singapore') {
+    return QWEN_SINGAPORE_BASE_URL;
+  }
+  if (normalized === 'qwen' && settings.qwenEndpoint === 'us') {
+    return QWEN_US_BASE_URL;
   }
   return undefined;
 }
