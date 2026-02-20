@@ -316,7 +316,7 @@ Follow this decision tree to select the correct tool. Start from the top.
 ///
 /// The section is capped at MEMORY_SECTION_BUDGET characters.
 /// Returns an empty string if no memories are provided.
-fn build_memory_section(memories: Option<&[MemoryEntry]>) -> String {
+pub fn build_memory_section(memories: Option<&[MemoryEntry]>) -> String {
     match memories {
         Some(mems) if !mems.is_empty() => {
             let header = "\n\n## Project Memory\nThe following facts were learned from previous sessions:\n\n";

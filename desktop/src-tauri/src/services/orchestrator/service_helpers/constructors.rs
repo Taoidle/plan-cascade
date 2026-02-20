@@ -60,6 +60,18 @@ reports the index is unavailable.\n\n";
             compaction_config: CompactionConfig::default(),
         };
 
+        // Truncate knowledge block for sub-agents to avoid blowing their context budget.
+        const SUB_AGENT_KNOWLEDGE_BLOCK_CAP: usize = 4096;
+        let knowledge_block_snapshot = self.knowledge_block_snapshot.clone().map(|block| {
+            if block.len() > SUB_AGENT_KNOWLEDGE_BLOCK_CAP {
+                let mut truncated = block[..SUB_AGENT_KNOWLEDGE_BLOCK_CAP].to_string();
+                truncated.push_str("\n\n[Knowledge context truncated for sub-agent]");
+                truncated
+            } else {
+                block
+            }
+        });
+
         // Give each sub-agent a fresh read cache. Sub-agents have their own conversation
         // context and cannot reference "session memory" from the parent — so a shared cache
         // would return [DEDUP] for files the sub-agent has never seen, causing loops.
@@ -73,9 +85,13 @@ reports the index is unavailable.\n\n";
             self.shared_embedding_service.clone(),
             self.shared_embedding_manager.clone(),
             self.shared_hnsw_index.clone(),
+            self.detected_language.clone(),
+            self.skills_snapshot.clone(),
+            self.memories_snapshot.clone(),
+            knowledge_block_snapshot,
         );
         let result = sub_agent
-            .execute_story(&prompt, &get_basic_tool_definitions(), tx)
+            .execute_story(&prompt, &get_basic_tool_definitions_from_registry(), tx)
             .await;
 
         TaskExecutionResult {
@@ -170,7 +186,7 @@ impl OrchestratorService {
     /// Create a sub-agent orchestrator that shares the parent's read cache, index store,
     /// embedding service, and embedding manager. This avoids redundant file reads and
     /// enables CodebaseSearch in sub-agents.
-    fn new_sub_agent_with_shared_state(
+    pub(super) fn new_sub_agent_with_shared_state(
         config: OrchestratorConfig,
         cancellation_token: CancellationToken,
         shared_read_cache: std::sync::Arc<
@@ -185,6 +201,10 @@ impl OrchestratorService {
         shared_embedding_service: Option<Arc<EmbeddingService>>,
         shared_embedding_manager: Option<Arc<EmbeddingManager>>,
         shared_hnsw_index: Option<Arc<HnswIndex>>,
+        detected_language: Option<String>,
+        skills_snapshot: Vec<crate::services::skills::model::SkillMatch>,
+        memories_snapshot: Vec<crate::services::memory::store::MemoryEntry>,
+        knowledge_block_snapshot: Option<String>,
     ) -> Self {
         let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
@@ -216,6 +236,19 @@ impl OrchestratorService {
 
         let compactor = build_compactor(&provider);
 
+        // Wrap non-empty snapshots in Arc<RwLock<...>> so the sub-agent's
+        // prompt builder can read them through the same field types as the parent.
+        let selected_skills = if skills_snapshot.is_empty() {
+            None
+        } else {
+            Some(Arc::new(RwLock::new(skills_snapshot)))
+        };
+        let loaded_memories = if memories_snapshot.is_empty() {
+            None
+        } else {
+            Some(Arc::new(RwLock::new(memories_snapshot)))
+        };
+
         Self {
             config,
             provider,
@@ -226,13 +259,13 @@ impl OrchestratorService {
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
             index_store: shared_index_store,
-            detected_language: Mutex::new(None),
+            detected_language: Mutex::new(detected_language),
             hooks: crate::services::orchestrator::hooks::AgenticHooks::new(),
-            selected_skills: None,
-            loaded_memories: None,
+            selected_skills,
+            loaded_memories,
             knowledge_context: None,
             knowledge_context_config: KnowledgeContextConfig::default(),
-            cached_knowledge_block: Mutex::new(None),
+            cached_knowledge_block: Mutex::new(knowledge_block_snapshot),
             composer_registry: None,
         }
     }
@@ -802,7 +835,7 @@ impl OrchestratorService {
         tx: mpsc::Sender<UnifiedStreamEvent>,
         run_quality_gates: bool,
     ) -> SessionExecutionResult {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
 
         session.start();
         if let Err(e) = self.save_session(session).await {

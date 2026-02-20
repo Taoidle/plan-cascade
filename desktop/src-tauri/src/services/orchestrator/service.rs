@@ -47,11 +47,14 @@ use crate::services::core::compaction::{
 };
 use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 use crate::services::streaming::UnifiedStreamEvent;
+#[allow(deprecated)]
 use crate::services::tools::{
-    build_project_summary, build_skills_section, build_system_prompt_with_memories,
-    build_tool_call_instructions, detect_language, extract_text_without_tool_calls,
-    format_tool_result, get_basic_tool_definitions, get_tool_definitions, merge_system_prompts,
-    parse_tool_calls, ParsedToolCall, TaskContext, TaskExecutionResult, TaskSpawner, ToolExecutor,
+    build_memory_section, build_project_summary, build_skills_section,
+    build_system_prompt_with_memories, build_tool_call_instructions, detect_language,
+    extract_text_without_tool_calls, format_tool_result, get_basic_tool_definitions,
+    get_basic_tool_definitions_from_registry, get_tool_definitions,
+    get_tool_definitions_from_registry, merge_system_prompts, parse_tool_calls, ParsedToolCall,
+    TaskContext, TaskExecutionResult, TaskSpawner, ToolExecutor,
 };
 use crate::services::knowledge::context_provider::{KnowledgeContextConfig, KnowledgeContextProvider};
 use crate::utils::error::{AppError, AppResult};
@@ -364,6 +367,14 @@ struct OrchestratorTaskSpawner {
     shared_hnsw_index: Option<Arc<HnswIndex>>,
     /// Detected language from the user's message, propagated to sub-agents.
     detected_language: Option<String>,
+
+    // Owned snapshots from parent — sub-agents only read, never write back.
+    /// Framework best-practice skills detected for the current project.
+    skills_snapshot: Vec<crate::services::skills::model::SkillMatch>,
+    /// Project memories from previous sessions.
+    memories_snapshot: Vec<crate::services::memory::store::MemoryEntry>,
+    /// Pre-built knowledge RAG context block (already truncated for sub-agents).
+    knowledge_block_snapshot: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

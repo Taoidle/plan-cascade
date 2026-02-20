@@ -2169,7 +2169,7 @@ impl OrchestratorService {
                 .await;
         }
 
-        let tools = get_basic_tool_definitions();
+        let tools = get_basic_tool_definitions_from_registry();
         let mut total_usage = UsageStats::default();
         let mut total_iterations = 0u32;
         let mut aggregate_capture = PhaseCapture::default();

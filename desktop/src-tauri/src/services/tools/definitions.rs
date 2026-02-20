@@ -9,22 +9,36 @@
 
 use crate::services::llm::types::{ParameterSchema, ToolDefinition};
 use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use super::trait_def::ToolRegistry;
+
+/// Lazily-initialized global tool registry.
+///
+/// `build_registry_static()` creates ~15 `Arc<dyn Tool>` objects. Caching the
+/// result in a `OnceLock` avoids rebuilding on every call. `ToolRegistry` is
+/// `Send + Sync` (all `Tool` impls are `Send + Sync`).
+static REGISTRY: OnceLock<ToolRegistry> = OnceLock::new();
+
+fn cached_registry() -> &'static ToolRegistry {
+    REGISTRY.get_or_init(|| super::executor::ToolExecutor::build_registry_static())
+}
 
 /// Get all available tool definitions from the trait-based registry.
 ///
 /// This is the recommended way to get tool definitions, as they are
 /// auto-generated from the `Tool` trait implementations and always in sync.
+/// Uses a cached `OnceLock<ToolRegistry>` to avoid rebuilding on every call.
 pub fn get_tool_definitions_from_registry() -> Vec<ToolDefinition> {
-    let registry = super::executor::ToolExecutor::build_registry_static();
-    registry.definitions()
+    cached_registry().definitions()
 }
 
 /// Get basic tool definitions (without Task/Analyze) from the trait-based registry.
 ///
 /// Used for sub-agents to prevent recursion.
+/// Uses a cached `OnceLock<ToolRegistry>` to avoid rebuilding on every call.
 pub fn get_basic_tool_definitions_from_registry() -> Vec<ToolDefinition> {
-    let registry = super::executor::ToolExecutor::build_registry_static();
-    registry
+    cached_registry()
         .definitions()
         .into_iter()
         .filter(|d| d.name != "Task" && d.name != "Analyze")
@@ -35,6 +49,7 @@ pub fn get_basic_tool_definitions_from_registry() -> Vec<ToolDefinition> {
 ///
 /// **Deprecated**: Prefer `get_tool_definitions_from_registry()` or
 /// `ToolExecutor::registry_definitions()` for auto-generated definitions.
+#[deprecated(note = "Use get_tool_definitions_from_registry() instead")]
 pub fn get_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         read_tool(),
@@ -56,6 +71,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
 }
 
 /// Get basic tool definitions (without Task tool, for sub-agents to prevent recursion)
+#[deprecated(note = "Use get_basic_tool_definitions_from_registry() instead")]
 pub fn get_basic_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         read_tool(),
@@ -530,6 +546,7 @@ fn notebook_edit_tool() -> ToolDefinition {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -690,5 +707,64 @@ mod tests {
         // component param exists and is optional
         assert!(props.contains_key("component"));
         assert!(!required.contains(&"component".to_string()));
+    }
+
+    #[test]
+    fn test_registry_basic_excludes_both_task_and_analyze() {
+        let basic = get_basic_tool_definitions_from_registry();
+        let names: Vec<&str> = basic.iter().map(|t| t.name.as_str()).collect();
+        assert!(!names.contains(&"Task"), "Registry basic must exclude Task");
+        assert!(
+            !names.contains(&"Analyze"),
+            "Registry basic must exclude Analyze"
+        );
+    }
+
+    #[test]
+    fn test_legacy_basic_excludes_task_only() {
+        // Legacy basic excludes only Task (Analyze is also absent from the
+        // hard-coded list). Registry basic explicitly filters both.
+        let legacy_basic = get_basic_tool_definitions();
+        let legacy_names: Vec<&str> = legacy_basic.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            !legacy_names.contains(&"Task"),
+            "Legacy basic should exclude Task"
+        );
+        assert!(
+            !legacy_names.contains(&"Analyze"),
+            "Legacy basic also omits Analyze from its hard-coded list"
+        );
+    }
+
+    #[test]
+    fn test_registry_full_schema_parity() {
+        // Verify that registry and legacy produce the same tool names
+        // (schema details may differ slightly but names must match).
+        let legacy = get_tool_definitions();
+        let registry = get_tool_definitions_from_registry();
+
+        let mut legacy_names: Vec<String> = legacy.iter().map(|t| t.name.clone()).collect();
+        let mut registry_names: Vec<String> = registry.iter().map(|t| t.name.clone()).collect();
+        legacy_names.sort();
+        registry_names.sort();
+
+        assert_eq!(
+            legacy_names, registry_names,
+            "Registry and legacy should produce identical tool name sets"
+        );
+    }
+
+    #[test]
+    fn test_cached_registry_returns_consistent_results() {
+        // Verify that the OnceLock-cached registry returns the same results
+        // across multiple invocations.
+        let first = get_tool_definitions_from_registry();
+        let second = get_tool_definitions_from_registry();
+        assert_eq!(first.len(), second.len());
+
+        for (a, b) in first.iter().zip(second.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.description, b.description);
+        }
     }
 }

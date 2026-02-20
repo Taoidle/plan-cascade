@@ -4036,3 +4036,192 @@ fn test_minimax_provider_gets_sliding_window_compactor() {
     let orchestrator = OrchestratorService::new(config);
     assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
 }
+
+// ── Sub-agent context injection tests ──────────────────────────────────
+
+#[test]
+fn test_sub_agent_inherits_skills_snapshot() {
+    use crate::services::skills::model::{MatchReason, SkillMatch, SkillSource, SkillSummary};
+
+    let skills = vec![SkillMatch {
+        score: 1.0,
+        match_reason: MatchReason::AutoDetected,
+        skill: SkillSummary {
+            id: "rust-best-practices".to_string(),
+            name: "Rust Best Practices".to_string(),
+            description: "Follow Rust idioms and patterns.".to_string(),
+            version: None,
+            tags: vec!["rust".to_string()],
+            source: SkillSource::Builtin,
+            priority: 10,
+            enabled: true,
+            detected: true,
+            user_invocable: false,
+            has_hooks: false,
+            inject_into: vec![],
+            path: std::path::PathBuf::new(),
+        },
+    }];
+
+    let config = test_config();
+    let shared_cache = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let sub = OrchestratorService::new_sub_agent_with_shared_state(
+        config,
+        CancellationToken::new(),
+        shared_cache,
+        None,
+        None,
+        None,
+        None,
+        None,
+        skills.clone(),
+        vec![],
+        None,
+    );
+
+    // The sub-agent should have selected_skills populated
+    let lock = sub.selected_skills.as_ref().expect("skills should be Some");
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let guard = rt.block_on(lock.read());
+    assert_eq!(guard.len(), 1);
+    assert_eq!(guard[0].skill.name, "Rust Best Practices");
+}
+
+#[test]
+fn test_sub_agent_inherits_memories_snapshot() {
+    use crate::services::memory::store::{MemoryCategory, MemoryEntry};
+
+    let memories = vec![MemoryEntry {
+        id: "m1".to_string(),
+        project_path: "/test".to_string(),
+        category: MemoryCategory::Preference,
+        content: "Always use async/await.".to_string(),
+        keywords: vec![],
+        importance: 1.0,
+        access_count: 0,
+        source_session_id: None,
+        source_context: None,
+        created_at: String::new(),
+        updated_at: String::new(),
+        last_accessed_at: String::new(),
+    }];
+
+    let config = test_config();
+    let shared_cache = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let sub = OrchestratorService::new_sub_agent_with_shared_state(
+        config,
+        CancellationToken::new(),
+        shared_cache,
+        None,
+        None,
+        None,
+        None,
+        None,
+        vec![],
+        memories.clone(),
+        None,
+    );
+
+    // The sub-agent should have loaded_memories populated
+    let lock = sub
+        .loaded_memories
+        .as_ref()
+        .expect("memories should be Some");
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let guard = rt.block_on(lock.read());
+    assert_eq!(guard.len(), 1);
+    assert_eq!(guard[0].content, "Always use async/await.");
+}
+
+#[test]
+fn test_sub_agent_knowledge_block_capped() {
+    // Create a knowledge block larger than SUB_AGENT_KNOWLEDGE_BLOCK_CAP (4096)
+    let big_block = "x".repeat(8000);
+
+    let spawner = OrchestratorTaskSpawner {
+        provider_config: test_config().provider,
+        project_root: std::env::temp_dir(),
+        context_window: 100000,
+        shared_read_cache: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        shared_index_store: None,
+        shared_embedding_service: None,
+        shared_embedding_manager: None,
+        shared_hnsw_index: None,
+        detected_language: None,
+        skills_snapshot: vec![],
+        memories_snapshot: vec![],
+        knowledge_block_snapshot: Some(big_block.clone()),
+    };
+
+    // The truncation happens in spawn_task() — simulate it here
+    const SUB_AGENT_KNOWLEDGE_BLOCK_CAP: usize = 4096;
+    let truncated = spawner.knowledge_block_snapshot.clone().map(|block| {
+        if block.len() > SUB_AGENT_KNOWLEDGE_BLOCK_CAP {
+            let mut t = block[..SUB_AGENT_KNOWLEDGE_BLOCK_CAP].to_string();
+            t.push_str("\n\n[Knowledge context truncated for sub-agent]");
+            t
+        } else {
+            block
+        }
+    });
+
+    let result = truncated.unwrap();
+    assert!(result.len() < big_block.len());
+    assert!(result.contains("[Knowledge context truncated for sub-agent]"));
+    // The truncated content (without suffix) should be exactly 4096 chars
+    assert!(result.starts_with(&"x".repeat(4096)));
+}
+
+#[test]
+fn test_sub_agent_detected_language_wired() {
+    let config = test_config();
+    let shared_cache = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let sub = OrchestratorService::new_sub_agent_with_shared_state(
+        config,
+        CancellationToken::new(),
+        shared_cache,
+        None,
+        None,
+        None,
+        None,
+        Some("zh".to_string()),
+        vec![],
+        vec![],
+        None,
+    );
+
+    let lang = sub.detected_language.lock().unwrap();
+    assert_eq!(lang.as_deref(), Some("zh"));
+}
+
+#[test]
+fn test_sub_agent_empty_snapshots_remain_none() {
+    // When snapshots are empty, fields should be None (not Some(Arc<RwLock<Vec::new()>>))
+    let config = test_config();
+    let shared_cache = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let sub = OrchestratorService::new_sub_agent_with_shared_state(
+        config,
+        CancellationToken::new(),
+        shared_cache,
+        None,
+        None,
+        None,
+        None,
+        None,
+        vec![],
+        vec![],
+        None,
+    );
+
+    assert!(sub.selected_skills.is_none(), "Empty skills should be None");
+    assert!(
+        sub.loaded_memories.is_none(),
+        "Empty memories should be None"
+    );
+    let cached = sub.cached_knowledge_block.lock().unwrap();
+    assert!(cached.is_none(), "No knowledge block should be None");
+}

@@ -30,6 +30,7 @@ pub mod trait_def;
 pub mod web_fetch;
 pub mod web_search;
 
+#[allow(deprecated)]
 pub use definitions::{
     get_basic_tool_definitions, get_basic_tool_definitions_from_registry, get_tool_definitions,
     get_tool_definitions_from_registry,
@@ -44,7 +45,7 @@ pub use prompt_fallback::{
     parse_tool_calls, ParsedToolCall,
 };
 pub use system_prompt::{
-    build_project_summary, build_skills_section, build_system_prompt,
+    build_memory_section, build_project_summary, build_skills_section, build_system_prompt,
     build_system_prompt_with_memories, detect_language, merge_system_prompts,
 };
 pub use task_spawner::{TaskContext, TaskExecutionResult, TaskSpawner};

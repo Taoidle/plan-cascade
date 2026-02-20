@@ -474,6 +474,34 @@ impl OrchestratorService {
                 }
             }
 
+            // Inject skills section (framework best practices) from parent snapshot
+            if let Some(ref skills_lock) = self.selected_skills {
+                if let Ok(guard) = skills_lock.try_read() {
+                    if !guard.is_empty() {
+                        parts.push(build_skills_section(&guard));
+                    }
+                }
+            }
+
+            // Inject memory section (project facts from previous sessions)
+            if let Some(ref memories_lock) = self.loaded_memories {
+                if let Ok(guard) = memories_lock.try_read() {
+                    if !guard.is_empty() {
+                        let section = build_memory_section(Some(&guard));
+                        if !section.is_empty() {
+                            parts.push(section);
+                        }
+                    }
+                }
+            }
+
+            // Inject cached knowledge context (RAG)
+            if let Ok(cached) = self.cached_knowledge_block.lock() {
+                if let Some(ref block) = *cached {
+                    parts.push(block.clone());
+                }
+            }
+
             // Determine effective fallback mode for sub-agent
             let sub_effective_mode = self
                 .config
@@ -1226,7 +1254,7 @@ impl OrchestratorService {
             *lang = Some(detect_language(&user_message).to_string());
         }
 
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let reliability = self.provider.tool_call_reliability();
         // For None reliability (Ollama), don't pass tools to API at all
         let use_prompt_fallback = matches!(reliability, ToolCallReliability::None);
@@ -1248,6 +1276,23 @@ impl OrchestratorService {
         const MAX_CONSECUTIVE_TASK_ONLY: u32 = 3;
 
         // Create TaskContext for Task tool support in the agentic loop
+        // Capture read-only snapshots from the parent for sub-agent injection.
+        let skills_snapshot = self.selected_skills
+            .as_ref()
+            .and_then(|lock| lock.try_read().ok())
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+
+        let memories_snapshot = self.loaded_memories
+            .as_ref()
+            .and_then(|lock| lock.try_read().ok())
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+
+        let knowledge_block_snapshot = self.cached_knowledge_block
+            .lock().ok()
+            .and_then(|guard| guard.clone());
+
         let task_spawner = Arc::new(OrchestratorTaskSpawner {
             provider_config: self.config.provider.clone(),
             project_root: self.config.project_root.clone(),
@@ -1258,6 +1303,9 @@ impl OrchestratorService {
             shared_embedding_manager: self.tool_executor.get_embedding_manager(),
             shared_hnsw_index: self.tool_executor.get_hnsw_index(),
             detected_language: self.detected_language.lock().unwrap().clone(),
+            skills_snapshot,
+            memories_snapshot,
+            knowledge_block_snapshot,
         });
         let task_ctx = TaskContext {
             spawner: task_spawner,
