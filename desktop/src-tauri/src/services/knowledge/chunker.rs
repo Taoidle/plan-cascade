@@ -138,6 +138,12 @@ pub enum ChunkerConfig {
         /// Minimum sentences per chunk (default 2).
         min_sentences: usize,
     },
+    /// Split source code using tree-sitter symbol boundaries.
+    Code {
+        /// Programming language hint (e.g. "rust", "python").
+        /// When `None`, inferred from document metadata.
+        language: Option<String>,
+    },
 }
 
 impl Default for ChunkerConfig {
@@ -163,6 +169,10 @@ impl ChunkerConfig {
                 threshold,
                 min_sentences,
             } => Box::new(SemanticChunker::new(*threshold, *min_sentences)),
+            ChunkerConfig::Code { language } => match language {
+                Some(lang) => Box::new(super::code_chunker::CodeChunker::with_language(lang)),
+                None => Box::new(super::code_chunker::CodeChunker::new()),
+            },
         }
     }
 }

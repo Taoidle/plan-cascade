@@ -25,8 +25,10 @@
 //! exceeds 10%, a full rebuild from SQLite is triggered.
 
 use hnsw_rs::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -44,13 +46,27 @@ const DEFAULT_MAX_ELEMENTS: usize = 100_000;
 /// Basename used for the persisted HNSW files.
 const HNSW_BASENAME: &str = "embeddings";
 
+/// Filename for the HNSW metadata sidecar (JSON).
+const HNSW_META_FILENAME: &str = "embeddings.hnsw.meta.json";
+
+/// Metadata written alongside the HNSW index files so that dimension
+/// mismatches (e.g. after switching embedding provider) can be detected
+/// and trigger an automatic rebuild.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HnswMetadata {
+    dimension: usize,
+    vector_count: usize,
+}
+
 /// Wrapper around `hnsw_rs::Hnsw` providing thread-safe, async-friendly
 /// approximate nearest neighbor search with disk persistence and soft-delete.
 pub struct HnswIndex {
     /// Directory where HNSW sidecar files are stored.
     index_dir: PathBuf,
-    /// Embedding vector dimension.
-    dimension: usize,
+    /// Embedding vector dimension.  Stored as `AtomicUsize` so that it can be
+    /// updated from `rebuild_hnsw_from_store` (which infers the real dimension
+    /// from stored vectors) without requiring `&mut self`.
+    dimension: AtomicUsize,
     /// The HNSW index wrapped for concurrent access.
     /// `None` means the index has not been built yet.
     inner: RwLock<Option<Arc<HnswInner>>>,
@@ -84,7 +100,7 @@ impl HnswIndex {
     pub fn new(index_dir: impl AsRef<Path>, dimension: usize) -> Self {
         Self {
             index_dir: index_dir.as_ref().to_path_buf(),
-            dimension,
+            dimension: AtomicUsize::new(dimension),
             inner: RwLock::new(None),
             stale_ids: RwLock::new(HashSet::new()),
             count: RwLock::new(0),
@@ -125,6 +141,42 @@ impl HnswIndex {
                 dir = %self.index_dir.display(),
                 "HNSW load_from_disk: files not found"
             );
+            return false;
+        }
+
+        // Check metadata sidecar for dimension mismatch
+        let meta_file = self.index_dir.join(HNSW_META_FILENAME);
+        let current_dim = self.dimension();
+        if meta_file.exists() {
+            if let Ok(meta_json) = std::fs::read_to_string(&meta_file) {
+                if let Ok(meta) = serde_json::from_str::<HnswMetadata>(&meta_json) {
+                    if current_dim > 0 && meta.dimension != current_dim {
+                        warn!(
+                            stored_dim = meta.dimension,
+                            expected_dim = current_dim,
+                            "HNSW load_from_disk: dimension mismatch, deleting stale index"
+                        );
+                        let _ = std::fs::remove_file(&graph_file);
+                        let _ = std::fs::remove_file(&data_file);
+                        let _ = std::fs::remove_file(&meta_file);
+                        return false;
+                    }
+                    // If current dimension is 0 (unknown), restore from metadata
+                    if current_dim == 0 && meta.dimension > 0 {
+                        self.set_dimension(meta.dimension);
+                    }
+                }
+            }
+        } else if current_dim > 0 {
+            // No meta file (pre-P0-1 index).  We cannot verify the stored
+            // dimension, so delete the stale files and force a rebuild.
+            warn!(
+                expected_dim = current_dim,
+                "HNSW load_from_disk: no metadata file found (legacy index), \
+                 deleting to force rebuild with correct dimensions"
+            );
+            let _ = std::fs::remove_file(&graph_file);
+            let _ = std::fs::remove_file(&data_file);
             return false;
         }
 
@@ -205,6 +257,8 @@ impl HnswIndex {
         drop(guard);
 
         let index_dir = self.index_dir.clone();
+        let dimension = self.dimension();
+        let vector_count = *self.count.read().await;
 
         tokio::task::spawn_blocking(move || {
             std::fs::create_dir_all(&index_dir)
@@ -214,6 +268,18 @@ impl HnswIndex {
                 .hnsw
                 .file_dump(&index_dir, HNSW_BASENAME)
                 .map_err(|e| format!("HNSW file_dump failed: {}", e))?;
+
+            // Write metadata sidecar for dimension tracking
+            let meta = HnswMetadata {
+                dimension,
+                vector_count,
+            };
+            if let Ok(json) = serde_json::to_string_pretty(&meta) {
+                let meta_path = index_dir.join(HNSW_META_FILENAME);
+                if let Err(e) = std::fs::write(&meta_path, json) {
+                    warn!(error = %e, "failed to write HNSW metadata sidecar");
+                }
+            }
 
             Ok(())
         })
@@ -257,6 +323,19 @@ impl HnswIndex {
     /// Returns a vector of `(data_id, distance)` pairs sorted by distance
     /// ascending.  Stale IDs are filtered out.
     pub async fn search(&self, query: &[f32], top_k: usize) -> Vec<(usize, f32)> {
+        // Dimension guard: refuse to search when the query vector dimension
+        // doesn't match the index dimension.  Without this check, `hnsw_rs`
+        // (via `anndists`) would panic with an assertion failure.
+        let idx_dim = self.dimension();
+        if idx_dim > 0 && query.len() != idx_dim {
+            warn!(
+                query_dim = query.len(),
+                index_dim = idx_dim,
+                "HNSW search: dimension mismatch, skipping search"
+            );
+            return Vec::new();
+        }
+
         let guard = self.inner.read().await;
         let inner = match guard.as_ref() {
             Some(inner) => Arc::clone(inner),
@@ -339,7 +418,15 @@ impl HnswIndex {
 
     /// Get the embedding dimension.
     pub fn dimension(&self) -> usize {
-        self.dimension
+        self.dimension.load(Ordering::Relaxed)
+    }
+
+    /// Update the embedding dimension.
+    ///
+    /// Used when the actual dimension is inferred from stored vectors (e.g.
+    /// during `rebuild_hnsw_from_store`) and the initial dimension was unknown.
+    pub fn set_dimension(&self, dim: usize) {
+        self.dimension.store(dim, Ordering::Relaxed);
     }
 }
 
@@ -642,5 +729,83 @@ mod tests {
         // Don't initialize
         let results = idx.search(&[1.0, 0.0, 0.0], 5).await;
         assert!(results.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // dimension mismatch triggers rebuild on load
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn load_from_disk_returns_false_on_dimension_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let index_dir = dir.path().join("hnsw_dim_mismatch");
+        let dim_old = 128;
+
+        // Build and save with dim=128
+        {
+            let idx = HnswIndex::new(&index_dir, dim_old);
+            idx.initialize().await;
+            for i in 0..5 {
+                idx.insert(i, &make_embedding(dim_old, i)).await;
+            }
+            idx.save_to_disk().await.expect("save should succeed");
+        }
+
+        // Try to load with dim=768 — should detect mismatch and return false
+        {
+            let idx2 = HnswIndex::new(&index_dir, 768);
+            assert!(
+                !idx2.load_from_disk().await,
+                "load should return false on dimension mismatch"
+            );
+            assert!(!idx2.is_ready().await);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // set_dimension updates dimension after rebuild
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn set_dimension_updates_after_rebuild() {
+        let dir = tempdir().expect("tempdir");
+        let dim = 64;
+        let idx = HnswIndex::new(dir.path().join("hnsw"), 0); // start with unknown dim
+        assert_eq!(idx.dimension(), 0);
+
+        idx.set_dimension(dim);
+        assert_eq!(idx.dimension(), dim);
+    }
+
+    // -----------------------------------------------------------------------
+    // metadata sidecar restores dimension when loading with dim=0
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn load_from_disk_restores_dimension_from_metadata() {
+        let dir = tempdir().expect("tempdir");
+        let index_dir = dir.path().join("hnsw_meta_restore");
+        let dim = 32;
+
+        // Build, save (writes metadata sidecar)
+        {
+            let idx = HnswIndex::new(&index_dir, dim);
+            idx.initialize().await;
+            for i in 0..3 {
+                idx.insert(i, &make_embedding(dim, i)).await;
+            }
+            idx.save_to_disk().await.expect("save");
+        }
+
+        // Load with dim=0 — should restore dimension from metadata
+        {
+            let idx2 = HnswIndex::new(&index_dir, 0);
+            assert!(idx2.load_from_disk().await, "should load successfully");
+            assert_eq!(
+                idx2.dimension(),
+                dim,
+                "dimension should be restored from metadata"
+            );
+        }
     }
 }

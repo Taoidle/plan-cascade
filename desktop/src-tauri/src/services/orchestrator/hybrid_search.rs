@@ -92,6 +92,22 @@ pub struct HybridSearchResult {
     pub semantic_similarity: Option<f32>,
 }
 
+/// Outcome of a hybrid search, wrapping results with degradation metadata.
+///
+/// When the semantic channel fails (e.g. embedding provider unavailable), the
+/// search still returns keyword-only results but sets `semantic_degraded = true`
+/// so callers can inform the user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HybridSearchOutcome {
+    /// The fused search results.
+    pub results: Vec<HybridSearchResult>,
+    /// `true` when the semantic channel was skipped or failed.
+    pub semantic_degraded: bool,
+    /// Human-readable reason when `semantic_degraded` is `true`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_error: Option<String>,
+}
+
 /// Configuration for the hybrid search engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridSearchConfig {
@@ -200,8 +216,10 @@ impl HybridSearchEngine {
         &self,
         query: &str,
         project_path: &str,
-    ) -> AppResult<Vec<HybridSearchResult>> {
+    ) -> AppResult<HybridSearchOutcome> {
         let mut channel_results: Vec<(SearchChannel, Vec<ChannelEntry>)> = Vec::new();
+        let mut semantic_degraded = false;
+        let mut semantic_error: Option<String> = None;
 
         // --- Channel 1: Symbol search ---
         let symbol_entries = self.search_symbols(query)?;
@@ -230,14 +248,24 @@ impl HybridSearchEngine {
                 Err(e) => {
                     // Log and skip — semantic failure should not block keyword results
                     tracing::warn!("Hybrid search: semantic channel failed: {}", e);
+                    semantic_degraded = true;
+                    semantic_error = Some(format!("{}", e));
                 }
             }
+        } else {
+            // No embedding manager configured — semantic unavailable
+            semantic_degraded = true;
+            semantic_error = Some("No embedding provider configured".to_string());
         }
 
         // --- RRF Fusion ---
         let fused = self.fuse_rrf(&channel_results);
 
-        Ok(fused)
+        Ok(HybridSearchOutcome {
+            results: fused,
+            semantic_degraded,
+            semantic_error,
+        })
     }
 
     // -----------------------------------------------------------------------

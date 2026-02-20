@@ -1373,11 +1373,10 @@ async fn execute_story_via_llm(
         }
     };
 
-    let analysis_artifacts_root = if let Some(local_data_dir) = dirs::data_local_dir() {
-        local_data_dir.join("plan-cascade").join("analysis-runs")
-    } else {
-        std::env::temp_dir().join("plan-cascade").join("analysis-runs")
-    };
+    let analysis_artifacts_root = dirs::home_dir()
+        .unwrap_or_else(|| std::env::temp_dir())
+        .join(".plan-cascade")
+        .join("analysis-runs");
 
     let config = OrchestratorConfig {
         provider: provider_config,

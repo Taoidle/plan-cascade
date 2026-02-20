@@ -46,10 +46,12 @@ impl CodebaseSearchTool {
             engine.set_hnsw_index(Arc::clone(hnsw));
         }
 
-        let results = engine
+        let outcome = engine
             .search(query, project_path)
             .await
             .map_err(|e| format!("{}", e))?;
+
+        let results = outcome.results;
 
         if results.is_empty() {
             return Ok(format!(
@@ -73,12 +75,22 @@ impl CodebaseSearchTool {
             ));
         }
 
+        // Prepend semantic degradation notice if applicable
+        let mut output = String::new();
+        if outcome.semantic_degraded {
+            let reason = outcome.semantic_error.as_deref().unwrap_or("unknown error");
+            output.push_str(&format!(
+                "> Note: Semantic search unavailable ({}), using keyword search only.\n\n",
+                reason
+            ));
+        }
+
         // Format results with provenance info
-        let mut output = format!(
+        output.push_str(&format!(
             "## Hybrid search for '{}' ({} results, RRF fusion)\n",
             query,
             results.len()
-        );
+        ));
         for result in results.iter().take(30) {
             // Build provenance tag
             let channels: Vec<String> = result

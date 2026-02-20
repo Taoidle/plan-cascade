@@ -10,11 +10,13 @@
 //! - `get_status` – returns the current `IndexStatusEvent`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::background_indexer::{BackgroundIndexer, IndexProgressCallback};
 use super::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
@@ -26,7 +28,9 @@ use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::EmbeddingService;
 use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
-use crate::storage::database::DbPool;
+use crate::commands::proxy::resolve_provider_proxy;
+use crate::services::proxy::ProxyConfig;
+use crate::storage::database::{Database, DbPool};
 use crate::storage::KeyringService;
 
 /// Tauri event name for index progress updates.
@@ -54,6 +58,10 @@ pub struct IndexStatusEvent {
 /// Internal bookkeeping for a running indexer.
 struct IndexerEntry {
     handle: tokio::task::JoinHandle<()>,
+    /// Send file-change notifications to the indexer's Phase 2 loop.
+    change_tx: tokio::sync::mpsc::Sender<std::path::PathBuf>,
+    /// Keeps the file-system watcher alive; dropped when the entry is removed.
+    _watcher: Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>,
 }
 
 /// Manages per-directory `BackgroundIndexer` lifecycle.
@@ -62,6 +70,9 @@ struct IndexerEntry {
 /// `tauri::State`.
 pub struct IndexManager {
     index_store: Arc<IndexStore>,
+    /// Database pool kept around for proxy resolution — constructing a
+    /// lightweight `Database` wrapper on demand.
+    db_pool: DbPool,
     active_indexers: RwLock<HashMap<String, IndexerEntry>>,
     statuses: Arc<RwLock<HashMap<String, IndexStatusEvent>>>,
     app_handle: RwLock<Option<AppHandle>>,
@@ -75,19 +86,24 @@ pub struct IndexManager {
     /// Per-project HNSW indexes for O(log n) approximate nearest neighbor search.
     /// The HNSW index is a derived cache of the SQLite embeddings (ADR-004).
     hnsw_indexes: RwLock<HashMap<String, Arc<HnswIndex>>>,
+    /// Guard against concurrent `ensure_indexed` calls for the same project.
+    /// Prevents duplicate indexer spawns from any caller.
+    trigger_guard: tokio::sync::Mutex<HashSet<String>>,
 }
 
 impl IndexManager {
     /// Create a new `IndexManager` backed by the given database connection pool.
     pub fn new(pool: DbPool) -> Self {
         Self {
-            index_store: Arc::new(IndexStore::new(pool)),
+            index_store: Arc::new(IndexStore::new(pool.clone())),
+            db_pool: pool,
             active_indexers: RwLock::new(HashMap::new()),
             statuses: Arc::new(RwLock::new(HashMap::new())),
             app_handle: RwLock::new(None),
             embedding_services: RwLock::new(HashMap::new()),
             embedding_managers: RwLock::new(HashMap::new()),
             hnsw_indexes: RwLock::new(HashMap::new()),
+            trigger_guard: tokio::sync::Mutex::new(HashSet::new()),
         }
     }
 
@@ -103,10 +119,20 @@ impl IndexManager {
     /// `"indexed"` status and returns immediately.  Otherwise it delegates
     /// to [`start_indexing`].
     pub async fn ensure_indexed(&self, project_path: &str) {
+        // Dedup guard: prevent concurrent ensure_indexed calls for the same path.
+        {
+            let mut guard = self.trigger_guard.lock().await;
+            if guard.contains(project_path) {
+                return;
+            }
+            guard.insert(project_path.to_string());
+        }
+
         // Quick check: is an indexer already running for this path?
         {
             let indexers = self.active_indexers.read().await;
             if indexers.contains_key(project_path) {
+                self.trigger_guard.lock().await.remove(project_path);
                 return;
             }
         }
@@ -171,10 +197,17 @@ impl IndexManager {
                 }
 
                 // Load or rebuild HNSW index for fast semantic search.
-                // Use a default dimension; the actual dimension is determined
-                // by the embedding provider.
+                // Infer dimension from the embedding manager if available,
+                // otherwise pass 0 and let load_from_disk restore it from metadata.
                 if summary.embedding_chunks > 0 {
-                    let _ = self.get_or_create_hnsw(project_path, 0).await;
+                    let dim = {
+                        let managers = self.embedding_managers.read().await;
+                        managers
+                            .get(project_path)
+                            .map(|m| m.dimension())
+                            .unwrap_or(0)
+                    };
+                    let _ = self.get_or_create_hnsw(project_path, dim).await;
                 }
 
                 let event = IndexStatusEvent {
@@ -192,6 +225,9 @@ impl IndexManager {
                 self.start_indexing(project_path).await;
             }
         }
+
+        // Release the dedup guard
+        self.trigger_guard.lock().await.remove(project_path);
     }
 
     /// Start (or restart) indexing for a project directory.
@@ -273,34 +309,112 @@ impl IndexManager {
 
         // Get or create HNSW index for this project (will try disk load first,
         // then rebuild from SQLite, or initialize empty).
-        let hnsw_idx = self.get_or_create_hnsw(project_path, 0).await;
+        let dim = embedding_mgr.dimension();
+        let hnsw_idx = self.get_or_create_hnsw(project_path, dim).await;
+
+        // Create a channel for incremental file-change notifications (Phase 2).
+        let (change_tx, change_rx) =
+            tokio::sync::mpsc::channel::<PathBuf>(256);
+
+        // Set up a file-system watcher that feeds into `change_tx`.
+        let watcher = {
+            let tx_clone = change_tx.clone();
+            let root_for_watcher = PathBuf::from(project_path);
+            match notify_debouncer_mini::new_debouncer(
+                Duration::from_millis(200),
+                move |events: Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify::Error>| {
+                    if let Ok(events) = events {
+                        for event in events {
+                            if event.path.is_file() {
+                                let _ = tx_clone.try_send(event.path);
+                            }
+                        }
+                    }
+                },
+            ) {
+                Ok(mut debouncer) => {
+                    if let Err(e) = debouncer
+                        .watcher()
+                        .watch(&root_for_watcher, notify::RecursiveMode::Recursive)
+                    {
+                        warn!(
+                            error = %e,
+                            project = %project_path,
+                            "index manager: failed to watch directory for changes"
+                        );
+                    }
+                    Some(debouncer)
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        project = %project_path,
+                        "index manager: failed to create file watcher"
+                    );
+                    None
+                }
+            }
+        };
 
         let handle = tokio::task::spawn(async move {
             let indexer = BackgroundIndexer::new(project_root, index_store.clone())
                 .with_progress_callback(progress_cb)
                 .with_embedding_service(embedding_svc)
                 .with_embedding_manager(embedding_mgr)
-                .with_hnsw_index(hnsw_idx);
+                .with_hnsw_index(hnsw_idx)
+                .with_change_receiver(change_rx);
 
             let join = indexer.start().await;
             let result = join.await;
 
             // Determine final status.
-            let final_event = if result.is_ok() {
-                let summary = index_store
-                    .get_project_summary(&pp_for_task)
-                    .unwrap_or_default();
-                IndexStatusEvent {
-                    project_path: pp_for_task.clone(),
-                    status: "indexed".to_string(),
-                    indexed_files: summary.total_files,
-                    total_files: summary.total_files,
-                    error_message: None,
-                    total_symbols: summary.total_symbols,
-                    embedding_chunks: summary.embedding_chunks,
+            let final_event = match result {
+                Ok(embedding_stats) => {
+                    let summary = index_store
+                        .get_project_summary(&pp_for_task)
+                        .unwrap_or_default();
+
+                    // Distinguish "indexed" (has embeddings) from
+                    // "indexed_no_embedding" (file index OK but embedding failed).
+                    let (status, error_msg) = if summary.total_files == 0 {
+                        ("error".to_string(), Some("No files were indexed".to_string()))
+                    } else if summary.embedding_chunks == 0 {
+                        let err = embedding_stats.as_ref().and_then(|s| {
+                            if s.has_failures() {
+                                Some(format!(
+                                    "Embedding failed for {}/{} files",
+                                    s.failed_files, s.total_files
+                                ))
+                            } else {
+                                None
+                            }
+                        });
+                        ("indexed_no_embedding".to_string(), err)
+                    } else {
+                        let err = embedding_stats.as_ref().and_then(|s| {
+                            if s.has_failures() {
+                                Some(format!(
+                                    "Embedding partially failed ({}/{} files failed)",
+                                    s.failed_files, s.total_files
+                                ))
+                            } else {
+                                None
+                            }
+                        });
+                        ("indexed".to_string(), err)
+                    };
+
+                    IndexStatusEvent {
+                        project_path: pp_for_task.clone(),
+                        status,
+                        indexed_files: summary.total_files,
+                        total_files: summary.total_files,
+                        error_message: error_msg,
+                        total_symbols: summary.total_symbols,
+                        embedding_chunks: summary.embedding_chunks,
+                    }
                 }
-            } else {
-                IndexStatusEvent {
+                Err(_) => IndexStatusEvent {
                     project_path: pp_for_task.clone(),
                     status: "error".to_string(),
                     indexed_files: 0,
@@ -308,7 +422,7 @@ impl IndexManager {
                     error_message: Some("Background indexer task failed".to_string()),
                     total_symbols: 0,
                     embedding_chunks: 0,
-                }
+                },
             };
 
             {
@@ -326,9 +440,16 @@ impl IndexManager {
             );
         });
 
-        // Store the handle.
+        // Store the handle, change sender, and watcher.
         let mut indexers = self.active_indexers.write().await;
-        indexers.insert(project_path_owned, IndexerEntry { handle });
+        indexers.insert(
+            project_path_owned,
+            IndexerEntry {
+                handle,
+                change_tx,
+                _watcher: watcher,
+            },
+        );
     }
 
     /// Clear the existing index for a project and start a fresh full index.
@@ -397,6 +518,25 @@ impl IndexManager {
         }
     }
 
+    /// Push a file-change notification to the running indexer for a project.
+    ///
+    /// This is intended for external callers (e.g. `FileWatcherService`) that
+    /// already have their own file-change events and want to feed them into the
+    /// incremental indexing pipeline.  If no indexer is running for the project,
+    /// or the channel is full, the notification is silently dropped.
+    pub async fn notify_file_changed(&self, project_path: &str, file_path: PathBuf) {
+        let indexers = self.active_indexers.read().await;
+        if let Some(entry) = indexers.get(project_path) {
+            if let Err(e) = entry.change_tx.try_send(file_path) {
+                debug!(
+                    error = %e,
+                    project = %project_path,
+                    "index manager: could not send file change notification"
+                );
+            }
+        }
+    }
+
     /// Get a reference to the inner `IndexStore`.
     pub fn index_store(&self) -> &IndexStore {
         &self.index_store
@@ -433,8 +573,22 @@ impl IndexManager {
     /// and clearing its cached status.
     pub async fn remove_directory(&self, project_path: &str) {
         self.abort_indexer(project_path).await;
-        let mut map = self.statuses.write().await;
-        map.remove(project_path);
+        {
+            let mut map = self.statuses.write().await;
+            map.remove(project_path);
+        }
+        {
+            let mut services = self.embedding_services.write().await;
+            services.remove(project_path);
+        }
+        {
+            let mut managers = self.embedding_managers.write().await;
+            managers.remove(project_path);
+        }
+        {
+            let mut indexes = self.hnsw_indexes.write().await;
+            indexes.remove(project_path);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -518,10 +672,8 @@ impl IndexManager {
         primary_config.base_url = persisted.base_url.clone();
         primary_config.dimension = persisted.dimension;
         primary_config.batch_size = persisted.batch_size;
-        // NOTE: proxy is skipped for the indexing pipeline (IndexManager has no
-        // access to Database/proxy settings).  Cloud providers will use direct
-        // connections.  This is acceptable because indexing is a background task.
-        primary_config.proxy = None;
+        // Resolve proxy configuration from the database settings.
+        primary_config.proxy = self.resolve_embedding_proxy(persisted.provider);
 
         // Build optional fallback config (TF-IDF fallback is common).
         let fallback_config = persisted.fallback_provider.map(|fb_type| {
@@ -573,6 +725,23 @@ impl IndexManager {
         )
     }
 
+    /// Resolve the proxy configuration for a given embedding provider type.
+    ///
+    /// Reads the per-provider proxy strategy from the database and resolves
+    /// it against the global proxy config (if any).
+    fn resolve_embedding_proxy(&self, provider: EmbeddingProviderType) -> Option<ProxyConfig> {
+        let alias = match provider {
+            EmbeddingProviderType::OpenAI => "embedding_openai",
+            EmbeddingProviderType::Qwen => "embedding_qwen",
+            EmbeddingProviderType::Glm => "embedding_glm",
+            EmbeddingProviderType::Ollama => "embedding_ollama",
+            EmbeddingProviderType::TfIdf => return None,
+        };
+        let keyring = KeyringService::new();
+        let db = Database::from_pool(self.db_pool.clone());
+        resolve_provider_proxy(&keyring, &db, alias)
+    }
+
     /// Return the keyring alias for a given embedding provider type.
     fn embedding_keyring_alias(provider: EmbeddingProviderType) -> Option<&'static str> {
         match provider {
@@ -606,21 +775,14 @@ impl IndexManager {
     }
 
     /// Get the HNSW index directory for a project.
+    /// Stored under `~/.plan-cascade/hnsw_indexes/<project-hash>/`.
     fn hnsw_index_dir(project_path: &str) -> std::path::PathBuf {
         let hash = Self::project_hash(project_path);
-        if let Some(data_dir) = dirs::data_local_dir() {
-            data_dir
-                .join("plan-cascade")
-                .join("hnsw_indexes")
-                .join(hash)
-        } else {
-            // Fallback to home dir
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".plan-cascade")
-                .join("hnsw_indexes")
-                .join(hash)
-        }
+        dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".plan-cascade")
+            .join("hnsw_indexes")
+            .join(hash)
     }
 
     /// Get or create an HNSW index for a project, attempting to load from disk first.
@@ -707,6 +869,10 @@ impl IndexManager {
         if vectors.is_empty() {
             return Ok(0);
         }
+
+        // Infer actual dimension from the first vector
+        let actual_dim = vectors[0].1.len();
+        hnsw.set_dimension(actual_dim);
 
         hnsw.initialize().await;
         hnsw.batch_insert(&vectors).await;

@@ -121,14 +121,12 @@ fn default_enable_compaction() -> bool {
 }
 
 fn default_analysis_artifacts_root() -> PathBuf {
-    if let Some(local_data_dir) = dirs::data_local_dir() {
-        return local_data_dir.join("plan-cascade").join("analysis-runs");
-    }
     if let Ok(base) = ensure_plan_cascade_dir() {
         return base.join("analysis-runs");
     }
-    std::env::temp_dir()
-        .join("plan-cascade")
+    dirs::home_dir()
+        .unwrap_or_else(|| std::env::temp_dir())
+        .join(".plan-cascade")
         .join("analysis-runs")
 }
 

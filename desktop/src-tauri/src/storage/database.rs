@@ -50,10 +50,18 @@ pub struct Database {
 }
 
 impl Database {
+    /// Create a database from an existing connection pool.
+    ///
+    /// Useful when a component needs a `Database` instance but only has
+    /// access to a `DbPool` (e.g. `IndexManager` resolving proxy settings).
+    pub fn from_pool(pool: DbPool) -> Self {
+        Self { pool }
+    }
+
     /// Create a database from an existing pool (for testing).
     #[cfg(test)]
     pub fn from_pool_for_test(pool: DbPool) -> Self {
-        Self { pool }
+        Self::from_pool(pool)
     }
 
     /// Create an in-memory database for testing.

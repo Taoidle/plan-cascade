@@ -62,12 +62,11 @@ impl KnowledgeState {
                 .map_err(|e| AppError::internal(format!("Failed to create EmbeddingManager: {}", e)))?,
         );
 
-        // Store HNSW index in the platform-specific data directory
-        let hnsw_dir = if let Some(data_dir) = dirs::data_local_dir() {
-            data_dir.join("plan-cascade").join("knowledge-hnsw")
-        } else {
-            std::env::temp_dir().join("plan-cascade").join("knowledge-hnsw")
-        };
+        // Store HNSW index under ~/.plan-cascade/knowledge-hnsw
+        let hnsw_dir = dirs::home_dir()
+            .unwrap_or_else(|| std::env::temp_dir())
+            .join(".plan-cascade")
+            .join("knowledge-hnsw");
         let hnsw_index = Arc::new(HnswIndex::new(hnsw_dir, 8192));
 
         let reranker: Option<Arc<dyn Reranker>> = Some(Arc::new(NoopReranker));

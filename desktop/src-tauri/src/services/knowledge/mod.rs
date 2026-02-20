@@ -7,6 +7,7 @@
 //! - `context_provider`: Auto-retrieval of relevant knowledge for agent context
 
 pub mod chunker;
+pub mod code_chunker;
 pub mod reranker;
 pub mod pipeline;
 pub mod context_provider;

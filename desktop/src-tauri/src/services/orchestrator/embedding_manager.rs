@@ -22,6 +22,16 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing;
 
+/// Maximum number of retry attempts for transient embedding errors.
+const EMBED_MAX_RETRY_ATTEMPTS: usize = 3;
+
+/// Base delay between retries (in milliseconds).  Actual delays follow
+/// exponential backoff: 500ms, 1000ms, 2000ms, …
+const EMBED_RETRY_BASE_DELAY_MS: u64 = 500;
+
+/// Maximum delay cap to prevent excessively long waits.
+const EMBED_RETRY_MAX_DELAY_MS: u64 = 10_000;
+
 use mini_moka::sync::{Cache, ConcurrentCacheExt};
 
 use super::embedding_provider::{
@@ -330,6 +340,93 @@ impl EmbeddingManager {
     // Internal helpers
     // -----------------------------------------------------------------------
 
+    /// Embed a batch of texts with retry + exponential backoff for transient errors.
+    ///
+    /// Retries up to `EMBED_MAX_RETRY_ATTEMPTS` times on retryable errors.
+    /// Respects `retry_after_secs()` from rate-limit responses; otherwise uses
+    /// exponential backoff starting at `EMBED_RETRY_BASE_DELAY_MS`.
+    async fn embed_batch_with_retry(
+        provider: &dyn EmbeddingProvider,
+        batch: &[&str],
+    ) -> EmbeddingResult<Vec<Vec<f32>>> {
+        let mut last_err: Option<EmbeddingError> = None;
+
+        for attempt in 0..EMBED_MAX_RETRY_ATTEMPTS {
+            match provider.embed_documents(batch).await {
+                Ok(result) => return Ok(result),
+                Err(err) => {
+                    if !err.is_retryable() {
+                        return Err(err);
+                    }
+
+                    // Determine wait duration
+                    let wait_ms = if let Some(secs) = err.retry_after_secs() {
+                        secs * 1000
+                    } else {
+                        let backoff = EMBED_RETRY_BASE_DELAY_MS * (1u64 << attempt);
+                        backoff.min(EMBED_RETRY_MAX_DELAY_MS)
+                    };
+
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        max_attempts = EMBED_MAX_RETRY_ATTEMPTS,
+                        wait_ms,
+                        error = %err,
+                        "embed_batch_with_retry: retryable error, backing off"
+                    );
+
+                    last_err = Some(err);
+                    tokio::time::sleep(Duration::from_millis(wait_ms)).await;
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| EmbeddingError::Other {
+            message: "retry attempts exhausted".to_string(),
+        }))
+    }
+
+    /// Embed a single query with retry + exponential backoff for transient errors.
+    async fn embed_query_with_retry(
+        provider: &dyn EmbeddingProvider,
+        query: &str,
+    ) -> EmbeddingResult<Vec<f32>> {
+        let mut last_err: Option<EmbeddingError> = None;
+
+        for attempt in 0..EMBED_MAX_RETRY_ATTEMPTS {
+            match provider.embed_query(query).await {
+                Ok(result) => return Ok(result),
+                Err(err) => {
+                    if !err.is_retryable() {
+                        return Err(err);
+                    }
+
+                    let wait_ms = if let Some(secs) = err.retry_after_secs() {
+                        secs * 1000
+                    } else {
+                        let backoff = EMBED_RETRY_BASE_DELAY_MS * (1u64 << attempt);
+                        backoff.min(EMBED_RETRY_MAX_DELAY_MS)
+                    };
+
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        max_attempts = EMBED_MAX_RETRY_ATTEMPTS,
+                        wait_ms,
+                        error = %err,
+                        "embed_query_with_retry: retryable error, backing off"
+                    );
+
+                    last_err = Some(err);
+                    tokio::time::sleep(Duration::from_millis(wait_ms)).await;
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| EmbeddingError::Other {
+            message: "retry attempts exhausted".to_string(),
+        }))
+    }
+
     /// Embed documents via a specific provider, with cache lookup and batch chunking.
     async fn embed_documents_with_provider(
         &self,
@@ -354,13 +451,13 @@ impl EmbeddingManager {
             }
         }
 
-        // Phase 2: Embed uncached texts in batches
+        // Phase 2: Embed uncached texts in batches (with retry)
         if !uncached_texts.is_empty() {
             let max_batch = provider.max_batch_size();
             let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(uncached_texts.len());
 
             for chunk in uncached_texts.chunks(max_batch) {
-                let batch_result = provider.embed_documents(chunk).await?;
+                let batch_result = Self::embed_batch_with_retry(provider, chunk).await?;
                 all_embeddings.extend(batch_result);
             }
 
@@ -395,8 +492,8 @@ impl EmbeddingManager {
             return Ok(cached);
         }
 
-        // Cache miss: call provider
-        let embedding = provider.embed_query(query).await?;
+        // Cache miss: call provider with retry
+        let embedding = Self::embed_query_with_retry(provider, query).await?;
 
         // Store in cache
         self.cache_put(provider_type, &model, query, embedding.clone());

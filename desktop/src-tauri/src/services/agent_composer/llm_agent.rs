@@ -167,8 +167,8 @@ impl Agent for LlmAgent {
         };
 
         // Compute analysis artifacts root using the same logic as the orchestrator
-        let analysis_artifacts_root = dirs::data_local_dir()
-            .map(|d| d.join("plan-cascade").join("analysis-runs"))
+        let analysis_artifacts_root = dirs::home_dir()
+            .map(|d| d.join(".plan-cascade").join("analysis-runs"))
             .unwrap_or_else(|| ctx.project_root.join(".plan-cascade").join("analysis-runs"));
 
         let orchestrator_config = OrchestratorConfig {

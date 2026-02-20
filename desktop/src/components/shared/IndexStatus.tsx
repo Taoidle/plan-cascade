@@ -15,7 +15,7 @@ import { useSettingsStore } from '../../store/settings';
 
 interface IndexStatusEvent {
   project_path: string;
-  status: 'idle' | 'indexing' | 'indexed' | 'error';
+  status: 'idle' | 'indexing' | 'indexed' | 'indexed_no_embedding' | 'error';
   indexed_files: number;
   total_files: number;
   error_message?: string | null;
@@ -192,7 +192,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
   }
 
   // indexed state: green dot + file count + capability badges + re-index button
-  if (status === 'indexed') {
+  if (status === 'indexed' || status === 'indexed_no_embedding') {
     const semanticReady = embeddingChunks > 0;
 
     return (

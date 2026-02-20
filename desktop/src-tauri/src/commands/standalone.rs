@@ -177,14 +177,12 @@ pub(crate) fn get_api_key_with_aliases(
 }
 
 fn analysis_artifacts_root() -> PathBuf {
-    if let Some(local_data_dir) = dirs::data_local_dir() {
-        return local_data_dir.join("plan-cascade").join("analysis-runs");
-    }
     if let Ok(base) = ensure_plan_cascade_dir() {
         return base.join("analysis-runs");
     }
-    std::env::temp_dir()
-        .join("plan-cascade")
+    dirs::home_dir()
+        .unwrap_or_else(|| std::env::temp_dir())
+        .join(".plan-cascade")
         .join("analysis-runs")
 }
 
@@ -742,20 +740,10 @@ pub async fn get_index_status(
 
     let mgr_lock = standalone_state.index_manager.read().await;
     if let Some(mgr) = &*mgr_lock {
+        // Pure read-only query — indexing is triggered by set_working_directory
+        // and init_app, not by status polls. This prevents the race condition
+        // where multiple rapid get_index_status calls spawn duplicate indexers.
         let status = mgr.get_status(&dir).await;
-
-        // If status is idle, trigger ensure_indexed in background so vocabulary
-        // is restored and real-time events are emitted for the frontend listener.
-        if status.status == "idle" {
-            let mgr_arc = standalone_state.index_manager.clone();
-            let dir_clone = dir.clone();
-            tokio::spawn(async move {
-                let lock = mgr_arc.read().await;
-                if let Some(m) = &*lock {
-                    m.ensure_indexed(&dir_clone).await;
-                }
-            });
-        }
 
         Ok(CommandResponse::ok(status))
     } else {

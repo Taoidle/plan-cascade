@@ -6,6 +6,7 @@
 //! triggered by file-watcher events.
 
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -23,6 +24,27 @@ use super::tree_sitter_parser;
 ///
 /// Called with `(indexed_so_far, total_files)` during a full index pass.
 pub type IndexProgressCallback = Arc<dyn Fn(usize, usize) + Send + Sync>;
+
+/// Statistics from a managed embedding pass.
+///
+/// Used by `IndexManager` to determine the final status (e.g.
+/// `"indexed"` vs `"indexed_no_embedding"` vs `"error"`).
+#[derive(Debug, Default)]
+pub struct EmbeddingPassStats {
+    /// Number of embedding chunks successfully stored in SQLite.
+    pub stored_chunks: usize,
+    /// Number of files where embedding failed (skipped, still counted).
+    pub failed_files: usize,
+    /// Total number of files that were considered for embedding.
+    pub total_files: usize,
+}
+
+impl EmbeddingPassStats {
+    /// Returns `true` if at least one file failed during the embedding pass.
+    pub fn has_failures(&self) -> bool {
+        self.failed_files > 0
+    }
+}
 
 /// Background file indexer that populates and maintains the SQLite index.
 ///
@@ -115,7 +137,7 @@ impl BackgroundIndexer {
     ///
     /// Errors during indexing are logged but never propagated; the task
     /// keeps running so that future change events are still processed.
-    pub async fn start(self) -> tokio::task::JoinHandle<()> {
+    pub async fn start(self) -> tokio::task::JoinHandle<Option<EmbeddingPassStats>> {
         let project_root = self.project_root;
         let index_store = self.index_store;
         let embedding_service = self.embedding_service;
@@ -142,17 +164,28 @@ impl BackgroundIndexer {
 
             // --- Phase 1b: Generate embeddings ---
             // Prefer EmbeddingManager over direct EmbeddingService when both are set.
-            if let Some(ref emb_mgr) = embedding_manager {
+            let embedding_stats: Option<EmbeddingPassStats> = if let Some(ref emb_mgr) = embedding_manager {
                 info!("background indexer: starting embedding generation (via EmbeddingManager)");
-                if let Err(e) =
-                    run_embedding_pass_managed(&project_root, &index_store, emb_mgr, hnsw_index.as_ref()).await
-                {
-                    warn!(
-                        error = %e,
-                        "background indexer: embedding generation (managed) failed"
-                    );
-                } else {
-                    info!("background indexer: embedding generation (managed) complete");
+                match run_embedding_pass_managed(&project_root, &index_store, emb_mgr, hnsw_index.as_ref()).await {
+                    Ok(stats) => {
+                        if stats.has_failures() {
+                            warn!(
+                                failed = stats.failed_files,
+                                total = stats.total_files,
+                                "background indexer: embedding generation (managed) complete with partial failures"
+                            );
+                        } else {
+                            info!("background indexer: embedding generation (managed) complete");
+                        }
+                        Some(stats)
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "background indexer: embedding generation (managed) failed"
+                        );
+                        None
+                    }
                 }
             } else if let Some(ref emb_svc) = embedding_service {
                 info!("background indexer: starting embedding generation");
@@ -164,7 +197,10 @@ impl BackgroundIndexer {
                 } else {
                     info!("background indexer: embedding generation complete");
                 }
-            }
+                None // Legacy path does not return stats
+            } else {
+                None
+            };
 
             // --- Phase 2: Incremental updates ---
             if let Some(mut rx) = change_rx {
@@ -214,6 +250,8 @@ impl BackgroundIndexer {
                 }
                 debug!("background indexer: change channel closed, stopping");
             }
+
+            embedding_stats
         })
     }
 }
@@ -786,13 +824,15 @@ async fn run_embedding_pass_managed(
     index_store: &IndexStore,
     manager: &EmbeddingManager,
     hnsw_index: Option<&Arc<HnswIndex>>,
-) -> Result<(), String> {
+) -> Result<EmbeddingPassStats, String> {
     let project_path = project_root.to_string_lossy().to_string();
 
-    // Collect all chunks first (to build vocabulary from the full corpus)
+    // Collect all chunks first, grouped by file for per-file fault tolerance.
     let inventory = build_file_inventory(project_root, &[]).map_err(|e| e.to_string())?;
 
-    let mut all_chunks: Vec<(String, FileChunk)> = Vec::new(); // (relative_path, chunk)
+    // Group chunks by relative file path
+    let mut file_chunks: HashMap<String, Vec<FileChunk>> = HashMap::new();
+    let mut all_texts_for_vocab: Vec<String> = Vec::new();
 
     for item in &inventory.items {
         if item.size_bytes > MAX_EMBEDDABLE_FILE_SIZE {
@@ -801,65 +841,84 @@ async fn run_embedding_pass_managed(
         let abs_path = project_root.join(&item.path);
         let content = match std::fs::read_to_string(&abs_path) {
             Ok(c) => c,
-            Err(_) => continue, // skip unreadable files
+            Err(_) => continue,
         };
         let chunks = chunk_file_content(&content, &item.language);
-        for chunk in chunks {
-            all_chunks.push((item.path.clone(), chunk));
+        for chunk in &chunks {
+            all_texts_for_vocab.push(chunk.text.clone());
+        }
+        if !chunks.is_empty() {
+            file_chunks.insert(item.path.clone(), chunks);
         }
     }
 
-    if all_chunks.is_empty() {
+    if file_chunks.is_empty() {
         info!("background indexer: no chunks to embed (managed)");
-        return Ok(());
+        return Ok(EmbeddingPassStats::default());
     }
 
-    let texts: Vec<&str> = all_chunks.iter().map(|(_, c)| c.text.as_str()).collect();
-
-    // If primary provider is TF-IDF, build vocabulary before embedding
+    // If primary provider is TF-IDF, build vocabulary from the full corpus
+    // (TF-IDF needs all texts to compute IDF weights correctly).
     if manager.provider_type() == EmbeddingProviderType::TfIdf {
+        let refs: Vec<&str> = all_texts_for_vocab.iter().map(|s| s.as_str()).collect();
         let primary = manager.primary_provider();
         if let Some(tfidf) = primary.as_any().downcast_ref::<TfIdfEmbeddingProvider>() {
-            tfidf.build_vocabulary(&texts);
+            tfidf.build_vocabulary(&refs);
             debug!(
-                chunks = texts.len(),
+                chunks = refs.len(),
                 "background indexer: TF-IDF vocabulary built via manager"
             );
         }
     }
 
-    // Generate embeddings via manager (async, with caching and fallback)
-    let embeddings = manager
-        .embed_documents(&texts)
-        .await
-        .map_err(|e| format!("embedding manager embed_documents failed: {}", e))?;
+    let mut stats = EmbeddingPassStats {
+        stored_chunks: 0,
+        failed_files: 0,
+        total_files: file_chunks.len(),
+    };
 
-    let mut stored = 0usize;
+    // Embed per-file: each file can fail independently without losing others.
+    for (rel_path, chunks) in &file_chunks {
+        let file_texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
 
-    for ((rel_path, chunk), embedding) in all_chunks.iter().zip(embeddings.iter()) {
-        let bytes = embedding_to_bytes(embedding);
-        if let Err(e) = index_store.upsert_chunk_embedding(
-            &project_path,
-            rel_path,
-            chunk.index as i64,
-            &chunk.text,
-            &bytes,
-        ) {
-            warn!(
-                file = %rel_path,
-                chunk = chunk.index,
-                error = %e,
-                "background indexer: failed to store embedding (managed)"
-            );
-        } else {
-            stored += 1;
+        match manager.embed_documents(&file_texts).await {
+            Ok(embeddings) => {
+                for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
+                    let bytes = embedding_to_bytes(embedding);
+                    if let Err(e) = index_store.upsert_chunk_embedding(
+                        &project_path,
+                        rel_path,
+                        chunk.index as i64,
+                        &chunk.text,
+                        &bytes,
+                    ) {
+                        warn!(
+                            file = %rel_path,
+                            chunk = chunk.index,
+                            error = %e,
+                            "background indexer: failed to store embedding (managed)"
+                        );
+                    } else {
+                        stats.stored_chunks += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    file = %rel_path,
+                    error = %e,
+                    "background indexer: embedding failed for file, skipping"
+                );
+                stats.failed_files += 1;
+            }
         }
     }
 
     info!(
-        chunks = stored,
-        total = all_chunks.len(),
-        "background indexer: embeddings stored (managed)"
+        stored = stats.stored_chunks,
+        failed_files = stats.failed_files,
+        total_files = stats.total_files,
+        "background indexer: per-file embedding pass complete (managed)"
     );
 
     // Rebuild HNSW index from SQLite after full embedding pass
@@ -889,7 +948,7 @@ async fn run_embedding_pass_managed(
         }
     }
 
-    Ok(())
+    Ok(stats)
 }
 
 /// Re-embed a single changed file using the `EmbeddingManager`.
@@ -1066,6 +1125,10 @@ async fn rebuild_hnsw_after_embedding(
         return Ok(());
     }
 
+    // Infer actual dimension from the first vector and update the index
+    let actual_dim = all_embeddings[0].1.len();
+    hnsw.set_dimension(actual_dim);
+
     // Reset the HNSW index to clear any stale data from a previous pass
     hnsw.reset().await;
 
@@ -1079,6 +1142,7 @@ async fn rebuild_hnsw_after_embedding(
 
     info!(
         vectors = all_embeddings.len(),
+        dimension = actual_dim,
         "background indexer: HNSW index rebuilt and saved to disk"
     );
 
