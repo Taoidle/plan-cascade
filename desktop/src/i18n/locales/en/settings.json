@@ -420,7 +420,9 @@
 
     "model": {
       "label": "Model",
-      "help": "Enter the embedding model identifier. Leave blank to use the provider's default model."
+      "help": "Enter the embedding model identifier. Leave blank to use the provider's default model.",
+      "customOption": "Custom Model",
+      "customPlaceholder": "Enter model ID..."
     },
 
     "baseUrl": {

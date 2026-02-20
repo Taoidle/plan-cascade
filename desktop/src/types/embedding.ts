@@ -12,6 +12,15 @@
 /** Embedding provider type identifiers (matches Rust `EmbeddingProviderType` serde). */
 export type EmbeddingProviderType = 'tf_idf' | 'ollama' | 'qwen' | 'glm' | 'open_ai';
 
+/** A built-in model preset with pre-populated defaults. */
+export interface EmbeddingModelPreset {
+  model_id: string;
+  display_name: string;
+  default_dimension: number;
+  supported_dimensions?: number[];
+  max_batch_size: number;
+}
+
 /** Capability metadata for an embedding provider. */
 export interface EmbeddingProviderCapability {
   provider_type: EmbeddingProviderType;
@@ -22,6 +31,7 @@ export interface EmbeddingProviderCapability {
   default_dimension: number;
   max_batch_size: number;
   supported_dimensions?: number[];
+  models?: EmbeddingModelPreset[];
 }
 
 // ---------------------------------------------------------------------------

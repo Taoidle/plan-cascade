@@ -150,7 +150,19 @@ export const useEmbeddingStore = create<EmbeddingState>()((set, get) => ({
     }
   },
 
-  setModel: (model: string) => set({ model }),
+  setModel: (model: string) => {
+    const capability = get().providers.find(p => p.provider_type === get().provider);
+    const preset = capability?.models?.find(m => m.model_id === model);
+    if (preset) {
+      set({
+        model,
+        dimension: preset.default_dimension,
+        batchSize: Math.min(preset.max_batch_size, get().batchSize),
+      });
+    } else {
+      set({ model });
+    }
+  },
   setBaseUrl: (baseUrl: string) => set({ baseUrl }),
   setDimension: (dimension: number) => set({ dimension }),
   setBatchSize: (batchSize: number) => set({ batchSize }),

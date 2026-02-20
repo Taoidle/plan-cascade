@@ -6,22 +6,23 @@
 //!
 //! ## Default Model
 //!
-//! Uses `text-embedding-v4` (1024-dimensional) by default. The dimension is
-//! detected automatically after the first successful embedding call.
+//! Uses `text-embedding-v3` (1024-dimensional) by default. The dimension is
+//! fixed at construction time from the config and sent explicitly in every API
+//! request, which is required for Matryoshka models (v3, v4) to return the
+//! correct truncated vector size.
 //!
 //! ## DashScope API
 //!
 //! POST `https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding`
 //!
 //! - Header: `Authorization: Bearer {api_key}`
-//! - Body: `{ model, input: { texts: [...] }, parameters: { text_type: "query"|"document" } }`
+//! - Body: `{ model, input: { texts: [...] }, parameters: { text_type, dimension? } }`
 //! - Response: `{ output: { embeddings: [{ text_index, embedding }] } }`
 
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing;
 
 use super::embedding_provider::{
@@ -39,7 +40,7 @@ const DASHSCOPE_DEFAULT_URL: &str =
     "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding";
 
 /// Default embedding model.
-const DEFAULT_MODEL: &str = "text-embedding-v4";
+const DEFAULT_MODEL: &str = "text-embedding-v3";
 
 /// Default dimension for text-embedding-v4.
 const DEFAULT_DIMENSION: usize = 1024;
@@ -69,6 +70,8 @@ struct DashScopeInput {
 #[derive(Debug, Serialize)]
 struct DashScopeParameters {
     text_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dimension: Option<usize>,
 }
 
 /// DashScope embedding API response body.
@@ -124,10 +127,8 @@ pub struct QwenEmbeddingProvider {
     model: String,
     /// Base URL for the DashScope embedding API.
     base_url: String,
-    /// Detected embedding dimension (updated after first successful call).
-    /// Uses AtomicUsize for lock-free interior mutability compatible with
-    /// the `Send + Sync` requirement of the trait.
-    dimension: AtomicUsize,
+    /// Embedding dimension. Fixed at construction time from the config.
+    dimension: usize,
     /// Human-readable display name for this provider instance.
     display_name: String,
 }
@@ -172,7 +173,7 @@ impl QwenEmbeddingProvider {
             api_key,
             model,
             base_url,
-            dimension: AtomicUsize::new(initial_dimension),
+            dimension: initial_dimension,
             display_name,
         }
     }
@@ -207,6 +208,7 @@ impl QwenEmbeddingProvider {
             },
             parameters: DashScopeParameters {
                 text_type: text_type.to_string(),
+                dimension: Some(self.dimension),
             },
         };
 
@@ -274,9 +276,6 @@ impl QwenEmbeddingProvider {
         indexed_embeddings.sort_by_key(|(idx, _)| *idx);
 
         let embeddings: Vec<Vec<f32>> = indexed_embeddings.into_iter().map(|(_, e)| e).collect();
-
-        // Update cached dimension from the first embedding
-        self.update_dimension(&embeddings);
 
         Ok(embeddings)
     }
@@ -424,14 +423,6 @@ impl QwenEmbeddingProvider {
         }
     }
 
-    /// Update the stored dimension from a successful embedding response.
-    fn update_dimension(&self, embeddings: &[Vec<f32>]) {
-        if let Some(first) = embeddings.first() {
-            if !first.is_empty() {
-                self.dimension.store(first.len(), Ordering::Relaxed);
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -471,7 +462,7 @@ impl EmbeddingProvider for QwenEmbeddingProvider {
     }
 
     fn dimension(&self) -> usize {
-        self.dimension.load(Ordering::Relaxed)
+        self.dimension
     }
 
     async fn health_check(&self) -> EmbeddingResult<()> {
@@ -643,7 +634,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Dimension tracking tests
+    // Dimension tests
     // =========================================================================
 
     #[test]
@@ -653,24 +644,14 @@ mod tests {
     }
 
     #[test]
-    fn update_dimension_from_embeddings() {
-        let provider = QwenEmbeddingProvider::new(&default_config());
-        assert_eq!(provider.dimension(), 1024);
-
-        // Simulate receiving embeddings with different dimension
-        let fake_embeddings = vec![vec![0.0f32; 512]];
-        provider.update_dimension(&fake_embeddings);
+    fn dimension_is_fixed_at_construction() {
+        let config = EmbeddingProviderConfig {
+            dimension: Some(512),
+            api_key: Some("test-key".to_string()),
+            ..EmbeddingProviderConfig::new(EmbeddingProviderType::Qwen)
+        };
+        let provider = QwenEmbeddingProvider::new(&config);
         assert_eq!(provider.dimension(), 512);
-    }
-
-    #[test]
-    fn update_dimension_ignores_empty_embeddings() {
-        let provider = QwenEmbeddingProvider::new(&default_config());
-        provider.update_dimension(&[]);
-        assert_eq!(provider.dimension(), 1024); // unchanged
-
-        provider.update_dimension(&[vec![]]);
-        assert_eq!(provider.dimension(), 1024); // unchanged
     }
 
     // =========================================================================
@@ -866,7 +847,7 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn dashscope_request_serializes_correctly() {
+    fn dashscope_request_serializes_with_dimension() {
         let request = DashScopeRequest {
             model: "text-embedding-v4".to_string(),
             input: DashScopeInput {
@@ -874,6 +855,7 @@ mod tests {
             },
             parameters: DashScopeParameters {
                 text_type: "document".to_string(),
+                dimension: Some(1024),
             },
         };
 
@@ -881,6 +863,24 @@ mod tests {
         assert_eq!(json["model"], "text-embedding-v4");
         assert_eq!(json["input"]["texts"].as_array().unwrap().len(), 2);
         assert_eq!(json["parameters"]["text_type"], "document");
+        assert_eq!(json["parameters"]["dimension"], 1024);
+    }
+
+    #[test]
+    fn dashscope_request_omits_dimension_when_none() {
+        let request = DashScopeRequest {
+            model: "text-embedding-v3".to_string(),
+            input: DashScopeInput {
+                texts: vec!["hello".to_string()],
+            },
+            parameters: DashScopeParameters {
+                text_type: "query".to_string(),
+                dimension: None,
+            },
+        };
+
+        let json = serde_json::to_value(&request).unwrap();
+        assert!(json["parameters"].get("dimension").is_none());
     }
 
     #[test]

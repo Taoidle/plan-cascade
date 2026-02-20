@@ -6,7 +6,7 @@
  * fallback provider, API key management for cloud providers, and health check.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import {
@@ -88,6 +88,9 @@ export function EmbeddingSection() {
     message: string;
   } | null>(null);
 
+  // Custom model input (when "custom" is selected from the dropdown)
+  const [customModelInput, setCustomModelInput] = useState('');
+
   // Load config and providers on mount
   useEffect(() => {
     void fetchConfig();
@@ -106,8 +109,24 @@ export function EmbeddingSection() {
     (p) => p.provider_type === provider,
   );
 
-  // Available dimensions for dimension selector
-  const supportedDimensions = currentCapability?.supported_dimensions;
+  // Model presets for this provider
+  const modelPresets = currentCapability?.models;
+  const hasPresets = modelPresets && modelPresets.length > 0;
+
+  // Whether the current model matches a preset
+  const isPresetModel = hasPresets && modelPresets.some((m) => m.model_id === model);
+  const isCustomModel = hasPresets && !isPresetModel;
+
+  // The current model's preset (if any)
+  const currentPreset = hasPresets ? modelPresets.find((m) => m.model_id === model) : undefined;
+
+  // Available dimensions for dimension selector — model-specific or provider-level
+  const supportedDimensions = useMemo(() => {
+    if (currentPreset?.supported_dimensions) {
+      return currentPreset.supported_dimensions;
+    }
+    return currentCapability?.supported_dimensions;
+  }, [currentPreset, currentCapability]);
 
   // Fallback provider options (exclude current provider)
   const fallbackOptions = providers.filter(
@@ -319,19 +338,68 @@ export function EmbeddingSection() {
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
           {t('embedding.model.label')}
         </h3>
-        <input
-          type="text"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder={currentCapability?.default_model ?? ''}
-          className={clsx(
-            'w-full max-w-md px-3 py-2 rounded-lg border',
-            'border-gray-200 dark:border-gray-700',
-            'bg-white dark:bg-gray-800',
-            'text-gray-900 dark:text-white',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500',
-          )}
-        />
+        {hasPresets ? (
+          <div className="space-y-2">
+            <select
+              value={isCustomModel ? '__custom__' : model}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === '__custom__') {
+                  setCustomModelInput('');
+                  setModel('');
+                } else {
+                  setModel(val);
+                }
+              }}
+              className={clsx(
+                'w-full max-w-md px-3 py-2 rounded-lg border',
+                'border-gray-200 dark:border-gray-700',
+                'bg-white dark:bg-gray-800',
+                'text-gray-900 dark:text-white',
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
+              )}
+            >
+              {modelPresets.map((preset) => (
+                <option key={preset.model_id} value={preset.model_id}>
+                  {preset.display_name} ({preset.model_id})
+                </option>
+              ))}
+              <option value="__custom__">{t('embedding.model.customOption')}</option>
+            </select>
+            {isCustomModel && (
+              <input
+                type="text"
+                value={customModelInput || model}
+                onChange={(e) => {
+                  setCustomModelInput(e.target.value);
+                  setModel(e.target.value);
+                }}
+                placeholder={t('embedding.model.customPlaceholder')}
+                className={clsx(
+                  'w-full max-w-md px-3 py-2 rounded-lg border',
+                  'border-gray-200 dark:border-gray-700',
+                  'bg-white dark:bg-gray-800',
+                  'text-gray-900 dark:text-white',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                )}
+              />
+            )}
+          </div>
+        ) : (
+          <input
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder={currentCapability?.default_model ?? ''}
+            className={clsx(
+              'w-full max-w-md px-3 py-2 rounded-lg border',
+              'border-gray-200 dark:border-gray-700',
+              'bg-white dark:bg-gray-800',
+              'text-gray-900 dark:text-white',
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
+            )}
+          />
+        )}
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {t('embedding.model.help')}
         </p>

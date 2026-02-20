@@ -166,6 +166,7 @@ impl EmbeddingProviderType {
                 default_dimension: 0, // dynamic, depends on vocabulary
                 max_batch_size: 1000,
                 supported_dimensions: None,
+                models: vec![],
             },
             Self::Ollama => EmbeddingProviderCapability {
                 provider_type: *self,
@@ -176,6 +177,7 @@ impl EmbeddingProviderType {
                 default_dimension: 768,
                 max_batch_size: 64,
                 supported_dimensions: None,
+                models: vec![],
             },
             Self::Qwen => EmbeddingProviderCapability {
                 provider_type: *self,
@@ -185,7 +187,30 @@ impl EmbeddingProviderType {
                 default_model: "text-embedding-v3".to_string(),
                 default_dimension: 1024,
                 max_batch_size: 25,
-                supported_dimensions: Some(vec![512, 1024, 1536]),
+                supported_dimensions: Some(vec![64, 128, 256, 512, 768, 1024]),
+                models: vec![
+                    EmbeddingModelPreset {
+                        model_id: "text-embedding-v4".to_string(),
+                        display_name: "Text Embedding v4 (Qwen3)".to_string(),
+                        default_dimension: 1024,
+                        supported_dimensions: Some(vec![64, 128, 256, 512, 768, 1024, 1536, 2048]),
+                        max_batch_size: 10,
+                    },
+                    EmbeddingModelPreset {
+                        model_id: "text-embedding-v3".to_string(),
+                        display_name: "Text Embedding v3".to_string(),
+                        default_dimension: 1024,
+                        supported_dimensions: Some(vec![64, 128, 256, 512, 768, 1024]),
+                        max_batch_size: 10,
+                    },
+                    EmbeddingModelPreset {
+                        model_id: "text-embedding-v2".to_string(),
+                        display_name: "Text Embedding v2".to_string(),
+                        default_dimension: 1536,
+                        supported_dimensions: None,
+                        max_batch_size: 25,
+                    },
+                ],
             },
             Self::Glm => EmbeddingProviderCapability {
                 provider_type: *self,
@@ -196,6 +221,22 @@ impl EmbeddingProviderType {
                 default_dimension: 2048,
                 max_batch_size: 64,
                 supported_dimensions: Some(vec![256, 512, 1024, 2048]),
+                models: vec![
+                    EmbeddingModelPreset {
+                        model_id: "embedding-3".to_string(),
+                        display_name: "Embedding-3".to_string(),
+                        default_dimension: 2048,
+                        supported_dimensions: Some(vec![256, 512, 1024, 2048]),
+                        max_batch_size: 64,
+                    },
+                    EmbeddingModelPreset {
+                        model_id: "embedding-2".to_string(),
+                        display_name: "Embedding-2".to_string(),
+                        default_dimension: 1024,
+                        supported_dimensions: None,
+                        max_batch_size: 64,
+                    },
+                ],
             },
             Self::OpenAI => EmbeddingProviderCapability {
                 provider_type: *self,
@@ -206,6 +247,29 @@ impl EmbeddingProviderType {
                 default_dimension: 1536,
                 max_batch_size: 2048,
                 supported_dimensions: Some(vec![256, 512, 1024, 1536, 3072]),
+                models: vec![
+                    EmbeddingModelPreset {
+                        model_id: "text-embedding-3-small".to_string(),
+                        display_name: "Text Embedding 3 Small".to_string(),
+                        default_dimension: 1536,
+                        supported_dimensions: Some(vec![256, 512, 1024, 1536]),
+                        max_batch_size: 2048,
+                    },
+                    EmbeddingModelPreset {
+                        model_id: "text-embedding-3-large".to_string(),
+                        display_name: "Text Embedding 3 Large".to_string(),
+                        default_dimension: 3072,
+                        supported_dimensions: Some(vec![256, 512, 1024, 1536, 3072]),
+                        max_batch_size: 2048,
+                    },
+                    EmbeddingModelPreset {
+                        model_id: "text-embedding-ada-002".to_string(),
+                        display_name: "Text Embedding Ada 002".to_string(),
+                        default_dimension: 1536,
+                        supported_dimensions: None,
+                        max_batch_size: 2048,
+                    },
+                ],
             },
         }
     }
@@ -339,7 +403,18 @@ impl EmbeddingProviderConfig {
                     message: "dimension must be at least 1".to_string(),
                 });
             }
-            if let Some(ref supported) = capability.supported_dimensions {
+
+            // If model presets exist, try model-specific validation first.
+            let model_preset = capability
+                .models
+                .iter()
+                .find(|m| m.model_id == self.model);
+
+            let effective_supported = model_preset
+                .and_then(|m| m.supported_dimensions.as_ref())
+                .or(capability.supported_dimensions.as_ref());
+
+            if let Some(supported) = effective_supported {
                 if !supported.contains(&dim) {
                     return Err(EmbeddingError::InvalidConfig {
                         message: format!(
@@ -430,6 +505,30 @@ pub struct EmbeddingProviderCapability {
     /// `None` means the dimension is fixed or determined by the model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supported_dimensions: Option<Vec<usize>>,
+
+    /// Built-in model presets for this provider.
+    /// Empty for providers with user-defined models (e.g., Ollama, TF-IDF).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<EmbeddingModelPreset>,
+}
+
+/// A built-in model preset with pre-populated defaults.
+///
+/// Allows the UI to offer a dropdown of known models with correct
+/// dimension and batch-size defaults, reducing user configuration errors.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingModelPreset {
+    /// Model identifier sent to the API (e.g., "text-embedding-v4").
+    pub model_id: String,
+    /// Human-readable display name (e.g., "Text Embedding v4 (Qwen3)").
+    pub display_name: String,
+    /// Default embedding dimension for this model.
+    pub default_dimension: usize,
+    /// Supported dimension options. `None` means the model has a fixed dimension.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supported_dimensions: Option<Vec<usize>>,
+    /// Max batch size for this specific model.
+    pub max_batch_size: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -832,6 +931,118 @@ mod tests {
             deserialized,
             EmbeddingError::ServerError { status: Some(500), .. }
         ));
+    }
+
+    // =========================================================================
+    // EmbeddingModelPreset tests
+    // =========================================================================
+
+    #[test]
+    fn qwen_capability_has_model_presets() {
+        let cap = EmbeddingProviderType::Qwen.default_capability();
+        assert_eq!(cap.models.len(), 3);
+        assert_eq!(cap.models[0].model_id, "text-embedding-v4");
+        assert_eq!(cap.models[1].model_id, "text-embedding-v3");
+        assert_eq!(cap.models[2].model_id, "text-embedding-v2");
+    }
+
+    #[test]
+    fn glm_capability_has_model_presets() {
+        let cap = EmbeddingProviderType::Glm.default_capability();
+        assert_eq!(cap.models.len(), 2);
+        assert_eq!(cap.models[0].model_id, "embedding-3");
+        assert_eq!(cap.models[1].model_id, "embedding-2");
+    }
+
+    #[test]
+    fn openai_capability_has_model_presets() {
+        let cap = EmbeddingProviderType::OpenAI.default_capability();
+        assert_eq!(cap.models.len(), 3);
+        assert_eq!(cap.models[0].model_id, "text-embedding-3-small");
+        assert_eq!(cap.models[1].model_id, "text-embedding-3-large");
+        assert_eq!(cap.models[2].model_id, "text-embedding-ada-002");
+    }
+
+    #[test]
+    fn local_providers_have_no_model_presets() {
+        let tfidf = EmbeddingProviderType::TfIdf.default_capability();
+        assert!(tfidf.models.is_empty());
+
+        let ollama = EmbeddingProviderType::Ollama.default_capability();
+        assert!(ollama.models.is_empty());
+    }
+
+    #[test]
+    fn model_preset_v4_has_matryoshka_dimensions() {
+        let cap = EmbeddingProviderType::Qwen.default_capability();
+        let v4 = cap.models.iter().find(|m| m.model_id == "text-embedding-v4").unwrap();
+        let dims = v4.supported_dimensions.as_ref().unwrap();
+        assert!(dims.contains(&1024));
+        assert!(dims.contains(&2048));
+        assert_eq!(v4.default_dimension, 1024);
+    }
+
+    #[test]
+    fn model_preset_v2_has_fixed_dimension() {
+        let cap = EmbeddingProviderType::Qwen.default_capability();
+        let v2 = cap.models.iter().find(|m| m.model_id == "text-embedding-v2").unwrap();
+        assert!(v2.supported_dimensions.is_none());
+        assert_eq!(v2.default_dimension, 1536);
+    }
+
+    #[test]
+    fn validate_uses_model_specific_dimensions() {
+        // text-embedding-v4 supports 2048, but the provider-level supported_dimensions
+        // for Qwen (v3) doesn't include 2048.
+        let mut config = EmbeddingProviderConfig::new(EmbeddingProviderType::Qwen);
+        config.api_key = Some("test-key".to_string());
+        config.model = "text-embedding-v4".to_string();
+        config.dimension = Some(2048);
+        // Should pass because model-specific dims include 2048
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_model_specific_dimension() {
+        let mut config = EmbeddingProviderConfig::new(EmbeddingProviderType::Qwen);
+        config.api_key = Some("test-key".to_string());
+        config.model = "text-embedding-v4".to_string();
+        config.dimension = Some(4096); // Not in v4's supported dims
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_custom_model_falls_back_to_provider_dimensions() {
+        let mut config = EmbeddingProviderConfig::new(EmbeddingProviderType::Qwen);
+        config.api_key = Some("test-key".to_string());
+        config.model = "custom-model-xyz".to_string();
+        config.dimension = Some(1024);
+        // Custom model not in presets, falls back to provider-level dims which include 1024
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn model_preset_serde_roundtrip() {
+        let preset = EmbeddingModelPreset {
+            model_id: "test-model".to_string(),
+            display_name: "Test Model".to_string(),
+            default_dimension: 512,
+            supported_dimensions: Some(vec![256, 512]),
+            max_batch_size: 32,
+        };
+        let json = serde_json::to_string(&preset).unwrap();
+        let deserialized: EmbeddingModelPreset = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.model_id, "test-model");
+        assert_eq!(deserialized.default_dimension, 512);
+    }
+
+    #[test]
+    fn capability_with_models_serde_roundtrip() {
+        let cap = EmbeddingProviderType::Qwen.default_capability();
+        let json = serde_json::to_string(&cap).unwrap();
+        let deserialized: EmbeddingProviderCapability = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.models.len(), 3);
+        assert_eq!(deserialized.models[0].model_id, "text-embedding-v4");
     }
 
     // =========================================================================

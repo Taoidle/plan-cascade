@@ -420,7 +420,9 @@
 
     "model": {
       "label": "模型",
-      "help": "输入嵌入模型标识符。留空将使用提供商的默认模型。"
+      "help": "输入嵌入模型标识符。留空将使用提供商的默认模型。",
+      "customOption": "自定义模型",
+      "customPlaceholder": "输入模型 ID..."
     },
 
     "baseUrl": {
