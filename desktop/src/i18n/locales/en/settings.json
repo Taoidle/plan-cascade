@@ -117,18 +117,28 @@
     },
 
     "glmEndpoint": {
-      "label": "API Endpoint",
-      "help": "Select the endpoint matching your GLM plan. The Coding endpoint is required for GLM Coding plans.",
+      "label": "API Region & Endpoint",
+      "help": "Select the endpoint matching your GLM account region and plan. China endpoints are for keys registered on open.bigmodel.cn, International endpoints are for keys registered on z.ai.",
       "options": {
         "standard": {
-          "name": "Standard Endpoint",
-          "description": "General-purpose API endpoint for most GLM plans.",
+          "name": "China — Standard",
+          "description": "General-purpose API endpoint for most GLM plans (open.bigmodel.cn).",
           "url": "https://open.bigmodel.cn/api/paas/v4/"
         },
         "coding": {
-          "name": "Coding Endpoint",
-          "description": "Dedicated endpoint for GLM Coding plans. Required when using the Coding plan.",
+          "name": "China — Coding",
+          "description": "Dedicated endpoint for GLM Coding plans on the China platform.",
           "url": "https://open.bigmodel.cn/api/coding/paas/v4/"
+        },
+        "international": {
+          "name": "International — Standard",
+          "description": "General-purpose API endpoint for the international platform (z.ai).",
+          "url": "https://api.z.ai/api/paas/v4/"
+        },
+        "international-coding": {
+          "name": "International — Coding",
+          "description": "Dedicated endpoint for GLM Coding plans on the international platform (z.ai).",
+          "url": "https://api.z.ai/api/coding/paas/v4/"
         }
       }
     },

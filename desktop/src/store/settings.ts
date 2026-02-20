@@ -12,7 +12,7 @@ export type Backend = 'claude-code' | 'claude-api' | 'openai' | 'deepseek' | 'gl
 export type Theme = 'system' | 'light' | 'dark';
 export type Language = 'en' | 'zh' | 'ja';
 export type StandaloneContextTurns = 2 | 4 | 6 | 8 | 10 | 20 | 50 | 100 | 200 | 500 | -1;
-export type GlmEndpoint = 'standard' | 'coding';
+export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'international-coding';
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
 

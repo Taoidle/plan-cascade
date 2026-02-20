@@ -129,6 +129,10 @@ export function useGitAI(): UseGitAIReturn {
             resolvedBaseUrl = 'https://api.minimaxi.com/v1/chat/completions';
           } else if (canonicalProvider === 'glm' && glmEndpoint === 'coding') {
             resolvedBaseUrl = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions';
+          } else if (canonicalProvider === 'glm' && glmEndpoint === 'international') {
+            resolvedBaseUrl = 'https://api.z.ai/api/paas/v4/chat/completions';
+          } else if (canonicalProvider === 'glm' && glmEndpoint === 'international-coding') {
+            resolvedBaseUrl = 'https://api.z.ai/api/coding/paas/v4/chat/completions';
           } else if (canonicalProvider === 'qwen' && qwenEndpoint === 'singapore') {
             resolvedBaseUrl = 'https://dashscope-intl.aliyuncs.com/api/v1';
           } else if (canonicalProvider === 'qwen' && qwenEndpoint === 'us') {

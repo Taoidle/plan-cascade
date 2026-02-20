@@ -586,7 +586,7 @@ export function LLMBackendSection() {
             {t('llm.glmEndpoint.label')}
           </h3>
           <div className="space-y-2">
-            {(['standard', 'coding'] as GlmEndpoint[]).map((ep) => (
+            {(['standard', 'coding', 'international', 'international-coding'] as GlmEndpoint[]).map((ep) => (
               <label
                 key={ep}
                 className={clsx(

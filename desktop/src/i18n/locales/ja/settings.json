@@ -117,18 +117,28 @@
     },
 
     "glmEndpoint": {
-      "label": "APIエンドポイント",
-      "help": "GLMプランに合ったエンドポイントを選択してください。コーディングプランにはコーディングエンドポイントが必要です。",
+      "label": "APIリージョン・エンドポイント",
+      "help": "GLMアカウントのリージョンとプランに合ったエンドポイントを選択してください。中国エンドポイントは open.bigmodel.cn で登録したキー用、国際エンドポイントは z.ai で登録したキー用です。",
       "options": {
         "standard": {
-          "name": "標準エンドポイント",
-          "description": "ほとんどのGLMプラン向けの汎用APIエンドポイント。",
+          "name": "中国 — 標準",
+          "description": "ほとんどのGLMプラン向けの汎用APIエンドポイント（open.bigmodel.cn）。",
           "url": "https://open.bigmodel.cn/api/paas/v4/"
         },
         "coding": {
-          "name": "コーディングエンドポイント",
-          "description": "GLMコーディングプラン専用エンドポイント。コーディングプラン利用時に必須。",
+          "name": "中国 — コーディング",
+          "description": "中国プラットフォームのGLMコーディングプラン専用エンドポイント。",
           "url": "https://open.bigmodel.cn/api/coding/paas/v4/"
+        },
+        "international": {
+          "name": "国際版 — 標準",
+          "description": "国際プラットフォーム（z.ai）の汎用APIエンドポイント。",
+          "url": "https://api.z.ai/api/paas/v4/"
+        },
+        "international-coding": {
+          "name": "国際版 — コーディング",
+          "description": "国際プラットフォーム（z.ai）のGLMコーディングプラン専用エンドポイント。",
+          "url": "https://api.z.ai/api/coding/paas/v4/"
         }
       }
     },

@@ -24,10 +24,13 @@ use crate::services::proxy::build_http_client;
 use crate::services::streaming::adapters::GlmAdapter;
 use crate::services::streaming::{StreamAdapter, UnifiedStreamEvent};
 
-/// Default GLM API endpoint
+/// Default GLM API endpoint (China)
 const GLM_API_URL: &str = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
 /// Coding plan endpoint (required for some GLM-4.7 key/plan combinations)
 const GLM_CODING_API_URL: &str = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions";
+/// International coding plan endpoint (z.ai) — used by ADR-005 retry logic
+/// when the frontend-provided base_url is the z.ai standard endpoint.
+const GLM_INTL_CODING_API_URL: &str = "https://api.z.ai/api/coding/paas/v4/chat/completions";
 
 /// GLM provider backed by zai-rs SDK types for serialization/deserialization.
 ///
@@ -57,6 +60,33 @@ impl GlmProvider {
 
     fn using_default_endpoint(&self) -> bool {
         self.config.base_url.is_none()
+    }
+
+    /// Whether the configured base_url is an international (z.ai) standard endpoint.
+    fn using_intl_standard_endpoint(&self) -> bool {
+        self.config
+            .base_url
+            .as_deref()
+            .map(|u| u.contains("api.z.ai") && !u.contains("/coding/"))
+            .unwrap_or(false)
+    }
+
+    /// Whether the configured base_url is any international (z.ai) endpoint.
+    fn using_intl_endpoint(&self) -> bool {
+        self.config
+            .base_url
+            .as_deref()
+            .map(|u| u.contains("api.z.ai"))
+            .unwrap_or(false)
+    }
+
+    /// Get the coding endpoint matching the current region.
+    fn coding_endpoint_for_region(&self) -> &'static str {
+        if self.using_intl_endpoint() {
+            GLM_INTL_CODING_API_URL
+        } else {
+            GLM_CODING_API_URL
+        }
     }
 
     /// Check if model supports reasoning (GLM-4.5+, GLM-4.6, GLM-4.7 models)
@@ -212,10 +242,11 @@ impl GlmProvider {
 
     fn invalid_param_with_endpoint_hint(&self, body_text: &str) -> LlmError {
         if self.model_is_glm47_family() {
+            let coding_url = self.coding_endpoint_for_region();
             LlmError::InvalidRequest {
                 message: format!(
                     "{} (GLM-4.7 may require Coding endpoint for your key/plan: {})",
-                    body_text, GLM_CODING_API_URL
+                    body_text, coding_url
                 ),
             }
         } else {
@@ -493,14 +524,19 @@ impl LlmProvider for GlmProvider {
                     message: e.to_string(),
                 })?;
 
-                // Step 3: GLM-4.7 coding endpoint fallback
+                // Step 3: GLM-4.7 coding endpoint fallback (auto-switch to coding endpoint
+                // for the same region when using a standard endpoint)
                 if status != 200
                     && Self::is_invalid_param_error(status, &body_text)
                     && self.model_is_glm47_family()
-                    && self.using_default_endpoint()
+                    && (self.using_default_endpoint() || self.using_intl_standard_endpoint())
                 {
                     response = self
-                        .post_chat_completion(GLM_CODING_API_URL, api_key, &compat_body)
+                        .post_chat_completion(
+                            self.coding_endpoint_for_region(),
+                            api_key,
+                            &compat_body,
+                        )
                         .await?;
 
                     status = response.status().as_u16();
@@ -569,15 +605,22 @@ impl LlmProvider for GlmProvider {
                     .await?;
 
                 status = response.status().as_u16();
-                if status != 200 && self.model_is_glm47_family() && self.using_default_endpoint() {
+                if status != 200
+                    && self.model_is_glm47_family()
+                    && (self.using_default_endpoint() || self.using_intl_standard_endpoint())
+                {
                     let retry_text = response.text().await.map_err(|e| LlmError::NetworkError {
                         message: e.to_string(),
                     })?;
 
                     if Self::is_invalid_param_error(status, &retry_text) {
-                        // Step 3: GLM-4.7 coding endpoint fallback
+                        // Step 3: GLM-4.7 coding endpoint fallback (region-aware)
                         response = self
-                            .post_chat_completion(GLM_CODING_API_URL, api_key, &compat_body)
+                            .post_chat_completion(
+                                self.coding_endpoint_for_region(),
+                                api_key,
+                                &compat_body,
+                            )
                             .await?;
                         status = response.status().as_u16();
                     } else {

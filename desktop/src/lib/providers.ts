@@ -104,6 +104,7 @@ export const FALLBACK_MODELS_BY_PROVIDER: Record<string, string[]> = {
   openai: ['gpt-4o', 'o1-preview', 'o3-mini'],
   deepseek: ['deepseek-chat', 'deepseek-r1'],
   glm: [
+    'glm-5',
     'glm-4.7',
     'glm-4.6',
     'glm-4.6v',

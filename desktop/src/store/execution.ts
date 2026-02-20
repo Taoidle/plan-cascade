@@ -550,6 +550,8 @@ function resolveStandaloneProvider(
 }
 
 const GLM_CODING_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions';
+const GLM_INTL_BASE_URL = 'https://api.z.ai/api/paas/v4/chat/completions';
+const GLM_INTL_CODING_BASE_URL = 'https://api.z.ai/api/coding/paas/v4/chat/completions';
 const MINIMAX_CHINA_BASE_URL = 'https://api.minimaxi.com/v1/chat/completions';
 const QWEN_SINGAPORE_BASE_URL = 'https://dashscope-intl.aliyuncs.com/api/v1';
 const QWEN_US_BASE_URL = 'https://dashscope-us.aliyuncs.com/api/v1';
@@ -577,6 +579,12 @@ function resolveProviderBaseUrl(
   const normalized = normalizeProviderName(provider);
   if (normalized === 'glm' && settings.glmEndpoint === 'coding') {
     return GLM_CODING_BASE_URL;
+  }
+  if (normalized === 'glm' && settings.glmEndpoint === 'international') {
+    return GLM_INTL_BASE_URL;
+  }
+  if (normalized === 'glm' && settings.glmEndpoint === 'international-coding') {
+    return GLM_INTL_CODING_BASE_URL;
   }
   if (normalized === 'minimax' && settings.minimaxEndpoint === 'china') {
     return MINIMAX_CHINA_BASE_URL;
