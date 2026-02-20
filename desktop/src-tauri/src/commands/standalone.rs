@@ -735,6 +735,7 @@ pub async fn get_index_status(
             error_message: None,
             total_symbols: 0,
             embedding_chunks: 0,
+            embedding_provider_name: None,
         }));
     }
 
@@ -755,6 +756,7 @@ pub async fn get_index_status(
             error_message: None,
             total_symbols: 0,
             embedding_chunks: 0,
+            embedding_provider_name: None,
         }))
     }
 }

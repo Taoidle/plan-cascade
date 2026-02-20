@@ -301,6 +301,12 @@ impl EmbeddingManager {
         self.primary.provider_type()
     }
 
+    /// Returns the primary provider's human-readable display name.
+    /// Examples: "OpenAI (text-embedding-3-small)", "TF-IDF (Local)", "Ollama (all-minilm)"
+    pub fn display_name(&self) -> &str {
+        self.primary.display_name()
+    }
+
     /// Returns a reference to the primary provider for direct access
     /// (e.g., TF-IDF vocabulary operations via downcast).
     pub fn primary_provider(&self) -> &dyn EmbeddingProvider {

@@ -106,6 +106,22 @@ pub struct HybridSearchOutcome {
     /// Human-readable reason when `semantic_degraded` is `true`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_error: Option<String>,
+
+    /// Embedding provider display name (e.g., "OpenAI (text-embedding-3-small)").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_display: Option<String>,
+    /// Embedding vector dimension (0 means unknown or not configured).
+    #[serde(default)]
+    pub embedding_dimension: usize,
+    /// Number of vectors in the HNSW index.
+    #[serde(default)]
+    pub hnsw_vector_count: usize,
+    /// Whether HNSW was used for semantic search.
+    #[serde(default)]
+    pub hnsw_used: bool,
+    /// Which search channels actually returned results.
+    #[serde(default)]
+    pub active_channels: Vec<SearchChannel>,
 }
 
 /// Configuration for the hybrid search engine.
@@ -258,6 +274,30 @@ impl HybridSearchEngine {
             semantic_error = Some("No embedding provider configured".to_string());
         }
 
+        // --- Collect metadata ---
+        let active_channels: Vec<SearchChannel> =
+            channel_results.iter().map(|(ch, _)| *ch).collect();
+
+        let (provider_display, embedding_dimension) =
+            if let Some(ref emb_mgr) = self.embedding_manager {
+                (
+                    Some(emb_mgr.display_name().to_string()),
+                    emb_mgr.dimension(),
+                )
+            } else {
+                (None, 0)
+            };
+
+        let (hnsw_used, hnsw_vector_count) = if let Some(ref hnsw) = self.hnsw_index {
+            if hnsw.is_ready().await {
+                (true, hnsw.get_count().await)
+            } else {
+                (false, 0)
+            }
+        } else {
+            (false, 0)
+        };
+
         // --- RRF Fusion ---
         let fused = self.fuse_rrf(&channel_results);
 
@@ -265,6 +305,11 @@ impl HybridSearchEngine {
             results: fused,
             semantic_degraded,
             semantic_error,
+            provider_display,
+            embedding_dimension,
+            hnsw_vector_count,
+            hnsw_used,
+            active_channels,
         })
     }
 

@@ -75,8 +75,38 @@ impl CodebaseSearchTool {
             ));
         }
 
-        // Prepend semantic degradation notice if applicable
         let mut output = String::new();
+
+        // --- Search metadata header ---
+        if let Some(ref provider) = outcome.provider_display {
+            let dim_info = if outcome.embedding_dimension > 0 {
+                format!(", {}-dim", outcome.embedding_dimension)
+            } else {
+                String::new()
+            };
+            output.push_str(&format!("> Provider: {}{}\n", provider, dim_info));
+        }
+
+        if outcome.semantic_degraded {
+            let reason = outcome.semantic_error.as_deref().unwrap_or("unknown");
+            output.push_str(&format!("> Semantic: degraded ({})\n", reason));
+        } else if outcome.hnsw_used {
+            output.push_str(&format!(
+                "> Semantic: active (HNSW, {} vectors)\n",
+                outcome.hnsw_vector_count
+            ));
+        } else {
+            output.push_str("> Semantic: not configured\n");
+        }
+
+        if !outcome.active_channels.is_empty() {
+            let ch_names: Vec<String> =
+                outcome.active_channels.iter().map(|c| format!("{}", c)).collect();
+            output.push_str(&format!("> Channels: {}\n", ch_names.join(", ")));
+        }
+        output.push('\n');
+
+        // Prepend semantic degradation notice if applicable (context for LLM)
         if outcome.semantic_degraded {
             let reason = outcome.semantic_error.as_deref().unwrap_or("unknown error");
             output.push_str(&format!(

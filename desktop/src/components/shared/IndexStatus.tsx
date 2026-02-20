@@ -23,6 +23,8 @@ interface IndexStatusEvent {
   total_symbols?: number;
   /** Number of embedding chunks stored. When > 0, semantic search is available. */
   embedding_chunks?: number;
+  /** Display name of the active embedding provider */
+  embedding_provider_name?: string | null;
   /** LSP enrichment state: 'none' | 'enriching' | 'enriched' */
   lsp_enrichment?: 'none' | 'enriching' | 'enriched' | null;
 }
@@ -49,6 +51,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [totalSymbols, setTotalSymbols] = useState(0);
   const [embeddingChunks, setEmbeddingChunks] = useState(0);
+  const [embeddingProviderName, setEmbeddingProviderName] = useState<string | null>(null);
   const [lspEnrichment, setLspEnrichment] = useState<'none' | 'enriching' | 'enriched'>('none');
 
   const applyEvent = useCallback((evt: IndexStatusEvent) => {
@@ -58,6 +61,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     setErrorMessage(evt.error_message ?? null);
     setTotalSymbols(evt.total_symbols ?? 0);
     setEmbeddingChunks(evt.embedding_chunks ?? 0);
+    setEmbeddingProviderName(evt.embedding_provider_name ?? null);
     setLspEnrichment(evt.lsp_enrichment ?? 'none');
   }, []);
 
@@ -70,6 +74,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
       setErrorMessage(null);
       setTotalSymbols(0);
       setEmbeddingChunks(0);
+      setEmbeddingProviderName(null);
       setLspEnrichment('none');
       return;
     }
@@ -225,7 +230,9 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
             )}
           >
             {semanticReady
-              ? t('indexing.semanticSearchReady')
+              ? embeddingProviderName
+                ? `Semantic (${embeddingProviderName})`
+                : t('indexing.semanticSearchReady')
               : t('indexing.semanticSearchUnavailable')}
           </span>
         )}
@@ -239,7 +246,9 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
             )}
             title={
               semanticReady
-                ? t('indexing.semanticSearchReady')
+                ? embeddingProviderName
+                  ? `Semantic: ${embeddingProviderName}`
+                  : t('indexing.semanticSearchReady')
                 : t('indexing.semanticSearchUnavailable')
             }
           />

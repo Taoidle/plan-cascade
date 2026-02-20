@@ -53,6 +53,9 @@ pub struct IndexStatusEvent {
     /// When > 0, semantic search is available.
     #[serde(default)]
     pub embedding_chunks: usize,
+    /// Active embedding provider display name, `None` when not configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_provider_name: Option<String>,
 }
 
 /// Internal bookkeeping for a running indexer.
@@ -210,6 +213,10 @@ impl IndexManager {
                     let _ = self.get_or_create_hnsw(project_path, dim).await;
                 }
 
+                let embedding_provider_name = {
+                    let managers = self.embedding_managers.read().await;
+                    managers.get(project_path).map(|m| m.display_name().to_string())
+                };
                 let event = IndexStatusEvent {
                     project_path: project_path.to_string(),
                     status: "indexed".to_string(),
@@ -218,6 +225,7 @@ impl IndexManager {
                     error_message: None,
                     total_symbols: summary.total_symbols,
                     embedding_chunks: summary.embedding_chunks,
+                    embedding_provider_name,
                 };
                 self.set_status_and_emit(project_path, event).await;
             }
@@ -254,6 +262,7 @@ impl IndexManager {
             error_message: None,
             total_symbols: 0,
             embedding_chunks: 0,
+            embedding_provider_name: None,
         };
         self.set_status_and_emit(project_path, initial_event).await;
 
@@ -270,6 +279,7 @@ impl IndexManager {
                 error_message: None,
                 total_symbols: 0,
                 embedding_chunks: 0,
+                embedding_provider_name: None,
             };
             // Update statuses map (blocking write is fine in the sync callback
             // because contention is low and the lock is only briefly held).
@@ -356,6 +366,9 @@ impl IndexManager {
             }
         };
 
+        // Capture provider display name before embedding_mgr is moved into the indexer.
+        let provider_display_name = embedding_mgr.display_name().to_string();
+
         let handle = tokio::task::spawn(async move {
             let indexer = BackgroundIndexer::new(project_root, index_store.clone())
                 .with_progress_callback(progress_cb)
@@ -412,6 +425,7 @@ impl IndexManager {
                         error_message: error_msg,
                         total_symbols: summary.total_symbols,
                         embedding_chunks: summary.embedding_chunks,
+                        embedding_provider_name: Some(provider_display_name.clone()),
                     }
                 }
                 Err(_) => IndexStatusEvent {
@@ -422,6 +436,7 @@ impl IndexManager {
                     error_message: Some("Background indexer task failed".to_string()),
                     total_symbols: 0,
                     embedding_chunks: 0,
+                    embedding_provider_name: None,
                 },
             };
 
@@ -497,15 +512,22 @@ impl IndexManager {
 
         // Fallback: query the index store.
         match self.index_store.get_project_summary(project_path) {
-            Ok(summary) if summary.total_files > 0 => IndexStatusEvent {
-                project_path: project_path.to_string(),
-                status: "indexed".to_string(),
-                indexed_files: summary.total_files,
-                total_files: summary.total_files,
-                error_message: None,
-                total_symbols: summary.total_symbols,
-                embedding_chunks: summary.embedding_chunks,
-            },
+            Ok(summary) if summary.total_files > 0 => {
+                let embedding_provider_name = {
+                    let managers = self.embedding_managers.read().await;
+                    managers.get(project_path).map(|m| m.display_name().to_string())
+                };
+                IndexStatusEvent {
+                    project_path: project_path.to_string(),
+                    status: "indexed".to_string(),
+                    indexed_files: summary.total_files,
+                    total_files: summary.total_files,
+                    error_message: None,
+                    total_symbols: summary.total_symbols,
+                    embedding_chunks: summary.embedding_chunks,
+                    embedding_provider_name,
+                }
+            }
             _ => IndexStatusEvent {
                 project_path: project_path.to_string(),
                 status: "idle".to_string(),
@@ -514,6 +536,7 @@ impl IndexManager {
                 error_message: None,
                 total_symbols: 0,
                 embedding_chunks: 0,
+                embedding_provider_name: None,
             },
         }
     }
@@ -1114,6 +1137,7 @@ mod tests {
                     error_message: None,
                     total_symbols: 0,
                     embedding_chunks: 0,
+                    embedding_provider_name: None,
                 },
             );
         }
