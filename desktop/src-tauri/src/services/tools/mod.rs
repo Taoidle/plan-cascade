@@ -30,10 +30,8 @@ pub mod trait_def;
 pub mod web_fetch;
 pub mod web_search;
 
-#[allow(deprecated)]
 pub use definitions::{
-    get_basic_tool_definitions, get_basic_tool_definitions_from_registry, get_tool_definitions,
-    get_tool_definitions_from_registry,
+    get_basic_tool_definitions_from_registry, get_tool_definitions_from_registry,
 };
 pub use executor::{ReadCacheEntry, ToolExecutor, ToolResult};
 pub use mcp_adapter::McpToolAdapter;

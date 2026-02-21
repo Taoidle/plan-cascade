@@ -9,7 +9,7 @@
 
 use plan_cascade_desktop::services::tools::{
     build_tool_call_instructions, extract_text_without_tool_calls, format_tool_result,
-    get_tool_definitions, parse_tool_calls, ParsedToolCall, ToolExecutor,
+    get_tool_definitions_from_registry, parse_tool_calls, ParsedToolCall, ToolExecutor,
 };
 
 // ============================================================================
@@ -18,7 +18,7 @@ use plan_cascade_desktop::services::tools::{
 
 #[test]
 fn test_build_instructions_contains_format_markers() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let instructions = build_tool_call_instructions(&tools);
 
     assert!(
@@ -33,7 +33,7 @@ fn test_build_instructions_contains_format_markers() {
 
 #[test]
 fn test_build_instructions_contains_all_tool_names() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let instructions = build_tool_call_instructions(&tools);
 
     for tool in &tools {
@@ -47,7 +47,7 @@ fn test_build_instructions_contains_all_tool_names() {
 
 #[test]
 fn test_build_instructions_contains_parameter_info() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let instructions = build_tool_call_instructions(&tools);
 
     // Read tool should show file_path as required
@@ -58,7 +58,7 @@ fn test_build_instructions_contains_parameter_info() {
 
 #[test]
 fn test_build_instructions_contains_examples() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let instructions = build_tool_call_instructions(&tools);
 
     assert!(
@@ -71,7 +71,7 @@ fn test_build_instructions_contains_examples() {
 
 #[test]
 fn test_build_instructions_contains_usage_guidance() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let instructions = build_tool_call_instructions(&tools);
 
     assert!(instructions.contains("IMPORTANT"));
@@ -661,7 +661,7 @@ async fn test_fallback_write_then_verify_flow() {
 
 #[test]
 fn test_instructions_describe_all_parameters() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let instructions = build_tool_call_instructions(&tools);
 
     // Verify key parameters are documented in the instructions
@@ -676,7 +676,7 @@ fn test_instructions_describe_all_parameters() {
 
 #[test]
 fn test_instructions_mark_required_vs_optional() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let instructions = build_tool_call_instructions(&tools);
 
     // Should contain both markers
@@ -689,7 +689,7 @@ fn test_instructions_mark_required_vs_optional() {
 
 #[test]
 fn test_instructions_include_parameter_types() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let instructions = build_tool_call_instructions(&tools);
 
     // Check parameter types are present

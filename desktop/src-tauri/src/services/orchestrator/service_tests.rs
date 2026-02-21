@@ -1003,7 +1003,7 @@ fn test_reliable_provider_no_fallback_instructions() {
         compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
-    let tools = crate::services::tools::get_tool_definitions();
+    let tools = crate::services::tools::get_tool_definitions_from_registry();
     let opts = LlmRequestOptions::default();
     let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
     // Reliable providers should NOT get fallback instructions
@@ -1036,7 +1036,7 @@ fn test_unreliable_provider_gets_fallback_instructions() {
         compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
-    let tools = crate::services::tools::get_tool_definitions();
+    let tools = crate::services::tools::get_tool_definitions_from_registry();
     let opts = LlmRequestOptions::default();
     let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
     // Unreliable providers should get fallback instructions (bilingual)
@@ -1074,7 +1074,7 @@ fn test_user_override_disables_fallback_for_unreliable() {
         compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
-    let tools = crate::services::tools::get_tool_definitions();
+    let tools = crate::services::tools::get_tool_definitions_from_registry();
     let opts = LlmRequestOptions::default();
     let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
     // User explicitly set Off — no fallback instructions even for unreliable provider
@@ -1106,7 +1106,7 @@ fn test_none_provider_gets_fallback_instructions() {
         compaction_config: CompactionConfig::default(),
     };
     let orchestrator = OrchestratorService::new(config);
-    let tools = crate::services::tools::get_tool_definitions();
+    let tools = crate::services::tools::get_tool_definitions_from_registry();
     let opts = LlmRequestOptions::default();
     let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
     // None-reliability providers should get fallback instructions

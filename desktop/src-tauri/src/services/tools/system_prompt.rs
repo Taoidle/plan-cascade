@@ -518,12 +518,12 @@ pub fn build_system_prompt_with_skills(
 mod tests {
     use super::*;
     use crate::services::orchestrator::index_store::ComponentSummary;
-    use crate::services::tools::definitions::get_tool_definitions;
+    use crate::services::tools::definitions::get_tool_definitions_from_registry;
     use std::path::PathBuf;
 
     #[test]
     fn test_build_system_prompt_contains_tools() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, None, "TestProvider", "test-model", "en");
 
         // Should contain working directory
@@ -547,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_contains_decision_tree() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
 
         assert!(prompt.contains("Decision Tree"));
@@ -558,7 +558,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_no_workflow_pattern() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
 
         // The old "Workflow Pattern" section should be gone
@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_with_summary() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let summary = make_test_summary();
         let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, Some(&summary), "TestProvider", "test-model", "en");
 
@@ -746,7 +746,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_without_summary() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, None, "TestProvider", "test-model", "en");
 
         // Should not crash and should not contain summary section
@@ -761,7 +761,7 @@ mod tests {
 
     #[test]
     fn test_system_prompt_recommends_codebase_search_for_exploration() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
 
         assert!(
@@ -780,7 +780,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_with_empty_summary_no_injection() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let empty_summary = ProjectIndexSummary::default();
         let prompt = build_system_prompt(
             &PathBuf::from("/test/project"),
@@ -857,7 +857,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_contains_provider_identity() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt(
             &PathBuf::from("/test"),
             &tools,
@@ -879,7 +879,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_chinese_language() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt(
             &PathBuf::from("/test"),
             &tools,
@@ -906,7 +906,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_english_language() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt(
             &PathBuf::from("/test"),
             &tools,
@@ -1029,7 +1029,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_with_memories() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let memories = make_test_memories();
         let prompt = build_system_prompt_with_memories(
             &PathBuf::from("/test/project"),
@@ -1060,7 +1060,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_memory_section_position() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let summary = make_test_summary();
         let memories = make_test_memories();
         let prompt = build_system_prompt_with_memories(
@@ -1090,7 +1090,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_no_memories() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt_with_memories(
             &PathBuf::from("/test/project"),
             &tools,
@@ -1106,7 +1106,7 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_empty_memories() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let empty: Vec<MemoryEntry> = vec![];
         let prompt = build_system_prompt_with_memories(
             &PathBuf::from("/test/project"),
@@ -1124,7 +1124,7 @@ mod tests {
     #[test]
     fn test_build_system_prompt_backward_compatible() {
         // build_system_prompt (without memories) should still work
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let prompt = build_system_prompt(
             &PathBuf::from("/test/project"),
             &tools,

@@ -8,12 +8,11 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
-
 use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::{ReadCacheEntry, ToolResult};
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
+
+use super::text_utils::decode_read_text;
 
 /// Read file tool — reads file contents with line numbers and caching.
 pub struct ReadTool;
@@ -33,93 +32,6 @@ fn missing_param_error(param: &str) -> String {
             format!("Missing required parameter: {param}. Correct format:\n{example}")
         }
         _ => format!("Missing required parameter: {param}"),
-    }
-}
-
-fn is_likely_text_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        "txt"
-            | "md"
-            | "markdown"
-            | "rst"
-            | "json"
-            | "jsonl"
-            | "yaml"
-            | "yml"
-            | "toml"
-            | "ini"
-            | "cfg"
-            | "conf"
-            | "lock"
-            | "env"
-            | "gitignore"
-            | "gitattributes"
-            | "py"
-            | "rs"
-            | "ts"
-            | "tsx"
-            | "js"
-            | "jsx"
-            | "java"
-            | "kt"
-            | "go"
-            | "c"
-            | "h"
-            | "cpp"
-            | "hpp"
-            | "cs"
-            | "rb"
-            | "php"
-            | "swift"
-            | "scala"
-            | "sql"
-            | "sh"
-            | "bash"
-            | "ps1"
-            | "zsh"
-            | "fish"
-            | "xml"
-            | "html"
-            | "htm"
-            | "css"
-            | "scss"
-            | "less"
-            | "svg"
-            | "vue"
-            | "svelte"
-    )
-}
-
-fn is_probably_binary(bytes: &[u8]) -> bool {
-    if bytes.is_empty() {
-        return false;
-    }
-    let sample_len = bytes.len().min(4096);
-    let sample = &bytes[..sample_len];
-    if sample.contains(&0) {
-        return true;
-    }
-    let mut suspicious = 0usize;
-    for b in sample {
-        let is_text_like = matches!(*b, 0x09 | 0x0A | 0x0D | 0x20..=0x7E);
-        if !is_text_like {
-            suspicious += 1;
-        }
-    }
-    (suspicious as f64 / sample_len as f64) > 0.30
-}
-
-fn decode_read_text(bytes: &[u8], ext: &str) -> Option<(String, bool)> {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => Some((text.to_string(), false)),
-        Err(_) => {
-            if is_likely_text_extension(ext) || !is_probably_binary(bytes) {
-                Some((String::from_utf8_lossy(bytes).into_owned(), true))
-            } else {
-                None
-            }
-        }
     }
 }
 
@@ -396,6 +308,7 @@ impl Tool for ReadTool {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
     fn make_ctx(dir: &Path) -> ToolExecutionContext {

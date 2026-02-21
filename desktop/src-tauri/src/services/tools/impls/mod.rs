@@ -7,6 +7,7 @@
 //! - Auto-generated tool definitions from trait methods
 //! - Foundation for MCP tool integration
 
+pub mod text_utils;
 pub mod read;
 pub mod write;
 pub mod edit;

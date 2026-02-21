@@ -1328,11 +1328,11 @@ pub fn format_tool_result(tool_name: &str, tool_id: &str, result: &str, is_error
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::tools::definitions::get_tool_definitions;
+    use crate::services::tools::definitions::get_tool_definitions_from_registry;
 
     #[test]
     fn test_build_tool_call_instructions() {
-        let tools = get_tool_definitions();
+        let tools = get_tool_definitions_from_registry();
         let instructions = build_tool_call_instructions(&tools);
 
         assert!(instructions.contains("```tool_call"));

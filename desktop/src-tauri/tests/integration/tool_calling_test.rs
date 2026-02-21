@@ -8,7 +8,7 @@
 
 use plan_cascade_desktop::services::llm::types::ToolDefinition;
 use plan_cascade_desktop::services::tools::{
-    build_system_prompt, get_tool_definitions, merge_system_prompts, ToolExecutor,
+    build_system_prompt, get_tool_definitions_from_registry, merge_system_prompts, ToolExecutor,
 };
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -19,13 +19,13 @@ use tempfile::TempDir;
 
 #[test]
 fn test_get_tool_definitions_returns_14_tools() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     assert_eq!(tools.len(), 14, "Expected exactly 14 tool definitions");
 }
 
 #[test]
 fn test_all_tool_names_present() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
 
     let expected = [
@@ -55,7 +55,7 @@ fn test_all_tool_names_present() {
 
 #[test]
 fn test_tool_definitions_have_descriptions() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     for tool in &tools {
         assert!(
             !tool.description.is_empty(),
@@ -67,7 +67,7 @@ fn test_tool_definitions_have_descriptions() {
 
 #[test]
 fn test_tool_definitions_have_object_schemas() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     for tool in &tools {
         assert_eq!(
             tool.input_schema.schema_type, "object",
@@ -85,7 +85,7 @@ fn test_tool_definitions_have_object_schemas() {
 fn test_tool_definition_serializes_to_openai_function_format() {
     // OpenAI function calling expects:
     // { "name": "...", "description": "...", "input_schema": { "type": "object", "properties": {...}, "required": [...] } }
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
 
     for tool in &tools {
         let json = serde_json::to_value(tool).unwrap();
@@ -124,7 +124,7 @@ fn test_tool_definition_serializes_to_openai_function_format() {
 
 #[test]
 fn test_read_tool_openai_schema_has_required_fields() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let read_tool = tools.iter().find(|t| t.name == "Read").unwrap();
 
     let json = serde_json::to_value(read_tool).unwrap();
@@ -148,7 +148,7 @@ fn test_read_tool_openai_schema_has_required_fields() {
 
 #[test]
 fn test_write_tool_openai_schema_has_required_fields() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let write_tool = tools.iter().find(|t| t.name == "Write").unwrap();
 
     let json = serde_json::to_value(write_tool).unwrap();
@@ -166,7 +166,7 @@ fn test_write_tool_openai_schema_has_required_fields() {
 
 #[test]
 fn test_edit_tool_openai_schema_has_required_fields() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let edit_tool = tools.iter().find(|t| t.name == "Edit").unwrap();
 
     let json = serde_json::to_value(edit_tool).unwrap();
@@ -187,7 +187,7 @@ fn test_edit_tool_openai_schema_has_required_fields() {
 
 #[test]
 fn test_bash_tool_openai_schema() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let bash_tool = tools.iter().find(|t| t.name == "Bash").unwrap();
 
     let json = serde_json::to_value(bash_tool).unwrap();
@@ -203,7 +203,7 @@ fn test_bash_tool_openai_schema() {
 
 #[test]
 fn test_cwd_tool_has_empty_properties() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let cwd_tool = tools.iter().find(|t| t.name == "Cwd").unwrap();
 
     let json = serde_json::to_value(cwd_tool).unwrap();
@@ -228,7 +228,7 @@ fn test_tool_definitions_serialize_for_anthropic_format() {
     // Anthropic format expects:
     // { "name": "...", "description": "...", "input_schema": { "type": "object", "properties": {...}, "required": [...] } }
     // Same structure as our ToolDefinition, so verify full round-trip serialization
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
 
     for tool in &tools {
         // Serialize to JSON string
@@ -248,7 +248,7 @@ fn test_tool_definitions_serialize_for_anthropic_format() {
 
 #[test]
 fn test_tool_definitions_round_trip_preserves_property_types() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
 
     for tool in &tools {
         let json_str = serde_json::to_string(tool).unwrap();
@@ -283,7 +283,7 @@ fn test_tool_definitions_round_trip_preserves_property_types() {
 
 #[test]
 fn test_parameter_schema_types_correct() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
 
     // Verify specific parameter types
     let read_tool = tools.iter().find(|t| t.name == "Read").unwrap();
@@ -308,7 +308,7 @@ fn test_parameter_schema_types_correct() {
 #[test]
 fn test_tool_definitions_all_serializable_to_json_array() {
     // Verify all tools can be serialized together as an array (as sent to APIs)
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let json_str = serde_json::to_string(&tools).unwrap();
     assert!(!json_str.is_empty());
 
@@ -322,7 +322,7 @@ fn test_tool_definitions_all_serializable_to_json_array() {
 
 #[test]
 fn test_system_prompt_includes_working_directory() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("D:\\test\\my-project");
     let prompt = build_system_prompt(&project_root, &tools, None);
 
@@ -334,7 +334,7 @@ fn test_system_prompt_includes_working_directory() {
 
 #[test]
 fn test_system_prompt_includes_all_tool_names() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("/test/project");
     let prompt = build_system_prompt(&project_root, &tools, None);
 
@@ -349,7 +349,7 @@ fn test_system_prompt_includes_all_tool_names() {
 
 #[test]
 fn test_system_prompt_includes_tool_descriptions() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("/test/project");
     let prompt = build_system_prompt(&project_root, &tools, None);
 
@@ -361,7 +361,7 @@ fn test_system_prompt_includes_tool_descriptions() {
 
 #[test]
 fn test_system_prompt_includes_usage_guidelines() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("/test/project");
     let prompt = build_system_prompt(&project_root, &tools, None);
 
@@ -1088,7 +1088,7 @@ async fn test_ls_missing_path() {
 
 #[test]
 fn test_web_fetch_tool_definition_exists() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let wf = tools.iter().find(|t| t.name == "WebFetch").unwrap();
     let props = wf.input_schema.properties.as_ref().unwrap();
     assert!(props.contains_key("url"));
@@ -1145,7 +1145,7 @@ async fn test_web_fetch_blocks_localhost() {
 
 #[test]
 fn test_web_search_tool_definition_exists() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let ws = tools.iter().find(|t| t.name == "WebSearch").unwrap();
     let props = ws.input_schema.properties.as_ref().unwrap();
     assert!(props.contains_key("query"));
@@ -1184,7 +1184,7 @@ async fn test_web_search_not_configured() {
 
 #[test]
 fn test_notebook_edit_tool_definition_exists() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let nb = tools.iter().find(|t| t.name == "NotebookEdit").unwrap();
     let props = nb.input_schema.properties.as_ref().unwrap();
     assert!(props.contains_key("notebook_path"));
@@ -1370,7 +1370,7 @@ fn test_tool_result_ok_has_no_image_data() {
 
 #[test]
 fn test_system_prompt_includes_web_fetch_guidance() {
-    let tools = get_tool_definitions();
+    let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("/test/project");
     let prompt = build_system_prompt(&project_root, &tools, None);
 
