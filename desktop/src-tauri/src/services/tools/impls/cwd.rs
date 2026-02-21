@@ -45,36 +45,14 @@ impl Tool for CwdTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Mutex};
+    use super::super::test_helpers::make_test_ctx;
     use tempfile::TempDir;
-
-    fn make_ctx(dir: &Path) -> ToolExecutionContext {
-        ToolExecutionContext {
-            session_id: "test".to_string(),
-            project_root: dir.to_path_buf(),
-            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
-            read_cache: Arc::new(Mutex::new(HashMap::new())),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
-            web_search: None,
-            index_store: None,
-            embedding_service: None,
-            embedding_manager: None,
-            hnsw_index: None,
-            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_context: None,
-            core_context: None,
-        }
-    }
 
     #[tokio::test]
     async fn test_cwd_tool() {
         let dir = TempDir::new().unwrap();
         let tool = CwdTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
         assert!(result.success);

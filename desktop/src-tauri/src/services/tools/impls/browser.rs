@@ -999,28 +999,11 @@ impl Tool for BrowserTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::{HashMap, HashSet};
-    use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use super::super::test_helpers::make_test_ctx;
+    use std::path::Path;
 
     fn make_ctx() -> ToolExecutionContext {
-        ToolExecutionContext {
-            session_id: "test".to_string(),
-            project_root: PathBuf::from("/tmp/test"),
-            working_directory: Arc::new(Mutex::new(PathBuf::from("/tmp/test"))),
-            read_cache: Arc::new(Mutex::new(HashMap::new())),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
-            web_search: None,
-            index_store: None,
-            embedding_service: None,
-            embedding_manager: None,
-            hnsw_index: None,
-            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_context: None,
-            core_context: None,
-        }
+        make_test_ctx(Path::new("/tmp/test"))
     }
 
     // ── Runtime detection tests ──────────────────────────────────────

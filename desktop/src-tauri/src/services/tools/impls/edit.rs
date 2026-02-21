@@ -91,6 +91,15 @@ impl Tool for EditTool {
             return ToolResult::err(format!("File not found: {}", file_path));
         }
 
+        // Enforce read-before-write: the file must have been read first
+        if let Ok(read_files) = ctx.read_files.lock() {
+            if !read_files.contains(&path) {
+                return ToolResult::err(
+                    "You must read the file before editing it. Use the Read tool first to view the current contents.",
+                );
+            }
+        }
+
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) => return ToolResult::err(format!("Failed to read file: {}", e)),
@@ -127,6 +136,7 @@ impl Tool for EditTool {
 
         match std::fs::write(&path, &new_content) {
             Ok(_) => {
+                ctx.invalidate_read_cache_for_path(&path);
                 if replace_all {
                     ToolResult::ok(format!(
                         "Successfully replaced {} occurrences in {}",
@@ -145,59 +155,42 @@ impl Tool for EditTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::path::Path;
-    use std::sync::{Arc, Mutex};
+    use super::super::test_helpers::make_test_ctx;
     use tempfile::TempDir;
-
-    fn make_ctx(dir: &Path) -> ToolExecutionContext {
-        ToolExecutionContext {
-            session_id: "test".to_string(),
-            project_root: dir.to_path_buf(),
-            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
-            read_cache: Arc::new(Mutex::new(HashMap::new())),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
-            web_search: None,
-            index_store: None,
-            embedding_service: None,
-            embedding_manager: None,
-            hnsw_index: None,
-            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_context: None,
-            core_context: None,
-        }
-    }
 
     #[tokio::test]
     async fn test_edit_tool_basic() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("test.txt"), "line 1\nline 2\nline 3\n").unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "line 1\nline 2\nline 3\n").unwrap();
         let tool = EditTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
+        // Pre-populate read_files to satisfy read-before-write guard
+        ctx.read_files.lock().unwrap().insert(file_path.clone());
 
         let args = serde_json::json!({
-            "file_path": dir.path().join("test.txt").to_string_lossy().to_string(),
+            "file_path": file_path.to_string_lossy().to_string(),
             "old_string": "line 2",
             "new_string": "modified line 2"
         });
         let result = tool.execute(&ctx, args).await;
         assert!(result.success);
 
-        let content = std::fs::read_to_string(dir.path().join("test.txt")).unwrap();
+        let content = std::fs::read_to_string(&file_path).unwrap();
         assert!(content.contains("modified line 2"));
     }
 
     #[tokio::test]
     async fn test_edit_tool_non_unique() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("dup.txt"), "foo foo foo").unwrap();
+        let file_path = dir.path().join("dup.txt");
+        std::fs::write(&file_path, "foo foo foo").unwrap();
         let tool = EditTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
+        ctx.read_files.lock().unwrap().insert(file_path.clone());
 
         let args = serde_json::json!({
-            "file_path": dir.path().join("dup.txt").to_string_lossy().to_string(),
+            "file_path": file_path.to_string_lossy().to_string(),
             "old_string": "foo",
             "new_string": "bar"
         });
@@ -209,20 +202,41 @@ mod tests {
     #[tokio::test]
     async fn test_edit_tool_replace_all() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("dup.txt"), "foo foo foo").unwrap();
+        let file_path = dir.path().join("dup.txt");
+        std::fs::write(&file_path, "foo foo foo").unwrap();
         let tool = EditTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
+        ctx.read_files.lock().unwrap().insert(file_path.clone());
 
         let args = serde_json::json!({
-            "file_path": dir.path().join("dup.txt").to_string_lossy().to_string(),
+            "file_path": file_path.to_string_lossy().to_string(),
             "old_string": "foo",
             "new_string": "bar",
             "replace_all": true
         });
         let result = tool.execute(&ctx, args).await;
         assert!(result.success);
-        let content = std::fs::read_to_string(dir.path().join("dup.txt")).unwrap();
+        let content = std::fs::read_to_string(&file_path).unwrap();
         assert_eq!(content, "bar bar bar");
+    }
+
+    #[tokio::test]
+    async fn test_edit_tool_rejects_unread_file() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("unread.txt");
+        std::fs::write(&file_path, "original content").unwrap();
+        let tool = EditTool::new();
+        let ctx = make_test_ctx(dir.path());
+        // Do NOT insert into read_files — simulate editing without reading first
+
+        let args = serde_json::json!({
+            "file_path": file_path.to_string_lossy().to_string(),
+            "old_string": "original",
+            "new_string": "modified"
+        });
+        let result = tool.execute(&ctx, args).await;
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("must read the file before editing"));
     }
 
     #[test]

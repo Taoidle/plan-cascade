@@ -87,6 +87,7 @@ impl Tool for WriteTool {
 
         match std::fs::write(&path, content) {
             Ok(_) => {
+                ctx.invalidate_read_cache_for_path(&path);
                 let line_count = content.lines().count();
                 ToolResult::ok(format!(
                     "Successfully wrote {} lines to {}",
@@ -102,36 +103,14 @@ impl Tool for WriteTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::path::Path;
-    use std::sync::{Arc, Mutex};
+    use super::super::test_helpers::make_test_ctx;
     use tempfile::TempDir;
-
-    fn make_ctx(dir: &Path) -> ToolExecutionContext {
-        ToolExecutionContext {
-            session_id: "test".to_string(),
-            project_root: dir.to_path_buf(),
-            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
-            read_cache: Arc::new(Mutex::new(HashMap::new())),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
-            web_search: None,
-            index_store: None,
-            embedding_service: None,
-            embedding_manager: None,
-            hnsw_index: None,
-            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_context: None,
-            core_context: None,
-        }
-    }
 
     #[tokio::test]
     async fn test_write_tool_basic() {
         let dir = TempDir::new().unwrap();
         let tool = WriteTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let new_file = dir.path().join("new_file.txt");
         let args = serde_json::json!({
@@ -148,7 +127,7 @@ mod tests {
     async fn test_write_tool_creates_directories() {
         let dir = TempDir::new().unwrap();
         let tool = WriteTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let nested = dir.path().join("a/b/c/file.txt");
         let args = serde_json::json!({
@@ -164,7 +143,7 @@ mod tests {
     async fn test_write_tool_missing_params() {
         let dir = TempDir::new().unwrap();
         let tool = WriteTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
         assert!(!result.success);

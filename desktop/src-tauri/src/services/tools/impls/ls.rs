@@ -171,30 +171,8 @@ impl Tool for LsTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::path::Path;
-    use std::sync::{Arc, Mutex};
+    use super::super::test_helpers::make_test_ctx;
     use tempfile::TempDir;
-
-    fn make_ctx(dir: &Path) -> ToolExecutionContext {
-        ToolExecutionContext {
-            session_id: "test".to_string(),
-            project_root: dir.to_path_buf(),
-            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
-            read_cache: Arc::new(Mutex::new(HashMap::new())),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
-            web_search: None,
-            index_store: None,
-            embedding_service: None,
-            embedding_manager: None,
-            hnsw_index: None,
-            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_context: None,
-            core_context: None,
-        }
-    }
 
     #[tokio::test]
     async fn test_ls_tool_basic() {
@@ -203,7 +181,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("subdir")).unwrap();
 
         let tool = LsTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let args = serde_json::json!({
             "path": dir.path().to_string_lossy().to_string()
@@ -222,7 +200,7 @@ mod tests {
         std::fs::write(dir.path().join("test.txt"), "content").unwrap();
 
         let tool = LsTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let args = serde_json::json!({
             "path": dir.path().join("test.txt").to_string_lossy().to_string()

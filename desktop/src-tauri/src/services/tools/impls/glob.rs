@@ -12,35 +12,7 @@ use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
 
 use super::read::validate_path;
-
-/// Directories excluded from default full-workspace scans.
-const DEFAULT_SCAN_EXCLUDES: &[&str] = &[
-    ".git",
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    "coverage",
-    ".venv",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".plan-cascade",
-    "builtin-skills",
-    "external-skills",
-    "claude-code",
-    "codex",
-];
-
-fn is_default_scan_excluded(base: &Path, candidate: &Path) -> bool {
-    if let Ok(relative) = candidate.strip_prefix(base) {
-        if let Some(first) = relative.components().next() {
-            let root = first.as_os_str().to_string_lossy();
-            return DEFAULT_SCAN_EXCLUDES.contains(&root.as_ref());
-        }
-    }
-    false
-}
+use super::scan_utils::is_default_scan_excluded;
 
 fn missing_param_error() -> String {
     let example = r#"```tool_call
@@ -153,29 +125,8 @@ impl Tool for GlobTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::sync::{Arc, Mutex};
+    use super::super::test_helpers::make_test_ctx;
     use tempfile::TempDir;
-
-    fn make_ctx(dir: &Path) -> ToolExecutionContext {
-        ToolExecutionContext {
-            session_id: "test".to_string(),
-            project_root: dir.to_path_buf(),
-            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
-            read_cache: Arc::new(Mutex::new(HashMap::new())),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
-            web_search: None,
-            index_store: None,
-            embedding_service: None,
-            embedding_manager: None,
-            hnsw_index: None,
-            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_context: None,
-            core_context: None,
-        }
-    }
 
     #[tokio::test]
     async fn test_glob_tool_basic() {
@@ -185,7 +136,7 @@ mod tests {
         std::fs::write(dir.path().join("sub/nested.txt"), "nested").unwrap();
 
         let tool = GlobTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let args = serde_json::json!({
             "pattern": "**/*.txt",
@@ -202,7 +153,7 @@ mod tests {
     async fn test_glob_tool_missing_param() {
         let dir = TempDir::new().unwrap();
         let tool = GlobTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
         assert!(!result.success);

@@ -694,29 +694,8 @@ impl Tool for CodebaseSearchTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Mutex};
-
-    fn make_ctx(dir: &Path) -> ToolExecutionContext {
-        ToolExecutionContext {
-            session_id: "test".to_string(),
-            project_root: dir.to_path_buf(),
-            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
-            read_cache: Arc::new(Mutex::new(HashMap::new())),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
-            web_search: None,
-            index_store: None,
-            embedding_service: None,
-            embedding_manager: None,
-            hnsw_index: None,
-            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_context: None,
-            core_context: None,
-        }
-    }
+    use super::super::test_helpers::make_test_ctx;
+    use std::path::Path;
 
     #[test]
     fn test_codebase_search_tool_name() {
@@ -750,7 +729,7 @@ mod tests {
     #[tokio::test]
     async fn test_codebase_search_no_index() {
         let tool = CodebaseSearchTool::new();
-        let ctx = make_ctx(Path::new("/tmp"));
+        let ctx = make_test_ctx(Path::new("/tmp"));
         let args = serde_json::json!({"query": "test_function"});
         let result = tool.execute(&ctx, args).await;
         assert!(result.success);
@@ -764,7 +743,7 @@ mod tests {
     #[tokio::test]
     async fn test_codebase_search_missing_query() {
         let tool = CodebaseSearchTool::new();
-        let ctx = make_ctx(Path::new("/tmp"));
+        let ctx = make_test_ctx(Path::new("/tmp"));
         let result = tool.execute(&ctx, serde_json::json!({})).await;
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("query"));

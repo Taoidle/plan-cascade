@@ -307,36 +307,15 @@ impl Tool for ReadTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::sync::{Arc, Mutex};
+    use super::super::test_helpers::make_test_ctx;
     use tempfile::TempDir;
-
-    fn make_ctx(dir: &Path) -> ToolExecutionContext {
-        ToolExecutionContext {
-            session_id: "test".to_string(),
-            project_root: dir.to_path_buf(),
-            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
-            read_cache: Arc::new(Mutex::new(HashMap::new())),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
-            web_search: None,
-            index_store: None,
-            embedding_service: None,
-            embedding_manager: None,
-            hnsw_index: None,
-            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_context: None,
-            core_context: None,
-        }
-    }
 
     #[tokio::test]
     async fn test_read_tool_basic() {
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join("test.txt"), "line 1\nline 2\nline 3\n").unwrap();
         let tool = ReadTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let args = serde_json::json!({
             "file_path": dir.path().join("test.txt").to_string_lossy().to_string()
@@ -350,7 +329,7 @@ mod tests {
     async fn test_read_tool_not_found() {
         let dir = TempDir::new().unwrap();
         let tool = ReadTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let args = serde_json::json!({
             "file_path": dir.path().join("nonexistent.txt").to_string_lossy().to_string()
@@ -365,7 +344,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join("test.txt"), "content\n").unwrap();
         let tool = ReadTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let args = serde_json::json!({
             "file_path": dir.path().join("test.txt").to_string_lossy().to_string()
@@ -387,7 +366,7 @@ mod tests {
     async fn test_read_tool_missing_param() {
         let dir = TempDir::new().unwrap();
         let tool = ReadTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
         assert!(!result.success);

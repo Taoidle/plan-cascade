@@ -12,7 +12,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 use crate::services::llm::types::{ParameterSchema, ToolDefinition};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
@@ -83,6 +82,17 @@ impl ToolExecutionContext {
             .lock()
             .map(|cwd| cwd.clone())
             .unwrap_or_else(|_| self.project_root.clone())
+    }
+
+    /// Invalidate all read-cache entries whose path matches the given file.
+    ///
+    /// Called by Write and Edit tools after successful file modifications to
+    /// prevent stale cache hits when the same file is read again within the
+    /// same second (mtime granularity is typically 1 second).
+    pub fn invalidate_read_cache_for_path(&self, path: &std::path::Path) {
+        if let Ok(mut cache) = self.read_cache.lock() {
+            cache.retain(|key, _| key.0 != *path);
+        }
     }
 }
 

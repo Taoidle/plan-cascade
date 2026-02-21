@@ -8,6 +8,9 @@
 //! - Foundation for MCP tool integration
 
 pub mod text_utils;
+mod scan_utils;
+#[cfg(test)]
+pub(crate) mod test_helpers;
 pub mod read;
 pub mod write;
 pub mod edit;

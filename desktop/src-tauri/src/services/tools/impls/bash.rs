@@ -211,35 +211,14 @@ impl Tool for BashTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::sync::Arc;
+    use super::super::test_helpers::make_test_ctx;
     use tempfile::TempDir;
-
-    fn make_ctx(dir: &Path) -> ToolExecutionContext {
-        ToolExecutionContext {
-            session_id: "test".to_string(),
-            project_root: dir.to_path_buf(),
-            working_directory: Arc::new(Mutex::new(dir.to_path_buf())),
-            read_cache: Arc::new(Mutex::new(HashMap::new())),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            web_fetch: Arc::new(crate::services::tools::web_fetch::WebFetchService::new()),
-            web_search: None,
-            index_store: None,
-            embedding_service: None,
-            embedding_manager: None,
-            hnsw_index: None,
-            task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
-            task_context: None,
-            core_context: None,
-        }
-    }
 
     #[tokio::test]
     async fn test_bash_tool_echo() {
         let dir = TempDir::new().unwrap();
         let tool = BashTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let args = serde_json::json!({"command": "echo hello"});
         let result = tool.execute(&ctx, args).await;
@@ -251,7 +230,7 @@ mod tests {
     async fn test_bash_tool_blocked() {
         let dir = TempDir::new().unwrap();
         let tool = BashTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let args = serde_json::json!({"command": "rm -rf /"});
         let result = tool.execute(&ctx, args).await;
@@ -263,7 +242,7 @@ mod tests {
     async fn test_bash_tool_missing_command() {
         let dir = TempDir::new().unwrap();
         let tool = BashTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
         assert!(!result.success);
@@ -288,7 +267,7 @@ mod tests {
         let subdir = dir.path().join("sub");
         std::fs::create_dir(&subdir).unwrap();
         let tool = BashTool::new();
-        let ctx = make_ctx(dir.path());
+        let ctx = make_test_ctx(dir.path());
 
         // Execute cd command
         let args = serde_json::json!({"command": "cd sub"});
