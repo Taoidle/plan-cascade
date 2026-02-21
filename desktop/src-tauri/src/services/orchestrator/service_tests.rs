@@ -18,6 +18,7 @@ fn test_config() -> OrchestratorConfig {
         analysis_session_id: None,
         project_id: None,
         compaction_config: CompactionConfig::default(),
+        task_type: None,
     }
 }
 
@@ -501,6 +502,7 @@ fn test_architecture_baseline_keeps_seed_files_ahead_of_observed_noise() {
         analysis_session_id: None,
         project_id: None,
         compaction_config: CompactionConfig::default(),
+        task_type: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let mut ledger = AnalysisLedger::default();
@@ -572,6 +574,7 @@ fn test_baseline_steps_cover_required_tool_families() {
         analysis_session_id: None,
         project_id: None,
         compaction_config: CompactionConfig::default(),
+        task_type: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let ledger = AnalysisLedger::default();
@@ -1001,6 +1004,7 @@ fn test_reliable_provider_no_fallback_instructions() {
         analysis_session_id: None,
         project_id: None,
         compaction_config: CompactionConfig::default(),
+        task_type: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions_from_registry();
@@ -1034,6 +1038,7 @@ fn test_unreliable_provider_gets_fallback_instructions() {
         analysis_session_id: None,
         project_id: None,
         compaction_config: CompactionConfig::default(),
+        task_type: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions_from_registry();
@@ -1072,6 +1077,7 @@ fn test_user_override_disables_fallback_for_unreliable() {
         analysis_session_id: None,
         project_id: None,
         compaction_config: CompactionConfig::default(),
+        task_type: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions_from_registry();
@@ -1104,6 +1110,7 @@ fn test_none_provider_gets_fallback_instructions() {
         analysis_session_id: None,
         project_id: None,
         compaction_config: CompactionConfig::default(),
+        task_type: None,
     };
     let orchestrator = OrchestratorService::new(config);
     let tools = crate::services::tools::get_tool_definitions_from_registry();
@@ -1233,6 +1240,7 @@ fn test_sub_agent_spawner_uses_compaction_enabled() {
         analysis_session_id: None,
         project_id: None,
         compaction_config: CompactionConfig::default(),
+        task_type: None,
     };
     assert!(spawner_config.enable_compaction);
     assert_eq!(spawner_config.max_total_tokens, 512_000);

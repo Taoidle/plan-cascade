@@ -106,6 +106,10 @@ pub struct OrchestratorConfig {
     /// When omitted, defaults are used and the compactor is selected based on provider reliability.
     #[serde(default)]
     pub compaction_config: CompactionConfig,
+    /// Optional task type for sub-agent tool guidance differentiation.
+    /// Values: "explore", "analyze", "implement", or None for main agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<String>,
 }
 
 fn default_max_iterations() -> u32 {

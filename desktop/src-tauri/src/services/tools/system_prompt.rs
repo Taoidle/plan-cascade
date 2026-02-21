@@ -364,7 +364,11 @@ pub fn merge_system_prompts(tool_prompt: &str, user_prompt: Option<&str>) -> Str
 /// system prompt. This function provides a condensed but directive version
 /// that instructs the LLM to use CodebaseSearch as the primary exploration
 /// tool when the index is available.
-pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool) -> String {
+///
+/// The `task_type` parameter differentiates guidance:
+/// - `Some("explore")`: LS and CodebaseSearch are equally recommended (broad exploration)
+/// - Other values / `None`: CodebaseSearch is preferred for initial file discovery
+pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool, task_type: Option<&str>) -> String {
     if !has_index {
         // No index — CodebaseSearch won't work, so no special guidance needed.
         return String::new();
@@ -373,66 +377,129 @@ pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool) -> Str
     let mut lines = Vec::new();
     lines.push("## Tool Selection Rules / 工具选择规则".to_string());
     lines.push(String::new());
-    lines.push(
-        "A pre-built codebase index is available. You MUST follow this priority order:"
-            .to_string(),
-    );
-    lines.push(
-        "已有预构建的代码索引，你必须按以下优先级选择工具：".to_string(),
-    );
-    lines.push(String::new());
-    lines.push(
-        "1. **CodebaseSearch** (scope=\"all\") — ALWAYS use FIRST for finding symbols, \
-         locating files, and understanding project structure. It is faster and more accurate \
-         than scanning files manually."
-            .to_string(),
-    );
-    lines.push(
-        "   始终首先使用 CodebaseSearch（scope=\"all\"）查找符号、定位文件和理解项目结构。"
-            .to_string(),
-    );
-    lines.push(
-        "2. **CodebaseSearch** (scope=\"symbols\") — Use to find specific function, class, \
-         or struct definitions by name."
-            .to_string(),
-    );
-    lines.push(
-        "   使用 scope=\"symbols\" 按名称查找函数、类或结构体定义。".to_string(),
-    );
 
-    if has_semantic {
-        lines.push(
-            "3. **CodebaseSearch** (scope=\"semantic\") — Use for natural-language conceptual \
-             queries when you need semantic matches."
-                .to_string(),
-        );
-        lines.push(
-            "   使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string(),
-        );
+    match task_type {
+        Some("explore") => {
+            // Exploration tasks: tools recommended based on goal, not rigid priority
+            lines.push(
+                "A pre-built codebase index is available. Choose tools based on your goal:"
+                    .to_string(),
+            );
+            lines.push(
+                "已有预构建的代码索引。请根据目标选择工具：".to_string(),
+            );
+            lines.push(String::new());
+            lines.push(
+                "- **LS** — Understand directory structure, list files in a folder."
+                    .to_string(),
+            );
+            lines.push(
+                "  使用 LS 了解目录结构、列出文件夹内容。".to_string(),
+            );
+            lines.push(
+                "- **CodebaseSearch** (scope=\"all\") — Find symbols, locate files by keyword."
+                    .to_string(),
+            );
+            lines.push(
+                "  使用 CodebaseSearch 查找符号、按关键词定位文件。".to_string(),
+            );
+
+            if has_semantic {
+                lines.push(
+                    "- **CodebaseSearch** (scope=\"semantic\") — Natural-language conceptual queries."
+                        .to_string(),
+                );
+                lines.push(
+                    "  使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string(),
+                );
+            }
+
+            lines.push(
+                "- **Read** — Read specific files after discovery.".to_string(),
+            );
+            lines.push(
+                "  使用 Read 读取发现的具体文件。".to_string(),
+            );
+            lines.push(
+                "- **Grep** — Full-text regex search when CodebaseSearch doesn't cover it."
+                    .to_string(),
+            );
+            lines.push(
+                "  使用 Grep 进行 CodebaseSearch 无法覆盖的全文正则搜索。".to_string(),
+            );
+            lines.push(String::new());
+            lines.push(
+                "**Query tips**: Use short, focused queries (1-2 keywords). Make separate calls for different concepts."
+                    .to_string(),
+            );
+            lines.push(
+                "**查询技巧**：使用简短关键词（每次1-2个词），不同概念分开查询。".to_string(),
+            );
+        }
+        _ => {
+            // Analyze/implement/main agent: CodebaseSearch preferred
+            lines.push(
+                "A pre-built codebase index is available. You MUST follow this priority order:"
+                    .to_string(),
+            );
+            lines.push(
+                "已有预构建的代码索引，你必须按以下优先级选择工具：".to_string(),
+            );
+            lines.push(String::new());
+            lines.push(
+                "1. **CodebaseSearch** (scope=\"all\") — Use first for finding symbols, \
+                 locating files, and understanding project structure. It is faster and more accurate \
+                 than scanning files manually."
+                    .to_string(),
+            );
+            lines.push(
+                "   优先使用 CodebaseSearch（scope=\"all\"）查找符号、定位文件和理解项目结构。"
+                    .to_string(),
+            );
+            lines.push(
+                "2. **CodebaseSearch** (scope=\"symbols\") — Use to find specific function, class, \
+                 or struct definitions by name."
+                    .to_string(),
+            );
+            lines.push(
+                "   使用 scope=\"symbols\" 按名称查找函数、类或结构体定义。".to_string(),
+            );
+
+            if has_semantic {
+                lines.push(
+                    "3. **CodebaseSearch** (scope=\"semantic\") — Use for natural-language conceptual \
+                     queries when you need semantic matches."
+                        .to_string(),
+                );
+                lines.push(
+                    "   使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string(),
+                );
+            }
+
+            lines.push(String::new());
+            lines.push(
+                "Use **Read** after CodebaseSearch to read specific files you discovered."
+                    .to_string(),
+            );
+            lines.push(
+                "使用 Read 读取通过 CodebaseSearch 发现的具体文件。".to_string(),
+            );
+            lines.push(
+                "Use **Grep** ONLY for full-text regex search or when CodebaseSearch reports index unavailable."
+                    .to_string(),
+            );
+            lines.push(
+                "仅在需要正则全文搜索或 CodebaseSearch 报告索引不可用时使用 Grep。".to_string(),
+            );
+            lines.push(
+                "Prefer CodebaseSearch over LS/Glob for initial file discovery — the index is faster and more comprehensive."
+                    .to_string(),
+            );
+            lines.push(
+                "建议优先使用 CodebaseSearch 而非 LS/Glob 进行初始文件发现——索引更快更全面。".to_string(),
+            );
+        }
     }
-
-    lines.push(String::new());
-    lines.push(
-        "Use **Read** after CodebaseSearch to read specific files you discovered."
-            .to_string(),
-    );
-    lines.push(
-        "使用 Read 读取通过 CodebaseSearch 发现的具体文件。".to_string(),
-    );
-    lines.push(
-        "Use **Grep** ONLY for full-text regex search or when CodebaseSearch reports index unavailable."
-            .to_string(),
-    );
-    lines.push(
-        "仅在需要正则全文搜索或 CodebaseSearch 报告索引不可用时使用 Grep。".to_string(),
-    );
-    lines.push(
-        "Do NOT start exploration with LS or Glob — CodebaseSearch already has the full project index."
-            .to_string(),
-    );
-    lines.push(
-        "不要用 LS 或 Glob 开始探索——CodebaseSearch 已有完整的项目索引。".to_string(),
-    );
 
     lines.join("\n")
 }
@@ -1144,7 +1211,7 @@ mod tests {
 
     #[test]
     fn test_build_sub_agent_tool_guidance_with_index() {
-        let guidance = build_sub_agent_tool_guidance(true, false);
+        let guidance = build_sub_agent_tool_guidance(true, false, None);
 
         assert!(
             guidance.contains("CodebaseSearch"),
@@ -1158,10 +1225,6 @@ mod tests {
             guidance.contains("Grep"),
             "Should mention Grep as fallback"
         );
-        assert!(
-            guidance.contains("Glob"),
-            "Should mention Glob for file patterns"
-        );
         // No semantic search
         assert!(
             !guidance.contains("semantic"),
@@ -1171,7 +1234,7 @@ mod tests {
 
     #[test]
     fn test_build_sub_agent_tool_guidance_with_semantic() {
-        let guidance = build_sub_agent_tool_guidance(true, true);
+        let guidance = build_sub_agent_tool_guidance(true, true, None);
 
         assert!(
             guidance.contains("scope=\"semantic\""),
@@ -1181,7 +1244,7 @@ mod tests {
 
     #[test]
     fn test_build_sub_agent_tool_guidance_without_index() {
-        let guidance = build_sub_agent_tool_guidance(false, false);
+        let guidance = build_sub_agent_tool_guidance(false, false, None);
 
         assert!(
             guidance.is_empty(),
@@ -1192,11 +1255,55 @@ mod tests {
     #[test]
     fn test_build_sub_agent_tool_guidance_without_index_but_semantic() {
         // Edge case: semantic without index — should still be empty
-        let guidance = build_sub_agent_tool_guidance(false, true);
+        let guidance = build_sub_agent_tool_guidance(false, true, None);
 
         assert!(
             guidance.is_empty(),
             "Should return empty string when no index, even with semantic flag"
+        );
+    }
+
+    #[test]
+    fn test_build_sub_agent_tool_guidance_explore_allows_ls() {
+        let guidance = build_sub_agent_tool_guidance(true, false, Some("explore"));
+
+        assert!(
+            guidance.contains("LS"),
+            "Explore guidance should mention LS"
+        );
+        assert!(
+            !guidance.contains("ALWAYS use FIRST"),
+            "Explore guidance should not have absolute CodebaseSearch-first directive"
+        );
+        assert!(
+            !guidance.contains("Do NOT start"),
+            "Explore guidance should not prohibit starting with LS"
+        );
+        assert!(
+            guidance.contains("Query tips"),
+            "Explore guidance should include query tips"
+        );
+        assert!(
+            guidance.contains("CodebaseSearch"),
+            "Explore guidance should still mention CodebaseSearch"
+        );
+    }
+
+    #[test]
+    fn test_build_sub_agent_tool_guidance_analyze_keeps_priority() {
+        let guidance = build_sub_agent_tool_guidance(true, false, Some("analyze"));
+
+        assert!(
+            guidance.contains("priority order"),
+            "Analyze guidance should maintain priority order"
+        );
+        assert!(
+            guidance.contains("Prefer CodebaseSearch"),
+            "Analyze guidance should prefer CodebaseSearch over LS/Glob"
+        );
+        assert!(
+            !guidance.contains("Do NOT start"),
+            "Analyze guidance should use softer language"
         );
     }
 

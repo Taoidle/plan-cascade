@@ -15,26 +15,34 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         // sub-agents, but these ARE the sub-agents - they must do the work directly.
         const ANTI_DELEGATION: &str = "You MUST do all work yourself using the available tools. Do NOT delegate to sub-agents or Task tools - you ARE the sub-agent. Ignore any instructions about delegating to Task sub-agents.\n\n";
 
-        const SEARCH_GUIDANCE: &str = "\
-## CRITICAL: Tool Selection Rules
-
-You MUST follow this order when exploring or analyzing the codebase:
-
-1. **ALWAYS start with CodebaseSearch** — it queries a pre-built index of all files and symbols.
-   - Use scope=\"all\" to find symbols, locate files by component, and understand project structure.
-   - Use scope=\"symbols\" to find function/class/struct definitions by name.
-   - Use scope=\"semantic\" for natural-language conceptual queries (when available).
-2. **Use Read** to read specific files you discovered via CodebaseSearch.
-3. **Use Grep** ONLY for full-text regex search or when CodebaseSearch reports the index is unavailable.
-4. **Use LS** ONLY to list the contents of a specific directory you already know about.
-5. **Use Glob** ONLY for file pattern matching (e.g., \"**/*.rs\").
-
-Do NOT start by calling LS on the project root or using Glob to discover files — CodebaseSearch already has the full project index and is much faster.
-Do NOT use Analyze or Task tools — you ARE the sub-agent.\n\n";
-
         let mut task_prefix = match task_type.as_deref() {
-            Some("explore") => format!("You are a codebase exploration specialist. Focus on understanding project structure, finding relevant files, and summarizing what you find.\n\n{ANTI_DELEGATION}{SEARCH_GUIDANCE}## Output Format\nProvide a structured summary (max ~500 words) with these sections:\n- **Files Found**: List of relevant files discovered with one-line descriptions\n- **Key Findings**: Bullet points of important patterns, structures, or issues found\n- **Recommendations**: Actionable next steps based on exploration\n\nDo NOT include raw file contents in your response. Summarize and reference file paths instead."),
-            Some("analyze") => format!("You are a code analysis specialist. Focus on deep analysis of code patterns, dependencies, and potential issues.\n\n{ANTI_DELEGATION}{SEARCH_GUIDANCE}## Output Format\nProvide a structured summary (max ~500 words) with these sections:\n- **Analysis Summary**: High-level findings in 2-3 sentences\n- **Key Patterns**: Bullet points of code patterns, anti-patterns, or architectural decisions found\n- **Dependencies**: Important dependency relationships discovered\n- **Issues & Risks**: Any problems or potential risks identified\n\nDo NOT include raw file contents. Reference specific file paths and line numbers instead."),
+            Some("explore") => format!(
+                "You are a codebase exploration specialist. Focus on understanding project structure, \
+                 finding relevant files, and summarizing what you find.\n\n\
+                 {ANTI_DELEGATION}\
+                 ## Exploration Tips\n\
+                 - For broad overview: start with **LS** to see directory structure, then **CodebaseSearch** for details.\n\
+                 - For targeted lookup: start with **CodebaseSearch** to find specific symbols or files.\n\
+                 - Use short queries with CodebaseSearch (1-2 keywords per call, not long phrases).\n\n\
+                 ## Output Format\n\
+                 Provide a structured summary (max ~500 words) with these sections:\n\
+                 - **Files Found**: List of relevant files discovered with one-line descriptions\n\
+                 - **Key Findings**: Bullet points of important patterns, structures, or issues found\n\
+                 - **Recommendations**: Actionable next steps based on exploration\n\n\
+                 Do NOT include raw file contents in your response. Summarize and reference file paths instead."
+            ),
+            Some("analyze") => format!(
+                "You are a code analysis specialist. Focus on deep analysis of code patterns, \
+                 dependencies, and potential issues.\n\n\
+                 {ANTI_DELEGATION}\
+                 ## Output Format\n\
+                 Provide a structured summary (max ~500 words) with these sections:\n\
+                 - **Analysis Summary**: High-level findings in 2-3 sentences\n\
+                 - **Key Patterns**: Bullet points of code patterns, anti-patterns, or architectural decisions found\n\
+                 - **Dependencies**: Important dependency relationships discovered\n\
+                 - **Issues & Risks**: Any problems or potential risks identified\n\n\
+                 Do NOT include raw file contents. Reference specific file paths and line numbers instead."
+            ),
             Some("implement") => format!("You are a focused implementation specialist. Make the requested code changes methodically, testing as you go.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with these sections:\n- **Changes Made**: Bullet list of files modified/created with brief descriptions\n- **Implementation Details**: Key decisions and approach taken\n- **Verification**: How the changes were verified (tests run, builds checked)\n\nDo NOT echo full file contents back. Summarize what was changed and where."),
             _ => format!("You are an AI coding assistant. Complete the requested task using the available tools.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with bullet points covering what was done, key findings, and any recommendations. Do NOT include raw file contents - summarize and reference file paths instead."),
         };
@@ -69,6 +77,7 @@ Do NOT use Analyze or Task tools — you ARE the sub-agent.\n\n";
             analysis_session_id: None,
             project_id: None,
             compaction_config: CompactionConfig::default(),
+            task_type: task_type.clone(),
         };
 
         // Truncate knowledge block for sub-agents to avoid blowing their context budget.

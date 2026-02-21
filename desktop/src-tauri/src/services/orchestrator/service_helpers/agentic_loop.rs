@@ -475,6 +475,7 @@ impl OrchestratorService {
                         let guidance = build_sub_agent_tool_guidance(
                             summary.total_symbols > 0,
                             summary.embedding_chunks > 0,
+                            self.config.task_type.as_deref(),
                         );
                         if !guidance.is_empty() {
                             parts.push(guidance);

@@ -620,6 +620,7 @@ pub async fn check_provider_health(
         analysis_session_id: None,
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let orchestrator = OrchestratorService::new(orchestrator_config);
@@ -1096,6 +1097,7 @@ pub async fn execute_standalone(
         analysis_session_id,
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config);
@@ -1343,6 +1345,7 @@ pub async fn execute_standalone_with_session(
         analysis_session_id: Some(session_id.clone()),
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     // Get database pool for session persistence
@@ -1536,6 +1539,7 @@ pub async fn get_standalone_status(
         analysis_session_id: None,
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1612,6 +1616,7 @@ pub async fn get_standalone_progress(
         analysis_session_id: None,
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1669,6 +1674,7 @@ pub async fn resume_standalone_execution(
         analysis_session_id: None,
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let temp_orchestrator = OrchestratorService::new(temp_config).with_database(pool.clone());
@@ -1775,6 +1781,7 @@ pub async fn resume_standalone_execution(
         analysis_session_id: Some(request.session_id.clone()),
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
@@ -1858,6 +1865,7 @@ pub async fn get_standalone_session(
         analysis_session_id: None,
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1917,6 +1925,7 @@ pub async fn list_standalone_sessions(
         analysis_session_id: None,
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -1968,6 +1977,7 @@ pub async fn delete_standalone_session(
         analysis_session_id: None,
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);
@@ -2019,6 +2029,7 @@ pub async fn cleanup_standalone_sessions(
         analysis_session_id: None,
         project_id: None,
         compaction_config: Default::default(),
+        task_type: None,
     };
 
     let orchestrator = OrchestratorService::new(temp_config).with_database(pool);

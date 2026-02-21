@@ -55,7 +55,10 @@ impl CodebaseSearchTool {
 
         if results.is_empty() {
             return Ok(format!(
-                "No results found for '{}' (scope: all, hybrid RRF).",
+                "No results found for '{}' (scope: all, hybrid RRF).\n\
+                 Hint: Try shorter queries (1-2 keywords). \
+                 Use scope=\"files\" or scope=\"symbols\" for narrower search. \
+                 Use LS to browse directories or Grep for full-text content search.",
                 query
             ));
         }
@@ -569,7 +572,9 @@ impl Tool for CodebaseSearchTool {
         properties.insert(
             "query".to_string(),
             ParameterSchema::string(Some(
-                "Search pattern — symbol name, file path fragment, or keyword to search for",
+                "Search query — a symbol name, file path fragment, or keyword. \
+                 Best with short queries (1-2 keywords, e.g. 'auth' not 'authentication service handler'). \
+                 Make separate calls for different concepts.",
             )),
         );
 
@@ -674,7 +679,10 @@ impl Tool for CodebaseSearchTool {
 
         if output_sections.is_empty() {
             ToolResult::ok(format!(
-                "No results found for '{}' (scope: {}).",
+                "No results found for '{}' (scope: {}).\n\
+                 Hint: Try a shorter or different keyword. \
+                 Use scope=\"files\" for file paths, scope=\"symbols\" for function/class names. \
+                 You can also use Grep for regex search or LS to browse directories.",
                 query, scope
             ))
         } else {
