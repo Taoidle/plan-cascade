@@ -8,13 +8,14 @@
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::WalkBuilder;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use super::analysis_index::{
-    build_file_inventory, detect_component, extract_symbols, is_test_path, AnalysisLimits,
+    build_file_inventory, detect_component, extract_symbols_from_str, is_test_path, AnalysisLimits,
 };
 use super::embedding_manager::EmbeddingManager;
 use super::embedding_provider::EmbeddingProviderType;
@@ -53,7 +54,14 @@ impl EmbeddingPassStats {
 /// Result of an incremental index operation for a single file-change event.
 enum IncrementalResult {
     /// The file was re-indexed because its content hash changed.
-    Updated,
+    /// Carries the already-read content, detected language, and normalized
+    /// relative path so that downstream embedding can reuse them without
+    /// additional disk reads.
+    Updated {
+        content: String,
+        language: String,
+        rel_path: String,
+    },
     /// The file was deleted from disk and its index entry was cleaned up.
     Deleted { rel_path: String },
     /// A directory was deleted; all child file indexes were cleaned up.
@@ -79,6 +87,10 @@ pub struct BackgroundIndexer {
     hnsw_index: Option<Arc<HnswIndex>>,
     change_rx: Option<tokio::sync::mpsc::Receiver<PathBuf>>,
     progress_callback: Option<IndexProgressCallback>,
+    /// Shared flag set by the file watcher when the mpsc channel overflows.
+    /// The incremental loop checks this after each batch and triggers a
+    /// catch-up sync when set.
+    channel_overflow: Option<Arc<AtomicBool>>,
 }
 
 impl BackgroundIndexer {
@@ -92,6 +104,7 @@ impl BackgroundIndexer {
             hnsw_index: None,
             change_rx: None,
             progress_callback: None,
+            channel_overflow: None,
         }
     }
 
@@ -144,6 +157,16 @@ impl BackgroundIndexer {
         self
     }
 
+    /// Attach a shared overflow flag from the file watcher channel.
+    ///
+    /// When the watcher's `try_send` fails (channel full), it sets this flag
+    /// to `true`.  The incremental loop checks the flag after each batch and
+    /// triggers a lightweight catch-up sync to reconcile missed events.
+    pub fn with_channel_overflow_flag(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.channel_overflow = Some(flag);
+        self
+    }
+
     /// Spawn the background indexing task and return its `JoinHandle`.
     ///
     /// The task:
@@ -161,6 +184,7 @@ impl BackgroundIndexer {
         let hnsw_index: Option<Arc<HnswIndex>> = self.hnsw_index;
         let change_rx = self.change_rx;
         let progress_callback = self.progress_callback;
+        let channel_overflow = self.channel_overflow;
 
         tokio::spawn(async move {
             // --- Phase 1: Full index ---
@@ -228,7 +252,8 @@ impl BackgroundIndexer {
                     embedding_manager.as_ref(),
                     embedding_service.as_ref(),
                     hnsw_index.as_ref(),
-                    &gitignore,
+                    gitignore,
+                    channel_overflow.as_ref().map(|f| f.as_ref()),
                 )
                 .await;
             }
@@ -248,6 +273,7 @@ impl BackgroundIndexer {
         let embedding_service = self.embedding_service;
         let hnsw_index = self.hnsw_index;
         let change_rx = self.change_rx;
+        let channel_overflow = self.channel_overflow;
 
         tokio::spawn(async move {
             if let Some(mut rx) = change_rx {
@@ -263,7 +289,8 @@ impl BackgroundIndexer {
                     embedding_manager.as_ref(),
                     embedding_service.as_ref(),
                     hnsw_index.as_ref(),
-                    &gitignore,
+                    gitignore,
+                    channel_overflow.as_ref().map(|f| f.as_ref()),
                 )
                 .await;
             }
@@ -350,6 +377,11 @@ fn is_ignored_by_gitignore(gitignore: &Gitignore, project_root: &Path, path: &Pa
 }
 
 /// Shared Phase-2 incremental loop used by both `start()` and `start_watch_only()`.
+///
+/// Uses a batch-drain pattern: waits for the first event, then drains all
+/// immediately available events before processing.  This provides natural
+/// deduplication for bursts (e.g. `git checkout`) and enables `.gitignore`
+/// change detection within each batch.
 async fn run_incremental_loop(
     rx: &mut tokio::sync::mpsc::Receiver<PathBuf>,
     project_root: &Path,
@@ -357,40 +389,50 @@ async fn run_incremental_loop(
     embedding_manager: Option<&Arc<EmbeddingManager>>,
     embedding_service: Option<&Arc<EmbeddingService>>,
     hnsw_index: Option<&Arc<HnswIndex>>,
-    gitignore: &Gitignore,
+    mut gitignore: Gitignore,
+    channel_overflow: Option<&AtomicBool>,
 ) {
     let project_path = project_root.to_string_lossy().to_string();
 
     debug!("background indexer: listening for incremental changes");
-    while let Some(changed_path) = rx.recv().await {
-        if is_ignored_by_gitignore(gitignore, project_root, &changed_path) {
-            debug!(path = %changed_path.display(), "background indexer: skipping gitignored path");
-            continue;
+    loop {
+        // Wait for the first event (blocks until a path arrives or channel closes).
+        let first = match rx.recv().await {
+            Some(path) => path,
+            None => break,
+        };
+
+        // Drain all immediately available events into a batch.
+        let mut batch = vec![first];
+        while let Ok(path) = rx.try_recv() {
+            batch.push(path);
         }
-        match run_incremental_index(project_root, index_store, &changed_path) {
-            Ok(IncrementalResult::Deleted { rel_path }) => {
-                // Mark HNSW entries stale, then delete embeddings from SQLite.
-                if let Some(hnsw) = hnsw_index {
-                    if hnsw.is_ready().await {
-                        if let Ok(rowids) =
-                            index_store.get_embedding_rowids_for_file(&project_path, &rel_path)
-                        {
-                            for rowid in rowids {
-                                hnsw.mark_stale(rowid).await;
-                            }
-                        }
-                    }
-                }
-                let _ = index_store.delete_embeddings_for_file(&project_path, &rel_path);
-                continue; // skip embedding re-generation
+
+        // Detect .gitignore changes in this batch and rebuild the matcher.
+        let gitignore_changed = batch.iter().any(|p| {
+            p.file_name().and_then(|n| n.to_str()) == Some(".gitignore")
+        });
+        if gitignore_changed {
+            gitignore = build_gitignore_matcher(project_root);
+            info!("background indexer: .gitignore changed, rebuilt matcher");
+            apply_gitignore_retroactively(project_root, index_store, &gitignore, hnsw_index).await;
+        }
+
+        // Deduplicate paths within the batch.
+        let unique: HashSet<PathBuf> = batch.into_iter().collect();
+
+        for changed_path in unique {
+            if is_ignored_by_gitignore(&gitignore, project_root, &changed_path) {
+                debug!(path = %changed_path.display(), "background indexer: skipping gitignored path");
+                continue;
             }
-            Ok(IncrementalResult::DirectoryDeleted { child_rel_paths }) => {
-                // A directory was deleted — clean up HNSW + embeddings for all children.
-                for rel_path in &child_rel_paths {
+            match run_incremental_index(project_root, index_store, &changed_path) {
+                Ok(IncrementalResult::Deleted { rel_path }) => {
+                    // Mark HNSW entries stale, then delete embeddings from SQLite.
                     if let Some(hnsw) = hnsw_index {
                         if hnsw.is_ready().await {
                             if let Ok(rowids) =
-                                index_store.get_embedding_rowids_for_file(&project_path, rel_path)
+                                index_store.get_embedding_rowids_for_file(&project_path, &rel_path)
                             {
                                 for rowid in rowids {
                                     hnsw.mark_stale(rowid).await;
@@ -398,58 +440,223 @@ async fn run_incremental_loop(
                             }
                         }
                     }
-                    let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
+                    let _ = index_store.delete_embeddings_for_file(&project_path, &rel_path);
                 }
-                continue; // skip embedding re-generation
-            }
-            Ok(IncrementalResult::Skipped) => continue,
-            Ok(IncrementalResult::Updated) => { /* fall through to embedding update */ }
-            Err(e) => {
-                warn!(
-                    path = %changed_path.display(),
-                    error = %e,
-                    "background indexer: incremental index failed"
-                );
-                continue;
+                Ok(IncrementalResult::DirectoryDeleted { child_rel_paths }) => {
+                    for rel_path in &child_rel_paths {
+                        if let Some(hnsw) = hnsw_index {
+                            if hnsw.is_ready().await {
+                                if let Ok(rowids) =
+                                    index_store.get_embedding_rowids_for_file(&project_path, rel_path)
+                                {
+                                    for rowid in rowids {
+                                        hnsw.mark_stale(rowid).await;
+                                    }
+                                }
+                            }
+                        }
+                        let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
+                    }
+                }
+                Ok(IncrementalResult::Skipped) => {}
+                Ok(IncrementalResult::Updated {
+                    content,
+                    language,
+                    rel_path,
+                }) => {
+                    if let Some(emb_mgr) = embedding_manager {
+                        if let Err(e) = run_incremental_embedding_managed_with_content(
+                            project_root,
+                            index_store,
+                            emb_mgr,
+                            &changed_path,
+                            &content,
+                            &language,
+                            &rel_path,
+                            hnsw_index,
+                        )
+                        .await
+                        {
+                            warn!(
+                                path = %changed_path.display(),
+                                error = %e,
+                                "background indexer: incremental embedding (managed) failed"
+                            );
+                        }
+                    } else if let Some(emb_svc) = embedding_service {
+                        if let Err(e) = run_incremental_embedding_with_content(
+                            project_root,
+                            index_store,
+                            emb_svc,
+                            &changed_path,
+                            &content,
+                            &language,
+                            &rel_path,
+                            hnsw_index,
+                        )
+                        .await
+                        {
+                            warn!(
+                                path = %changed_path.display(),
+                                error = %e,
+                                "background indexer: incremental embedding failed"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        path = %changed_path.display(),
+                        error = %e,
+                        "background indexer: incremental index failed"
+                    );
+                }
             }
         }
 
-        // Re-embed the changed file — prefer manager over direct service
-        if let Some(emb_mgr) = embedding_manager {
-            if let Err(e) = run_incremental_embedding_managed(
-                project_root,
-                index_store,
-                emb_mgr,
-                &changed_path,
-                hnsw_index,
-            )
-            .await
-            {
-                warn!(
-                    path = %changed_path.display(),
-                    error = %e,
-                    "background indexer: incremental embedding (managed) failed"
-                );
-            }
-        } else if let Some(emb_svc) = embedding_service {
-            if let Err(e) = run_incremental_embedding(
-                project_root,
-                index_store,
-                emb_svc,
-                &changed_path,
-                hnsw_index,
-            )
-            .await
-            {
-                warn!(
-                    path = %changed_path.display(),
-                    error = %e,
-                    "background indexer: incremental embedding failed"
-                );
+        // Check channel overflow flag after processing each batch.
+        if let Some(flag) = channel_overflow {
+            if flag.swap(false, Ordering::AcqRel) {
+                info!("background indexer: channel overflow detected, running catch-up sync");
+                run_catchup_sync(project_root, index_store, &gitignore);
             }
         }
     }
     debug!("background indexer: change channel closed, stopping");
+}
+
+/// Remove index entries for files that are now matched by an updated gitignore.
+///
+/// Called after `.gitignore` changes to clean up entries that should no longer
+/// be indexed.
+async fn apply_gitignore_retroactively(
+    project_root: &Path,
+    index_store: &IndexStore,
+    gitignore: &Gitignore,
+    hnsw_index: Option<&Arc<HnswIndex>>,
+) {
+    let project_path = project_root.to_string_lossy().to_string();
+    let indexed_paths = match index_store.get_indexed_file_paths(&project_path) {
+        Ok(paths) => paths,
+        Err(e) => {
+            warn!(error = %e, "background indexer: failed to get indexed paths for gitignore cleanup");
+            return;
+        }
+    };
+
+    let mut removed = 0usize;
+    for rel_path in &indexed_paths {
+        let abs_path = project_root.join(rel_path);
+        if is_ignored_by_gitignore(gitignore, project_root, &abs_path) {
+            // Mark HNSW entries stale
+            if let Some(hnsw) = hnsw_index {
+                if hnsw.is_ready().await {
+                    if let Ok(rowids) =
+                        index_store.get_embedding_rowids_for_file(&project_path, rel_path)
+                    {
+                        for rowid in rowids {
+                            hnsw.mark_stale(rowid).await;
+                        }
+                    }
+                }
+            }
+            let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
+            let _ = index_store.delete_file_index(&project_path, rel_path);
+            removed += 1;
+        }
+    }
+
+    if removed > 0 {
+        info!(
+            removed_files = removed,
+            "background indexer: removed newly-ignored files from index"
+        );
+    }
+}
+
+/// Lightweight catch-up sync after channel overflow.
+///
+/// Reconciles the file index with the current state of the file system:
+/// 1. Remove entries for files that no longer exist or are now gitignored
+/// 2. Discover and index new/changed files
+///
+/// Does NOT trigger embedding updates — those happen on subsequent normal
+/// change events.
+fn run_catchup_sync(
+    project_root: &Path,
+    index_store: &IndexStore,
+    gitignore: &Gitignore,
+) {
+    let project_path = project_root.to_string_lossy().to_string();
+
+    // 1. Check existing index entries: remove deleted / gitignored files,
+    //    update files whose hash changed.
+    if let Ok(indexed_paths) = index_store.get_indexed_file_paths(&project_path) {
+        let mut removed = 0usize;
+        let mut updated = 0usize;
+
+        for rel_path in &indexed_paths {
+            let abs_path = project_root.join(rel_path);
+
+            // Remove if deleted or now gitignored
+            if !abs_path.is_file() || is_ignored_by_gitignore(gitignore, project_root, &abs_path) {
+                let _ = index_store.delete_file_index(&project_path, rel_path);
+                let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
+                removed += 1;
+                continue;
+            }
+
+            // Check hash staleness and re-index if changed
+            if let Ok(result) = run_incremental_index(project_root, index_store, &abs_path) {
+                if matches!(result, IncrementalResult::Updated { .. }) {
+                    updated += 1;
+                }
+            }
+        }
+
+        if removed > 0 || updated > 0 {
+            info!(
+                removed = removed,
+                updated = updated,
+                "background indexer: catch-up sync reconciled existing entries"
+            );
+        }
+    }
+
+    // 2. Discover new files by scanning the file system.
+    if let Ok(inventory) = build_file_inventory(project_root, &[]) {
+        let mut new_files = 0usize;
+        for item in &inventory.items {
+            let abs_path = project_root.join(&item.path);
+            if is_ignored_by_gitignore(gitignore, project_root, &abs_path) {
+                continue;
+            }
+            let content_hash = compute_content_hash(&abs_path);
+            let is_stale = index_store
+                .is_index_stale(&project_path, &item.path, &content_hash)
+                .unwrap_or(true);
+            if is_stale {
+                if let Err(e) = index_store.upsert_file_index(&project_path, item, &content_hash) {
+                    warn!(
+                        file = %item.path,
+                        error = %e,
+                        "background indexer: catch-up sync failed to upsert file"
+                    );
+                } else {
+                    new_files += 1;
+                }
+            }
+        }
+
+        if new_files > 0 {
+            info!(
+                new_files = new_files,
+                "background indexer: catch-up sync discovered new files"
+            );
+        }
+    }
+
+    info!("background indexer: catch-up sync complete");
 }
 
 /// Run a full index of every file under `project_root`.
@@ -570,7 +777,13 @@ fn run_incremental_index(
         return Ok(IncrementalResult::Skipped);
     }
 
-    let content_hash = compute_content_hash(changed_path);
+    // Single disk read: read bytes once and derive hash + content from them.
+    let bytes = std::fs::read(changed_path).map_err(|e| e.to_string())?;
+    let content_hash = {
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        format!("{:x}", hasher.finalize())
+    };
 
     let stale = index_store
         .is_index_stale(&project_path, &rel_str, &content_hash)
@@ -581,8 +794,11 @@ fn run_incremental_index(
         return Ok(IncrementalResult::Skipped);
     }
 
-    // Build a minimal inventory item for this single file.
-    let metadata = std::fs::metadata(changed_path).map_err(|e| e.to_string())?;
+    // Convert the already-read bytes to UTF-8 string.
+    let content = String::from_utf8(bytes)
+        .map_err(|_| format!("non-UTF-8 file: {:?}", changed_path))?;
+    let file_size = content.len() as u64;
+
     let ext = changed_path
         .extension()
         .and_then(|s| s.to_str())
@@ -590,16 +806,21 @@ fn run_incremental_index(
     let language = detect_language_simple(ext.as_deref());
 
     let limits = AnalysisLimits::default();
-    let symbols = extract_symbols(changed_path, &language, limits.max_symbols_per_file);
+    let symbols = extract_symbols_from_str(&content, &language, limits.max_symbols_per_file);
 
-    let line_count = estimate_line_count_simple(changed_path, metadata.len());
+    // Compute line count from already-read content instead of re-reading from disk.
+    let line_count = if content.is_empty() {
+        0
+    } else {
+        content.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1
+    };
 
     let item = super::analysis_index::FileInventoryItem {
         path: rel_str.clone(),
         component: detect_component(&rel_str),
-        language,
+        language: language.clone(),
         extension: ext,
-        size_bytes: metadata.len(),
+        size_bytes: file_size,
         line_count,
         is_test: is_test_path(&rel_str),
         symbols,
@@ -610,7 +831,11 @@ fn run_incremental_index(
         .map_err(|e| e.to_string())?;
 
     debug!(path = %rel_str, "background indexer: incremental index updated");
-    Ok(IncrementalResult::Updated)
+    Ok(IncrementalResult::Updated {
+        content,
+        language,
+        rel_path: rel_str,
+    })
 }
 
 /// Compute a SHA-256 content hash for the file at `path`.
@@ -642,23 +867,6 @@ fn detect_language_simple(ext: Option<&str>) -> String {
         _ => "other",
     }
     .to_string()
-}
-
-/// Estimate the number of lines in a file without loading very large files.
-fn estimate_line_count_simple(path: &Path, file_size: u64) -> usize {
-    if file_size > 2_000_000 {
-        return 0;
-    }
-    match std::fs::read(path) {
-        Ok(bytes) => {
-            if bytes.is_empty() {
-                0
-            } else {
-                bytes.iter().filter(|&&b| b == b'\n').count() + 1
-            }
-        }
-        Err(_) => 0,
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -918,6 +1126,10 @@ async fn run_embedding_pass(
 }
 
 /// Re-embed a single changed file.
+///
+/// Retained for catch-up sync and other scenarios where the file content is
+/// not already available in memory.
+#[allow(dead_code)]
 async fn run_incremental_embedding(
     project_root: &Path,
     index_store: &IndexStore,
@@ -1032,6 +1244,131 @@ async fn run_incremental_embedding(
             }
         } else if hnsw.is_ready().await {
             // Just save incrementally
+            if let Err(e) = hnsw.save_to_disk().await {
+                warn!(
+                    error = %e,
+                    "background indexer: failed to save HNSW after incremental embedding"
+                );
+            }
+        }
+    }
+
+    debug!(
+        path = %rel_str,
+        chunks = chunks.len(),
+        "background indexer: incremental embedding updated"
+    );
+    Ok(())
+}
+
+/// Re-embed a single changed file using already-read content.
+///
+/// Avoids redundant disk I/O by accepting the file content, language, and
+/// relative path that were already computed during the incremental index step.
+///
+/// Uses the "generate-then-swap" pattern for transactional safety.
+async fn run_incremental_embedding_with_content(
+    project_root: &Path,
+    index_store: &IndexStore,
+    embedding_service: &EmbeddingService,
+    _changed_path: &Path,
+    content: &str,
+    language: &str,
+    rel_str: &str,
+    hnsw_index: Option<&Arc<HnswIndex>>,
+) -> Result<(), String> {
+    let project_path = project_root.to_string_lossy().to_string();
+
+    if content.len() as u64 > MAX_EMBEDDABLE_FILE_SIZE {
+        return Ok(());
+    }
+
+    // Mark old HNSW entries as stale.
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, rel_str) {
+                for rowid in rowids {
+                    hnsw.mark_stale(rowid).await;
+                }
+            }
+        }
+    }
+
+    if !embedding_service.is_ready() {
+        match index_store.load_vocabulary(&project_path) {
+            Ok(Some(json)) => {
+                if let Err(e) = embedding_service.import_vocabulary(&json) {
+                    warn!(
+                        error = %e,
+                        "background indexer: failed to import vocabulary for incremental embedding"
+                    );
+                    return Ok(());
+                }
+                info!(
+                    "background indexer: restored vocabulary from SQLite for incremental embedding"
+                );
+            }
+            _ => return Ok(()),
+        }
+    }
+
+    // Generate all embeddings first (outside any transaction).
+    let chunks = chunk_file_content(content, language);
+    if chunks.is_empty() {
+        return Ok(());
+    }
+
+    let embeddings: Vec<Vec<f32>> = chunks
+        .iter()
+        .map(|chunk| embedding_service.embed_text(&chunk.text))
+        .collect();
+
+    // Build the batch for the atomic replace.
+    let embedding_bytes: Vec<Vec<u8>> = embeddings.iter().map(|e| embedding_to_bytes(e)).collect();
+    let batch: Vec<(i64, &str, &[u8])> = chunks
+        .iter()
+        .zip(embedding_bytes.iter())
+        .map(|(chunk, bytes)| (chunk.index as i64, chunk.text.as_str(), bytes.as_slice()))
+        .collect();
+
+    // Atomic delete-then-insert in a single transaction.
+    if let Err(e) = index_store.replace_file_embeddings_tfidf(&project_path, rel_str, &batch) {
+        warn!(
+            file = %rel_str,
+            error = %e,
+            "background indexer: transactional embedding replace failed"
+        );
+        return Err(e.to_string());
+    }
+
+    // Insert new embeddings into HNSW.
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
+                if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
+                    &project_path,
+                    rel_str,
+                    chunk.index as i64,
+                ) {
+                    hnsw.insert(rowid, embedding).await;
+                }
+            }
+        }
+    }
+
+    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%)
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await && hnsw.needs_rebuild().await {
+            info!(
+                "background indexer: HNSW stale ratio exceeded 10%, triggering full rebuild"
+            );
+            if let Err(e) = rebuild_hnsw_after_embedding(index_store, &project_path, hnsw).await {
+                warn!(
+                    error = %e,
+                    "background indexer: periodic HNSW rebuild failed"
+                );
+            }
+        } else if hnsw.is_ready().await {
             if let Err(e) = hnsw.save_to_disk().await {
                 warn!(
                     error = %e,
@@ -1197,6 +1534,10 @@ async fn run_embedding_pass_managed(
 ///
 /// Provider-aware replacement for `run_incremental_embedding`. Handles
 /// TF-IDF vocabulary restoration from SQLite when the provider is not ready.
+///
+/// Retained for catch-up sync and other scenarios where the file content is
+/// not already available in memory.
+#[allow(dead_code)]
 async fn run_incremental_embedding_managed(
     project_root: &Path,
     index_store: &IndexStore,
@@ -1326,6 +1667,155 @@ async fn run_incremental_embedding_managed(
             }
         } else if hnsw.is_ready().await {
             // Just save incrementally
+            if let Err(e) = hnsw.save_to_disk().await {
+                warn!(
+                    error = %e,
+                    "background indexer: failed to save HNSW after incremental embedding (managed)"
+                );
+            }
+        }
+    }
+
+    debug!(
+        path = %rel_str,
+        chunks = chunks.len(),
+        "background indexer: incremental embedding updated (managed)"
+    );
+    Ok(())
+}
+
+/// Re-embed a single changed file using the `EmbeddingManager` and already-read content.
+///
+/// Avoids redundant disk I/O by accepting the file content, language, and
+/// relative path that were already computed during the incremental index step.
+///
+/// Uses the "generate-then-swap" pattern: embeddings are computed first
+/// (outside any transaction), then atomically replaced in SQLite via
+/// `replace_file_embeddings`.  If the API call fails the old embeddings
+/// remain intact.
+async fn run_incremental_embedding_managed_with_content(
+    project_root: &Path,
+    index_store: &IndexStore,
+    manager: &EmbeddingManager,
+    _changed_path: &Path,
+    content: &str,
+    language: &str,
+    rel_str: &str,
+    hnsw_index: Option<&Arc<HnswIndex>>,
+) -> Result<(), String> {
+    let project_path = project_root.to_string_lossy().to_string();
+
+    if content.len() as u64 > MAX_EMBEDDABLE_FILE_SIZE {
+        return Ok(());
+    }
+
+    // Mark old HNSW entries as stale (safe even if the API call later fails —
+    // a periodic HNSW rebuild will reconcile).
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, rel_str) {
+                for rowid in rowids {
+                    hnsw.mark_stale(rowid).await;
+                }
+            }
+        }
+    }
+
+    // If primary provider is TF-IDF, ensure vocabulary is loaded
+    if manager.provider_type() == EmbeddingProviderType::TfIdf {
+        let primary = manager.primary_provider();
+        if let Some(tfidf) = primary.as_any().downcast_ref::<TfIdfEmbeddingProvider>() {
+            if !tfidf.is_ready() {
+                match index_store.load_vocabulary(&project_path) {
+                    Ok(Some(json)) => {
+                        if let Err(e) = tfidf.import_vocabulary(&json) {
+                            warn!(
+                                error = %e,
+                                "background indexer: failed to import vocabulary for incremental embedding (managed)"
+                            );
+                            return Ok(());
+                        }
+                        info!(
+                            "background indexer: restored vocabulary from SQLite for incremental embedding (managed)"
+                        );
+                    }
+                    _ => return Ok(()),
+                }
+            }
+        }
+    }
+
+    let chunks = chunk_file_content(content, language);
+    if chunks.is_empty() {
+        return Ok(());
+    }
+
+    let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
+
+    // Generate embeddings OUTSIDE the transaction (may call external API).
+    let embeddings = manager
+        .embed_documents(&texts)
+        .await
+        .map_err(|e| format!("embedding manager incremental embed failed: {}", e))?;
+
+    // Build the batch for the atomic replace.
+    let embedding_bytes: Vec<Vec<u8>> = embeddings.iter().map(|e| embedding_to_bytes(e)).collect();
+    let batch: Vec<(i64, &str, &[u8])> = chunks
+        .iter()
+        .zip(embedding_bytes.iter())
+        .map(|(chunk, bytes)| (chunk.index as i64, chunk.text.as_str(), bytes.as_slice()))
+        .collect();
+
+    // Determine provider metadata for the stored embeddings.
+    let provider_type_str = format!("{:?}", manager.provider_type()).to_lowercase();
+    let provider_model = manager.display_name().to_string();
+    let dim = embeddings.first().map(|e| e.len() as i64).unwrap_or(0);
+
+    // Atomic delete-then-insert in a single transaction.
+    if let Err(e) = index_store.replace_file_embeddings(
+        &project_path,
+        rel_str,
+        &batch,
+        &provider_type_str,
+        &provider_model,
+        dim,
+    ) {
+        warn!(
+            file = %rel_str,
+            error = %e,
+            "background indexer: transactional embedding replace failed (managed)"
+        );
+        return Err(e.to_string());
+    }
+
+    // Insert new embeddings into HNSW.
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
+                if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
+                    &project_path,
+                    rel_str,
+                    chunk.index as i64,
+                ) {
+                    hnsw.insert(rowid, embedding).await;
+                }
+            }
+        }
+    }
+
+    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%)
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await && hnsw.needs_rebuild().await {
+            info!(
+                "background indexer: HNSW stale ratio exceeded 10% (managed), triggering full rebuild"
+            );
+            if let Err(e) = rebuild_hnsw_after_embedding(index_store, &project_path, hnsw).await {
+                warn!(
+                    error = %e,
+                    "background indexer: periodic HNSW rebuild failed (managed)"
+                );
+            }
+        } else if hnsw.is_ready().await {
             if let Err(e) = hnsw.save_to_disk().await {
                 warn!(
                     error = %e,

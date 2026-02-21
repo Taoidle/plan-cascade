@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -327,7 +328,8 @@ impl IndexManager {
         let hnsw_idx = self.get_or_create_hnsw(project_path, dim).await;
 
         // Create a channel + file-system watcher for Phase 2.
-        let (change_tx, change_rx, watcher) = Self::create_file_watcher(project_path);
+        let (change_tx, change_rx, watcher, overflow_flag) =
+            Self::create_file_watcher(project_path);
 
         // Capture provider display name before embedding_mgr is moved into the indexer.
         let provider_display_name = embedding_mgr.display_name().to_string();
@@ -338,7 +340,8 @@ impl IndexManager {
                 .with_embedding_service(embedding_svc)
                 .with_embedding_manager(embedding_mgr)
                 .with_hnsw_index(hnsw_idx)
-                .with_change_receiver(change_rx);
+                .with_change_receiver(change_rx)
+                .with_channel_overflow_flag(overflow_flag);
 
             let join = indexer.start().await;
             let result = join.await;
@@ -583,20 +586,25 @@ impl IndexManager {
 
     /// Create a debounced file watcher + mpsc channel for a project directory.
     ///
-    /// Returns `(sender, receiver, optional_debouncer)`.  The sender is kept
-    /// alongside the `IndexerEntry` so that external callers can also push
-    /// file-change notifications.
+    /// Returns `(sender, receiver, optional_debouncer, overflow_flag)`.
+    /// The sender is kept alongside the `IndexerEntry` so that external
+    /// callers can also push file-change notifications.  The overflow flag
+    /// is set to `true` whenever `try_send` fails (channel full) so the
+    /// incremental loop can trigger a catch-up sync.
     fn create_file_watcher(
         project_path: &str,
     ) -> (
         tokio::sync::mpsc::Sender<PathBuf>,
         tokio::sync::mpsc::Receiver<PathBuf>,
         Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>,
+        Arc<AtomicBool>,
     ) {
         let (tx, rx) = tokio::sync::mpsc::channel::<PathBuf>(4096);
+        let overflow_flag = Arc::new(AtomicBool::new(false));
 
         let watcher = {
             let tx_clone = tx.clone();
+            let overflow = Arc::clone(&overflow_flag);
             let root = PathBuf::from(project_path);
             match notify_debouncer_mini::new_debouncer(
                 Duration::from_millis(200),
@@ -611,9 +619,12 @@ impl IndexManager {
                             // is_file() would be false.  The incremental
                             // indexer handles non-file paths gracefully.
                             if let Err(e) = tx_clone.try_send(event.path) {
+                                // Set the overflow flag so the incremental loop
+                                // can trigger a catch-up sync later.
+                                overflow.store(true, std::sync::atomic::Ordering::Release);
                                 tracing::warn!(
                                     path = %e.into_inner().display(),
-                                    "index watcher: channel full, event dropped — consider reindex"
+                                    "index watcher: channel full, event dropped — catch-up sync will reconcile"
                                 );
                             }
                         }
@@ -644,7 +655,7 @@ impl IndexManager {
             }
         };
 
-        (tx, rx, watcher)
+        (tx, rx, watcher, overflow_flag)
     }
 
     /// Start an incremental-only file watcher for a project that already has
@@ -660,7 +671,8 @@ impl IndexManager {
             }
         }
 
-        let (change_tx, change_rx, watcher) = Self::create_file_watcher(project_path);
+        let (change_tx, change_rx, watcher, overflow_flag) =
+            Self::create_file_watcher(project_path);
 
         let project_root = PathBuf::from(project_path);
         let index_store = self.index_store.clone();
@@ -680,7 +692,8 @@ impl IndexManager {
         };
 
         let mut indexer = BackgroundIndexer::new(project_root, index_store)
-            .with_change_receiver(change_rx);
+            .with_change_receiver(change_rx)
+            .with_channel_overflow_flag(overflow_flag);
         if let Some(svc) = embedding_svc {
             indexer = indexer.with_embedding_service(svc);
         }

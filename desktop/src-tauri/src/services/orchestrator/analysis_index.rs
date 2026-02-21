@@ -489,11 +489,11 @@ pub fn extract_symbols(path: &Path, language: &str, max_symbols: usize) -> Vec<S
     extract_symbols_from_str(&content, language, max_symbols)
 }
 
-/// Inner helper that operates on a string slice (simplifies testing).
+/// Extract symbols from a string slice (simplifies testing and avoids redundant file reads).
 ///
 /// Uses tree-sitter for accurate parsing when the language is supported,
 /// falling back to regex-based extraction for unsupported languages.
-fn extract_symbols_from_str(content: &str, language: &str, max_symbols: usize) -> Vec<SymbolInfo> {
+pub fn extract_symbols_from_str(content: &str, language: &str, max_symbols: usize) -> Vec<SymbolInfo> {
     // Try tree-sitter first for supported languages
     if super::tree_sitter_parser::is_language_supported(language) {
         let symbols = super::tree_sitter_parser::parse_symbols(content, language, max_symbols);

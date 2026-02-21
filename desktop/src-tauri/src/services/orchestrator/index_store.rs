@@ -862,6 +862,71 @@ impl IndexStore {
         Ok(deleted)
     }
 
+    /// Atomically replace all embeddings for a file in a single SQLite transaction.
+    ///
+    /// Deletes the old embeddings and inserts the new ones inside the same
+    /// transaction.  If anything fails the entire operation is rolled back,
+    /// preserving the previous state.  This prevents a crash between DELETE
+    /// and INSERT from leaving the file without any embeddings.
+    pub fn replace_file_embeddings(
+        &self,
+        project_path: &str,
+        file_path: &str,
+        new_embeddings: &[(i64, &str, &[u8])], // (chunk_index, chunk_text, embedding_bytes)
+        provider_type: &str,
+        provider_model: &str,
+        embedding_dimension: i64,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute(
+            "DELETE FROM file_embeddings WHERE project_path = ?1 AND file_path = ?2",
+            params![project_path, file_path],
+        )?;
+
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO file_embeddings (project_path, file_path, chunk_index, chunk_text, embedding,
+                                              provider_type, provider_model, embedding_dimension, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, CURRENT_TIMESTAMP)",
+            )?;
+            for (idx, text, bytes) in new_embeddings {
+                stmt.execute(params![
+                    project_path,
+                    file_path,
+                    idx,
+                    text,
+                    bytes,
+                    provider_type,
+                    provider_model,
+                    embedding_dimension,
+                ])?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Convenience wrapper for `replace_file_embeddings` with default TF-IDF
+    /// provider metadata.
+    pub fn replace_file_embeddings_tfidf(
+        &self,
+        project_path: &str,
+        file_path: &str,
+        new_embeddings: &[(i64, &str, &[u8])],
+    ) -> AppResult<()> {
+        self.replace_file_embeddings(
+            project_path,
+            file_path,
+            new_embeddings,
+            "tfidf",
+            "tfidf-v1",
+            0,
+        )
+    }
+
     /// Delete all embeddings for a project that match a specific provider_type.
     ///
     /// Useful for clearing stale embeddings when switching to a different
