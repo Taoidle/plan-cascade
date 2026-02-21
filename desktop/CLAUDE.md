@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Plan Cascade Desktop is a cross-platform AI programming orchestration app built with **Tauri 2** (React 18 frontend + pure Rust backend, no Python sidecar). It manages LLM-powered task execution with features like agent management, analytics, quality gates, git worktrees, timeline checkpoints, and MCP server integration.
+Plan Cascade Desktop is a cross-platform AI programming orchestration app built with **Tauri 2** (React 18 frontend + pure Rust backend, no Python sidecar). It manages LLM-powered task execution with features like agent management, analytics, quality gates, git worktrees, timeline checkpoints, MCP server integration, knowledge base (RAG), plugins, guardrails, webhooks, remote control, and A2A protocol.
 
 ## Build & Development Commands
 
@@ -20,6 +20,9 @@ pnpm test                     # Vitest (jsdom environment)
 pnpm test:watch               # Vitest watch mode
 pnpm test:coverage            # Coverage report (60% threshold)
 
+# Run a single frontend test file
+pnpm test -- src/store/execution.test.ts
+
 # Full app
 pnpm tauri:dev                # Tauri dev with hot reload + devtools
 pnpm tauri:build              # Production build for current platform
@@ -29,6 +32,7 @@ pnpm tauri:build:dev          # Debug build
 cargo test                    # Rust unit + integration tests
 cargo clippy                  # Rust linting
 cargo check                   # Type checking
+cargo build --features browser  # Build with optional browser automation (chromiumoxide)
 ```
 
 Platform-specific builds: `pnpm tauri:build:windows`, `pnpm tauri:build:macos`, `pnpm tauri:build:linux`.
@@ -42,17 +46,40 @@ Frontend (React/TypeScript)  ──Tauri IPC──>  Commands (Rust)  ──>  S
      src/                                  src-tauri/src/commands/  src-tauri/src/services/  src-tauri/src/storage/
 ```
 
-**Frontend** (`src/`): React components organized by feature domain (`components/{Agents,Analytics,ClaudeCodeMode,ExpertMode,SimpleMode,Projects,Timeline,Settings,MCP,...}/`). State managed via Zustand stores (`store/`). IPC wrappers in `lib/tauri.ts`. Path alias: `@/*` maps to `src/*`.
+**Frontend** (`src/`): React components organized by feature domain (`components/{Agents,Analytics,ClaudeCodeMode,ExpertMode,SimpleMode,Projects,Timeline,Settings,MCP,KnowledgeBase,Plugins,...}/`). State managed via Zustand stores (`store/`). IPC wrappers in `lib/tauri.ts`. Path alias: `@/*` maps to `src/*`.
 
-**Backend** (`src-tauri/src/`): ~115 Tauri commands across 15 domain modules in `commands/`. Business logic in `services/` (often with subdirectories for complex domains like `analytics/`, `claude_code/`, `orchestrator/`). Data structures in `models/`. Persistence via `storage/` (SQLite with r2d2 connection pooling, OS keyring for API keys, JSON config files).
+**Backend** (`src-tauri/src/`): ~300 Tauri commands across 30+ domain modules in `commands/`. Business logic in `services/` (often with subdirectories for complex domains like `analytics/`, `claude_code/`, `orchestrator/`, `git/`, `streaming/`, `knowledge/`, `plugins/`, `guardrail/`, `webhook/`, `remote/`). Data structures in `models/`. Persistence via `storage/` (SQLite with r2d2 connection pooling, AES-256-GCM encrypted keyring for API keys, JSON config files).
+
+### Cargo Workspace
+
+Five crates with dependency chain: `core` <-- `llm` <-- `tools`, `core` <-- `quality-gates`.
+
+| Crate | Path | Purpose |
+|-------|------|---------|
+| `plan-cascade-desktop` | `src-tauri/` | Main Tauri app, commands, services, storage |
+| `plan-cascade-core` | `crates/core/` | Core traits, error types, context hierarchy, streaming, event actions |
+| `plan-cascade-llm` | `crates/llm/` | LLM provider abstraction + streaming adapters |
+| `plan-cascade-tools` | `crates/tools/` | Tool executor types, trait definitions, prompt fallback utilities |
+| `plan-cascade-quality-gates` | `crates/quality-gates/` | Quality gate pipeline, validators, project type detection |
 
 ### App State Architecture
 
-Seven Tauri-managed state objects initialized in `main.rs`:
-- `AppState` — core services (database, keyring, config); lazy-initialized via `init_app` command
-- `ClaudeCodeState`, `AnalyticsState`, `QualityGatesState`, `WorktreeState`, `StandaloneState`, `SpecInterviewState` — domain-specific state
+Eighteen Tauri-managed state objects initialized in `main.rs`:
+- `AppState` — core services (database, keyring, config, memory store); lazy-initialized via `init_app` command
+- Domain-specific: `ClaudeCodeState`, `AnalyticsState`, `QualityGatesState`, `WorktreeState`, `StandaloneState`, `SpecInterviewState`, `McpRuntimeState`, `LspState`, `PluginState`, `GuardrailState`, `WebhookState`, `RemoteState`, `TaskModeState`, `ExecutionRegistry`, `KnowledgeState`, `ArtifactState`, `GitState`
 
 State is accessed in commands via `tauri::State<'_, T>`. `AppState` uses `Arc<RwLock<Option<T>>>` for lazy initialization — services start as `None` and are populated by `init_app`.
+
+### UI Modes
+
+The frontend renders mode-specific panels based on the active mode in the `mode` Zustand store:
+- `simple` — Main chat mode with Git panel sidebar
+- `expert` — PRD generation, dependency graph, strategy selection
+- `claude-code` — Claude Code CLI GUI mode
+- `projects` — Project/session browser
+- `analytics` — Usage and cost dashboard
+- `knowledge` — RAG knowledge base
+- `artifacts` — Artifact version browser
 
 ### IPC Pattern
 
@@ -88,11 +115,11 @@ Key components:
 
 ### LLM Provider Abstraction
 
-Six providers in `services/llm/` with different tool-calling reliability levels:
+Providers in `services/llm/` with different tool-calling reliability levels:
 
 - **Reliable** (Anthropic, OpenAI): Native tool use, LLM-summary compaction
 - **Unreliable** (Qwen, DeepSeek, GLM): Dual-channel tool calling — tools passed via native API AND prompt-based fallback instructions. Native `tool_calls` checked first, then text-based parsing with repair-hint retry.
-- **None** (Ollama): Prompt-only tool calling, no native tool support
+- **None** (Ollama, MiniMax): Prompt-only tool calling, no native tool support
 
 Compaction strategy follows provider reliability: reliable providers use LLM-summary rewrite, unreliable/none use prefix-stable sliding-window deletion (preserves head 2 + tail 6 messages).
 
@@ -119,3 +146,4 @@ Real-time updates use Tauri's event system. Backend emits via `AppHandle::emit("
 - Backend integration tests in `src-tauri/tests/integration/`
 - Release builds use LTO, `opt-level = "s"`, and strip symbols
 - Conventional commits: `type(scope): description` (e.g., `feat(analytics): add CSV export`, `fix(agents): resolve duplicate ID issue`)
+- Optional `browser` feature flag enables chromiumoxide-based headless Chrome automation
