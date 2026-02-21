@@ -475,6 +475,28 @@ impl IndexStore {
         Ok(deleted)
     }
 
+    /// Return all indexed file paths under a given directory prefix.
+    ///
+    /// Used by the incremental indexer to discover child files when a
+    /// directory deletion event is received.  The `dir_prefix` should be a
+    /// relative path (e.g. `"src/components"`).
+    pub fn get_indexed_files_under_prefix(
+        &self,
+        project_path: &str,
+        dir_prefix: &str,
+    ) -> AppResult<Vec<String>> {
+        let conn = self.get_connection()?;
+        let pattern = format!("{}/%", dir_prefix.trim_end_matches('/'));
+        let mut stmt = conn.prepare(
+            "SELECT file_path FROM file_index WHERE project_path = ?1 AND file_path LIKE ?2",
+        )?;
+        let paths = stmt
+            .query_map(params![project_path, pattern], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(paths)
+    }
+
     /// Return all indexed file paths for a project.
     ///
     /// Used by the full-index stale-entry cleanup to compute the set

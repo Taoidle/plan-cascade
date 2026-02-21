@@ -593,7 +593,7 @@ impl IndexManager {
         tokio::sync::mpsc::Receiver<PathBuf>,
         Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>,
     ) {
-        let (tx, rx) = tokio::sync::mpsc::channel::<PathBuf>(256);
+        let (tx, rx) = tokio::sync::mpsc::channel::<PathBuf>(4096);
 
         let watcher = {
             let tx_clone = tx.clone();
@@ -610,7 +610,12 @@ impl IndexManager {
                             // produce paths that no longer exist on disk, so
                             // is_file() would be false.  The incremental
                             // indexer handles non-file paths gracefully.
-                            let _ = tx_clone.try_send(event.path);
+                            if let Err(e) = tx_clone.try_send(event.path) {
+                                tracing::warn!(
+                                    path = %e.into_inner().display(),
+                                    "index watcher: channel full, event dropped — consider reindex"
+                                );
+                            }
                         }
                     }
                 },

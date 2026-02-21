@@ -6,6 +6,7 @@
 //! triggered by file-watcher events.
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ignore::WalkBuilder;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -55,6 +56,8 @@ enum IncrementalResult {
     Updated,
     /// The file was deleted from disk and its index entry was cleaned up.
     Deleted { rel_path: String },
+    /// A directory was deleted; all child file indexes were cleaned up.
+    DirectoryDeleted { child_rel_paths: Vec<String> },
     /// No action was needed (file unchanged or event was irrelevant).
     Skipped,
 }
@@ -272,14 +275,70 @@ impl BackgroundIndexer {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Build a `Gitignore` matcher from the project's `.gitignore` and `.git/info/exclude`.
+/// Build a comprehensive `Gitignore` matcher for incremental indexing.
 ///
-/// Returns `Gitignore::empty()` if neither file exists or parsing fails.
+/// Respects the same gitignore hierarchy as the full index (`WalkBuilder`):
+/// - Global gitignore (`~/.config/git/ignore` or `$XDG_CONFIG_HOME/git/ignore`)
+/// - `.git/info/exclude`
+/// - Root `.gitignore`
+/// - Subdirectory `.gitignore` files (e.g. `src/.gitignore`)
+///
+/// Returns `Gitignore::empty()` if building fails.
 fn build_gitignore_matcher(project_root: &Path) -> Gitignore {
     let mut builder = GitignoreBuilder::new(project_root);
-    builder.add(project_root.join(".gitignore"));
+
+    // 1. Global gitignore
+    if let Some(global_path) = resolve_global_gitignore() {
+        builder.add(global_path);
+    }
+
+    // 2. .git/info/exclude
     builder.add(project_root.join(".git/info/exclude"));
+
+    // 3. Root .gitignore
+    builder.add(project_root.join(".gitignore"));
+
+    // 4. Subdirectory .gitignore files — walk the tree using the `ignore` crate
+    //    itself so that already-ignored directories are skipped efficiently.
+    let walker = WalkBuilder::new(project_root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_exclude(true)
+        .git_global(true)
+        .max_depth(Some(15))
+        .build();
+
+    for entry in walker {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if path.is_file()
+            && path.file_name().and_then(|n| n.to_str()) == Some(".gitignore")
+            && path.parent() != Some(project_root)
+        {
+            builder.add(path);
+        }
+    }
+
     builder.build().unwrap_or_else(|_| Gitignore::empty())
+}
+
+/// Resolve the global gitignore path.
+///
+/// Checks `$XDG_CONFIG_HOME/git/ignore` first, then `~/.config/git/ignore`.
+fn resolve_global_gitignore() -> Option<PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        let p = PathBuf::from(xdg).join("git/ignore");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".config/git/ignore");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 /// Check whether a path should be ignored according to the gitignore matcher.
@@ -323,6 +382,24 @@ async fn run_incremental_loop(
                     }
                 }
                 let _ = index_store.delete_embeddings_for_file(&project_path, &rel_path);
+                continue; // skip embedding re-generation
+            }
+            Ok(IncrementalResult::DirectoryDeleted { child_rel_paths }) => {
+                // A directory was deleted — clean up HNSW + embeddings for all children.
+                for rel_path in &child_rel_paths {
+                    if let Some(hnsw) = hnsw_index {
+                        if hnsw.is_ready().await {
+                            if let Ok(rowids) =
+                                index_store.get_embedding_rowids_for_file(&project_path, rel_path)
+                            {
+                                for rowid in rowids {
+                                    hnsw.mark_stale(rowid).await;
+                                }
+                            }
+                        }
+                    }
+                    let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
+                }
                 continue; // skip embedding re-generation
             }
             Ok(IncrementalResult::Skipped) => continue,
@@ -458,8 +535,9 @@ fn run_incremental_index(
     let rel_str = rel.to_string_lossy().replace('\\', "/");
     let project_path = project_root.to_string_lossy().to_string();
 
-    // If the file no longer exists on disk, try to clean up its index entry.
+    // If the path no longer exists on disk, handle deletion.
     if !changed_path.is_file() {
+        // Try exact file match first (single file deleted).
         let deleted = index_store
             .delete_file_index(&project_path, &rel_str)
             .map_err(|e| e.to_string())?;
@@ -467,6 +545,28 @@ fn run_incremental_index(
             debug!(path = %rel_str, "background indexer: file deleted, cleaned up index");
             return Ok(IncrementalResult::Deleted { rel_path: rel_str });
         }
+
+        // If path doesn't exist at all, it may be a deleted directory.
+        // Find and clean up all child file indexes under this prefix.
+        if !changed_path.exists() {
+            let child_paths = index_store
+                .get_indexed_files_under_prefix(&project_path, &rel_str)
+                .map_err(|e| e.to_string())?;
+            if !child_paths.is_empty() {
+                for child in &child_paths {
+                    let _ = index_store.delete_file_index(&project_path, child);
+                }
+                debug!(
+                    path = %rel_str,
+                    children = child_paths.len(),
+                    "background indexer: directory deleted, cleaned up child file indexes"
+                );
+                return Ok(IncrementalResult::DirectoryDeleted {
+                    child_rel_paths: child_paths,
+                });
+            }
+        }
+
         return Ok(IncrementalResult::Skipped);
     }
 
