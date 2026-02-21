@@ -46,6 +46,16 @@ impl EmbeddingPassStats {
     }
 }
 
+/// Result of an incremental index operation for a single file-change event.
+enum IncrementalResult {
+    /// The file was re-indexed because its content hash changed.
+    Updated,
+    /// The file was deleted from disk and its index entry was cleaned up.
+    Deleted { rel_path: String },
+    /// No action was needed (file unchanged or event was irrelevant).
+    Skipped,
+}
+
 /// Background file indexer that populates and maintains the SQLite index.
 ///
 /// Usage:
@@ -204,54 +214,49 @@ impl BackgroundIndexer {
 
             // --- Phase 2: Incremental updates ---
             if let Some(mut rx) = change_rx {
-                debug!("background indexer: listening for incremental changes");
-                while let Some(changed_path) = rx.recv().await {
-                    if let Err(e) =
-                        run_incremental_index(&project_root, &index_store, &changed_path)
-                    {
-                        warn!(
-                            path = %changed_path.display(),
-                            error = %e,
-                            "background indexer: incremental index failed"
-                        );
-                    }
-                    // Re-embed the changed file — prefer manager over direct service
-                    if let Some(ref emb_mgr) = embedding_manager {
-                        if let Err(e) = run_incremental_embedding_managed(
-                            &project_root,
-                            &index_store,
-                            emb_mgr,
-                            &changed_path,
-                            hnsw_index.as_ref(),
-                        )
-                        .await
-                        {
-                            warn!(
-                                path = %changed_path.display(),
-                                error = %e,
-                                "background indexer: incremental embedding (managed) failed"
-                            );
-                        }
-                    } else if let Some(ref emb_svc) = embedding_service {
-                        if let Err(e) = run_incremental_embedding(
-                            &project_root,
-                            &index_store,
-                            emb_svc,
-                            &changed_path,
-                            hnsw_index.as_ref(),
-                        ).await {
-                            warn!(
-                                path = %changed_path.display(),
-                                error = %e,
-                                "background indexer: incremental embedding failed"
-                            );
-                        }
-                    }
-                }
-                debug!("background indexer: change channel closed, stopping");
+                run_incremental_loop(
+                    &mut rx,
+                    &project_root,
+                    &index_store,
+                    embedding_manager.as_ref(),
+                    embedding_service.as_ref(),
+                    hnsw_index.as_ref(),
+                )
+                .await;
             }
 
             embedding_stats
+        })
+    }
+
+    /// Spawn a background task that ONLY listens for incremental changes.
+    ///
+    /// Skips Phase 1 (full index) and Phase 1b (full embedding).
+    /// Used when restoring an already-indexed project after app restart.
+    pub async fn start_watch_only(self) -> tokio::task::JoinHandle<()> {
+        let project_root = self.project_root;
+        let index_store = self.index_store;
+        let embedding_manager = self.embedding_manager;
+        let embedding_service = self.embedding_service;
+        let hnsw_index = self.hnsw_index;
+        let change_rx = self.change_rx;
+
+        tokio::spawn(async move {
+            if let Some(mut rx) = change_rx {
+                debug!(
+                    project = %project_root.display(),
+                    "background indexer: starting watch-only incremental loop"
+                );
+                run_incremental_loop(
+                    &mut rx,
+                    &project_root,
+                    &index_store,
+                    embedding_manager.as_ref(),
+                    embedding_service.as_ref(),
+                    hnsw_index.as_ref(),
+                )
+                .await;
+            }
         })
     }
 }
@@ -259,6 +264,86 @@ impl BackgroundIndexer {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Shared Phase-2 incremental loop used by both `start()` and `start_watch_only()`.
+async fn run_incremental_loop(
+    rx: &mut tokio::sync::mpsc::Receiver<PathBuf>,
+    project_root: &Path,
+    index_store: &IndexStore,
+    embedding_manager: Option<&Arc<EmbeddingManager>>,
+    embedding_service: Option<&Arc<EmbeddingService>>,
+    hnsw_index: Option<&Arc<HnswIndex>>,
+) {
+    let project_path = project_root.to_string_lossy().to_string();
+
+    debug!("background indexer: listening for incremental changes");
+    while let Some(changed_path) = rx.recv().await {
+        match run_incremental_index(project_root, index_store, &changed_path) {
+            Ok(IncrementalResult::Deleted { rel_path }) => {
+                // Mark HNSW entries stale, then delete embeddings from SQLite.
+                if let Some(hnsw) = hnsw_index {
+                    if hnsw.is_ready().await {
+                        if let Ok(rowids) =
+                            index_store.get_embedding_rowids_for_file(&project_path, &rel_path)
+                        {
+                            for rowid in rowids {
+                                hnsw.mark_stale(rowid).await;
+                            }
+                        }
+                    }
+                }
+                let _ = index_store.delete_embeddings_for_file(&project_path, &rel_path);
+                continue; // skip embedding re-generation
+            }
+            Ok(IncrementalResult::Skipped) => continue,
+            Ok(IncrementalResult::Updated) => { /* fall through to embedding update */ }
+            Err(e) => {
+                warn!(
+                    path = %changed_path.display(),
+                    error = %e,
+                    "background indexer: incremental index failed"
+                );
+                continue;
+            }
+        }
+
+        // Re-embed the changed file — prefer manager over direct service
+        if let Some(emb_mgr) = embedding_manager {
+            if let Err(e) = run_incremental_embedding_managed(
+                project_root,
+                index_store,
+                emb_mgr,
+                &changed_path,
+                hnsw_index,
+            )
+            .await
+            {
+                warn!(
+                    path = %changed_path.display(),
+                    error = %e,
+                    "background indexer: incremental embedding (managed) failed"
+                );
+            }
+        } else if let Some(emb_svc) = embedding_service {
+            if let Err(e) = run_incremental_embedding(
+                project_root,
+                index_store,
+                emb_svc,
+                &changed_path,
+                hnsw_index,
+            )
+            .await
+            {
+                warn!(
+                    path = %changed_path.display(),
+                    error = %e,
+                    "background indexer: incremental embedding failed"
+                );
+            }
+        }
+    }
+    debug!("background indexer: change channel closed, stopping");
+}
 
 /// Run a full index of every file under `project_root`.
 ///
@@ -299,16 +384,43 @@ fn run_full_index(
         cb(total_files, total_files);
     }
 
+    // --- Stale entry cleanup ---
+    // Remove index entries for files that no longer exist in the project.
+    {
+        use std::collections::HashSet;
+
+        let current_paths: HashSet<&str> =
+            inventory.items.iter().map(|item| item.path.as_str()).collect();
+
+        if let Ok(indexed_paths) = index_store.get_indexed_file_paths(&project_path) {
+            let mut stale_count = 0usize;
+            for stale_path in &indexed_paths {
+                if !current_paths.contains(stale_path.as_str()) {
+                    let _ = index_store.delete_file_index(&project_path, stale_path);
+                    let _ = index_store.delete_embeddings_for_file(&project_path, stale_path);
+                    stale_count += 1;
+                }
+            }
+            if stale_count > 0 {
+                info!(
+                    stale_files = stale_count,
+                    "background indexer: cleaned up stale entries"
+                );
+            }
+        }
+    }
+
     info!(files = total_files, "background indexer: full index stored");
     Ok(())
 }
 
-/// Re-index a single file if its content hash is stale.
+/// Re-index a single file if its content hash is stale, or clean up its
+/// index entry when the file has been deleted from disk.
 fn run_incremental_index(
     project_root: &Path,
     index_store: &IndexStore,
     changed_path: &Path,
-) -> Result<(), String> {
+) -> Result<IncrementalResult, String> {
     let rel = changed_path
         .strip_prefix(project_root)
         .map_err(|_| format!("path {:?} is not under project root", changed_path))?;
@@ -316,10 +428,16 @@ fn run_incremental_index(
     let rel_str = rel.to_string_lossy().replace('\\', "/");
     let project_path = project_root.to_string_lossy().to_string();
 
-    // If the file no longer exists we skip silently (it was deleted).
+    // If the file no longer exists on disk, try to clean up its index entry.
     if !changed_path.is_file() {
-        debug!(path = %rel_str, "background indexer: skipping non-file path");
-        return Ok(());
+        let deleted = index_store
+            .delete_file_index(&project_path, &rel_str)
+            .map_err(|e| e.to_string())?;
+        if deleted > 0 {
+            debug!(path = %rel_str, "background indexer: file deleted, cleaned up index");
+            return Ok(IncrementalResult::Deleted { rel_path: rel_str });
+        }
+        return Ok(IncrementalResult::Skipped);
     }
 
     let content_hash = compute_content_hash(changed_path);
@@ -330,7 +448,7 @@ fn run_incremental_index(
 
     if !stale {
         debug!(path = %rel_str, "background indexer: file unchanged, skipping");
-        return Ok(());
+        return Ok(IncrementalResult::Skipped);
     }
 
     // Build a minimal inventory item for this single file.
@@ -362,7 +480,7 @@ fn run_incremental_index(
         .map_err(|e| e.to_string())?;
 
     debug!(path = %rel_str, "background indexer: incremental index updated");
-    Ok(())
+    Ok(IncrementalResult::Updated)
 }
 
 /// Compute a SHA-256 content hash for the file at `path`.

@@ -459,6 +459,97 @@ impl IndexStore {
         Ok(deleted)
     }
 
+    /// Return all indexed file paths for a project.
+    ///
+    /// Used by the full-index stale-entry cleanup to compute the set
+    /// difference between currently-existing files and indexed files.
+    pub fn get_indexed_file_paths(&self, project_path: &str) -> AppResult<Vec<String>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT file_path FROM file_index WHERE project_path = ?1",
+        )?;
+        let paths = stmt
+            .query_map(params![project_path], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(paths)
+    }
+
+    /// Return the SQLite ROWIDs of all embedding chunks for a specific file.
+    ///
+    /// Used to mark HNSW entries as stale before deleting the SQLite rows.
+    pub fn get_embedding_rowids_for_file(
+        &self,
+        project_path: &str,
+        file_path: &str,
+    ) -> AppResult<Vec<usize>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT rowid FROM file_embeddings WHERE project_path = ?1 AND file_path = ?2",
+        )?;
+        let rowids = stmt
+            .query_map(params![project_path, file_path], |row| {
+                row.get::<_, i64>(0).map(|v| v as usize)
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rowids)
+    }
+
+    /// Delete the index entry for a single file (file_index + file_symbols + FTS).
+    ///
+    /// Does **not** delete embeddings — the caller handles that separately
+    /// (e.g. after marking HNSW entries stale).
+    ///
+    /// Returns the number of `file_index` rows deleted (0 or 1).
+    pub fn delete_file_index(&self, project_path: &str, file_path: &str) -> AppResult<usize> {
+        let conn = self.get_connection()?;
+        conn.execute_batch("PRAGMA foreign_keys = ON")?;
+
+        // Look up the file_index id; if not found, nothing to do.
+        let file_index_id: i64 = match conn.query_row(
+            "SELECT id FROM file_index WHERE project_path = ?1 AND file_path = ?2",
+            params![project_path, file_path],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(0),
+            Err(e) => return Err(AppError::database(e.to_string())),
+        };
+
+        // Collect symbol IDs and delete their FTS entries.
+        let symbol_ids: Vec<i64> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM file_symbols WHERE file_index_id = ?1",
+            )?;
+            let mapped = stmt
+                .query_map(params![file_index_id], |row| row.get::<_, i64>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            mapped
+        };
+        if !symbol_ids.is_empty() {
+            let mut fts_del = conn.prepare("DELETE FROM symbol_fts WHERE rowid = ?1")?;
+            for id in &symbol_ids {
+                let _ = fts_del.execute(params![id]);
+            }
+        }
+
+        // Delete filepath_fts entry.
+        let _ = conn.execute(
+            "DELETE FROM filepath_fts WHERE rowid = ?1",
+            params![file_index_id],
+        );
+
+        // Delete the file_index row (CASCADE deletes file_symbols).
+        let deleted = conn.execute(
+            "DELETE FROM file_index WHERE id = ?1",
+            params![file_index_id],
+        )?;
+
+        Ok(deleted)
+    }
+
     /// Query files whose path matches a SQL LIKE pattern.
     ///
     /// The `path_pattern` should use `%` as wildcard, e.g. `"%controller%"`.
@@ -3191,5 +3282,121 @@ mod tests {
         // Ordered by language
         assert_eq!(servers[0].language, "go");
         assert_eq!(servers[1].language, "rust");
+    }
+
+    // =========================================================================
+    // delete_file_index / get_indexed_file_paths / get_embedding_rowids tests
+    // =========================================================================
+
+    #[test]
+    fn delete_file_index_removes_single_file() {
+        let store = create_test_store();
+
+        let item_a = make_item(
+            "src/a.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("fn_a".to_string(), SymbolKind::Function, 1)],
+        );
+        let item_b = make_item(
+            "src/b.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("fn_b".to_string(), SymbolKind::Function, 1)],
+        );
+        store.upsert_file_index("/project", &item_a, "ha").unwrap();
+        store.upsert_file_index("/project", &item_b, "hb").unwrap();
+
+        let deleted = store.delete_file_index("/project", "src/a.rs").unwrap();
+        assert_eq!(deleted, 1);
+
+        // a.rs should be gone
+        let symbols_a = store.get_file_symbols("/project", "src/a.rs").unwrap();
+        assert!(symbols_a.is_empty());
+
+        // b.rs should be unaffected
+        let symbols_b = store.get_file_symbols("/project", "src/b.rs").unwrap();
+        assert_eq!(symbols_b.len(), 1);
+        assert_eq!(symbols_b[0].name, "fn_b");
+
+        let summary = store.get_project_summary("/project").unwrap();
+        assert_eq!(summary.total_files, 1);
+    }
+
+    #[test]
+    fn delete_file_index_clears_fts_entries() {
+        let store = create_test_store();
+
+        let item = make_item(
+            "src/target.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic("target_fn".to_string(), SymbolKind::Function, 1)],
+        );
+        store.upsert_file_index("/project", &item, "h1").unwrap();
+
+        assert!(fts_symbol_count(&store, "\"target_fn\"*") > 0);
+        assert!(fts_filepath_count(&store, "\"target\"*") > 0);
+
+        store.delete_file_index("/project", "src/target.rs").unwrap();
+
+        assert_eq!(fts_symbol_count(&store, "\"target_fn\"*"), 0);
+        assert_eq!(fts_filepath_count(&store, "\"target\"*"), 0);
+    }
+
+    #[test]
+    fn delete_file_index_returns_zero_for_nonexistent() {
+        let store = create_test_store();
+        let deleted = store
+            .delete_file_index("/project", "src/nonexistent.rs")
+            .unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn get_indexed_file_paths_returns_all_paths() {
+        let store = create_test_store();
+
+        let item_a = make_item("src/a.rs", "backend", "rust", vec![]);
+        let item_b = make_item("src/b.rs", "backend", "rust", vec![]);
+        let item_c = make_item("src/c.rs", "backend", "rust", vec![]);
+        store.upsert_file_index("/project", &item_a, "ha").unwrap();
+        store.upsert_file_index("/project", &item_b, "hb").unwrap();
+        store.upsert_file_index("/project", &item_c, "hc").unwrap();
+
+        let mut paths = store.get_indexed_file_paths("/project").unwrap();
+        paths.sort();
+        assert_eq!(paths, vec!["src/a.rs", "src/b.rs", "src/c.rs"]);
+    }
+
+    #[test]
+    fn get_embedding_rowids_for_file_returns_correct_rowids() {
+        let store = create_test_store();
+        let emb: Vec<u8> = vec![0, 0, 128, 63];
+
+        store
+            .upsert_chunk_embedding("/project", "src/a.rs", 0, "chunk 0", &emb)
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "src/a.rs", 1, "chunk 1", &emb)
+            .unwrap();
+        store
+            .upsert_chunk_embedding("/project", "src/b.rs", 0, "chunk b", &emb)
+            .unwrap();
+
+        let rowids = store
+            .get_embedding_rowids_for_file("/project", "src/a.rs")
+            .unwrap();
+        assert_eq!(rowids.len(), 2);
+
+        let rowids_b = store
+            .get_embedding_rowids_for_file("/project", "src/b.rs")
+            .unwrap();
+        assert_eq!(rowids_b.len(), 1);
+
+        let rowids_none = store
+            .get_embedding_rowids_for_file("/project", "src/none.rs")
+            .unwrap();
+        assert!(rowids_none.is_empty());
     }
 }

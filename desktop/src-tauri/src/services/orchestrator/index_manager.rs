@@ -228,6 +228,10 @@ impl IndexManager {
                     embedding_provider_name,
                 };
                 self.set_status_and_emit(project_path, event).await;
+
+                // Restore the incremental file watcher so that file changes
+                // are picked up even after an app restart.
+                self.start_incremental_watcher(project_path).await;
             }
             _ => {
                 self.start_indexing(project_path).await;
@@ -322,49 +326,8 @@ impl IndexManager {
         let dim = embedding_mgr.dimension();
         let hnsw_idx = self.get_or_create_hnsw(project_path, dim).await;
 
-        // Create a channel for incremental file-change notifications (Phase 2).
-        let (change_tx, change_rx) =
-            tokio::sync::mpsc::channel::<PathBuf>(256);
-
-        // Set up a file-system watcher that feeds into `change_tx`.
-        let watcher = {
-            let tx_clone = change_tx.clone();
-            let root_for_watcher = PathBuf::from(project_path);
-            match notify_debouncer_mini::new_debouncer(
-                Duration::from_millis(200),
-                move |events: Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify::Error>| {
-                    if let Ok(events) = events {
-                        for event in events {
-                            if event.path.is_file() {
-                                let _ = tx_clone.try_send(event.path);
-                            }
-                        }
-                    }
-                },
-            ) {
-                Ok(mut debouncer) => {
-                    if let Err(e) = debouncer
-                        .watcher()
-                        .watch(&root_for_watcher, notify::RecursiveMode::Recursive)
-                    {
-                        warn!(
-                            error = %e,
-                            project = %project_path,
-                            "index manager: failed to watch directory for changes"
-                        );
-                    }
-                    Some(debouncer)
-                }
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        project = %project_path,
-                        "index manager: failed to create file watcher"
-                    );
-                    None
-                }
-            }
-        };
+        // Create a channel + file-system watcher for Phase 2.
+        let (change_tx, change_rx, watcher) = Self::create_file_watcher(project_path);
 
         // Capture provider display name before embedding_mgr is moved into the indexer.
         let provider_display_name = embedding_mgr.display_name().to_string();
@@ -617,6 +580,129 @@ impl IndexManager {
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
+
+    /// Create a debounced file watcher + mpsc channel for a project directory.
+    ///
+    /// Returns `(sender, receiver, optional_debouncer)`.  The sender is kept
+    /// alongside the `IndexerEntry` so that external callers can also push
+    /// file-change notifications.
+    fn create_file_watcher(
+        project_path: &str,
+    ) -> (
+        tokio::sync::mpsc::Sender<PathBuf>,
+        tokio::sync::mpsc::Receiver<PathBuf>,
+        Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::channel::<PathBuf>(256);
+
+        let watcher = {
+            let tx_clone = tx.clone();
+            let root = PathBuf::from(project_path);
+            match notify_debouncer_mini::new_debouncer(
+                Duration::from_millis(200),
+                move |events: Result<
+                    Vec<notify_debouncer_mini::DebouncedEvent>,
+                    notify::Error,
+                >| {
+                    if let Ok(events) = events {
+                        for event in events {
+                            // Do NOT filter by is_file() here: deletion events
+                            // produce paths that no longer exist on disk, so
+                            // is_file() would be false.  The incremental
+                            // indexer handles non-file paths gracefully.
+                            let _ = tx_clone.try_send(event.path);
+                        }
+                    }
+                },
+            ) {
+                Ok(mut debouncer) => {
+                    if let Err(e) = debouncer
+                        .watcher()
+                        .watch(&root, notify::RecursiveMode::Recursive)
+                    {
+                        warn!(
+                            error = %e,
+                            project = %project_path,
+                            "index manager: failed to watch directory for changes"
+                        );
+                    }
+                    Some(debouncer)
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        project = %project_path,
+                        "index manager: failed to create file watcher"
+                    );
+                    None
+                }
+            }
+        };
+
+        (tx, rx, watcher)
+    }
+
+    /// Start an incremental-only file watcher for a project that already has
+    /// an index.  Skips Phase 1 (full index) and Phase 1b (embedding).
+    ///
+    /// Called from `ensure_indexed` when the index already exists.
+    async fn start_incremental_watcher(&self, project_path: &str) {
+        // Guard: if an indexer is already running for this path, skip.
+        {
+            let indexers = self.active_indexers.read().await;
+            if indexers.contains_key(project_path) {
+                return;
+            }
+        }
+
+        let (change_tx, change_rx, watcher) = Self::create_file_watcher(project_path);
+
+        let project_root = PathBuf::from(project_path);
+        let index_store = self.index_store.clone();
+
+        // Get embedding-related services (already restored by ensure_indexed).
+        let embedding_svc = {
+            let embeds = self.embedding_services.read().await;
+            embeds.get(project_path).cloned()
+        };
+        let embedding_mgr = {
+            let managers = self.embedding_managers.read().await;
+            managers.get(project_path).cloned()
+        };
+        let hnsw_idx = {
+            let indexes = self.hnsw_indexes.read().await;
+            indexes.get(project_path).cloned()
+        };
+
+        let mut indexer = BackgroundIndexer::new(project_root, index_store)
+            .with_change_receiver(change_rx);
+        if let Some(svc) = embedding_svc {
+            indexer = indexer.with_embedding_service(svc);
+        }
+        if let Some(mgr) = embedding_mgr {
+            indexer = indexer.with_embedding_manager(mgr);
+        }
+        if let Some(idx) = hnsw_idx {
+            indexer = indexer.with_hnsw_index(idx);
+        }
+
+        let handle = indexer.start_watch_only().await;
+
+        let mut indexers = self.active_indexers.write().await;
+        indexers.insert(
+            project_path.to_string(),
+            IndexerEntry {
+                handle,
+                change_tx,
+                _watcher: watcher,
+            },
+        );
+
+        info!(
+            project = %project_path,
+            "index manager: started incremental watcher for existing index"
+        );
+    }
 
     /// Load the persisted embedding configuration from the `settings` table.
     ///
