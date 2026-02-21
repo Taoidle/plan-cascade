@@ -37,6 +37,10 @@ impl Tool for CwdTool {
         )
     }
 
+    fn is_parallel_safe(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, ctx: &ToolExecutionContext, _args: Value) -> ToolResult {
         ToolResult::ok(ctx.working_directory_snapshot().to_string_lossy().to_string())
     }

@@ -56,6 +56,10 @@ const HNSW_META_FILENAME: &str = "embeddings.hnsw.meta.json";
 struct HnswMetadata {
     dimension: usize,
     vector_count: usize,
+    /// HNSW data IDs marked as stale (soft-deleted).
+    /// Persisted so stale filtering survives app restart.
+    #[serde(default)]
+    stale_ids: Vec<usize>,
 }
 
 /// Wrapper around `hnsw_rs::Hnsw` providing thread-safe, async-friendly
@@ -146,6 +150,7 @@ impl HnswIndex {
         // Check metadata sidecar for dimension mismatch
         let meta_file = self.index_dir.join(HNSW_META_FILENAME);
         let current_dim = self.dimension();
+        let mut loaded_meta: Option<HnswMetadata> = None;
         if meta_file.exists() {
             if let Ok(meta_json) = std::fs::read_to_string(&meta_file) {
                 if let Ok(meta) = serde_json::from_str::<HnswMetadata>(&meta_json) {
@@ -164,6 +169,7 @@ impl HnswIndex {
                     if current_dim == 0 && meta.dimension > 0 {
                         self.set_dimension(meta.dimension);
                     }
+                    loaded_meta = Some(meta);
                 }
             }
         } else if current_dim > 0 {
@@ -215,6 +221,17 @@ impl HnswIndex {
                 self.count.store(nb_point, Ordering::Relaxed);
                 let mut stale = self.stale_ids.write().await;
                 stale.clear();
+                if let Some(ref meta) = loaded_meta {
+                    for &id in &meta.stale_ids {
+                        stale.insert(id);
+                    }
+                    if !stale.is_empty() {
+                        info!(
+                            stale_count = stale.len(),
+                            "HNSW load_from_disk: restored stale IDs from metadata"
+                        );
+                    }
+                }
                 info!(
                     dir = %self.index_dir.display(),
                     points = nb_point,
@@ -257,6 +274,10 @@ impl HnswIndex {
         let index_dir = self.index_dir.clone();
         let dimension = self.dimension();
         let vector_count = self.count.load(Ordering::Relaxed);
+        let stale_snapshot: Vec<usize> = {
+            let stale = self.stale_ids.read().await;
+            stale.iter().copied().collect()
+        };
 
         tokio::task::spawn_blocking(move || {
             std::fs::create_dir_all(&index_dir)
@@ -267,10 +288,11 @@ impl HnswIndex {
                 .file_dump(&index_dir, HNSW_BASENAME)
                 .map_err(|e| format!("HNSW file_dump failed: {}", e))?;
 
-            // Write metadata sidecar for dimension tracking
+            // Write metadata sidecar for dimension and stale ID tracking
             let meta = HnswMetadata {
                 dimension,
                 vector_count,
+                stale_ids: stale_snapshot,
             };
             if let Ok(json) = serde_json::to_string_pretty(&meta) {
                 let meta_path = index_dir.join(HNSW_META_FILENAME);
@@ -402,6 +424,54 @@ impl HnswIndex {
     /// Reset the index to empty state (for rebuild).
     pub async fn reset(&self) {
         self.initialize().await;
+    }
+
+    /// Atomically rebuild the HNSW index from the given vectors.
+    ///
+    /// Builds a new Hnsw graph in `spawn_blocking` (CPU-bound), then swaps it
+    /// into `inner` under a single write lock.  Concurrent `search()` calls
+    /// always see either the old or the new index, never an empty one.
+    pub async fn rebuild_from_vectors(
+        &self,
+        vectors: &[(usize, Vec<f32>)],
+    ) -> Result<(), String> {
+        if vectors.is_empty() {
+            self.initialize().await;
+            return Ok(());
+        }
+
+        let actual_dim = vectors[0].1.len();
+        let vectors_owned: Vec<(usize, Vec<f32>)> = vectors.to_vec();
+
+        let new_inner = tokio::task::spawn_blocking(move || {
+            let hnsw = Hnsw::<f32, DistCosine>::new(
+                MAX_NB_CONNECTION,
+                vectors_owned.len().max(DEFAULT_MAX_ELEMENTS),
+                MAX_LAYER,
+                EF_CONSTRUCTION,
+                DistCosine,
+            );
+            for (id, embedding) in &vectors_owned {
+                hnsw.insert_slice((embedding, *id));
+            }
+            Arc::new(HnswInner { hnsw })
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking panicked: {}", e))?;
+
+        // Atomic swap — concurrent searches see old or new, never empty
+        {
+            let mut guard = self.inner.write().await;
+            *guard = Some(new_inner);
+        }
+        self.dimension.store(actual_dim, Ordering::Relaxed);
+        self.count.store(vectors.len(), Ordering::Relaxed);
+        {
+            let mut stale = self.stale_ids.write().await;
+            stale.clear();
+        }
+
+        Ok(())
     }
 
     /// Get the index directory path.
@@ -800,5 +870,122 @@ mod tests {
                 "dimension should be restored from metadata"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // save/load preserves stale IDs across restart
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn save_load_preserves_stale_ids() {
+        let dir = tempdir().expect("tempdir");
+        let index_dir = dir.path().join("hnsw_stale_persist");
+        let dim = 16;
+
+        // Build index, mark some IDs as stale, save
+        {
+            let idx = HnswIndex::new(&index_dir, dim);
+            idx.initialize().await;
+            for i in 0..5 {
+                idx.insert(i, &make_embedding(dim, i)).await;
+            }
+            idx.mark_stale(1).await;
+            idx.mark_stale(3).await;
+            assert_eq!(idx.get_stale_count().await, 2);
+            idx.save_to_disk().await.expect("save should succeed");
+        }
+
+        // Load in a fresh HnswIndex — stale IDs should be restored
+        {
+            let idx2 = HnswIndex::new(&index_dir, dim);
+            assert!(idx2.load_from_disk().await, "should load successfully");
+            assert_eq!(
+                idx2.get_stale_count().await,
+                2,
+                "stale IDs should survive save/load"
+            );
+
+            // Search should filter out the stale IDs
+            let results = idx2.search(&make_embedding(dim, 1), 10).await;
+            let result_ids: Vec<usize> = results.iter().map(|(id, _)| *id).collect();
+            assert!(
+                !result_ids.contains(&1),
+                "stale ID 1 should be filtered from search"
+            );
+            assert!(
+                !result_ids.contains(&3),
+                "stale ID 3 should be filtered from search"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // rebuild_from_vectors atomically replaces the index
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn rebuild_from_vectors_atomic() {
+        let dir = tempdir().expect("tempdir");
+        let dim = 8;
+        let idx = HnswIndex::new(dir.path().join("hnsw_rebuild"), dim);
+        idx.initialize().await;
+
+        // Insert initial vectors and mark one stale
+        for i in 0..5 {
+            idx.insert(i, &make_embedding(dim, i)).await;
+        }
+        idx.mark_stale(2).await;
+        assert_eq!(idx.get_count().await, 5);
+        assert_eq!(idx.get_stale_count().await, 1);
+
+        // Rebuild with a different set of vectors
+        let new_vectors: Vec<(usize, Vec<f32>)> = (10..13)
+            .map(|i| (i, make_embedding(dim, i)))
+            .collect();
+        idx.rebuild_from_vectors(&new_vectors)
+            .await
+            .expect("rebuild should succeed");
+
+        // Count should reflect new vectors, stale should be cleared
+        assert_eq!(idx.get_count().await, 3);
+        assert_eq!(idx.get_stale_count().await, 0);
+
+        // Search should find new vectors
+        let results = idx.search(&make_embedding(dim, 10), 5).await;
+        let result_ids: Vec<usize> = results.iter().map(|(id, _)| *id).collect();
+        assert!(
+            result_ids.contains(&10),
+            "new vector 10 should be searchable"
+        );
+
+        // Old vectors should not be found
+        assert!(
+            !result_ids.contains(&0),
+            "old vector 0 should not be in rebuilt index"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // rebuild_from_vectors with empty input initializes empty index
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn rebuild_from_vectors_empty() {
+        let dir = tempdir().expect("tempdir");
+        let dim = 8;
+        let idx = HnswIndex::new(dir.path().join("hnsw_rebuild_empty"), dim);
+        idx.initialize().await;
+
+        for i in 0..3 {
+            idx.insert(i, &make_embedding(dim, i)).await;
+        }
+        assert_eq!(idx.get_count().await, 3);
+
+        // Rebuild with empty vectors should reset to empty
+        idx.rebuild_from_vectors(&[])
+            .await
+            .expect("rebuild with empty should succeed");
+        assert_eq!(idx.get_count().await, 0);
+        assert!(idx.is_ready().await, "index should still be initialized");
     }
 }

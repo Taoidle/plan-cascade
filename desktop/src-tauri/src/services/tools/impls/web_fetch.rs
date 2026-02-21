@@ -60,6 +60,10 @@ impl Tool for WebFetchTool {
         true
     }
 
+    fn is_parallel_safe(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         let url = match args.get("url").and_then(|v| v.as_str()) {
             Some(u) => u,

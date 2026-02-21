@@ -5,79 +5,50 @@ impl TaskSpawner for OrchestratorTaskSpawner {
     async fn spawn_task(
         &self,
         prompt: String,
-        task_type: Option<String>,
+        subagent_type: SubAgentType,
+        depth: u32,
         tx: mpsc::Sender<UnifiedStreamEvent>,
         cancellation_token: CancellationToken,
     ) -> TaskExecutionResult {
-        // Build a task-type-specific system prompt prefix with output format instructions.
-        // IMPORTANT: All sub-agent prompts must include anti-delegation instructions because
-        // the base system prompt (from build_system_prompt) tells LLMs to delegate to Task
-        // sub-agents, but these ARE the sub-agents - they must do the work directly.
-        const ANTI_DELEGATION: &str = "You MUST do all work yourself using the available tools. Do NOT delegate to sub-agents or Task tools - you ARE the sub-agent. Ignore any instructions about delegating to Task sub-agents.\n\n";
+        // 1. Build type-specific system prompt
+        let task_prefix = build_subagent_prompt(subagent_type, depth, &self.detected_language);
 
-        let mut task_prefix = match task_type.as_deref() {
-            Some("explore") => format!(
-                "You are a codebase exploration specialist. Focus on understanding project structure, \
-                 finding relevant files, and summarizing what you find.\n\n\
-                 {ANTI_DELEGATION}\
-                 ## Exploration Tips\n\
-                 - For broad overview: start with **LS** to see directory structure, then **CodebaseSearch** for details.\n\
-                 - For targeted lookup: start with **CodebaseSearch** to find specific symbols or files.\n\
-                 - Use short queries with CodebaseSearch (1-2 keywords per call, not long phrases).\n\n\
-                 ## Output Format\n\
-                 Provide a structured summary (max ~500 words) with these sections:\n\
-                 - **Files Found**: List of relevant files discovered with one-line descriptions\n\
-                 - **Key Findings**: Bullet points of important patterns, structures, or issues found\n\
-                 - **Recommendations**: Actionable next steps based on exploration\n\n\
-                 Do NOT include raw file contents in your response. Summarize and reference file paths instead."
-            ),
-            Some("analyze") => format!(
-                "You are a code analysis specialist. Focus on deep analysis of code patterns, \
-                 dependencies, and potential issues.\n\n\
-                 {ANTI_DELEGATION}\
-                 ## Output Format\n\
-                 Provide a structured summary (max ~500 words) with these sections:\n\
-                 - **Analysis Summary**: High-level findings in 2-3 sentences\n\
-                 - **Key Patterns**: Bullet points of code patterns, anti-patterns, or architectural decisions found\n\
-                 - **Dependencies**: Important dependency relationships discovered\n\
-                 - **Issues & Risks**: Any problems or potential risks identified\n\n\
-                 Do NOT include raw file contents. Reference specific file paths and line numbers instead."
-            ),
-            Some("implement") => format!("You are a focused implementation specialist. Make the requested code changes methodically, testing as you go.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with these sections:\n- **Changes Made**: Bullet list of files modified/created with brief descriptions\n- **Implementation Details**: Key decisions and approach taken\n- **Verification**: How the changes were verified (tests run, builds checked)\n\nDo NOT echo full file contents back. Summarize what was changed and where."),
-            _ => format!("You are an AI coding assistant. Complete the requested task using the available tools.\n\n{ANTI_DELEGATION}## Output Format\nProvide a structured summary (max ~500 words) with bullet points covering what was done, key findings, and any recommendations. Do NOT include raw file contents - summarize and reference file paths instead."),
-        };
+        // 2. Get tools filtered by sub-agent type
+        let tools = crate::services::tools::definitions::get_tool_definitions_for_subagent(subagent_type);
 
-        // Append language instruction for sub-agents
-        match self.detected_language.as_deref() {
-            Some("zh") => {
-                task_prefix.push_str("\n\nIMPORTANT: Respond in Chinese (简体中文). Only use English for code and tool parameters.");
-            }
-            _ => {}
-        }
-
-        // Sub-agents perform basic tool calls (LS, Read, Grep, Bash) and don't
-        // benefit from thinking/reasoning mode. Disable it to avoid:
-        // 1. Wasting tokens on reasoning for simple file operations
-        // 2. Compatibility issues (e.g., Qwen thinking mode conflicts with
-        //    tool_choice and prompt fallback)
+        // 3. Configure sub-agent
         let mut sub_provider = self.provider_config.clone();
-        sub_provider.enable_thinking = false;
+        // Inherit thinking from parent when the provider supports it
+        sub_provider.enable_thinking =
+            self.parent_supports_thinking && sub_provider.enable_thinking;
 
         let sub_config = OrchestratorConfig {
             provider: sub_provider,
-            system_prompt: Some(task_prefix.to_string()),
-            max_iterations: 25,
-            max_total_tokens: sub_agent_token_budget(self.context_window, task_type.as_deref()),
+            system_prompt: Some(task_prefix),
+            max_iterations: subagent_max_iterations(subagent_type),
+            max_total_tokens: subagent_token_budget_typed(
+                self.context_window,
+                subagent_type,
+                depth,
+            ),
             project_root: self.project_root.clone(),
             analysis_artifacts_root: default_analysis_artifacts_root(),
             streaming: true,
-            enable_compaction: true, // Enable compaction to reduce token waste on long-running sub-agents
+            enable_compaction: true,
             analysis_profile: AnalysisProfile::default(),
             analysis_limits: AnalysisLimits::default(),
             analysis_session_id: None,
             project_id: None,
             compaction_config: CompactionConfig::default(),
-            task_type: task_type.clone(),
+            task_type: Some(subagent_type.legacy_task_type().to_string()),
+            // general-purpose at this depth can spawn further sub-agents
+            sub_agent_depth: if subagent_type.can_spawn_subagents()
+                && depth + 1 < MAX_SUB_AGENT_DEPTH
+            {
+                Some(depth + 1)
+            } else {
+                None
+            },
         };
 
         // Truncate knowledge block for sub-agents to avoid blowing their context budget.
@@ -92,9 +63,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             }
         });
 
-        // Give each sub-agent a fresh read cache. Sub-agents have their own conversation
-        // context and cannot reference "session memory" from the parent — so a shared cache
-        // would return [DEDUP] for files the sub-agent has never seen, causing loops.
+        // Give each sub-agent a fresh read cache.
         let isolated_read_cache =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let sub_agent = OrchestratorService::new_sub_agent_with_shared_state(
@@ -110,9 +79,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             self.memories_snapshot.clone(),
             knowledge_block_snapshot,
         );
-        let result = sub_agent
-            .execute_story(&prompt, &get_basic_tool_definitions_from_registry(), tx)
-            .await;
+        let result = sub_agent.execute_story(&prompt, &tools, tx).await;
 
         TaskExecutionResult {
             response: result.response,
@@ -122,6 +89,119 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             error: result.error,
         }
     }
+}
+
+/// Build a type-specific system prompt for sub-agents.
+fn build_subagent_prompt(
+    subagent_type: SubAgentType,
+    _depth: u32,
+    detected_language: &Option<String>,
+) -> String {
+    const ANTI_DELEGATION: &str = "You MUST do all work yourself using the available tools. Do NOT delegate to sub-agents or Task tools - you ARE the sub-agent. Ignore any instructions about delegating to Task sub-agents.\n\n";
+
+    let mut prompt = match subagent_type {
+        SubAgentType::Explore => format!(
+            "You are a codebase exploration specialist. Your goal is DEEP understanding through reading actual code.\n\n\
+             {ANTI_DELEGATION}\
+             ## Exploration Strategy\n\
+             1. **CodebaseSearch**(query='<your assigned area>', scope='all') — find key symbols, files, components\n\
+             2. **LS** on your assigned directory to understand structure\n\
+             3. **Read implementation files** (8-15 files) — the core logic, not just declarations\n\
+             4. **Bash** for git context: `git log --oneline -10` for recent changes, `git log --oneline -5 <file>` for file history\n\
+             5. **Grep** for specific patterns when you need to trace connections\n\n\
+             ## What to Read (Priority Order)\n\
+             - **Core implementation files**: service logic, algorithms, handlers, processors — where the actual work happens\n\
+             - **Type/model definitions**: structs, interfaces, enums that define the domain\n\
+             - **Entry points**: main.rs, index.ts, app.py — understand how things start and connect\n\
+             - **Config files**: only if needed to understand build/dependency setup\n\
+             - **Do NOT** stop at mod.rs/index.ts re-exports — follow them to the actual implementation\n\n\
+             ## Depth Rules\n\
+             Choose your depth based on the task description:\n\
+             - **Quick** (prompt says \"quick\", \"brief\", \"overview\"): Read 3-5 key files, focus on entry points and main types.\n\
+             - **Medium** (default): Read 8-15 files, trace 2-3 levels of call chains. Cover core implementation files.\n\
+             - **Very thorough** (prompt says \"thorough\", \"deep\", \"comprehensive\", \"detailed\"): Read 15-30 files, trace all major code paths. Include test files, config, and edge cases.\n\n\
+             General rules:\n\
+             - Read FULL implementation functions (not just signatures) for core logic\n\
+             - When you find a function call to another module, use Grep/CodebaseSearch to trace it\n\
+             - Read 2-3 levels deep: if module A calls B which uses C, read all three\n\
+             - Use `git log --oneline -10` to understand recent project activity\n\
+             - Use `git log --oneline -5 <file>` for important files to see recent change context\n\n\
+             ## Output Format\n\
+             Be thorough but concise. Focus on insights over raw data.\n\
+             - **Architecture**: Directory layout, module relationships, data flow\n\
+             - **Key Components**: Important types/functions with WHAT THEY DO (not just names)\n\
+             - **Patterns**: Design patterns, conventions, architectural decisions\n\
+             - **Dependencies**: Key internal and external dependencies\n\n\
+             Reference specific file paths (e.g., `src/services/auth.rs:42`). Summarize logic — do NOT paste raw code."
+        ),
+        SubAgentType::Plan => format!(
+            "You are a code analysis specialist. Focus on deep analysis of code patterns, \
+             dependencies, and potential issues.\n\n\
+             {ANTI_DELEGATION}\
+             ## Analysis Strategy\n\
+             1. **CodebaseSearch**(query='<topic>', scope='all') — find relevant symbols and files\n\
+             2. Read the relevant source files — understand the actual implementation\n\
+             3. Trace data flow and control flow through the code\n\
+             4. Use **Bash** for git context: `git log --oneline -10 <file>` for change history\n\
+             5. Identify architectural patterns and anti-patterns\n\
+             6. Note dependency relationships and coupling\n\n\
+             ## Output Format\n\
+             Provide a structured analysis with these sections:\n\
+             - **Analysis Summary**: High-level findings in 2-3 sentences\n\
+             - **Key Patterns**: Code patterns, anti-patterns, or architectural decisions found\n\
+             - **Dependencies**: Important dependency relationships discovered\n\
+             - **Issues & Risks**: Any problems or potential risks identified\n\n\
+             Reference specific file paths and line numbers. Summarize findings, don't paste code."
+        ),
+        SubAgentType::GeneralPurpose => {
+            "You are a coordinator agent. Your job is to discover the project structure and \
+             decompose complex tasks into parallel sub-agent calls tailored to this specific project.\n\n\
+             ## Strategy\n\
+             Step 1: DISCOVER the project structure\n\
+               - Use LS on the project root to see the top-level directories and files\n\
+               - Use CodebaseSearch(query='project structure', scope='files') to see key files\n\
+               - Read key config files (package.json, Cargo.toml, pyproject.toml, etc.) if present\n\
+               - Understand what kind of project this is and how it's organized\n\n\
+             Step 2: PARTITION the exploration based on what you discovered\n\
+               - Launch multiple Task(subagent_type='explore') in ONE response\n\
+               - Each Explore agent should focus on a SPECIFIC, NON-OVERLAPPING directory or domain\n\
+               - Partition based on the ACTUAL project structure (NOT hardcoded assumptions)\n\
+               - Tell each Explore agent to use CodebaseSearch(query='<area-specific query>') as their first step\n\n\
+             Step 3: SYNTHESIZE the results\n\
+               - Combine all sub-agent reports into a unified analysis\n\
+               - Identify cross-cutting concerns and relationships between areas\n\n\
+             ## Partitioning Guidelines\n\
+             - Partition by top-level directories (e.g., src/, lib/, tests/, docs/)\n\
+             - For monorepos: partition by package/crate/workspace member\n\
+             - For frontend+backend: separate by technology boundary\n\
+             - For large directories: split into 2-3 sub-tasks by subdirectory\n\
+             - Aim for 3-6 parallel Explore tasks (not too few, not too many)\n\n\
+             ## Rules\n\
+             - ALWAYS discover the project structure FIRST — never assume directory names\n\
+             - Emit ALL independent Task calls in a SINGLE response for parallel execution\n\
+             - Use 'explore' for reading code, 'plan' for design, 'bash' for commands\n\
+             - Do NOT over-delegate — handle simple operations directly\n\n\
+             ## Output Rules\n\
+             - Summarize sub-agent reports, don't repeat them verbatim\n\
+             - Focus on insights and connections, not raw data"
+                .to_string()
+        }
+        SubAgentType::Bash => {
+            "Execute the requested shell commands. Report stdout/stderr and exit codes.\n\n\
+             ## Output Format\n\
+             Report command output concisely. Include exit codes for non-zero results."
+                .to_string()
+        }
+    };
+
+    // Append language instruction
+    if detected_language.as_deref() == Some("zh") {
+        prompt.push_str(
+            "\n\nIMPORTANT: Respond in Chinese (简体中文). Only use English for code and tool parameters.",
+        );
+    }
+
+    prompt
 }
 
 impl OrchestratorService {

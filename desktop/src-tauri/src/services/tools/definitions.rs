@@ -18,7 +18,7 @@ use super::trait_def::ToolRegistry;
 /// `Send + Sync` (all `Tool` impls are `Send + Sync`).
 static REGISTRY: OnceLock<ToolRegistry> = OnceLock::new();
 
-fn cached_registry() -> &'static ToolRegistry {
+pub(crate) fn cached_registry() -> &'static ToolRegistry {
     REGISTRY.get_or_init(|| super::executor::ToolExecutor::build_registry_static())
 }
 
@@ -41,6 +41,28 @@ pub fn get_basic_tool_definitions_from_registry() -> Vec<ToolDefinition> {
         .into_iter()
         .filter(|d| d.name != "Task" && d.name != "Analyze")
         .collect()
+}
+
+/// Get tool definitions filtered by sub-agent type.
+///
+/// Each `SubAgentType` has a specific set of allowed tools. This function
+/// returns only the definitions for tools permitted by that type.
+pub fn get_tool_definitions_for_subagent(
+    subagent_type: super::task_spawner::SubAgentType,
+) -> Vec<ToolDefinition> {
+    let allowed = subagent_type.allowed_tools();
+    cached_registry()
+        .definitions()
+        .into_iter()
+        .filter(|d| allowed.contains(&d.name.as_str()))
+        .collect()
+}
+
+/// Check if a tool is parallel-safe by name (via the cached registry).
+pub fn is_tool_parallel_safe(name: &str) -> bool {
+    cached_registry()
+        .get(name)
+        .map_or(false, |t| t.is_parallel_safe())
 }
 
 #[cfg(test)]

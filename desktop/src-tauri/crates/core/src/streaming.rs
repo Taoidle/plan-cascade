@@ -98,8 +98,15 @@ pub enum UnifiedStreamEvent {
         sub_agent_id: String,
         /// Truncated prompt summary
         prompt: String,
+        /// Legacy task type for backward compatibility
         #[serde(skip_serializing_if = "Option::is_none")]
         task_type: Option<String>,
+        /// Sub-agent type: "general-purpose", "explore", "plan", "bash"
+        #[serde(skip_serializing_if = "Option::is_none")]
+        subagent_type: Option<String>,
+        /// Nesting depth (root = 0)
+        #[serde(default)]
+        depth: u32,
     },
 
     /// A sub-agent task has completed
@@ -107,6 +114,18 @@ pub enum UnifiedStreamEvent {
         sub_agent_id: String,
         success: bool,
         usage: serde_json::Value,
+    },
+
+    /// An event originating from a sub-agent, tagged with sub-agent context.
+    /// Wraps the inner event's data as JSON to avoid recursive enum nesting
+    /// (`Box<UnifiedStreamEvent>` is incompatible with `#[serde(tag = "type")]`).
+    SubAgentEvent {
+        sub_agent_id: String,
+        depth: u32,
+        /// The original event type (e.g., "text_delta", "tool_start")
+        event_type: String,
+        /// The original event's fields (excluding "type")
+        event_data: serde_json::Value,
     },
 
     // ========================================================================
@@ -415,6 +434,24 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"type\":\"text_delta\""));
         assert!(json.contains("\"content\":\"Hello\""));
+
+        let parsed: UnifiedStreamEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn test_sub_agent_event_serialization() {
+        let event = UnifiedStreamEvent::SubAgentEvent {
+            sub_agent_id: "agent-1".to_string(),
+            depth: 1,
+            event_type: "text_delta".to_string(),
+            event_data: serde_json::json!({"content": "hello"}),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"sub_agent_event\""));
+        assert!(json.contains("\"sub_agent_id\":\"agent-1\""));
+        assert!(json.contains("\"event_type\":\"text_delta\""));
+        assert!(json.contains("\"depth\":1"));
 
         let parsed: UnifiedStreamEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(event, parsed);

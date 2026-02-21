@@ -769,7 +769,7 @@ impl IndexManager {
             indexer = indexer.with_hnsw_index(idx);
         }
 
-        let handle = indexer.start_watch_only().await;
+        let handle = indexer.start_watch_with_catchup().await;
 
         let mut indexers = self.active_indexers.write().await;
         indexers.insert(
@@ -1066,8 +1066,8 @@ impl IndexManager {
         let actual_dim = vectors[0].1.len();
         hnsw.set_dimension(actual_dim);
 
-        hnsw.initialize().await;
-        hnsw.batch_insert(&vectors).await;
+        // Atomically rebuild — concurrent searches see old or new, never empty
+        hnsw.rebuild_from_vectors(&vectors).await?;
 
         Ok(vectors.len())
     }

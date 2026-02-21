@@ -1398,6 +1398,7 @@ async fn execute_story_via_llm(
         project_id: None,
         compaction_config: Default::default(),
         task_type: None,
+        sub_agent_depth: None,
     };
 
     let mut orchestrator = OrchestratorService::new(config);

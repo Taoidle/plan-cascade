@@ -161,6 +161,10 @@ impl Tool for GrepTool {
         )
     }
 
+    fn is_parallel_safe(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,

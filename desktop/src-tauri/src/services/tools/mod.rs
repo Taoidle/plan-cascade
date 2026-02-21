@@ -47,5 +47,7 @@ pub use system_prompt::{
     build_sub_agent_tool_guidance, build_system_prompt, build_system_prompt_with_memories,
     detect_language, merge_system_prompts,
 };
-pub use task_spawner::{TaskContext, TaskExecutionResult, TaskSpawner};
+pub use task_spawner::{
+    SubAgentType, TaskContext, TaskExecutionResult, TaskSpawner, MAX_SUB_AGENT_DEPTH,
+};
 pub use trait_def::{Tool, ToolExecutionContext, ToolRegistry};

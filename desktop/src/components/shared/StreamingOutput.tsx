@@ -61,6 +61,12 @@ async function saveTextWithDialog(filename: string, content: string): Promise<bo
   return true;
 }
 
+function localTimestampForFilename(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+}
+
 function serializeRawOutput(lines: StreamLine[]): string {
   return lines
     .map((line) => {
@@ -240,7 +246,7 @@ export function StreamingOutput({
         notifyExport('error', 'No conversation content available to export.');
         return;
       }
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`conversation-${stamp}.txt`, content);
       if (!saved) {
         notifyExport('error', 'Export canceled.');
@@ -260,7 +266,7 @@ export function StreamingOutput({
         notifyExport('error', 'No output available to export.');
         return;
       }
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`output-raw-${stamp}.txt`, content);
       if (!saved) {
         notifyExport('error', 'Export canceled.');
@@ -280,7 +286,7 @@ export function StreamingOutput({
         notifyExport('error', 'No AI reply available to export.');
         return;
       }
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`ai-reply-latest-${stamp}.md`, latest.content);
       if (!saved) {
         notifyExport('error', 'Export canceled.');
@@ -315,7 +321,7 @@ export function StreamingOutput({
         return;
       }
       const reply = assistantReplies[index];
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`ai-reply-${index + 1}-${stamp}.md`, reply.content);
       if (!saved) {
         notifyExport('error', 'Export canceled.');
@@ -543,13 +549,19 @@ export function StreamingOutput({
 // Tool Call Display Components
 // ============================================================================
 
-type DisplayBlock =
+export type DisplayBlock =
   | { kind: 'line'; line: StreamLine }
   | {
       kind: 'group';
       groupId: string;
       groupKind: 'tool_activity' | 'analysis_activity';
       lines: StreamLine[];
+    }
+  | {
+      kind: 'sub_agent_group';
+      subAgentId: string;
+      lines: StreamLine[];
+      depth: number;
     };
 
 function classifyGroupKind(line: StreamLine): 'tool_activity' | 'analysis_activity' | null {
@@ -567,7 +579,7 @@ function classifyGroupKind(line: StreamLine): 'tool_activity' | 'analysis_activi
   return null;
 }
 
-function buildDisplayBlocks(lines: StreamLine[], compactMode: boolean): DisplayBlock[] {
+export function buildDisplayBlocks(lines: StreamLine[], compactMode: boolean): DisplayBlock[] {
   if (!compactMode || lines.length === 0) {
     return lines.map((line) => ({ kind: 'line', line }));
   }
@@ -575,6 +587,26 @@ function buildDisplayBlocks(lines: StreamLine[], compactMode: boolean): DisplayB
   const blocks: DisplayBlock[] = [];
   let i = 0;
   while (i < lines.length) {
+    // First priority: group consecutive lines from the same sub-agent
+    const subId = lines[i].subAgentId;
+    if (subId) {
+      const group: StreamLine[] = [lines[i]];
+      let j = i + 1;
+      while (j < lines.length && lines[j].subAgentId === subId) {
+        group.push(lines[j]);
+        j += 1;
+      }
+      blocks.push({
+        kind: 'sub_agent_group',
+        subAgentId: subId,
+        lines: group,
+        depth: lines[i].subAgentDepth || 0,
+      });
+      i = j;
+      continue;
+    }
+
+    // Existing tool/analysis grouping logic for root-level lines
     const kind = classifyGroupKind(lines[i]);
     if (!kind) {
       blocks.push({ kind: 'line', line: lines[i] });
@@ -713,6 +745,17 @@ const HistoricalBlockList = memo(function HistoricalBlockList({
   return (
     <>
       {blocks.map((block) => {
+        if (block.kind === 'sub_agent_group') {
+          return (
+            <SubAgentGroupPanel
+              key={`sa-${block.subAgentId}-${block.lines[0]?.id}`}
+              subAgentId={block.subAgentId}
+              lines={block.lines}
+              depth={block.depth}
+              compact={compact}
+            />
+          );
+        }
         if (block.kind === 'group') {
           return (
             <EventGroupLine
@@ -730,7 +773,7 @@ const HistoricalBlockList = memo(function HistoricalBlockList({
   );
 });
 
-function EventGroupLine({
+export function EventGroupLine({
   groupId,
   kind,
   lines,
@@ -817,6 +860,100 @@ function EventGroupLine({
   );
 }
 
+/** Sub-agent group panel: collapsible container for all events from a single sub-agent */
+export function SubAgentGroupPanel({
+  subAgentId,
+  lines,
+  depth,
+  compact,
+}: {
+  subAgentId: string;
+  lines: StreamLine[];
+  depth: number;
+  compact: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Detect sub-agent status from start/end markers
+  const hasStart = lines.some((l) => l.type === 'sub_agent' && l.content.includes('[sub_agent:start]'));
+  const endLine = lines.find((l) => l.type === 'sub_agent' && l.content.includes('[sub_agent:end]'));
+  const isComplete = !!endLine;
+  const isFailed = endLine ? /failed|error/i.test(endLine.content) : false;
+  const isRunning = hasStart && !isComplete;
+
+  const borderClass = isFailed
+    ? 'border-red-700/40 bg-red-950/20'
+    : isComplete
+      ? 'border-green-700/40 bg-green-950/20'
+      : 'border-amber-700/40 bg-amber-950/20';
+  const labelClass = isFailed
+    ? 'text-red-300'
+    : isComplete
+      ? 'text-green-300'
+      : 'text-amber-300';
+
+  // Extract prompt preview from the start line
+  const startLine = lines.find((l) => l.type === 'sub_agent' && l.content.includes('[sub_agent:start]'));
+  const promptPreview = startLine
+    ? startLine.content.replace(/^\[sub_agent:start\]\s*/, '').substring(0, 120)
+    : subAgentId.substring(0, 8);
+
+  const eventCount = lines.filter((l) => l.type !== 'sub_agent').length;
+
+  return (
+    <div
+      className={clsx(
+        'my-1 rounded border',
+        borderClass,
+        compact ? 'px-2 py-1' : 'px-3 py-1.5',
+      )}
+      style={{ marginLeft: depth > 0 ? `${depth * 12}px` : undefined }}
+    >
+      <div className="flex items-center gap-2">
+        {isFailed ? (
+          <CrossCircledIcon className="w-3 h-3 text-red-400 flex-shrink-0" />
+        ) : isComplete ? (
+          <CheckCircledIcon className="w-3 h-3 text-green-400 flex-shrink-0" />
+        ) : (
+          <GearIcon className={clsx('w-3 h-3 text-amber-400', isRunning && 'animate-spin')} />
+        )}
+        <span className={clsx('font-mono text-xs font-semibold uppercase tracking-wide', labelClass)}>
+          Sub-agent
+        </span>
+        <span className={clsx('font-mono text-xs truncate', labelClass.replace('300', '400/80'))}>
+          {promptPreview}
+        </span>
+        <span className="font-mono text-2xs text-gray-500 ml-auto flex-shrink-0">
+          {eventCount} events
+        </span>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="text-2xs text-gray-400 hover:text-gray-200 flex-shrink-0"
+        >
+          {expanded ? 'collapse' : 'expand'}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="mt-2 space-y-1 border-t border-gray-700/40 pt-2">
+          {lines.map((line) => (
+            <div
+              key={`sa-${subAgentId}-${line.id}`}
+              className={clsx(
+                'font-mono text-xs whitespace-pre-wrap break-all',
+                LINE_TYPE_COLORS[line.type]
+              )}
+            >
+              {LINE_TYPE_PREFIX[line.type]}
+              {line.content}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Parse tool name and arguments from formatted content like "[tool:Read] /path/to/file" */
 function parseToolContent(content: string): { toolName: string; args: string } {
   const match = content.match(/^\[tool:([^\]]+)\]\s*(.*)/s);
@@ -839,7 +976,7 @@ function parseToolContent(content: string): { toolName: string; args: string } {
   return { toolName: 'Tool', args: content };
 }
 
-const ToolCallLine = memo(function ToolCallLine({ content, compact }: { content: string; compact: boolean }) {
+export const ToolCallLine = memo(function ToolCallLine({ content, compact }: { content: string; compact: boolean }) {
   const { toolName, args } = parseToolContent(content);
 
   return (
@@ -893,7 +1030,7 @@ function parseSubAgentContent(content: string): {
   return { phase: 'update', details: content, success: null };
 }
 
-const SubAgentLine = memo(function SubAgentLine({ content, compact }: { content: string; compact: boolean }) {
+export const SubAgentLine = memo(function SubAgentLine({ content, compact }: { content: string; compact: boolean }) {
   const parsed = parseSubAgentContent(content);
   const isStart = parsed.phase === 'start';
   const isEndSuccess = parsed.phase === 'end' && parsed.success === true;
@@ -974,7 +1111,7 @@ function parseAnalysisContent(content: string): {
   return { kind: 'generic', phase: part2, status: part3, details };
 }
 
-const AnalysisLine = memo(function AnalysisLine({ content, compact }: { content: string; compact: boolean }) {
+export const AnalysisLine = memo(function AnalysisLine({ content, compact }: { content: string; compact: boolean }) {
   const parsed = parseAnalysisContent(content);
   const isError = parsed.status === 'error' || /failed|warning|issue/i.test(parsed.details);
   const isDone = parsed.kind === 'phase_end' && !isError;
@@ -1042,7 +1179,7 @@ function parseToolResultContent(content: string): { toolId: string; result: stri
   return { toolId: '', result: content, isError: false };
 }
 
-const ToolResultLine = memo(function ToolResultLine({ content, compact }: { content: string; compact: boolean }) {
+export const ToolResultLine = memo(function ToolResultLine({ content, compact }: { content: string; compact: boolean }) {
   const { result, isError } = parseToolResultContent(content);
   const [expanded, setExpanded] = useState(false);
   const isLong = result.length > 200;

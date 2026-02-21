@@ -1867,6 +1867,8 @@ impl OrchestratorService {
                     sub_agent_id: worker.sub_agent_id.clone(),
                     prompt: worker.objective.clone(),
                     task_type: Some(phase.task_type().to_string()),
+                    subagent_type: None,
+                    depth: 0,
                 })
                 .await;
             let _ = tx
@@ -2165,6 +2167,8 @@ impl OrchestratorService {
                     sub_agent_id: phase_id.clone(),
                     prompt: format!("{}: {}", phase.title(), phase.objective()),
                     task_type: Some(phase.task_type().to_string()),
+                    subagent_type: None,
+                    depth: 0,
                 })
                 .await;
         }
@@ -2218,6 +2222,7 @@ impl OrchestratorService {
                 project_id: self.config.project_id.clone(),
                 compaction_config: CompactionConfig::default(),
                 task_type: None,
+                sub_agent_depth: None,
             };
             let phase_agent =
                 OrchestratorService::new_sub_agent(phase_config, self.cancellation_token.clone());

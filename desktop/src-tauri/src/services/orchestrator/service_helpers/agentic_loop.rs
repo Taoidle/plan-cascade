@@ -442,6 +442,11 @@ impl OrchestratorService {
         let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
         let mut loop_detector = ToolCallLoopDetector::new(3, 20);
+        // Track whether any tool has been successfully executed in this loop.
+        // When true and this is a sub-agent, a text-only response is treated as
+        // a final summary rather than a repair-worthy narration.
+        let mut has_executed_tools = false;
+        let is_sub_agent = self.config.task_type.is_some();
 
         // Build a minimal system prompt for sub-agents.
         // Unlike the main agent, sub-agents do NOT get the full build_system_prompt()
@@ -1003,127 +1008,177 @@ impl OrchestratorService {
                     }
                 }
 
-                // Execute each parsed tool call and collect results
+                // Step 1: Validate all parsed fallback tool calls
+                let mut valid_fallback_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
                 let mut tool_results = Vec::new();
                 for ptc in &parsed_fallback.calls {
                     fallback_call_counter += 1;
                     let tool_id = format!("story_fallback_{}", fallback_call_counter);
 
-                    let (effective_tool_name, effective_args) =
-                        match prepare_tool_call_for_execution(
-                            &ptc.tool_name,
-                            &ptc.arguments,
-                            request_options.analysis_phase.as_deref(),
-                        ) {
-                            Ok(prepared) => prepared,
-                            Err(error_message) => {
-                                let _ = tx
-                                    .send(UnifiedStreamEvent::ToolResult {
-                                        tool_id: tool_id.clone(),
-                                        result: None,
-                                        error: Some(error_message.clone()),
-                                    })
-                                    .await;
-                                tool_results.push(format_tool_result(
-                                    &ptc.tool_name,
-                                    &tool_id,
-                                    &error_message,
-                                    true,
-                                ));
-                                continue;
-                            }
-                        };
-
-                    let _ = tx
-                        .send(UnifiedStreamEvent::ToolStart {
-                            tool_id: tool_id.clone(),
-                            tool_name: effective_tool_name.clone(),
-                            arguments: Some(effective_args.to_string()),
-                        })
-                        .await;
-
-                    let result = self
-                        .tool_executor
-                        .execute(&effective_tool_name, &effective_args)
-                        .await;
-                    let context_tool_output = tool_output_for_model_context(
-                        &effective_tool_name,
-                        &result,
+                    match prepare_tool_call_for_execution(
+                        &ptc.tool_name,
+                        &ptc.arguments,
                         request_options.analysis_phase.as_deref(),
-                    );
+                    ) {
+                        Ok((name, args)) => valid_fallback_calls.push((tool_id, name, args)),
+                        Err(error_message) => {
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tool_id.clone(),
+                                    result: None,
+                                    error: Some(error_message.clone()),
+                                })
+                                .await;
+                            tool_results.push(format_tool_result(
+                                &ptc.tool_name,
+                                &tool_id,
+                                &error_message,
+                                true,
+                            ));
+                        }
+                    }
+                }
 
-                    // Emit tool result event (always 閳?for frontend display)
-                    let _ = tx
-                        .send(UnifiedStreamEvent::ToolResult {
-                            tool_id: tool_id.clone(),
-                            result: if result.success {
-                                result.output.clone()
-                            } else {
-                                None
-                            },
-                            error: if !result.success {
-                                result.error.clone()
-                            } else {
-                                None
-                            },
-                        })
-                        .await;
+                // Step 2: Check if all valid calls are parallel-safe
+                let all_parallel_fb = valid_fallback_calls.len() > 1
+                    && valid_fallback_calls.iter().all(|(_, name, _)| {
+                        crate::services::tools::definitions::is_tool_parallel_safe(name)
+                    });
 
-                    // For dedup results, push the dedup message so the LLM
-                    // knows the file was already read. For normal results,
-                    // push the full (truncated) tool output.
-                    if result.is_dedup {
-                        let dedup_msg = result.output.as_deref().unwrap_or(
-                            "[File already read] Content is in session memory above. Do NOT re-read."
-                        );
-                        tool_results.push(format_tool_result(
-                            &effective_tool_name,
-                            &tool_id,
-                            dedup_msg,
-                            false,
-                        ));
-                    } else {
-                        tool_results.push(format_tool_result(
-                            &effective_tool_name,
-                            &tool_id,
-                            &context_tool_output,
-                            !result.success,
-                        ));
+                if all_parallel_fb {
+                    // ═══════════════════════════════════════════════════
+                    // Parallel fallback execution
+                    // ═══════════════════════════════════════════════════
+
+                    // Emit all ToolStart events
+                    for (tool_id, name, args) in &valid_fallback_calls {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolStart {
+                                tool_id: tool_id.clone(),
+                                tool_name: name.clone(),
+                                arguments: Some(args.to_string()),
+                            })
+                            .await;
                     }
 
-                    // Check for tool call loop in fallback path
-                    if let Some(detection) = loop_detector.record_call(
-                        &effective_tool_name,
-                        &effective_args.to_string(),
-                        result.is_dedup,
-                    ) {
-                        match detection {
-                            LoopDetection::Warning(msg) => {
-                                eprintln!(
-                                    "[loop-detector] Level 1 escalation (fallback): {}",
-                                    effective_tool_name
-                                );
-                                tool_results.push(msg);
+                    // Spawn all futures
+                    let exec_ctx = Arc::new(self.tool_executor.build_tool_context());
+                    let mut futures = Vec::with_capacity(valid_fallback_calls.len());
+                    for (tool_id, name, args) in &valid_fallback_calls {
+                        let ctx_ref = Arc::clone(&exec_ctx);
+                        let name = name.clone();
+                        let args = args.clone();
+                        let tool_id = tool_id.clone();
+                        futures.push(async move {
+                            let registry = crate::services::tools::definitions::cached_registry();
+                            let result = registry.execute(&name, &ctx_ref, args).await;
+                            (tool_id, name, result)
+                        });
+                    }
+
+                    let results = futures_util::future::join_all(futures).await;
+                    let analysis_phase = request_options.analysis_phase.as_deref();
+
+                    // Process results in original order
+                    for (tool_id, effective_tool_name, result) in results {
+                        let context_tool_output = tool_output_for_model_context(
+                            &effective_tool_name, &result, analysis_phase,
+                        );
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolResult {
+                                tool_id: tool_id.clone(),
+                                result: if result.success { result.output.clone() } else { None },
+                                error: if !result.success { result.error.clone() } else { None },
+                            })
+                            .await;
+
+                        if result.is_dedup {
+                            let dedup_msg = result.output.as_deref().unwrap_or(
+                                "[File already read] Content is in session memory above. Do NOT re-read."
+                            );
+                            tool_results.push(format_tool_result(&effective_tool_name, &tool_id, dedup_msg, false));
+                        } else {
+                            tool_results.push(format_tool_result(&effective_tool_name, &tool_id, &context_tool_output, !result.success));
+                        }
+
+                        // Loop detection (sequential after collecting results)
+                        let args_str = valid_fallback_calls.iter()
+                            .find(|(id, _, _)| id == &tool_id)
+                            .map(|(_, _, a)| a.to_string())
+                            .unwrap_or_default();
+                        if let Some(detection) = loop_detector.record_call(&effective_tool_name, &args_str, result.is_dedup) {
+                            match detection {
+                                LoopDetection::Warning(msg) => {
+                                    eprintln!("[loop-detector] Level 1 escalation (fallback-parallel): {}", effective_tool_name);
+                                    tool_results.push(msg);
+                                }
+                                LoopDetection::StripTools(msg, _tools) => {
+                                    eprintln!("[loop-detector] Level 2 escalation (fallback-parallel): {}", effective_tool_name);
+                                    tool_results.push(msg);
+                                }
+                                LoopDetection::ForceTerminate(msg) => {
+                                    eprintln!("[loop-detector] Level 3 escalation (fallback-parallel): force terminating for {}", effective_tool_name);
+                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                }
                             }
-                            LoopDetection::StripTools(msg, _tools) => {
-                                eprintln!("[loop-detector] Level 2 escalation (fallback): stripping tools for {}", effective_tool_name);
-                                tool_results.push(msg);
-                            }
-                            LoopDetection::ForceTerminate(msg) => {
-                                eprintln!("[loop-detector] Level 3 escalation (fallback): force terminating for {}", effective_tool_name);
-                                let _ = tx
-                                    .send(UnifiedStreamEvent::Error {
-                                        message: msg.clone(),
-                                        code: None,
-                                    })
-                                    .await;
-                                return ExecutionResult {
-                                    response: last_assistant_text,
-                                    usage: total_usage,
-                                    iterations,
-                                    success: false,
-                                    error: Some(msg),
-                                };
+                        }
+                    }
+                } else {
+                    // ═══════════════════════════════════════════════════
+                    // Sequential fallback execution (existing logic)
+                    // ═══════════════════════════════════════════════════
+                    for (tool_id, effective_tool_name, effective_args) in &valid_fallback_calls {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolStart {
+                                tool_id: tool_id.clone(),
+                                tool_name: effective_tool_name.clone(),
+                                arguments: Some(effective_args.to_string()),
+                            })
+                            .await;
+
+                        let result = self
+                            .tool_executor
+                            .execute(effective_tool_name, effective_args)
+                            .await;
+                        let context_tool_output = tool_output_for_model_context(
+                            effective_tool_name,
+                            &result,
+                            request_options.analysis_phase.as_deref(),
+                        );
+
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolResult {
+                                tool_id: tool_id.clone(),
+                                result: if result.success { result.output.clone() } else { None },
+                                error: if !result.success { result.error.clone() } else { None },
+                            })
+                            .await;
+
+                        if result.is_dedup {
+                            let dedup_msg = result.output.as_deref().unwrap_or(
+                                "[File already read] Content is in session memory above. Do NOT re-read."
+                            );
+                            tool_results.push(format_tool_result(effective_tool_name, tool_id, dedup_msg, false));
+                        } else {
+                            tool_results.push(format_tool_result(effective_tool_name, tool_id, &context_tool_output, !result.success));
+                        }
+
+                        if let Some(detection) = loop_detector.record_call(effective_tool_name, &effective_args.to_string(), result.is_dedup) {
+                            match detection {
+                                LoopDetection::Warning(msg) => {
+                                    eprintln!("[loop-detector] Level 1 escalation (fallback): {}", effective_tool_name);
+                                    tool_results.push(msg);
+                                }
+                                LoopDetection::StripTools(msg, _tools) => {
+                                    eprintln!("[loop-detector] Level 2 escalation (fallback): stripping tools for {}", effective_tool_name);
+                                    tool_results.push(msg);
+                                }
+                                LoopDetection::ForceTerminate(msg) => {
+                                    eprintln!("[loop-detector] Level 3 escalation (fallback): force terminating for {}", effective_tool_name);
+                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                }
                             }
                         }
                     }
@@ -1132,6 +1187,7 @@ impl OrchestratorService {
                 // Feed all tool results back as a user message
                 let combined_results = tool_results.join("\n\n");
                 messages.push(Message::user(combined_results));
+                has_executed_tools = true;
             } else if !parsed_fallback.dropped_reasons.is_empty() {
                 let repair_hint = format!(
                     "Tool call validation failed. Emit valid tool_call blocks with required arguments.\nIssues:\n- {}",
@@ -1178,7 +1234,13 @@ impl OrchestratorService {
                     .unwrap_or(false);
                 let empty_response_without_signals =
                     content_is_empty && !thinking_has_content && !has_cached_assistant_text;
+
+                // Sub-agents that have already executed tools are producing a
+                // final summary — do NOT repair-hint their report text.
+                let sub_agent_final_summary = is_sub_agent && has_executed_tools && !content_is_empty;
+
                 let needs_repair = repair_retry_count < 2
+                    && !sub_agent_final_summary
                     && (empty_response_without_signals
                         || pending_action_intent
                         || (!matches!(reliability, ToolCallReliability::Reliable)
@@ -1292,6 +1354,9 @@ impl OrchestratorService {
         let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
         let mut loop_detector = ToolCallLoopDetector::new(3, 20);
+        // Track whether any tool has been successfully executed in this loop.
+        // Used to suppress repair hints when the model produces a final summary.
+        let mut has_executed_tools = false;
         // Track consecutive iterations where the ONLY tool calls are Task
         // delegations. This catches the "infinite delegation" pattern where the
         // main agent keeps spawning sub-agents with different prompts but never
@@ -1299,42 +1364,58 @@ impl OrchestratorService {
         let mut consecutive_task_only_iterations = 0u32;
         const MAX_CONSECUTIVE_TASK_ONLY: u32 = 3;
 
-        // Create TaskContext for Task tool support in the agentic loop
-        // Capture read-only snapshots from the parent for sub-agent injection.
-        let skills_snapshot = self.selected_skills
-            .as_ref()
-            .and_then(|lock| lock.try_read().ok())
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        // Create TaskContext for Task tool support in the agentic loop.
+        //
+        // For the main agent (sub_agent_depth is None), depth defaults to 0.
+        // For coordinator sub-agents (sub_agent_depth is Some(n)), depth is n.
+        // When sub_agent_depth is None AND this is a sub-agent (task_type is set),
+        // TaskContext is NOT created, making the Task tool unavailable (leaf node).
+        let current_depth = self.config.sub_agent_depth.unwrap_or(0);
+        let is_leaf_subagent = self.config.sub_agent_depth.is_none()
+            && self.config.task_type.is_some();
 
-        let memories_snapshot = self.loaded_memories
-            .as_ref()
-            .and_then(|lock| lock.try_read().ok())
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let task_ctx = if !is_leaf_subagent {
+            // Capture read-only snapshots from the parent for sub-agent injection.
+            let skills_snapshot = self.selected_skills
+                .as_ref()
+                .and_then(|lock| lock.try_read().ok())
+                .map(|guard| guard.clone())
+                .unwrap_or_default();
 
-        let knowledge_block_snapshot = self.cached_knowledge_block
-            .lock().ok()
-            .and_then(|guard| guard.clone());
+            let memories_snapshot = self.loaded_memories
+                .as_ref()
+                .and_then(|lock| lock.try_read().ok())
+                .map(|guard| guard.clone())
+                .unwrap_or_default();
 
-        let task_spawner = Arc::new(OrchestratorTaskSpawner {
-            provider_config: self.config.provider.clone(),
-            project_root: self.config.project_root.clone(),
-            context_window: self.provider.context_window(),
-            shared_read_cache: self.tool_executor.shared_read_cache(),
-            shared_index_store: self.tool_executor.get_index_store(),
-            shared_embedding_service: self.tool_executor.get_embedding_service(),
-            shared_embedding_manager: self.tool_executor.get_embedding_manager(),
-            shared_hnsw_index: self.tool_executor.get_hnsw_index(),
-            detected_language: self.detected_language.lock().unwrap().clone(),
-            skills_snapshot,
-            memories_snapshot,
-            knowledge_block_snapshot,
-        });
-        let task_ctx = TaskContext {
-            spawner: task_spawner,
-            tx: tx.clone(),
-            cancellation_token: self.cancellation_token.clone(),
+            let knowledge_block_snapshot = self.cached_knowledge_block
+                .lock().ok()
+                .and_then(|guard| guard.clone());
+
+            let task_spawner = Arc::new(OrchestratorTaskSpawner {
+                provider_config: self.config.provider.clone(),
+                project_root: self.config.project_root.clone(),
+                context_window: self.provider.context_window(),
+                shared_read_cache: self.tool_executor.shared_read_cache(),
+                shared_index_store: self.tool_executor.get_index_store(),
+                shared_embedding_service: self.tool_executor.get_embedding_service(),
+                shared_embedding_manager: self.tool_executor.get_embedding_manager(),
+                shared_hnsw_index: self.tool_executor.get_hnsw_index(),
+                detected_language: self.detected_language.lock().unwrap().clone(),
+                parent_supports_thinking: self.provider.supports_thinking(),
+                skills_snapshot,
+                memories_snapshot,
+                knowledge_block_snapshot,
+            });
+            Some(TaskContext {
+                spawner: task_spawner,
+                tx: tx.clone(),
+                cancellation_token: self.cancellation_token.clone(),
+                depth: current_depth,
+                max_depth: MAX_SUB_AGENT_DEPTH,
+            })
+        } else {
+            None
         };
 
         // Session memory manager for Layer 2 context (placed at index 1, after system prompt)
@@ -1657,214 +1738,361 @@ impl OrchestratorService {
                     content,
                 });
 
-                // Execute each tool call
-                let mut successful_native_calls: usize = 0;
+                // Step 1: Validate all tool calls
+                let mut valid_calls: Vec<(String, String, serde_json::Value)> = Vec::new(); // (tc_id, name, args)
                 for tc in &response.tool_calls {
-                    // Validate tool name and arguments before execution
-                    let (effective_tool_name, effective_args) =
-                        match prepare_tool_call_for_execution(
-                            &tc.name,
-                            &tc.arguments,
-                            None,
-                        ) {
-                            Ok(prepared) => prepared,
-                            Err(error_message) => {
-                                let _ = tx
-                                    .send(UnifiedStreamEvent::ToolResult {
-                                        tool_id: tc.id.clone(),
-                                        result: None,
-                                        error: Some(error_message.clone()),
-                                    })
-                                    .await;
-                                messages.push(Message::tool_result(&tc.id, error_message, true));
-                                continue;
-                            }
-                        };
-                    successful_native_calls += 1;
-
-                    let _ = tx
-                        .send(UnifiedStreamEvent::ToolStart {
-                            tool_id: tc.id.clone(),
-                            tool_name: effective_tool_name.clone(),
-                            arguments: Some(effective_args.to_string()),
-                        })
-                        .await;
-
-                    // Hook: on_before_tool - can skip tool execution
-                    if let Some(skip_result) = self.hooks.fire_on_before_tool(
-                        &hook_ctx,
-                        &effective_tool_name,
-                        &effective_args.to_string(),
-                    ).await {
-                        let skip_msg = skip_result.skip_reason.unwrap_or_else(|| "Skipped by hook".to_string());
-                        let _ = tx
-                            .send(UnifiedStreamEvent::ToolResult {
-                                tool_id: tc.id.clone(),
-                                result: None,
-                                error: Some(skip_msg.clone()),
-                            })
-                            .await;
-                        messages.push(Message::tool_result(&tc.id, skip_msg, true));
-                        continue;
-                    }
-
-                    let (result, nested_usage, nested_iterations) = if effective_tool_name == "Analyze" {
-                        self.execute_analyze_tool_result(&effective_args, &tx).await
-                    } else {
-                        (
-                            self.tool_executor
-                                .execute_with_context(&effective_tool_name, &effective_args, Some(&task_ctx))
-                                .await,
-                            UsageStats::default(),
-                            0,
-                        )
-                    };
-                    merge_usage(&mut total_usage, &nested_usage);
-                    iterations += nested_iterations;
-
-                    // Emit tool result event (always for frontend display)
-                    let _ = tx
-                        .send(UnifiedStreamEvent::ToolResult {
-                            tool_id: tc.id.clone(),
-                            result: if result.success {
-                                result.output.clone()
-                            } else {
-                                None
-                            },
-                            error: if !result.success {
-                                result.error.clone()
-                            } else {
-                                None
-                            },
-                        })
-                        .await;
-
-                    // Hook: on_after_tool
-                    self.hooks.fire_on_after_tool(
-                        &hook_ctx,
-                        &effective_tool_name,
-                        result.success,
-                        result.output.as_ref().map(|o| truncate_for_log(o, 200)),
-                    ).await;
-
-                    // Apply EventActions if the tool declared any side effects.
-                    // The orchestrator is the sole action applicator: state deltas,
-                    // checkpoints, quality gate results, and transfer requests are
-                    // all processed here in deterministic order.
-                    if let Some(ref actions) = result.event_actions {
-                        if actions.has_actions() {
-                            let apply_result = crate::services::orchestrator::event_actions_applicator::apply_actions(
-                                actions,
-                                &mut event_actions_state,
-                                None, // TimelineService not available in basic execute()
-                                &self.config.project_root.to_string_lossy(),
-                                &hook_ctx.session_id,
-                                &[],
-                                &tx,
-                            ).await;
-                            match apply_result {
-                                Ok(ref action_outcome) => {
-                                    // Handle agent transfer if requested (ADR-F001)
-                                    if let Some(ref target_agent) = action_outcome.transfer_target {
-                                        self.handle_agent_transfer(
-                                            target_agent,
-                                            &hook_ctx.session_id,
-                                            &event_actions_state,
-                                            &tx,
-                                        ).await;
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("[event-actions] Failed to apply actions from {}: {}", effective_tool_name, e);
-                                }
-                            }
+                    match prepare_tool_call_for_execution(
+                        &tc.name,
+                        &tc.arguments,
+                        None,
+                    ) {
+                        Ok((name, args)) => valid_calls.push((tc.id.clone(), name, args)),
+                        Err(error_message) => {
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tc.id.clone(),
+                                    result: None,
+                                    error: Some(error_message.clone()),
+                                })
+                                .await;
+                            messages.push(Message::tool_result(&tc.id, error_message, true));
                         }
                     }
+                }
+                let successful_native_calls = valid_calls.len();
 
-                    // If the result is a dedup hit, push a short informative
-                    // tool_result so the LLM knows the file was already read
-                    // and should use session memory instead of re-reading.
-                    if result.is_dedup {
-                        let dedup_msg = result.output.as_deref().unwrap_or(
-                            "[File already read] Content is in session memory above. Do NOT re-read."
-                        );
-                        messages.push(Message::tool_result(&tc.id, dedup_msg.to_string(), false));
-                    } else {
-                        // Truncate tool output for messages vec (LLM context)
-                        // while keeping full content in the ToolResult event above.
-                        let context_content =
-                            truncate_tool_output_for_context(&effective_tool_name, &result.to_content());
+                // Step 2: Check if all validated calls are parallel-safe
+                let all_parallel = valid_calls.len() > 1
+                    && valid_calls.iter().all(|(_, name, _)| {
+                        name != "Analyze"
+                            && crate::services::tools::definitions::is_tool_parallel_safe(name)
+                    });
 
-                        // Add tool result to messages (with multimodal support)
-                        if let Some((mime, b64)) = &result.image_data {
-                            if self.provider.supports_multimodal() {
-                                use crate::services::llm::types::ContentBlock;
-                                let blocks = vec![
-                                    ContentBlock::Text {
-                                        text: context_content.clone(),
-                                    },
-                                    ContentBlock::Image {
-                                        media_type: mime.clone(),
-                                        data: b64.clone(),
-                                    },
-                                ];
-                                messages.push(Message::tool_result_multimodal(
-                                    &tc.id,
-                                    blocks,
-                                    !result.success,
-                                ));
+                if all_parallel {
+                    // ═══════════════════════════════════════════════════════
+                    // Step 3a: PARALLEL execution path
+                    // ═══════════════════════════════════════════════════════
+
+                    // Emit all ToolStart events
+                    for (tc_id, name, args) in &valid_calls {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolStart {
+                                tool_id: tc_id.clone(),
+                                tool_name: name.clone(),
+                                arguments: Some(args.to_string()),
+                            })
+                            .await;
+                    }
+
+                    // Build execution context once (shared across parallel calls)
+                    let exec_ctx = match task_ctx.as_ref() {
+                        Some(tc) => self.tool_executor.build_tool_context_with_task(tc),
+                        None => self.tool_executor.build_tool_context(),
+                    };
+                    let exec_ctx = Arc::new(exec_ctx);
+
+                    // Spawn all tool executions concurrently
+                    let mut futures = Vec::with_capacity(valid_calls.len());
+                    for (tc_id, name, args) in &valid_calls {
+                        let ctx_ref = Arc::clone(&exec_ctx);
+                        let name = name.clone();
+                        let args = args.clone();
+                        let tc_id = tc_id.clone();
+                        futures.push(async move {
+                            let registry = crate::services::tools::definitions::cached_registry();
+                            let result = registry.execute(&name, &ctx_ref, args).await;
+                            (tc_id, name, result)
+                        });
+                    }
+
+                    let results = futures_util::future::join_all(futures).await;
+
+                    // Process results in original order (events, messages, loop detection)
+                    for (tc_id, effective_tool_name, result) in results {
+                        // Emit tool result event
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolResult {
+                                tool_id: tc_id.clone(),
+                                result: if result.success {
+                                    result.output.clone()
+                                } else {
+                                    None
+                                },
+                                error: if !result.success {
+                                    result.error.clone()
+                                } else {
+                                    None
+                                },
+                            })
+                            .await;
+
+                        // Hook: on_after_tool
+                        self.hooks.fire_on_after_tool(
+                            &hook_ctx,
+                            &effective_tool_name,
+                            result.success,
+                            result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                        ).await;
+
+                        // Add to messages
+                        if result.is_dedup {
+                            let dedup_msg = result.output.as_deref().unwrap_or(
+                                "[File already read] Content is in session memory above. Do NOT re-read."
+                            );
+                            messages.push(Message::tool_result(&tc_id, dedup_msg.to_string(), false));
+                        } else {
+                            let context_content =
+                                truncate_tool_output_for_context(&effective_tool_name, &result.to_content());
+                            if let Some((mime, b64)) = &result.image_data {
+                                if self.provider.supports_multimodal() {
+                                    use crate::services::llm::types::ContentBlock;
+                                    let blocks = vec![
+                                        ContentBlock::Text {
+                                            text: context_content.clone(),
+                                        },
+                                        ContentBlock::Image {
+                                            media_type: mime.clone(),
+                                            data: b64.clone(),
+                                        },
+                                    ];
+                                    messages.push(Message::tool_result_multimodal(
+                                        &tc_id,
+                                        blocks,
+                                        !result.success,
+                                    ));
+                                } else {
+                                    messages.push(Message::tool_result(
+                                        &tc_id,
+                                        context_content,
+                                        !result.success,
+                                    ));
+                                }
                             } else {
                                 messages.push(Message::tool_result(
-                                    &tc.id,
+                                    &tc_id,
                                     context_content,
                                     !result.success,
                                 ));
                             }
-                        } else {
-                            messages.push(Message::tool_result(
-                                &tc.id,
-                                context_content,
-                                !result.success,
-                            ));
+                        }
+
+                        // Loop detection (sequential, after collecting results)
+                        let args_str = valid_calls.iter()
+                            .find(|(id, _, _)| id == &tc_id)
+                            .map(|(_, _, a)| a.to_string())
+                            .unwrap_or_default();
+                        if let Some(detection) = loop_detector.record_call(
+                            &effective_tool_name,
+                            &args_str,
+                            result.is_dedup,
+                        ) {
+                            match detection {
+                                LoopDetection::Warning(msg) => {
+                                    eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
+                                    messages.push(Message::user(msg));
+                                }
+                                LoopDetection::StripTools(msg, _tools) => {
+                                    eprintln!("[loop-detector] Level 2 escalation: stripping tools for {}", effective_tool_name);
+                                    messages.push(Message::user(msg));
+                                }
+                                LoopDetection::ForceTerminate(msg) => {
+                                    eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", effective_tool_name);
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::Error {
+                                            message: msg.clone(),
+                                            code: None,
+                                        })
+                                        .await;
+                                    return ExecutionResult {
+                                        response: last_assistant_text,
+                                        usage: total_usage,
+                                        iterations,
+                                        success: false,
+                                        error: Some(msg),
+                                    };
+                                }
+                            }
                         }
                     }
+                } else {
+                    // ═══════════════════════════════════════════════════════
+                    // Step 3b: SEQUENTIAL execution path (existing logic)
+                    // ═══════════════════════════════════════════════════════
+                    for (tc_id, effective_tool_name, effective_args) in &valid_calls {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolStart {
+                                tool_id: tc_id.clone(),
+                                tool_name: effective_tool_name.clone(),
+                                arguments: Some(effective_args.to_string()),
+                            })
+                            .await;
 
-                    // Check for tool call loop (same tool+args repeated consecutively)
-                    if let Some(detection) = loop_detector.record_call(
-                        &effective_tool_name,
-                        &effective_args.to_string(),
-                        result.is_dedup,
-                    ) {
-                        match detection {
-                            LoopDetection::Warning(msg) => {
-                                eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
-                                messages.push(Message::user(msg));
+                        // Hook: on_before_tool - can skip tool execution
+                        if let Some(skip_result) = self.hooks.fire_on_before_tool(
+                            &hook_ctx,
+                            effective_tool_name,
+                            &effective_args.to_string(),
+                        ).await {
+                            let skip_msg = skip_result.skip_reason.unwrap_or_else(|| "Skipped by hook".to_string());
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tc_id.clone(),
+                                    result: None,
+                                    error: Some(skip_msg.clone()),
+                                })
+                                .await;
+                            messages.push(Message::tool_result(tc_id, skip_msg, true));
+                            continue;
+                        }
+
+                        let (result, nested_usage, nested_iterations) = if effective_tool_name == "Analyze" {
+                            self.execute_analyze_tool_result(effective_args, &tx).await
+                        } else {
+                            (
+                                self.tool_executor
+                                    .execute_with_context(effective_tool_name, effective_args, task_ctx.as_ref())
+                                    .await,
+                                UsageStats::default(),
+                                0,
+                            )
+                        };
+                        merge_usage(&mut total_usage, &nested_usage);
+                        iterations += nested_iterations;
+
+                        // Emit tool result event (always for frontend display)
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolResult {
+                                tool_id: tc_id.clone(),
+                                result: if result.success {
+                                    result.output.clone()
+                                } else {
+                                    None
+                                },
+                                error: if !result.success {
+                                    result.error.clone()
+                                } else {
+                                    None
+                                },
+                            })
+                            .await;
+
+                        // Hook: on_after_tool
+                        self.hooks.fire_on_after_tool(
+                            &hook_ctx,
+                            effective_tool_name,
+                            result.success,
+                            result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                        ).await;
+
+                        // Apply EventActions if the tool declared any side effects.
+                        if let Some(ref actions) = result.event_actions {
+                            if actions.has_actions() {
+                                let apply_result = crate::services::orchestrator::event_actions_applicator::apply_actions(
+                                    actions,
+                                    &mut event_actions_state,
+                                    None,
+                                    &self.config.project_root.to_string_lossy(),
+                                    &hook_ctx.session_id,
+                                    &[],
+                                    &tx,
+                                ).await;
+                                match apply_result {
+                                    Ok(ref action_outcome) => {
+                                        if let Some(ref target_agent) = action_outcome.transfer_target {
+                                            self.handle_agent_transfer(
+                                                target_agent,
+                                                &hook_ctx.session_id,
+                                                &event_actions_state,
+                                                &tx,
+                                            ).await;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[event-actions] Failed to apply actions from {}: {}", effective_tool_name, e);
+                                    }
+                                }
                             }
-                            LoopDetection::StripTools(msg, _tools) => {
-                                eprintln!(
-                                    "[loop-detector] Level 2 escalation: stripping tools for {}",
-                                    effective_tool_name
-                                );
-                                messages.push(Message::user(msg));
+                        }
+
+                        // Handle dedup and message construction
+                        if result.is_dedup {
+                            let dedup_msg = result.output.as_deref().unwrap_or(
+                                "[File already read] Content is in session memory above. Do NOT re-read."
+                            );
+                            messages.push(Message::tool_result(tc_id, dedup_msg.to_string(), false));
+                        } else {
+                            let context_content =
+                                truncate_tool_output_for_context(effective_tool_name, &result.to_content());
+                            if let Some((mime, b64)) = &result.image_data {
+                                if self.provider.supports_multimodal() {
+                                    use crate::services::llm::types::ContentBlock;
+                                    let blocks = vec![
+                                        ContentBlock::Text {
+                                            text: context_content.clone(),
+                                        },
+                                        ContentBlock::Image {
+                                            media_type: mime.clone(),
+                                            data: b64.clone(),
+                                        },
+                                    ];
+                                    messages.push(Message::tool_result_multimodal(
+                                        tc_id,
+                                        blocks,
+                                        !result.success,
+                                    ));
+                                } else {
+                                    messages.push(Message::tool_result(
+                                        tc_id,
+                                        context_content,
+                                        !result.success,
+                                    ));
+                                }
+                            } else {
+                                messages.push(Message::tool_result(
+                                    tc_id,
+                                    context_content,
+                                    !result.success,
+                                ));
                             }
-                            LoopDetection::ForceTerminate(msg) => {
-                                eprintln!(
-                                    "[loop-detector] Level 3 escalation: force terminating for {}",
-                                    effective_tool_name
-                                );
-                                let _ = tx
-                                    .send(UnifiedStreamEvent::Error {
-                                        message: msg.clone(),
-                                        code: None,
-                                    })
-                                    .await;
-                                return ExecutionResult {
-                                    response: last_assistant_text,
-                                    usage: total_usage,
-                                    iterations,
-                                    success: false,
-                                    error: Some(msg),
-                                };
+                        }
+
+                        // Check for tool call loop
+                        if let Some(detection) = loop_detector.record_call(
+                            effective_tool_name,
+                            &effective_args.to_string(),
+                            result.is_dedup,
+                        ) {
+                            match detection {
+                                LoopDetection::Warning(msg) => {
+                                    eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
+                                    messages.push(Message::user(msg));
+                                }
+                                LoopDetection::StripTools(msg, _tools) => {
+                                    eprintln!(
+                                        "[loop-detector] Level 2 escalation: stripping tools for {}",
+                                        effective_tool_name
+                                    );
+                                    messages.push(Message::user(msg));
+                                }
+                                LoopDetection::ForceTerminate(msg) => {
+                                    eprintln!(
+                                        "[loop-detector] Level 3 escalation: force terminating for {}",
+                                        effective_tool_name
+                                    );
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::Error {
+                                            message: msg.clone(),
+                                            code: None,
+                                        })
+                                        .await;
+                                    return ExecutionResult {
+                                        response: last_assistant_text,
+                                        usage: total_usage,
+                                        iterations,
+                                        success: false,
+                                        error: Some(msg),
+                                    };
+                                }
                             }
                         }
                     }
@@ -1874,6 +2102,9 @@ impl OrchestratorService {
                 // Temp state is ephemeral scratch data that should not persist
                 // across tool rounds.
                 session_memory_manager.clear_temp_state();
+                if successful_native_calls > 0 {
+                    has_executed_tools = true;
+                }
 
                 // Story-003: When ALL native tool calls failed validation (e.g. empty
                 // tool names, malformed arguments from Qwen thinking mode), inject a
@@ -1908,170 +2139,216 @@ impl OrchestratorService {
                     }
                 }
 
-                // Execute each parsed tool call and collect results
+                // Step 1: Validate all parsed fallback tool calls
+                let mut valid_fallback_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
                 let mut tool_results = Vec::new();
                 for ptc in &parsed_fallback.calls {
                     fallback_call_counter += 1;
                     let tool_id = format!("fallback_{}", fallback_call_counter);
+                    // Validate and prepare each call
+                    match prepare_tool_call_for_execution(&ptc.tool_name, &ptc.arguments, None) {
+                        Ok((name, args)) => valid_fallback_calls.push((tool_id, name, args)),
+                        Err(error_message) => {
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tool_id.clone(),
+                                    result: None,
+                                    error: Some(error_message.clone()),
+                                })
+                                .await;
+                            tool_results.push(format_tool_result(&ptc.tool_name, &tool_id, &error_message, true));
+                        }
+                    }
+                }
 
-                    let _ = tx
-                        .send(UnifiedStreamEvent::ToolStart {
-                            tool_id: tool_id.clone(),
-                            tool_name: ptc.tool_name.clone(),
-                            arguments: Some(ptc.arguments.to_string()),
-                        })
-                        .await;
+                // Step 2: Check if all valid calls are parallel-safe
+                // Exclude Analyze from parallel (needs special handler)
+                let all_parallel_fb = valid_fallback_calls.len() > 1
+                    && valid_fallback_calls.iter().all(|(_, name, _)| {
+                        name != "Analyze"
+                            && crate::services::tools::definitions::is_tool_parallel_safe(name)
+                    });
 
-                    // Hook: on_before_tool (fallback path)
-                    if let Some(skip_result) = self.hooks.fire_on_before_tool(
-                        &hook_ctx,
-                        &ptc.tool_name,
-                        &ptc.arguments.to_string(),
-                    ).await {
-                        let skip_msg = skip_result.skip_reason.unwrap_or_else(|| "Skipped by hook".to_string());
-                        tool_results.push(format_tool_result(
-                            &ptc.tool_name,
-                            &tool_id,
-                            &skip_msg,
-                            true,
-                        ));
-                        continue;
+                if all_parallel_fb {
+                    // ═══════════════════════════════════════════════════
+                    // Parallel fallback execution
+                    // ═══════════════════════════════════════════════════
+                    // Parallel-safe tools don't have hooks or event_actions,
+                    // so we can safely parallelize without those features.
+
+                    // Emit all ToolStart events
+                    for (tool_id, name, args) in &valid_fallback_calls {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolStart {
+                                tool_id: tool_id.clone(),
+                                tool_name: name.clone(),
+                                arguments: Some(args.to_string()),
+                            })
+                            .await;
                     }
 
-                    let (result, nested_usage, nested_iterations) = if ptc.tool_name == "Analyze" {
-                        self.execute_analyze_tool_result(&ptc.arguments, &tx).await
-                    } else {
-                        (
-                            self.tool_executor
-                                .execute_with_context(
-                                    &ptc.tool_name,
-                                    &ptc.arguments,
-                                    Some(&task_ctx),
-                                )
-                                .await,
-                            UsageStats::default(),
-                            0,
-                        )
+                    let exec_ctx = match task_ctx.as_ref() {
+                        Some(tc) => self.tool_executor.build_tool_context_with_task(tc),
+                        None => self.tool_executor.build_tool_context(),
                     };
-                    merge_usage(&mut total_usage, &nested_usage);
-                    iterations += nested_iterations;
+                    let exec_ctx = Arc::new(exec_ctx);
 
-                    // Emit tool result event (always for frontend display)
-                    let _ = tx
-                        .send(UnifiedStreamEvent::ToolResult {
-                            tool_id: tool_id.clone(),
-                            result: if result.success {
-                                result.output.clone()
-                            } else {
-                                None
-                            },
-                            error: if !result.success {
-                                result.error.clone()
-                            } else {
-                                None
-                            },
-                        })
-                        .await;
+                    let mut futures = Vec::with_capacity(valid_fallback_calls.len());
+                    for (tool_id, name, args) in &valid_fallback_calls {
+                        let ctx_ref = Arc::clone(&exec_ctx);
+                        let name = name.clone();
+                        let args = args.clone();
+                        let tool_id = tool_id.clone();
+                        futures.push(async move {
+                            let registry = crate::services::tools::definitions::cached_registry();
+                            let result = registry.execute(&name, &ctx_ref, args).await;
+                            (tool_id, name, result)
+                        });
+                    }
 
-                    // Hook: on_after_tool (fallback path)
-                    self.hooks.fire_on_after_tool(
-                        &hook_ctx,
-                        &ptc.tool_name,
-                        result.success,
-                        result.output.as_ref().map(|o| truncate_for_log(o, 200)),
-                    ).await;
+                    let results = futures_util::future::join_all(futures).await;
 
-                    // Apply EventActions if the tool declared any side effects (fallback path).
-                    if let Some(ref actions) = result.event_actions {
-                        if actions.has_actions() {
-                            let apply_result = crate::services::orchestrator::event_actions_applicator::apply_actions(
-                                actions,
-                                &mut event_actions_state,
-                                None,
-                                &self.config.project_root.to_string_lossy(),
-                                &hook_ctx.session_id,
-                                &[],
-                                &tx,
-                            ).await;
-                            match apply_result {
-                                Ok(ref action_outcome) => {
-                                    // Handle agent transfer if requested (ADR-F001, fallback path)
-                                    if let Some(ref target_agent) = action_outcome.transfer_target {
-                                        self.handle_agent_transfer(
-                                            target_agent,
-                                            &hook_ctx.session_id,
-                                            &event_actions_state,
-                                            &tx,
-                                        ).await;
-                                    }
+                    for (tool_id, effective_tool_name, result) in results {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolResult {
+                                tool_id: tool_id.clone(),
+                                result: if result.success { result.output.clone() } else { None },
+                                error: if !result.success { result.error.clone() } else { None },
+                            })
+                            .await;
+
+                        // Hook: on_after_tool (parallel-safe tools have minimal hooks)
+                        self.hooks.fire_on_after_tool(
+                            &hook_ctx, &effective_tool_name, result.success,
+                            result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                        ).await;
+
+                        if result.is_dedup {
+                            let dedup_msg = result.output.as_deref().unwrap_or(
+                                "[File already read] Content is in session memory above. Do NOT re-read."
+                            );
+                            tool_results.push(format_tool_result(&effective_tool_name, &tool_id, dedup_msg, false));
+                        } else {
+                            let context_content = truncate_tool_output_for_context(&effective_tool_name, &result.to_content());
+                            tool_results.push(format_tool_result(&effective_tool_name, &tool_id, &context_content, !result.success));
+                        }
+
+                        let args_str = valid_fallback_calls.iter()
+                            .find(|(id, _, _)| id == &tool_id)
+                            .map(|(_, _, a)| a.to_string())
+                            .unwrap_or_default();
+                        if let Some(detection) = loop_detector.record_call(&effective_tool_name, &args_str, result.is_dedup) {
+                            match detection {
+                                LoopDetection::Warning(msg) => {
+                                    eprintln!("[loop-detector] Level 1 (fallback-parallel): {}", effective_tool_name);
+                                    tool_results.push(msg);
                                 }
-                                Err(e) => {
-                                    eprintln!("[event-actions] Failed to apply actions from {} (fallback): {}", ptc.tool_name, e);
+                                LoopDetection::StripTools(msg, _) => {
+                                    eprintln!("[loop-detector] Level 2 (fallback-parallel): {}", effective_tool_name);
+                                    tool_results.push(msg);
+                                }
+                                LoopDetection::ForceTerminate(msg) => {
+                                    eprintln!("[loop-detector] Level 3 (fallback-parallel): force terminating {}", effective_tool_name);
+                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
                                 }
                             }
                         }
                     }
+                } else {
+                    // ═══════════════════════════════════════════════════
+                    // Sequential fallback execution (existing logic with hooks/event_actions)
+                    // ═══════════════════════════════════════════════════
+                    for (tool_id, effective_tool_name, effective_args) in &valid_fallback_calls {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolStart {
+                                tool_id: tool_id.clone(),
+                                tool_name: effective_tool_name.clone(),
+                                arguments: Some(effective_args.to_string()),
+                            })
+                            .await;
 
-                    // For dedup results, push the dedup message so the LLM
-                    // knows the file was already read. For normal results,
-                    // push the full (truncated) tool output.
-                    if result.is_dedup {
-                        let dedup_msg = result.output.as_deref().unwrap_or(
-                            "[File already read] Content is in session memory above. Do NOT re-read."
-                        );
-                        tool_results.push(format_tool_result(
-                            &ptc.tool_name,
-                            &tool_id,
-                            dedup_msg,
-                            false,
-                        ));
-                    } else {
-                        // Truncate tool output for messages vec (LLM context)
-                        // while keeping full content in the ToolResult event above.
-                        let context_content =
-                            truncate_tool_output_for_context(&ptc.tool_name, &result.to_content());
+                        // Hook: on_before_tool (fallback path)
+                        if let Some(skip_result) = self.hooks.fire_on_before_tool(
+                            &hook_ctx, effective_tool_name, &effective_args.to_string(),
+                        ).await {
+                            let skip_msg = skip_result.skip_reason.unwrap_or_else(|| "Skipped by hook".to_string());
+                            tool_results.push(format_tool_result(effective_tool_name, tool_id, &skip_msg, true));
+                            continue;
+                        }
 
-                        tool_results.push(format_tool_result(
-                            &ptc.tool_name,
-                            &tool_id,
-                            &context_content,
-                            !result.success,
-                        ));
-                    }
+                        let (result, nested_usage, nested_iterations) = if effective_tool_name == "Analyze" {
+                            self.execute_analyze_tool_result(effective_args, &tx).await
+                        } else {
+                            (
+                                self.tool_executor.execute_with_context(effective_tool_name, effective_args, task_ctx.as_ref()).await,
+                                UsageStats::default(),
+                                0,
+                            )
+                        };
+                        merge_usage(&mut total_usage, &nested_usage);
+                        iterations += nested_iterations;
 
-                    // Check for tool call loop in fallback path
-                    if let Some(detection) = loop_detector.record_call(
-                        &ptc.tool_name,
-                        &ptc.arguments.to_string(),
-                        result.is_dedup,
-                    ) {
-                        match detection {
-                            LoopDetection::Warning(msg) => {
-                                eprintln!(
-                                    "[loop-detector] Level 1 escalation (fallback): {}",
-                                    ptc.tool_name
-                                );
-                                tool_results.push(msg);
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolResult {
+                                tool_id: tool_id.clone(),
+                                result: if result.success { result.output.clone() } else { None },
+                                error: if !result.success { result.error.clone() } else { None },
+                            })
+                            .await;
+
+                        // Hook: on_after_tool (fallback path)
+                        self.hooks.fire_on_after_tool(
+                            &hook_ctx, effective_tool_name, result.success,
+                            result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                        ).await;
+
+                        // Apply EventActions if the tool declared any side effects
+                        if let Some(ref actions) = result.event_actions {
+                            if actions.has_actions() {
+                                let apply_result = crate::services::orchestrator::event_actions_applicator::apply_actions(
+                                    actions, &mut event_actions_state, None,
+                                    &self.config.project_root.to_string_lossy(),
+                                    &hook_ctx.session_id, &[], &tx,
+                                ).await;
+                                match apply_result {
+                                    Ok(ref action_outcome) => {
+                                        if let Some(ref target_agent) = action_outcome.transfer_target {
+                                            self.handle_agent_transfer(target_agent, &hook_ctx.session_id, &event_actions_state, &tx).await;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[event-actions] Failed to apply actions from {} (fallback): {}", effective_tool_name, e);
+                                    }
+                                }
                             }
-                            LoopDetection::StripTools(msg, _tools) => {
-                                eprintln!("[loop-detector] Level 2 escalation (fallback): stripping tools for {}", ptc.tool_name);
-                                tool_results.push(msg);
-                            }
-                            LoopDetection::ForceTerminate(msg) => {
-                                eprintln!("[loop-detector] Level 3 escalation (fallback): force terminating for {}", ptc.tool_name);
-                                let _ = tx
-                                    .send(UnifiedStreamEvent::Error {
-                                        message: msg.clone(),
-                                        code: None,
-                                    })
-                                    .await;
-                                return ExecutionResult {
-                                    response: last_assistant_text,
-                                    usage: total_usage,
-                                    iterations,
-                                    success: false,
-                                    error: Some(msg),
-                                };
+                        }
+
+                        if result.is_dedup {
+                            let dedup_msg = result.output.as_deref().unwrap_or(
+                                "[File already read] Content is in session memory above. Do NOT re-read."
+                            );
+                            tool_results.push(format_tool_result(effective_tool_name, tool_id, dedup_msg, false));
+                        } else {
+                            let context_content = truncate_tool_output_for_context(effective_tool_name, &result.to_content());
+                            tool_results.push(format_tool_result(effective_tool_name, tool_id, &context_content, !result.success));
+                        }
+
+                        if let Some(detection) = loop_detector.record_call(effective_tool_name, &effective_args.to_string(), result.is_dedup) {
+                            match detection {
+                                LoopDetection::Warning(msg) => {
+                                    eprintln!("[loop-detector] Level 1 (fallback): {}", effective_tool_name);
+                                    tool_results.push(msg);
+                                }
+                                LoopDetection::StripTools(msg, _) => {
+                                    eprintln!("[loop-detector] Level 2 (fallback): stripping tools for {}", effective_tool_name);
+                                    tool_results.push(msg);
+                                }
+                                LoopDetection::ForceTerminate(msg) => {
+                                    eprintln!("[loop-detector] Level 3 (fallback): force terminating for {}", effective_tool_name);
+                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                }
                             }
                         }
                     }
@@ -2083,6 +2360,7 @@ impl OrchestratorService {
                 // Feed all tool results back as a user message
                 let combined_results = tool_results.join("\n\n");
                 messages.push(Message::user(combined_results));
+                has_executed_tools = true;
             } else if !parsed_fallback.dropped_reasons.is_empty() {
                 let repair_hint = format!(
                     "Tool call parsing detected invalid calls. Please emit valid tool_call JSON blocks.\nIssues:\n- {}",
@@ -2121,7 +2399,16 @@ impl OrchestratorService {
                     .unwrap_or(false);
                 let empty_response_without_signals =
                     content_is_empty && !thinking_has_content && !has_cached_assistant_text;
+
+                // When the model has already executed tools and now provides a
+                // substantial text response (>80 chars), treat it as a final
+                // answer rather than a repair-worthy narration.
+                let likely_final_answer = has_executed_tools
+                    && !content_is_empty
+                    && response_text.len() > 80;
+
                 let needs_repair = repair_retry_count < 2
+                    && !likely_final_answer
                     && (empty_response_without_signals
                         || pending_action_intent
                         || (!matches!(reliability, ToolCallReliability::Reliable)

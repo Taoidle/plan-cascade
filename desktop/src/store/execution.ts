@@ -19,24 +19,45 @@ export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'fai
 
 // ============================================================================
 // Streaming delta accumulator — throttles React state updates to ~20/sec
+// Per-sub-agent isolation prevents output interleaving from parallel sub-agents.
 // ============================================================================
 
-let pendingTextDelta = '';
-let pendingThinkingDelta = '';
+interface PendingDelta {
+  text: string;
+  thinking: string;
+  subAgentId?: string;
+  subAgentDepth?: number;
+}
+const pendingDeltas = new Map<string, PendingDelta>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Root agent key for the delta map */
+const ROOT_DELTA_KEY = '__root__';
+
+function getPending(subAgentId?: string, depth?: number): PendingDelta {
+  const key = subAgentId || ROOT_DELTA_KEY;
+  let entry = pendingDeltas.get(key);
+  if (!entry) {
+    entry = { text: '', thinking: '', subAgentId, subAgentDepth: depth };
+    pendingDeltas.set(key, entry);
+  }
+  return entry;
+}
 
 function flushPendingDeltas(get: () => ExecutionState) {
   if (flushTimer) {
     clearTimeout(flushTimer);
     flushTimer = null;
   }
-  if (pendingTextDelta) {
-    get().appendStreamLine(pendingTextDelta, 'text');
-    pendingTextDelta = '';
-  }
-  if (pendingThinkingDelta) {
-    get().appendStreamLine(pendingThinkingDelta, 'thinking');
-    pendingThinkingDelta = '';
+  for (const [, delta] of pendingDeltas) {
+    if (delta.text) {
+      get().appendStreamLine(delta.text, 'text', delta.subAgentId, delta.subAgentDepth);
+      delta.text = '';
+    }
+    if (delta.thinking) {
+      get().appendStreamLine(delta.thinking, 'thinking', delta.subAgentId, delta.subAgentDepth);
+      delta.thinking = '';
+    }
   }
 }
 
@@ -116,6 +137,10 @@ export interface StreamLine {
   content: string;
   type: StreamLineType;
   timestamp: number;
+  /** Sub-agent ID if this line originated from a sub-agent */
+  subAgentId?: string;
+  /** Sub-agent nesting depth (0 = root) */
+  subAgentDepth?: number;
 }
 
 export interface HistoryConversationLine {
@@ -479,7 +504,7 @@ interface ExecutionState {
   clearStrategyAnalysis: () => void;
 
   /** Append a streaming output line */
-  appendStreamLine: (content: string, type: StreamLineType) => void;
+  appendStreamLine: (content: string, type: StreamLineType, subAgentId?: string, subAgentDepth?: number) => void;
 
   /** Clear streaming output buffer */
   clearStreamingOutput: () => void;
@@ -1454,7 +1479,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   addLog: (message) => {
-    const timestamp = new Date().toISOString().slice(11, 19);
+    const timestamp = new Date().toLocaleTimeString('en-GB', { hour12: false });
     set((state) => ({
       logs: [...state.logs, `[${timestamp}] ${message}`],
     }));
@@ -1792,14 +1817,19 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     });
   },
 
-  appendStreamLine: (content, type) => {
+  appendStreamLine: (content, type, subAgentId, subAgentDepth) => {
     set((state) => {
       const lines = state.streamingOutput;
       const last = lines.length > 0 ? lines[lines.length - 1] : null;
 
       // For text and thinking deltas, concatenate to the last line of the same type
-      // so streaming chunks form continuous prose instead of one-chunk-per-line
-      if ((type === 'text' || type === 'thinking') && last && last.type === type) {
+      // AND the same subAgentId — prevents different sub-agents' text from mixing
+      if (
+        (type === 'text' || type === 'thinking') &&
+        last &&
+        last.type === type &&
+        last.subAgentId === subAgentId
+      ) {
         const updated = { ...last, content: last.content + content };
         const newLines = lines.slice();
         newLines[newLines.length - 1] = updated;
@@ -1815,6 +1845,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         content,
         type,
         timestamp: Date.now(),
+        subAgentId,
+        subAgentDepth,
       };
       // Keep buffer capped at 500 lines by trimming old entries when appending
       const trimmed = lines.length >= 500 ? lines.slice(-499) : lines;
@@ -2476,6 +2508,10 @@ interface UnifiedEventPayload {
   objective?: string;
   prompt?: string;
   sub_agent_id?: string;
+  subagent_type?: string;
+  depth?: number;
+  event_type?: string;
+  event_data?: Record<string, unknown>;
   task_type?: string;
   role?: string;
   tool_id?: string;
@@ -2837,6 +2873,79 @@ function handleUnifiedExecutionEvent(
         get().appendStreamLine(`[tool_result:${payload.tool_id || ''}] ${preview}`, 'tool_result');
       }
       break;
+
+    case 'sub_agent_event': {
+      const innerType = payload.event_type as string;
+      const innerData = (payload.event_data || {}) as Record<string, unknown>;
+      const subAgentId = payload.sub_agent_id as string;
+      const depth = (payload.depth as number) || 0;
+
+      switch (innerType) {
+        case 'text_delta': {
+          const content = innerData.content as string;
+          if (content) {
+            const pending = getPending(subAgentId, depth);
+            const filterResult = get().toolCallFilter.processChunk(content);
+            if (filterResult.output) pending.text += filterResult.output;
+            if (filterResult.toolIndicator) {
+              // Flush text first, then add tool indicator
+              if (pending.text) {
+                get().appendStreamLine(pending.text, 'text', subAgentId, depth);
+                pending.text = '';
+              }
+              get().appendStreamLine(filterResult.toolIndicator, 'tool', subAgentId, depth);
+            }
+            scheduleFlush(get);
+          }
+          break;
+        }
+        case 'thinking_delta': {
+          if (useSettingsStore.getState().showReasoningOutput && innerData.content) {
+            const pending = getPending(subAgentId, depth);
+            pending.thinking += innerData.content as string;
+            scheduleFlush(get);
+          }
+          break;
+        }
+        case 'tool_start': {
+          flushPendingDeltas(get);
+          const argsPreview = formatToolArgs(
+            (innerData.tool_name as string) || '',
+            (innerData.arguments as string) || ''
+          );
+          get().appendStreamLine(
+            `[tool:${innerData.tool_name}] ${argsPreview}`,
+            'tool', subAgentId, depth
+          );
+          break;
+        }
+        case 'tool_result': {
+          if (innerData.error) {
+            get().appendStreamLine(
+              `[tool_error:${innerData.tool_id || ''}] ${innerData.error}`,
+              'error', subAgentId, depth
+            );
+          } else if (innerData.result) {
+            const result = innerData.result as string;
+            const preview = result.length > 500 ? result.substring(0, 500) + '...' : result;
+            get().appendStreamLine(
+              `[tool_result:${innerData.tool_id || ''}] ${preview}`,
+              'tool_result', subAgentId, depth
+            );
+          }
+          break;
+        }
+        case 'error': {
+          if (innerData.message) {
+            get().appendStreamLine(innerData.message as string, 'error', subAgentId, depth);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+      break;
+    }
 
     case 'sub_agent_start':
       if (showSubAgent) {
@@ -3612,7 +3721,7 @@ async function setupTauriEventListeners(
             get().appendStreamLine(filterResult.toolIndicator, 'tool');
           }
           if (filterResult.output) {
-            pendingTextDelta += filterResult.output;
+            getPending().text += filterResult.output;
             scheduleFlush(get);
           }
           break;
@@ -3626,7 +3735,7 @@ async function setupTauriEventListeners(
 
         case 'thinking_delta':
           if (useSettingsStore.getState().showReasoningOutput) {
-            pendingThinkingDelta += streamEvent.content;
+            getPending().thinking += streamEvent.content;
             scheduleFlush(get);
           }
           break;

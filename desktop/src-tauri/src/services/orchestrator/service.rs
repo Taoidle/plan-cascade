@@ -55,7 +55,8 @@ use crate::services::tools::{
     build_tool_call_instructions, detect_language, extract_text_without_tool_calls,
     format_tool_result, get_basic_tool_definitions_from_registry,
     get_tool_definitions_from_registry, merge_system_prompts,
-    parse_tool_calls, ParsedToolCall, TaskContext, TaskExecutionResult, TaskSpawner, ToolExecutor,
+    parse_tool_calls, ParsedToolCall, SubAgentType, TaskContext, TaskExecutionResult,
+    TaskSpawner, ToolExecutor, MAX_SUB_AGENT_DEPTH,
 };
 use crate::services::knowledge::context_provider::{KnowledgeContextConfig, KnowledgeContextProvider};
 use crate::utils::error::{AppError, AppResult};
@@ -110,6 +111,11 @@ pub struct OrchestratorConfig {
     /// Values: "explore", "analyze", "implement", or None for main agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_type: Option<String>,
+    /// When set, this sub-agent can spawn further sub-agents at this depth level.
+    /// When None, Task tool returns depth-limit error (leaf node behavior).
+    /// Root agent uses `Some(0)`, coordinator sub-agent uses `Some(1)`, etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_agent_depth: Option<u32>,
 }
 
 fn default_max_iterations() -> u32 {
@@ -151,6 +157,38 @@ fn sub_agent_token_budget(context_window: u32, task_type: Option<&str>) -> u32 {
         _ => 8,
     };
     (context_window * multiplier).clamp(20_000, 4_000_000)
+}
+
+/// Compute token budget for typed sub-agents with depth-based decay.
+///
+/// Each nesting level gets 60% of the parent's budget to prevent
+/// unbounded token consumption in deep hierarchies.
+fn subagent_token_budget_typed(
+    context_window: u32,
+    subagent_type: crate::services::tools::SubAgentType,
+    depth: u32,
+) -> u32 {
+    use crate::services::tools::SubAgentType;
+    let type_multiplier: u32 = match subagent_type {
+        SubAgentType::Explore | SubAgentType::Plan => 15,
+        SubAgentType::GeneralPurpose => 10,
+        SubAgentType::Bash => 4,
+    };
+    // Each depth level decays to 60% of the parent
+    let depth_factor = 0.6_f64.powi(depth as i32);
+    let budget = (context_window as f64 * type_multiplier as f64 * depth_factor) as u32;
+    budget.clamp(20_000, 4_000_000)
+}
+
+/// Max iterations for typed sub-agents.
+fn subagent_max_iterations(subagent_type: crate::services::tools::SubAgentType) -> u32 {
+    use crate::services::tools::SubAgentType;
+    match subagent_type {
+        SubAgentType::Explore => 100,
+        SubAgentType::Plan => 50,
+        SubAgentType::GeneralPurpose => 60,
+        SubAgentType::Bash => 10,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -375,6 +413,9 @@ struct OrchestratorTaskSpawner {
     shared_hnsw_index: Option<Arc<HnswIndex>>,
     /// Detected language from the user's message, propagated to sub-agents.
     detected_language: Option<String>,
+    /// Whether the parent provider supports thinking (runtime check result).
+    /// When true, sub-agents inherit the parent's enable_thinking setting.
+    parent_supports_thinking: bool,
 
     // Owned snapshots from parent — sub-agents only read, never write back.
     /// Framework best-practice skills detected for the current project.

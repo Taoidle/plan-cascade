@@ -318,6 +318,56 @@ impl BackgroundIndexer {
             }
         })
     }
+
+    /// Spawn a background task that runs a one-time catch-up sync before
+    /// entering the incremental loop.
+    ///
+    /// Used when restoring an already-indexed project after app restart,
+    /// to detect files that changed while the app was closed.
+    pub async fn start_watch_with_catchup(self) -> tokio::task::JoinHandle<()> {
+        let project_root = self.project_root;
+        let index_store = self.index_store;
+        let embedding_manager = self.embedding_manager;
+        let embedding_service = self.embedding_service;
+        let hnsw_index = self.hnsw_index;
+        let change_rx = self.change_rx;
+        let channel_overflow = self.channel_overflow;
+        let batch_callback = self.batch_callback;
+
+        tokio::spawn(async move {
+            let gitignore = build_gitignore_matcher(&project_root);
+
+            info!(
+                project = %project_root.display(),
+                "background indexer: running startup catch-up sync"
+            );
+            run_catchup_sync(
+                &project_root,
+                &index_store,
+                &gitignore,
+                embedding_manager.as_ref(),
+                embedding_service.as_ref(),
+                hnsw_index.as_ref(),
+                batch_callback.as_ref(),
+            )
+            .await;
+
+            if let Some(mut rx) = change_rx {
+                run_incremental_loop(
+                    &mut rx,
+                    &project_root,
+                    &index_store,
+                    embedding_manager.as_ref(),
+                    embedding_service.as_ref(),
+                    hnsw_index.as_ref(),
+                    gitignore,
+                    channel_overflow.as_ref().map(|f| f.as_ref()),
+                    batch_callback.as_ref(),
+                )
+                .await;
+            }
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -726,60 +776,73 @@ async fn run_catchup_sync(
         }
     }
 
-    // 2. Discover new files by scanning the file system.
-    if let Ok(inventory) = build_file_inventory(project_root, &[]) {
+    // 2. Discover new files via lightweight walk + run_incremental_index.
+    //    Unlike the previous approach that used build_file_inventory() (which
+    //    reads every file to compute hashes, then discards the content),
+    //    run_incremental_index() returns the file content in its Updated
+    //    variant, so embedding can proceed without a second disk read.
+    {
+        let walker = WalkBuilder::new(project_root)
+            .hidden(false)
+            .follow_links(false)
+            .git_ignore(true)
+            .git_exclude(true)
+            .git_global(true)
+            .build();
+
         let mut new_files = 0usize;
-        for item in &inventory.items {
-            let abs_path = project_root.join(&item.path);
+        for entry in walker {
+            let Ok(entry) = entry else { continue };
+            let abs_path = entry.path().to_path_buf();
+            if !abs_path.is_file() {
+                continue;
+            }
             if is_ignored_by_gitignore(gitignore, project_root, &abs_path) {
                 continue;
             }
-            let content_hash = item
-                .content_hash
-                .clone()
-                .unwrap_or_else(|| compute_content_hash(&abs_path));
-            let is_stale = index_store
-                .is_index_stale(&project_path, &item.path, &content_hash)
-                .unwrap_or(true);
-            if is_stale {
-                if let Err(e) = index_store.upsert_file_index(&project_path, item, &content_hash) {
-                    warn!(
-                        file = %item.path,
-                        error = %e,
-                        "background indexer: catch-up sync failed to upsert file"
-                    );
-                } else {
+
+            match run_incremental_index(project_root, index_store, &abs_path) {
+                Ok(IncrementalResult::Updated {
+                    content,
+                    language,
+                    rel_path,
+                }) => {
                     new_files += 1;
-                    // Embed the newly indexed file
-                    if abs_path.is_file() && item.size_bytes <= MAX_EMBEDDABLE_FILE_SIZE {
-                        if let Ok(content) = std::fs::read_to_string(&abs_path) {
-                            if let Some(emb_mgr) = embedding_manager {
-                                let _ = run_incremental_embedding_managed_with_content(
-                                    project_root,
-                                    index_store,
-                                    emb_mgr,
-                                    &abs_path,
-                                    &content,
-                                    &item.language,
-                                    &item.path,
-                                    hnsw_index,
-                                )
-                                .await;
-                            } else if let Some(emb_svc) = embedding_service {
-                                let _ = run_incremental_embedding_with_content(
-                                    project_root,
-                                    index_store,
-                                    emb_svc,
-                                    &abs_path,
-                                    &content,
-                                    &item.language,
-                                    &item.path,
-                                    hnsw_index,
-                                )
-                                .await;
-                            }
+                    if content.len() as u64 <= MAX_EMBEDDABLE_FILE_SIZE {
+                        if let Some(emb_mgr) = embedding_manager {
+                            let _ = run_incremental_embedding_managed_with_content(
+                                project_root,
+                                index_store,
+                                emb_mgr,
+                                &abs_path,
+                                &content,
+                                &language,
+                                &rel_path,
+                                hnsw_index,
+                            )
+                            .await;
+                        } else if let Some(emb_svc) = embedding_service {
+                            let _ = run_incremental_embedding_with_content(
+                                project_root,
+                                index_store,
+                                emb_svc,
+                                &abs_path,
+                                &content,
+                                &language,
+                                &rel_path,
+                                hnsw_index,
+                            )
+                            .await;
                         }
                     }
+                }
+                Ok(_) => {} // Skipped or Deleted — expected
+                Err(e) => {
+                    debug!(
+                        path = %abs_path.display(),
+                        error = %e,
+                        "background indexer: catch-up sync skipped file"
+                    );
                 }
             }
         }
@@ -2068,11 +2131,9 @@ async fn rebuild_hnsw_after_embedding(
     let actual_dim = all_embeddings[0].1.len();
     hnsw.set_dimension(actual_dim);
 
-    // Reset the HNSW index to clear any stale data from a previous pass
-    hnsw.reset().await;
-
-    // Batch insert all embeddings
-    hnsw.batch_insert(&all_embeddings).await;
+    // Atomically rebuild the HNSW index — concurrent searches see either the
+    // old or the new index, never an empty one.
+    hnsw.rebuild_from_vectors(&all_embeddings).await?;
 
     // Save to disk
     hnsw.save_to_disk().await.map_err(|e| {

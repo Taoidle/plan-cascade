@@ -186,6 +186,7 @@ impl Agent for LlmAgent {
             project_id: None,
             compaction_config: Default::default(),
             task_type: None,
+            sub_agent_depth: None,
         };
 
         // Create the OrchestratorService

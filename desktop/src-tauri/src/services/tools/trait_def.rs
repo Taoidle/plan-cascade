@@ -121,6 +121,15 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// Whether this tool is safe to execute concurrently with other parallel-safe tools.
+    ///
+    /// Read-only tools and tools with independent state (e.g., Task sub-agents) return true.
+    /// Tools with side effects (Write, Edit, Bash) or shared mutable state (Browser) return false.
+    /// Default: false (sequential execution).
+    fn is_parallel_safe(&self) -> bool {
+        false
+    }
+
     /// Execute the tool with the given context and arguments.
     ///
     /// Returns a `ToolResult` indicating success/failure with output or error.

@@ -54,6 +54,10 @@ impl Tool for WebSearchTool {
         true
     }
 
+    fn is_parallel_safe(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         let query = match args.get("query").and_then(|v| v.as_str()) {
             Some(q) => q,

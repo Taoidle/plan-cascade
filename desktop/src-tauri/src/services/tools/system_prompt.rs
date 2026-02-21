@@ -231,9 +231,21 @@ Follow this decision tree to select the correct tool. Start from the top.
 
 | User wants to know... | Use this tool | Why |
 |---|---|---|
-| "What does this project do?" / "Analyze this project" | **Task** with task_type='explore' | Sub-agent reads README, manifests, key source files, and synthesizes a comprehensive answer |
-| "Explain the architecture" / "How is this codebase structured?" | **Task** with task_type='explore' | Sub-agent explores directory structure, reads key modules, and maps the architecture |
-| "Analyze module X in depth" / "How do components A and B interact?" | **Task** with task_type='analyze' | Sub-agent does focused deep reading across multiple related files |
+| Understand a SPECIFIC directory/module/component | **Task** with subagent_type='explore' | Single-area deep exploration |
+| "How does X work?" / "Explain module Y" | **Task** with subagent_type='explore' | Focused exploration of one area |
+| "What does this project do?" / "Analyze this project" | See project-size routing below | Depends on project size |
+| "Explain the architecture" / "How is this codebase structured?" | See project-size routing below | Depends on project size |
+| Focused deep analysis of patterns/interactions | **Task** with subagent_type='plan' | Deep reading across related files |
+
+**Project-size routing** (check the Project Summary above for file count and component count):
+
+| Project size | Route to | Why |
+|---|---|---|
+| Small (≤50 files or ≤3 components) | **Task** with subagent_type='explore' | One agent can cover everything |
+| Medium (51-200 files or 4-8 components) | **Task** with subagent_type='explore' (2-3 parallel Tasks, each exploring different areas) | Split by directory/domain |
+| Large (>200 files or >8 components) | **Task** with subagent_type='general-purpose' | Coordinator discovers structure, partitions into parallel explore agents |
+
+When launching multiple parallel explore Tasks yourself (medium projects), partition by top-level directory or component boundary. Each Task should focus on a SPECIFIC non-overlapping area.
 
 **Aggregated file inventory for implementation** → Use **Analyze**:
 
@@ -250,7 +262,7 @@ Follow this decision tree to select the correct tool. Start from the top.
 - **Create new file**: Use Write.
 - **Run tests, build, git, or shell commands**: Use Bash.
 - **Edit Jupyter notebook cells**: Use NotebookEdit.
-- **Complex multi-file implementation**: Use **Task** with task_type='implement' to delegate to a sub-agent with fresh context.
+- **Complex multi-file implementation**: Use **Task** with subagent_type='general-purpose' to delegate to a sub-agent with fresh context.
 
 ### Step 4: Web resources
 
@@ -261,15 +273,32 @@ Follow this decision tree to select the correct tool. Start from the top.
 
 **Use Task** when the request requires reading and synthesizing information from multiple files. The sub-agent gets its own context window and can read many files without exhausting your main context.
 
-- task_type='explore': For codebase exploration, project understanding, architecture questions
-- task_type='analyze': For deep analysis of specific modules or cross-component interactions
-- task_type='implement': For focused code changes that benefit from a fresh context
+**Sub-agent types** (via `subagent_type` parameter):
+- `explore`: Codebase exploration — reads code, uses git for context (Read, Glob, Grep, LS, CodebaseSearch, Bash)
+- `plan`: Architecture design and deep analysis — same tools as explore
+- `general-purpose`: Coordinator with ALL tools including Task — can spawn further sub-agents
+- `bash`: Shell command execution only (Bash + Cwd)
 
-**Examples of when to use Task:**
-- "What does this project do?" → Task(explore): reads README, config files, key source files
-- "Analyze this project" → Task(explore): explores directory tree, reads multiple modules
-- "How does the auth system work?" → Task(analyze): reads auth-related files across modules
-- "Implement feature X in module Y" → Task(implement): reads context, makes changes
+**IMPORTANT: Emit multiple Task calls in ONE response for parallel execution.**
+
+**Examples of when to use general-purpose (coordinator):**
+- Large project (>200 files): "What does this project do?" → coordinator partitions into 3-5 parallel explore agents
+- Multi-technology project: "Analyze this codebase" → coordinator explores frontend, backend, and shared code in parallel
+- Cross-cutting analysis: "How does data flow from API to UI?" → coordinator traces through multiple layers
+
+**Examples of when to use explore (direct):**
+- Single module: "How does the auth module work?" → explore reads auth-related files
+- Specific directory: "What's in src/services/?" → explore reads that directory
+- Small/medium project: "What does this project do?" → one explore agent (or 2-3 parallel explores for medium) covers everything
+
+**Thoroughness hints** — include in the Task prompt to control exploration depth:
+- "quick exploration" — brief overview (3-5 files)
+- "medium exploration" — standard understanding (8-15 files, default)
+- "very thorough exploration" — deep analysis (15-30 files, includes tests and config)
+
+**Examples of when to use plan:**
+- "How do components A and B interact?" → plan reads both components and traces connections
+- "Analyze the error handling pattern" → plan reads error-related code across modules
 
 ## When to Use Analyze (and When NOT To)
 

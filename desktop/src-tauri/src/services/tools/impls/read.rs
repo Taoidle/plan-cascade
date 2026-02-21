@@ -97,6 +97,10 @@ impl Tool for ReadTool {
         )
     }
 
+    fn is_parallel_safe(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         let file_path = match args.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,

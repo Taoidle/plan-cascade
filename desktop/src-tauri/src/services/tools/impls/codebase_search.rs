@@ -54,13 +54,29 @@ impl CodebaseSearchTool {
         let results = outcome.results;
 
         if results.is_empty() {
-            return Ok(format!(
+            let mut hint = format!(
                 "No results found for '{}' (scope: all, hybrid RRF).\n\
                  Hint: Try shorter queries (1-2 keywords). \
                  Use scope=\"files\" or scope=\"symbols\" for narrower search. \
                  Use LS to browse directories or Grep for full-text content search.",
                 query
-            ));
+            );
+            // List available components to help the LLM refine its search
+            if let Ok(summary) = index_store.get_project_summary(project_path) {
+                if !summary.components.is_empty() {
+                    let names: Vec<&str> = summary
+                        .components
+                        .iter()
+                        .take(15)
+                        .map(|c| c.name.as_str())
+                        .collect();
+                    hint.push_str(&format!(
+                        "\nAvailable components: {}",
+                        names.join(", ")
+                    ));
+                }
+            }
+            return Ok(hint);
         }
 
         // Apply component filter if specified
@@ -604,6 +620,10 @@ impl Tool for CodebaseSearchTool {
         )
     }
 
+    fn is_parallel_safe(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         let query = match args.get("query").and_then(|v| v.as_str()) {
             Some(q) => q,
@@ -678,13 +698,29 @@ impl Tool for CodebaseSearchTool {
         }
 
         if output_sections.is_empty() {
-            ToolResult::ok(format!(
+            let mut hint = format!(
                 "No results found for '{}' (scope: {}).\n\
                  Hint: Try a shorter or different keyword. \
                  Use scope=\"files\" for file paths, scope=\"symbols\" for function/class names. \
                  You can also use Grep for regex search or LS to browse directories.",
                 query, scope
-            ))
+            );
+            // List available components to help the LLM refine its search
+            if let Ok(summary) = index_store.get_project_summary(&project_path) {
+                if !summary.components.is_empty() {
+                    let names: Vec<&str> = summary
+                        .components
+                        .iter()
+                        .take(15)
+                        .map(|c| c.name.as_str())
+                        .collect();
+                    hint.push_str(&format!(
+                        "\nAvailable components: {}",
+                        names.join(", ")
+                    ));
+                }
+            }
+            ToolResult::ok(hint)
         } else {
             ToolResult::ok(output_sections.join("\n"))
         }

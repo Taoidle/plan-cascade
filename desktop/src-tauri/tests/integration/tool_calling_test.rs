@@ -324,7 +324,7 @@ fn test_tool_definitions_all_serializable_to_json_array() {
 fn test_system_prompt_includes_working_directory() {
     let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("D:\\test\\my-project");
-    let prompt = build_system_prompt(&project_root, &tools, None);
+    let prompt = build_system_prompt(&project_root, &tools, None, "test", "test-model", "en");
 
     assert!(
         prompt.contains("D:\\test\\my-project"),
@@ -336,7 +336,7 @@ fn test_system_prompt_includes_working_directory() {
 fn test_system_prompt_includes_all_tool_names() {
     let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("/test/project");
-    let prompt = build_system_prompt(&project_root, &tools, None);
+    let prompt = build_system_prompt(&project_root, &tools, None, "test", "test-model", "en");
 
     for tool in &tools {
         assert!(
@@ -351,7 +351,7 @@ fn test_system_prompt_includes_all_tool_names() {
 fn test_system_prompt_includes_tool_descriptions() {
     let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("/test/project");
-    let prompt = build_system_prompt(&project_root, &tools, None);
+    let prompt = build_system_prompt(&project_root, &tools, None, "test", "test-model", "en");
 
     // At least check a few key descriptions are present
     assert!(prompt.contains("Read the contents of a file"));
@@ -363,7 +363,7 @@ fn test_system_prompt_includes_tool_descriptions() {
 fn test_system_prompt_includes_usage_guidelines() {
     let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("/test/project");
-    let prompt = build_system_prompt(&project_root, &tools, None);
+    let prompt = build_system_prompt(&project_root, &tools, None, "test", "test-model", "en");
 
     assert!(prompt.contains("General Guidelines"));
     assert!(prompt.contains("Read before modifying"));
@@ -1372,7 +1372,7 @@ fn test_tool_result_ok_has_no_image_data() {
 fn test_system_prompt_includes_web_fetch_guidance() {
     let tools = get_tool_definitions_from_registry();
     let project_root = PathBuf::from("/test/project");
-    let prompt = build_system_prompt(&project_root, &tools, None);
+    let prompt = build_system_prompt(&project_root, &tools, None, "test", "test-model", "en");
 
     assert!(
         prompt.contains("WebFetch"),

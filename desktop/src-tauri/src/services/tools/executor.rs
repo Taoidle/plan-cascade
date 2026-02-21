@@ -383,7 +383,7 @@ impl ToolExecutor {
     /// Used to pass shared state to trait-based tool implementations.
     /// Populates ALL fields so tools can access services through context
     /// instead of requiring executor-private state.
-    fn build_tool_context(&self) -> super::trait_def::ToolExecutionContext {
+    pub(crate) fn build_tool_context(&self) -> super::trait_def::ToolExecutionContext {
         super::trait_def::ToolExecutionContext {
             session_id: String::new(),
             project_root: self.project_root.clone(),
@@ -415,6 +415,8 @@ impl ToolExecutor {
             spawner: Arc::clone(&task_ctx.spawner),
             tx: task_ctx.tx.clone(),
             cancellation_token: task_ctx.cancellation_token.clone(),
+            depth: task_ctx.depth,
+            max_depth: task_ctx.max_depth,
         }));
         ctx
     }
