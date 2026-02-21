@@ -30,6 +30,12 @@ use super::tree_sitter_parser;
 /// Called with `(indexed_so_far, total_files)` during a full index pass.
 pub type IndexProgressCallback = Arc<dyn Fn(usize, usize) + Send + Sync>;
 
+/// Callback invoked after each incremental batch completes.
+///
+/// Used by `IndexManager` to refresh the frontend with fresh index statistics
+/// so that file/symbol/embedding counts stay up to date.
+pub type BatchCompleteCallback = Arc<dyn Fn() + Send + Sync>;
+
 /// Statistics from a managed embedding pass.
 ///
 /// Used by `IndexManager` to determine the final status (e.g.
@@ -91,6 +97,8 @@ pub struct BackgroundIndexer {
     /// The incremental loop checks this after each batch and triggers a
     /// catch-up sync when set.
     channel_overflow: Option<Arc<AtomicBool>>,
+    /// Callback invoked after each incremental batch to update frontend status.
+    batch_callback: Option<BatchCompleteCallback>,
 }
 
 impl BackgroundIndexer {
@@ -105,6 +113,7 @@ impl BackgroundIndexer {
             change_rx: None,
             progress_callback: None,
             channel_overflow: None,
+            batch_callback: None,
         }
     }
 
@@ -167,6 +176,15 @@ impl BackgroundIndexer {
         self
     }
 
+    /// Attach a callback that is invoked after each incremental batch.
+    ///
+    /// Used by `IndexManager` to emit updated index statistics to the
+    /// frontend after file changes are processed incrementally.
+    pub fn with_batch_callback(mut self, cb: BatchCompleteCallback) -> Self {
+        self.batch_callback = Some(cb);
+        self
+    }
+
     /// Spawn the background indexing task and return its `JoinHandle`.
     ///
     /// The task:
@@ -185,6 +203,7 @@ impl BackgroundIndexer {
         let change_rx = self.change_rx;
         let progress_callback = self.progress_callback;
         let channel_overflow = self.channel_overflow;
+        let batch_callback = self.batch_callback;
 
         tokio::spawn(async move {
             // --- Phase 1: Full index ---
@@ -254,6 +273,7 @@ impl BackgroundIndexer {
                     hnsw_index.as_ref(),
                     gitignore,
                     channel_overflow.as_ref().map(|f| f.as_ref()),
+                    batch_callback.as_ref(),
                 )
                 .await;
             }
@@ -274,6 +294,7 @@ impl BackgroundIndexer {
         let hnsw_index = self.hnsw_index;
         let change_rx = self.change_rx;
         let channel_overflow = self.channel_overflow;
+        let batch_callback = self.batch_callback;
 
         tokio::spawn(async move {
             if let Some(mut rx) = change_rx {
@@ -291,6 +312,7 @@ impl BackgroundIndexer {
                     hnsw_index.as_ref(),
                     gitignore,
                     channel_overflow.as_ref().map(|f| f.as_ref()),
+                    batch_callback.as_ref(),
                 )
                 .await;
             }
@@ -391,6 +413,7 @@ async fn run_incremental_loop(
     hnsw_index: Option<&Arc<HnswIndex>>,
     mut gitignore: Gitignore,
     channel_overflow: Option<&AtomicBool>,
+    batch_callback: Option<&BatchCompleteCallback>,
 ) {
     let project_path = project_root.to_string_lossy().to_string();
 
@@ -421,6 +444,8 @@ async fn run_incremental_loop(
         // Deduplicate paths within the batch.
         let unique: HashSet<PathBuf> = batch.into_iter().collect();
 
+        let mut batch_had_changes = false;
+
         for changed_path in unique {
             if is_ignored_by_gitignore(&gitignore, project_root, &changed_path) {
                 debug!(path = %changed_path.display(), "background indexer: skipping gitignored path");
@@ -441,6 +466,7 @@ async fn run_incremental_loop(
                         }
                     }
                     let _ = index_store.delete_embeddings_for_file(&project_path, &rel_path);
+                    batch_had_changes = true;
                 }
                 Ok(IncrementalResult::DirectoryDeleted { child_rel_paths }) => {
                     for rel_path in &child_rel_paths {
@@ -457,6 +483,7 @@ async fn run_incremental_loop(
                         }
                         let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
                     }
+                    batch_had_changes = true;
                 }
                 Ok(IncrementalResult::Skipped) => {}
                 Ok(IncrementalResult::Updated {
@@ -503,6 +530,7 @@ async fn run_incremental_loop(
                             );
                         }
                     }
+                    batch_had_changes = true;
                 }
                 Err(e) => {
                     warn!(
@@ -511,6 +539,27 @@ async fn run_incremental_loop(
                         "background indexer: incremental index failed"
                     );
                 }
+            }
+        }
+
+        // Batch-level HNSW save — one file_dump per batch instead of per file.
+        if batch_had_changes {
+            if let Some(hnsw) = hnsw_index {
+                if hnsw.is_ready().await {
+                    if let Err(e) = hnsw.save_to_disk().await {
+                        warn!(
+                            error = %e,
+                            "background indexer: failed to save HNSW after batch"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Batch-level status emit — refresh frontend with fresh index statistics.
+        if batch_had_changes {
+            if let Some(cb) = batch_callback {
+                cb();
             }
         }
 
@@ -611,8 +660,20 @@ async fn run_catchup_sync(
 
             // Remove if deleted or now gitignored
             if !abs_path.is_file() || is_ignored_by_gitignore(gitignore, project_root, &abs_path) {
-                let _ = index_store.delete_file_index(&project_path, rel_path);
+                // Mark HNSW entries stale before deleting from SQLite
+                if let Some(hnsw) = hnsw_index {
+                    if hnsw.is_ready().await {
+                        if let Ok(rowids) =
+                            index_store.get_embedding_rowids_for_file(&project_path, rel_path)
+                        {
+                            for rowid in rowids {
+                                hnsw.mark_stale(rowid).await;
+                            }
+                        }
+                    }
+                }
                 let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
+                let _ = index_store.delete_file_index(&project_path, rel_path);
                 removed += 1;
                 continue;
             }
@@ -723,6 +784,19 @@ async fn run_catchup_sync(
                 new_files = new_files,
                 "background indexer: catch-up sync discovered new files"
             );
+        }
+    }
+
+    // Save HNSW once after all catch-up changes (per-file saves were removed
+    // from _with_content functions to avoid N file_dumps per batch).
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            if let Err(e) = hnsw.save_to_disk().await {
+                warn!(
+                    error = %e,
+                    "background indexer: failed to save HNSW after catch-up sync"
+                );
+            }
         }
     }
 
@@ -1443,7 +1517,10 @@ async fn run_incremental_embedding_with_content(
         }
     }
 
-    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%)
+    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%).
+    // Note: save_to_disk is NOT called here — it is deferred to the
+    // batch-level save in run_incremental_loop to avoid N file_dumps
+    // for N files in a batch.
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await && hnsw.needs_rebuild().await {
             info!(
@@ -1453,13 +1530,6 @@ async fn run_incremental_embedding_with_content(
                 warn!(
                     error = %e,
                     "background indexer: periodic HNSW rebuild failed"
-                );
-            }
-        } else if hnsw.is_ready().await {
-            if let Err(e) = hnsw.save_to_disk().await {
-                warn!(
-                    error = %e,
-                    "background indexer: failed to save HNSW after incremental embedding"
                 );
             }
         }
@@ -1908,7 +1978,10 @@ async fn run_incremental_embedding_managed_with_content(
         }
     }
 
-    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%)
+    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%).
+    // Note: save_to_disk is NOT called here — it is deferred to the
+    // batch-level save in run_incremental_loop to avoid N file_dumps
+    // for N files in a batch.
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await && hnsw.needs_rebuild().await {
             info!(
@@ -1918,13 +1991,6 @@ async fn run_incremental_embedding_managed_with_content(
                 warn!(
                     error = %e,
                     "background indexer: periodic HNSW rebuild failed (managed)"
-                );
-            }
-        } else if hnsw.is_ready().await {
-            if let Err(e) = hnsw.save_to_disk().await {
-                warn!(
-                    error = %e,
-                    "background indexer: failed to save HNSW after incremental embedding (managed)"
                 );
             }
         }

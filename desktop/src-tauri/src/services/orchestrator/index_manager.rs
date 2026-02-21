@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use super::background_indexer::{BackgroundIndexer, IndexProgressCallback};
+use super::background_indexer::{BackgroundIndexer, BatchCompleteCallback, IndexProgressCallback};
 use super::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
 use super::embedding_provider::{
     EmbeddingProviderConfig, EmbeddingProviderType, PersistedEmbeddingConfig,
@@ -335,13 +335,41 @@ impl IndexManager {
         let provider_display_name = embedding_mgr.display_name().to_string();
 
         let handle = tokio::task::spawn(async move {
+            // Build batch callback for incremental status refresh.
+            let pp_for_batch = pp_for_task.clone();
+            let statuses_for_batch = statuses_for_task.clone();
+            let app_for_batch = app_for_task.clone();
+            let store_for_batch = index_store.clone();
+            let provider_name_for_batch = provider_display_name.clone();
+            let batch_cb: BatchCompleteCallback = Arc::new(move || {
+                if let Ok(summary) = store_for_batch.get_project_summary(&pp_for_batch) {
+                    let event = IndexStatusEvent {
+                        project_path: pp_for_batch.clone(),
+                        status: "indexed".to_string(),
+                        indexed_files: summary.total_files,
+                        total_files: summary.total_files,
+                        error_message: None,
+                        total_symbols: summary.total_symbols,
+                        embedding_chunks: summary.embedding_chunks,
+                        embedding_provider_name: Some(provider_name_for_batch.clone()),
+                    };
+                    if let Ok(mut map) = statuses_for_batch.try_write() {
+                        map.insert(pp_for_batch.clone(), event.clone());
+                    }
+                    if let Some(ref app) = app_for_batch {
+                        let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
+                    }
+                }
+            });
+
             let indexer = BackgroundIndexer::new(project_root, index_store.clone())
                 .with_progress_callback(progress_cb)
                 .with_embedding_service(embedding_svc)
                 .with_embedding_manager(embedding_mgr)
                 .with_hnsw_index(hnsw_idx)
                 .with_change_receiver(change_rx)
-                .with_channel_overflow_flag(overflow_flag);
+                .with_channel_overflow_flag(overflow_flag)
+                .with_batch_callback(batch_cb);
 
             let join = indexer.start().await;
             let result = join.await;
@@ -691,9 +719,46 @@ impl IndexManager {
             indexes.get(project_path).cloned()
         };
 
+        // Build batch callback for incremental status refresh.
+        let pp_for_batch = project_path.to_string();
+        let statuses_for_batch = self.statuses.clone();
+        let app_for_batch = {
+            let guard = self.app_handle.read().await;
+            guard.clone()
+        };
+        let store_for_batch = self.index_store.clone();
+        let provider_name_for_batch = {
+            let managers = self.embedding_managers.read().await;
+            managers
+                .get(project_path)
+                .map(|m| m.display_name().to_string())
+                .unwrap_or_default()
+        };
+        let batch_cb: BatchCompleteCallback = Arc::new(move || {
+            if let Ok(summary) = store_for_batch.get_project_summary(&pp_for_batch) {
+                let event = IndexStatusEvent {
+                    project_path: pp_for_batch.clone(),
+                    status: "indexed".to_string(),
+                    indexed_files: summary.total_files,
+                    total_files: summary.total_files,
+                    error_message: None,
+                    total_symbols: summary.total_symbols,
+                    embedding_chunks: summary.embedding_chunks,
+                    embedding_provider_name: Some(provider_name_for_batch.clone()),
+                };
+                if let Ok(mut map) = statuses_for_batch.try_write() {
+                    map.insert(pp_for_batch.clone(), event.clone());
+                }
+                if let Some(ref app) = app_for_batch {
+                    let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
+                }
+            }
+        });
+
         let mut indexer = BackgroundIndexer::new(project_root, index_store)
             .with_change_receiver(change_rx)
-            .with_channel_overflow_flag(overflow_flag);
+            .with_channel_overflow_flag(overflow_flag)
+            .with_batch_callback(batch_cb);
         if let Some(svc) = embedding_svc {
             indexer = indexer.with_embedding_service(svc);
         }
