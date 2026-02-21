@@ -7,6 +7,7 @@ use crate::utils::error::AppResult;
 use ignore::WalkBuilder;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -128,6 +129,11 @@ pub struct FileInventoryItem {
     pub line_count: usize,
     pub is_test: bool,
     pub symbols: Vec<SymbolInfo>,
+    /// Pre-computed SHA-256 content hash (hex).  Populated by
+    /// `build_file_inventory_with_limits` to avoid a redundant disk read in
+    /// downstream consumers such as `run_full_index`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -225,10 +231,38 @@ pub fn build_file_inventory_with_limits(
         let component = detect_component(&rel_norm);
         let line_count = estimate_line_count(path, metadata.len()).unwrap_or(0);
 
-        let symbols = if metadata.len() <= max_symbol_file_size {
-            extract_symbols(path, &language, limits.max_symbols_per_file)
+        // Single disk read: compute content hash and extract symbols from the
+        // same bytes so that downstream consumers (run_full_index, catch-up sync)
+        // do not need to re-read the file.
+        let (symbols, content_hash) = if metadata.len() <= max_symbol_file_size {
+            match fs::read(path) {
+                Ok(bytes) => {
+                    let hash = {
+                        let mut hasher = Sha256::new();
+                        hasher.update(&bytes);
+                        format!("{:x}", hasher.finalize())
+                    };
+                    let syms = match String::from_utf8(bytes) {
+                        Ok(content) => {
+                            extract_symbols_from_str(&content, &language, limits.max_symbols_per_file)
+                        }
+                        Err(_) => Vec::new(),
+                    };
+                    (syms, Some(hash))
+                }
+                Err(_) => (Vec::new(), None),
+            }
         } else {
-            Vec::new()
+            // File too large for symbol extraction — still compute hash.
+            let hash = match fs::read(path) {
+                Ok(bytes) => {
+                    let mut hasher = Sha256::new();
+                    hasher.update(&bytes);
+                    Some(format!("{:x}", hasher.finalize()))
+                }
+                Err(_) => None,
+            };
+            (Vec::new(), hash)
         };
 
         items.push(FileInventoryItem {
@@ -240,6 +274,7 @@ pub fn build_file_inventory_with_limits(
             line_count,
             is_test,
             symbols,
+            content_hash,
         });
     }
 
@@ -826,6 +861,7 @@ mod tests {
                     line_count: 1,
                     is_test: false,
                     symbols: vec![],
+                    content_hash: None,
                 },
                 FileInventoryItem {
                     path: "tests/test_a.py".to_string(),
@@ -836,6 +872,7 @@ mod tests {
                     line_count: 1,
                     is_test: true,
                     symbols: vec![],
+                    content_hash: None,
                 },
                 FileInventoryItem {
                     path: "tests/test_b.py".to_string(),
@@ -846,6 +883,7 @@ mod tests {
                     line_count: 1,
                     is_test: true,
                     symbols: vec![],
+                    content_hash: None,
                 },
                 FileInventoryItem {
                     path: "README.md".to_string(),
@@ -856,6 +894,7 @@ mod tests {
                     line_count: 1,
                     is_test: false,
                     symbols: vec![],
+                    content_hash: None,
                 },
             ],
         };

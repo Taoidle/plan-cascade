@@ -1316,6 +1316,7 @@ mod tests {
                 SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1),
                 SymbolInfo::basic("AppConfig".to_string(), SymbolKind::Struct, 10),
             ],
+            content_hash: None,
         };
 
         let item2 = FileInventoryItem {
@@ -1331,6 +1332,7 @@ mod tests {
                 SymbolKind::Function,
                 5,
             )],
+            content_hash: None,
         };
 
         let item3 = FileInventoryItem {
@@ -1345,6 +1347,7 @@ mod tests {
                 SymbolInfo::basic("App".to_string(), SymbolKind::Function, 1),
                 SymbolInfo::basic("AppProps".to_string(), SymbolKind::Interface, 5),
             ],
+            content_hash: None,
         };
 
         store
@@ -1638,6 +1641,7 @@ mod tests {
                 SymbolKind::Function,
                 1,
             )],
+            content_hash: None,
         };
 
         store

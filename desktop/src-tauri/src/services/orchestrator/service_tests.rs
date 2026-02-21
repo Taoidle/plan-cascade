@@ -387,6 +387,7 @@ fn test_build_deterministic_analysis_fallback_report_avoids_raw_phase_dump() {
                 line_count: 12,
                 is_test: false,
                 symbols: vec![],
+                content_hash: None,
             },
             crate::services::orchestrator::analysis_index::FileInventoryItem {
                 path: "tests/test_orchestrator.py".to_string(),
@@ -397,6 +398,7 @@ fn test_build_deterministic_analysis_fallback_report_avoids_raw_phase_dump() {
                 line_count: 8,
                 is_test: true,
                 symbols: vec![],
+                content_hash: None,
             },
         ],
     });

@@ -574,6 +574,7 @@ async fn run_incremental_loop(
                     embedding_manager,
                     embedding_service,
                     hnsw_index,
+                    batch_callback,
                 )
                 .await;
             }
@@ -646,6 +647,7 @@ async fn run_catchup_sync(
     embedding_manager: Option<&Arc<EmbeddingManager>>,
     embedding_service: Option<&Arc<EmbeddingService>>,
     hnsw_index: Option<&Arc<HnswIndex>>,
+    batch_callback: Option<&BatchCompleteCallback>,
 ) {
     let project_path = project_root.to_string_lossy().to_string();
 
@@ -732,7 +734,10 @@ async fn run_catchup_sync(
             if is_ignored_by_gitignore(gitignore, project_root, &abs_path) {
                 continue;
             }
-            let content_hash = compute_content_hash(&abs_path);
+            let content_hash = item
+                .content_hash
+                .clone()
+                .unwrap_or_else(|| compute_content_hash(&abs_path));
             let is_stale = index_store
                 .is_index_stale(&project_path, &item.path, &content_hash)
                 .unwrap_or(true);
@@ -800,6 +805,11 @@ async fn run_catchup_sync(
         }
     }
 
+    // Refresh frontend with updated index statistics after catch-up reconciliation.
+    if let Some(cb) = batch_callback {
+        cb();
+    }
+
     info!("background indexer: catch-up sync complete");
 }
 
@@ -819,7 +829,10 @@ fn run_full_index(
 
     for (i, item) in inventory.items.iter().enumerate() {
         let abs_path = project_root.join(&item.path);
-        let content_hash = compute_content_hash(&abs_path);
+        let content_hash = item
+            .content_hash
+            .clone()
+            .unwrap_or_else(|| compute_content_hash(&abs_path));
         if let Err(e) = index_store.upsert_file_index(&project_path, item, &content_hash) {
             warn!(
                 file = %item.path,
@@ -968,6 +981,7 @@ fn run_incremental_index(
         line_count,
         is_test: is_test_path(&rel_str),
         symbols,
+        content_hash: Some(content_hash.clone()),
     };
 
     index_store
@@ -1290,7 +1304,7 @@ async fn run_embedding_pass(
 ///
 /// Retained for catch-up sync and other scenarios where the file content is
 /// not already available in memory.
-#[allow(dead_code)]
+#[cfg(test)]
 async fn run_incremental_embedding(
     project_root: &Path,
     index_store: &IndexStore,
@@ -1444,16 +1458,19 @@ async fn run_incremental_embedding_with_content(
         return Ok(());
     }
 
-    // Mark old HNSW entries as stale.
-    if let Some(hnsw) = hnsw_index {
+    // Capture old HNSW rowids BEFORE the SQLite replace (which DELETEs old rows).
+    // Stale marking is deferred until after embedding + SQLite replace succeed.
+    let old_hnsw_rowids: Vec<usize> = if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await {
-            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, rel_str) {
-                for rowid in rowids {
-                    hnsw.mark_stale(rowid).await;
-                }
-            }
+            index_store
+                .get_embedding_rowids_for_file(&project_path, rel_str)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
         }
-    }
+    } else {
+        Vec::new()
+    };
 
     if !embedding_service.is_ready() {
         match index_store.load_vocabulary(&project_path) {
@@ -1500,6 +1517,15 @@ async fn run_incremental_embedding_with_content(
             "background indexer: transactional embedding replace failed"
         );
         return Err(e.to_string());
+    }
+
+    // Mark old HNSW entries as stale NOW — after embedding + SQLite replace succeeded.
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            for rowid in &old_hnsw_rowids {
+                hnsw.mark_stale(*rowid).await;
+            }
+        }
     }
 
     // Insert new embeddings into HNSW.
@@ -1712,7 +1738,7 @@ async fn run_embedding_pass_managed(
 ///
 /// Retained for catch-up sync and other scenarios where the file content is
 /// not already available in memory.
-#[allow(dead_code)]
+#[cfg(test)]
 async fn run_incremental_embedding_managed(
     project_root: &Path,
     index_store: &IndexStore,
@@ -1884,17 +1910,20 @@ async fn run_incremental_embedding_managed_with_content(
         return Ok(());
     }
 
-    // Mark old HNSW entries as stale (safe even if the API call later fails —
-    // a periodic HNSW rebuild will reconcile).
-    if let Some(hnsw) = hnsw_index {
+    // Capture old HNSW rowids BEFORE the SQLite replace (which DELETEs old rows).
+    // Stale marking is deferred until after the API call + SQLite replace succeed
+    // so that a transient API failure does not permanently exclude old embeddings.
+    let old_hnsw_rowids: Vec<usize> = if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await {
-            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, rel_str) {
-                for rowid in rowids {
-                    hnsw.mark_stale(rowid).await;
-                }
-            }
+            index_store
+                .get_embedding_rowids_for_file(&project_path, rel_str)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
         }
-    }
+    } else {
+        Vec::new()
+    };
 
     // If primary provider is TF-IDF, ensure vocabulary is loaded
     if manager.provider_type() == EmbeddingProviderType::TfIdf {
@@ -1961,6 +1990,15 @@ async fn run_incremental_embedding_managed_with_content(
             "background indexer: transactional embedding replace failed (managed)"
         );
         return Err(e.to_string());
+    }
+
+    // Mark old HNSW entries as stale NOW — after API + SQLite replace succeeded.
+    if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            for rowid in &old_hnsw_rowids {
+                hnsw.mark_stale(*rowid).await;
+            }
+        }
     }
 
     // Insert new embeddings into HNSW.

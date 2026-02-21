@@ -1131,6 +1131,7 @@ mod tests {
                 SymbolInfo::basic("UserController".to_string(), SymbolKind::Struct, 5),
                 SymbolInfo::basic("handle_request".to_string(), SymbolKind::Function, 15),
             ],
+            content_hash: None,
         };
         store
             .upsert_file_index("/project", &item, "hash1")
@@ -1163,6 +1164,7 @@ mod tests {
                 line_count: 30,
                 is_test: false,
                 symbols: vec![],
+                content_hash: None,
             },
             FileInventoryItem {
                 path: "src/services/user.rs".to_string(),
@@ -1173,6 +1175,7 @@ mod tests {
                 line_count: 45,
                 is_test: false,
                 symbols: vec![],
+                content_hash: None,
             },
             FileInventoryItem {
                 path: "src/models/user.rs".to_string(),
@@ -1183,6 +1186,7 @@ mod tests {
                 line_count: 20,
                 is_test: false,
                 symbols: vec![],
+                content_hash: None,
             },
         ];
 
@@ -1496,6 +1500,7 @@ mod tests {
                 SymbolInfo::basic("auth_handler".to_string(), SymbolKind::Function, 5),
                 SymbolInfo::basic("validate_token".to_string(), SymbolKind::Function, 15),
             ],
+            content_hash: None,
         };
         store.upsert_file_index("/project", &item, "hash1").unwrap();
 
@@ -1525,6 +1530,7 @@ mod tests {
                 line_count: 30,
                 is_test: false,
                 symbols: vec![],
+                content_hash: None,
             },
             FileInventoryItem {
                 path: "src/services/user.rs".to_string(),
@@ -1535,6 +1541,7 @@ mod tests {
                 line_count: 45,
                 is_test: false,
                 symbols: vec![],
+                content_hash: None,
             },
         ];
 
@@ -1569,6 +1576,7 @@ mod tests {
             symbols: vec![
                 SymbolInfo::basic("x".to_string(), SymbolKind::Function, 1),
             ],
+            content_hash: None,
         };
         store.upsert_file_index("/project", &item, "hash1").unwrap();
 
@@ -1600,6 +1608,7 @@ mod tests {
             symbols: vec![
                 SymbolInfo::basic("auth_handler".to_string(), SymbolKind::Function, 5),
             ],
+            content_hash: None,
         };
         store.upsert_file_index("/project", &item, "hash1").unwrap();
 
@@ -1643,6 +1652,7 @@ mod tests {
                 SymbolInfo::basic("user_controller".to_string(), SymbolKind::Struct, 5),
                 SymbolInfo::basic("handle_request".to_string(), SymbolKind::Function, 15),
             ],
+            content_hash: None,
         };
         store.upsert_file_index("/project", &item, "hash1").unwrap();
 

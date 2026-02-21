@@ -1669,6 +1669,7 @@ mod tests {
             line_count: 50,
             is_test: false,
             symbols,
+            content_hash: None,
         }
     }
 
