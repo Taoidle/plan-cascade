@@ -465,6 +465,12 @@ impl IndexStore {
             }
         }
 
+        // Delete all embeddings for this project
+        tx.execute(
+            "DELETE FROM file_embeddings WHERE project_path = ?1",
+            params![project_path],
+        )?;
+
         // Delete from file_index (cascades to file_symbols)
         let deleted = tx.execute(
             "DELETE FROM file_index WHERE project_path = ?1",

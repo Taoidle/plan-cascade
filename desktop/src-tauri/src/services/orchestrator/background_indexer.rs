@@ -518,7 +518,15 @@ async fn run_incremental_loop(
         if let Some(flag) = channel_overflow {
             if flag.swap(false, Ordering::AcqRel) {
                 info!("background indexer: channel overflow detected, running catch-up sync");
-                run_catchup_sync(project_root, index_store, &gitignore);
+                run_catchup_sync(
+                    project_root,
+                    index_store,
+                    &gitignore,
+                    embedding_manager,
+                    embedding_service,
+                    hnsw_index,
+                )
+                .await;
             }
         }
     }
@@ -580,12 +588,15 @@ async fn apply_gitignore_retroactively(
 /// 1. Remove entries for files that no longer exist or are now gitignored
 /// 2. Discover and index new/changed files
 ///
-/// Does NOT trigger embedding updates — those happen on subsequent normal
-/// change events.
-fn run_catchup_sync(
+/// Also updates embeddings for changed/new files so they don't remain stale
+/// indefinitely after a channel overflow event.
+async fn run_catchup_sync(
     project_root: &Path,
     index_store: &IndexStore,
     gitignore: &Gitignore,
+    embedding_manager: Option<&Arc<EmbeddingManager>>,
+    embedding_service: Option<&Arc<EmbeddingService>>,
+    hnsw_index: Option<&Arc<HnswIndex>>,
 ) {
     let project_path = project_root.to_string_lossy().to_string();
 
@@ -607,9 +618,38 @@ fn run_catchup_sync(
             }
 
             // Check hash staleness and re-index if changed
-            if let Ok(result) = run_incremental_index(project_root, index_store, &abs_path) {
-                if matches!(result, IncrementalResult::Updated { .. }) {
-                    updated += 1;
+            if let Ok(IncrementalResult::Updated {
+                content,
+                language,
+                rel_path,
+            }) = run_incremental_index(project_root, index_store, &abs_path)
+            {
+                updated += 1;
+                // Also update embedding for this file
+                if let Some(emb_mgr) = embedding_manager {
+                    let _ = run_incremental_embedding_managed_with_content(
+                        project_root,
+                        index_store,
+                        emb_mgr,
+                        &abs_path,
+                        &content,
+                        &language,
+                        &rel_path,
+                        hnsw_index,
+                    )
+                    .await;
+                } else if let Some(emb_svc) = embedding_service {
+                    let _ = run_incremental_embedding_with_content(
+                        project_root,
+                        index_store,
+                        emb_svc,
+                        &abs_path,
+                        &content,
+                        &language,
+                        &rel_path,
+                        hnsw_index,
+                    )
+                    .await;
                 }
             }
         }
@@ -644,6 +684,36 @@ fn run_catchup_sync(
                     );
                 } else {
                     new_files += 1;
+                    // Embed the newly indexed file
+                    if abs_path.is_file() && item.size_bytes <= MAX_EMBEDDABLE_FILE_SIZE {
+                        if let Ok(content) = std::fs::read_to_string(&abs_path) {
+                            if let Some(emb_mgr) = embedding_manager {
+                                let _ = run_incremental_embedding_managed_with_content(
+                                    project_root,
+                                    index_store,
+                                    emb_mgr,
+                                    &abs_path,
+                                    &content,
+                                    &item.language,
+                                    &item.path,
+                                    hnsw_index,
+                                )
+                                .await;
+                            } else if let Some(emb_svc) = embedding_service {
+                                let _ = run_incremental_embedding_with_content(
+                                    project_root,
+                                    index_store,
+                                    emb_svc,
+                                    &abs_path,
+                                    &content,
+                                    &item.language,
+                                    &item.path,
+                                    hnsw_index,
+                                )
+                                .await;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1068,27 +1138,44 @@ async fn run_embedding_pass(
     let texts: Vec<&str> = all_chunks.iter().map(|(_, c)| c.text.as_str()).collect();
     embedding_service.build_vocabulary(&texts);
 
-    // Generate embeddings and store them
+    // Generate embeddings and store them per-file using replace_file_embeddings_tfidf
+    // to prevent orphan chunks when a file's chunk count decreases.
     let embeddings = embedding_service.embed_batch(&texts);
     let mut stored = 0usize;
 
-    for ((rel_path, chunk), embedding) in all_chunks.iter().zip(embeddings.iter()) {
-        let bytes = embedding_to_bytes(embedding);
-        if let Err(e) = index_store.upsert_chunk_embedding(
-            &project_path,
-            rel_path,
-            chunk.index as i64,
-            &chunk.text,
-            &bytes,
-        ) {
-            warn!(
-                file = %rel_path,
-                chunk = chunk.index,
-                error = %e,
-                "background indexer: failed to store embedding"
-            );
-        } else {
-            stored += 1;
+    // Group chunks and embeddings by file path
+    let mut file_groups: HashMap<&str, Vec<(usize, &FileChunk, &Vec<f32>)>> = HashMap::new();
+    for (i, ((rel_path, chunk), embedding)) in
+        all_chunks.iter().zip(embeddings.iter()).enumerate()
+    {
+        file_groups
+            .entry(rel_path.as_str())
+            .or_default()
+            .push((i, chunk, embedding));
+    }
+
+    for (rel_path, group) in &file_groups {
+        let embedding_bytes: Vec<Vec<u8>> =
+            group.iter().map(|(_, _, emb)| embedding_to_bytes(emb)).collect();
+        let batch: Vec<(i64, &str, &[u8])> = group
+            .iter()
+            .zip(embedding_bytes.iter())
+            .map(|((_, chunk, _), bytes)| {
+                (chunk.index as i64, chunk.text.as_str(), bytes.as_slice())
+            })
+            .collect();
+
+        match index_store.replace_file_embeddings_tfidf(&project_path, rel_path, &batch) {
+            Ok(()) => {
+                stored += batch.len();
+            }
+            Err(e) => {
+                warn!(
+                    file = %rel_path,
+                    error = %e,
+                    "background indexer: failed to store embeddings"
+                );
+            }
         }
     }
 
@@ -1457,28 +1544,46 @@ async fn run_embedding_pass_managed(
     };
 
     // Embed per-file: each file can fail independently without losing others.
+    // Uses replace_file_embeddings() to atomically delete old + insert new,
+    // preventing orphan chunks when a file's chunk count decreases.
     for (rel_path, chunks) in &file_chunks {
         let file_texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
 
         match manager.embed_documents(&file_texts).await {
             Ok(embeddings) => {
-                for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
-                    let bytes = embedding_to_bytes(embedding);
-                    if let Err(e) = index_store.upsert_chunk_embedding(
-                        &project_path,
-                        rel_path,
-                        chunk.index as i64,
-                        &chunk.text,
-                        &bytes,
-                    ) {
+                let embedding_bytes: Vec<Vec<u8>> =
+                    embeddings.iter().map(|e| embedding_to_bytes(e)).collect();
+                let batch: Vec<(i64, &str, &[u8])> = chunks
+                    .iter()
+                    .zip(embedding_bytes.iter())
+                    .map(|(chunk, bytes)| {
+                        (chunk.index as i64, chunk.text.as_str(), bytes.as_slice())
+                    })
+                    .collect();
+
+                let provider_type_str =
+                    format!("{:?}", manager.provider_type()).to_lowercase();
+                let provider_model = manager.display_name().to_string();
+                let dim = embeddings.first().map(|e| e.len() as i64).unwrap_or(0);
+
+                match index_store.replace_file_embeddings(
+                    &project_path,
+                    rel_path,
+                    &batch,
+                    &provider_type_str,
+                    &provider_model,
+                    dim,
+                ) {
+                    Ok(()) => {
+                        stats.stored_chunks += batch.len();
+                    }
+                    Err(e) => {
                         warn!(
                             file = %rel_path,
-                            chunk = chunk.index,
                             error = %e,
-                            "background indexer: failed to store embedding (managed)"
+                            "background indexer: failed to store embeddings (managed)"
                         );
-                    } else {
-                        stats.stored_chunks += 1;
+                        stats.failed_files += 1;
                     }
                 }
             }

@@ -73,7 +73,7 @@ pub struct HnswIndex {
     /// Set of data IDs marked as stale (soft-deleted).
     stale_ids: RwLock<HashSet<usize>>,
     /// Total number of vectors inserted (including stale ones).
-    count: RwLock<usize>,
+    count: AtomicUsize,
 }
 
 /// Newtype wrapper so we can send the HNSW across threads.
@@ -103,7 +103,7 @@ impl HnswIndex {
             dimension: AtomicUsize::new(dimension),
             inner: RwLock::new(None),
             stale_ids: RwLock::new(HashSet::new()),
-            count: RwLock::new(0),
+            count: AtomicUsize::new(0),
         }
     }
 
@@ -118,8 +118,7 @@ impl HnswIndex {
         );
         let mut guard = self.inner.write().await;
         *guard = Some(Arc::new(HnswInner { hnsw }));
-        let mut count = self.count.write().await;
-        *count = 0;
+        self.count.store(0, Ordering::Relaxed);
         let mut stale = self.stale_ids.write().await;
         stale.clear();
     }
@@ -213,8 +212,7 @@ impl HnswIndex {
                 let nb_point = hnsw.get_nb_point();
                 let mut guard = self.inner.write().await;
                 *guard = Some(Arc::new(HnswInner { hnsw }));
-                let mut count = self.count.write().await;
-                *count = nb_point;
+                self.count.store(nb_point, Ordering::Relaxed);
                 let mut stale = self.stale_ids.write().await;
                 stale.clear();
                 info!(
@@ -258,7 +256,7 @@ impl HnswIndex {
 
         let index_dir = self.index_dir.clone();
         let dimension = self.dimension();
-        let vector_count = *self.count.read().await;
+        let vector_count = self.count.load(Ordering::Relaxed);
 
         tokio::task::spawn_blocking(move || {
             std::fs::create_dir_all(&index_dir)
@@ -296,9 +294,7 @@ impl HnswIndex {
         if let Some(inner) = guard.as_ref() {
             let data = embedding.to_vec();
             inner.hnsw.insert_slice((&data, id));
-            drop(guard);
-            let mut count = self.count.write().await;
-            *count += 1;
+            self.count.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -312,9 +308,7 @@ impl HnswIndex {
             for (id, embedding) in items {
                 inner.hnsw.insert_slice((embedding, *id));
             }
-            drop(guard);
-            let mut count = self.count.write().await;
-            *count += items.len();
+            self.count.fetch_add(items.len(), Ordering::Relaxed);
         }
     }
 
@@ -386,8 +380,7 @@ impl HnswIndex {
 
     /// Returns the number of vectors in the index (including stale ones).
     pub async fn get_count(&self) -> usize {
-        let count = self.count.read().await;
-        *count
+        self.count.load(Ordering::Relaxed)
     }
 
     /// Returns the number of stale IDs.
@@ -398,12 +391,12 @@ impl HnswIndex {
 
     /// Returns true if the stale ratio exceeds the rebuild threshold (10%).
     pub async fn needs_rebuild(&self) -> bool {
-        let count = self.count.read().await;
-        let stale = self.stale_ids.read().await;
-        if *count == 0 {
+        let count = self.count.load(Ordering::Relaxed);
+        if count == 0 {
             return false;
         }
-        (stale.len() as f64 / *count as f64) > 0.10
+        let stale = self.stale_ids.read().await;
+        (stale.len() as f64 / count as f64) > 0.10
     }
 
     /// Reset the index to empty state (for rebuild).
