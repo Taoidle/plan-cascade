@@ -648,7 +648,7 @@ fn detect_language(ext: Option<&str>) -> String {
     .to_string()
 }
 
-fn detect_component(path: &str) -> String {
+pub(super) fn detect_component(path: &str) -> String {
     if path == "pyproject.toml"
         || path == "README.md"
         || path == "README_zh.md"
@@ -682,7 +682,7 @@ fn detect_component(path: &str) -> String {
     "other".to_string()
 }
 
-fn is_test_path(path: &str) -> bool {
+pub(super) fn is_test_path(path: &str) -> bool {
     path.starts_with("tests/")
         || path.starts_with("desktop/src-tauri/tests/")
         || path.starts_with("desktop/src/components/__tests__/")

@@ -496,6 +496,28 @@ impl IndexStore {
         Ok(rowids)
     }
 
+    /// Return the SQLite ROWID of a single embedding chunk.
+    ///
+    /// Uses the `UNIQUE(project_path, file_path, chunk_index)` index for O(1) lookup.
+    pub fn get_embedding_rowid_for_chunk(
+        &self,
+        project_path: &str,
+        file_path: &str,
+        chunk_index: i64,
+    ) -> AppResult<Option<usize>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT rowid FROM file_embeddings WHERE project_path = ?1 AND file_path = ?2 AND chunk_index = ?3",
+            params![project_path, file_path, chunk_index],
+            |row| row.get::<_, i64>(0).map(|v| v as usize),
+        );
+        match result {
+            Ok(rowid) => Ok(Some(rowid)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
     /// Delete the index entry for a single file (file_index + file_symbols + FTS).
     ///
     /// Does **not** delete embeddings — the caller handles that separately

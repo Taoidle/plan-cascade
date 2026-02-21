@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-use super::analysis_index::{build_file_inventory, extract_symbols, AnalysisLimits};
+use super::analysis_index::{
+    build_file_inventory, detect_component, extract_symbols, is_test_path, AnalysisLimits,
+};
 use super::embedding_manager::EmbeddingManager;
 use super::embedding_provider::EmbeddingProviderType;
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
@@ -466,12 +468,12 @@ fn run_incremental_index(
 
     let item = super::analysis_index::FileInventoryItem {
         path: rel_str.clone(),
-        component: String::new(), // component detection is non-critical for incremental
+        component: detect_component(&rel_str),
         language,
         extension: ext,
         size_bytes: metadata.len(),
         line_count,
-        is_test: false,
+        is_test: is_test_path(&rel_str),
         symbols,
     };
 
@@ -821,17 +823,10 @@ async fn run_incremental_embedding(
     // We need to capture the ROWIDs before deleting.
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await {
-            if let Ok(all_ids) = index_store.get_all_embedding_ids_and_vectors(&project_path) {
-                // We need to find ROWIDs for this specific file.
-                // Since get_all_embedding_ids_and_vectors returns all project embeddings,
-                // we use get_embeddings_by_rowids to find which belong to this file.
-                let rowids: Vec<usize> = all_ids.iter().map(|(id, _)| *id).collect();
-                if let Ok(metadata) = index_store.get_embeddings_by_rowids(&rowids) {
-                    for (rowid, (file_path, _, _)) in &metadata {
-                        if file_path == &rel_str {
-                            hnsw.mark_stale(*rowid).await;
-                        }
-                    }
+            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, &rel_str)
+            {
+                for rowid in rowids {
+                    hnsw.mark_stale(rowid).await;
                 }
             }
         }
@@ -883,11 +878,12 @@ async fn run_incremental_embedding(
             // Insert new embedding into HNSW
             if let Some(hnsw) = hnsw_index {
                 if hnsw.is_ready().await {
-                    // Retrieve the ROWID of the just-inserted embedding
-                    if let Ok(all_ids) = index_store.get_all_embedding_ids_and_vectors(&project_path) {
-                        if let Some((rowid, _)) = all_ids.iter().rev().find(|(_, v)| v == &embedding) {
-                            hnsw.insert(*rowid, &embedding).await;
-                        }
+                    if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
+                        &project_path,
+                        &rel_str,
+                        chunk.index as i64,
+                    ) {
+                        hnsw.insert(rowid, &embedding).await;
                     }
                 }
             }
@@ -1105,14 +1101,10 @@ async fn run_incremental_embedding_managed(
     // Mark old embeddings for this file as stale in HNSW before deleting from SQLite
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await {
-            if let Ok(all_ids) = index_store.get_all_embedding_ids_and_vectors(&project_path) {
-                let rowids: Vec<usize> = all_ids.iter().map(|(id, _)| *id).collect();
-                if let Ok(metadata) = index_store.get_embeddings_by_rowids(&rowids) {
-                    for (rowid, (file_path, _, _)) in &metadata {
-                        if file_path == &rel_str {
-                            hnsw.mark_stale(*rowid).await;
-                        }
-                    }
+            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, &rel_str)
+            {
+                for rowid in rowids {
+                    hnsw.mark_stale(rowid).await;
                 }
             }
         }
@@ -1180,10 +1172,12 @@ async fn run_incremental_embedding_managed(
             // Insert new embedding into HNSW
             if let Some(hnsw) = hnsw_index {
                 if hnsw.is_ready().await {
-                    if let Ok(all_ids) = index_store.get_all_embedding_ids_and_vectors(&project_path) {
-                        if let Some((rowid, _)) = all_ids.iter().rev().find(|(_, v)| v == embedding) {
-                            hnsw.insert(*rowid, embedding).await;
-                        }
+                    if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
+                        &project_path,
+                        &rel_str,
+                        chunk.index as i64,
+                    ) {
+                        hnsw.insert(rowid, embedding).await;
                     }
                 }
             }
