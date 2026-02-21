@@ -5,6 +5,7 @@
 //! the indexer listens on an optional `mpsc` channel for incremental updates
 //! triggered by file-watcher events.
 
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -216,6 +217,7 @@ impl BackgroundIndexer {
 
             // --- Phase 2: Incremental updates ---
             if let Some(mut rx) = change_rx {
+                let gitignore = build_gitignore_matcher(&project_root);
                 run_incremental_loop(
                     &mut rx,
                     &project_root,
@@ -223,6 +225,7 @@ impl BackgroundIndexer {
                     embedding_manager.as_ref(),
                     embedding_service.as_ref(),
                     hnsw_index.as_ref(),
+                    &gitignore,
                 )
                 .await;
             }
@@ -249,6 +252,7 @@ impl BackgroundIndexer {
                     project = %project_root.display(),
                     "background indexer: starting watch-only incremental loop"
                 );
+                let gitignore = build_gitignore_matcher(&project_root);
                 run_incremental_loop(
                     &mut rx,
                     &project_root,
@@ -256,6 +260,7 @@ impl BackgroundIndexer {
                     embedding_manager.as_ref(),
                     embedding_service.as_ref(),
                     hnsw_index.as_ref(),
+                    &gitignore,
                 )
                 .await;
             }
@@ -267,6 +272,24 @@ impl BackgroundIndexer {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/// Build a `Gitignore` matcher from the project's `.gitignore` and `.git/info/exclude`.
+///
+/// Returns `Gitignore::empty()` if neither file exists or parsing fails.
+fn build_gitignore_matcher(project_root: &Path) -> Gitignore {
+    let mut builder = GitignoreBuilder::new(project_root);
+    builder.add(project_root.join(".gitignore"));
+    builder.add(project_root.join(".git/info/exclude"));
+    builder.build().unwrap_or_else(|_| Gitignore::empty())
+}
+
+/// Check whether a path should be ignored according to the gitignore matcher.
+fn is_ignored_by_gitignore(gitignore: &Gitignore, project_root: &Path, path: &Path) -> bool {
+    let rel_path = path.strip_prefix(project_root).unwrap_or(path);
+    gitignore
+        .matched_path_or_any_parents(rel_path, path.is_dir())
+        .is_ignore()
+}
+
 /// Shared Phase-2 incremental loop used by both `start()` and `start_watch_only()`.
 async fn run_incremental_loop(
     rx: &mut tokio::sync::mpsc::Receiver<PathBuf>,
@@ -275,11 +298,16 @@ async fn run_incremental_loop(
     embedding_manager: Option<&Arc<EmbeddingManager>>,
     embedding_service: Option<&Arc<EmbeddingService>>,
     hnsw_index: Option<&Arc<HnswIndex>>,
+    gitignore: &Gitignore,
 ) {
     let project_path = project_root.to_string_lossy().to_string();
 
     debug!("background indexer: listening for incremental changes");
     while let Some(changed_path) = rx.recv().await {
+        if is_ignored_by_gitignore(gitignore, project_root, &changed_path) {
+            debug!(path = %changed_path.display(), "background indexer: skipping gitignored path");
+            continue;
+        }
         match run_incremental_index(project_root, index_store, &changed_path) {
             Ok(IncrementalResult::Deleted { rel_path }) => {
                 // Mark HNSW entries stale, then delete embeddings from SQLite.
@@ -2489,5 +2517,113 @@ pub fn process_config(config: &Config) -> String {
         let results = hnsw.search(&query, 1).await;
         assert!(!results.is_empty(), "search should work on fresh index");
         assert_eq!(results[0].0, 3, "should find the matching vector");
+    }
+
+    // -----------------------------------------------------------------------
+    // Gitignore filtering tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gitignore_filtering_skips_ignored_paths() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        // Write a .gitignore that ignores node_modules/ and dist/
+        fs::write(root.join(".gitignore"), "node_modules/\ndist/\n").expect("write gitignore");
+
+        // Create matching and non-matching files
+        fs::create_dir_all(root.join("node_modules/pkg")).expect("mkdir");
+        fs::write(root.join("node_modules/pkg/index.js"), "module.exports = {}").expect("write");
+        fs::create_dir_all(root.join("dist")).expect("mkdir");
+        fs::write(root.join("dist/bundle.js"), "var a=1;").expect("write");
+        fs::create_dir_all(root.join("src")).expect("mkdir");
+        fs::write(root.join("src/main.rs"), "fn main() {}").expect("write");
+
+        let matcher = build_gitignore_matcher(root);
+
+        assert!(
+            is_ignored_by_gitignore(&matcher, root, &root.join("node_modules/pkg/index.js")),
+            "node_modules file should be ignored"
+        );
+        assert!(
+            is_ignored_by_gitignore(&matcher, root, &root.join("dist/bundle.js")),
+            "dist file should be ignored"
+        );
+        assert!(
+            !is_ignored_by_gitignore(&matcher, root, &root.join("src/main.rs")),
+            "src file should NOT be ignored"
+        );
+    }
+
+    #[test]
+    fn gitignore_filtering_handles_missing_gitignore() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        // No .gitignore file — matcher should not ignore anything
+        fs::create_dir_all(root.join("src")).expect("mkdir");
+        fs::write(root.join("src/main.rs"), "fn main() {}").expect("write");
+        fs::create_dir_all(root.join("node_modules/pkg")).expect("mkdir");
+        fs::write(root.join("node_modules/pkg/index.js"), "module.exports = {}").expect("write");
+
+        let matcher = build_gitignore_matcher(root);
+
+        assert!(
+            !is_ignored_by_gitignore(&matcher, root, &root.join("src/main.rs")),
+            "should not ignore when no .gitignore exists"
+        );
+        assert!(
+            !is_ignored_by_gitignore(&matcher, root, &root.join("node_modules/pkg/index.js")),
+            "should not ignore when no .gitignore exists"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_watch_only_skips_gitignored_incremental_changes() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        // Write a .gitignore that ignores node_modules/
+        fs::write(root.join(".gitignore"), "node_modules/\n").expect("write gitignore");
+
+        // Pre-create files so incremental indexing has something to work with
+        fs::write(root.join("main.py"), "def main():\n    pass\n").expect("write");
+        fs::create_dir_all(root.join("node_modules")).expect("mkdir");
+        fs::write(root.join("node_modules/foo.js"), "var x = 1;").expect("write");
+
+        let store = test_store();
+        let (tx, rx) = tokio::sync::mpsc::channel::<PathBuf>(16);
+
+        // Use start_watch_only to test only the incremental loop (no full index)
+        let indexer = BackgroundIndexer::new(root.to_path_buf(), store.clone())
+            .with_change_receiver(rx);
+
+        let handle = indexer.start_watch_only().await;
+
+        // Send an ignored path — it should be skipped
+        tx.send(root.join("node_modules/foo.js")).await.expect("send");
+
+        // Send a normal file change
+        tx.send(root.join("main.py")).await.expect("send");
+
+        // Close the channel so the task exits
+        drop(tx);
+        handle.await.expect("task should complete");
+
+        let project_path = root.to_string_lossy().to_string();
+
+        // main.py should be indexed
+        let symbols = store.get_file_symbols(&project_path, "main.py").expect("symbols");
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "main");
+
+        // node_modules/foo.js should NOT be in the index
+        let nm_symbols = store
+            .get_file_symbols(&project_path, "node_modules/foo.js")
+            .expect("symbols");
+        assert!(
+            nm_symbols.is_empty(),
+            "gitignored file should not be indexed"
+        );
     }
 }

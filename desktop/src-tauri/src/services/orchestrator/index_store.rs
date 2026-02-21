@@ -93,11 +93,13 @@ impl IndexStore {
     ) -> AppResult<()> {
         let conn = self.get_connection()?;
 
-        // Enable foreign keys for this connection
+        // Enable foreign keys for this connection (PRAGMA must be outside transaction)
         conn.execute_batch("PRAGMA foreign_keys = ON")?;
 
+        let tx = conn.unchecked_transaction()?;
+
         // Upsert the file_index row
-        conn.execute(
+        tx.execute(
             "INSERT INTO file_index (project_path, file_path, component, language, extension,
                                      size_bytes, line_count, is_test, content_hash, indexed_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP)
@@ -124,7 +126,7 @@ impl IndexStore {
         )?;
 
         // Retrieve the file_index id
-        let file_index_id: i64 = conn.query_row(
+        let file_index_id: i64 = tx.query_row(
             "SELECT id FROM file_index WHERE project_path = ?1 AND file_path = ?2",
             params![project_path, item.path],
             |row| row.get(0),
@@ -132,7 +134,7 @@ impl IndexStore {
 
         // Collect old symbol rowids before deleting (for FTS cleanup)
         let old_symbol_ids: Vec<i64> = {
-            let mut id_stmt = conn.prepare(
+            let mut id_stmt = tx.prepare(
                 "SELECT id FROM file_symbols WHERE file_index_id = ?1",
             )?;
             let mapped = id_stmt
@@ -144,46 +146,50 @@ impl IndexStore {
 
         // Delete old FTS entries for these symbols (contentless mode: DELETE by rowid)
         if !old_symbol_ids.is_empty() {
-            let mut fts_del = conn.prepare(
-                "DELETE FROM symbol_fts WHERE rowid = ?1",
-            )?;
-            for id in &old_symbol_ids {
-                let _ = fts_del.execute(params![id]);
+            {
+                let mut fts_del = tx.prepare(
+                    "DELETE FROM symbol_fts WHERE rowid = ?1",
+                )?;
+                for id in &old_symbol_ids {
+                    let _ = fts_del.execute(params![id]);
+                }
             }
         }
 
         // Delete existing symbols for this file (cascade would handle on delete,
         // but for update we need to clear manually)
-        conn.execute(
+        tx.execute(
             "DELETE FROM file_symbols WHERE file_index_id = ?1",
             params![file_index_id],
         )?;
 
         // Insert new symbols with extended fields
-        let mut stmt = conn.prepare(
-            "INSERT INTO file_symbols (file_index_id, name, kind, line_number, parent_symbol, signature, doc_comment, start_line, end_line)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        )?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO file_symbols (file_index_id, name, kind, line_number, parent_symbol, signature, doc_comment, start_line, end_line)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            )?;
 
-        for symbol in &item.symbols {
-            let kind_str = symbol_kind_to_str(&symbol.kind);
-            stmt.execute(params![
-                file_index_id,
-                symbol.name,
-                kind_str,
-                symbol.line as i64,
-                symbol.parent,
-                symbol.signature,
-                symbol.doc_comment,
-                symbol.line as i64, // start_line = line
-                symbol.end_line as i64,
-            ])?;
+            for symbol in &item.symbols {
+                let kind_str = symbol_kind_to_str(&symbol.kind);
+                stmt.execute(params![
+                    file_index_id,
+                    symbol.name,
+                    kind_str,
+                    symbol.line as i64,
+                    symbol.parent,
+                    symbol.signature,
+                    symbol.doc_comment,
+                    symbol.line as i64, // start_line = line
+                    symbol.end_line as i64,
+                ])?;
+            }
         }
 
         // Insert new FTS entries for symbols
         // Get the new symbol IDs (rowids) for FTS insertion
         {
-            let mut sym_stmt = conn.prepare(
+            let mut sym_stmt = tx.prepare(
                 "SELECT id, name, kind, COALESCE(doc_comment, ''), COALESCE(signature, '')
                  FROM file_symbols WHERE file_index_id = ?1",
             )?;
@@ -200,7 +206,7 @@ impl IndexStore {
                 .filter_map(|r| r.ok())
                 .collect();
 
-            let mut fts_ins = conn.prepare(
+            let mut fts_ins = tx.prepare(
                 "INSERT INTO symbol_fts (rowid, symbol_name, file_path, symbol_kind, doc_comment, signature)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
@@ -210,16 +216,19 @@ impl IndexStore {
         }
 
         // Sync filepath_fts: delete old entry for this file_index row, insert new one
-        let _ = conn.execute(
-            "DELETE FROM filepath_fts WHERE rowid = ?1",
-            params![file_index_id],
-        );
-        conn.execute(
-            "INSERT INTO filepath_fts (rowid, file_path, component, language)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![file_index_id, item.path, item.component, item.language],
-        )?;
+        {
+            let _ = tx.execute(
+                "DELETE FROM filepath_fts WHERE rowid = ?1",
+                params![file_index_id],
+            );
+            tx.execute(
+                "INSERT INTO filepath_fts (rowid, file_path, component, language)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![file_index_id, item.path, item.component, item.language],
+            )?;
+        }
 
+        tx.commit()?;
         Ok(())
     }
 
@@ -411,9 +420,11 @@ impl IndexStore {
         let conn = self.get_connection()?;
         conn.execute_batch("PRAGMA foreign_keys = ON")?;
 
+        let tx = conn.unchecked_transaction()?;
+
         // Collect file_index IDs and symbol IDs for FTS cleanup before deletion
         let file_ids: Vec<i64> = {
-            let mut stmt = conn.prepare(
+            let mut stmt = tx.prepare(
                 "SELECT id FROM file_index WHERE project_path = ?1",
             )?;
             let mapped = stmt
@@ -423,39 +434,44 @@ impl IndexStore {
             mapped
         };
 
-        // Delete symbol_fts entries (by symbol rowids belonging to this project)
+        // Delete symbol_fts and filepath_fts entries
         if !file_ids.is_empty() {
-            let mut sym_id_stmt = conn.prepare(
-                "SELECT id FROM file_symbols WHERE file_index_id = ?1",
-            )?;
-            let mut fts_del = conn.prepare(
-                "DELETE FROM symbol_fts WHERE rowid = ?1",
-            )?;
-            for file_id in &file_ids {
-                let sym_ids: Vec<i64> = sym_id_stmt
-                    .query_map(params![file_id], |row| row.get::<_, i64>(0))?
-                    .filter_map(|r| r.ok())
-                    .collect();
-                for sym_id in sym_ids {
-                    let _ = fts_del.execute(params![sym_id]);
+            {
+                let mut sym_id_stmt = tx.prepare(
+                    "SELECT id FROM file_symbols WHERE file_index_id = ?1",
+                )?;
+                let mut fts_del = tx.prepare(
+                    "DELETE FROM symbol_fts WHERE rowid = ?1",
+                )?;
+                for file_id in &file_ids {
+                    let sym_ids: Vec<i64> = sym_id_stmt
+                        .query_map(params![file_id], |row| row.get::<_, i64>(0))?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    for sym_id in sym_ids {
+                        let _ = fts_del.execute(params![sym_id]);
+                    }
                 }
             }
 
             // Delete filepath_fts entries (by file_index rowids)
-            let mut fp_del = conn.prepare(
-                "DELETE FROM filepath_fts WHERE rowid = ?1",
-            )?;
-            for file_id in &file_ids {
-                let _ = fp_del.execute(params![file_id]);
+            {
+                let mut fp_del = tx.prepare(
+                    "DELETE FROM filepath_fts WHERE rowid = ?1",
+                )?;
+                for file_id in &file_ids {
+                    let _ = fp_del.execute(params![file_id]);
+                }
             }
         }
 
         // Delete from file_index (cascades to file_symbols)
-        let deleted = conn.execute(
+        let deleted = tx.execute(
             "DELETE FROM file_index WHERE project_path = ?1",
             params![project_path],
         )?;
 
+        tx.commit()?;
         Ok(deleted)
     }
 
@@ -539,36 +555,41 @@ impl IndexStore {
             Err(e) => return Err(AppError::database(e.to_string())),
         };
 
+        let tx = conn.unchecked_transaction()?;
+
         // Collect symbol IDs and delete their FTS entries.
-        let symbol_ids: Vec<i64> = {
-            let mut stmt = conn.prepare(
-                "SELECT id FROM file_symbols WHERE file_index_id = ?1",
-            )?;
-            let mapped = stmt
-                .query_map(params![file_index_id], |row| row.get::<_, i64>(0))?
-                .filter_map(|r| r.ok())
-                .collect();
-            mapped
-        };
-        if !symbol_ids.is_empty() {
-            let mut fts_del = conn.prepare("DELETE FROM symbol_fts WHERE rowid = ?1")?;
-            for id in &symbol_ids {
-                let _ = fts_del.execute(params![id]);
+        {
+            let symbol_ids: Vec<i64> = {
+                let mut stmt = tx.prepare(
+                    "SELECT id FROM file_symbols WHERE file_index_id = ?1",
+                )?;
+                let mapped = stmt
+                    .query_map(params![file_index_id], |row| row.get::<_, i64>(0))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                mapped
+            };
+            if !symbol_ids.is_empty() {
+                let mut fts_del = tx.prepare("DELETE FROM symbol_fts WHERE rowid = ?1")?;
+                for id in &symbol_ids {
+                    let _ = fts_del.execute(params![id]);
+                }
             }
         }
 
         // Delete filepath_fts entry.
-        let _ = conn.execute(
+        let _ = tx.execute(
             "DELETE FROM filepath_fts WHERE rowid = ?1",
             params![file_index_id],
         );
 
         // Delete the file_index row (CASCADE deletes file_symbols).
-        let deleted = conn.execute(
+        let deleted = tx.execute(
             "DELETE FROM file_index WHERE id = ?1",
             params![file_index_id],
         )?;
 
+        tx.commit()?;
         Ok(deleted)
     }
 
