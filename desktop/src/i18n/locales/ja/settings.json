@@ -52,7 +52,9 @@
       "maxParallelStories": "最大並列ストーリー数",
       "maxIterations": "最大イテレーション数",
       "maxTotalTokens": "最大トークン予算",
-      "timeout": "タイムアウト（秒）"
+      "timeout": "タイムアウト（秒）",
+      "maxConcurrentSubagents": "最大並行サブエージェント数",
+      "maxConcurrentSubagentsHelp": "0 = 自動（プロバイダのデフォルト値）"
     }
   },
 

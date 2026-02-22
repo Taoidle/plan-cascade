@@ -20,6 +20,21 @@ pub enum ProviderType {
     Minimax,
 }
 
+impl ProviderType {
+    /// Default maximum number of concurrent sub-agents for this provider.
+    ///
+    /// Lower values for providers with strict QPS limits (GLM, Qwen, MiniMax, Ollama).
+    /// Higher values for providers with generous rate limits (Anthropic, OpenAI).
+    pub fn default_max_concurrent_subagents(&self) -> usize {
+        match self {
+            ProviderType::Anthropic | ProviderType::OpenAI => 6,
+            ProviderType::DeepSeek => 3,
+            ProviderType::Glm | ProviderType::Qwen | ProviderType::Minimax => 2,
+            ProviderType::Ollama => 2,
+        }
+    }
+}
+
 impl std::fmt::Display for ProviderType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -148,6 +163,10 @@ pub struct ProviderConfig {
     /// None means no proxy (direct connection).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub proxy: Option<ProxyConfig>,
+    /// Optional override for maximum concurrent sub-agents.
+    /// When None, uses `ProviderType::default_max_concurrent_subagents()`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub max_concurrent_subagents: Option<usize>,
 }
 
 fn default_max_tokens() -> u32 {
@@ -156,6 +175,17 @@ fn default_max_tokens() -> u32 {
 
 fn default_temperature() -> f32 {
     0.7
+}
+
+impl ProviderConfig {
+    /// Get the effective maximum number of concurrent sub-agents.
+    ///
+    /// Returns the user-configured value if set, otherwise falls back
+    /// to the provider's default.
+    pub fn effective_max_concurrent_subagents(&self) -> usize {
+        self.max_concurrent_subagents
+            .unwrap_or_else(|| self.provider.default_max_concurrent_subagents())
+    }
 }
 
 impl Default for ProviderConfig {
@@ -173,6 +203,7 @@ impl Default for ProviderConfig {
             fallback_tool_format_mode: None,
             options: HashMap::new(),
             proxy: None,
+            max_concurrent_subagents: None,
         }
     }
 }
@@ -625,6 +656,7 @@ mod tests {
             fallback_tool_format_mode: None,
             options: HashMap::new(),
             proxy: None,
+            max_concurrent_subagents: None,
         };
 
         let json = serde_json::to_string(&config).unwrap();

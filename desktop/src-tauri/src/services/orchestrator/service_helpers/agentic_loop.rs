@@ -447,6 +447,21 @@ impl OrchestratorService {
         // a final summary rather than a repair-worthy narration.
         let mut has_executed_tools = false;
         let is_sub_agent = self.config.task_type.is_some();
+        // Track consecutive iterations where the ONLY tool calls are Task
+        // delegations (lower threshold than main agent since sub-agents should
+        // do direct work more often).
+        let mut consecutive_task_only_iterations = 0u32;
+        const SUB_AGENT_MAX_CONSECUTIVE_TASK_ONLY: u32 = 2;
+
+        // Build TaskContext so coordinator sub-agents can spawn nested sub-agents.
+        let task_ctx = self.build_task_context(&tx);
+        if task_ctx.is_some() {
+            eprintln!(
+                "[sub-agent-loop] TaskContext created at depth={}, task_type={:?}",
+                self.config.sub_agent_depth.unwrap_or(0),
+                self.config.task_type,
+            );
+        }
 
         // Build a minimal system prompt for sub-agents.
         // Unlike the main agent, sub-agents do NOT get the full build_system_prompt()
@@ -680,46 +695,96 @@ impl OrchestratorService {
 
             // Call LLM directly with the minimal system prompt (bypasses
             // build_system_prompt which has conflicting sub-agent instructions).
-            let response = if self.config.streaming {
-                self.provider
-                    .stream_message(
-                        messages.to_vec(),
-                        system_prompt.clone(),
-                        api_tools.to_vec(),
-                        tx.clone(),
-                        request_options.clone(),
-                    )
-                    .await
-            } else {
-                self.provider
-                    .send_message(
-                        messages.to_vec(),
-                        system_prompt.clone(),
-                        api_tools.to_vec(),
-                        request_options.clone(),
-                    )
-                    .await
-            };
-
-            let response = match response {
-                Ok(r) => r,
-                Err(e) => {
-                    // Emit error event
-                    let _ = tx
-                        .send(UnifiedStreamEvent::Error {
-                            message: e.to_string(),
-                            code: None,
-                        })
-                        .await;
-
-                    return ExecutionResult {
-                        response: None,
-                        usage: total_usage,
-                        iterations,
-                        success: false,
-                        error: Some(e.to_string()),
+            // Uses retry loop with exponential backoff for transient errors
+            // (rate-limits, network, server errors) — same pattern as
+            // call_llm_streaming/call_llm for the main agent.
+            let max_retries: u32 = 10;
+            let max_delay_secs: u64 = 60;
+            let response = 'retry_loop: {
+                let mut last_err = None;
+                for attempt in 0..=max_retries {
+                    let result = if self.config.streaming {
+                        self.provider
+                            .stream_message(
+                                messages.to_vec(),
+                                system_prompt.clone(),
+                                api_tools.to_vec(),
+                                tx.clone(),
+                                request_options.clone(),
+                            )
+                            .await
+                    } else {
+                        self.provider
+                            .send_message(
+                                messages.to_vec(),
+                                system_prompt.clone(),
+                                api_tools.to_vec(),
+                                request_options.clone(),
+                            )
+                            .await
                     };
+                    match result {
+                        Ok(r) => break 'retry_loop r,
+                        Err(e) if e.is_retryable() && attempt < max_retries => {
+                            let delay = std::cmp::min(1u64 << attempt, max_delay_secs);
+                            let wait = e.retry_after_secs().map_or(delay, |r| std::cmp::max(r, delay));
+                            eprintln!(
+                                "[sub-agent:retry] {} on attempt {}/{}, retrying in {}s",
+                                e,
+                                attempt + 1,
+                                max_retries,
+                                wait
+                            );
+                            // Notify frontend about the retry
+                            let _ = tx
+                                .send(UnifiedStreamEvent::Error {
+                                    message: format!(
+                                        "Rate limited, retrying in {}s (attempt {}/{})",
+                                        wait, attempt + 1, max_retries
+                                    ),
+                                    code: Some("retrying".to_string()),
+                                })
+                                .await;
+                            // Wait with cancellation support
+                            tokio::select! {
+                                _ = tokio::time::sleep(std::time::Duration::from_secs(wait)) => {}
+                                _ = self.cancellation_token.cancelled() => {
+                                    return ExecutionResult {
+                                        response: None,
+                                        usage: total_usage,
+                                        iterations,
+                                        success: false,
+                                        error: Some("Execution cancelled during retry wait".to_string()),
+                                    };
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            last_err = Some(e);
+                            break;
+                        }
+                    }
                 }
+                // All retries exhausted or non-retryable error
+                let e = last_err.unwrap_or_else(|| {
+                    crate::services::llm::LlmError::Other {
+                        message: "Max retries exhausted".to_string(),
+                    }
+                });
+                // Emit error event
+                let _ = tx
+                    .send(UnifiedStreamEvent::Error {
+                        message: e.to_string(),
+                        code: None,
+                    })
+                    .await;
+                return ExecutionResult {
+                    response: None,
+                    usage: total_usage,
+                    iterations,
+                    success: false,
+                    error: Some(e.to_string()),
+                };
             };
 
             // Update usage
@@ -816,149 +881,210 @@ impl OrchestratorService {
                     content,
                 });
 
-                // Execute each tool call
-                let mut successful_native_calls: usize = 0;
+                // Step 1: Validate all native tool calls
+                let mut valid_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
                 for tc in &response.tool_calls {
-                    let (effective_tool_name, effective_args) =
-                        match prepare_tool_call_for_execution(
-                            &tc.name,
-                            &tc.arguments,
-                            request_options.analysis_phase.as_deref(),
-                        ) {
-                            Ok(prepared) => prepared,
-                            Err(error_message) => {
-                                let _ = tx
-                                    .send(UnifiedStreamEvent::ToolResult {
-                                        tool_id: tc.id.clone(),
-                                        result: None,
-                                        error: Some(error_message.clone()),
-                                    })
-                                    .await;
-                                messages.push(Message::tool_result(&tc.id, error_message, true));
-                                continue;
-                            }
-                        };
-                    successful_native_calls += 1;
-
-                    // Emit tool start event
-                    let _ = tx
-                        .send(UnifiedStreamEvent::ToolStart {
-                            tool_id: tc.id.clone(),
-                            tool_name: effective_tool_name.clone(),
-                            arguments: Some(effective_args.to_string()),
-                        })
-                        .await;
-
-                    // Execute the tool (supports orchestrator-native tools like Analyze)
-                    let result = self
-                        .tool_executor
-                        .execute(&effective_tool_name, &effective_args)
-                        .await;
-                    let context_tool_output = tool_output_for_model_context(
-                        &effective_tool_name,
-                        &result,
+                    match prepare_tool_call_for_execution(
+                        &tc.name,
+                        &tc.arguments,
                         request_options.analysis_phase.as_deref(),
-                    );
+                    ) {
+                        Ok((name, args)) => valid_calls.push((tc.id.clone(), name, args)),
+                        Err(error_message) => {
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tc.id.clone(),
+                                    result: None,
+                                    error: Some(error_message.clone()),
+                                })
+                                .await;
+                            messages.push(Message::tool_result(&tc.id, error_message, true));
+                        }
+                    }
+                }
+                let successful_native_calls = valid_calls.len();
 
-                    // Emit tool result event (always 閳?for frontend display)
-                    let _ = tx
-                        .send(UnifiedStreamEvent::ToolResult {
-                            tool_id: tc.id.clone(),
-                            result: if result.success {
-                                result.output.clone()
-                            } else {
-                                None
-                            },
-                            error: if !result.success {
-                                result.error.clone()
-                            } else {
-                                None
-                            },
-                        })
-                        .await;
+                // Step 2: Check if all validated calls are parallel-safe
+                let all_parallel = valid_calls.len() > 1
+                    && valid_calls.iter().all(|(_, name, _)| {
+                        crate::services::tools::definitions::is_tool_parallel_safe(name)
+                    });
 
-                    // If the result is a dedup hit, push a short informative
-                    // tool_result so the LLM knows the file was already read
-                    // and should use session memory instead of re-reading.
-                    if result.is_dedup {
-                        let dedup_msg = result.output.as_deref().unwrap_or(
-                            "[File already read] Content is in session memory above. Do NOT re-read."
+                if all_parallel {
+                    // ═══════════════════════════════════════════════════
+                    // Step 3a: PARALLEL native execution (sub-agent)
+                    // ═══════════════════════════════════════════════════
+
+                    // Emit all ToolStart events
+                    for (tc_id, name, args) in &valid_calls {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolStart {
+                                tool_id: tc_id.clone(),
+                                tool_name: name.clone(),
+                                arguments: Some(args.to_string()),
+                            })
+                            .await;
+                    }
+
+                    // Build execution context once (shared across parallel calls)
+                    let exec_ctx = Arc::new(match task_ctx.as_ref() {
+                        Some(tc) => self.tool_executor.build_tool_context_with_task(tc),
+                        None => self.tool_executor.build_tool_context(),
+                    });
+
+                    // Spawn all tool executions concurrently
+                    let mut futures = Vec::with_capacity(valid_calls.len());
+                    for (tc_id, name, args) in &valid_calls {
+                        let ctx_ref = Arc::clone(&exec_ctx);
+                        let name = name.clone();
+                        let args = args.clone();
+                        let tc_id = tc_id.clone();
+                        futures.push(async move {
+                            let registry = crate::services::tools::definitions::cached_registry();
+                            let result = registry.execute(&name, &ctx_ref, args).await;
+                            (tc_id, name, result)
+                        });
+                    }
+
+                    let results = futures_util::future::join_all(futures).await;
+                    let analysis_phase = request_options.analysis_phase.as_deref();
+
+                    // Process results in original order
+                    for (tc_id, effective_tool_name, result) in results {
+                        let context_tool_output = tool_output_for_model_context(
+                            &effective_tool_name, &result, analysis_phase,
                         );
-                        messages.push(Message::tool_result(&tc.id, dedup_msg.to_string(), false));
-                    } else {
-                        // Add tool result to messages (with multimodal support)
-                        if let Some((mime, b64)) = &result.image_data {
+
+                        // Emit tool result event
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolResult {
+                                tool_id: tc_id.clone(),
+                                result: if result.success { result.output.clone() } else { None },
+                                error: if !result.success { result.error.clone() } else { None },
+                            })
+                            .await;
+
+                        // Add to messages
+                        if result.is_dedup {
+                            let dedup_msg = result.output.as_deref().unwrap_or(
+                                "[File already read] Content is in session memory above. Do NOT re-read."
+                            );
+                            messages.push(Message::tool_result(&tc_id, dedup_msg.to_string(), false));
+                        } else if let Some((mime, b64)) = &result.image_data {
                             if self.provider.supports_multimodal() {
                                 use crate::services::llm::types::ContentBlock;
                                 let blocks = vec![
-                                    ContentBlock::Text {
-                                        text: context_tool_output.clone(),
-                                    },
-                                    ContentBlock::Image {
-                                        media_type: mime.clone(),
-                                        data: b64.clone(),
-                                    },
+                                    ContentBlock::Text { text: context_tool_output.clone() },
+                                    ContentBlock::Image { media_type: mime.clone(), data: b64.clone() },
                                 ];
-                                messages.push(Message::tool_result_multimodal(
-                                    &tc.id,
-                                    blocks,
-                                    !result.success,
-                                ));
+                                messages.push(Message::tool_result_multimodal(&tc_id, blocks, !result.success));
                             } else {
-                                messages.push(Message::tool_result(
-                                    &tc.id,
-                                    context_tool_output.clone(),
-                                    !result.success,
-                                ));
+                                messages.push(Message::tool_result(&tc_id, context_tool_output.clone(), !result.success));
                             }
                         } else {
-                            messages.push(Message::tool_result(
-                                &tc.id,
-                                context_tool_output.clone(),
-                                !result.success,
-                            ));
+                            messages.push(Message::tool_result(&tc_id, context_tool_output.clone(), !result.success));
+                        }
+
+                        // Loop detection (sequential after collecting results)
+                        let args_str = valid_calls.iter()
+                            .find(|(id, _, _)| id == &tc_id)
+                            .map(|(_, _, a)| a.to_string())
+                            .unwrap_or_default();
+                        if let Some(detection) = loop_detector.record_call(
+                            &effective_tool_name, &args_str, result.is_dedup,
+                        ) {
+                            match detection {
+                                LoopDetection::Warning(msg) => {
+                                    eprintln!("[loop-detector] Level 1 escalation (sub-native-parallel): {}", effective_tool_name);
+                                    messages.push(Message::user(msg));
+                                }
+                                LoopDetection::StripTools(msg, _tools) => {
+                                    eprintln!("[loop-detector] Level 2 escalation (sub-native-parallel): {}", effective_tool_name);
+                                    messages.push(Message::user(msg));
+                                }
+                                LoopDetection::ForceTerminate(msg) => {
+                                    eprintln!("[loop-detector] Level 3 (sub-native-parallel): force terminating for {}", effective_tool_name);
+                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                }
+                            }
                         }
                     }
+                } else {
+                    // ═══════════════════════════════════════════════════
+                    // Step 3b: SEQUENTIAL native execution (sub-agent)
+                    // ═══════════════════════════════════════════════════
+                    for (tc_id, effective_tool_name, effective_args) in &valid_calls {
+                        // Emit tool start event
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolStart {
+                                tool_id: tc_id.clone(),
+                                tool_name: effective_tool_name.clone(),
+                                arguments: Some(effective_args.to_string()),
+                            })
+                            .await;
 
-                    // Check for tool call loop (same tool+args repeated consecutively)
-                    if let Some(detection) = loop_detector.record_call(
-                        &effective_tool_name,
-                        &effective_args.to_string(),
-                        result.is_dedup,
-                    ) {
-                        match detection {
-                            LoopDetection::Warning(msg) => {
-                                eprintln!(
-                                    "[loop-detector] Level 1 escalation: {}",
-                                    effective_tool_name
-                                );
-                                messages.push(Message::user(msg));
+                        // Execute the tool with TaskContext for sub-agent spawning support
+                        let result = self
+                            .tool_executor
+                            .execute_with_context(effective_tool_name, effective_args, task_ctx.as_ref())
+                            .await;
+                        let context_tool_output = tool_output_for_model_context(
+                            effective_tool_name,
+                            &result,
+                            request_options.analysis_phase.as_deref(),
+                        );
+
+                        // Emit tool result event
+                        let _ = tx
+                            .send(UnifiedStreamEvent::ToolResult {
+                                tool_id: tc_id.clone(),
+                                result: if result.success { result.output.clone() } else { None },
+                                error: if !result.success { result.error.clone() } else { None },
+                            })
+                            .await;
+
+                        // Handle dedup and message construction
+                        if result.is_dedup {
+                            let dedup_msg = result.output.as_deref().unwrap_or(
+                                "[File already read] Content is in session memory above. Do NOT re-read."
+                            );
+                            messages.push(Message::tool_result(tc_id, dedup_msg.to_string(), false));
+                        } else if let Some((mime, b64)) = &result.image_data {
+                            if self.provider.supports_multimodal() {
+                                use crate::services::llm::types::ContentBlock;
+                                let blocks = vec![
+                                    ContentBlock::Text { text: context_tool_output.clone() },
+                                    ContentBlock::Image { media_type: mime.clone(), data: b64.clone() },
+                                ];
+                                messages.push(Message::tool_result_multimodal(tc_id, blocks, !result.success));
+                            } else {
+                                messages.push(Message::tool_result(tc_id, context_tool_output.clone(), !result.success));
                             }
-                            LoopDetection::StripTools(msg, _tools) => {
-                                eprintln!(
-                                    "[loop-detector] Level 2 escalation: stripping tools for {}",
-                                    effective_tool_name
-                                );
-                                messages.push(Message::user(msg));
-                            }
-                            LoopDetection::ForceTerminate(msg) => {
-                                eprintln!(
-                                    "[loop-detector] Level 3 escalation: force terminating for {}",
-                                    effective_tool_name
-                                );
-                                let _ = tx
-                                    .send(UnifiedStreamEvent::Error {
-                                        message: msg.clone(),
-                                        code: None,
-                                    })
-                                    .await;
-                                return ExecutionResult {
-                                    response: last_assistant_text,
-                                    usage: total_usage,
-                                    iterations,
-                                    success: false,
-                                    error: Some(msg),
-                                };
+                        } else {
+                            messages.push(Message::tool_result(tc_id, context_tool_output.clone(), !result.success));
+                        }
+
+                        // Check for tool call loop
+                        if let Some(detection) = loop_detector.record_call(
+                            effective_tool_name,
+                            &effective_args.to_string(),
+                            result.is_dedup,
+                        ) {
+                            match detection {
+                                LoopDetection::Warning(msg) => {
+                                    eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
+                                    messages.push(Message::user(msg));
+                                }
+                                LoopDetection::StripTools(msg, _tools) => {
+                                    eprintln!("[loop-detector] Level 2 escalation: stripping tools for {}", effective_tool_name);
+                                    messages.push(Message::user(msg));
+                                }
+                                LoopDetection::ForceTerminate(msg) => {
+                                    eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", effective_tool_name);
+                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                }
                             }
                         }
                     }
@@ -976,6 +1102,9 @@ impl OrchestratorService {
                         "All tool calls failed validation. Please retry with correct tool names and valid JSON arguments. \
                         Available tools: Read, Write, Edit, Bash, Glob, Grep, LS, Cwd, CodebaseSearch, WebFetch, WebSearch.".to_string()
                     ));
+                }
+                if successful_native_calls > 0 {
+                    has_executed_tools = true;
                 }
             } else if !parsed_fallback.calls.is_empty() {
                 repair_retry_count = 0; // Reset on successful tool calls
@@ -1062,7 +1191,10 @@ impl OrchestratorService {
                     }
 
                     // Spawn all futures
-                    let exec_ctx = Arc::new(self.tool_executor.build_tool_context());
+                    let exec_ctx = Arc::new(match task_ctx.as_ref() {
+                        Some(tc) => self.tool_executor.build_tool_context_with_task(tc),
+                        None => self.tool_executor.build_tool_context(),
+                    });
                     let mut futures = Vec::with_capacity(valid_fallback_calls.len());
                     for (tool_id, name, args) in &valid_fallback_calls {
                         let ctx_ref = Arc::clone(&exec_ctx);
@@ -1139,7 +1271,7 @@ impl OrchestratorService {
 
                         let result = self
                             .tool_executor
-                            .execute(effective_tool_name, effective_args)
+                            .execute_with_context(effective_tool_name, effective_args, task_ctx.as_ref())
                             .await;
                         let context_tool_output = tool_output_for_model_context(
                             effective_tool_name,
@@ -1323,7 +1455,97 @@ impl OrchestratorService {
                     error: None,
                 };
             }
+
+            // Track consecutive Task-only iterations to prevent infinite delegation.
+            if task_ctx.is_some() {
+                let tool_names: Vec<&str> = if has_native_tool_calls {
+                    response.tool_calls.iter().map(|tc| tc.name.as_str()).collect()
+                } else if !parsed_fallback.calls.is_empty() {
+                    parsed_fallback.calls.iter().map(|ptc| ptc.tool_name.as_str()).collect()
+                } else {
+                    vec![]
+                };
+                let all_task = !tool_names.is_empty()
+                    && tool_names.iter().all(|n| *n == "Task");
+                if all_task {
+                    consecutive_task_only_iterations += 1;
+                } else {
+                    consecutive_task_only_iterations = 0;
+                }
+                if consecutive_task_only_iterations >= SUB_AGENT_MAX_CONSECUTIVE_TASK_ONLY {
+                    eprintln!(
+                        "[task-delegation-limit] sub-agent: {} consecutive Task-only iterations, injecting direct-work hint",
+                        consecutive_task_only_iterations
+                    );
+                    messages.push(Message::user(
+                        "[DELEGATION LIMIT] You have delegated to sub-agents multiple times \
+                         without doing direct work. Use tools directly (Read, Grep, LS, etc.) \
+                         before delegating again.".to_string(),
+                    ));
+                    consecutive_task_only_iterations = 0;
+                }
+            }
         }
+    }
+
+    /// Build a TaskContext for sub-agent spawning, if this agent is allowed.
+    ///
+    /// For the main agent (sub_agent_depth is None), depth defaults to 0.
+    /// For coordinator sub-agents (sub_agent_depth is Some(n)), depth is n.
+    /// When sub_agent_depth is None AND this is a sub-agent (task_type is set),
+    /// TaskContext is NOT created, making the Task tool unavailable (leaf node).
+    fn build_task_context(
+        &self,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+    ) -> Option<TaskContext> {
+        let current_depth = self.config.sub_agent_depth.unwrap_or(0);
+        let is_leaf_subagent = self.config.sub_agent_depth.is_none()
+            && self.config.task_type.is_some();
+        if is_leaf_subagent {
+            return None;
+        }
+
+        // Capture read-only snapshots from the parent for sub-agent injection.
+        let skills_snapshot = self.selected_skills
+            .as_ref()
+            .and_then(|lock| lock.try_read().ok())
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+
+        let memories_snapshot = self.loaded_memories
+            .as_ref()
+            .and_then(|lock| lock.try_read().ok())
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+
+        let knowledge_block_snapshot = self.cached_knowledge_block
+            .lock().ok()
+            .and_then(|guard| guard.clone());
+
+        let task_spawner = Arc::new(OrchestratorTaskSpawner {
+            provider_config: self.config.provider.clone(),
+            project_root: self.config.project_root.clone(),
+            context_window: self.provider.context_window(),
+            shared_read_cache: self.tool_executor.shared_read_cache(),
+            shared_index_store: self.tool_executor.get_index_store(),
+            shared_embedding_service: self.tool_executor.get_embedding_service(),
+            shared_embedding_manager: self.tool_executor.get_embedding_manager(),
+            shared_hnsw_index: self.tool_executor.get_hnsw_index(),
+            detected_language: self.detected_language.lock().unwrap().clone(),
+            parent_supports_thinking: self.provider.supports_thinking(),
+            skills_snapshot,
+            memories_snapshot,
+            knowledge_block_snapshot,
+        });
+        let max_concurrent = self.config.provider.effective_max_concurrent_subagents();
+        Some(TaskContext {
+            spawner: task_spawner,
+            tx: tx.clone(),
+            cancellation_token: self.cancellation_token.clone(),
+            depth: current_depth,
+            max_depth: MAX_SUB_AGENT_DEPTH,
+            llm_semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
+        })
     }
 
     /// Execute a user message through the agentic loop
@@ -1364,59 +1586,7 @@ impl OrchestratorService {
         let mut consecutive_task_only_iterations = 0u32;
         const MAX_CONSECUTIVE_TASK_ONLY: u32 = 3;
 
-        // Create TaskContext for Task tool support in the agentic loop.
-        //
-        // For the main agent (sub_agent_depth is None), depth defaults to 0.
-        // For coordinator sub-agents (sub_agent_depth is Some(n)), depth is n.
-        // When sub_agent_depth is None AND this is a sub-agent (task_type is set),
-        // TaskContext is NOT created, making the Task tool unavailable (leaf node).
-        let current_depth = self.config.sub_agent_depth.unwrap_or(0);
-        let is_leaf_subagent = self.config.sub_agent_depth.is_none()
-            && self.config.task_type.is_some();
-
-        let task_ctx = if !is_leaf_subagent {
-            // Capture read-only snapshots from the parent for sub-agent injection.
-            let skills_snapshot = self.selected_skills
-                .as_ref()
-                .and_then(|lock| lock.try_read().ok())
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
-
-            let memories_snapshot = self.loaded_memories
-                .as_ref()
-                .and_then(|lock| lock.try_read().ok())
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
-
-            let knowledge_block_snapshot = self.cached_knowledge_block
-                .lock().ok()
-                .and_then(|guard| guard.clone());
-
-            let task_spawner = Arc::new(OrchestratorTaskSpawner {
-                provider_config: self.config.provider.clone(),
-                project_root: self.config.project_root.clone(),
-                context_window: self.provider.context_window(),
-                shared_read_cache: self.tool_executor.shared_read_cache(),
-                shared_index_store: self.tool_executor.get_index_store(),
-                shared_embedding_service: self.tool_executor.get_embedding_service(),
-                shared_embedding_manager: self.tool_executor.get_embedding_manager(),
-                shared_hnsw_index: self.tool_executor.get_hnsw_index(),
-                detected_language: self.detected_language.lock().unwrap().clone(),
-                parent_supports_thinking: self.provider.supports_thinking(),
-                skills_snapshot,
-                memories_snapshot,
-                knowledge_block_snapshot,
-            });
-            Some(TaskContext {
-                spawner: task_spawner,
-                tx: tx.clone(),
-                cancellation_token: self.cancellation_token.clone(),
-                depth: current_depth,
-                max_depth: MAX_SUB_AGENT_DEPTH,
-            })
-        } else {
-            None
-        };
+        let task_ctx = self.build_task_context(&tx);
 
         // Session memory manager for Layer 2 context (placed at index 1, after system prompt)
         let mut session_memory_manager = SessionMemoryManager::new(1);

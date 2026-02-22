@@ -127,6 +127,9 @@ pub struct TaskContext {
     pub depth: u32,
     /// Maximum allowed nesting depth
     pub max_depth: u32,
+    /// Semaphore controlling the maximum number of concurrent sub-agent LLM calls.
+    /// Prevents QPS bursts on rate-limited providers (e.g., GLM, Qwen).
+    pub llm_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 /// Create a forwarding channel that wraps all sub-agent events as `SubAgentEvent`.

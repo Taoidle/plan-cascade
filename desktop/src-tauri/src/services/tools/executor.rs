@@ -417,6 +417,7 @@ impl ToolExecutor {
             cancellation_token: task_ctx.cancellation_token.clone(),
             depth: task_ctx.depth,
             max_depth: task_ctx.max_depth,
+            llm_semaphore: Arc::clone(&task_ctx.llm_semaphore),
         }));
         ctx
     }

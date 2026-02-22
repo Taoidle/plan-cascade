@@ -584,25 +584,39 @@ export function buildDisplayBlocks(lines: StreamLine[], compactMode: boolean): D
     return lines.map((line) => ({ kind: 'line', line }));
   }
 
+  // Pass 1: collect all sub-agent lines by ID, record first-occurrence index
+  const subAgentMap = new Map<string, { firstIndex: number; lines: StreamLine[] }>();
+  const emittedSubAgents = new Set<string>();
+  for (let i = 0; i < lines.length; i++) {
+    const subId = lines[i].subAgentId;
+    if (subId) {
+      const entry = subAgentMap.get(subId);
+      if (entry) {
+        entry.lines.push(lines[i]);
+      } else {
+        subAgentMap.set(subId, { firstIndex: i, lines: [lines[i]] });
+      }
+    }
+  }
+
+  // Pass 2: build blocks, inserting merged sub-agent groups at first-occurrence position
   const blocks: DisplayBlock[] = [];
   let i = 0;
   while (i < lines.length) {
-    // First priority: group consecutive lines from the same sub-agent
     const subId = lines[i].subAgentId;
     if (subId) {
-      const group: StreamLine[] = [lines[i]];
-      let j = i + 1;
-      while (j < lines.length && lines[j].subAgentId === subId) {
-        group.push(lines[j]);
-        j += 1;
+      // Emit merged group at first occurrence, skip subsequent lines for this sub-agent
+      if (!emittedSubAgents.has(subId)) {
+        emittedSubAgents.add(subId);
+        const entry = subAgentMap.get(subId)!;
+        blocks.push({
+          kind: 'sub_agent_group',
+          subAgentId: subId,
+          lines: entry.lines,
+          depth: entry.lines[0].subAgentDepth || 0,
+        });
       }
-      blocks.push({
-        kind: 'sub_agent_group',
-        subAgentId: subId,
-        lines: group,
-        depth: lines[i].subAgentDepth || 0,
-      });
-      i = j;
+      i += 1;
       continue;
     }
 

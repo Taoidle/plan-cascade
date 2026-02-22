@@ -232,6 +232,33 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
               )}
             />
           </div>
+          <div>
+            <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+              {t('general.executionLimits.maxConcurrentSubagents')}
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={20}
+              value={useSettingsStore.getState().maxConcurrentSubagents}
+              onChange={(e) => {
+                const value = parseInt(e.target.value, 10);
+                if (!isNaN(value)) {
+                  useSettingsStore.setState({ maxConcurrentSubagents: value });
+                }
+              }}
+              className={clsx(
+                'w-full px-3 py-2 rounded-lg border',
+                'border-gray-200 dark:border-gray-700',
+                'bg-white dark:bg-gray-800',
+                'text-gray-900 dark:text-white',
+                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              )}
+            />
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+              {t('general.executionLimits.maxConcurrentSubagentsHelp')}
+            </p>
+          </div>
         </div>
       </section>
 

@@ -174,7 +174,18 @@ impl Tool for TaskTool {
             task_ctx.tx.clone(),
         );
 
-        // Spawn the sub-agent task
+        // Acquire a semaphore permit to limit concurrent sub-agent LLM calls.
+        // This prevents QPS bursts on rate-limited providers (e.g., GLM 2-5 QPS).
+        let _permit = match task_ctx.llm_semaphore.acquire().await {
+            Ok(permit) => permit,
+            Err(_) => {
+                return ToolResult::err(
+                    "Sub-agent concurrency semaphore closed unexpectedly",
+                );
+            }
+        };
+
+        // Spawn the sub-agent task (permit is held until spawn_task completes)
         let result = task_ctx
             .spawner
             .spawn_task(

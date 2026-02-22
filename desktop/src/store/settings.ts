@@ -52,6 +52,7 @@ interface SettingsState {
   maxIterations: number;
   maxTotalTokens: number;
   timeoutSeconds: number;
+  maxConcurrentSubagents: number;
 
   // UI settings
   defaultMode: 'simple' | 'expert';
@@ -112,6 +113,7 @@ interface SettingsState {
   setGlmEndpoint: (endpoint: GlmEndpoint) => void;
   setMinimaxEndpoint: (endpoint: MinimaxEndpoint) => void;
   setQwenEndpoint: (endpoint: QwenEndpoint) => void;
+  setMaxConcurrentSubagents: (value: number) => void;
   setSearchProvider: (provider: 'tavily' | 'brave' | 'duckduckgo') => void;
 
   // Chat UI actions
@@ -162,6 +164,7 @@ const defaultSettings = {
   maxIterations: 50,
   maxTotalTokens: 1_000_000,
   timeoutSeconds: 300,
+  maxConcurrentSubagents: 0,
 
   // UI
   defaultMode: 'simple' as const,
@@ -257,6 +260,7 @@ export const useSettingsStore = create<SettingsState>()(
       setEnableCodeBlockCopy: (enableCodeBlockCopy) => set({ enableCodeBlockCopy }),
 
       setMaxTotalTokens: (maxTotalTokens) => set({ maxTotalTokens }),
+      setMaxConcurrentSubagents: (maxConcurrentSubagents) => set({ maxConcurrentSubagents }),
 
       setGlmEndpoint: (glmEndpoint) => set({ glmEndpoint }),
       setMinimaxEndpoint: (minimaxEndpoint) => set({ minimaxEndpoint }),

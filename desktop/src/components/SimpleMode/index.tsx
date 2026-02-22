@@ -395,6 +395,18 @@ function ChatTranscript({
 
       result.push({ turnIndex: turnIndex++, userLine: lines[i], assistantLines });
     }
+    // Fallback: if no info lines but content exists, synthesize a turn so the panel isn't empty
+    if (result.length === 0 && lines.length > 0 &&
+        lines.some((l) => l.type !== 'info')) {
+      const syntheticUserLine: StreamLine = {
+        id: -1, content: '(continued)', type: 'info', timestamp: lines[0].timestamp,
+      };
+      result.push({
+        turnIndex: 0,
+        userLine: syntheticUserLine,
+        assistantLines: lines.filter((l) => l.type !== 'info'),
+      });
+    }
     return result;
   }, [lines]);
 
@@ -435,7 +447,8 @@ function ChatTranscript({
     containerRef.current.scrollTop = containerRef.current.scrollHeight;
   }, [lines]);
 
-  if (richTurns.length === 0) {
+  const hasContent = lines.length > 0 && lines.some((l) => l.type !== 'info');
+  if (richTurns.length === 0 && !hasContent) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
         {status === 'running'

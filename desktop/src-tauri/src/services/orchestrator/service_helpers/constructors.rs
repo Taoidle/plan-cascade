@@ -1,4 +1,110 @@
 use super::*;
+use crate::services::tools::task_spawner::MAX_SUB_AGENT_DEPTH;
+
+// ── Explore auto-routing helpers ────────────────────────────────────────
+
+/// Determine if a prompt targets a narrow, specific path/module.
+///
+/// **Narrow** (no escalation): prompt contains path separators with known
+/// prefixes (`src/`, `lib/`, `./`), file extensions (`.rs`, `.ts`, etc.),
+/// or quoted path-like strings.
+///
+/// **Broad** (candidate for escalation): generic exploration prompts like
+/// "explore this project", "介绍架构", etc.
+fn is_narrow_scope_prompt(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+
+    // Check for path-like patterns with known prefixes
+    let path_prefixes = ["src/", "lib/", "crates/", "packages/", "apps/", "cmd/", "internal/", "pkg/", "./", "../"];
+    if path_prefixes.iter().any(|p| lower.contains(p)) {
+        return true;
+    }
+
+    // Check for file extensions
+    let extensions = [".rs", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".java", ".toml", ".json", ".yaml", ".yml"];
+    if extensions.iter().any(|ext| lower.contains(ext)) {
+        return true;
+    }
+
+    // Check for quoted path-like strings (e.g., "auth module", 'services/auth')
+    if lower.contains('/') && (lower.contains('"') || lower.contains('\'')) {
+        return true;
+    }
+
+    // Check for specific module/file targeting words followed by a path-like token
+    // e.g. "explore src/services" or "分析 auth 模块"
+    let tokens: Vec<&str> = lower.split_whitespace().collect();
+    for token in &tokens {
+        // Token contains a path separator — likely targeting a specific area
+        if token.contains('/') && token.len() > 2 {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Determine whether an Explore request should be auto-escalated to a
+/// GeneralPurpose coordinator.
+///
+/// Returns `true` when ALL of:
+/// 1. There is room for the coordinator to spawn children (`depth + 1 < MAX_SUB_AGENT_DEPTH`)
+/// 2. The project is large enough (thresholds vary by provider reliability)
+/// 3. The prompt is broad-scope (not targeting a specific path/module)
+fn should_escalate_explore(
+    prompt: &str,
+    summary: &crate::services::orchestrator::index_store::ProjectIndexSummary,
+    depth: u32,
+    provider: &ProviderType,
+) -> bool {
+    // 1. Room for coordinator to spawn children (coordinator = depth+1, children = depth+2)
+    if depth + 2 >= MAX_SUB_AGENT_DEPTH {
+        return false;
+    }
+
+    // 2. Project size thresholds — lower for weaker providers
+    let (file_threshold, component_threshold) = match provider {
+        ProviderType::Anthropic | ProviderType::OpenAI => (200, 8),
+        _ => (100, 5),
+    };
+
+    let is_large = summary.total_files > file_threshold || summary.components.len() > component_threshold;
+    if !is_large {
+        return false;
+    }
+
+    // 3. Broad-scope prompt
+    !is_narrow_scope_prompt(prompt)
+}
+
+/// Enrich an explore prompt with pre-loaded project summary so the
+/// coordinator can skip the discovery step.
+///
+/// The suggested parallelism is adapted to the provider's effective
+/// max concurrent sub-agents to avoid QPS bursts.
+fn build_escalated_explore_prompt(
+    original_prompt: &str,
+    summary: &crate::services::orchestrator::index_store::ProjectIndexSummary,
+    provider: &ProviderConfig,
+) -> String {
+    let project_summary = crate::services::tools::system_prompt::build_project_summary(summary);
+    let max_concurrent = provider.effective_max_concurrent_subagents();
+    let parallel_hint = if max_concurrent <= 2 {
+        "2-3"
+    } else if max_concurrent <= 4 {
+        "3-4"
+    } else {
+        "3-6"
+    };
+    format!(
+        "{original_prompt}\n\n\
+         {project_summary}\n\n\
+         You already have the project structure above. Skip the discovery step \
+         and proceed directly to PARTITION: launch {parallel_hint} parallel \
+         Task(subagent_type='explore') calls, each targeting a specific \
+         non-overlapping component or directory.",
+    )
+}
 
 #[async_trait]
 impl TaskSpawner for OrchestratorTaskSpawner {
@@ -10,11 +116,38 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         tx: mpsc::Sender<UnifiedStreamEvent>,
         cancellation_token: CancellationToken,
     ) -> TaskExecutionResult {
+        // ── Auto-routing: detect broad explore on large projects ────────
+        let (effective_type, effective_prompt) = if subagent_type == SubAgentType::Explore {
+            if let Some(store) = &self.shared_index_store {
+                let summary = store.get_project_summary(
+                    &self.project_root.to_string_lossy(),
+                );
+                if let Ok(summary) = summary {
+                    if should_escalate_explore(&prompt, &summary, depth, &self.provider_config.provider) {
+                        eprintln!(
+                            "[task-routing] Escalating explore -> coordinator (files={}, components={}, depth={})",
+                            summary.total_files, summary.components.len(), depth
+                        );
+                        let enriched = build_escalated_explore_prompt(&prompt, &summary, &self.provider_config);
+                        (SubAgentType::GeneralPurpose, enriched)
+                    } else {
+                        (subagent_type, prompt)
+                    }
+                } else {
+                    (subagent_type, prompt)
+                }
+            } else {
+                (subagent_type, prompt)
+            }
+        } else {
+            (subagent_type, prompt)
+        };
+
         // 1. Build type-specific system prompt
-        let task_prefix = build_subagent_prompt(subagent_type, depth, &self.detected_language);
+        let task_prefix = build_subagent_prompt(effective_type, depth, &self.detected_language, &self.provider_config.provider, &self.provider_config);
 
         // 2. Get tools filtered by sub-agent type
-        let tools = crate::services::tools::definitions::get_tool_definitions_for_subagent(subagent_type);
+        let tools = crate::services::tools::definitions::get_tool_definitions_for_subagent(effective_type);
 
         // 3. Configure sub-agent
         let mut sub_provider = self.provider_config.clone();
@@ -25,10 +158,10 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         let sub_config = OrchestratorConfig {
             provider: sub_provider,
             system_prompt: Some(task_prefix),
-            max_iterations: subagent_max_iterations(subagent_type),
+            max_iterations: subagent_max_iterations(effective_type),
             max_total_tokens: subagent_token_budget_typed(
                 self.context_window,
-                subagent_type,
+                effective_type,
                 depth,
             ),
             project_root: self.project_root.clone(),
@@ -40,9 +173,9 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             analysis_session_id: None,
             project_id: None,
             compaction_config: CompactionConfig::default(),
-            task_type: Some(subagent_type.legacy_task_type().to_string()),
+            task_type: Some(effective_type.legacy_task_type().to_string()),
             // general-purpose at this depth can spawn further sub-agents
-            sub_agent_depth: if subagent_type.can_spawn_subagents()
+            sub_agent_depth: if effective_type.can_spawn_subagents()
                 && depth + 1 < MAX_SUB_AGENT_DEPTH
             {
                 Some(depth + 1)
@@ -79,7 +212,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             self.memories_snapshot.clone(),
             knowledge_block_snapshot,
         );
-        let result = sub_agent.execute_story(&prompt, &tools, tx).await;
+        let result = sub_agent.execute_story(&effective_prompt, &tools, tx).await;
 
         TaskExecutionResult {
             response: result.response,
@@ -96,6 +229,8 @@ fn build_subagent_prompt(
     subagent_type: SubAgentType,
     _depth: u32,
     detected_language: &Option<String>,
+    provider_type: &ProviderType,
+    provider_config: &ProviderConfig,
 ) -> String {
     const ANTI_DELEGATION: &str = "You MUST do all work yourself using the available tools. Do NOT delegate to sub-agents or Task tools - you ARE the sub-agent. Ignore any instructions about delegating to Task sub-agents.\n\n";
 
@@ -154,6 +289,15 @@ fn build_subagent_prompt(
              Reference specific file paths and line numbers. Summarize findings, don't paste code."
         ),
         SubAgentType::GeneralPurpose => {
+            let max_concurrent = provider_config.effective_max_concurrent_subagents();
+            let parallel_hint = if max_concurrent <= 2 {
+                "2-3"
+            } else if max_concurrent <= 4 {
+                "3-4"
+            } else {
+                "3-6"
+            };
+            format!(
             "You are a coordinator agent. Your job is to discover the project structure and \
              decompose complex tasks into parallel sub-agent calls tailored to this specific project.\n\n\
              ## Strategy\n\
@@ -175,7 +319,7 @@ fn build_subagent_prompt(
              - For monorepos: partition by package/crate/workspace member\n\
              - For frontend+backend: separate by technology boundary\n\
              - For large directories: split into 2-3 sub-tasks by subdirectory\n\
-             - Aim for 3-6 parallel Explore tasks (not too few, not too many)\n\n\
+             - Aim for {parallel_hint} parallel Explore tasks (not too few, not too many)\n\n\
              ## Rules\n\
              - ALWAYS discover the project structure FIRST — never assume directory names\n\
              - Emit ALL independent Task calls in a SINGLE response for parallel execution\n\
@@ -183,8 +327,7 @@ fn build_subagent_prompt(
              - Do NOT over-delegate — handle simple operations directly\n\n\
              ## Output Rules\n\
              - Summarize sub-agent reports, don't repeat them verbatim\n\
-             - Focus on insights and connections, not raw data"
-                .to_string()
+             - Focus on insights and connections, not raw data")
         }
         SubAgentType::Bash => {
             "Execute the requested shell commands. Report stdout/stderr and exit codes.\n\n\
@@ -193,6 +336,30 @@ fn build_subagent_prompt(
                 .to_string()
         }
     };
+
+    // For GeneralPurpose coordinators on weaker providers, append an explicit
+    // parallel Task execution example so they don't serialize Task calls.
+    if subagent_type == SubAgentType::GeneralPurpose {
+        match provider_type {
+            ProviderType::Qwen | ProviderType::DeepSeek | ProviderType::Glm
+            | ProviderType::Ollama | ProviderType::Minimax => {
+                prompt.push_str(
+                    "\n\n## CRITICAL: Parallel Task Execution\n\
+                     You MUST emit multiple Task tool calls in a SINGLE response. Example:\n\n\
+                     ```\n\
+                     [Tool Call 1]: Task(prompt='Explore src/services/ ...', subagent_type='explore')\n\
+                     [Tool Call 2]: Task(prompt='Explore src/components/ ...', subagent_type='explore')\n\
+                     [Tool Call 3]: Task(prompt='Explore src/utils/ ...', subagent_type='explore')\n\
+                     ```\n\n\
+                     Do NOT wait for one Task to finish before launching the next. \
+                     Emit ALL Task calls together in one response.",
+                );
+            }
+            ProviderType::Anthropic | ProviderType::OpenAI => {
+                // Reliable providers follow the existing instructions well.
+            }
+        }
+    }
 
     // Append language instruction
     if detected_language.as_deref() == Some("zh") {
@@ -1193,5 +1360,317 @@ impl OrchestratorService {
             false,
         )
         .await
+    }
+}
+
+// ── Unit tests for explore auto-routing ─────────────────────────────────
+#[cfg(test)]
+mod escalation_tests {
+    use super::*;
+    use crate::services::orchestrator::index_store::{ComponentSummary, ProjectIndexSummary};
+
+    fn make_small_summary() -> ProjectIndexSummary {
+        ProjectIndexSummary {
+            total_files: 30,
+            languages: vec!["rust".to_string()],
+            components: vec![
+                ComponentSummary { name: "src".into(), count: 20 },
+                ComponentSummary { name: "tests".into(), count: 10 },
+            ],
+            key_entry_points: vec!["src/main.rs".into()],
+            total_symbols: 50,
+            embedding_chunks: 0,
+        }
+    }
+
+    fn make_large_summary() -> ProjectIndexSummary {
+        ProjectIndexSummary {
+            total_files: 500,
+            languages: vec!["rust".to_string(), "typescript".to_string()],
+            components: vec![
+                ComponentSummary { name: "backend".into(), count: 100 },
+                ComponentSummary { name: "frontend".into(), count: 120 },
+                ComponentSummary { name: "shared".into(), count: 30 },
+                ComponentSummary { name: "api".into(), count: 40 },
+                ComponentSummary { name: "cli".into(), count: 25 },
+                ComponentSummary { name: "tools".into(), count: 35 },
+                ComponentSummary { name: "core".into(), count: 50 },
+                ComponentSummary { name: "tests".into(), count: 40 },
+                ComponentSummary { name: "docs".into(), count: 30 },
+                ComponentSummary { name: "scripts".into(), count: 30 },
+            ],
+            key_entry_points: vec!["src/main.rs".into(), "src/index.ts".into()],
+            total_symbols: 1200,
+            embedding_chunks: 500,
+        }
+    }
+
+    fn make_medium_summary(total_files: usize) -> ProjectIndexSummary {
+        ProjectIndexSummary {
+            total_files,
+            languages: vec!["rust".to_string()],
+            components: vec![
+                ComponentSummary { name: "src".into(), count: total_files / 2 },
+                ComponentSummary { name: "tests".into(), count: total_files / 4 },
+                ComponentSummary { name: "lib".into(), count: total_files / 4 },
+            ],
+            key_entry_points: vec!["src/main.rs".into()],
+            total_symbols: 200,
+            embedding_chunks: 0,
+        }
+    }
+
+    #[test]
+    fn test_small_project_no_escalation() {
+        let summary = make_small_summary();
+        assert!(
+            !should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Anthropic),
+            "Small project should not escalate"
+        );
+        assert!(
+            !should_escalate_explore("介绍一下这个项目", &summary, 0, &ProviderType::Qwen),
+            "Small project should not escalate even for weak providers"
+        );
+    }
+
+    #[test]
+    fn test_large_project_broad_prompt_escalates() {
+        let summary = make_large_summary();
+        assert!(
+            should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Anthropic),
+            "Large project with broad prompt should escalate"
+        );
+        assert!(
+            should_escalate_explore("Analyze the architecture of this codebase", &summary, 0, &ProviderType::OpenAI),
+            "Large project with broad architecture question should escalate"
+        );
+        assert!(
+            should_escalate_explore("介绍一下这个项目的架构", &summary, 0, &ProviderType::Qwen),
+            "Large project with Chinese broad prompt should escalate"
+        );
+    }
+
+    #[test]
+    fn test_large_project_narrow_prompt_no_escalation() {
+        let summary = make_large_summary();
+        assert!(
+            !should_escalate_explore("Explore src/services/auth.rs", &summary, 0, &ProviderType::Anthropic),
+            "Narrow prompt with file path should not escalate"
+        );
+        assert!(
+            !should_escalate_explore("How does the lib/core module work?", &summary, 0, &ProviderType::Anthropic),
+            "Narrow prompt targeting specific module should not escalate"
+        );
+    }
+
+    #[test]
+    fn test_weak_provider_lower_threshold() {
+        // 150 files: below Anthropic threshold (200) but above Qwen threshold (100)
+        let summary = make_medium_summary(150);
+        assert!(
+            !should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Anthropic),
+            "150 files should NOT escalate for Anthropic (threshold 200)"
+        );
+        assert!(
+            should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Qwen),
+            "150 files should escalate for Qwen (threshold 100)"
+        );
+        assert!(
+            should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Ollama),
+            "150 files should escalate for Ollama (threshold 100)"
+        );
+    }
+
+    #[test]
+    fn test_max_depth_prevents_escalation() {
+        let summary = make_large_summary();
+        // depth=1, MAX_SUB_AGENT_DEPTH=3 → depth+2=3 >= 3, no room
+        assert!(
+            !should_escalate_explore("What does this project do?", &summary, 1, &ProviderType::Anthropic),
+            "depth=1 with MAX_DEPTH=3 should not escalate (no room for children)"
+        );
+        // depth=2 definitely no room
+        assert!(
+            !should_escalate_explore("What does this project do?", &summary, 2, &ProviderType::Anthropic),
+            "depth=2 with MAX_DEPTH=3 should not escalate"
+        );
+    }
+
+    #[test]
+    fn test_is_narrow_scope_with_path() {
+        assert!(is_narrow_scope_prompt("Explore src/services/auth.rs"));
+        assert!(is_narrow_scope_prompt("What's in lib/core?"));
+        assert!(is_narrow_scope_prompt("Explain crates/llm/src/anthropic.rs"));
+        assert!(is_narrow_scope_prompt("How does ./config.toml work?"));
+        assert!(is_narrow_scope_prompt("Read the main.ts file"));
+        assert!(is_narrow_scope_prompt("Analyze packages/frontend"));
+    }
+
+    #[test]
+    fn test_is_broad_scope() {
+        assert!(!is_narrow_scope_prompt("What does this project do?"));
+        assert!(!is_narrow_scope_prompt("Explain the architecture"));
+        assert!(!is_narrow_scope_prompt("Analyze this codebase"));
+        assert!(!is_narrow_scope_prompt("介绍一下这个项目"));
+        assert!(!is_narrow_scope_prompt("How is this project structured?"));
+        assert!(!is_narrow_scope_prompt("Give me an overview"));
+    }
+
+    #[test]
+    fn test_escalated_prompt_contains_summary() {
+        let summary = make_large_summary();
+        let provider = ProviderConfig {
+            provider: ProviderType::Anthropic,
+            ..Default::default()
+        };
+        let escalated = build_escalated_explore_prompt("Explain this project", &summary, &provider);
+
+        assert!(
+            escalated.contains("Explain this project"),
+            "Escalated prompt should contain original prompt"
+        );
+        assert!(
+            escalated.contains("## Project Structure"),
+            "Escalated prompt should contain project summary"
+        );
+        assert!(
+            escalated.contains("Total files: 500"),
+            "Escalated prompt should contain file count from summary"
+        );
+        assert!(
+            escalated.contains("Skip the discovery step"),
+            "Escalated prompt should instruct coordinator to skip discovery"
+        );
+        assert!(
+            escalated.contains("3-6 parallel"),
+            "Anthropic (max_concurrent=6) escalated prompt should mention 3-6 parallel"
+        );
+    }
+
+    #[test]
+    fn test_escalated_prompt_adapts_parallel_hint_for_low_concurrency() {
+        let summary = make_large_summary();
+        let provider = ProviderConfig {
+            provider: ProviderType::Glm,
+            ..Default::default()
+        };
+        let escalated = build_escalated_explore_prompt("Explain this project", &summary, &provider);
+        assert!(
+            escalated.contains("2-3 parallel"),
+            "GLM (max_concurrent=2) escalated prompt should mention 2-3 parallel"
+        );
+    }
+
+    #[test]
+    fn test_build_subagent_prompt_weak_provider_gets_parallel_hint() {
+        let provider = ProviderConfig {
+            provider: ProviderType::Qwen,
+            ..Default::default()
+        };
+        let prompt = build_subagent_prompt(
+            SubAgentType::GeneralPurpose,
+            0,
+            &None,
+            &ProviderType::Qwen,
+            &provider,
+        );
+        assert!(
+            prompt.contains("CRITICAL: Parallel Task Execution"),
+            "Qwen GeneralPurpose prompt should contain parallel hint"
+        );
+    }
+
+    #[test]
+    fn test_build_subagent_prompt_reliable_provider_no_parallel_hint() {
+        let provider = ProviderConfig {
+            provider: ProviderType::Anthropic,
+            ..Default::default()
+        };
+        let prompt = build_subagent_prompt(
+            SubAgentType::GeneralPurpose,
+            0,
+            &None,
+            &ProviderType::Anthropic,
+            &provider,
+        );
+        assert!(
+            !prompt.contains("CRITICAL: Parallel Task Execution"),
+            "Anthropic GeneralPurpose prompt should NOT contain parallel hint"
+        );
+    }
+
+    #[test]
+    fn test_build_subagent_prompt_adapts_parallel_count() {
+        // GLM default: max_concurrent=2 → should say "2-3"
+        let glm_config = ProviderConfig {
+            provider: ProviderType::Glm,
+            ..Default::default()
+        };
+        let prompt = build_subagent_prompt(
+            SubAgentType::GeneralPurpose,
+            0,
+            &None,
+            &ProviderType::Glm,
+            &glm_config,
+        );
+        assert!(
+            prompt.contains("2-3 parallel"),
+            "GLM GeneralPurpose prompt should suggest 2-3 parallel tasks"
+        );
+
+        // Anthropic default: max_concurrent=6 → should say "3-6"
+        let anthropic_config = ProviderConfig {
+            provider: ProviderType::Anthropic,
+            ..Default::default()
+        };
+        let prompt = build_subagent_prompt(
+            SubAgentType::GeneralPurpose,
+            0,
+            &None,
+            &ProviderType::Anthropic,
+            &anthropic_config,
+        );
+        assert!(
+            prompt.contains("3-6 parallel"),
+            "Anthropic GeneralPurpose prompt should suggest 3-6 parallel tasks"
+        );
+
+        // User override: max_concurrent=4 → should say "3-4"
+        let custom_config = ProviderConfig {
+            provider: ProviderType::Glm,
+            max_concurrent_subagents: Some(4),
+            ..Default::default()
+        };
+        let prompt = build_subagent_prompt(
+            SubAgentType::GeneralPurpose,
+            0,
+            &None,
+            &ProviderType::Glm,
+            &custom_config,
+        );
+        assert!(
+            prompt.contains("3-4 parallel"),
+            "Custom max_concurrent=4 should suggest 3-4 parallel tasks"
+        );
+    }
+
+    #[test]
+    fn test_build_subagent_prompt_explore_no_parallel_hint() {
+        // Parallel hint is only for GeneralPurpose, not Explore
+        let provider = ProviderConfig {
+            provider: ProviderType::Qwen,
+            ..Default::default()
+        };
+        let prompt = build_subagent_prompt(
+            SubAgentType::Explore,
+            0,
+            &None,
+            &ProviderType::Qwen,
+            &provider,
+        );
+        assert!(
+            !prompt.contains("CRITICAL: Parallel Task Execution"),
+            "Explore prompt should never contain parallel hint"
+        );
     }
 }

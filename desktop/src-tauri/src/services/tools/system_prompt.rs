@@ -229,23 +229,17 @@ Follow this decision tree to select the correct tool. Start from the top.
 
 **Project-level understanding** (requires reading multiple files) → Use **Task** sub-agent:
 
-| User wants to know... | Use this tool | Why |
-|---|---|---|
-| Understand a SPECIFIC directory/module/component | **Task** with subagent_type='explore' | Single-area deep exploration |
-| "How does X work?" / "Explain module Y" | **Task** with subagent_type='explore' | Focused exploration of one area |
-| "What does this project do?" / "Analyze this project" | See project-size routing below | Depends on project size |
-| "Explain the architecture" / "How is this codebase structured?" | See project-size routing below | Depends on project size |
-| Focused deep analysis of patterns/interactions | **Task** with subagent_type='plan' | Deep reading across related files |
+| User wants to know... | Use this tool |
+|---|---|
+| Understand a SPECIFIC directory/module/component | **Task** with subagent_type='explore' |
+| "How does X work?" / "Explain module Y" | **Task** with subagent_type='explore' |
+| "What does this project do?" / "Analyze this project" | **Task** with subagent_type='explore' |
+| "Explain the architecture" / "How is this codebase structured?" | **Task** with subagent_type='explore' |
+| Focused deep analysis of patterns/interactions | **Task** with subagent_type='plan' |
 
-**Project-size routing** (check the Project Summary above for file count and component count):
+For project understanding, use `Task(subagent_type='explore')`. The system auto-escalates to a coordinator pattern for large projects — you do not need to choose between explore and general-purpose yourself.
 
-| Project size | Route to | Why |
-|---|---|---|
-| Small (≤50 files or ≤3 components) | **Task** with subagent_type='explore' | One agent can cover everything |
-| Medium (51-200 files or 4-8 components) | **Task** with subagent_type='explore' (2-3 parallel Tasks, each exploring different areas) | Split by directory/domain |
-| Large (>200 files or >8 components) | **Task** with subagent_type='general-purpose' | Coordinator discovers structure, partitions into parallel explore agents |
-
-When launching multiple parallel explore Tasks yourself (medium projects), partition by top-level directory or component boundary. Each Task should focus on a SPECIFIC non-overlapping area.
+For medium-sized projects, you may emit 2-3 parallel explore Tasks in one response, each targeting a different top-level directory or component area.
 
 **Aggregated file inventory for implementation** → Use **Analyze**:
 
@@ -281,15 +275,14 @@ When launching multiple parallel explore Tasks yourself (medium projects), parti
 
 **IMPORTANT: Emit multiple Task calls in ONE response for parallel execution.**
 
-**Examples of when to use general-purpose (coordinator):**
-- Large project (>200 files): "What does this project do?" → coordinator partitions into 3-5 parallel explore agents
-- Multi-technology project: "Analyze this codebase" → coordinator explores frontend, backend, and shared code in parallel
-- Cross-cutting analysis: "How does data flow from API to UI?" → coordinator traces through multiple layers
+**Examples of when to use explore:**
+- "How does the auth module work?" → explore reads auth-related files
+- "What's in src/services/?" → explore reads that directory
+- "What does this project do?" → explore agent (auto-escalated for large projects)
 
-**Examples of when to use explore (direct):**
-- Single module: "How does the auth module work?" → explore reads auth-related files
-- Specific directory: "What's in src/services/?" → explore reads that directory
-- Small/medium project: "What does this project do?" → one explore agent (or 2-3 parallel explores for medium) covers everything
+**Examples of when to use general-purpose:**
+- Complex multi-file implementation that needs write access
+- Tasks requiring shell commands AND file editing in sequence
 
 **Thoroughness hints** — include in the Task prompt to control exploration depth:
 - "quick exploration" — brief overview (3-5 files)
@@ -1333,6 +1326,32 @@ mod tests {
         assert!(
             !guidance.contains("Do NOT start"),
             "Analyze guidance should use softer language"
+        );
+    }
+
+    #[test]
+    fn test_system_prompt_simplified_routing_no_project_size_table() {
+        let tools = get_tool_definitions_from_registry();
+        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
+
+        // Old project-size routing table should be gone
+        assert!(
+            !prompt.contains("Small (≤50 files"),
+            "Old small/medium/large routing table should be removed"
+        );
+        assert!(
+            !prompt.contains("Medium (51-200 files"),
+            "Old medium row should be removed"
+        );
+        assert!(
+            !prompt.contains("Large (>200 files"),
+            "Old large row should be removed"
+        );
+
+        // Should contain the simplified auto-escalation note
+        assert!(
+            prompt.contains("auto-escalates"),
+            "Should mention auto-escalation for large projects"
         );
     }
 

@@ -1039,6 +1039,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settings.enableThinking ?? false,
           maxTotalTokens: settings.maxTotalTokens ?? undefined,
           maxIterations: settings.maxIterations ?? undefined,
+          maxConcurrentSubagents: settings.maxConcurrentSubagents || undefined,
         });
 
         if (!result.success || !result.data) {
@@ -1848,10 +1849,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         subAgentId,
         subAgentDepth,
       };
-      // Keep buffer capped at 500 lines by trimming old entries when appending
-      const trimmed = lines.length >= 500 ? lines.slice(-499) : lines;
       return {
-        streamingOutput: [...trimmed, line],
+        streamingOutput: [...lines, line],
         streamLineCounter: counter,
       };
     });
@@ -2250,6 +2249,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxTotalTokens: settingsSnapshot.maxTotalTokens ?? undefined,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
+          maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
         });
 
         if (!result.success || !result.data) {
@@ -2436,6 +2436,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxTotalTokens: settingsSnapshot.maxTotalTokens ?? undefined,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
+          maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
         });
 
         if (!result.success || !result.data) {
@@ -2951,7 +2952,7 @@ function handleUnifiedExecutionEvent(
       if (showSubAgent) {
         const promptPreview = (payload.prompt || '').trim().substring(0, 180);
         const label = promptPreview || payload.sub_agent_id || payload.task_type || 'sub-agent';
-        get().appendStreamLine(`[sub_agent:start] ${label}`, 'sub_agent');
+        get().appendStreamLine(`[sub_agent:start] ${label}`, 'sub_agent', payload.sub_agent_id, payload.depth);
       }
       break;
 
@@ -2960,7 +2961,7 @@ function handleUnifiedExecutionEvent(
         const usage = formatSubAgentUsage(payload.usage);
         get().appendStreamLine(
           `[sub_agent:end] ${payload.success ? 'completed' : 'failed'}${usage}`,
-          'sub_agent'
+          'sub_agent', payload.sub_agent_id, payload.depth
         );
       }
       break;

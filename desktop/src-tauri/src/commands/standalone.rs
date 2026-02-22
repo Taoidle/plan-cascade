@@ -996,6 +996,7 @@ pub async fn execute_standalone(
     enable_thinking: Option<bool>,
     max_total_tokens: Option<u32>,
     max_iterations: Option<u32>,
+    max_concurrent_subagents: Option<u32>,
     app: AppHandle,
     app_state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
@@ -1072,6 +1073,9 @@ pub async fn execute_standalone(
         model,
         enable_thinking: enable_thinking.unwrap_or(false),
         proxy,
+        max_concurrent_subagents: max_concurrent_subagents
+            .filter(|&v| v > 0)
+            .map(|v| v as usize),
         ..Default::default()
     };
     let analysis_session_id = analysis_session_id
