@@ -239,7 +239,7 @@ Follow this decision tree to select the correct tool. Start from the top.
 
 For project understanding, use `Task(subagent_type='explore')`. The system auto-escalates to a coordinator pattern for large projects — you do not need to choose between explore and general-purpose yourself.
 
-For medium-sized projects, you may emit 2-3 parallel explore Tasks in one response, each targeting a different top-level directory or component area.
+For medium-sized projects, emit multiple parallel explore Tasks in one response, each targeting a different top-level directory or component area. Decompose based on the problem structure — the system automatically queues and limits concurrency.
 
 **Aggregated file inventory for implementation** → Use **Analyze**:
 

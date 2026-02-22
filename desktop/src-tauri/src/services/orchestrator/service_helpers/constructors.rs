@@ -89,20 +89,16 @@ fn build_escalated_explore_prompt(
 ) -> String {
     let project_summary = crate::services::tools::system_prompt::build_project_summary(summary);
     let max_concurrent = provider.effective_max_concurrent_subagents();
-    let parallel_hint = if max_concurrent <= 2 {
-        "2-3"
-    } else if max_concurrent <= 4 {
-        "3-4"
-    } else {
-        "3-6"
-    };
     format!(
         "{original_prompt}\n\n\
          {project_summary}\n\n\
          You already have the project structure above. Skip the discovery step \
-         and proceed directly to PARTITION: launch {parallel_hint} parallel \
+         and proceed directly to PARTITION: launch parallel \
          Task(subagent_type='explore') calls, each targeting a specific \
-         non-overlapping component or directory.",
+         non-overlapping component or directory.\n\
+         Decompose into as many parallel tasks as the problem naturally requires \
+         (typically 3-8). The system automatically queues execution — at most \
+         {max_concurrent} tasks run simultaneously, the rest wait in queue.",
     )
 }
 
@@ -290,13 +286,6 @@ fn build_subagent_prompt(
         ),
         SubAgentType::GeneralPurpose => {
             let max_concurrent = provider_config.effective_max_concurrent_subagents();
-            let parallel_hint = if max_concurrent <= 2 {
-                "2-3"
-            } else if max_concurrent <= 4 {
-                "3-4"
-            } else {
-                "3-6"
-            };
             format!(
             "You are a coordinator agent. Your job is to discover the project structure and \
              decompose complex tasks into parallel sub-agent calls tailored to this specific project.\n\n\
@@ -319,7 +308,10 @@ fn build_subagent_prompt(
              - For monorepos: partition by package/crate/workspace member\n\
              - For frontend+backend: separate by technology boundary\n\
              - For large directories: split into 2-3 sub-tasks by subdirectory\n\
-             - Aim for {parallel_hint} parallel Explore tasks (not too few, not too many)\n\n\
+             - Decompose into as many parallel Explore tasks as the problem naturally \
+               requires (typically 3-8, but more if the project is large enough). \
+               The system automatically queues execution — at most {max_concurrent} \
+               tasks run simultaneously, the rest wait in queue.\n\n\
              ## Rules\n\
              - ALWAYS discover the project structure FIRST — never assume directory names\n\
              - Emit ALL independent Task calls in a SINGLE response for parallel execution\n\
@@ -352,7 +344,10 @@ fn build_subagent_prompt(
                      [Tool Call 3]: Task(prompt='Explore src/utils/ ...', subagent_type='explore')\n\
                      ```\n\n\
                      Do NOT wait for one Task to finish before launching the next. \
-                     Emit ALL Task calls together in one response.",
+                     Emit ALL Task calls together in one response. \
+                     The system handles concurrency automatically — emit as many \
+                     Task calls as the problem requires, they will be queued and \
+                     executed within rate limits.",
                 );
             }
             ProviderType::Anthropic | ProviderType::OpenAI => {
@@ -1542,22 +1537,40 @@ mod escalation_tests {
             "Escalated prompt should instruct coordinator to skip discovery"
         );
         assert!(
-            escalated.contains("3-6 parallel"),
-            "Anthropic (max_concurrent=6) escalated prompt should mention 3-6 parallel"
+            escalated.contains("as many parallel tasks as the problem naturally requires"),
+            "Escalated prompt should allow free decomposition"
+        );
+        assert!(
+            escalated.contains("system automatically queues"),
+            "Escalated prompt should mention automatic queuing"
         );
     }
 
     #[test]
-    fn test_escalated_prompt_adapts_parallel_hint_for_low_concurrency() {
+    fn test_escalated_prompt_shows_max_concurrent() {
         let summary = make_large_summary();
+        // Anthropic default max_concurrent=6
         let provider = ProviderConfig {
-            provider: ProviderType::Glm,
+            provider: ProviderType::Anthropic,
             ..Default::default()
         };
         let escalated = build_escalated_explore_prompt("Explain this project", &summary, &provider);
+        let max_concurrent = provider.effective_max_concurrent_subagents();
         assert!(
-            escalated.contains("2-3 parallel"),
-            "GLM (max_concurrent=2) escalated prompt should mention 2-3 parallel"
+            escalated.contains(&format!("at most {} tasks run simultaneously", max_concurrent)),
+            "Escalated prompt should show actual max_concurrent value"
+        );
+
+        // GLM default max_concurrent (lower)
+        let glm_provider = ProviderConfig {
+            provider: ProviderType::Glm,
+            ..Default::default()
+        };
+        let escalated_glm = build_escalated_explore_prompt("Explain this project", &summary, &glm_provider);
+        let glm_max = glm_provider.effective_max_concurrent_subagents();
+        assert!(
+            escalated_glm.contains(&format!("at most {} tasks run simultaneously", glm_max)),
+            "GLM escalated prompt should show its max_concurrent value"
         );
     }
 
@@ -1600,8 +1613,8 @@ mod escalation_tests {
     }
 
     #[test]
-    fn test_build_subagent_prompt_adapts_parallel_count() {
-        // GLM default: max_concurrent=2 → should say "2-3"
+    fn test_build_subagent_prompt_shows_max_concurrent_and_queuing() {
+        // GLM default
         let glm_config = ProviderConfig {
             provider: ProviderType::Glm,
             ..Default::default()
@@ -1613,12 +1626,21 @@ mod escalation_tests {
             &ProviderType::Glm,
             &glm_config,
         );
+        let glm_max = glm_config.effective_max_concurrent_subagents();
         assert!(
-            prompt.contains("2-3 parallel"),
-            "GLM GeneralPurpose prompt should suggest 2-3 parallel tasks"
+            prompt.contains(&format!("at most {}", glm_max)),
+            "GLM GeneralPurpose prompt should show actual max_concurrent"
+        );
+        assert!(
+            prompt.contains("as many parallel Explore tasks as the problem naturally"),
+            "GLM prompt should allow free decomposition"
+        );
+        assert!(
+            prompt.contains("system automatically queues"),
+            "GLM prompt should mention automatic queuing"
         );
 
-        // Anthropic default: max_concurrent=6 → should say "3-6"
+        // Anthropic default
         let anthropic_config = ProviderConfig {
             provider: ProviderType::Anthropic,
             ..Default::default()
@@ -1630,12 +1652,13 @@ mod escalation_tests {
             &ProviderType::Anthropic,
             &anthropic_config,
         );
+        let anthropic_max = anthropic_config.effective_max_concurrent_subagents();
         assert!(
-            prompt.contains("3-6 parallel"),
-            "Anthropic GeneralPurpose prompt should suggest 3-6 parallel tasks"
+            prompt.contains(&format!("at most {}", anthropic_max)),
+            "Anthropic GeneralPurpose prompt should show actual max_concurrent"
         );
 
-        // User override: max_concurrent=4 → should say "3-4"
+        // User override: max_concurrent=4
         let custom_config = ProviderConfig {
             provider: ProviderType::Glm,
             max_concurrent_subagents: Some(4),
@@ -1649,8 +1672,8 @@ mod escalation_tests {
             &custom_config,
         );
         assert!(
-            prompt.contains("3-4 parallel"),
-            "Custom max_concurrent=4 should suggest 3-4 parallel tasks"
+            prompt.contains("at most 4"),
+            "Custom max_concurrent=4 should show in prompt"
         );
     }
 
