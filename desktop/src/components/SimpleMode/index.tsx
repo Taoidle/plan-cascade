@@ -360,13 +360,13 @@ export function SimpleMode() {
                     disabled={isDisabled}
                     placeholder={
                       isRunning
-                        ? t('input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
+                        ? t('workflow.input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
                         : workflowMode === 'task' && workflowPhase === 'interviewing'
-                          ? t('input.interviewPlaceholder', { defaultValue: 'Type your answer...' })
+                          ? t('workflow.input.interviewPlaceholder', { defaultValue: 'Type your answer...' })
                           : workflowMode === 'task' && workflowPhase === 'reviewing_prd'
-                            ? t('input.prdFeedbackPlaceholder', { defaultValue: 'Add feedback or press Approve on the PRD card...' })
+                            ? t('workflow.input.prdFeedbackPlaceholder', { defaultValue: 'Add feedback or press Approve on the PRD card...' })
                             : workflowMode === 'task'
-                              ? t('input.placeholder', {
+                              ? t('workflow.input.taskPlaceholder', {
                                   defaultValue: 'Describe a task (implementation / analysis / refactor)...',
                                 })
                               : t('input.followUpPlaceholder', {
@@ -393,7 +393,7 @@ export function SimpleMode() {
                     onClick={cancelWorkflow}
                     className="text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                   >
-                    Cancel workflow
+                    {t('workflow.cancelWorkflow')}
                   </button>
                 </div>
               )}

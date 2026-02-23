@@ -225,5 +225,141 @@
     "refresh": "更新",
     "refreshProjectsTitle": "プロジェクト一覧を更新",
     "refreshAnalyticsTitle": "分析データを更新"
+  },
+
+  "workflow": {
+    "cancelWorkflow": "ワークフローをキャンセル",
+
+    "strategy": {
+      "title": "戦略分析",
+      "confidence": "{{pct}}% 信頼度",
+      "risk": "リスク",
+      "stories": "ストーリー数",
+      "parallel": "並列度"
+    },
+
+    "config": {
+      "title": "設定",
+      "customized": "カスタム済み",
+      "flow": "フロー",
+      "tdd": "TDD",
+      "maxParallel": "最大並列数",
+      "qualityGates": "品質ゲート",
+      "interview": "インタビュー",
+      "on": "オン",
+      "off": "オフ",
+      "enabled": "有効",
+      "skip": "スキップ",
+      "continue": "続行",
+      "customize": "カスタマイズ",
+      "flowLevel": "フローレベル",
+      "quick": "クイック",
+      "standard": "スタンダード",
+      "full": "フル",
+      "tddMode": "TDD モード",
+      "flexible": "フレキシブル",
+      "strict": "ストリクト",
+      "specInterview": "仕様インタビュー",
+      "applyAndContinue": "適用して続行",
+      "back": "戻る",
+      "useNaturalLanguage": "自然言語で指定",
+      "nlDescription": "自然言語で設定の希望を記述してください：",
+      "nlPlaceholder": "例：「6個の並列エージェントを使用してTDDを有効にする」",
+      "apply": "適用",
+      "backToForm": "フォームに戻る"
+    },
+
+    "progress": {
+      "title": "ワークフロー進捗",
+      "phaseAnalyze": "分析",
+      "phaseConfig": "設定",
+      "phaseInterview": "インタビュー",
+      "phasePrd": "PRD",
+      "phaseReview": "レビュー",
+      "phaseExecute": "実行",
+      "phaseDone": "完了",
+      "batch": "バッチ {{current}}/{{total}}",
+      "storiesDone": "{{completed}}/{{total}} ストーリー完了",
+      "running": "{{count}} 実行中",
+      "completed": "{{count}} 完了",
+      "failed": "{{count}} 失敗",
+      "qualityGates": "品質ゲート",
+      "passed": "{{count}} 合格",
+      "total": "/ {{count}} 合計"
+    },
+
+    "interview": {
+      "questionTitle": "インタビュー質問",
+      "questionNumber": "{{current}}/{{total}}",
+      "required": "必須",
+      "optional": "任意",
+      "inputText": "テキスト入力",
+      "inputTextarea": "テキストエリア",
+      "inputSingleSelect": "1つ選択",
+      "inputMultiSelect": "複数選択",
+      "inputBoolean": "はい / いいえ",
+      "skipped": "スキップ済み",
+      "yes": "はい",
+      "no": "いいえ",
+      "skipBtn": "スキップ",
+      "submit": "送信",
+      "submitCount": "送信 ({{count}})"
+    },
+
+    "prd": {
+      "title": "PRD",
+      "storiesAndBatches": "{{stories}} ストーリー / {{batches}} バッチ",
+      "batch": "バッチ {{index}}",
+      "storyCount": "{{count}} ストーリー",
+      "storyCountPlural": "{{count}} ストーリー",
+      "acceptanceCriteria": "受け入れ基準：",
+      "deps": "依存: {{deps}}",
+      "approveAndExecute": "承認して実行",
+      "edit": "編集",
+      "doneEditing": "編集完了"
+    },
+
+    "execution": {
+      "batchStarted": "バッチ開始",
+      "storyStarted": "ストーリー開始",
+      "storyCompleted": "ストーリー完了",
+      "storyFailed": "ストーリー失敗",
+      "batchComplete": "バッチ完了",
+      "batchLabel": "バッチ {{current}}/{{total}}"
+    },
+
+    "gates": {
+      "qualityGate": "品質ゲート: {{title}}",
+      "passed": "合格",
+      "failed": "不合格"
+    },
+
+    "report": {
+      "executionComplete": "実行完了",
+      "executionFailed": "実行失敗",
+      "total": "合計",
+      "completed": "完了",
+      "failed": "失敗",
+      "duration": "所要時間",
+      "agentAssignments": "エージェント割り当て"
+    },
+
+    "input": {
+      "taskPlaceholder": "タスクを説明してください（実装 / 分析 / リファクタリング）...",
+      "interviewPlaceholder": "回答を入力...",
+      "prdFeedbackPlaceholder": "フィードバックを追加するか、PRDカードの承認ボタンを押してください...",
+      "waitingPlaceholder": "応答を待っています..."
+    },
+
+    "orchestrator": {
+      "analyzingTask": "タスクの複雑さを分析中...",
+      "startingInterview": "要件インタビューを開始...",
+      "interviewComplete": "インタビュー完了！要件をコンパイル中...",
+      "generatingPrd": "タスク説明からPRDを生成中...",
+      "prdApproved": "PRDが承認されました！実行を開始...",
+      "prdFeedbackNoted": "PRDフィードバックを記録しました：「{{feedback}}」。PRDカードの編集ボタンで変更してください。",
+      "workflowCancelled": "ワークフローがキャンセルされました。",
+      "configUpdated": "設定が更新されました：{{details}}"
+    }
   }
 }

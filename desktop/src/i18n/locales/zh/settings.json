@@ -330,6 +330,8 @@
     "title": "阶段代理分配",
     "description": "为每个执行阶段分配默认代理和备选链。",
 
+    "cliAgents": "CLI 代理",
+
     "columns": {
       "phase": "阶段",
       "defaultAgent": "默认代理",

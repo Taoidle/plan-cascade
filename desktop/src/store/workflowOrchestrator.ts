@@ -13,10 +13,13 @@
 
 import { create } from 'zustand';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import i18n from '../i18n';
 import { useExecutionStore } from './execution';
 import { useTaskModeStore, type TaskPrd, type StrategyAnalysis, type StoryQualityGateResults } from './taskMode';
 import { useSpecInterviewStore, type InterviewQuestion } from './specInterview';
 import { useSettingsStore } from './settings';
+import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
+import type { CrossModeConversationTurn } from '../types/crossModeContext';
 import type {
   WorkflowPhase,
   WorkflowConfig,
@@ -68,6 +71,9 @@ interface WorkflowOrchestratorState {
   /** Event unsubscribe function */
   _unlistenFn: UnlistenFn | null;
 
+  /** Conversation history extracted from Chat for Task context sharing */
+  _conversationHistory: CrossModeConversationTurn[];
+
   // Actions
   startWorkflow: (description: string) => Promise<void>;
   confirmConfig: (overrides?: Partial<WorkflowConfig>) => Promise<void>;
@@ -108,6 +114,7 @@ const DEFAULT_STATE = {
   pendingQuestion: null as InterviewQuestionCardData | null,
   error: null as string | null,
   _unlistenFn: null as UnlistenFn | null,
+  _conversationHistory: [] as CrossModeConversationTurn[],
 };
 
 // ============================================================================
@@ -231,7 +238,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
    */
   startWorkflow: async (description: string) => {
     set({ phase: 'analyzing', taskDescription: description, error: null });
-    injectInfo('Analyzing task complexity...', 'info');
+    injectInfo(i18n.t('workflow.orchestrator.analyzingTask', { ns: 'simpleMode' }), 'info');
+
+    // Extract complete Chat conversation history for Task context sharing
+    const conversationHistory = buildConversationHistory();
+    set({ _conversationHistory: conversationHistory });
 
     try {
       // 1. Enter task mode (creates session + runs strategy analysis)
@@ -304,7 +315,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (config.specInterviewEnabled) {
         // Start interview flow
         set({ phase: 'interviewing' });
-        injectInfo('Starting requirements interview...', 'info');
+        injectInfo(i18n.t('workflow.orchestrator.startingInterview', { ns: 'simpleMode' }), 'info');
 
         const workspacePath = useSettingsStore.getState().workspacePath;
         const session = await useSpecInterviewStore.getState().startInterview({
@@ -398,7 +409,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     if (Object.keys(updates).length > 0) {
       set((state) => ({ config: { ...state.config, ...updates } }));
-      injectInfo(`Config updated: ${Object.entries(updates).map(([k, v]) => `${k}=${v}`).join(', ')}`, 'success');
+      injectInfo(i18n.t('workflow.orchestrator.configUpdated', { ns: 'simpleMode', details: Object.entries(updates).map(([k, v]) => `${k}=${v}`).join(', ') }), 'success');
     }
   },
 
@@ -428,7 +439,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     // Check if interview is complete
     if (updatedSession.status === 'finalized') {
-      injectInfo('Interview complete! Compiling requirements...', 'success');
+      injectInfo(i18n.t('workflow.orchestrator.interviewComplete', { ns: 'simpleMode' }), 'success');
 
       // Compile spec
       const { config, taskDescription } = get();
@@ -484,7 +495,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     }
 
     if (updatedSession.status === 'finalized') {
-      injectInfo('Interview complete! Compiling requirements...', 'success');
+      injectInfo(i18n.t('workflow.orchestrator.interviewComplete', { ns: 'simpleMode' }), 'success');
       const { config, taskDescription } = get();
       const compiled = await useSpecInterviewStore.getState().compileSpec({
         description: taskDescription,
@@ -522,7 +533,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     }
 
     set({ phase: 'executing', editablePrd: prd });
-    injectInfo('PRD approved! Starting execution...', 'success');
+    injectInfo(i18n.t('workflow.orchestrator.prdApproved', { ns: 'simpleMode' }), 'success');
 
     try {
       // Subscribe to progress events
@@ -548,7 +559,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   addPrdFeedback: (_feedback: string) => {
     // In the future, this could use LLM to apply NL edits to the PRD.
     // For now, inject as info message.
-    injectInfo(`PRD feedback noted: "${_feedback}". Use the Edit button on the PRD card to make changes.`, 'info');
+    injectInfo(i18n.t('workflow.orchestrator.prdFeedbackNoted', { ns: 'simpleMode', feedback: _feedback }), 'info');
   },
 
   /** Cancel the current workflow */
@@ -566,7 +577,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     }
 
     set({ phase: 'cancelled' });
-    injectInfo('Workflow cancelled.', 'warning');
+    injectInfo(i18n.t('workflow.orchestrator.workflowCancelled', { ns: 'simpleMode' }), 'warning');
   },
 
   /** Reset the orchestrator to idle state */
@@ -594,12 +605,16 @@ type GetFn = () => WorkflowOrchestratorState;
 /**
  * Generate PRD phase (called after config confirmation or interview completion).
  */
-async function generatePrdPhase(set: SetFn, _get: GetFn) {
+async function generatePrdPhase(set: SetFn, get: GetFn) {
   set({ phase: 'generating_prd' });
-  injectInfo('Generating PRD from task description...', 'info');
+  injectInfo(i18n.t('workflow.orchestrator.generatingPrd', { ns: 'simpleMode' }), 'info');
 
   try {
-    await useTaskModeStore.getState().generatePrd();
+    // Pass conversation history and context budget to PRD generation
+    const history = get()._conversationHistory || [];
+    const settings = useSettingsStore.getState();
+    const maxContextTokens = settings.maxTotalTokens ?? 200_000;
+    await useTaskModeStore.getState().generatePrd(history, maxContextTokens);
 
     const taskModeState = useTaskModeStore.getState();
     if (taskModeState.error) {
@@ -614,6 +629,10 @@ async function generatePrdPhase(set: SetFn, _get: GetFn) {
       injectError('PRD Generation Failed', 'No PRD data returned');
       return;
     }
+
+    // Synthesize planning turn into conversation history (Task → Chat writeback)
+    const { taskDescription, strategyAnalysis } = get();
+    synthesizePlanningTurn(taskDescription, strategyAnalysis, prd);
 
     set({ phase: 'reviewing_prd', editablePrd: prd });
 
@@ -711,6 +730,9 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn) {
         injectCard('completion_report', reportData);
 
         set({ phase: success ? 'completed' : 'failed' });
+
+        // Synthesize execution result into conversation history (Task → Chat writeback)
+        synthesizeExecutionTurn(payload.storiesCompleted, totalStories, success);
 
         // Fetch full report for duration/agent data
         useTaskModeStore.getState().fetchReport().then(() => {

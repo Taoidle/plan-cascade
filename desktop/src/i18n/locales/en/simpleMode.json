@@ -225,5 +225,141 @@
     "refresh": "Refresh",
     "refreshProjectsTitle": "Refresh project list",
     "refreshAnalyticsTitle": "Refresh analytics data"
+  },
+
+  "workflow": {
+    "cancelWorkflow": "Cancel workflow",
+
+    "strategy": {
+      "title": "Strategy Analysis",
+      "confidence": "{{pct}}% confidence",
+      "risk": "Risk",
+      "stories": "Stories",
+      "parallel": "Parallel"
+    },
+
+    "config": {
+      "title": "Configuration",
+      "customized": "customized",
+      "flow": "Flow",
+      "tdd": "TDD",
+      "maxParallel": "Max Parallel",
+      "qualityGates": "Quality Gates",
+      "interview": "Interview",
+      "on": "on",
+      "off": "off",
+      "enabled": "enabled",
+      "skip": "skip",
+      "continue": "Continue",
+      "customize": "Customize",
+      "flowLevel": "Flow Level",
+      "quick": "Quick",
+      "standard": "Standard",
+      "full": "Full",
+      "tddMode": "TDD Mode",
+      "flexible": "Flexible",
+      "strict": "Strict",
+      "specInterview": "Spec Interview",
+      "applyAndContinue": "Apply & Continue",
+      "back": "Back",
+      "useNaturalLanguage": "Use natural language",
+      "nlDescription": "Describe your configuration preferences in natural language:",
+      "nlPlaceholder": "e.g., \"use 6 parallel agents and enable TDD\"",
+      "apply": "Apply",
+      "backToForm": "Back to form"
+    },
+
+    "progress": {
+      "title": "Workflow Progress",
+      "phaseAnalyze": "Analyze",
+      "phaseConfig": "Config",
+      "phaseInterview": "Interview",
+      "phasePrd": "PRD",
+      "phaseReview": "Review",
+      "phaseExecute": "Execute",
+      "phaseDone": "Done",
+      "batch": "Batch {{current}}/{{total}}",
+      "storiesDone": "{{completed}}/{{total}} stories done",
+      "running": "{{count}} running",
+      "completed": "{{count}} completed",
+      "failed": "{{count}} failed",
+      "qualityGates": "Quality Gates",
+      "passed": "{{count}} passed",
+      "total": "/ {{count}} total"
+    },
+
+    "interview": {
+      "questionTitle": "Interview Question",
+      "questionNumber": "{{current}}/{{total}}",
+      "required": "required",
+      "optional": "optional",
+      "inputText": "text input",
+      "inputTextarea": "text area",
+      "inputSingleSelect": "choose one",
+      "inputMultiSelect": "choose multiple",
+      "inputBoolean": "yes / no",
+      "skipped": "Skipped",
+      "yes": "Yes",
+      "no": "No",
+      "skipBtn": "Skip",
+      "submit": "Submit",
+      "submitCount": "Submit ({{count}})"
+    },
+
+    "prd": {
+      "title": "PRD",
+      "storiesAndBatches": "{{stories}} stories / {{batches}} batches",
+      "batch": "Batch {{index}}",
+      "storyCount": "{{count}} story",
+      "storyCountPlural": "{{count}} stories",
+      "acceptanceCriteria": "Acceptance Criteria:",
+      "deps": "deps: {{deps}}",
+      "approveAndExecute": "Approve & Execute",
+      "edit": "Edit",
+      "doneEditing": "Done Editing"
+    },
+
+    "execution": {
+      "batchStarted": "Batch Started",
+      "storyStarted": "Story Started",
+      "storyCompleted": "Story Completed",
+      "storyFailed": "Story Failed",
+      "batchComplete": "Batch Complete",
+      "batchLabel": "Batch {{current}}/{{total}}"
+    },
+
+    "gates": {
+      "qualityGate": "Quality Gate: {{title}}",
+      "passed": "passed",
+      "failed": "failed"
+    },
+
+    "report": {
+      "executionComplete": "Execution Complete",
+      "executionFailed": "Execution Failed",
+      "total": "Total",
+      "completed": "Completed",
+      "failed": "Failed",
+      "duration": "Duration",
+      "agentAssignments": "Agent Assignments"
+    },
+
+    "input": {
+      "taskPlaceholder": "Describe a task (implementation / analysis / refactor)...",
+      "interviewPlaceholder": "Type your answer...",
+      "prdFeedbackPlaceholder": "Add feedback or press Approve on the PRD card...",
+      "waitingPlaceholder": "Waiting for response..."
+    },
+
+    "orchestrator": {
+      "analyzingTask": "Analyzing task complexity...",
+      "startingInterview": "Starting requirements interview...",
+      "interviewComplete": "Interview complete! Compiling requirements...",
+      "generatingPrd": "Generating PRD from task description...",
+      "prdApproved": "PRD approved! Starting execution...",
+      "prdFeedbackNoted": "PRD feedback noted: \"{{feedback}}\". Use the Edit button on the PRD card to make changes.",
+      "workflowCancelled": "Workflow cancelled.",
+      "configUpdated": "Config updated: {{details}}"
+    }
   }
 }

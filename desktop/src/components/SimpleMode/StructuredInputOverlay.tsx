@@ -7,6 +7,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { InterviewQuestionCardData } from '../../types/workflowCard';
 
@@ -63,6 +64,7 @@ function BooleanInput({
   onSkip,
   loading,
 }: StructuredInputOverlayProps) {
+  const { t } = useTranslation('simpleMode');
   return (
     <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 truncate">
@@ -79,7 +81,7 @@ function BooleanInput({
             'disabled:opacity-50 disabled:cursor-not-allowed'
           )}
         >
-          Yes
+          {t('workflow.interview.yes')}
         </button>
         <button
           onClick={() => onSubmit('no')}
@@ -91,7 +93,7 @@ function BooleanInput({
             'disabled:opacity-50 disabled:cursor-not-allowed'
           )}
         >
-          No
+          {t('workflow.interview.no')}
         </button>
         {!question.required && (
           <button
@@ -99,7 +101,7 @@ function BooleanInput({
             disabled={loading}
             className="px-3 py-2 rounded-lg text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
           >
-            Skip
+            {t('workflow.interview.skipBtn')}
           </button>
         )}
       </div>
@@ -113,6 +115,7 @@ function SingleSelectInput({
   onSkip,
   loading,
 }: StructuredInputOverlayProps) {
+  const { t } = useTranslation('simpleMode');
   const [selected, setSelected] = useState<string | null>(null);
 
   const handleSubmit = useCallback(() => {
@@ -146,7 +149,7 @@ function SingleSelectInput({
           disabled={loading || !selected}
           className="px-4 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          Submit
+          {t('workflow.interview.submit')}
         </button>
         {!question.required && (
           <button
@@ -154,7 +157,7 @@ function SingleSelectInput({
             disabled={loading}
             className="px-3 py-1.5 rounded-lg text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
           >
-            Skip
+            {t('workflow.interview.skipBtn')}
           </button>
         )}
       </div>
@@ -168,6 +171,7 @@ function MultiSelectInput({
   onSkip,
   loading,
 }: StructuredInputOverlayProps) {
+  const { t } = useTranslation('simpleMode');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const toggleOption = useCallback((opt: string) => {
@@ -229,7 +233,7 @@ function MultiSelectInput({
           disabled={loading || selected.size === 0}
           className="px-4 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          Submit ({selected.size})
+          {t('workflow.interview.submitCount', { count: selected.size })}
         </button>
         {!question.required && (
           <button
@@ -237,7 +241,7 @@ function MultiSelectInput({
             disabled={loading}
             className="px-3 py-1.5 rounded-lg text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
           >
-            Skip
+            {t('workflow.interview.skipBtn')}
           </button>
         )}
       </div>

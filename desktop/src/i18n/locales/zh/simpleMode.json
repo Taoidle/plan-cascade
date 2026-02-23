@@ -225,5 +225,141 @@
     "refresh": "刷新",
     "refreshProjectsTitle": "刷新项目列表",
     "refreshAnalyticsTitle": "刷新分析数据"
+  },
+
+  "workflow": {
+    "cancelWorkflow": "取消工作流",
+
+    "strategy": {
+      "title": "策略分析",
+      "confidence": "{{pct}}% 置信度",
+      "risk": "风险",
+      "stories": "故事数",
+      "parallel": "并行度"
+    },
+
+    "config": {
+      "title": "配置",
+      "customized": "已自定义",
+      "flow": "流程",
+      "tdd": "TDD",
+      "maxParallel": "最大并行数",
+      "qualityGates": "质量门禁",
+      "interview": "访谈",
+      "on": "开启",
+      "off": "关闭",
+      "enabled": "已启用",
+      "skip": "跳过",
+      "continue": "继续",
+      "customize": "自定义",
+      "flowLevel": "流程级别",
+      "quick": "快速",
+      "standard": "标准",
+      "full": "完整",
+      "tddMode": "TDD 模式",
+      "flexible": "灵活",
+      "strict": "严格",
+      "specInterview": "需求访谈",
+      "applyAndContinue": "应用并继续",
+      "back": "返回",
+      "useNaturalLanguage": "使用自然语言",
+      "nlDescription": "用自然语言描述你的配置偏好：",
+      "nlPlaceholder": "例如：「使用 6 个并行代理并启用 TDD」",
+      "apply": "应用",
+      "backToForm": "返回表单"
+    },
+
+    "progress": {
+      "title": "工作流进度",
+      "phaseAnalyze": "分析",
+      "phaseConfig": "配置",
+      "phaseInterview": "访谈",
+      "phasePrd": "PRD",
+      "phaseReview": "审查",
+      "phaseExecute": "执行",
+      "phaseDone": "完成",
+      "batch": "批次 {{current}}/{{total}}",
+      "storiesDone": "{{completed}}/{{total}} 个故事已完成",
+      "running": "{{count}} 个运行中",
+      "completed": "{{count}} 个已完成",
+      "failed": "{{count}} 个失败",
+      "qualityGates": "质量门禁",
+      "passed": "{{count}} 个通过",
+      "total": "/ 共 {{count}} 个"
+    },
+
+    "interview": {
+      "questionTitle": "访谈问题",
+      "questionNumber": "{{current}}/{{total}}",
+      "required": "必填",
+      "optional": "选填",
+      "inputText": "文本输入",
+      "inputTextarea": "文本区域",
+      "inputSingleSelect": "单选",
+      "inputMultiSelect": "多选",
+      "inputBoolean": "是 / 否",
+      "skipped": "已跳过",
+      "yes": "是",
+      "no": "否",
+      "skipBtn": "跳过",
+      "submit": "提交",
+      "submitCount": "提交 ({{count}})"
+    },
+
+    "prd": {
+      "title": "PRD",
+      "storiesAndBatches": "{{stories}} 个故事 / {{batches}} 个批次",
+      "batch": "批次 {{index}}",
+      "storyCount": "{{count}} 个故事",
+      "storyCountPlural": "{{count}} 个故事",
+      "acceptanceCriteria": "验收标准：",
+      "deps": "依赖: {{deps}}",
+      "approveAndExecute": "批准并执行",
+      "edit": "编辑",
+      "doneEditing": "完成编辑"
+    },
+
+    "execution": {
+      "batchStarted": "批次开始",
+      "storyStarted": "故事开始",
+      "storyCompleted": "故事完成",
+      "storyFailed": "故事失败",
+      "batchComplete": "批次完成",
+      "batchLabel": "批次 {{current}}/{{total}}"
+    },
+
+    "gates": {
+      "qualityGate": "质量门禁: {{title}}",
+      "passed": "通过",
+      "failed": "失败"
+    },
+
+    "report": {
+      "executionComplete": "执行完成",
+      "executionFailed": "执行失败",
+      "total": "总计",
+      "completed": "已完成",
+      "failed": "失败",
+      "duration": "耗时",
+      "agentAssignments": "代理分配"
+    },
+
+    "input": {
+      "taskPlaceholder": "描述一个任务（实现 / 分析 / 重构）...",
+      "interviewPlaceholder": "输入你的回答...",
+      "prdFeedbackPlaceholder": "添加反馈或在 PRD 卡片上点击批准...",
+      "waitingPlaceholder": "等待响应中..."
+    },
+
+    "orchestrator": {
+      "analyzingTask": "正在分析任务复杂度...",
+      "startingInterview": "开始需求访谈...",
+      "interviewComplete": "访谈完成！正在编译需求...",
+      "generatingPrd": "正在从任务描述生成 PRD...",
+      "prdApproved": "PRD 已批准！开始执行...",
+      "prdFeedbackNoted": "PRD 反馈已记录：「{{feedback}}」。使用 PRD 卡片上的编辑按钮进行修改。",
+      "workflowCancelled": "工作流已取消。",
+      "configUpdated": "配置已更新：{{details}}"
+    }
   }
 }

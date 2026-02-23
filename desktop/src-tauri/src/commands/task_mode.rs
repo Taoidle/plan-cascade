@@ -196,6 +196,33 @@ pub struct ExecutionReport {
     pub agent_performance: Vec<AgentPerformanceEntry>,
 }
 
+/// A conversation turn from the Chat mode, passed via IPC for context sharing.
+///
+/// Used to provide the PRD generation LLM with the full conversation history
+/// from the Chat session, enabling cross-mode context awareness.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationTurnInput {
+    /// User message content
+    pub user: String,
+    /// Assistant response content
+    pub assistant: String,
+}
+
+/// Phase agent configuration from the frontend Settings panel.
+///
+/// Maps to `PhaseConfig` in the agent resolver. Values like `"llm:anthropic:claude-sonnet-4-20250514"`
+/// are stored as-is and passed through to the agent resolver for LLM-mode execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhaseConfigInput {
+    /// Default agent for this phase (e.g., "claude-code" or "llm:anthropic:claude-sonnet-4-20250514")
+    pub default_agent: String,
+    /// Fallback chain of agent names
+    #[serde(default)]
+    pub fallback_chain: Vec<String>,
+}
+
 /// Workflow configuration from the frontend orchestrator.
 ///
 /// Passed through from the Simple Mode workflow to control execution behavior.
@@ -335,13 +362,15 @@ pub async fn enter_task_mode(
 #[allow(non_snake_case)]
 pub async fn generate_task_prd(
     session_id: String,
-    provider: String,
-    model: String,
+    provider: Option<String>,
+    model: Option<String>,
     api_key: Option<String>,
     apiKey: Option<String>,
     base_url: Option<String>,
     baseUrl: Option<String>,
     compiled_spec: Option<serde_json::Value>,
+    conversation_history: Option<Vec<ConversationTurnInput>>,
+    max_context_tokens: Option<usize>,
     state: tauri::State<'_, TaskModeState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<CommandResponse<TaskPrd>, String> {
@@ -389,10 +418,42 @@ pub async fn generate_task_prd(
         }
     }
 
+    // Resolve provider/model: explicit param → database settings → hardcoded defaults
+    let resolved_provider = match provider {
+        Some(ref p) if !p.is_empty() => p.clone(),
+        _ => {
+            match app_state
+                .with_database(|db| db.get_setting("llm_provider"))
+                .await
+            {
+                Ok(Some(p)) if !p.is_empty() => p,
+                _ => "anthropic".to_string(),
+            }
+        }
+    };
+    let resolved_model = match model {
+        Some(ref m) if !m.is_empty() => m.clone(),
+        _ => {
+            match app_state
+                .with_database(|db| db.get_setting("llm_model"))
+                .await
+            {
+                Ok(Some(m)) if !m.is_empty() => m,
+                _ => match resolved_provider.as_str() {
+                    "anthropic" => "claude-sonnet-4-20250514".to_string(),
+                    "openai" => "gpt-4o".to_string(),
+                    "deepseek" => "deepseek-chat".to_string(),
+                    "ollama" => "qwen2.5-coder:14b".to_string(),
+                    _ => "claude-sonnet-4-20250514".to_string(),
+                },
+            }
+        }
+    };
+
     // Resolve provider configuration
     let llm_provider = match resolve_llm_provider(
-        &provider,
-        &model,
+        &resolved_provider,
+        &resolved_model,
         api_key.or(apiKey),
         base_url.or(baseUrl),
         &app_state,
@@ -410,8 +471,17 @@ pub async fn generate_task_prd(
         }
     };
 
-    // Call LLM for PRD generation
-    let prd = match prd_generator::generate_prd_with_llm(llm_provider, &description).await {
+    // Call LLM for PRD generation with conversation history context
+    let history = conversation_history.unwrap_or_default();
+    let context_budget = max_context_tokens.unwrap_or(200_000);
+    let prd = match prd_generator::generate_prd_with_llm(
+        llm_provider,
+        &description,
+        &history,
+        context_budget,
+    )
+    .await
+    {
         Ok(prd) => prd,
         Err(e) => {
             // Reset status back to Initialized on failure
@@ -534,6 +604,7 @@ async fn resolve_llm_provider(
 async fn resolve_provider_config(
     provider_name: &str,
     model: &str,
+    explicit_base_url: Option<String>,
     app_state: &tauri::State<'_, AppState>,
 ) -> Result<crate::services::llm::types::ProviderConfig, String> {
     use crate::commands::standalone::normalize_provider_name;
@@ -565,8 +636,11 @@ async fn resolve_provider_config(
         ));
     }
 
-    let mut resolved_base_url: Option<String> = None;
-    {
+    // Resolve base URL: explicit param > DB settings > default
+    let mut resolved_base_url = explicit_base_url
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty());
+    if resolved_base_url.is_none() {
         let key = format!("provider_{}_base_url", canonical);
         if let Ok(Some(db_url)) = app_state
             .with_database(|db| db.get_setting(&key))
@@ -614,8 +688,10 @@ pub async fn approve_task_prd(
     app_state: tauri::State<'_, AppState>,
     provider: Option<String>,
     model: Option<String>,
+    base_url: Option<String>,
     execution_mode: Option<StoryExecutionMode>,
     workflow_config: Option<TaskWorkflowConfig>,
+    phase_configs: Option<HashMap<String, PhaseConfigInput>>,
 ) -> Result<CommandResponse<bool>, String> {
     let mut session_guard = state.session.write().await;
     let session = match session_guard.as_mut() {
@@ -688,7 +764,7 @@ pub async fn approve_task_prd(
             // Resolve LLM provider config if provider/model specified
             let provider_config: Option<crate::services::llm::types::ProviderConfig> =
                 if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
-                    match resolve_provider_config(prov, mdl, &app_state).await {
+                    match resolve_provider_config(prov, mdl, base_url.clone(), &app_state).await {
                         Ok(cfg) => Some(cfg),
                         Err(e) => {
                             eprintln!("[approve_task_prd] LLM provider config resolution failed: {}", e);
@@ -729,7 +805,12 @@ pub async fn approve_task_prd(
                     exec_config,
                     cancellation_token,
                 );
-                let resolver = AgentResolver::with_defaults();
+                let resolver = match &phase_configs {
+                    Some(configs) if !configs.is_empty() => {
+                        AgentResolver::new(build_agents_config_from_frontend(configs))
+                    }
+                    _ => AgentResolver::with_defaults(),
+                };
 
                 // Create emit callback that sends events via Tauri AppHandle
                 let app_for_emit = app_handle.clone();
@@ -1556,6 +1637,71 @@ fn build_story_prompt(ctx: &StoryExecutionContext) -> String {
     }
 
     prompt
+}
+
+// ============================================================================
+// Phase Config Conversion
+// ============================================================================
+
+/// Build an `AgentsConfig` from frontend `PhaseConfigInput` settings.
+///
+/// Converts the flat frontend phase configs into the `AgentsConfig` structure
+/// expected by `AgentResolver`. CLI agent names (e.g., "claude-code") are
+/// registered as agents. LLM provider refs (e.g., "llm:anthropic:model") are
+/// also registered so the resolver considers them "available".
+fn build_agents_config_from_frontend(
+    configs: &HashMap<String, PhaseConfigInput>,
+) -> crate::services::task_mode::agent_resolver::AgentsConfig {
+    use crate::services::task_mode::agent_resolver::{
+        AgentDefinition, AgentOverrides, AgentsConfig, PhaseConfig,
+    };
+
+    let mut agents: HashMap<String, AgentDefinition> = HashMap::new();
+    let mut phase_defaults: HashMap<String, PhaseConfig> = HashMap::new();
+
+    // Helper: register an agent name (CLI or LLM) so it's marked available
+    let mut register_agent = |name: &str| {
+        if !agents.contains_key(name) {
+            agents.insert(
+                name.to_string(),
+                AgentDefinition {
+                    name: name.to_string(),
+                    description: String::new(),
+                    available: true,
+                    suitable_phases: vec![],
+                },
+            );
+        }
+    };
+
+    for (phase_id, input) in configs {
+        register_agent(&input.default_agent);
+        for fb in &input.fallback_chain {
+            register_agent(fb);
+        }
+
+        phase_defaults.insert(
+            phase_id.clone(),
+            PhaseConfig {
+                default_agent: Some(input.default_agent.clone()),
+                fallback_chain: input.fallback_chain.clone(),
+                story_type_overrides: HashMap::new(),
+            },
+        );
+    }
+
+    // Default agent is the implementation phase's default, or first available
+    let default_agent = configs
+        .get("implementation")
+        .map(|c| c.default_agent.clone())
+        .unwrap_or_else(|| "claude-code".to_string());
+
+    AgentsConfig {
+        default_agent,
+        agents,
+        phase_defaults,
+        overrides: AgentOverrides::default(),
+    }
 }
 
 // ============================================================================

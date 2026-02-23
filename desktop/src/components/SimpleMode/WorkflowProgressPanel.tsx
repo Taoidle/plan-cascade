@@ -5,19 +5,20 @@
  * Shows phase timeline, batch progress, story status grid, and quality gate summary.
  */
 
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { useTaskModeStore, type GateStatus } from '../../store/taskMode';
 import type { WorkflowPhase } from '../../types/workflowCard';
 
-const PHASE_STEPS: { phase: WorkflowPhase; label: string }[] = [
-  { phase: 'analyzing', label: 'Analyze' },
-  { phase: 'configuring', label: 'Config' },
-  { phase: 'interviewing', label: 'Interview' },
-  { phase: 'generating_prd', label: 'PRD' },
-  { phase: 'reviewing_prd', label: 'Review' },
-  { phase: 'executing', label: 'Execute' },
-  { phase: 'completed', label: 'Done' },
+const PHASE_STEPS: { phase: WorkflowPhase; labelKey: string }[] = [
+  { phase: 'analyzing', labelKey: 'workflow.progress.phaseAnalyze' },
+  { phase: 'configuring', labelKey: 'workflow.progress.phaseConfig' },
+  { phase: 'interviewing', labelKey: 'workflow.progress.phaseInterview' },
+  { phase: 'generating_prd', labelKey: 'workflow.progress.phasePrd' },
+  { phase: 'reviewing_prd', labelKey: 'workflow.progress.phaseReview' },
+  { phase: 'executing', labelKey: 'workflow.progress.phaseExecute' },
+  { phase: 'completed', labelKey: 'workflow.progress.phaseDone' },
 ];
 
 const PHASE_ORDER: WorkflowPhase[] = PHASE_STEPS.map((s) => s.phase);
@@ -64,13 +65,14 @@ function WorkflowPhaseTimeline({
   steps,
 }: {
   currentPhase: WorkflowPhase;
-  steps: { phase: WorkflowPhase; label: string }[];
+  steps: { phase: WorkflowPhase; labelKey: string }[];
 }) {
+  const { t } = useTranslation('simpleMode');
   const currentIndex = PHASE_ORDER.indexOf(currentPhase);
 
   return (
     <div>
-      <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">Workflow Progress</p>
+      <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">{t('workflow.progress.title')}</p>
       <div className="flex items-center gap-0.5">
         {steps.map((step, i) => {
           const stepIndex = PHASE_ORDER.indexOf(step.phase);
@@ -105,7 +107,7 @@ function WorkflowPhaseTimeline({
                         : 'text-gray-400 dark:text-gray-500'
                   )}
                 >
-                  {step.label}
+                  {t(step.labelKey)}
                 </span>
               </div>
               {i < steps.length - 1 && <div className="w-0.5" />}
@@ -128,6 +130,7 @@ function BatchProgressSection({
   storyStatuses: Record<string, string>;
   prd: ReturnType<typeof useTaskModeStore.getState>['prd'];
 }) {
+  const { t } = useTranslation('simpleMode');
   const stories = prd?.stories ?? [];
   const statusEntries = Object.entries(storyStatuses);
   const completed = statusEntries.filter(([, s]) => s === 'completed').length;
@@ -139,10 +142,10 @@ function BatchProgressSection({
     <div>
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
-          Batch {Math.min(currentBatch + 1, totalBatches)}/{totalBatches}
+          {t('workflow.progress.batch', { current: Math.min(currentBatch + 1, totalBatches), total: totalBatches })}
         </p>
         <span className="text-2xs text-gray-500 dark:text-gray-400">
-          {completed}/{total} stories done
+          {t('workflow.progress.storiesDone', { completed, total })}
         </span>
       </div>
 
@@ -166,14 +169,14 @@ function BatchProgressSection({
         {running > 0 && (
           <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-            {running} running
+            {t('workflow.progress.running', { count: running })}
           </span>
         )}
         {completed > 0 && (
-          <span className="text-green-600 dark:text-green-400">{completed} completed</span>
+          <span className="text-green-600 dark:text-green-400">{t('workflow.progress.completed', { count: completed })}</span>
         )}
         {failed > 0 && (
-          <span className="text-red-600 dark:text-red-400">{failed} failed</span>
+          <span className="text-red-600 dark:text-red-400">{t('workflow.progress.failed', { count: failed })}</span>
         )}
       </div>
     </div>
@@ -218,6 +221,7 @@ function QualityGateSummary({
 }: {
   results: Record<string, { overallStatus: GateStatus; gates: unknown[] }>;
 }) {
+  const { t } = useTranslation('simpleMode');
   const entries = Object.values(results);
   const passed = entries.filter((r) => r.overallStatus === 'passed').length;
   const failed = entries.filter((r) => r.overallStatus === 'failed').length;
@@ -227,11 +231,11 @@ function QualityGateSummary({
 
   return (
     <div>
-      <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Quality Gates</p>
+      <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('workflow.progress.qualityGates')}</p>
       <div className="mt-1 flex items-center gap-3 text-xs">
-        <span className="text-green-600 dark:text-green-400">{passed} passed</span>
-        {failed > 0 && <span className="text-red-600 dark:text-red-400">{failed} failed</span>}
-        <span className="text-gray-500 dark:text-gray-400">/ {total} total</span>
+        <span className="text-green-600 dark:text-green-400">{t('workflow.progress.passed', { count: passed })}</span>
+        {failed > 0 && <span className="text-red-600 dark:text-red-400">{t('workflow.progress.failed', { count: failed })}</span>}
+        <span className="text-gray-500 dark:text-gray-400">{t('workflow.progress.total', { count: total })}</span>
       </div>
 
       {/* Pass rate bar */}

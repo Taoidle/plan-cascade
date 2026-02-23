@@ -9,10 +9,12 @@
 
 import { useState, useCallback } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import type { ConfigCardData } from '../../../types/workflowCard';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
 
 export function ConfigCard({ data, interactive }: { data: ConfigCardData; interactive: boolean }) {
+  const { t } = useTranslation('simpleMode');
   const [layer, setLayer] = useState<1 | 2 | 3>(1);
   const [localConfig, setLocalConfig] = useState(data);
   const [nlOverride, setNlOverride] = useState('');
@@ -43,11 +45,11 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
       {/* Header */}
       <div className="px-3 py-2 bg-sky-100/50 dark:bg-sky-900/30 border-b border-sky-200 dark:border-sky-800 flex items-center justify-between">
         <span className="text-xs font-semibold text-sky-700 dark:text-sky-300 uppercase tracking-wide">
-          Configuration
+          {t('workflow.config.title')}
         </span>
         {data.isOverridden && (
           <span className="text-2xs px-1.5 py-0.5 rounded bg-sky-200 dark:bg-sky-800 text-sky-600 dark:text-sky-400">
-            customized
+            {t('workflow.config.customized')}
           </span>
         )}
       </div>
@@ -57,11 +59,11 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
         {layer === 1 && (
           <>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-              <ConfigRow label="Flow" value={data.flowLevel} />
-              <ConfigRow label="TDD" value={data.tddMode} />
-              <ConfigRow label="Max Parallel" value={String(data.maxParallel)} />
-              <ConfigRow label="Quality Gates" value={data.qualityGatesEnabled ? 'on' : 'off'} />
-              <ConfigRow label="Interview" value={data.specInterviewEnabled ? 'enabled' : 'skip'} />
+              <ConfigRow label={t('workflow.config.flow')} value={data.flowLevel} />
+              <ConfigRow label={t('workflow.config.tdd')} value={data.tddMode} />
+              <ConfigRow label={t('workflow.config.maxParallel')} value={String(data.maxParallel)} />
+              <ConfigRow label={t('workflow.config.qualityGates')} value={data.qualityGatesEnabled ? t('workflow.config.on') : t('workflow.config.off')} />
+              <ConfigRow label={t('workflow.config.interview')} value={data.specInterviewEnabled ? t('workflow.config.enabled') : t('workflow.config.skip')} />
             </div>
 
             {isActive && (
@@ -70,13 +72,13 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
                   onClick={handleConfirm}
                   className="px-3 py-1 text-xs font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 transition-colors"
                 >
-                  Continue
+                  {t('workflow.config.continue')}
                 </button>
                 <button
                   onClick={() => setLayer(2)}
                   className="text-xs text-sky-600 dark:text-sky-400 hover:underline"
                 >
-                  Customize
+                  {t('workflow.config.customize')}
                 </button>
               </div>
             )}
@@ -88,27 +90,27 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
           <>
             <div className="space-y-2">
               <SelectField
-                label="Flow Level"
+                label={t('workflow.config.flowLevel')}
                 value={localConfig.flowLevel}
                 options={[
-                  { value: 'quick', label: 'Quick' },
-                  { value: 'standard', label: 'Standard' },
-                  { value: 'full', label: 'Full' },
+                  { value: 'quick', label: t('workflow.config.quick') },
+                  { value: 'standard', label: t('workflow.config.standard') },
+                  { value: 'full', label: t('workflow.config.full') },
                 ]}
                 onChange={(v) => setLocalConfig({ ...localConfig, flowLevel: v as ConfigCardData['flowLevel'] })}
               />
               <SelectField
-                label="TDD Mode"
+                label={t('workflow.config.tddMode')}
                 value={localConfig.tddMode}
                 options={[
-                  { value: 'off', label: 'Off' },
-                  { value: 'flexible', label: 'Flexible' },
-                  { value: 'strict', label: 'Strict' },
+                  { value: 'off', label: t('workflow.config.off') },
+                  { value: 'flexible', label: t('workflow.config.flexible') },
+                  { value: 'strict', label: t('workflow.config.strict') },
                 ]}
                 onChange={(v) => setLocalConfig({ ...localConfig, tddMode: v as ConfigCardData['tddMode'] })}
               />
               <div className="flex items-center gap-2">
-                <label className="text-xs text-sky-700 dark:text-sky-300 w-24 shrink-0">Max Parallel</label>
+                <label className="text-xs text-sky-700 dark:text-sky-300 w-24 shrink-0">{t('workflow.config.maxParallel')}</label>
                 <input
                   type="range"
                   min={1}
@@ -120,12 +122,12 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
                 <span className="text-xs text-sky-600 dark:text-sky-400 w-6 text-right">{localConfig.maxParallel}</span>
               </div>
               <ToggleField
-                label="Quality Gates"
+                label={t('workflow.config.qualityGates')}
                 value={localConfig.qualityGatesEnabled}
                 onChange={(v) => setLocalConfig({ ...localConfig, qualityGatesEnabled: v })}
               />
               <ToggleField
-                label="Spec Interview"
+                label={t('workflow.config.specInterview')}
                 value={localConfig.specInterviewEnabled}
                 onChange={(v) => setLocalConfig({ ...localConfig, specInterviewEnabled: v })}
               />
@@ -136,19 +138,19 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
                 onClick={handleConfirm}
                 className="px-3 py-1 text-xs font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 transition-colors"
               >
-                Apply & Continue
+                {t('workflow.config.applyAndContinue')}
               </button>
               <button
                 onClick={() => setLayer(1)}
                 className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
               >
-                Back
+                {t('workflow.config.back')}
               </button>
               <button
                 onClick={() => setLayer(3)}
                 className="text-xs text-sky-600 dark:text-sky-400 hover:underline ml-auto"
               >
-                Use natural language
+                {t('workflow.config.useNaturalLanguage')}
               </button>
             </div>
           </>
@@ -158,7 +160,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
         {layer === 3 && (
           <>
             <p className="text-xs text-sky-600 dark:text-sky-400">
-              Describe your configuration preferences in natural language:
+              {t('workflow.config.nlDescription')}
             </p>
             <div className="flex gap-2">
               <input
@@ -166,21 +168,21 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
                 value={nlOverride}
                 onChange={(e) => setNlOverride(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleNlSubmit()}
-                placeholder='e.g., "use 6 parallel agents and enable TDD"'
+                placeholder={t('workflow.config.nlPlaceholder')}
                 className="flex-1 px-2 py-1 text-xs rounded border border-sky-300 dark:border-sky-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
               />
               <button
                 onClick={handleNlSubmit}
                 className="px-3 py-1 text-xs font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 transition-colors"
               >
-                Apply
+                {t('workflow.config.apply')}
               </button>
             </div>
             <button
               onClick={() => setLayer(2)}
               className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
-              Back to form
+              {t('workflow.config.backToForm')}
             </button>
           </>
         )}
@@ -234,6 +236,7 @@ function ToggleField({
   value: boolean;
   onChange: (v: boolean) => void;
 }) {
+  const { t } = useTranslation('simpleMode');
   return (
     <div className="flex items-center gap-2">
       <label className="text-xs text-sky-700 dark:text-sky-300 w-24 shrink-0">{label}</label>
@@ -251,7 +254,7 @@ function ToggleField({
           )}
         />
       </button>
-      <span className="text-xs text-sky-600/80 dark:text-sky-400/80">{value ? 'on' : 'off'}</span>
+      <span className="text-xs text-sky-600/80 dark:text-sky-400/80">{value ? t('workflow.config.on') : t('workflow.config.off')}</span>
     </div>
   );
 }

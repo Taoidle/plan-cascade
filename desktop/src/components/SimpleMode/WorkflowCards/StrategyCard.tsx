@@ -5,9 +5,11 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import type { StrategyCardData } from '../../../types/workflowCard';
 
 export function StrategyCard({ data }: { data: StrategyCardData }) {
+  const { t } = useTranslation('simpleMode');
   const confidencePct = Math.round(data.confidence * 100);
 
   return (
@@ -16,7 +18,7 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
       <div className="px-3 py-2 bg-indigo-100/50 dark:bg-indigo-900/30 border-b border-indigo-200 dark:border-indigo-800">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wide">
-            Strategy Analysis
+            {t('workflow.strategy.title')}
           </span>
           <span className={clsx(
             'text-xs px-2 py-0.5 rounded-full font-medium',
@@ -26,7 +28,7 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
                 ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
                 : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
           )}>
-            {confidencePct}% confidence
+            {t('workflow.strategy.confidence', { pct: confidencePct })}
           </span>
         </div>
       </div>
@@ -44,9 +46,9 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
 
         {/* Dimension bars */}
         <div className="grid grid-cols-3 gap-2">
-          <DimensionPill label="Risk" value={data.riskLevel} color={riskColor(data.riskLevel)} />
-          <DimensionPill label="Stories" value={String(data.estimatedStories)} color="text-indigo-600 dark:text-indigo-400" />
-          <DimensionPill label="Parallel" value={data.parallelizationBenefit} color={benefitColor(data.parallelizationBenefit)} />
+          <DimensionPill label={t('workflow.strategy.risk')} value={data.riskLevel} color={riskColor(data.riskLevel)} />
+          <DimensionPill label={t('workflow.strategy.stories')} value={String(data.estimatedStories)} color="text-indigo-600 dark:text-indigo-400" />
+          <DimensionPill label={t('workflow.strategy.parallel')} value={data.parallelizationBenefit} color={benefitColor(data.parallelizationBenefit)} />
         </div>
 
         {/* Functional areas */}

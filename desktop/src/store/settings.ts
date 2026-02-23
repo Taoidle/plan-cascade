@@ -32,6 +32,11 @@ interface QualityGates {
   maxRetries: number;
 }
 
+export interface PhaseAgentConfig {
+  defaultAgent: string;
+  fallbackChain: string[];
+}
+
 interface SettingsState {
   // Backend settings
   backend: Backend;
@@ -93,6 +98,9 @@ interface SettingsState {
   // Search provider settings
   searchProvider: 'tavily' | 'brave' | 'duckduckgo';
 
+  // Phase agent configs
+  phaseConfigs: Record<string, PhaseAgentConfig>;
+
   // Actions
   setBackend: (backend: Backend) => void;
   setProvider: (provider: string) => void;
@@ -115,6 +123,10 @@ interface SettingsState {
   setQwenEndpoint: (endpoint: QwenEndpoint) => void;
   setMaxConcurrentSubagents: (value: number) => void;
   setSearchProvider: (provider: 'tavily' | 'brave' | 'duckduckgo') => void;
+
+  // Phase agent actions
+  setPhaseConfigs: (configs: Record<string, PhaseAgentConfig>) => void;
+  updatePhaseConfig: (phaseId: string, config: Partial<PhaseAgentConfig>) => void;
 
   // Chat UI actions
   setShowLineNumbers: (show: boolean) => void;
@@ -204,6 +216,15 @@ const defaultSettings = {
 
   // Search provider
   searchProvider: 'duckduckgo' as const,
+
+  // Phase agent configs
+  phaseConfigs: {
+    planning: { defaultAgent: 'claude-code', fallbackChain: ['codex'] },
+    implementation: { defaultAgent: 'claude-code', fallbackChain: ['codex', 'aider'] },
+    retry: { defaultAgent: 'claude-code', fallbackChain: ['aider'] },
+    refactor: { defaultAgent: 'aider', fallbackChain: ['claude-code'] },
+    review: { defaultAgent: 'claude-code', fallbackChain: ['codex'] },
+  } as Record<string, PhaseAgentConfig>,
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -266,6 +287,15 @@ export const useSettingsStore = create<SettingsState>()(
       setMinimaxEndpoint: (minimaxEndpoint) => set({ minimaxEndpoint }),
       setQwenEndpoint: (qwenEndpoint) => set({ qwenEndpoint }),
       setSearchProvider: (searchProvider) => set({ searchProvider }),
+
+      setPhaseConfigs: (phaseConfigs) => set({ phaseConfigs }),
+      updatePhaseConfig: (phaseId, config) =>
+        set((state) => ({
+          phaseConfigs: {
+            ...state.phaseConfigs,
+            [phaseId]: { ...state.phaseConfigs[phaseId], ...config },
+          },
+        })),
 
       setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
       setTourCompleted: (tourCompleted) => set({ tourCompleted }),

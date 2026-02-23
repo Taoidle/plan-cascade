@@ -9,6 +9,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { CrossModeConversationTurn } from '../types/crossModeContext';
 
 // ============================================================================
 // Types
@@ -226,8 +227,8 @@ export interface TaskModeState {
   /** Enter task mode with a description */
   enterTaskMode: (description: string) => Promise<void>;
 
-  /** Generate PRD from current session */
-  generatePrd: () => Promise<void>;
+  /** Generate PRD from current session, optionally with conversation history for context */
+  generatePrd: (conversationHistory?: CrossModeConversationTurn[], maxContextTokens?: number) => Promise<void>;
 
   /** Approve PRD (optionally with edits) and start execution */
   approvePrd: (prd: TaskPrd) => Promise<void>;
@@ -330,7 +331,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
   },
 
-  generatePrd: async () => {
+  generatePrd: async (conversationHistory?: CrossModeConversationTurn[], maxContextTokens?: number) => {
     const { sessionId } = get();
     if (!sessionId) {
       set({ error: 'No active session' });
@@ -338,9 +339,23 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
     set({ isLoading: true, error: null, sessionStatus: 'generating_prd' });
     try {
+      // Read provider/model + endpoint settings from settings store
+      const settingsStore = (await import('./settings')).useSettingsStore.getState();
+      const { provider, model, glmEndpoint, qwenEndpoint, minimaxEndpoint } = settingsStore;
+      const { resolveProviderBaseUrl } = await import('../lib/providers');
+      const baseUrl = provider
+        ? resolveProviderBaseUrl(provider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
+        : undefined;
       const result = await invoke<CommandResponse<TaskPrd>>(
         'generate_task_prd',
-        { sessionId }
+        {
+          sessionId,
+          provider: provider || null,
+          model: model || null,
+          baseUrl: baseUrl || null,
+          conversationHistory: conversationHistory || [],
+          maxContextTokens: maxContextTokens ?? null,
+        }
       );
       if (result.success && result.data) {
         set({
@@ -364,9 +379,15 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
     set({ isLoading: true, error: null });
     try {
+      const settingsStore = (await import('./settings')).useSettingsStore.getState();
+      const { provider, model, phaseConfigs, glmEndpoint, qwenEndpoint, minimaxEndpoint } = settingsStore;
+      const { resolveProviderBaseUrl } = await import('../lib/providers');
+      const baseUrl = provider
+        ? resolveProviderBaseUrl(provider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
+        : undefined;
       const result = await invoke<CommandResponse<boolean>>(
         'approve_task_prd',
-        { sessionId, prd }
+        { sessionId, prd, provider: provider || null, model: model || null, baseUrl: baseUrl || null, phaseConfigs }
       );
       if (result.success) {
         set({

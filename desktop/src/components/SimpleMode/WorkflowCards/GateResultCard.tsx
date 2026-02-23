@@ -4,11 +4,13 @@
  * Displays per-story quality gate pass/fail results with individual gate details.
  */
 
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { GateResultCardData } from '../../../types/workflowCard';
 import type { GateStatus } from '../../../store/taskMode';
 
 export function GateResultCard({ data }: { data: GateResultCardData }) {
+  const { t } = useTranslation('simpleMode');
   const isPassed = data.overallStatus === 'passed';
 
   return (
@@ -29,7 +31,7 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
               isPassed ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'
             )}
           >
-            Quality Gate: {data.storyTitle}
+            {t('workflow.gates.qualityGate', { title: data.storyTitle })}
           </span>
         </div>
         <span

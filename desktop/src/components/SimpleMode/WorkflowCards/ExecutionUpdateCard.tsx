@@ -4,10 +4,12 @@
  * Inline execution progress updates showing batch/story status.
  */
 
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { ExecutionUpdateCardData } from '../../../types/workflowCard';
 
 export function ExecutionUpdateCard({ data }: { data: ExecutionUpdateCardData }) {
+  const { t } = useTranslation('simpleMode');
   const progressPct = Math.min(100, Math.max(0, data.progressPct));
 
   return (
@@ -16,7 +18,7 @@ export function ExecutionUpdateCard({ data }: { data: ExecutionUpdateCardData })
         <div className="flex items-center gap-2">
           <EventIcon eventType={data.eventType} />
           <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
-            {formatEventType(data.eventType)}
+            {formatEventType(data.eventType, t)}
           </span>
           {data.storyTitle && (
             <span className="text-xs text-blue-600/80 dark:text-blue-400/80 truncate max-w-48">
@@ -30,7 +32,7 @@ export function ExecutionUpdateCard({ data }: { data: ExecutionUpdateCardData })
           )}
         </div>
         <span className="text-2xs text-blue-500 dark:text-blue-400">
-          Batch {data.currentBatch + 1}/{data.totalBatches}
+          {t('workflow.execution.batchLabel', { current: data.currentBatch + 1, total: data.totalBatches })}
         </span>
       </div>
 
@@ -90,13 +92,13 @@ function EventIcon({ eventType }: { eventType: ExecutionUpdateCardData['eventTyp
   }
 }
 
-function formatEventType(type: ExecutionUpdateCardData['eventType']): string {
+function formatEventType(type: ExecutionUpdateCardData['eventType'], t: (key: string) => string): string {
   switch (type) {
-    case 'batch_start': return 'Batch Started';
-    case 'story_start': return 'Story Started';
-    case 'story_complete': return 'Story Completed';
-    case 'story_failed': return 'Story Failed';
-    case 'batch_complete': return 'Batch Complete';
+    case 'batch_start': return t('workflow.execution.batchStarted');
+    case 'story_start': return t('workflow.execution.storyStarted');
+    case 'story_complete': return t('workflow.execution.storyCompleted');
+    case 'story_failed': return t('workflow.execution.storyFailed');
+    case 'batch_complete': return t('workflow.execution.batchComplete');
     default: return type;
   }
 }

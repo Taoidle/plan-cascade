@@ -330,6 +330,8 @@
     "title": "Phase Agent Assignment",
     "description": "Assign default agents and fallback chains to each execution phase.",
 
+    "cliAgents": "CLI Agents",
+
     "columns": {
       "phase": "Phase",
       "defaultAgent": "Default Agent",

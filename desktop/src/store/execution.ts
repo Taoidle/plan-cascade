@@ -427,6 +427,9 @@ interface ExecutionState {
   /** Currently active foreground session ID (for tracking which bg session was swapped in) */
   activeSessionId: string | null;
 
+  /** Pending task context to inject into the next sendFollowUp (Claude Code backend) */
+  _pendingTaskContext: string | null;
+
   // Actions
   /** Add a file attachment */
   addAttachment: (file: FileAttachmentData) => void;
@@ -538,6 +541,12 @@ interface ExecutionState {
 
   /** Edit a user message and resend it */
   editAndResend: (userLineId: number, newContent: string) => Promise<void>;
+
+  /** Append a synthetic StandaloneTurn (used by contextBridge for Task→Chat writeback) */
+  appendStandaloneTurn: (turn: StandaloneTurn) => void;
+
+  /** Set pending task context to inject into next sendFollowUp (Claude Code backend) */
+  setPendingTaskContext: (context: string) => void;
 }
 
 const HISTORY_KEY = 'plan-cascade-execution-history';
@@ -872,6 +881,7 @@ const initialState = {
   attachments: [] as FileAttachmentData[],
   backgroundSessions: {} as Record<string, SessionSnapshot>,
   activeSessionId: null as string | null,
+  _pendingTaskContext: null as string | null,
 };
 
 export const useExecutionStore = create<ExecutionState>()((set, get) => ({
@@ -1337,11 +1347,19 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       result: null,
     });
 
+    // Inject pending task context if available (from Task→Chat writeback)
+    const pendingTaskContext = get()._pendingTaskContext;
+    let basePrompt = prompt;
+    if (pendingTaskContext) {
+      basePrompt = pendingTaskContext + '\n\n' + prompt;
+      set({ _pendingTaskContext: null });
+    }
+
     // Enrich prompt with file attachments if any
     const followUpAttachments = get().attachments;
     const enrichedPrompt = followUpAttachments.length > 0
-      ? buildPromptWithAttachments(prompt, followUpAttachments)
-      : prompt;
+      ? buildPromptWithAttachments(basePrompt, followUpAttachments)
+      : basePrompt;
     get().clearAttachments();
 
     get().addLog(`Follow-up: ${prompt}`);
@@ -2532,6 +2550,20 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     }
 
     get().addLog(`Edited and resent userLineId=${userLineId}`);
+  },
+
+  appendStandaloneTurn: (turn: StandaloneTurn) => {
+    const limit = getStandaloneContextTurnsLimit();
+    set({
+      standaloneTurns: trimStandaloneTurns(
+        [...get().standaloneTurns, turn],
+        limit
+      ),
+    });
+  },
+
+  setPendingTaskContext: (context: string) => {
+    set({ _pendingTaskContext: context });
   },
 }));
 

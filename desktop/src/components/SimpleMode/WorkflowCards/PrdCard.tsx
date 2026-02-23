@@ -6,11 +6,13 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { PrdCardData, PrdStoryData } from '../../../types/workflowCard';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
 
 export function PrdCard({ data, interactive }: { data: PrdCardData; interactive: boolean }) {
+  const { t } = useTranslation('simpleMode');
   const [expandedStories, setExpandedStories] = useState<Set<string>>(new Set());
   const [isEditing, setIsEditing] = useState(false);
   const phase = useWorkflowOrchestratorStore((s) => s.phase);
@@ -46,10 +48,10 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
       <div className="px-3 py-2 bg-emerald-100/50 dark:bg-emerald-900/30 border-b border-emerald-200 dark:border-emerald-800">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
-            PRD
+            {t('workflow.prd.title')}
           </span>
           <span className="text-2xs text-emerald-600 dark:text-emerald-400">
-            {data.stories.length} stories / {data.batches.length} batches
+            {t('workflow.prd.storiesAndBatches', { stories: data.stories.length, batches: data.batches.length })}
           </span>
         </div>
         <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200 mt-1">{data.title}</p>
@@ -65,9 +67,9 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
             {/* Batch header */}
             <div className="px-3 py-1 bg-emerald-100/30 dark:bg-emerald-900/20">
               <span className="text-2xs font-medium text-emerald-600 dark:text-emerald-400">
-                Batch {batch.batchIndex + 1}
+                {t('workflow.prd.batch', { index: batch.batchIndex + 1 })}
                 <span className="ml-1 text-emerald-500/60 dark:text-emerald-400/60">
-                  ({batch.storyIds.length} {batch.storyIds.length === 1 ? 'story' : 'stories'})
+                  ({batch.storyIds.length === 1 ? t('workflow.prd.storyCount', { count: batch.storyIds.length }) : t('workflow.prd.storyCountPlural', { count: batch.storyIds.length })})
                 </span>
               </span>
             </div>
@@ -110,7 +112,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
             onClick={handleApprove}
             className="px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
           >
-            Approve & Execute
+            {t('workflow.prd.approveAndExecute')}
           </button>
           <button
             onClick={() => setIsEditing(!isEditing)}
@@ -121,7 +123,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
                 : 'border-emerald-300 dark:border-emerald-700 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100/50 dark:hover:bg-emerald-900/30'
             )}
           >
-            {isEditing ? 'Done Editing' : 'Edit'}
+            {isEditing ? t('workflow.prd.doneEditing') : t('workflow.prd.edit')}
           </button>
         </div>
       )}
@@ -140,6 +142,7 @@ function StoryRow({
   onToggle: () => void;
   isEditing: boolean;
 }) {
+  const { t } = useTranslation('simpleMode');
   const priorityColor = {
     high: 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400',
     medium: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',
@@ -178,7 +181,7 @@ function StoryRow({
 
         {story.dependencies.length > 0 && (
           <span className="text-2xs text-emerald-500/50 dark:text-emerald-400/50">
-            deps: {story.dependencies.join(', ')}
+            {t('workflow.prd.deps', { deps: story.dependencies.join(', ') })}
           </span>
         )}
       </button>
@@ -189,7 +192,7 @@ function StoryRow({
 
           {story.acceptanceCriteria.length > 0 && (
             <div className="space-y-0.5">
-              <span className="text-2xs font-medium text-emerald-600 dark:text-emerald-400">Acceptance Criteria:</span>
+              <span className="text-2xs font-medium text-emerald-600 dark:text-emerald-400">{t('workflow.prd.acceptanceCriteria')}</span>
               {story.acceptanceCriteria.map((ac, i) => (
                 <p key={i} className="text-2xs text-emerald-600/70 dark:text-emerald-400/70 pl-2">
                   • {ac}

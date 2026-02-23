@@ -4,10 +4,12 @@
  * Final summary with metrics showing success/failure counts, duration, and agent assignments.
  */
 
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { CompletionReportCardData } from '../../../types/workflowCard';
 
 export function CompletionReportCard({ data }: { data: CompletionReportCardData }) {
+  const { t } = useTranslation('simpleMode');
   const agentEntries = Object.entries(data.agentAssignments);
   const durationStr = data.duration > 0 ? formatDuration(data.duration) : null;
 
@@ -45,7 +47,7 @@ export function CompletionReportCard({ data }: { data: CompletionReportCardData 
               data.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'
             )}
           >
-            {data.success ? 'Execution Complete' : 'Execution Failed'}
+            {data.success ? t('workflow.report.executionComplete') : t('workflow.report.executionFailed')}
           </span>
         </div>
       </div>
@@ -53,16 +55,16 @@ export function CompletionReportCard({ data }: { data: CompletionReportCardData 
       <div className="px-3 py-2 space-y-2">
         {/* Metrics grid */}
         <div className="grid grid-cols-4 gap-2">
-          <MetricBox label="Total" value={data.totalStories} color="text-gray-700 dark:text-gray-300" />
-          <MetricBox label="Completed" value={data.completed} color="text-green-600 dark:text-green-400" />
-          <MetricBox label="Failed" value={data.failed} color="text-red-600 dark:text-red-400" />
-          {durationStr && <MetricBox label="Duration" value={durationStr} color="text-blue-600 dark:text-blue-400" />}
+          <MetricBox label={t('workflow.report.total')} value={data.totalStories} color="text-gray-700 dark:text-gray-300" />
+          <MetricBox label={t('workflow.report.completed')} value={data.completed} color="text-green-600 dark:text-green-400" />
+          <MetricBox label={t('workflow.report.failed')} value={data.failed} color="text-red-600 dark:text-red-400" />
+          {durationStr && <MetricBox label={t('workflow.report.duration')} value={durationStr} color="text-blue-600 dark:text-blue-400" />}
         </div>
 
         {/* Agent assignments */}
         {agentEntries.length > 0 && (
           <div>
-            <span className="text-2xs font-medium text-gray-500 dark:text-gray-400">Agent Assignments</span>
+            <span className="text-2xs font-medium text-gray-500 dark:text-gray-400">{t('workflow.report.agentAssignments')}</span>
             <div className="mt-1 flex flex-wrap gap-1">
               {agentEntries.map(([storyId, agent]) => (
                 <span

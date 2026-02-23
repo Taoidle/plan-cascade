@@ -5,9 +5,11 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import type { InterviewAnswerCardData } from '../../../types/workflowCard';
 
 export function InterviewAnswerCard({ data }: { data: InterviewAnswerCardData }) {
+  const { t } = useTranslation('simpleMode');
   return (
     <div className="flex justify-end">
       <div
@@ -18,7 +20,7 @@ export function InterviewAnswerCard({ data }: { data: InterviewAnswerCardData })
             : 'bg-violet-600 text-white'
         )}
       >
-        {data.skipped ? 'Skipped' : data.answer}
+        {data.skipped ? t('workflow.interview.skipped') : data.answer}
       </div>
     </div>
   );

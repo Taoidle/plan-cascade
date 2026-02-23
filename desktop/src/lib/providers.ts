@@ -252,3 +252,38 @@ export function getCustomModelsByProvider(): Record<string, string[]> {
 export function setCustomModelsByProvider(value: Record<string, string[]>): void {
   localStorage.setItem(CUSTOM_MODELS_STORAGE_KEY, JSON.stringify(value));
 }
+
+// ============================================================================
+// Provider endpoint → base URL resolution
+// ============================================================================
+
+const GLM_CODING_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions';
+const GLM_INTL_BASE_URL = 'https://api.z.ai/api/paas/v4/chat/completions';
+const GLM_INTL_CODING_BASE_URL = 'https://api.z.ai/api/coding/paas/v4/chat/completions';
+const MINIMAX_CHINA_BASE_URL = 'https://api.minimaxi.com/v1/chat/completions';
+const QWEN_SINGAPORE_BASE_URL = 'https://dashscope-intl.aliyuncs.com/api/v1';
+const QWEN_US_BASE_URL = 'https://dashscope-us.aliyuncs.com/api/v1';
+
+/**
+ * Resolve provider-specific base URL override from user endpoint settings.
+ * Returns `undefined` when the default endpoint should be used.
+ */
+export function resolveProviderBaseUrl(
+  provider: string,
+  settings: { glmEndpoint?: string; minimaxEndpoint?: string; qwenEndpoint?: string },
+): string | undefined {
+  const normalized = normalizeProvider(provider);
+  if (normalized === 'glm') {
+    if (settings.glmEndpoint === 'coding') return GLM_CODING_BASE_URL;
+    if (settings.glmEndpoint === 'international') return GLM_INTL_BASE_URL;
+    if (settings.glmEndpoint === 'international-coding') return GLM_INTL_CODING_BASE_URL;
+  }
+  if (normalized === 'minimax' && settings.minimaxEndpoint === 'china') {
+    return MINIMAX_CHINA_BASE_URL;
+  }
+  if (normalized === 'qwen') {
+    if (settings.qwenEndpoint === 'singapore') return QWEN_SINGAPORE_BASE_URL;
+    if (settings.qwenEndpoint === 'us') return QWEN_US_BASE_URL;
+  }
+  return undefined;
+}
