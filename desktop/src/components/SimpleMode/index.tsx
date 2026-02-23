@@ -12,7 +12,6 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
 import { InputBox } from './InputBox';
-import { ProgressView } from './ProgressView';
 import { ConnectionStatus } from './ConnectionStatus';
 import { MessageActions, EditMode } from './MessageActions';
 import { ModelSwitcher } from './ModelSwitcher';
@@ -20,7 +19,7 @@ import { WorkspaceTreeSidebar } from './WorkspaceTreeSidebar';
 import { GitPanel } from './GitPanel';
 import { useExecutionStore, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
-import { StreamingOutput, GlobalProgressBar, ErrorState, ProjectSelector, IndexStatus } from '../shared';
+import { StreamingOutput, ErrorState, ProjectSelector, IndexStatus } from '../shared';
 import {
   buildDisplayBlocks,
   ToolCallLine,
@@ -31,6 +30,11 @@ import {
   EventGroupLine,
 } from '../shared/StreamingOutput';
 import { ContextualActions } from '../shared/ContextualActions';
+import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
+import { WorkflowCardRenderer } from './WorkflowCards/WorkflowCardRenderer';
+import { StructuredInputOverlay } from './StructuredInputOverlay';
+import { WorkflowProgressPanel } from './WorkflowProgressPanel';
+import type { CardPayload } from '../../types/workflowCard';
 
 type WorkflowMode = 'chat' | 'task';
 
@@ -54,8 +58,6 @@ export function SimpleMode() {
     reset,
     initialize,
     cleanup,
-    analyzeStrategy,
-    strategyAnalysis,
     isAnalyzingStrategy,
     clearStrategyAnalysis,
     isChatSession,
@@ -102,21 +104,36 @@ export function SimpleMode() {
     prevPathRef.current = workspacePath;
   }, [workspacePath, isChatSession, reset, clearStrategyAnalysis]);
 
+  const workflowPhase = useWorkflowOrchestratorStore((s) => s.phase);
+  const pendingQuestion = useWorkflowOrchestratorStore((s) => s.pendingQuestion);
+  const startWorkflow = useWorkflowOrchestratorStore((s) => s.startWorkflow);
+  const submitInterviewAnswer = useWorkflowOrchestratorStore((s) => s.submitInterviewAnswer);
+  const skipInterviewQuestion = useWorkflowOrchestratorStore((s) => s.skipInterviewQuestion);
+  const overrideConfigNatural = useWorkflowOrchestratorStore((s) => s.overrideConfigNatural);
+  const addPrdFeedback = useWorkflowOrchestratorStore((s) => s.addPrdFeedback);
+  const cancelWorkflow = useWorkflowOrchestratorStore((s) => s.cancelWorkflow);
+  const resetWorkflow = useWorkflowOrchestratorStore((s) => s.resetWorkflow);
+  const isInterviewSubmitting = useWorkflowOrchestratorStore((s) => s.phase === 'interviewing') &&
+    pendingQuestion === null;
+
   const handleStart = useCallback(async () => {
     if (!description.trim() || isSubmitting || isAnalyzingStrategy) return;
 
     if (workflowMode === 'task') {
-      await analyzeStrategy(description);
+      // Route Task mode through the workflow orchestrator
+      await startWorkflow(description);
+      setDescription('');
+      return;
     }
 
     await start(description, 'simple');
     setDescription('');
   }, [
-    analyzeStrategy,
     description,
     isAnalyzingStrategy,
     isSubmitting,
     start,
+    startWorkflow,
     workflowMode,
   ]);
 
@@ -124,14 +141,28 @@ export function SimpleMode() {
     if (!description.trim() || isSubmitting) return;
     const prompt = description;
     setDescription('');
+
+    // Route through orchestrator if in active Task workflow phase
+    if (workflowMode === 'task' && workflowPhase !== 'idle') {
+      if (workflowPhase === 'interviewing') {
+        await submitInterviewAnswer(prompt);
+      } else if (workflowPhase === 'configuring') {
+        overrideConfigNatural(prompt);
+      } else if (workflowPhase === 'reviewing_prd') {
+        addPrdFeedback(prompt);
+      }
+      return;
+    }
+
     await sendFollowUp(prompt);
-  }, [description, isSubmitting, sendFollowUp]);
+  }, [description, isSubmitting, sendFollowUp, workflowMode, workflowPhase, submitInterviewAnswer, overrideConfigNatural, addPrdFeedback]);
 
   const handleNewTask = useCallback(() => {
+    resetWorkflow();
     reset();
     clearStrategyAnalysis();
     setDescription('');
-  }, [reset, clearStrategyAnalysis]);
+  }, [reset, clearStrategyAnalysis, resetWorkflow]);
 
   const handleRestoreHistory = useCallback(
     (historyId: string) => {
@@ -287,32 +318,59 @@ export function SimpleMode() {
               <ChatTranscript lines={streamingOutput} status={status} />
             </div>
 
-            <div className="shrink-0 p-4 border-t border-gray-200 dark:border-gray-700">
-              <InputBox
-                value={description}
-                onChange={setDescription}
-                onSubmit={isChatSession ? handleFollowUp : handleStart}
-                disabled={isDisabled}
-                placeholder={
-                  isRunning
-                    ? t('input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
-                    : workflowMode === 'task'
-                      ? t('input.placeholder', {
-                          defaultValue: 'Describe a task (implementation / analysis / refactor)...',
-                        })
-                      : t('input.followUpPlaceholder', {
-                          defaultValue: 'Type a normal chat message...',
-                        })
-                }
-                isLoading={isRunning}
-                attachments={attachments}
-                onAttach={addAttachment}
-                onRemoveAttachment={removeAttachment}
-                workspacePath={workspacePath}
-              />
+            <div className="shrink-0 border-t border-gray-200 dark:border-gray-700">
+              {/* Structured input overlay for interview boolean/select questions */}
+              {workflowMode === 'task' && pendingQuestion && pendingQuestion.inputType !== 'text' && pendingQuestion.inputType !== 'textarea' ? (
+                <StructuredInputOverlay
+                  question={pendingQuestion}
+                  onSubmit={submitInterviewAnswer}
+                  onSkip={skipInterviewQuestion}
+                  loading={isInterviewSubmitting}
+                />
+              ) : (
+                <div className="p-4">
+                  <InputBox
+                    value={description}
+                    onChange={setDescription}
+                    onSubmit={isChatSession || (workflowMode === 'task' && workflowPhase !== 'idle') ? handleFollowUp : handleStart}
+                    disabled={isDisabled}
+                    placeholder={
+                      isRunning
+                        ? t('input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
+                        : workflowMode === 'task' && workflowPhase === 'interviewing'
+                          ? t('input.interviewPlaceholder', { defaultValue: 'Type your answer...' })
+                          : workflowMode === 'task' && workflowPhase === 'reviewing_prd'
+                            ? t('input.prdFeedbackPlaceholder', { defaultValue: 'Add feedback or press Approve on the PRD card...' })
+                            : workflowMode === 'task'
+                              ? t('input.placeholder', {
+                                  defaultValue: 'Describe a task (implementation / analysis / refactor)...',
+                                })
+                              : t('input.followUpPlaceholder', {
+                                  defaultValue: 'Type a normal chat message...',
+                                })
+                    }
+                    isLoading={isRunning}
+                    attachments={attachments}
+                    onAttach={addAttachment}
+                    onRemoveAttachment={removeAttachment}
+                    workspacePath={workspacePath}
+                  />
+                </div>
+              )}
               {apiError && (
-                <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                <div className="mx-4 mb-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
                   <p className="text-sm text-red-600 dark:text-red-400">{apiError}</p>
+                </div>
+              )}
+              {/* Cancel button during active workflow */}
+              {workflowMode === 'task' && workflowPhase !== 'idle' && workflowPhase !== 'completed' && workflowPhase !== 'failed' && workflowPhase !== 'cancelled' && (
+                <div className="px-4 pb-3">
+                  <button
+                    onClick={cancelWorkflow}
+                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                  >
+                    Cancel workflow
+                  </button>
                 </div>
               )}
             </div>
@@ -321,24 +379,21 @@ export function SimpleMode() {
           {showOutputPanel && (
             <div className="min-h-0 flex flex-col">
               <div className="shrink-0 space-y-2 mb-2">
-                {(isAnalyzingStrategy || strategyAnalysis) && workflowMode === 'task' && (
-                  <StrategyBanner
-                    isAnalyzing={isAnalyzingStrategy}
-                    analysis={strategyAnalysis}
-                    t={t}
-                  />
+                {workflowMode === 'task' ? (
+                  <>
+                    {/* Task mode: show workflow progress panel */}
+                    {workflowPhase !== 'idle' && <WorkflowProgressPanel />}
+                    <ExecutionLogsCard logs={logs} />
+                    <ErrorState maxErrors={3} />
+                  </>
+                ) : (
+                  <>
+                    {/* Chat mode: no progress section, only analysis coverage */}
+                    {analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
+                    <ExecutionLogsCard logs={logs} />
+                    <ErrorState maxErrors={3} />
+                  </>
                 )}
-                {analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
-                {isRunning && !isChatSession && (
-                  <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-                    <GlobalProgressBar compact showStoryLabels={false} />
-                    <div className="mt-2">
-                      <ProgressView />
-                    </div>
-                  </div>
-                )}
-                <ExecutionLogsCard logs={logs} />
-                <ErrorState maxErrors={3} />
               </div>
               <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0" />
             </div>
@@ -605,6 +660,14 @@ function ChatAssistantSection({
           }
           // Single line block
           const line = block.line;
+          if (line.type === 'card') {
+            try {
+              const payload = JSON.parse(line.content) as CardPayload;
+              return <WorkflowCardRenderer key={line.id} payload={payload} />;
+            } catch {
+              return null;
+            }
+          }
           if (line.type === 'text') {
             return (
               <div key={line.id}>
@@ -723,43 +786,6 @@ function TokenUsageInline({
   );
 }
 
-function StrategyBanner({
-  isAnalyzing,
-  analysis,
-  t,
-}: {
-  isAnalyzing: boolean;
-  analysis: ReturnType<typeof useExecutionStore.getState>['strategyAnalysis'];
-  t: ReturnType<typeof useTranslation>['t'];
-}) {
-  if (isAnalyzing) {
-    return (
-      <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 flex items-center gap-2">
-        <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full" />
-        <p className="text-sm text-blue-600 dark:text-blue-400">
-          {t('strategy.analyzing', { defaultValue: 'Analyzing task complexity...' })}
-        </p>
-      </div>
-    );
-  }
-
-  if (!analysis) return null;
-
-  return (
-    <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-green-700 dark:text-green-300">
-          {t('strategy.selected', { defaultValue: 'Strategy' })}:{' '}
-          <span className="font-semibold">{analysis.strategy.replace(/_/g, ' ')}</span>
-          <span className="ml-2 text-xs text-green-600 dark:text-green-400">
-            ({(analysis.confidence * 100).toFixed(0)}% confidence)
-          </span>
-        </p>
-      </div>
-      <p className="text-xs text-green-600 dark:text-green-400 mt-1">{analysis.reasoning}</p>
-    </div>
-  );
-}
 
 function pct(value: number | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';

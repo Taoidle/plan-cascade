@@ -267,6 +267,141 @@ pub fn create_provider(
 }
 
 // ============================================================================
+// Compiled Spec → TaskPrd Conversion
+// ============================================================================
+
+/// Convert a compiled spec PRD JSON (from the interview pipeline) to a TaskPrd.
+///
+/// The compiled spec's `prd_json` contains stories in snake_case format.
+/// This function converts them to camelCase `TaskPrd` format and calculates
+/// execution batches.
+///
+/// Expected input structure:
+/// ```json
+/// {
+///   "title": "...",
+///   "description": "...",
+///   "stories": [
+///     {
+///       "id": "story-001",
+///       "title": "...",
+///       "description": "...",
+///       "priority": "high",
+///       "dependencies": [],
+///       "acceptance_criteria": ["..."]
+///     }
+///   ]
+/// }
+/// ```
+pub fn convert_compiled_prd_to_task_prd(
+    spec_value: serde_json::Value,
+) -> Result<TaskPrd, String> {
+    // Extract prd_json field if present, otherwise treat the value itself as PRD
+    let prd_value = spec_value
+        .get("prd_json")
+        .cloned()
+        .unwrap_or(spec_value);
+
+    // Extract title and description
+    let title = prd_value
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Compiled PRD")
+        .to_string();
+    let description = prd_value
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Extract stories
+    let stories_array = prd_value
+        .get("stories")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "Missing or invalid 'stories' array in compiled spec".to_string())?;
+
+    if stories_array.is_empty() {
+        return Err("Compiled spec contains no stories".to_string());
+    }
+
+    let mut stories = Vec::new();
+    for (i, story_val) in stories_array.iter().enumerate() {
+        let id = story_val
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&format!("story-{:03}", i + 1))
+            .to_string();
+        let story_title = story_val
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Untitled Story")
+            .to_string();
+        let story_desc = story_val
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let priority = story_val
+            .get("priority")
+            .and_then(|v| v.as_str())
+            .unwrap_or("medium")
+            .to_string();
+        let dependencies: Vec<String> = story_val
+            .get("dependencies")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Support both snake_case and camelCase field names
+        let acceptance_criteria: Vec<String> = story_val
+            .get("acceptance_criteria")
+            .or_else(|| story_val.get("acceptanceCriteria"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        stories.push(TaskStory {
+            id,
+            title: story_title,
+            description: story_desc,
+            priority,
+            dependencies,
+            acceptance_criteria,
+        });
+    }
+
+    // Calculate batches from dependencies
+    let executable: Vec<ExecutableStory> = stories
+        .iter()
+        .map(|s| ExecutableStory {
+            id: s.id.clone(),
+            title: s.title.clone(),
+            description: s.description.clone(),
+            dependencies: s.dependencies.clone(),
+            acceptance_criteria: s.acceptance_criteria.clone(),
+            agent: None,
+        })
+        .collect();
+
+    let batches = calculate_batches(&executable, DEFAULT_MAX_PARALLEL)
+        .map_err(|e| format!("Batch calculation failed: {}", e))?;
+
+    Ok(TaskPrd {
+        title,
+        description,
+        stories,
+        batches,
+    })
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

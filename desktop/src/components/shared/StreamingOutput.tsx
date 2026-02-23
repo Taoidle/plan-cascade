@@ -127,6 +127,7 @@ const LINE_TYPE_COLORS: Record<StreamLineType, string> = {
   analysis: 'text-sky-300',
   thinking: 'text-gray-500 italic',
   code: 'text-cyan-300',
+  card: 'text-indigo-400',
 };
 
 const LINE_TYPE_PREFIX: Record<StreamLineType, string> = {
@@ -141,6 +142,7 @@ const LINE_TYPE_PREFIX: Record<StreamLineType, string> = {
   analysis: '',
   thinking: '     ',
   code: '',
+  card: '',
 };
 
 // ============================================================================

@@ -196,6 +196,30 @@ pub struct ExecutionReport {
     pub agent_performance: Vec<AgentPerformanceEntry>,
 }
 
+/// Workflow configuration from the frontend orchestrator.
+///
+/// Passed through from the Simple Mode workflow to control execution behavior.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskWorkflowConfig {
+    /// Flow level: quick/standard/full
+    pub flow_level: Option<String>,
+    /// TDD mode: off/flexible/strict
+    pub tdd_mode: Option<String>,
+    /// Whether to enable spec interview
+    pub enable_interview: bool,
+    /// Maximum parallel stories
+    pub max_parallel: Option<usize>,
+    /// Skip verification gates (--no-verify)
+    pub skip_verification: bool,
+    /// Skip code review gate (--no-review)
+    pub skip_review: bool,
+    /// Override all agents with this agent name
+    pub global_agent_override: Option<String>,
+    /// Override implementation agents only
+    pub impl_agent_override: Option<String>,
+}
+
 /// Current task execution status for the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -317,6 +341,7 @@ pub async fn generate_task_prd(
     apiKey: Option<String>,
     base_url: Option<String>,
     baseUrl: Option<String>,
+    compiled_spec: Option<serde_json::Value>,
     state: tauri::State<'_, TaskModeState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<CommandResponse<TaskPrd>, String> {
@@ -343,6 +368,24 @@ pub async fn generate_task_prd(
         let mut session_guard = state.session.write().await;
         if let Some(s) = session_guard.as_mut() {
             s.status = TaskModeStatus::GeneratingPrd;
+        }
+    }
+
+    // If compiled_spec is provided (from interview pipeline), convert directly
+    if let Some(spec_value) = compiled_spec {
+        match prd_generator::convert_compiled_prd_to_task_prd(spec_value) {
+            Ok(prd) => {
+                let mut session_guard = state.session.write().await;
+                if let Some(s) = session_guard.as_mut() {
+                    s.status = TaskModeStatus::ReviewingPrd;
+                    s.prd = Some(prd.clone());
+                }
+                return Ok(CommandResponse::ok(prd));
+            }
+            Err(e) => {
+                eprintln!("[generate_task_prd] compiled_spec conversion failed, falling back to LLM: {}", e);
+                // Fall through to LLM generation
+            }
         }
     }
 
@@ -572,6 +615,7 @@ pub async fn approve_task_prd(
     provider: Option<String>,
     model: Option<String>,
     execution_mode: Option<StoryExecutionMode>,
+    workflow_config: Option<TaskWorkflowConfig>,
 ) -> Result<CommandResponse<bool>, String> {
     let mut session_guard = state.session.write().await;
     let session = match session_guard.as_mut() {
@@ -605,7 +649,15 @@ pub async fn approve_task_prd(
         })
         .collect();
 
-    let config = ExecutionConfig::default();
+    // Build execution config from workflow config overrides
+    let mut config = ExecutionConfig::default();
+    if let Some(ref wc) = workflow_config {
+        if let Some(max_p) = wc.max_parallel {
+            config.max_parallel = max_p;
+        }
+        config.skip_verification = wc.skip_verification;
+        config.skip_review = wc.skip_review;
+    }
     match crate::services::task_mode::calculate_batches(&stories, config.max_parallel) {
         Ok(batches) => {
             let mut approved_prd = prd;
@@ -670,10 +722,11 @@ pub async fn approve_task_prd(
             };
 
             // Spawn background tokio task for batch execution
+            let exec_config = config;
             tokio::spawn(async move {
                 let executor = BatchExecutor::new(
                     stories_for_exec,
-                    ExecutionConfig::default(),
+                    exec_config,
                     cancellation_token,
                 );
                 let resolver = AgentResolver::with_defaults();

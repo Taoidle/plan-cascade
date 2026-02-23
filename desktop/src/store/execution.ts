@@ -130,7 +130,8 @@ export type StreamLineType =
   | 'sub_agent'
   | 'analysis'
   | 'thinking'
-  | 'code';
+  | 'code'
+  | 'card';
 
 export interface StreamLine {
   id: number;
@@ -1535,6 +1536,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       analysis: '[Analysis] ',
       thinking: '[Thinking] ',
       code: '[Code] ',
+      card: '[Card] ',
     };
     const conversationLines: HistoryConversationLine[] | undefined =
       state.streamingOutput.length > 0

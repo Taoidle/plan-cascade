@@ -80,6 +80,12 @@ pub struct ExecutionConfig {
     /// DoD gate mode (Soft = warning only, Hard = blocking)
     #[serde(default = "default_dod_mode")]
     pub dod_mode: GateMode,
+    /// Skip verification gates (format, lint, typecheck)
+    #[serde(default)]
+    pub skip_verification: bool,
+    /// Skip code review gate
+    #[serde(default)]
+    pub skip_review: bool,
 }
 
 fn default_max_parallel() -> usize {
@@ -110,6 +116,8 @@ impl Default for ExecutionConfig {
             retry_enabled: default_retry_enabled(),
             dor_mode: default_dor_mode(),
             dod_mode: default_dod_mode(),
+            skip_verification: false,
+            skip_review: false,
         }
     }
 }
