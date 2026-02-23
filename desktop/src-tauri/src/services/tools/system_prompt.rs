@@ -252,11 +252,17 @@ For medium-sized projects, emit multiple parallel explore Tasks in one response,
 
 ### Step 3: The user wants to modify code or run commands
 
+**First, assess the scope:**
+
+- Single file, simple change → handle directly (Read → Edit / Write / Bash)
+- 2-3 closely related files → handle directly, one at a time
+- **Multiple independent files/modules/domains** → **decompose into parallel Tasks** (see "Autonomous Task Decomposition" below)
+
+**Direct execution tools:**
 - **Edit existing file**: Use Read first to see current contents, then Edit with exact string replacement.
 - **Create new file**: Use Write.
 - **Run tests, build, git, or shell commands**: Use Bash.
 - **Edit Jupyter notebook cells**: Use NotebookEdit.
-- **Complex multi-file implementation**: Use **Task** with subagent_type='general-purpose' to delegate to a sub-agent with fresh context.
 
 ### Step 4: Web resources
 
@@ -292,6 +298,71 @@ For medium-sized projects, emit multiple parallel explore Tasks in one response,
 **Examples of when to use plan:**
 - "How do components A and B interact?" → plan reads both components and traces connections
 - "Analyze the error handling pattern" → plan reads error-related code across modules
+
+## Autonomous Task Decomposition
+
+When a user request touches **multiple independent files, modules, or domains**, you MUST proactively decompose it into parallel sub-tasks. Do NOT execute everything sequentially yourself — spawn parallel Task agents to maximize speed.
+
+### When to Decompose
+
+| Signal | Action |
+|--------|--------|
+| Request mentions multiple specific files/modules/areas | Decompose by file/module |
+| Request involves both frontend AND backend changes | Decompose by technology boundary |
+| Request says "all", "every", "each" for a set of items | Decompose by item or group |
+| Request involves repetitive operations across many targets | Decompose by target group |
+| Single file, simple change | Do NOT decompose — handle directly |
+
+### How to Decompose — 4 Steps
+
+**Step A: Analyze** — Identify the independent work units. Read relevant files or use CodebaseSearch/Grep to understand the scope.
+
+**Step B: Plan & Announce** — Briefly tell the user what you're about to do: how many sub-tasks, what each one handles.
+
+**Step C: Spawn Parallel Tasks** — Emit ALL Task calls in ONE response. Each Task gets a specific, self-contained prompt describing exactly what to do. Use `subagent_type='general-purpose'` for tasks that need to write code.
+
+**Step D: Synthesize & Verify** — After all sub-agents complete, summarize the results and run verification (e.g., `Bash` to run tests, build, or lint).
+
+### Decomposition Example
+
+User: "Remove all failing tests from the project"
+
+Your response should be:
+
+1. First, run the test suite to identify failing tests: `Bash(cargo test 2>&1 | grep FAILED)`
+2. Analyze the failures — group them by module/domain
+3. Announce: "I found 20 failing tests across 4 areas. Launching 4 parallel agents..."
+4. Spawn in ONE response:
+   - `Task(prompt='Remove these failing tests from src/services/auth/: [list]...', subagent_type='general-purpose')`
+   - `Task(prompt='Remove these failing tests from src/services/api/: [list]...', subagent_type='general-purpose')`
+   - `Task(prompt='Remove these failing tests from src/components/: [list]...', subagent_type='general-purpose')`
+   - `Task(prompt='Remove these failing tests from src/utils/: [list]...', subagent_type='general-purpose')`
+5. After completion, verify: `Bash(cargo test)`
+
+### More Examples
+
+**"Add error handling to all API endpoints"** →
+- Identify all endpoint files
+- Group by domain (auth, users, orders, etc.)
+- Spawn one Task per domain group
+
+**"Refactor all components to use the new design system"** →
+- List all components that need changes
+- Group into 3-5 batches by directory
+- Spawn one Task per batch
+
+**"Fix the import paths after the directory restructure"** →
+- Find all files with broken imports
+- Group by top-level module
+- Spawn one Task per module
+
+### Rules
+
+- Always tell the user your decomposition plan BEFORE spawning
+- Give each Task a SPECIFIC, COMPLETE prompt — the sub-agent has no access to your conversation history
+- Include file paths, exact requirements, and acceptance criteria in each Task prompt
+- After all Tasks complete, ALWAYS run a verification step (tests, build, lint)
+- If a sub-agent fails, analyze the error and retry that specific sub-task
 
 ## When to Use Analyze (and When NOT To)
 
@@ -1389,6 +1460,56 @@ mod tests {
             line_count < 100,
             "Should have truncated memories, got {} lines",
             line_count
+        );
+    }
+
+    // =========================================================================
+    // Autonomous Task Decomposition section tests
+    // =========================================================================
+
+    #[test]
+    fn test_system_prompt_contains_autonomous_decomposition() {
+        let tools = get_tool_definitions_from_registry();
+        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
+
+        assert!(
+            prompt.contains("Autonomous Task Decomposition"),
+            "System prompt should contain the Autonomous Task Decomposition section"
+        );
+        assert!(
+            prompt.contains("When to Decompose"),
+            "Should contain decomposition trigger table"
+        );
+        assert!(
+            prompt.contains("How to Decompose"),
+            "Should contain the 4-step decomposition strategy"
+        );
+        assert!(
+            prompt.contains("Step A: Analyze"),
+            "Should contain Step A"
+        );
+        assert!(
+            prompt.contains("Step D: Synthesize"),
+            "Should contain Step D"
+        );
+        assert!(
+            prompt.contains("Decomposition Example"),
+            "Should contain a concrete decomposition example"
+        );
+    }
+
+    #[test]
+    fn test_system_prompt_step3_has_scope_assessment() {
+        let tools = get_tool_definitions_from_registry();
+        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
+
+        assert!(
+            prompt.contains("assess the scope"),
+            "Step 3 should start with scope assessment"
+        );
+        assert!(
+            prompt.contains("decompose into parallel Tasks"),
+            "Step 3 should mention decomposition for multi-file changes"
         );
     }
 }
