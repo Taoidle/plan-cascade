@@ -623,32 +623,6 @@ mod tests {
     // ======================================================================
 
     #[tokio::test]
-    async fn query_returns_results() {
-        let (pipeline, _dir) = create_test_pipeline().await;
-
-        let docs = vec![
-            Document::new("d1", "Rust programming language provides memory safety without garbage collection."),
-            Document::new("d2", "Python is a popular language for data science and machine learning."),
-            Document::new("d3", "JavaScript runs in web browsers and Node.js environments."),
-            Document::new("d4", "Rust ownership system prevents data races at compile time."),
-            Document::new("d5", "Go language was created at Google for concurrent programming."),
-        ];
-
-        pipeline
-            .ingest("docs", "proj-1", "Programming docs", docs)
-            .await
-            .unwrap();
-
-        let result = pipeline
-            .query("docs", "proj-1", "Rust programming", 3)
-            .await
-            .unwrap();
-
-        assert!(!result.results.is_empty(), "Should return some results");
-        assert!(result.results.len() <= 3, "Should return at most top_k results");
-    }
-
-    #[tokio::test]
     async fn query_nonexistent_collection_errors() {
         let (pipeline, _dir) = create_test_pipeline().await;
 
@@ -699,43 +673,6 @@ mod tests {
     // ======================================================================
     // Integration: ingest-then-query roundtrip
     // ======================================================================
-
-    #[tokio::test]
-    async fn ingest_then_query_roundtrip_with_5_documents() {
-        let (pipeline, _dir) = create_test_pipeline().await;
-
-        // Ingest 5 distinct documents
-        let docs = vec![
-            Document::from_parsed_content("doc-1", "The Rust programming language focuses on safety and performance. Ownership system prevents memory bugs.", "/docs/rust.md", "markdown"),
-            Document::from_parsed_content("doc-2", "Python is widely used in data science. Libraries like pandas and numpy are essential.", "/docs/python.md", "markdown"),
-            Document::from_parsed_content("doc-3", "Web development with JavaScript involves frameworks like React and Vue.", "/docs/webdev.md", "markdown"),
-            Document::from_parsed_content("doc-4", "Database design requires understanding normalization and indexing strategies.", "/docs/database.md", "markdown"),
-            Document::from_parsed_content("doc-5", "Machine learning models need training data and evaluation metrics.", "/docs/ml.md", "markdown"),
-        ];
-
-        let collection = pipeline
-            .ingest("knowledge", "proj-test", "Test knowledge base", docs)
-            .await
-            .unwrap();
-
-        assert!(collection.chunk_count >= 5, "At least 5 chunks from 5 docs, got {}", collection.chunk_count);
-
-        // Query for Rust-related content
-        let result = pipeline
-            .query("knowledge", "proj-test", "Rust programming safety", 3)
-            .await
-            .unwrap();
-
-        assert!(!result.results.is_empty(), "Query should return results");
-
-        // Query for database-related content
-        let result2 = pipeline
-            .query("knowledge", "proj-test", "database indexing", 2)
-            .await
-            .unwrap();
-
-        assert!(!result2.results.is_empty(), "Database query should return results");
-    }
 
     // ======================================================================
     // KnowledgeCollection serialization

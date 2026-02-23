@@ -572,6 +572,7 @@ impl OrchestratorService {
         loop {
             // Check for cancellation
             if self.cancellation_token.is_cancelled() {
+                emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
                     response: None,
                     usage: total_usage,
@@ -584,6 +585,7 @@ impl OrchestratorService {
             // Wait while paused (sleep-poll until unpaused or cancelled)
             while self.is_paused() {
                 if self.cancellation_token.is_cancelled() {
+                    emit_usage(&tx, &total_usage).await;
                     return ExecutionResult {
                         response: None,
                         usage: total_usage,
@@ -636,6 +638,7 @@ impl OrchestratorService {
                         stop_reason: Some(stop_reason),
                     })
                     .await;
+                emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
                     response,
                     usage: total_usage,
@@ -663,6 +666,7 @@ impl OrchestratorService {
                         stop_reason: Some("token_budget".to_string()),
                     })
                     .await;
+                emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
                     response: None,
                     usage: total_usage,
@@ -749,6 +753,7 @@ impl OrchestratorService {
                             tokio::select! {
                                 _ = tokio::time::sleep(std::time::Duration::from_secs(wait)) => {}
                                 _ = self.cancellation_token.cancelled() => {
+                                    emit_usage(&tx, &total_usage).await;
                                     return ExecutionResult {
                                         response: None,
                                         usage: total_usage,
@@ -778,6 +783,7 @@ impl OrchestratorService {
                         code: None,
                     })
                     .await;
+                emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
                     response: None,
                     usage: total_usage,
@@ -790,6 +796,18 @@ impl OrchestratorService {
             // Update usage
             let last_input_tokens = response.usage.input_tokens;
             merge_usage(&mut total_usage, &response.usage);
+            // Persist per-call usage to analytics database
+            track_analytics(
+                &self.analytics_tx,
+                &self.config.provider.provider.to_string(),
+                &self.config.provider.model,
+                &response.usage,
+                self.config.analysis_session_id.as_deref(),
+                self.config.project_id.as_deref(),
+                &self.analytics_cost_calculator,
+                iterations,
+                self.config.task_type.is_some(),
+            );
 
             // Check for context compaction before processing tool calls.
             // In analysis mode, use cheap deterministic trimming (Codex-like)
@@ -1005,6 +1023,7 @@ impl OrchestratorService {
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 (sub-native-parallel): force terminating for {}", effective_tool_name);
                                     let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    emit_usage(&tx, &total_usage).await;
                                     return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
                                 }
                             }
@@ -1083,6 +1102,7 @@ impl OrchestratorService {
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", effective_tool_name);
                                     let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    emit_usage(&tx, &total_usage).await;
                                     return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
                                 }
                             }
@@ -1119,6 +1139,7 @@ impl OrchestratorService {
                             "[loop-exit] Exiting with complete text response, ignoring {} fallback tool calls",
                             parsed_fallback.calls.len()
                         );
+                        emit_usage(&tx, &total_usage).await;
                         return ExecutionResult {
                             response: Some(cleaned),
                             usage: total_usage,
@@ -1251,6 +1272,7 @@ impl OrchestratorService {
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 escalation (fallback-parallel): force terminating for {}", effective_tool_name);
                                     let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    emit_usage(&tx, &total_usage).await;
                                     return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
                                 }
                             }
@@ -1309,6 +1331,7 @@ impl OrchestratorService {
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 escalation (fallback): force terminating for {}", effective_tool_name);
                                     let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    emit_usage(&tx, &total_usage).await;
                                     return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
                                 }
                             }
@@ -1418,6 +1441,7 @@ impl OrchestratorService {
                 }
 
                 if empty_response_without_signals {
+                    emit_usage(&tx, &total_usage).await;
                     return ExecutionResult {
                         response: None,
                         usage: total_usage,
@@ -1447,6 +1471,7 @@ impl OrchestratorService {
                     })
                     .or(last_assistant_text);
 
+                emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
                     response: final_content,
                     usage: total_usage,
@@ -1536,6 +1561,8 @@ impl OrchestratorService {
             skills_snapshot,
             memories_snapshot,
             knowledge_block_snapshot,
+            shared_analytics_tx: self.analytics_tx.clone(),
+            shared_analytics_cost_calculator: self.analytics_cost_calculator.clone(),
         });
         let max_concurrent = self.config.provider.effective_max_concurrent_subagents();
         Some(TaskContext {
@@ -1626,6 +1653,7 @@ impl OrchestratorService {
         loop {
             // Check for cancellation
             if self.cancellation_token.is_cancelled() {
+                emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
                     response: None,
                     usage: total_usage,
@@ -1638,6 +1666,7 @@ impl OrchestratorService {
             // Wait while paused (sleep-poll until unpaused or cancelled)
             while self.is_paused() {
                 if self.cancellation_token.is_cancelled() {
+                    emit_usage(&tx, &total_usage).await;
                     return ExecutionResult {
                         response: None,
                         usage: total_usage,
@@ -1690,6 +1719,7 @@ impl OrchestratorService {
                         stop_reason: Some(stop_reason),
                     })
                     .await;
+                emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
                     response,
                     usage: total_usage,
@@ -1717,6 +1747,7 @@ impl OrchestratorService {
                         stop_reason: Some("token_budget".to_string()),
                     })
                     .await;
+                emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
                     response: None,
                     usage: total_usage,
@@ -1802,6 +1833,7 @@ impl OrchestratorService {
                         })
                         .await;
 
+                    emit_usage(&tx, &total_usage).await;
                     return ExecutionResult {
                         response: None,
                         usage: total_usage,
@@ -1815,6 +1847,18 @@ impl OrchestratorService {
             // Update usage
             let last_input_tokens = response.usage.input_tokens;
             merge_usage(&mut total_usage, &response.usage);
+            // Persist per-call usage to analytics database
+            track_analytics(
+                &self.analytics_tx,
+                &self.config.provider.provider.to_string(),
+                &self.config.provider.model,
+                &response.usage,
+                self.config.analysis_session_id.as_deref(),
+                self.config.project_id.as_deref(),
+                &self.analytics_cost_calculator,
+                iterations,
+                self.config.task_type.is_some(),
+            );
 
             // Hook: on_after_llm
             self.hooks.fire_on_after_llm(&hook_ctx, response.content.clone()).await;
@@ -2073,6 +2117,7 @@ impl OrchestratorService {
                                             code: None,
                                         })
                                         .await;
+                                    emit_usage(&tx, &total_usage).await;
                                     return ExecutionResult {
                                         response: last_assistant_text,
                                         usage: total_usage,
@@ -2255,6 +2300,7 @@ impl OrchestratorService {
                                             code: None,
                                         })
                                         .await;
+                                    emit_usage(&tx, &total_usage).await;
                                     return ExecutionResult {
                                         response: last_assistant_text,
                                         usage: total_usage,
@@ -2420,6 +2466,7 @@ impl OrchestratorService {
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 (fallback-parallel): force terminating {}", effective_tool_name);
                                     let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    emit_usage(&tx, &total_usage).await;
                                     return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
                                 }
                             }
@@ -2517,6 +2564,7 @@ impl OrchestratorService {
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 (fallback): force terminating for {}", effective_tool_name);
                                     let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    emit_usage(&tx, &total_usage).await;
                                     return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
                                 }
                             }
@@ -2634,6 +2682,7 @@ impl OrchestratorService {
                             code: Some("empty_response".to_string()),
                         })
                         .await;
+                    emit_usage(&tx, &total_usage).await;
                     return ExecutionResult {
                         response: None,
                         usage: total_usage,

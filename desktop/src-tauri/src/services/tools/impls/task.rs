@@ -207,6 +207,9 @@ impl Tool for TaskTool {
                     usage: serde_json::json!({
                         "input_tokens": result.usage.input_tokens,
                         "output_tokens": result.usage.output_tokens,
+                        "thinking_tokens": result.usage.thinking_tokens,
+                        "cache_read_tokens": result.usage.cache_read_tokens,
+                        "cache_creation_tokens": result.usage.cache_creation_tokens,
                         "iterations": result.iterations,
                     }),
                 },

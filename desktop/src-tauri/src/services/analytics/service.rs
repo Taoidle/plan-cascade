@@ -129,6 +129,26 @@ impl AnalyticsService {
             )?;
         }
 
+        // Migration 2: Add extended token columns
+        if current_version < 2 {
+            conn.execute(
+                "ALTER TABLE usage_records ADD COLUMN thinking_tokens INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            conn.execute(
+                "ALTER TABLE usage_records ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            conn.execute(
+                "ALTER TABLE usage_records ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            conn.execute(
+                "INSERT INTO analytics_schema_version (version, applied_at) VALUES (2, ?1)",
+                params![chrono::Utc::now().timestamp()],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -235,8 +255,9 @@ impl AnalyticsService {
         conn.execute(
             "INSERT INTO usage_records
              (session_id, project_id, model_name, provider, input_tokens, output_tokens,
+              thinking_tokens, cache_read_tokens, cache_creation_tokens,
               cost_microdollars, timestamp, metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 record.session_id,
                 record.project_id,
@@ -244,6 +265,9 @@ impl AnalyticsService {
                 record.provider,
                 record.input_tokens,
                 record.output_tokens,
+                record.thinking_tokens,
+                record.cache_read_tokens,
+                record.cache_creation_tokens,
                 record.cost_microdollars,
                 record.timestamp,
                 record.metadata,
@@ -265,8 +289,9 @@ impl AnalyticsService {
             tx.execute(
                 "INSERT INTO usage_records
                  (session_id, project_id, model_name, provider, input_tokens, output_tokens,
+                  thinking_tokens, cache_read_tokens, cache_creation_tokens,
                   cost_microdollars, timestamp, metadata)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     record.session_id,
                     record.project_id,
@@ -274,6 +299,9 @@ impl AnalyticsService {
                     record.provider,
                     record.input_tokens,
                     record.output_tokens,
+                    record.thinking_tokens,
+                    record.cache_read_tokens,
+                    record.cache_creation_tokens,
                     record.cost_microdollars,
                     record.timestamp,
                     record.metadata,
@@ -292,7 +320,8 @@ impl AnalyticsService {
 
         let result = conn.query_row(
             "SELECT id, session_id, project_id, model_name, provider, input_tokens,
-                    output_tokens, cost_microdollars, timestamp, metadata
+                    output_tokens, thinking_tokens, cache_read_tokens, cache_creation_tokens,
+                    cost_microdollars, timestamp, metadata
              FROM usage_records WHERE id = ?1",
             params![id],
             |row| Self::row_to_usage_record(row),
@@ -316,7 +345,8 @@ impl AnalyticsService {
 
         let mut sql = String::from(
             "SELECT id, session_id, project_id, model_name, provider, input_tokens,
-                    output_tokens, cost_microdollars, timestamp, metadata
+                    output_tokens, thinking_tokens, cache_read_tokens, cache_creation_tokens,
+                    cost_microdollars, timestamp, metadata
              FROM usage_records WHERE 1=1",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -615,9 +645,12 @@ impl AnalyticsService {
             provider: row.get(4)?,
             input_tokens: row.get(5)?,
             output_tokens: row.get(6)?,
-            cost_microdollars: row.get(7)?,
-            timestamp: row.get(8)?,
-            metadata: row.get(9)?,
+            thinking_tokens: row.get(7)?,
+            cache_read_tokens: row.get(8)?,
+            cache_creation_tokens: row.get(9)?,
+            cost_microdollars: row.get(10)?,
+            timestamp: row.get(11)?,
+            metadata: row.get(12)?,
         })
     }
 

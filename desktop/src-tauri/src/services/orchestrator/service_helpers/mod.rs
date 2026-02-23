@@ -70,6 +70,74 @@ const ANALYZE_CACHE_TTL_SECS: i64 = 60 * 60 * 6;
 
 // ── Shared utility functions (used by 3+ submodules) ──────────────────
 
+/// Emit a Usage event to the streaming channel.
+/// Called before every return from agentic loop functions to ensure token
+/// consumption is always reported to the frontend, regardless of exit reason.
+async fn emit_usage(tx: &mpsc::Sender<UnifiedStreamEvent>, usage: &UsageStats) {
+    let _ = tx
+        .send(UnifiedStreamEvent::Usage {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            thinking_tokens: usage.thinking_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_creation_tokens: usage.cache_creation_tokens,
+        })
+        .await;
+}
+
+/// Persist a single LLM call's usage to the analytics database (non-blocking).
+/// Silently drops when the channel is full or not configured.
+fn track_analytics(
+    analytics_tx: &Option<mpsc::Sender<crate::services::analytics::TrackerMessage>>,
+    provider_name: &str,
+    model_name: &str,
+    usage: &UsageStats,
+    session_id: Option<&str>,
+    project_id: Option<&str>,
+    cost_calculator: &Option<Arc<crate::services::analytics::CostCalculator>>,
+    iteration: u32,
+    is_sub_agent: bool,
+) {
+    let atx = match analytics_tx {
+        Some(tx) => tx,
+        None => return,
+    };
+
+    let cost = cost_calculator
+        .as_ref()
+        .map(|calc| calc.calculate_cost(
+            provider_name, model_name,
+            usage.input_tokens as i64, usage.output_tokens as i64,
+        ))
+        .unwrap_or(0);
+
+    let mut record = crate::models::analytics::UsageRecord::new(
+        model_name, provider_name,
+        usage.input_tokens as i64, usage.output_tokens as i64,
+    )
+    .with_cost(cost)
+    .with_extended_tokens(
+        usage.thinking_tokens.unwrap_or(0) as i64,
+        usage.cache_read_tokens.unwrap_or(0) as i64,
+        usage.cache_creation_tokens.unwrap_or(0) as i64,
+    );
+
+    if let Some(sid) = session_id {
+        record = record.with_session(sid.to_string());
+    }
+    if let Some(pid) = project_id {
+        record = record.with_project(pid.to_string());
+    }
+
+    let metadata = serde_json::json!({
+        "iteration": iteration,
+        "is_sub_agent": is_sub_agent,
+    });
+    record.metadata = Some(metadata.to_string());
+
+    let _ = atx.try_send(crate::services::analytics::TrackerMessage::Track(record));
+}
+
 fn merge_usage(total: &mut UsageStats, delta: &UsageStats) {
     total.input_tokens += delta.input_tokens;
     total.output_tokens += delta.output_tokens;

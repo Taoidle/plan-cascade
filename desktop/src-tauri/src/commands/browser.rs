@@ -120,6 +120,7 @@ fn make_minimal_ctx() -> crate::services::tools::trait_def::ToolExecutionContext
         task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
         task_context: None,
         core_context: None,
+        file_change_tracker: None,
     }
 }
 

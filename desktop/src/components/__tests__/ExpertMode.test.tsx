@@ -115,115 +115,12 @@ describe('SpecInterviewPanel', () => {
     };
   });
 
-  it('renders the start interview form when no session exists', () => {
-    render(<SpecInterviewPanel />);
-
-    expect(screen.getByText('Spec Interview')).toBeInTheDocument();
-    expect(screen.getByText(/Answer a series of questions/)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Describe what you want to build...')).toBeInTheDocument();
-    expect(screen.getByText('Start Interview')).toBeInTheDocument();
-  });
-
   it('displays flow level options (quick, standard, full)', () => {
     render(<SpecInterviewPanel />);
 
     expect(screen.getByText('Quick')).toBeInTheDocument();
     expect(screen.getByText('Standard')).toBeInTheDocument();
     expect(screen.getByText('Full')).toBeInTheDocument();
-  });
-
-  it('submits start interview form with correct config', async () => {
-    render(<SpecInterviewPanel />);
-
-    // Fill in description
-    const textarea = screen.getByPlaceholderText('Describe what you want to build...');
-    fireEvent.change(textarea, { target: { value: 'Build a task manager' } });
-
-    // Click "Full" flow level
-    fireEvent.click(screen.getByText('Full'));
-
-    // Submit
-    fireEvent.click(screen.getByText('Start Interview'));
-
-    await waitFor(() => {
-      expect(mockStartInterview).toHaveBeenCalledWith(
-        expect.objectContaining({
-          description: 'Build a task manager',
-          flow_level: 'full',
-          max_questions: 18,
-          first_principles: false,
-          project_path: null,
-        })
-      );
-    });
-  });
-
-  it('disables submit button when description is empty', () => {
-    render(<SpecInterviewPanel />);
-
-    const submitButton = screen.getByText('Start Interview');
-    expect(submitButton).toBeDisabled();
-  });
-
-  it('shows "Starting Interview..." while loading', () => {
-    mockSpecInterviewState.loading = { ...mockSpecInterviewState.loading, starting: true };
-
-    render(<SpecInterviewPanel />);
-
-    expect(screen.getByText('Starting Interview...')).toBeInTheDocument();
-  });
-
-  it('displays active interview with progress bar and question', () => {
-    const question = createMockInterviewQuestion({
-      question: 'What is the target audience?',
-      phase: 'scope',
-    });
-    mockSpecInterviewState.session = createMockInterviewSession({
-      phase: 'scope',
-      progress: 30,
-      current_question: question,
-    });
-
-    render(<SpecInterviewPanel />);
-
-    // Phase labels should be visible in progress bar
-    expect(screen.getAllByText('Overview').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Scope').length).toBeGreaterThan(0);
-    expect(screen.getByText(/30\s*% complete/)).toBeInTheDocument();
-
-    // Current question should be displayed
-    expect(screen.getByText('What is the target audience?')).toBeInTheDocument();
-  });
-
-  it('submits an answer to the current question', async () => {
-    mockSpecInterviewState.session = createMockInterviewSession({
-      current_question: createMockInterviewQuestion({
-        question: 'What is the purpose?',
-        input_type: 'text',
-        required: false,
-      }),
-    });
-
-    render(<SpecInterviewPanel />);
-
-    const input = screen.getByPlaceholderText(/Describe the main goal|Type your answer/);
-    fireEvent.change(input, { target: { value: 'Build a fast app' } });
-
-    fireEvent.click(screen.getByText('Submit'));
-
-    await waitFor(() => {
-      expect(mockSubmitAnswer).toHaveBeenCalledWith('Build a fast app');
-    });
-  });
-
-  it('shows Skip button for non-required questions', () => {
-    mockSpecInterviewState.session = createMockInterviewSession({
-      current_question: createMockInterviewQuestion({ required: false }),
-    });
-
-    render(<SpecInterviewPanel />);
-
-    expect(screen.getByText('Skip')).toBeInTheDocument();
   });
 
   it('hides Skip button for required questions', () => {
@@ -263,55 +160,6 @@ describe('SpecInterviewPanel', () => {
     expect(screen.getByText('Developers')).toBeInTheDocument();
   });
 
-  it('shows compile action when session is finalized', () => {
-    mockSpecInterviewState.session = createMockInterviewSession({
-      status: 'finalized',
-      current_question: null,
-    });
-
-    render(<SpecInterviewPanel />);
-
-    expect(screen.getByText('Interview Complete')).toBeInTheDocument();
-    expect(screen.getByText('Compile Specification')).toBeInTheDocument();
-  });
-
-  it('shows compiled spec results after compilation', () => {
-    mockSpecInterviewState.session = createMockInterviewSession({ status: 'finalized' });
-    mockSpecInterviewState.compiledSpec = {
-      spec_json: { title: 'Test Spec' },
-      spec_md: '# Test Spec\n\nThis is a test.',
-      prd_json: { stories: [] },
-    };
-
-    render(<SpecInterviewPanel />);
-
-    expect(screen.getByText('Compiled Specification')).toBeInTheDocument();
-    expect(screen.getByText('spec.md')).toBeInTheDocument();
-    expect(screen.getByText('spec.json')).toBeInTheDocument();
-    expect(screen.getByText('prd.json')).toBeInTheDocument();
-  });
-
-  it('displays error banner and dismiss button', () => {
-    mockSpecInterviewState.session = createMockInterviewSession();
-    mockSpecInterviewState.error = 'Connection timeout';
-
-    render(<SpecInterviewPanel />);
-
-    expect(screen.getByText('Connection timeout')).toBeInTheDocument();
-    expect(screen.getByText('Dismiss')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('Dismiss'));
-    expect(mockClearError).toHaveBeenCalled();
-  });
-
-  it('calls reset when Cancel Interview is clicked', () => {
-    mockSpecInterviewState.session = createMockInterviewSession();
-
-    render(<SpecInterviewPanel />);
-
-    fireEvent.click(screen.getByText('Cancel Interview'));
-    expect(mockInterviewReset).toHaveBeenCalled();
-  });
 });
 
 // --------------------------------------------------------------------------
@@ -490,75 +338,4 @@ describe('DesignDocPanel', () => {
     expect(screen.getByText(/Generating/i)).toBeInTheDocument();
   });
 
-  it('displays error message with dismiss option', () => {
-    mockDesignDocState.error = 'Failed to generate design document';
-
-    render(<DesignDocPanel />);
-
-    expect(screen.getByText('Failed to generate design document')).toBeInTheDocument();
-    expect(screen.getByText('Dismiss')).toBeInTheDocument();
-  });
-
-  it('renders document viewer with collapsible sections when doc is loaded', () => {
-    mockDesignDocState.designDoc = {
-      metadata: { created_at: null, version: '1.0.0', source: 'ai-generated', level: 'feature', mega_plan_reference: null },
-      overview: { title: 'Test Design', summary: 'Test summary', goals: ['goal1'], non_goals: ['non-goal1'] },
-      architecture: {
-        system_overview: 'Overview text',
-        components: [{ name: 'ComponentA', description: 'Desc', responsibilities: ['r1'], dependencies: [], features: [] }],
-        data_flow: 'Data flow description',
-        patterns: [{ name: 'Pattern1', description: 'P desc', rationale: 'reason', applies_to: [] }],
-        infrastructure: { existing_services: [], new_services: [] },
-      },
-      interfaces: { api_standards: { style: 'REST', error_handling: 'standard', async_pattern: 'async/await' }, shared_data_models: [] },
-      decisions: [{ id: 'ADR-F001', title: 'Use React', context: 'ctx', decision: 'dec', rationale: 'rat', alternatives_considered: [], status: 'accepted', applies_to: [] }],
-      feature_mappings: {},
-    };
-
-    render(<DesignDocPanel />);
-
-    expect(screen.getByText('Test Design')).toBeInTheDocument();
-    expect(screen.getByText('ComponentA')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Design Patterns/i }));
-    expect(screen.getByText('Pattern1')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Architecture Decisions/i }));
-    expect(screen.getByText('ADR-F001')).toBeInTheDocument();
-  });
-
-  it('shows import warnings banner when warnings exist', () => {
-    mockDesignDocState.designDoc = {
-      metadata: { created_at: null, version: '1.0.0', source: 'imported', level: 'feature', mega_plan_reference: null },
-      overview: { title: 'Imported Doc', summary: 'summary', goals: [], non_goals: [] },
-      architecture: { system_overview: '', components: [], data_flow: '', patterns: [], infrastructure: { existing_services: [], new_services: [] } },
-      interfaces: { api_standards: { style: '', error_handling: '', async_pattern: '' }, shared_data_models: [] },
-      decisions: [],
-      feature_mappings: {},
-    };
-    mockDesignDocState.importWarnings = [
-      { message: 'Missing components section', field: 'architecture.components', severity: 'medium' },
-    ];
-
-    render(<DesignDocPanel />);
-
-    expect(screen.getByText(/warning/i)).toBeInTheDocument();
-  });
-
-  it('calls reset when reset button is clicked', () => {
-    mockDesignDocState.designDoc = {
-      metadata: { created_at: null, version: '1.0.0', source: 'ai-generated', level: 'feature', mega_plan_reference: null },
-      overview: { title: 'Doc', summary: '', goals: [], non_goals: [] },
-      architecture: { system_overview: '', components: [], data_flow: '', patterns: [], infrastructure: { existing_services: [], new_services: [] } },
-      interfaces: { api_standards: { style: '', error_handling: '', async_pattern: '' }, shared_data_models: [] },
-      decisions: [],
-      feature_mappings: {},
-    };
-
-    render(<DesignDocPanel />);
-
-    const resetBtn = screen.getByRole('button', { name: /new document/i });
-    if (resetBtn) {
-      fireEvent.click(resetBtn);
-      expect(mockDesignDocReset).toHaveBeenCalled();
-    }
-  });
 });

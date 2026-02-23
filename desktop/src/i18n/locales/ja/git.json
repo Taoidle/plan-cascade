@@ -1,8 +1,32 @@
 {
   "tabs": {
     "changes": "変更",
+    "aiChanges": "AI 変更",
     "history": "履歴",
     "branches": "ブランチ"
+  },
+
+  "aiChanges": {
+    "noSession": "アクティブなセッションがありません",
+    "loading": "AI 変更を読み込み中...",
+    "noChanges": "このセッションではまだ AI によるファイル変更はありません",
+    "turn": "ターン {{index}}",
+    "files_one": "({{count}} ファイル)",
+    "files_other": "({{count}} ファイル)",
+    "restore": "復元",
+    "restoreTitle": "ターン {{index}} の前の状態にファイルを復元",
+    "loadingDiff": "差分を読み込み中...",
+    "noDiff": "差分はありません",
+    "restoreComplete": "復元完了",
+    "restoreConfirm": "ターン {{index}} の前に復元しますか？",
+    "affectedFiles": "以下のファイルが影響を受けます：",
+    "actionDelete": "削除",
+    "actionRestore": "復元",
+    "actionDeleted": "削除済み",
+    "actionRestored": "復元済み",
+    "cancel": "キャンセル",
+    "restoring": "復元中...",
+    "done": "完了"
   },
 
   "toolChanges": {

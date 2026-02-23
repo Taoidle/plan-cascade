@@ -5,6 +5,7 @@
 use plan_cascade_desktop::commands::analytics::AnalyticsState;
 use plan_cascade_desktop::commands::artifacts::ArtifactState;
 use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
+use plan_cascade_desktop::commands::file_changes::FileChangesState;
 use plan_cascade_desktop::commands::guardrails::GuardrailState;
 use plan_cascade_desktop::commands::lsp::LspState;
 use plan_cascade_desktop::commands::mcp::McpRuntimeState;
@@ -45,6 +46,7 @@ fn main() {
         .manage(KnowledgeState::new())
         .manage(ArtifactState::new())
         .manage(GitState::new())
+        .manage(FileChangesState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -378,6 +380,14 @@ fn main() {
             plan_cascade_desktop::commands::a2a::list_a2a_agents,
             plan_cascade_desktop::commands::a2a::register_a2a_agent,
             plan_cascade_desktop::commands::a2a::remove_a2a_agent,
+            // File Change Tracking commands
+            plan_cascade_desktop::commands::file_changes::init_file_change_tracker,
+            plan_cascade_desktop::commands::file_changes::advance_turn_index,
+            plan_cascade_desktop::commands::file_changes::get_file_changes_by_turn,
+            plan_cascade_desktop::commands::file_changes::get_file_change_diff,
+            plan_cascade_desktop::commands::file_changes::restore_files_to_turn,
+            plan_cascade_desktop::commands::file_changes::truncate_changes_from_turn,
+            plan_cascade_desktop::commands::file_changes::restore_single_file,
             // Artifact commands
             plan_cascade_desktop::commands::artifacts::artifact_save,
             plan_cascade_desktop::commands::artifacts::artifact_load,

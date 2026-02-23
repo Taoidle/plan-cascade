@@ -157,6 +157,7 @@ pub fn tool_context_to_tool_execution_context(ctx: &ToolContext) -> ToolExecutio
         task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
         task_context: None,
         core_context: None,
+        file_change_tracker: None,
     }
 }
 
@@ -469,6 +470,7 @@ mod tests {
             task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
             task_context: None,
             core_context: None,
+            file_change_tracker: None,
         }
     }
 

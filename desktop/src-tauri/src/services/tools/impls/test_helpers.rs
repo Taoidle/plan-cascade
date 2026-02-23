@@ -25,5 +25,6 @@ pub(crate) fn make_test_ctx(dir: &Path) -> ToolExecutionContext {
         task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
         task_context: None,
         core_context: None,
+        file_change_tracker: None,
     }
 }

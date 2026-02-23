@@ -68,7 +68,7 @@ export function SimpleMode() {
     renameHistory,
     restoreFromHistory,
     sessionUsageTotals,
-    latestUsage,
+    turnUsageTotals,
     attachments,
     addAttachment,
     removeAttachment,
@@ -162,7 +162,7 @@ export function SimpleMode() {
           <ProjectSelector compact />
           <ModelSwitcher />
           {workspacePath && <IndexStatus compact />}
-          <TokenUsageInline latestUsage={latestUsage} totals={sessionUsageTotals} />
+          <TokenUsageInline turnUsage={turnUsageTotals} totals={sessionUsageTotals} />
         </div>
 
         <div className="flex items-center gap-2">
@@ -694,27 +694,27 @@ function ChatThinkingSection({ lines }: { lines: StreamLine[] }) {
 }
 
 function TokenUsageInline({
-  latestUsage,
+  turnUsage,
   totals,
 }: {
-  latestUsage: ReturnType<typeof useExecutionStore.getState>['latestUsage'];
+  turnUsage: ReturnType<typeof useExecutionStore.getState>['turnUsageTotals'];
   totals: ReturnType<typeof useExecutionStore.getState>['sessionUsageTotals'];
 }) {
-  if (!latestUsage && !totals) return null;
+  if (!turnUsage && !totals) return null;
 
-  const latest = latestUsage || {
+  const turn = turnUsage || {
     input_tokens: 0,
     output_tokens: 0,
     thinking_tokens: 0,
     cache_read_tokens: 0,
     cache_creation_tokens: 0,
   };
-  const total = totals || latest;
+  const total = totals || turn;
 
   return (
     <div className="hidden xl:flex items-center gap-2 ml-1">
       <span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-2xs">
-        turn in {formatNumber(latest.input_tokens)} / out {formatNumber(latest.output_tokens)}
+        turn in {formatNumber(turn.input_tokens)} / out {formatNumber(turn.output_tokens)}
       </span>
       <span className="px-2 py-1 rounded bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 text-2xs">
         session in {formatNumber(total.input_tokens)} / out {formatNumber(total.output_tokens)}

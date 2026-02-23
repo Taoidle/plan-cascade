@@ -49,6 +49,8 @@ export function UsageTable() {
               <th className="px-6 py-3 font-medium">{t('table.provider', 'Provider')}</th>
               <th className="px-6 py-3 font-medium text-right">{t('table.inputTokens', 'Input')}</th>
               <th className="px-6 py-3 font-medium text-right">{t('table.outputTokens', 'Output')}</th>
+              <th className="px-6 py-3 font-medium text-right">{t('table.thinkingTokens', 'Thinking')}</th>
+              <th className="px-6 py-3 font-medium text-right">{t('table.cacheTokens', 'Cache R/W')}</th>
               <th className="px-6 py-3 font-medium text-right">{t('table.cost', 'Cost')}</th>
               <th className="px-6 py-3 font-medium">{t('table.session', 'Session')}</th>
             </tr>
@@ -58,7 +60,7 @@ export function UsageTable() {
               // Loading skeleton
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i} className="animate-pulse">
-                  {Array.from({ length: 7 }).map((_, j) => (
+                  {Array.from({ length: 9 }).map((_, j) => (
                     <td key={j} className="px-6 py-4">
                       <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded" />
                     </td>
@@ -67,7 +69,7 @@ export function UsageTable() {
               ))
             ) : records.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+                <td colSpan={9} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
                   {t('table.noRecords', 'No usage records found')}
                 </td>
               </tr>
@@ -87,6 +89,14 @@ export function UsageTable() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
                     {formatTokens(record.output_tokens)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-gray-500 dark:text-gray-400">
+                    {record.thinking_tokens > 0 ? formatTokens(record.thinking_tokens) : '-'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-gray-500 dark:text-gray-400">
+                    {record.cache_read_tokens > 0 || record.cache_creation_tokens > 0
+                      ? `${formatTokens(record.cache_read_tokens)} / ${formatTokens(record.cache_creation_tokens)}`
+                      : '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right font-medium">
                     {formatCost(record.cost_microdollars)}

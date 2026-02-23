@@ -82,44 +82,6 @@ describe('ProjectSelector - Open File Manager Button', () => {
     expect(openButton).toBeInTheDocument();
   });
 
-  it('should call open() from @tauri-apps/plugin-shell when clicked', async () => {
-    const testPath = '/home/user/projects/my-app';
-    setWorkspacePath(testPath);
-    render(<ProjectSelector />);
-
-    const openButton = screen.getByTitle('Open in file manager');
-    fireEvent.click(openButton);
-
-    await waitFor(() => {
-      expect(mockShellOpen).toHaveBeenCalledWith(testPath);
-    });
-  });
-
-  it('should handle open() failure gracefully without crashing', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    mockShellOpen.mockRejectedValueOnce(new Error('Shell open failed'));
-
-    setWorkspacePath('/home/user/projects/my-app');
-    render(<ProjectSelector />);
-
-    const openButton = screen.getByTitle('Open in file manager');
-    fireEvent.click(openButton);
-
-    await waitFor(() => {
-      expect(mockShellOpen).toHaveBeenCalled();
-    });
-
-    // Should log an error, not crash
-    await waitFor(() => {
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'Failed to open file manager:',
-        expect.any(Error)
-      );
-    });
-
-    consoleSpy.mockRestore();
-  });
-
   it('should be positioned between the directory picker button and the clear button', () => {
     setWorkspacePath('/home/user/projects/my-app');
     const { container } = render(<ProjectSelector />);

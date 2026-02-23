@@ -1000,6 +1000,8 @@ pub async fn execute_standalone(
     app: AppHandle,
     app_state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
+    file_changes_state: State<'_, super::file_changes::FileChangesState>,
+    analytics_state: State<'_, super::analytics::AnalyticsState>,
 ) -> Result<CommandResponse<ExecutionResult>, String> {
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&provider) {
@@ -1108,6 +1110,20 @@ pub async fn execute_standalone(
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config);
 
+    // Wire file change tracker for AI file modification tracking
+    {
+        let tracker = file_changes_state
+            .get_or_create(&event_session_id, &project_path)
+            .await;
+        // Advance turn index and set app handle for event emission
+        if let Ok(mut t) = tracker.lock() {
+            let next = t.turn_index() + 1;
+            t.set_turn_index(next);
+            t.set_app_handle(app.clone());
+        }
+        orchestrator = orchestrator.with_file_change_tracker(tracker);
+    }
+
     // Wire database pool so IndexStore is available for CodebaseSearch
     match app_state.with_database(|db| Ok(db.pool().clone())).await {
         Ok(pool) => {
@@ -1125,6 +1141,16 @@ pub async fn execute_standalone(
         }
         if let Some(emb_mgr) = manager.get_embedding_manager(&project_path).await {
             orchestrator = orchestrator.with_embedding_manager(emb_mgr);
+        }
+    }
+
+    // Wire analytics tracking for persistent usage recording
+    {
+        let _ = analytics_state.initialize(&app_state).await;
+        if let Some(tx) = analytics_state.get_tracker_sender().await {
+            orchestrator = orchestrator
+                .with_analytics_tracker(tx)
+                .with_analytics_cost_calculator(analytics_state.cost_calculator());
         }
     }
 
@@ -1181,6 +1207,11 @@ pub async fn save_output_export(path: String, content: String) -> CommandRespons
 }
 
 /// Get usage statistics from the database
+///
+/// Deprecated: Use the new analytics system (`services/analytics/`) via
+/// `get_dashboard_summary` or `list_usage_records` commands instead.
+/// This function queries the legacy `analytics` table which is no longer written to.
+#[deprecated(note = "Use services/analytics/ commands (get_dashboard_summary, list_usage_records) instead")]
 #[tauri::command]
 pub async fn get_usage_stats(
     provider: Option<String>,
@@ -1228,6 +1259,10 @@ pub async fn get_usage_stats(
 }
 
 /// Calculate cost for token usage
+///
+/// Deprecated: Cost calculation is now handled by `services/analytics/cost.rs`
+/// (`CostCalculator`) with model-aware pricing from the analytics database.
+#[deprecated(note = "Use services/analytics/cost.rs CostCalculator instead")]
 pub fn calculate_cost(
     input_tokens: u32,
     output_tokens: u32,
@@ -1246,6 +1281,11 @@ pub fn calculate_cost(
 }
 
 /// Record usage in the database
+///
+/// Deprecated: Usage is now automatically tracked by the analytics pipeline
+/// (`services/analytics/tracker.rs`) via `track_analytics()` in the agentic loop.
+/// This function writes to the legacy `analytics` table which is no longer read.
+#[deprecated(note = "Usage is now tracked automatically via services/analytics/tracker.rs")]
 pub async fn record_usage(
     state: &AppState,
     provider: &str,
@@ -1278,6 +1318,8 @@ pub async fn execute_standalone_with_session(
     app: AppHandle,
     app_state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
+    file_changes_state: State<'_, super::file_changes::FileChangesState>,
+    analytics_state: State<'_, super::analytics::AnalyticsState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&request.provider) {
@@ -1364,6 +1406,19 @@ pub async fn execute_standalone_with_session(
     // Create orchestrator with database (IndexStore is auto-wired to ToolExecutor)
     let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
 
+    // Wire file change tracker for AI file modification tracking
+    {
+        let tracker = file_changes_state
+            .get_or_create(&session_id, &request.project_path)
+            .await;
+        if let Ok(mut t) = tracker.lock() {
+            let next = t.turn_index() + 1;
+            t.set_turn_index(next);
+            t.set_app_handle(app.clone());
+        }
+        orchestrator = orchestrator.with_file_change_tracker(tracker);
+    }
+
     // Wire embedding service and EmbeddingManager from IndexManager for semantic CodebaseSearch
     if let Some(ref manager) = *standalone_state.index_manager.read().await {
         if let Some(emb_svc) = manager.get_embedding_service(&request.project_path).await {
@@ -1371,6 +1426,16 @@ pub async fn execute_standalone_with_session(
         }
         if let Some(emb_mgr) = manager.get_embedding_manager(&request.project_path).await {
             orchestrator = orchestrator.with_embedding_manager(emb_mgr);
+        }
+    }
+
+    // Wire analytics tracking for persistent usage recording
+    {
+        let _ = analytics_state.initialize(&app_state).await;
+        if let Some(atx) = analytics_state.get_tracker_sender().await {
+            orchestrator = orchestrator
+                .with_analytics_tracker(atx)
+                .with_analytics_cost_calculator(analytics_state.cost_calculator());
         }
     }
 
@@ -1650,6 +1715,7 @@ pub async fn resume_standalone_execution(
     app: AppHandle,
     app_state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
+    file_changes_state: State<'_, super::file_changes::FileChangesState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     // Get database pool
     let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
@@ -1796,6 +1862,19 @@ pub async fn resume_standalone_execution(
     };
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
+
+    // Wire file change tracker for AI file modification tracking
+    {
+        let tracker = file_changes_state
+            .get_or_create(&request.session_id, &session.project_path)
+            .await;
+        if let Ok(mut t) = tracker.lock() {
+            let next = t.turn_index() + 1;
+            t.set_turn_index(next);
+            t.set_app_handle(app.clone());
+        }
+        orchestrator = orchestrator.with_file_change_tracker(tracker);
+    }
 
     // Wire embedding service and EmbeddingManager from IndexManager for semantic CodebaseSearch
     if let Some(ref manager) = *standalone_state.index_manager.read().await {

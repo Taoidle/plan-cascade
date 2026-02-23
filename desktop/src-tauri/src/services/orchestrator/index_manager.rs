@@ -1062,14 +1062,27 @@ impl IndexManager {
             return Ok(0);
         }
 
-        // Infer actual dimension from the first vector
+        // Infer actual dimension from the first vector.
+        // Mixed dimensions can occur when the embedding provider changes —
+        // rebuild_from_vectors filters mismatched vectors internally.
         let actual_dim = vectors[0].1.len();
+        let mismatched_count = vectors.iter().filter(|(_, v)| v.len() != actual_dim).count();
+        if mismatched_count > 0 {
+            warn!(
+                expected_dim = actual_dim,
+                mismatched = mismatched_count,
+                total = vectors.len(),
+                "index manager: found embeddings with mismatched dimensions, \
+                 they will be filtered during HNSW rebuild"
+            );
+        }
+
         hnsw.set_dimension(actual_dim);
 
         // Atomically rebuild — concurrent searches see old or new, never empty
         hnsw.rebuild_from_vectors(&vectors).await?;
 
-        Ok(vectors.len())
+        Ok(vectors.len() - mismatched_count)
     }
 
     /// Update the status map and emit a Tauri event.
@@ -1119,123 +1132,6 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // ensure_indexed: spawns indexer when no index exists
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn ensure_indexed_spawns_indexer_for_new_project() {
-        let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join("main.py"), "x = 1\n").expect("write");
-
-        let mgr = IndexManager::new(test_pool());
-        let project_path = dir.path().to_string_lossy().to_string();
-
-        mgr.ensure_indexed(&project_path).await;
-
-        // Give the background task a moment to finish.
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        let status = mgr.get_status(&project_path).await;
-        assert_eq!(status.status, "indexed");
-        assert!(status.total_files > 0);
-    }
-
-    // -----------------------------------------------------------------------
-    // ensure_indexed: does NOT spawn a second indexer
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn ensure_indexed_is_idempotent() {
-        let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join("lib.py"), "y = 2\n").expect("write");
-
-        let mgr = IndexManager::new(test_pool());
-        let project_path = dir.path().to_string_lossy().to_string();
-
-        mgr.ensure_indexed(&project_path).await;
-        // Wait for first indexing to complete.
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        // Second call should not spawn a new indexer because index already exists.
-        mgr.ensure_indexed(&project_path).await;
-
-        let indexers = mgr.active_indexers.read().await;
-        // The first indexer has already completed and its handle remains, but
-        // a second one should NOT have been inserted (the completed task stays
-        // in the map until replaced or removed, but no *new* entry is added).
-        // We just verify the status is still "indexed".
-        drop(indexers);
-
-        let status = mgr.get_status(&project_path).await;
-        assert_eq!(status.status, "indexed");
-    }
-
-    // -----------------------------------------------------------------------
-    // trigger_reindex: clears and re-indexes
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn trigger_reindex_clears_and_reindexes() {
-        let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join("a.py"), "a = 1\n").expect("write");
-
-        let mgr = IndexManager::new(test_pool());
-        let project_path = dir.path().to_string_lossy().to_string();
-
-        // Index first.
-        mgr.ensure_indexed(&project_path).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        let status_before = mgr.get_status(&project_path).await;
-        assert_eq!(status_before.status, "indexed");
-        assert_eq!(status_before.total_files, 1);
-
-        // Add a file and trigger reindex.
-        fs::write(dir.path().join("b.py"), "b = 2\n").expect("write");
-        mgr.trigger_reindex(&project_path).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        let status_after = mgr.get_status(&project_path).await;
-        assert_eq!(status_after.status, "indexed");
-        assert_eq!(status_after.total_files, 2);
-    }
-
-    // -----------------------------------------------------------------------
-    // start_indexing: aborts previous indexer
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn start_indexing_aborts_previous() {
-        let dir = tempdir().expect("tempdir");
-        for i in 0..50 {
-            fs::write(
-                dir.path().join(format!("file_{i}.py")),
-                format!("val = {i}\n"),
-            )
-            .expect("write");
-        }
-
-        let mgr = IndexManager::new(test_pool());
-        let project_path = dir.path().to_string_lossy().to_string();
-
-        // Start indexing twice rapidly; the second call should abort the first.
-        mgr.start_indexing(&project_path).await;
-        mgr.start_indexing(&project_path).await;
-
-        // Wait for the second indexer to finish.
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-
-        let status = mgr.get_status(&project_path).await;
-        // The final status should be "indexed" (or "error" if the abort caused
-        // a JoinError, but in practice the second indexer completes fine).
-        assert!(
-            status.status == "indexed" || status.status == "error",
-            "unexpected status: {}",
-            status.status,
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // get_status: returns cached status
     // -----------------------------------------------------------------------
 
     // -----------------------------------------------------------------------

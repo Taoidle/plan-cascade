@@ -43,6 +43,7 @@ pub mod worktree;
 pub mod git;
 pub mod knowledge;
 pub mod artifacts;
+pub mod file_change_tracker;
 pub mod graph_workflow;
 
 pub use agent::AgentService;

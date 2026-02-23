@@ -195,7 +195,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         // Give each sub-agent a fresh read cache.
         let isolated_read_cache =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
-        let sub_agent = OrchestratorService::new_sub_agent_with_shared_state(
+        let mut sub_agent = OrchestratorService::new_sub_agent_with_shared_state(
             sub_config,
             cancellation_token,
             isolated_read_cache,
@@ -208,6 +208,10 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             self.memories_snapshot.clone(),
             knowledge_block_snapshot,
         );
+        // Propagate analytics tracking to sub-agent
+        sub_agent.analytics_tx = self.shared_analytics_tx.clone();
+        sub_agent.analytics_cost_calculator = self.shared_analytics_cost_calculator.clone();
+
         let result = sub_agent.execute_story(&effective_prompt, &tools, tx).await;
 
         TaskExecutionResult {
@@ -402,7 +406,21 @@ impl OrchestratorService {
             knowledge_context_config: KnowledgeContextConfig::default(),
             cached_knowledge_block: Mutex::new(None),
             composer_registry: None,
+            analytics_tx: None,
+            analytics_cost_calculator: None,
         }
+    }
+
+    /// Wire an analytics tracker channel for persisting per-call usage to the analytics database.
+    pub fn with_analytics_tracker(mut self, tx: tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>) -> Self {
+        self.analytics_tx = Some(tx);
+        self
+    }
+
+    /// Wire a cost calculator for analytics tracking.
+    pub fn with_analytics_cost_calculator(mut self, calc: Arc<crate::services::analytics::CostCalculator>) -> Self {
+        self.analytics_cost_calculator = Some(calc);
+        self
     }
 
     /// Create a sub-agent orchestrator (no Task tool, no database, inherits cancellation).
@@ -444,6 +462,8 @@ impl OrchestratorService {
             knowledge_context_config: KnowledgeContextConfig::default(),
             cached_knowledge_block: Mutex::new(None),
             composer_registry: None,
+            analytics_tx: None,
+            analytics_cost_calculator: None,
         }
     }
 
@@ -532,7 +552,18 @@ impl OrchestratorService {
             knowledge_context_config: KnowledgeContextConfig::default(),
             cached_knowledge_block: Mutex::new(knowledge_block_snapshot),
             composer_registry: None,
+            analytics_tx: None,
+            analytics_cost_calculator: None,
         }
+    }
+
+    /// Wire a file change tracker to the tool executor for recording LLM file modifications.
+    pub fn with_file_change_tracker(
+        mut self,
+        tracker: Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>,
+    ) -> Self {
+        self.tool_executor.set_file_change_tracker(tracker);
+        self
     }
 
     /// Set the index store for project summary injection into the system prompt.

@@ -25,6 +25,9 @@ export interface UsageRecord {
   provider: string;
   input_tokens: number;
   output_tokens: number;
+  thinking_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
   cost_microdollars: number;
   timestamp: number;
   metadata: string | null;

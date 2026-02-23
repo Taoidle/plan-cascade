@@ -55,7 +55,7 @@ export type {
 // Store Types
 // ============================================================================
 
-export type GitTabId = 'changes' | 'history' | 'branches';
+export type GitTabId = 'changes' | 'history' | 'branches' | 'ai-changes';
 
 interface GitState {
   // --- Data (feature-002: Changes Tab) ---

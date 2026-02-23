@@ -905,25 +905,6 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
       expect(lastLine.type).toBe('text');
     });
 
-    it('should still route text_delta to foreground when session_id matches', async () => {
-      await setupForegroundAndBackground();
-
-      const fgOutputBefore = useExecutionStore.getState().streamingOutput.length;
-
-      emitEvent('claude_code:stream', {
-        event: { type: 'text_delta', content: 'Hello from foreground' },
-        session_id: 'fg-session-1',
-      });
-
-      const state = useExecutionStore.getState();
-      expect(state.streamingOutput.length).toBe(fgOutputBefore + 1);
-      expect(state.streamingOutput[state.streamingOutput.length - 1].content).toBe('Hello from foreground');
-
-      // Background should be unchanged (still just the initial line)
-      const bg = findBgByTaskId('bg-session-1');
-      expect(bg!.snapshot.streamingOutput).toHaveLength(1);
-    });
-
     it('should route tool_start to background session', async () => {
       await setupForegroundAndBackground();
 

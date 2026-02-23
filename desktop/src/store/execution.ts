@@ -146,6 +146,8 @@ export interface StreamLine {
 export interface HistoryConversationLine {
   type: StreamLineType;
   content: string;
+  subAgentId?: string;
+  subAgentDepth?: number;
 }
 
 export interface AnalysisCoverageSnapshot {
@@ -408,6 +410,9 @@ interface ExecutionState {
 
   /** Accumulated token usage for current chat session */
   sessionUsageTotals: BackendUsageStats | null;
+
+  /** Token usage accumulated for the current turn (reset on each new user message) */
+  turnUsageTotals: BackendUsageStats | null;
 
   /** Filter for stripping tool_call code blocks from streaming text */
   toolCallFilter: ToolCallStreamFilter;
@@ -861,6 +866,7 @@ const initialState = {
   standaloneSessionId: null as string | null,
   latestUsage: null as BackendUsageStats | null,
   sessionUsageTotals: null as BackendUsageStats | null,
+  turnUsageTotals: null as BackendUsageStats | null,
   toolCallFilter: new ToolCallStreamFilter(),
   attachments: [] as FileAttachmentData[],
   backgroundSessions: {} as Record<string, SessionSnapshot>,
@@ -940,6 +946,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       standaloneSessionId: nextStandaloneSessionId,
       latestUsage: preserveSimpleConversation ? get().latestUsage : null,
       sessionUsageTotals: preserveSimpleConversation ? get().sessionUsageTotals : null,
+      turnUsageTotals: null,
     });
 
     // Capture session identity for detecting backgrounding during async operations.
@@ -1534,6 +1541,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         ? state.streamingOutput.map((line) => ({
             type: line.type,
             content: line.content,
+            ...(line.subAgentId ? { subAgentId: line.subAgentId } : {}),
+            ...(line.subAgentDepth != null ? { subAgentDepth: line.subAgentDepth } : {}),
           }))
         : undefined;
     const conversationContent =
@@ -1677,6 +1686,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           content: line.content,
           type: line.type,
           timestamp: item.startedAt,
+          ...(line.subAgentId ? { subAgentId: line.subAgentId } : {}),
+          ...(line.subAgentDepth != null ? { subAgentDepth: line.subAgentDepth } : {}),
         });
       }
     } else if (item.conversationContent) {
@@ -1963,6 +1974,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       standaloneSessionId: null,
       latestUsage: null,
       sessionUsageTotals: null,
+      turnUsageTotals: null,
       startedAt: null,
       result: null,
       apiError: null,
@@ -2093,6 +2105,26 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     const targetTurn = turns.find((t) => t.userLineId === userLineId);
     if (!targetTurn) return;
 
+    // Restore files to the state before this turn (fire-and-forget)
+    const taskId = get().taskId;
+    const settingsSnapshot = useSettingsStore.getState();
+    const workspacePath = (settingsSnapshot as { workspacePath?: string }).workspacePath;
+    if (taskId && workspacePath) {
+      void invoke('restore_files_to_turn', {
+        sessionId: taskId,
+        projectRoot: workspacePath,
+        turnIndex: targetTurn.turnIndex,
+      })
+        .then(() =>
+          invoke('truncate_changes_from_turn', {
+            sessionId: taskId,
+            projectRoot: workspacePath,
+            turnIndex: targetTurn.turnIndex,
+          }),
+        )
+        .catch((err: unknown) => console.error('Failed to restore files on rollback:', err));
+    }
+
     // Truncate to keep everything up to and including the target turn's assistant response
     const keepUpToIndex = targetTurn.assistantEndIndex;
     const truncatedLines = lines.slice(0, keepUpToIndex + 1);
@@ -2101,10 +2133,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     const rebuiltTurns = rebuildStandaloneTurns(truncatedLines);
 
     // Cancel active Claude Code session if needed
-    const settingsSnapshot = useSettingsStore.getState();
     const backendValue = String((settingsSnapshot as { backend?: unknown }).backend || '');
     if (isClaudeCodeBackend(backendValue)) {
-      const taskId = get().taskId;
       if (taskId) {
         void invoke('cancel_execution', { session_id: taskId }).catch(() => {});
       }
@@ -3361,9 +3391,19 @@ function handleUnifiedExecutionEvent(
           cache_creation_tokens:
             (prev?.cache_creation_tokens || 0) + (usage.cache_creation_tokens || 0),
         };
+        const prevTurn = get().turnUsageTotals;
+        const nextTurnTotals: BackendUsageStats = {
+          input_tokens: (prevTurn?.input_tokens || 0) + usage.input_tokens,
+          output_tokens: (prevTurn?.output_tokens || 0) + usage.output_tokens,
+          thinking_tokens: (prevTurn?.thinking_tokens || 0) + (usage.thinking_tokens || 0),
+          cache_read_tokens: (prevTurn?.cache_read_tokens || 0) + (usage.cache_read_tokens || 0),
+          cache_creation_tokens:
+            (prevTurn?.cache_creation_tokens || 0) + (usage.cache_creation_tokens || 0),
+        };
         set({
           latestUsage: usage,
           sessionUsageTotals: nextTotals,
+          turnUsageTotals: nextTurnTotals,
         });
         get().addLog(
           `Usage: in=${payload.input_tokens}, out=${payload.output_tokens}${typeof payload.thinking_tokens === 'number' ? `, thinking=${payload.thinking_tokens}` : ''}`

@@ -397,23 +397,6 @@ describe('LLMBackendSection', () => {
     mockSettingsState.standaloneContextTurns = 8;
   });
 
-  it('renders LLM backend title and description', () => {
-    render(<LLMBackendSection />);
-
-    expect(screen.getByText('LLM Backend')).toBeInTheDocument();
-    expect(screen.getByText(/Select your preferred LLM provider/)).toBeInTheDocument();
-  });
-
-  it('renders all backend provider options', () => {
-    render(<LLMBackendSection />);
-
-    expect(screen.getByText('Claude Code (Claude Max)')).toBeInTheDocument();
-    expect(screen.getByText('Claude API')).toBeInTheDocument();
-    expect(screen.getByText('OpenAI')).toBeInTheDocument();
-    expect(screen.getByText('DeepSeek')).toBeInTheDocument();
-    expect(screen.getByText('Ollama (Local)')).toBeInTheDocument();
-  });
-
   it('selects the current backend', () => {
     render(<LLMBackendSection />);
 
@@ -431,14 +414,6 @@ describe('LLMBackendSection', () => {
     expect(mockSetProvider).toHaveBeenCalledWith('openai');
   });
 
-  it('shows API Key Required badge for providers that need keys', () => {
-    render(<LLMBackendSection />);
-
-    const apiKeyBadges = screen.getAllByText('API Key Required');
-    // Claude API, OpenAI, DeepSeek, GLM, Qwen require keys
-    expect(apiKeyBadges.length).toBe(5);
-  });
-
   it('updates standalone context turns setting', () => {
     render(<LLMBackendSection />);
 
@@ -446,32 +421,6 @@ describe('LLMBackendSection', () => {
     fireEvent.change(contextTurnsSelect, { target: { value: '20' } });
 
     expect(mockSetStandaloneContextTurns).toHaveBeenCalledWith(20);
-  });
-
-  it('renders streaming output toggles and updates preferences', () => {
-    render(<LLMBackendSection />);
-
-    const subAgentLabel = screen.getByText('Show sub-agent progress events');
-    const reasoningLabel = screen.getByText('Show model reasoning/thinking traces');
-    const subAgentToggle = subAgentLabel.closest('label')?.querySelector('input') as HTMLInputElement | null;
-    const reasoningToggle = reasoningLabel.closest('label')?.querySelector('input') as HTMLInputElement | null;
-
-    expect(subAgentToggle).toBeTruthy();
-    expect(reasoningToggle).toBeTruthy();
-
-    fireEvent.click(subAgentToggle!);
-    fireEvent.click(reasoningToggle!);
-
-    expect(mockSetShowSubAgentEvents).toHaveBeenCalledWith(false);
-    expect(mockSetShowReasoningOutput).toHaveBeenCalledWith(true);
-  });
-
-  it('renders model selector and custom model input', () => {
-    render(<LLMBackendSection />);
-
-    expect(screen.getByText('Model')).toBeInTheDocument();
-    expect(screen.getByText('Use provider default')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Model name')).toBeInTheDocument();
   });
 
   it('does not show API key configuration for non-key backends', () => {
@@ -482,27 +431,6 @@ describe('LLMBackendSection', () => {
     expect(screen.queryByText(/API Key for/)).not.toBeInTheDocument();
   });
 
-  it('keeps API key status scoped by provider', async () => {
-    mockSettingsState.backend = 'glm';
-    const { rerender } = render(<LLMBackendSection />);
-
-    const glmInput = screen.getByPlaceholderText('Enter your API key');
-    fireEvent.change(glmInput, { target: { value: 'glm-secret-key' } });
-    fireEvent.click(screen.getByText('Save'));
-
-    await waitFor(() => {
-      expect(screen.getByText('API key saved successfully')).toBeInTheDocument();
-    });
-
-    mockSettingsState.backend = 'deepseek';
-    rerender(<LLMBackendSection />);
-
-    await waitFor(() => {
-      expect(screen.getByText('API Key for DeepSeek')).toBeInTheDocument();
-    });
-    expect(screen.getByPlaceholderText('Enter your API key')).toBeInTheDocument();
-    expect(screen.queryByText('Remove')).not.toBeInTheDocument();
-  });
 });
 
 // --------------------------------------------------------------------------

@@ -1,8 +1,32 @@
 {
   "tabs": {
     "changes": "变更",
+    "aiChanges": "AI 变更",
     "history": "历史",
     "branches": "分支"
+  },
+
+  "aiChanges": {
+    "noSession": "无活动会话",
+    "loading": "正在加载 AI 变更...",
+    "noChanges": "本次会话中暂无 AI 文件变更",
+    "turn": "轮次 {{index}}",
+    "files_one": "({{count}} 个文件)",
+    "files_other": "({{count}} 个文件)",
+    "restore": "恢复",
+    "restoreTitle": "将文件恢复到轮次 {{index}} 之前",
+    "loadingDiff": "正在加载差异...",
+    "noDiff": "无差异内容",
+    "restoreComplete": "恢复完成",
+    "restoreConfirm": "恢复到轮次 {{index}} 之前？",
+    "affectedFiles": "以下文件将受到影响：",
+    "actionDelete": "删除",
+    "actionRestore": "恢复",
+    "actionDeleted": "已删除",
+    "actionRestored": "已恢复",
+    "cancel": "取消",
+    "restoring": "正在恢复...",
+    "done": "完成"
   },
 
   "toolChanges": {

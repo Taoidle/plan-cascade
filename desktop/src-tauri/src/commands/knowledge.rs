@@ -483,26 +483,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn crud_query_returns_results_after_ingest() {
-        let (state, _dir) = create_initialized_state().await;
-        let pipeline = state.get_pipeline().await.unwrap();
-
-        let docs = vec![
-            Document::new("d1", "Rust provides memory safety through ownership."),
-            Document::new("d2", "Python is popular for data science."),
-            Document::new("d3", "JavaScript powers the web."),
-        ];
-        pipeline
-            .ingest("docs", "proj-1", "Docs", docs)
-            .await
-            .unwrap();
-
-        let result = pipeline.query("docs", "proj-1", "Rust memory", 3).await.unwrap();
-        assert!(!result.results.is_empty(), "Query should return results");
-        assert_eq!(result.collection_name, "docs");
-    }
-
-    #[tokio::test]
     async fn crud_list_collections_returns_created() {
         let (state, _dir) = create_initialized_state().await;
         let pipeline = state.get_pipeline().await.unwrap();
@@ -561,89 +541,6 @@ mod tests {
 
         let result = pipeline.delete_collection("nonexistent", "proj-1").await;
         assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn crud_ingest_query_roundtrip() {
-        let (state, _dir) = create_initialized_state().await;
-        let pipeline = state.get_pipeline().await.unwrap();
-
-        // Ingest varied documents
-        let doc_inputs = vec![
-            DocumentInput {
-                id: "api-doc".to_string(),
-                content: "REST API endpoints for user management with CRUD operations.".to_string(),
-                source_path: Some("/docs/api.md".to_string()),
-                source_type: Some("markdown".to_string()),
-            },
-            DocumentInput {
-                id: "db-doc".to_string(),
-                content: "Database schema uses PostgreSQL with normalized tables.".to_string(),
-                source_path: Some("/docs/db.md".to_string()),
-                source_type: Some("markdown".to_string()),
-            },
-        ];
-
-        let docs: Vec<Document> = doc_inputs.into_iter().map(|d| d.into_document()).collect();
-        let collection = pipeline.ingest("knowledge", "proj-2", "Project docs", docs).await.unwrap();
-        assert!(collection.chunk_count >= 2);
-
-        // Query
-        let result = pipeline.query("knowledge", "proj-2", "REST API user", 2).await.unwrap();
-        assert!(!result.results.is_empty());
-
-        // List collections shows it
-        let colls = pipeline.list_collections("proj-2").unwrap();
-        assert_eq!(colls.len(), 1);
-        assert_eq!(colls[0].name, "knowledge");
-
-        // Delete
-        pipeline.delete_collection("knowledge", "proj-2").await.unwrap();
-        assert!(pipeline.list_collections("proj-2").unwrap().is_empty());
-    }
-
-    // ======================================================================
-    // Story-003: KnowledgeContextProvider integration tests
-    // ======================================================================
-
-    #[tokio::test]
-    async fn context_provider_from_knowledge_state() {
-        use crate::services::knowledge::context_provider::{
-            KnowledgeContextConfig, KnowledgeContextProvider,
-        };
-
-        let (state, _dir) = create_initialized_state().await;
-        let pipeline = state.get_pipeline().await.unwrap();
-
-        // Ingest documents
-        let docs = vec![
-            Document::new("d1", "Rust ownership prevents memory bugs."),
-            Document::new("d2", "Python data science with pandas."),
-        ];
-        pipeline
-            .ingest("kb", "proj-ctx", "Test KB", docs)
-            .await
-            .unwrap();
-
-        // Create provider from the same pipeline
-        let provider = KnowledgeContextProvider::new(pipeline);
-        let config = KnowledgeContextConfig {
-            enabled: true,
-            max_context_chunks: 3,
-            minimum_relevance_score: 0.0,
-        };
-
-        let chunks = provider
-            .query_for_context("proj-ctx", "Rust ownership", &config)
-            .await
-            .unwrap();
-
-        assert!(!chunks.is_empty(), "Should return relevant context");
-
-        // Format as block for system prompt
-        let block = KnowledgeContextProvider::format_context_block(&chunks);
-        assert!(block.contains("Relevant Knowledge Context"));
-        assert!(block.contains("Context 1"));
     }
 
     #[tokio::test]

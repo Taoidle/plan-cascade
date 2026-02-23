@@ -15,8 +15,11 @@ import { TabBar } from './TabBar';
 import { ChangesTab } from './ChangesTab';
 import { HistoryTab } from './HistoryTab';
 import { BranchesTab } from './BranchesTab';
+import { AIChangesTab } from './AIChangesTab';
 import { ToolChangesBar } from './ToolChangesBar';
 import type { StreamLine } from '../../../store/execution';
+import { useExecutionStore } from '../../../store/execution';
+import { useFileChangesStore } from '../../../store/fileChanges';
 
 // Re-export sub-components for consumers
 export { BranchesTab } from './BranchesTab';
@@ -44,6 +47,10 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
   const status = useGitStore((s) => s.status);
   const commitLog = useGitStore((s) => s.commitLog);
   const branches = useGitStore((s) => s.branches);
+  const taskId = useExecutionStore((s) => s.taskId);
+  const aiChangeCount = useFileChangesStore((s) =>
+    s.turnChanges.reduce((acc, t) => acc + t.changes.length, 0),
+  );
 
   // Initialize git status polling / event subscription
   useGitStatus();
@@ -56,10 +63,11 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
 
     return [
       { id: 'changes' as const, label: t('tabs.changes'), count: stagedCount },
+      { id: 'ai-changes' as const, label: t('tabs.aiChanges'), count: aiChangeCount },
       { id: 'history' as const, label: t('tabs.history'), count: commitLog.length },
       { id: 'branches' as const, label: t('tabs.branches'), count: branches.length },
     ];
-  }, [status, commitLog.length, branches.length, t]);
+  }, [status, commitLog.length, branches.length, aiChangeCount, t]);
 
   return (
     <div
@@ -76,6 +84,9 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
       {/* Tab Content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {selectedTab === 'changes' && <ChangesTab />}
+        {selectedTab === 'ai-changes' && (
+          <AIChangesTab sessionId={taskId} projectRoot={workspacePath} />
+        )}
         {selectedTab === 'history' && <HistoryTab />}
         {selectedTab === 'branches' && <BranchesTab />}
       </div>

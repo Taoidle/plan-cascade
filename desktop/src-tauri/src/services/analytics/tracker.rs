@@ -275,6 +275,16 @@ impl UsageTracker {
         Ok(())
     }
 
+    /// Get a clone of the channel sender for external use
+    pub fn sender(&self) -> mpsc::Sender<TrackerMessage> {
+        self.sender.clone()
+    }
+
+    /// Get a clone of the cost calculator for external use
+    pub fn cost_calculator(&self) -> Arc<CostCalculator> {
+        self.cost_calculator.clone()
+    }
+
     /// Check if tracking is enabled
     pub fn is_enabled(&self) -> bool {
         self.config.enabled

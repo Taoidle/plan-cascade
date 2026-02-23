@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use crate::services::file_change_tracker::FileChangeTracker;
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::services::orchestrator::hnsw_index::HnswIndex;
@@ -193,6 +194,8 @@ pub struct ToolExecutor {
     /// Registry of all available tools (trait-based).
     /// Used for definition generation and dynamic tool management.
     registry: super::trait_def::ToolRegistry,
+    /// Optional file change tracker for recording LLM file modifications.
+    file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
 }
 
 impl ToolExecutor {
@@ -243,6 +246,7 @@ impl ToolExecutor {
             embedding_manager: None,
             hnsw_index: None,
             registry: Self::build_registry(),
+            file_change_tracker: None,
         }
     }
 
@@ -268,6 +272,7 @@ impl ToolExecutor {
             embedding_manager: None,
             hnsw_index: None,
             registry: Self::build_registry(),
+            file_change_tracker: None,
         }
     }
 
@@ -343,6 +348,16 @@ impl ToolExecutor {
         self.hnsw_index.clone()
     }
 
+    /// Set the file change tracker for recording LLM file modifications.
+    pub fn set_file_change_tracker(&mut self, tracker: Arc<Mutex<FileChangeTracker>>) {
+        self.file_change_tracker = Some(tracker);
+    }
+
+    /// Get the file change tracker Arc (if set).
+    pub fn get_file_change_tracker(&self) -> Option<Arc<Mutex<FileChangeTracker>>> {
+        self.file_change_tracker.clone()
+    }
+
     /// Get a reference to the tool registry.
     ///
     /// Use this to inspect available tools, generate definitions, or
@@ -400,6 +415,7 @@ impl ToolExecutor {
             task_dedup_cache: Arc::clone(&self.task_dedup_cache),
             task_context: None, // Set by callers who have TaskContext
             core_context: None, // Set by callers who have OrchestratorContext
+            file_change_tracker: self.file_change_tracker.clone(),
         }
     }
 

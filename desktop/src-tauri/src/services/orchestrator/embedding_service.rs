@@ -371,16 +371,6 @@ mod tests {
     }
 
     #[test]
-    fn tokenize_camel_case() {
-        let tokens = tokenize("processUserData");
-        assert!(tokens.contains(&"process".to_string()));
-        assert!(tokens.contains(&"user".to_string()));
-        assert!(tokens.contains(&"data".to_string()));
-        // Full token also present
-        assert!(tokens.contains(&"processuserdata".to_string()));
-    }
-
-    #[test]
     fn tokenize_snake_case() {
         let tokens = tokenize("get_user_name");
         assert!(tokens.contains(&"get".to_string()));

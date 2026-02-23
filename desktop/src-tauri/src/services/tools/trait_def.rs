@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::services::file_change_tracker::FileChangeTracker;
 use crate::services::llm::types::{ParameterSchema, ToolDefinition};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
@@ -73,6 +74,10 @@ pub struct ToolExecutionContext {
     /// When set, tools can read from the shared memory store
     /// via `core_context.search_memory(pattern)`.
     pub core_context: Option<plan_cascade_core::context::ToolContext>,
+
+    /// Optional file change tracker for recording LLM file modifications.
+    /// When set, Write/Edit tools capture before/after snapshots in CAS.
+    pub file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
 }
 
 impl ToolExecutionContext {
@@ -478,6 +483,7 @@ mod tests {
             task_dedup_cache: Arc::new(Mutex::new(HashMap::new())),
             task_context: None,
             core_context: None,
+            file_change_tracker: None,
         }
     }
 

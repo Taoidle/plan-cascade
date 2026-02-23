@@ -311,26 +311,68 @@ impl HnswIndex {
     ///
     /// The `id` is the data ID (typically the SQLite row ID or a sequential
     /// counter) used to identify the vector in search results.
-    pub async fn insert(&self, id: usize, embedding: &[f32]) {
+    ///
+    /// Returns `true` if the insert succeeded, `false` if the index is not
+    /// initialized or the embedding dimension does not match.
+    pub async fn insert(&self, id: usize, embedding: &[f32]) -> bool {
+        // Dimension guard: refuse to insert when the embedding dimension
+        // doesn't match the index dimension.  Without this check, `hnsw_rs`
+        // (via `anndists`) would panic with an assertion failure.
+        let idx_dim = self.dimension();
+        if idx_dim > 0 && embedding.len() != idx_dim {
+            warn!(
+                embedding_dim = embedding.len(),
+                index_dim = idx_dim,
+                "HNSW insert: dimension mismatch, skipping insert"
+            );
+            return false;
+        }
+
         let guard = self.inner.read().await;
         if let Some(inner) = guard.as_ref() {
             let data = embedding.to_vec();
             inner.hnsw.insert_slice((&data, id));
             self.count.fetch_add(1, Ordering::Relaxed);
+            true
+        } else {
+            false
         }
     }
 
     /// Insert multiple vectors into the index.
-    pub async fn batch_insert(&self, items: &[(usize, Vec<f32>)]) {
+    ///
+    /// Returns `true` if all inserts succeeded, `false` if the index is not
+    /// initialized or the embedding dimension does not match.
+    pub async fn batch_insert(&self, items: &[(usize, Vec<f32>)]) -> bool {
         if items.is_empty() {
-            return;
+            return true;
         }
+
+        // Dimension guard: check the first item's dimension against the index.
+        let idx_dim = self.dimension();
+        if idx_dim > 0 {
+            if let Some((_, first_emb)) = items.first() {
+                if first_emb.len() != idx_dim {
+                    warn!(
+                        embedding_dim = first_emb.len(),
+                        index_dim = idx_dim,
+                        count = items.len(),
+                        "HNSW batch_insert: dimension mismatch, skipping batch"
+                    );
+                    return false;
+                }
+            }
+        }
+
         let guard = self.inner.read().await;
         if let Some(inner) = guard.as_ref() {
             for (id, embedding) in items {
                 inner.hnsw.insert_slice((embedding, *id));
             }
             self.count.fetch_add(items.len(), Ordering::Relaxed);
+            true
+        } else {
+            false
         }
     }
 
@@ -441,23 +483,59 @@ impl HnswIndex {
         }
 
         let actual_dim = vectors[0].1.len();
-        let vectors_owned: Vec<(usize, Vec<f32>)> = vectors.to_vec();
+
+        // Filter vectors to only include those matching the expected dimension.
+        // Mixed dimensions can occur when the embedding provider or its config
+        // changes between indexing runs, leaving stale embeddings in SQLite.
+        let filtered: Vec<(usize, Vec<f32>)> = vectors
+            .iter()
+            .filter(|(id, emb)| {
+                if emb.len() != actual_dim {
+                    warn!(
+                        id = id,
+                        expected_dim = actual_dim,
+                        actual_dim = emb.len(),
+                        "HNSW rebuild: filtering out vector with mismatched dimension"
+                    );
+                    false
+                } else {
+                    true
+                }
+            })
+            .cloned()
+            .collect();
+
+        if filtered.is_empty() {
+            self.initialize().await;
+            return Ok(());
+        }
+
+        let filtered_count = filtered.len();
 
         let new_inner = tokio::task::spawn_blocking(move || {
-            let hnsw = Hnsw::<f32, DistCosine>::new(
-                MAX_NB_CONNECTION,
-                vectors_owned.len().max(DEFAULT_MAX_ELEMENTS),
-                MAX_LAYER,
-                EF_CONSTRUCTION,
-                DistCosine,
-            );
-            for (id, embedding) in &vectors_owned {
-                hnsw.insert_slice((embedding, *id));
-            }
-            Arc::new(HnswInner { hnsw })
+            // Use catch_unwind as an additional safety net — hnsw_rs / anndists
+            // can panic on unexpected input rather than returning errors.
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let hnsw = Hnsw::<f32, DistCosine>::new(
+                    MAX_NB_CONNECTION,
+                    filtered.len().max(DEFAULT_MAX_ELEMENTS),
+                    MAX_LAYER,
+                    EF_CONSTRUCTION,
+                    DistCosine,
+                );
+                for (id, embedding) in &filtered {
+                    hnsw.insert_slice((embedding, *id));
+                }
+                Arc::new(HnswInner { hnsw })
+            }))
         })
         .await
-        .map_err(|e| format!("spawn_blocking panicked: {}", e))?;
+        .map_err(|e| format!("spawn_blocking panicked: {}", e))?
+        .map_err(|_| {
+            "HNSW rebuild panicked during vector insertion \
+             (possible dimension mismatch in hnsw_rs)"
+                .to_string()
+        })?;
 
         // Atomic swap — concurrent searches see old or new, never empty
         {
@@ -465,7 +543,7 @@ impl HnswIndex {
             *guard = Some(new_inner);
         }
         self.dimension.store(actual_dim, Ordering::Relaxed);
-        self.count.store(vectors.len(), Ordering::Relaxed);
+        self.count.store(filtered_count, Ordering::Relaxed);
         {
             let mut stale = self.stale_ids.write().await;
             stale.clear();

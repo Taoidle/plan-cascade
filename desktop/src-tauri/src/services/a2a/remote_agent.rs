@@ -13,7 +13,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use std::sync::Arc;
 //! use crate::services::a2a::remote_agent::RemoteA2aAgent;
 //! use crate::services::agent_composer::registry::ComposerRegistry;

@@ -85,10 +85,43 @@ impl Tool for WriteTool {
             }
         }
 
+        // Capture before-state for change tracking
+        let before_hash = if let Some(tracker) = &ctx.file_change_tracker {
+            if let Ok(t) = tracker.lock() {
+                t.capture_before(&path)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         match std::fs::write(&path, content) {
             Ok(_) => {
                 ctx.invalidate_read_cache_for_path(&path);
                 let line_count = content.lines().count();
+
+                // Record change in tracker
+                if let Some(tracker) = &ctx.file_change_tracker {
+                    if let Ok(mut t) = tracker.lock() {
+                        if let Ok(after_hash) = t.store_content(content.as_bytes()) {
+                            let rel_path = path
+                                .strip_prefix(&ctx.project_root)
+                                .unwrap_or(&path)
+                                .to_string_lossy()
+                                .to_string();
+                            t.record_change(
+                                "",
+                                "Write",
+                                &rel_path,
+                                before_hash,
+                                &after_hash,
+                                &format!("Wrote {} lines", line_count),
+                            );
+                        }
+                    }
+                }
+
                 ToolResult::ok(format!(
                     "Successfully wrote {} lines to {}",
                     line_count,

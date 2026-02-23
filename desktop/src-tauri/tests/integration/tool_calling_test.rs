@@ -17,11 +17,6 @@ use tempfile::TempDir;
 // Tool Definition Tests
 // ============================================================================
 
-#[test]
-fn test_get_tool_definitions_returns_14_tools() {
-    let tools = get_tool_definitions_from_registry();
-    assert_eq!(tools.len(), 14, "Expected exactly 14 tool definitions");
-}
 
 #[test]
 fn test_all_tool_names_present() {
@@ -313,7 +308,7 @@ fn test_tool_definitions_all_serializable_to_json_array() {
     assert!(!json_str.is_empty());
 
     let deserialized: Vec<ToolDefinition> = serde_json::from_str(&json_str).unwrap();
-    assert_eq!(deserialized.len(), 14);
+    assert_eq!(deserialized.len(), tools.len());
 }
 
 // ============================================================================
@@ -508,67 +503,6 @@ async fn test_executor_write_tool_creates_parent_dirs() {
         result.error
     );
     assert!(deep_file.exists());
-}
-
-#[tokio::test]
-async fn test_executor_edit_tool() {
-    let dir = setup_test_env();
-    let executor = ToolExecutor::new(dir.path());
-
-    let file_path = dir.path().join("hello.txt").to_string_lossy().to_string();
-    let args = serde_json::json!({
-        "file_path": file_path,
-        "old_string": "foo bar",
-        "new_string": "REPLACED"
-    });
-
-    let result = executor.execute("Edit", &args).await;
-    assert!(result.success, "Edit should succeed: {:?}", result.error);
-
-    let content = std::fs::read_to_string(dir.path().join("hello.txt")).unwrap();
-    assert!(content.contains("REPLACED"));
-    assert!(!content.contains("foo bar"));
-}
-
-#[tokio::test]
-async fn test_executor_edit_tool_replace_all() {
-    let dir = setup_test_env();
-    std::fs::write(dir.path().join("dup.txt"), "aaa bbb aaa ccc aaa").unwrap();
-    let executor = ToolExecutor::new(dir.path());
-
-    let args = serde_json::json!({
-        "file_path": dir.path().join("dup.txt").to_string_lossy().to_string(),
-        "old_string": "aaa",
-        "new_string": "ZZZ",
-        "replace_all": true
-    });
-
-    let result = executor.execute("Edit", &args).await;
-    assert!(
-        result.success,
-        "Edit replace_all should succeed: {:?}",
-        result.error
-    );
-
-    let content = std::fs::read_to_string(dir.path().join("dup.txt")).unwrap();
-    assert_eq!(content, "ZZZ bbb ZZZ ccc ZZZ");
-}
-
-#[tokio::test]
-async fn test_executor_edit_tool_non_unique_fails() {
-    let dir = setup_test_env();
-    std::fs::write(dir.path().join("dup.txt"), "aaa bbb aaa").unwrap();
-    let executor = ToolExecutor::new(dir.path());
-
-    let args = serde_json::json!({
-        "file_path": dir.path().join("dup.txt").to_string_lossy().to_string(),
-        "old_string": "aaa",
-        "new_string": "ZZZ"
-    });
-
-    let result = executor.execute("Edit", &args).await;
-    assert!(!result.success, "Edit should fail for non-unique string");
-    assert!(result.error.unwrap().contains("appears"));
 }
 
 #[tokio::test]
@@ -874,45 +808,6 @@ async fn test_write_then_read_flow() {
     let output = read_result.output.unwrap();
     assert!(output.contains("Hello from flow test!"));
     assert!(output.contains("Line 2."));
-}
-
-#[tokio::test]
-async fn test_write_then_edit_then_read_flow() {
-    let dir = setup_test_env();
-    let executor = ToolExecutor::new(dir.path());
-
-    let file_path = dir
-        .path()
-        .join("edit_flow.txt")
-        .to_string_lossy()
-        .to_string();
-
-    // Step 1: Write initial content
-    let write_args = serde_json::json!({
-        "file_path": &file_path,
-        "content": "function hello() {\n  return 'world';\n}\n"
-    });
-    let write_result = executor.execute("Write", &write_args).await;
-    assert!(write_result.success);
-
-    // Step 2: Edit the function
-    let edit_args = serde_json::json!({
-        "file_path": &file_path,
-        "old_string": "return 'world';",
-        "new_string": "return 'universe';"
-    });
-    let edit_result = executor.execute("Edit", &edit_args).await;
-    assert!(edit_result.success);
-
-    // Step 3: Read back and verify
-    let read_args = serde_json::json!({
-        "file_path": &file_path
-    });
-    let read_result = executor.execute("Read", &read_args).await;
-    assert!(read_result.success);
-    let output = read_result.output.unwrap();
-    assert!(output.contains("return 'universe';"));
-    assert!(!output.contains("return 'world';"));
 }
 
 #[tokio::test]

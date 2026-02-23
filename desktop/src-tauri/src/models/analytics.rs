@@ -21,6 +21,15 @@ pub struct UsageRecord {
     pub input_tokens: i64,
     /// Number of output tokens
     pub output_tokens: i64,
+    /// Number of thinking/reasoning tokens
+    #[serde(default)]
+    pub thinking_tokens: i64,
+    /// Number of cache read tokens
+    #[serde(default)]
+    pub cache_read_tokens: i64,
+    /// Number of cache creation tokens
+    #[serde(default)]
+    pub cache_creation_tokens: i64,
     /// Calculated cost in microdollars (1 USD = 1,000,000 microdollars)
     pub cost_microdollars: i64,
     /// Unix timestamp of the record
@@ -45,6 +54,9 @@ impl UsageRecord {
             provider: provider.into(),
             input_tokens,
             output_tokens,
+            thinking_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
             cost_microdollars: 0,
             timestamp: chrono::Utc::now().timestamp(),
             metadata: None,
@@ -66,6 +78,14 @@ impl UsageRecord {
     /// Set cost in microdollars
     pub fn with_cost(mut self, cost_microdollars: i64) -> Self {
         self.cost_microdollars = cost_microdollars;
+        self
+    }
+
+    /// Set extended token counts (thinking, cache read, cache creation)
+    pub fn with_extended_tokens(mut self, thinking: i64, cache_read: i64, cache_creation: i64) -> Self {
+        self.thinking_tokens = thinking;
+        self.cache_read_tokens = cache_read;
+        self.cache_creation_tokens = cache_creation;
         self
     }
 

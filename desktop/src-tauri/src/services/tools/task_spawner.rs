@@ -151,9 +151,12 @@ pub fn create_tagged_channel(
                 UnifiedStreamEvent::SubAgentStart { .. }
                 | UnifiedStreamEvent::SubAgentEnd { .. }
                 | UnifiedStreamEvent::SubAgentEvent { .. }
-                // Internal signal events don't need wrapping
-                | UnifiedStreamEvent::Usage { .. }
-                | UnifiedStreamEvent::Complete { .. } => event,
+                // Usage events don't need wrapping — they accumulate in the frontend
+                | UnifiedStreamEvent::Usage { .. } => event,
+                // Complete falls through to _other → wrapped as SubAgentEvent.
+                // This prevents sub-agent completion from triggering premature
+                // frontend "Completed" status while the parent agent is still running.
+                // Sub-agent completion is already signaled via SubAgentEnd.
                 // All other events get wrapped as SubAgentEvent
                 _other => {
                     if let Ok(json) = serde_json::to_value(&event) {

@@ -316,6 +316,7 @@ for line in sys.stdin:
             task_dedup_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
             task_context: None,
             core_context: None,
+            file_change_tracker: None,
         };
 
         let result = adapter

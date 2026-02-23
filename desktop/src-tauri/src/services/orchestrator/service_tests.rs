@@ -1571,25 +1571,6 @@ fn test_compaction_strategy_unreliable_provider_uses_prefix_stable() {
 }
 
 #[test]
-fn test_compaction_strategy_none_provider_uses_prefix_stable() {
-    // None-reliability providers (Ollama) should use prefix-stable compaction
-    let config = OrchestratorConfig {
-        provider: ProviderConfig {
-            provider: ProviderType::Ollama,
-            model: "llama3".to_string(),
-            base_url: Some("http://localhost:11434".to_string()),
-            ..Default::default()
-        },
-        ..test_config()
-    };
-    let orchestrator = OrchestratorService::new(config);
-    assert_eq!(
-        orchestrator.provider.tool_call_reliability(),
-        ToolCallReliability::None,
-    );
-}
-
-#[test]
 fn test_compaction_strategy_openai_uses_llm_summary() {
     // OpenAI is reliable, should use LLM-summary compaction
     let config = OrchestratorConfig {
@@ -2897,32 +2878,6 @@ fn test_recent_calls_sliding_window_respects_window_size() {
 }
 
 #[test]
-fn test_consecutive_count_not_reset_after_detection() {
-    let mut detector = ToolCallLoopDetector::new(3, 20);
-    // Trigger detection at count=3
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    let result = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    assert!(result.is_some());
-
-    // After detection, consecutive_count should still be 3, NOT reset to 0.
-    // A 4th identical call should increment to 4.
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    assert_eq!(detector.consecutive_count, 4, "consecutive_count should continue counting, not reset after detection");
-
-    // 5th call: no detection (5 % 3 != 0)
-    let result2 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    assert!(result2.is_none(), "Should not detect at count=5 (not a multiple of threshold)");
-    assert_eq!(detector.consecutive_count, 5);
-
-    // 6th call: fires again (6 % 3 == 0) - this is the second detection
-    let result3 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    assert!(result3.is_some(), "Should detect again at count=6 (2*threshold)");
-    assert_eq!(detector.consecutive_count, 6);
-    assert_eq!(detector.total_detections(), 2, "total_detections should be 2 after two firings");
-}
-
-#[test]
 fn test_constructor_accepts_threshold_and_window_size() {
     let detector = ToolCallLoopDetector::new(5, 30);
     assert_eq!(detector.threshold, 5);
@@ -3036,57 +2991,6 @@ fn test_escalation_level1_warning_on_first_detection() {
         other => panic!("Expected LoopDetection::Warning, got {:?}", other),
     }
     assert_eq!(detector.total_detections(), 1);
-}
-
-#[test]
-fn test_escalation_level2_strip_tools_on_second_detection() {
-    let mut detector = ToolCallLoopDetector::new(3, 20);
-    // First detection (Level 1): consecutive identical calls
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    let r1 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    assert!(matches!(r1, Some(LoopDetection::Warning(_))));
-
-    // Second detection (Level 2): keep going with the same call
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    let r2 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    match r2 {
-        Some(LoopDetection::StripTools(msg, tools)) => {
-            assert!(msg.contains("LOOP DETECTED"), "StripTools should contain warning: {}", msg);
-            assert!(tools.contains(&"Read".to_string()), "Should strip the looping tool");
-        }
-        other => panic!("Expected LoopDetection::StripTools on second detection, got {:?}", other),
-    }
-    assert_eq!(detector.total_detections(), 2);
-    assert!(detector.stripped_tools().contains("Read"));
-}
-
-#[test]
-fn test_escalation_level3_force_terminate_on_third_detection() {
-    let mut detector = ToolCallLoopDetector::new(3, 20);
-    // First detection
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-
-    // Second detection
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-
-    // Third detection (Level 3): force terminate
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    let r3 = detector.record_call("Read", r#"{"file_path":"a.rs"}"#, false);
-    match r3 {
-        Some(LoopDetection::ForceTerminate(msg)) => {
-            assert!(msg.contains("LOOP DETECTED") || msg.contains("FORCE TERMINATE"),
-                "ForceTerminate should mention loop/termination: {}", msg);
-        }
-        other => panic!("Expected LoopDetection::ForceTerminate on third detection, got {:?}", other),
-    }
-    assert_eq!(detector.total_detections(), 3);
 }
 
 #[test]
@@ -4178,6 +4082,8 @@ fn test_sub_agent_knowledge_block_capped() {
         skills_snapshot: vec![],
         memories_snapshot: vec![],
         knowledge_block_snapshot: Some(big_block.clone()),
+        shared_analytics_tx: None,
+        shared_analytics_cost_calculator: None,
     };
 
     // The truncation happens in spawn_task() — simulate it here

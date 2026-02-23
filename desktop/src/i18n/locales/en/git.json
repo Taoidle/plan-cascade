@@ -1,8 +1,32 @@
 {
   "tabs": {
     "changes": "Changes",
+    "aiChanges": "AI Changes",
     "history": "History",
     "branches": "Branches"
+  },
+
+  "aiChanges": {
+    "noSession": "No active session",
+    "loading": "Loading AI changes...",
+    "noChanges": "No AI file changes in this session yet",
+    "turn": "Turn {{index}}",
+    "files_one": "({{count}} file)",
+    "files_other": "({{count}} files)",
+    "restore": "Restore",
+    "restoreTitle": "Restore files to before Turn {{index}}",
+    "loadingDiff": "Loading diff...",
+    "noDiff": "No diff available",
+    "restoreComplete": "Restore Complete",
+    "restoreConfirm": "Restore to before Turn {{index}}?",
+    "affectedFiles": "The following files will be affected:",
+    "actionDelete": "delete",
+    "actionRestore": "restore",
+    "actionDeleted": "deleted",
+    "actionRestored": "restored",
+    "cancel": "Cancel",
+    "restoring": "Restoring...",
+    "done": "Done"
   },
 
   "toolChanges": {

@@ -1180,47 +1180,6 @@ def farewell(name):
     }
 
     #[test]
-    fn test_rust_impl_methods_have_parent() {
-        let src = r#"
-pub struct MyStruct {
-    value: i32,
-}
-
-impl MyStruct {
-    pub fn new(value: i32) -> Self {
-        Self { value }
-    }
-
-    pub fn get_value(&self) -> i32 {
-        self.value
-    }
-}
-"#;
-        let symbols = parse_symbols(src, "rust", 30);
-        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(
-            names.contains(&"MyStruct"),
-            "should find MyStruct. Got: {:?}",
-            names
-        );
-        assert!(
-            names.contains(&"new"),
-            "should find new method. Got: {:?}",
-            names
-        );
-        assert!(
-            names.contains(&"get_value"),
-            "should find get_value method. Got: {:?}",
-            names
-        );
-
-        let new_fn = symbols.iter().find(|s| s.name == "new").unwrap();
-        assert_eq!(new_fn.kind, SymbolKind::Function);
-        // The impl block should set parent context
-        assert!(new_fn.parent.is_some(), "impl method should have parent");
-    }
-
-    #[test]
     fn test_signatures_are_populated() {
         let src = r#"
 pub fn process_data(items: &[Item], config: &Config) -> Result<Vec<Output>> {

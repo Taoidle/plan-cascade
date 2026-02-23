@@ -1436,6 +1436,7 @@ async fn run_incremental_embedding(
     }
 
     let chunks = chunk_file_content(&content, &language);
+    let mut dim_mismatch = false;
     for chunk in &chunks {
         let embedding = embedding_service.embed_text(&chunk.text);
         let bytes = embedding_to_bytes(&embedding);
@@ -1452,8 +1453,8 @@ async fn run_incremental_embedding(
                 error = %e,
                 "background indexer: incremental embedding failed"
             );
-        } else {
-            // Insert new embedding into HNSW
+        } else if !dim_mismatch {
+            // Insert new embedding into HNSW (skip if dimension already mismatched)
             if let Some(hnsw) = hnsw_index {
                 if hnsw.is_ready().await {
                     if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
@@ -1461,16 +1462,19 @@ async fn run_incremental_embedding(
                         &rel_str,
                         chunk.index as i64,
                     ) {
-                        hnsw.insert(rowid, &embedding).await;
+                        if !hnsw.insert(rowid, &embedding).await {
+                            dim_mismatch = true;
+                        }
                     }
                 }
             }
         }
     }
 
-    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%)
+    // Check if HNSW needs a full rebuild due to dimension mismatch or
+    // stale ID accumulation (>10%)
     if let Some(hnsw) = hnsw_index {
-        if hnsw.is_ready().await && hnsw.needs_rebuild().await {
+        if hnsw.is_ready().await && (dim_mismatch || hnsw.needs_rebuild().await) {
             info!(
                 "background indexer: HNSW stale ratio exceeded 10%, triggering full rebuild"
             );
@@ -1591,27 +1595,40 @@ async fn run_incremental_embedding_with_content(
         }
     }
 
-    // Insert new embeddings into HNSW.
+    // Insert new embeddings into HNSW (with dimension-mismatch detection).
+    let mut dim_mismatch = false;
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await {
-            for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
-                if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
-                    &project_path,
-                    rel_str,
-                    chunk.index as i64,
-                ) {
-                    hnsw.insert(rowid, embedding).await;
+            let idx_dim = hnsw.dimension();
+            let emb_dim = embeddings.first().map(|e| e.len()).unwrap_or(0);
+            if idx_dim > 0 && emb_dim > 0 && idx_dim != emb_dim {
+                warn!(
+                    index_dim = idx_dim,
+                    embedding_dim = emb_dim,
+                    "background indexer: embedding dimension changed, triggering HNSW rebuild"
+                );
+                dim_mismatch = true;
+            } else {
+                for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
+                    if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
+                        &project_path,
+                        rel_str,
+                        chunk.index as i64,
+                    ) {
+                        hnsw.insert(rowid, embedding).await;
+                    }
                 }
             }
         }
     }
 
-    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%).
+    // Check if HNSW needs a full rebuild due to dimension mismatch or
+    // stale ID accumulation (>10%).
     // Note: save_to_disk is NOT called here — it is deferred to the
     // batch-level save in run_incremental_loop to avoid N file_dumps
     // for N files in a batch.
     if let Some(hnsw) = hnsw_index {
-        if hnsw.is_ready().await && hnsw.needs_rebuild().await {
+        if hnsw.is_ready().await && (dim_mismatch || hnsw.needs_rebuild().await) {
             info!(
                 "background indexer: HNSW stale ratio exceeded 10%, triggering full rebuild"
             );
@@ -1886,6 +1903,28 @@ async fn run_incremental_embedding_managed(
         .await
         .map_err(|e| format!("embedding manager incremental embed failed: {}", e))?;
 
+    // Pre-check dimension mismatch before inserting into HNSW.
+    let dim_mismatch = if let Some(hnsw) = hnsw_index {
+        if hnsw.is_ready().await {
+            let idx_dim = hnsw.dimension();
+            let emb_dim = embeddings.first().map(|e| e.len()).unwrap_or(0);
+            if idx_dim > 0 && emb_dim > 0 && idx_dim != emb_dim {
+                warn!(
+                    index_dim = idx_dim,
+                    embedding_dim = emb_dim,
+                    "background indexer: embedding dimension changed (managed), triggering HNSW rebuild"
+                );
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
     for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
         let bytes = embedding_to_bytes(embedding);
         if let Err(e) = index_store.upsert_chunk_embedding(
@@ -1901,8 +1940,8 @@ async fn run_incremental_embedding_managed(
                 error = %e,
                 "background indexer: incremental embedding failed (managed)"
             );
-        } else {
-            // Insert new embedding into HNSW
+        } else if !dim_mismatch {
+            // Insert new embedding into HNSW (skip if dimension mismatched)
             if let Some(hnsw) = hnsw_index {
                 if hnsw.is_ready().await {
                     if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
@@ -1917,9 +1956,10 @@ async fn run_incremental_embedding_managed(
         }
     }
 
-    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%)
+    // Check if HNSW needs a full rebuild due to dimension mismatch or
+    // stale ID accumulation (>10%)
     if let Some(hnsw) = hnsw_index {
-        if hnsw.is_ready().await && hnsw.needs_rebuild().await {
+        if hnsw.is_ready().await && (dim_mismatch || hnsw.needs_rebuild().await) {
             info!(
                 "background indexer: HNSW stale ratio exceeded 10% (managed), triggering full rebuild"
             );
@@ -2064,27 +2104,43 @@ async fn run_incremental_embedding_managed_with_content(
         }
     }
 
-    // Insert new embeddings into HNSW.
+    // Insert new embeddings into HNSW (with dimension-mismatch detection).
+    let mut dim_mismatch = false;
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await {
-            for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
-                if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
-                    &project_path,
-                    rel_str,
-                    chunk.index as i64,
-                ) {
-                    hnsw.insert(rowid, embedding).await;
+            // Check dimension up front — if the embedding provider changed,
+            // individual inserts would be rejected by the dimension guard.
+            // Trigger a full rebuild instead.
+            let idx_dim = hnsw.dimension();
+            let emb_dim = embeddings.first().map(|e| e.len()).unwrap_or(0);
+            if idx_dim > 0 && emb_dim > 0 && idx_dim != emb_dim {
+                warn!(
+                    index_dim = idx_dim,
+                    embedding_dim = emb_dim,
+                    "background indexer: embedding dimension changed (managed), triggering HNSW rebuild"
+                );
+                dim_mismatch = true;
+            } else {
+                for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
+                    if let Ok(Some(rowid)) = index_store.get_embedding_rowid_for_chunk(
+                        &project_path,
+                        rel_str,
+                        chunk.index as i64,
+                    ) {
+                        hnsw.insert(rowid, embedding).await;
+                    }
                 }
             }
         }
     }
 
-    // Check if HNSW needs a full rebuild due to stale ID accumulation (>10%).
+    // Check if HNSW needs a full rebuild due to dimension mismatch or
+    // stale ID accumulation (>10%).
     // Note: save_to_disk is NOT called here — it is deferred to the
     // batch-level save in run_incremental_loop to avoid N file_dumps
     // for N files in a batch.
     if let Some(hnsw) = hnsw_index {
-        if hnsw.is_ready().await && hnsw.needs_rebuild().await {
+        if hnsw.is_ready().await && (dim_mismatch || hnsw.needs_rebuild().await) {
             info!(
                 "background indexer: HNSW stale ratio exceeded 10% (managed), triggering full rebuild"
             );
@@ -2127,8 +2183,24 @@ async fn rebuild_hnsw_after_embedding(
         return Ok(());
     }
 
-    // Infer actual dimension from the first vector and update the index
+    // Infer actual dimension from the first vector and update the index.
+    // Mixed dimensions occur when the embedding provider changes — the
+    // filtering is handled inside rebuild_from_vectors.
     let actual_dim = all_embeddings[0].1.len();
+    let mismatched_count = all_embeddings
+        .iter()
+        .filter(|(_, v)| v.len() != actual_dim)
+        .count();
+    if mismatched_count > 0 {
+        warn!(
+            expected_dim = actual_dim,
+            mismatched = mismatched_count,
+            total = all_embeddings.len(),
+            "background indexer: found embeddings with mismatched dimensions, \
+             they will be filtered during HNSW rebuild"
+        );
+    }
+
     hnsw.set_dimension(actual_dim);
 
     // Atomically rebuild the HNSW index — concurrent searches see either the
@@ -2141,7 +2213,7 @@ async fn rebuild_hnsw_after_embedding(
     })?;
 
     info!(
-        vectors = all_embeddings.len(),
+        vectors = all_embeddings.len() - mismatched_count,
         dimension = actual_dim,
         "background indexer: HNSW index rebuilt and saved to disk"
     );

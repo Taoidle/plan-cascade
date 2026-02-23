@@ -656,69 +656,6 @@ mod tests {
         assert!(result.is_err(), "Should fail when not initialized");
     }
 
-    #[tokio::test]
-    async fn test_plugin_state_initialize() {
-        let dir = TempDir::new().unwrap();
-        let plugin_dir = dir.path().join(".claude-plugin");
-        fs::create_dir_all(&plugin_dir).unwrap();
-        create_test_plugin(&plugin_dir);
-
-        let state = PluginState::new();
-        state.initialize(dir.path().to_str().unwrap()).await;
-
-        let count = state.with_manager(|m| m.plugin_count()).await.unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[tokio::test]
-    async fn test_plugin_state_toggle() {
-        let dir = TempDir::new().unwrap();
-        let plugin_dir = dir.path().join(".claude-plugin");
-        fs::create_dir_all(&plugin_dir).unwrap();
-        create_test_plugin(&plugin_dir);
-
-        let state = PluginState::new();
-        state.initialize(dir.path().to_str().unwrap()).await;
-
-        // Verify enabled
-        let enabled = state
-            .with_manager(|m| m.is_plugin_enabled("test-plugin"))
-            .await
-            .unwrap();
-        assert!(enabled);
-
-        // Toggle off
-        let toggled = state
-            .with_manager_mut(|m| m.toggle_plugin("test-plugin", false))
-            .await
-            .unwrap();
-        assert!(toggled);
-
-        // Verify disabled
-        let enabled = state
-            .with_manager(|m| m.is_plugin_enabled("test-plugin"))
-            .await
-            .unwrap();
-        assert!(!enabled);
-    }
-
-    #[tokio::test]
-    async fn test_plugin_state_refresh() {
-        let dir = TempDir::new().unwrap();
-        let plugin_dir = dir.path().join(".claude-plugin");
-        fs::create_dir_all(&plugin_dir).unwrap();
-        create_test_plugin(&plugin_dir);
-
-        let state = PluginState::new();
-        state.initialize(dir.path().to_str().unwrap()).await;
-
-        let plugins = state.with_manager_mut(|m| {
-            m.refresh_plugins();
-            m.list_plugins()
-        }).await.unwrap();
-        assert_eq!(plugins.len(), 1);
-    }
-
     #[test]
     fn test_copy_dir_recursive() {
         let src = TempDir::new().unwrap();

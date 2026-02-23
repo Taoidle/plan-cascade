@@ -104,6 +104,18 @@ impl Tool for EditTool {
             Ok(b) => b,
             Err(e) => return ToolResult::err(format!("Failed to read file: {}", e)),
         };
+
+        // Capture before-state for change tracking (reuse already-read bytes)
+        let before_hash = if let Some(tracker) = &ctx.file_change_tracker {
+            if let Ok(t) = tracker.lock() {
+                t.store_content(&bytes).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
@@ -137,6 +149,33 @@ impl Tool for EditTool {
         match std::fs::write(&path, &new_content) {
             Ok(_) => {
                 ctx.invalidate_read_cache_for_path(&path);
+
+                // Record change in tracker
+                if let Some(tracker) = &ctx.file_change_tracker {
+                    if let Ok(mut t) = tracker.lock() {
+                        if let Ok(after_hash) = t.store_content(new_content.as_bytes()) {
+                            let rel_path = path
+                                .strip_prefix(&ctx.project_root)
+                                .unwrap_or(&path)
+                                .to_string_lossy()
+                                .to_string();
+                            let desc = if replace_all {
+                                format!("Replaced {} occurrences", occurrences)
+                            } else {
+                                "Edited 1 occurrence".to_string()
+                            };
+                            t.record_change(
+                                "",
+                                "Edit",
+                                &rel_path,
+                                before_hash,
+                                &after_hash,
+                                &desc,
+                            );
+                        }
+                    }
+                }
+
                 if replace_all {
                     ToolResult::ok(format!(
                         "Successfully replaced {} occurrences in {}",

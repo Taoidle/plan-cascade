@@ -391,6 +391,11 @@ pub struct OrchestratorService {
     /// When present, the agentic loop can transfer execution to named agents
     /// via the `TransferHandler` when `apply_actions` returns a `transfer_target`.
     composer_registry: Option<Arc<ComposerRegistry>>,
+    /// Optional analytics tracking channel. Each LLM call sends a usage record
+    /// through this channel for persistent storage in the analytics database.
+    pub(crate) analytics_tx: Option<mpsc::Sender<crate::services::analytics::TrackerMessage>>,
+    /// Optional cost calculator, used with analytics_tx to compute per-call costs.
+    pub(crate) analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances
@@ -424,6 +429,10 @@ struct OrchestratorTaskSpawner {
     memories_snapshot: Vec<crate::services::memory::store::MemoryEntry>,
     /// Pre-built knowledge RAG context block (already truncated for sub-agents).
     knowledge_block_snapshot: Option<String>,
+    /// Shared analytics tracking channel from the parent orchestrator.
+    shared_analytics_tx: Option<mpsc::Sender<crate::services::analytics::TrackerMessage>>,
+    /// Shared cost calculator from the parent orchestrator.
+    shared_analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

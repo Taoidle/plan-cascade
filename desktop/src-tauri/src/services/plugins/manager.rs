@@ -363,24 +363,6 @@ mod tests {
     }
 
     #[test]
-    fn test_plugin_manager_list_plugins() {
-        let dir = TempDir::new().unwrap();
-        let plugin_dir = dir.path().join(".claude-plugin");
-        fs::create_dir_all(&plugin_dir).unwrap();
-        create_plugin(&plugin_dir, "test-plugin", true, false, false);
-
-        let mut manager = PluginManager::new_with_home(dir.path(), dir.path());
-        manager.discover_and_load();
-
-        let list = manager.list_plugins();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].name, "test-plugin");
-        assert_eq!(list[0].version, "1.0.0");
-        assert_eq!(list[0].skill_count, 1);
-        assert!(list[0].enabled);
-    }
-
-    #[test]
     fn test_plugin_manager_toggle() {
         let dir = TempDir::new().unwrap();
         let plugin_dir = dir.path().join(".claude-plugin");

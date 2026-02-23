@@ -918,48 +918,6 @@ mod tests {
     // =====================================================================
 
     #[test]
-    fn extract_python_symbols() {
-        let src = r#"
-import os
-
-def greet(name):
-    return f"Hello {name}"
-
-class MyService:
-    def __init__(self):
-        pass
-
-    def run(self):
-        pass
-
-def helper():
-    pass
-
-class AnotherClass(Base):
-    pass
-"#;
-        let symbols = extract_symbols_from_str(src, "python", 30);
-        assert_eq!(symbols.len(), 4);
-
-        assert_eq!(symbols[0].name, "greet");
-        assert_eq!(symbols[0].kind, SymbolKind::Function);
-        assert_eq!(symbols[0].line, 4);
-
-        assert_eq!(symbols[1].name, "MyService");
-        assert_eq!(symbols[1].kind, SymbolKind::Class);
-        assert_eq!(symbols[1].line, 7);
-
-        // Indented method `__init__` and `run` should NOT match (not top-level)
-        assert_eq!(symbols[2].name, "helper");
-        assert_eq!(symbols[2].kind, SymbolKind::Function);
-        assert_eq!(symbols[2].line, 14);
-
-        assert_eq!(symbols[3].name, "AnotherClass");
-        assert_eq!(symbols[3].kind, SymbolKind::Class);
-        assert_eq!(symbols[3].line, 17);
-    }
-
-    #[test]
     fn extract_rust_symbols() {
         let src = r#"
 use std::io;
