@@ -158,6 +158,7 @@ pub fn tool_context_to_tool_execution_context(ctx: &ToolContext) -> ToolExecutio
         task_context: None,
         core_context: None,
         file_change_tracker: None,
+        permission_gate: None,
     }
 }
 
@@ -471,6 +472,7 @@ mod tests {
             task_context: None,
             core_context: None,
             file_change_tracker: None,
+            permission_gate: None,
         }
     }
 

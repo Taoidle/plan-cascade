@@ -33,7 +33,10 @@ import { ContextualActions } from '../shared/ContextualActions';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { WorkflowCardRenderer } from './WorkflowCards/WorkflowCardRenderer';
 import { StructuredInputOverlay } from './StructuredInputOverlay';
+import { ToolPermissionOverlay } from './ToolPermissionOverlay';
+import { PermissionSelector } from './PermissionSelector';
 import { WorkflowProgressPanel } from './WorkflowProgressPanel';
+import { useToolPermissionStore } from '../../store/toolPermission';
 import type { CardPayload } from '../../types/workflowCard';
 
 type WorkflowMode = 'chat' | 'task';
@@ -116,6 +119,14 @@ export function SimpleMode() {
   const isInterviewSubmitting = useWorkflowOrchestratorStore((s) => s.phase === 'interviewing') &&
     pendingQuestion === null;
 
+  // Tool permission state
+  const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
+  const permissionQueueSize = useToolPermissionStore((s) => s.requestQueue.length);
+  const isPermissionResponding = useToolPermissionStore((s) => s.isResponding);
+  const respondPermission = useToolPermissionStore((s) => s.respond);
+  const permissionLevel = useToolPermissionStore((s) => s.sessionLevel);
+  const setPermissionLevel = useToolPermissionStore((s) => s.setSessionLevel);
+
   const handleStart = useCallback(async () => {
     if (!description.trim() || isSubmitting || isAnalyzingStrategy) return;
 
@@ -192,6 +203,11 @@ export function SimpleMode() {
           <ConnectionStatus status={connectionStatus} />
           <ProjectSelector compact />
           <ModelSwitcher />
+          <PermissionSelector
+            level={permissionLevel}
+            onLevelChange={(level) => setPermissionLevel('current-session', level)}
+            sessionId="current-session"
+          />
           {workspacePath && <IndexStatus compact />}
           <TokenUsageInline turnUsage={turnUsageTotals} totals={sessionUsageTotals} />
         </div>
@@ -319,8 +335,16 @@ export function SimpleMode() {
             </div>
 
             <div className="shrink-0 border-t border-gray-200 dark:border-gray-700">
-              {/* Structured input overlay for interview boolean/select questions */}
-              {workflowMode === 'task' && pendingQuestion && pendingQuestion.inputType !== 'text' && pendingQuestion.inputType !== 'textarea' ? (
+              {/* Priority 1: Tool permission approval overlay */}
+              {permissionRequest ? (
+                <ToolPermissionOverlay
+                  request={permissionRequest}
+                  onRespond={respondPermission}
+                  loading={isPermissionResponding}
+                  queueSize={permissionQueueSize}
+                />
+              ) : /* Priority 2: Structured input overlay for interview boolean/select questions */
+              workflowMode === 'task' && pendingQuestion && pendingQuestion.inputType !== 'text' && pendingQuestion.inputType !== 'textarea' ? (
                 <StructuredInputOverlay
                   question={pendingQuestion}
                   onSubmit={submitInterviewAnswer}

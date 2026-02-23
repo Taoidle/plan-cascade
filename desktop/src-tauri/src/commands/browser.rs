@@ -121,6 +121,7 @@ fn make_minimal_ctx() -> crate::services::tools::trait_def::ToolExecutionContext
         task_context: None,
         core_context: None,
         file_change_tracker: None,
+        permission_gate: None,
     }
 }
 

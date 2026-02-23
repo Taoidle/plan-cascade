@@ -1563,6 +1563,7 @@ impl OrchestratorService {
             knowledge_block_snapshot,
             shared_analytics_tx: self.analytics_tx.clone(),
             shared_analytics_cost_calculator: self.analytics_cost_calculator.clone(),
+            shared_permission_gate: self.permission_gate.clone(),
         });
         let max_concurrent = self.config.provider.effective_max_concurrent_subagents();
         Some(TaskContext {
@@ -1614,6 +1615,11 @@ impl OrchestratorService {
         const MAX_CONSECUTIVE_TASK_ONLY: u32 = 3;
 
         let task_ctx = self.build_task_context(&tx);
+
+        // Connect permission gate event channel so approval requests reach the frontend
+        if let Some(ref gate) = self.permission_gate {
+            gate.set_event_tx(tx.clone()).await;
+        }
 
         // Session memory manager for Layer 2 context (placed at index 1, after system prompt)
         let mut session_memory_manager = SessionMemoryManager::new(1);

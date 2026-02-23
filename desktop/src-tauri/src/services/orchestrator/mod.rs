@@ -19,6 +19,8 @@ pub mod embedding_provider_tfidf;
 pub mod embedding_service;
 pub mod hooks;
 pub mod hnsw_index;
+pub mod permission_gate;
+pub mod permissions;
 pub mod transfer;
 pub mod hybrid_search;
 pub mod index_manager;

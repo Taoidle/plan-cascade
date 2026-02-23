@@ -372,6 +372,31 @@ pub enum UnifiedStreamEvent {
         /// Token count of the compaction summary
         compaction_tokens: u32,
     },
+
+    // ========================================================================
+    // Tool permission events (runtime approval gate)
+    // ========================================================================
+    /// Backend requests frontend approval for a tool execution
+    ToolPermissionRequest {
+        /// Unique identifier for this approval request
+        request_id: String,
+        /// Session that owns this tool call
+        session_id: String,
+        /// Name of the tool being invoked (e.g., "Bash", "Write")
+        tool_name: String,
+        /// JSON-serialized arguments to the tool
+        arguments: String,
+        /// Risk classification: "ReadOnly", "SafeWrite", or "Dangerous"
+        risk: String,
+    },
+
+    /// Frontend responds to a tool permission request
+    ToolPermissionResponse {
+        /// Matches the request_id from ToolPermissionRequest
+        request_id: String,
+        /// Whether the tool execution is allowed
+        allowed: bool,
+    },
 }
 
 /// Errors that can occur during stream adaptation

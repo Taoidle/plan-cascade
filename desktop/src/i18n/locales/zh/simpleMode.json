@@ -181,6 +181,32 @@
     "startConversation": "在右侧输入框中开始对话。"
   },
 
+  "permission": {
+    "toolRequiresApproval": "工具需要审批：",
+    "pending": "+{{count}} 个待审批",
+    "showArguments": "显示参数",
+    "hideArguments": "隐藏参数",
+    "allow": "允许",
+    "deny": "拒绝",
+    "alwaysAllow": "始终允许",
+    "risk": {
+      "readOnly": "只读",
+      "safeWrite": "写入",
+      "dangerous": "危险"
+    },
+    "level": {
+      "strict": "严格",
+      "standard": "标准",
+      "permissive": "宽松"
+    },
+    "levelDescription": {
+      "strict": "所有写入/执行操作需要确认",
+      "standard": "危险操作需要确认",
+      "permissive": "所有操作自动批准"
+    },
+    "tooltip": "权限：{{level}} - {{description}}"
+  },
+
   "actions": {
     "execute": "执行",
     "executeTitle": "开始执行",

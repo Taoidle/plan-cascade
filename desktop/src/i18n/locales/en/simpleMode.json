@@ -181,6 +181,32 @@
     "startConversation": "Start a conversation on the right input box."
   },
 
+  "permission": {
+    "toolRequiresApproval": "Tool requires approval:",
+    "pending": "+{{count}} pending",
+    "showArguments": "Show arguments",
+    "hideArguments": "Hide arguments",
+    "allow": "Allow",
+    "deny": "Deny",
+    "alwaysAllow": "Always Allow",
+    "risk": {
+      "readOnly": "Read Only",
+      "safeWrite": "Write",
+      "dangerous": "Dangerous"
+    },
+    "level": {
+      "strict": "Strict",
+      "standard": "Standard",
+      "permissive": "Permissive"
+    },
+    "levelDescription": {
+      "strict": "All write/exec operations need confirmation",
+      "standard": "Dangerous operations need confirmation",
+      "permissive": "All operations auto-approved"
+    },
+    "tooltip": "Permission: {{level}} - {{description}}"
+  },
+
   "actions": {
     "execute": "Execute",
     "executeTitle": "Start execution",

@@ -1429,6 +1429,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       });
       get().addLog('Execution cancelled');
       get().saveToHistory();
+
+      // Clear pending permission requests for the cancelled session
+      import('./toolPermission').then(({ useToolPermissionStore }) => {
+        useToolPermissionStore.getState().clearAll();
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       set({ apiError: errorMessage });
@@ -1469,6 +1474,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       backgroundSessions: state.backgroundSessions,
       activeSessionId: state.activeSessionId,
       toolCallFilter: new ToolCallStreamFilter(),
+    });
+
+    // Reset tool permission state for the new session
+    import('./toolPermission').then(({ useToolPermissionStore }) => {
+      useToolPermissionStore.getState().reset();
     });
   },
 
@@ -3751,6 +3761,27 @@ async function setupTauriEventListeners(
           default:
             break;
         }
+        return;
+      }
+
+      // ---- Tool permission request (not in typed union, handled separately) ----
+      if ((streamEvent as { type: string }).type === 'tool_permission_request') {
+        const evt = streamEvent as unknown as {
+          request_id: string;
+          session_id: string;
+          tool_name: string;
+          arguments: string;
+          risk: string;
+        };
+        import('./toolPermission').then(({ useToolPermissionStore }) => {
+          useToolPermissionStore.getState().enqueueRequest({
+            requestId: evt.request_id,
+            sessionId: evt.session_id,
+            toolName: evt.tool_name,
+            arguments: evt.arguments,
+            risk: evt.risk as 'ReadOnly' | 'SafeWrite' | 'Dangerous',
+          });
+        });
         return;
       }
 

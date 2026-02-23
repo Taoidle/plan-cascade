@@ -396,6 +396,9 @@ pub struct OrchestratorService {
     pub(crate) analytics_tx: Option<mpsc::Sender<crate::services::analytics::TrackerMessage>>,
     /// Optional cost calculator, used with analytics_tx to compute per-call costs.
     pub(crate) analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
+    /// Optional permission gate for tool execution approval.
+    /// Shared across parent and sub-agents via Arc.
+    pub(crate) permission_gate: Option<Arc<super::permission_gate::PermissionGate>>,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances
@@ -433,6 +436,8 @@ struct OrchestratorTaskSpawner {
     shared_analytics_tx: Option<mpsc::Sender<crate::services::analytics::TrackerMessage>>,
     /// Shared cost calculator from the parent orchestrator.
     shared_analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
+    /// Shared permission gate from the parent orchestrator.
+    shared_permission_gate: Option<Arc<super::permission_gate::PermissionGate>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

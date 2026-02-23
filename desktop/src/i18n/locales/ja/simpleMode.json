@@ -181,6 +181,32 @@
     "startConversation": "右の入力ボックスで会話を始めてください。"
   },
 
+  "permission": {
+    "toolRequiresApproval": "ツールの承認が必要です：",
+    "pending": "+{{count}} 件保留中",
+    "showArguments": "引数を表示",
+    "hideArguments": "引数を非表示",
+    "allow": "許可",
+    "deny": "拒否",
+    "alwaysAllow": "常に許可",
+    "risk": {
+      "readOnly": "読み取り専用",
+      "safeWrite": "書き込み",
+      "dangerous": "危険"
+    },
+    "level": {
+      "strict": "厳格",
+      "standard": "標準",
+      "permissive": "寛容"
+    },
+    "levelDescription": {
+      "strict": "すべての書き込み/実行操作に確認が必要",
+      "standard": "危険な操作に確認が必要",
+      "permissive": "すべての操作を自動承認"
+    },
+    "tooltip": "権限：{{level}} - {{description}}"
+  },
+
   "actions": {
     "execute": "実行",
     "executeTitle": "実行を開始",

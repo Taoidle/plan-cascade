@@ -196,6 +196,8 @@ pub struct ToolExecutor {
     registry: super::trait_def::ToolRegistry,
     /// Optional file change tracker for recording LLM file modifications.
     file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
+    /// Optional permission gate for tool execution approval.
+    permission_gate: Option<Arc<crate::services::orchestrator::permission_gate::PermissionGate>>,
 }
 
 impl ToolExecutor {
@@ -247,6 +249,7 @@ impl ToolExecutor {
             hnsw_index: None,
             registry: Self::build_registry(),
             file_change_tracker: None,
+            permission_gate: None,
         }
     }
 
@@ -273,6 +276,7 @@ impl ToolExecutor {
             hnsw_index: None,
             registry: Self::build_registry(),
             file_change_tracker: None,
+            permission_gate: None,
         }
     }
 
@@ -358,6 +362,14 @@ impl ToolExecutor {
         self.file_change_tracker.clone()
     }
 
+    /// Set the permission gate for tool execution approval.
+    pub fn set_permission_gate(
+        &mut self,
+        gate: Arc<crate::services::orchestrator::permission_gate::PermissionGate>,
+    ) {
+        self.permission_gate = Some(gate);
+    }
+
     /// Get a reference to the tool registry.
     ///
     /// Use this to inspect available tools, generate definitions, or
@@ -416,6 +428,7 @@ impl ToolExecutor {
             task_context: None, // Set by callers who have TaskContext
             core_context: None, // Set by callers who have OrchestratorContext
             file_change_tracker: self.file_change_tracker.clone(),
+            permission_gate: self.permission_gate.clone(),
         }
     }
 

@@ -4084,6 +4084,7 @@ fn test_sub_agent_knowledge_block_capped() {
         knowledge_block_snapshot: Some(big_block.clone()),
         shared_analytics_tx: None,
         shared_analytics_cost_calculator: None,
+        shared_permission_gate: None,
     };
 
     // The truncation happens in spawn_task() — simulate it here

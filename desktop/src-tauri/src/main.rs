@@ -20,6 +20,7 @@ use plan_cascade_desktop::commands::knowledge::KnowledgeState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
 use plan_cascade_desktop::commands::git::GitState;
+use plan_cascade_desktop::commands::permissions::PermissionState;
 use plan_cascade_desktop::state::AppState;
 
 use tauri::Manager;
@@ -47,6 +48,7 @@ fn main() {
         .manage(ArtifactState::new())
         .manage(GitState::new())
         .manage(FileChangesState::new())
+        .manage(PermissionState::new())
         .invoke_handler(tauri::generate_handler![
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
@@ -388,6 +390,10 @@ fn main() {
             plan_cascade_desktop::commands::file_changes::restore_files_to_turn,
             plan_cascade_desktop::commands::file_changes::truncate_changes_from_turn,
             plan_cascade_desktop::commands::file_changes::restore_single_file,
+            // Permission commands
+            plan_cascade_desktop::commands::permissions::set_session_permission_level,
+            plan_cascade_desktop::commands::permissions::get_session_permission_level,
+            plan_cascade_desktop::commands::permissions::respond_tool_permission,
             // Artifact commands
             plan_cascade_desktop::commands::artifacts::artifact_save,
             plan_cascade_desktop::commands::artifacts::artifact_load,

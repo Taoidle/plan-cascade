@@ -211,6 +211,11 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         // Propagate analytics tracking to sub-agent
         sub_agent.analytics_tx = self.shared_analytics_tx.clone();
         sub_agent.analytics_cost_calculator = self.shared_analytics_cost_calculator.clone();
+        // Propagate permission gate to sub-agent so tool calls are approved
+        if let Some(ref gate) = self.shared_permission_gate {
+            sub_agent.tool_executor.set_permission_gate(Arc::clone(gate));
+            sub_agent.permission_gate = Some(Arc::clone(gate));
+        }
 
         let result = sub_agent.execute_story(&effective_prompt, &tools, tx).await;
 
@@ -408,6 +413,7 @@ impl OrchestratorService {
             composer_registry: None,
             analytics_tx: None,
             analytics_cost_calculator: None,
+            permission_gate: None,
         }
     }
 
@@ -464,6 +470,7 @@ impl OrchestratorService {
             composer_registry: None,
             analytics_tx: None,
             analytics_cost_calculator: None,
+            permission_gate: None,
         }
     }
 
@@ -554,7 +561,20 @@ impl OrchestratorService {
             composer_registry: None,
             analytics_tx: None,
             analytics_cost_calculator: None,
+            permission_gate: None,
         }
+    }
+
+    /// Wire a permission gate for tool execution approval.
+    /// Also wires the gate to the tool executor so all tool calls go through approval.
+    pub fn with_permission_gate(
+        mut self,
+        gate: Arc<crate::services::orchestrator::permission_gate::PermissionGate>,
+    ) -> Self {
+        self.tool_executor
+            .set_permission_gate(Arc::clone(&gate));
+        self.permission_gate = Some(gate);
+        self
     }
 
     /// Wire a file change tracker to the tool executor for recording LLM file modifications.

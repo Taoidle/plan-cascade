@@ -19,6 +19,7 @@ use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::services::orchestrator::hnsw_index::HnswIndex;
 use crate::services::orchestrator::index_store::IndexStore;
+use crate::services::orchestrator::permission_gate::PermissionGate;
 use crate::services::tools::executor::ReadCacheEntry;
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::task_spawner::TaskContext;
@@ -78,6 +79,11 @@ pub struct ToolExecutionContext {
     /// Optional file change tracker for recording LLM file modifications.
     /// When set, Write/Edit tools capture before/after snapshots in CAS.
     pub file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
+
+    /// Optional permission gate for tool execution approval.
+    /// When set, tool calls are checked against the session's permission level
+    /// before execution. When None, all tools execute without approval.
+    pub permission_gate: Option<Arc<PermissionGate>>,
 }
 
 impl ToolExecutionContext {
@@ -214,6 +220,10 @@ impl ToolRegistry {
 
     /// Execute a tool by name with the given context and arguments.
     ///
+    /// When a `PermissionGate` is present in the context, tool calls are checked
+    /// against the session's permission level before execution. Denied tools
+    /// return a `ToolResult::err` without executing.
+    ///
     /// Returns `ToolResult::err` if the tool is not found.
     pub async fn execute(
         &self,
@@ -221,6 +231,13 @@ impl ToolRegistry {
         ctx: &ToolExecutionContext,
         args: Value,
     ) -> ToolResult {
+        // Permission gate check
+        if let Some(ref gate) = ctx.permission_gate {
+            if let Err(reason) = gate.check(&ctx.session_id, name, &args).await {
+                return ToolResult::err(reason);
+            }
+        }
+
         match self.tools.get(name) {
             Some(tool) => tool.execute(ctx, args).await,
             None => ToolResult::err(format!("Unknown tool: {}", name)),
@@ -484,6 +501,7 @@ mod tests {
             task_context: None,
             core_context: None,
             file_change_tracker: None,
+            permission_gate: None,
         }
     }
 

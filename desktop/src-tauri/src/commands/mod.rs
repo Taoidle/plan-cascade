@@ -40,6 +40,7 @@ pub mod worktree;
 pub mod git;
 pub mod knowledge;
 pub mod artifacts;
+pub mod permissions;
 pub mod pipeline_execution;
 pub mod browser;
 
@@ -80,5 +81,6 @@ pub use worktree::*;
 pub use git::*;
 pub use knowledge::*;
 pub use artifacts::*;
+pub use permissions::*;
 pub use pipeline_execution::*;
 pub use browser::*;

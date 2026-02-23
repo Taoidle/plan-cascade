@@ -1320,6 +1320,7 @@ pub async fn execute_standalone_with_session(
     standalone_state: State<'_, StandaloneState>,
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     analytics_state: State<'_, super::analytics::AnalyticsState>,
+    permission_state: State<'_, super::permissions::PermissionState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&request.provider) {
@@ -1404,7 +1405,9 @@ pub async fn execute_standalone_with_session(
         .map_err(|e| e.to_string())?;
 
     // Create orchestrator with database (IndexStore is auto-wired to ToolExecutor)
-    let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
+    let mut orchestrator = OrchestratorService::new(orchestrator_config)
+        .with_database(pool)
+        .with_permission_gate(permission_state.gate.clone());
 
     // Wire file change tracker for AI file modification tracking
     {
@@ -1528,7 +1531,14 @@ pub async fn execute_standalone_with_session(
 pub async fn cancel_standalone_execution(
     session_id: String,
     standalone_state: State<'_, StandaloneState>,
+    permission_state: State<'_, super::permissions::PermissionState>,
 ) -> Result<CommandResponse<bool>, String> {
+    // Cancel any pending permission requests for this session
+    permission_state
+        .gate
+        .cancel_session_requests(&session_id)
+        .await;
+
     if let Some(orchestrator) = standalone_state.get_orchestrator(&session_id).await {
         orchestrator.cancel();
         Ok(CommandResponse::ok(true))
@@ -1716,6 +1726,7 @@ pub async fn resume_standalone_execution(
     app_state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
+    permission_state: State<'_, super::permissions::PermissionState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     // Get database pool
     let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
@@ -1861,7 +1872,9 @@ pub async fn resume_standalone_execution(
         sub_agent_depth: None,
     };
 
-    let mut orchestrator = OrchestratorService::new(orchestrator_config).with_database(pool);
+    let mut orchestrator = OrchestratorService::new(orchestrator_config)
+        .with_database(pool)
+        .with_permission_gate(permission_state.gate.clone());
 
     // Wire file change tracker for AI file modification tracking
     {
