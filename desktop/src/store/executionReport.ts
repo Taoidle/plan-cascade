@@ -203,7 +203,7 @@ export function buildTimeline(
       entries.push({
         storyId,
         storyTitle: story?.title ?? storyId,
-        batchIndex: batch.batchIndex,
+        batchIndex: batch.index,
         agent,
         durationMs: avgDurationPerStory,
         startOffsetMs: offsetMs,

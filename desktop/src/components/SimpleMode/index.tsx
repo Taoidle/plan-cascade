@@ -80,6 +80,8 @@ export function SimpleMode() {
     backgroundSessions,
     switchToSession,
     removeBackgroundSession,
+    foregroundParentSessionId,
+    foregroundBgId,
   } = useExecutionStore();
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
@@ -326,6 +328,8 @@ export function SimpleMode() {
               backgroundSessions={backgroundSessions}
               onSwitchSession={switchToSession}
               onRemoveSession={removeBackgroundSession}
+              foregroundParentSessionId={foregroundParentSessionId}
+              foregroundBgId={foregroundBgId}
             />
           )}
 
@@ -585,6 +589,7 @@ function ChatTranscript({
                 isClaudeCodeBackend={isClaudeCodeBackendValue}
                 onEdit={handleEdit}
                 onCopy={handleCopy}
+                onFork={() => useExecutionStore.getState().forkSessionAtTurn(turn.userLine.id)}
               />
             ) : status === 'running' && isLastTurn ? (
               <div className="flex justify-start">
@@ -610,6 +615,7 @@ function ChatAssistantSection({
   isClaudeCodeBackend,
   onEdit,
   onCopy,
+  onFork,
 }: {
   lines: StreamLine[];
   isLastTurn: boolean;
@@ -618,6 +624,7 @@ function ChatAssistantSection({
   isClaudeCodeBackend: boolean;
   onEdit: (lineId: number, newContent: string) => void;
   onCopy: (content: string) => void;
+  onFork: (userLineId: number) => void;
 }) {
   const showReasoning = useSettingsStore((s) => s.showReasoningOutput);
 
@@ -741,6 +748,7 @@ function ChatAssistantSection({
           onRegenerate={() => useExecutionStore.getState().regenerateResponse(userLineId)}
           onRollback={() => useExecutionStore.getState().rollbackToTurn(userLineId)}
           onCopy={() => onCopy(textContent)}
+          onFork={() => onFork(userLineId)}
         />
       )}
     </div>

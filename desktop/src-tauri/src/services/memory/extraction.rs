@@ -117,6 +117,45 @@ pub fn detect_memory_command(user_message: &str) -> Option<MemoryCommand> {
 pub struct MemoryExtractor;
 
 impl MemoryExtractor {
+    /// Character threshold above which a conversation should be summarized
+    /// before memory extraction. ~6000 chars ≈ 2000 tokens.
+    pub const SUMMARIZE_THRESHOLD: usize = 6000;
+
+    /// Build a focused summarization prompt for long conversations.
+    ///
+    /// Instead of a generic summary, this prompt guides the LLM to extract
+    /// specific categories of information that are most valuable for
+    /// cross-session memory persistence.
+    pub fn build_summarization_prompt(
+        task_description: &str,
+        conversation_content: &str,
+    ) -> String {
+        format!(
+            r#"You are a conversation analyst. Your job is to distill a long development session into a focused summary that captures information worth remembering across sessions.
+
+## Original Task
+{task}
+
+## Full Conversation
+{conversation}
+
+---
+
+Produce a focused summary (under 2000 characters) that prioritizes the following categories. Only include categories where the conversation provides clear evidence:
+
+1. **User Preferences**: Communication language (e.g., prefers Chinese/Japanese/English), coding style preferences, tool preferences (e.g., "use pnpm not npm"), formatting preferences
+2. **Project Tech Stack**: Programming languages, frameworks, key libraries, build tools, package managers discovered or confirmed
+3. **Architecture & Patterns**: Key architectural decisions, design patterns in use, module organization, API conventions
+4. **Workflow Conventions**: Testing approach, branch naming, commit style, CI/CD patterns, directory structure conventions
+5. **Corrections & Pitfalls**: Mistakes encountered, things that don't work, approaches that were abandoned and why
+6. **Key Decisions Made**: Important choices during the session, trade-offs considered, rationale for decisions
+
+Format as a structured list with category headers. Omit categories with no relevant information. Be concise and factual — no filler text."#,
+            task = task_description,
+            conversation = conversation_content,
+        )
+    }
+
     /// Build the extraction prompt for the LLM.
     ///
     /// This prompt instructs the LLM to analyze session data and extract

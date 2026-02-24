@@ -954,6 +954,20 @@ impl Database {
         Ok(())
     }
 
+    /// Get all settings whose key starts with the given prefix
+    pub fn get_settings_by_prefix(&self, prefix: &str) -> AppResult<Vec<(String, String)>> {
+        let conn = self.get_connection()?;
+        let pattern = format!("{}%", prefix);
+        let mut stmt = conn.prepare("SELECT key, value FROM settings WHERE key LIKE ?1")?;
+        let rows = stmt
+            .query_map(params![pattern], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
     // ========================================================================
     // Execution Operations
     // ========================================================================

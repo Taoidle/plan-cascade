@@ -69,7 +69,8 @@ export interface TaskStory {
 
 /** Execution batch */
 export interface ExecutionBatch {
-  batchIndex: number;
+  /** Batch index (0-based). Rust field name is `index`, serialized as `"index"` via camelCase. */
+  index: number;
   storyIds: string[];
 }
 

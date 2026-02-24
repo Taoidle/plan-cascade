@@ -58,6 +58,7 @@
     "editPlaceholder": "メッセージを編集...",
     "save": "保存",
     "cancel": "キャンセル",
+    "fork": "フォーク",
     "contextWarning": "セッションが再開されます。以前のコンテキストは失われます。"
   },
 
@@ -100,7 +101,8 @@
     "deleteSession": "セッション削除",
     "activeSessions": "アクティブセッション",
     "switchSession": "このセッションに切替",
-    "removeSession": "セッションを削除"
+    "removeSession": "セッションを削除",
+    "currentFork": "（現在）"
   },
 
   "diffPanel": {
@@ -316,7 +318,10 @@
       "deps": "依存: {{deps}}",
       "approveAndExecute": "承認して実行",
       "edit": "編集",
-      "doneEditing": "編集完了"
+      "doneEditing": "編集完了",
+      "priorityHigh": "高",
+      "priorityMedium": "中",
+      "priorityLow": "低"
     },
 
     "execution": {

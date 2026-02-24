@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { PrdCardData, PrdStoryData } from '../../../types/workflowCard';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
+import type { TaskStory } from '../../../store/taskMode';
 
 export function PrdCard({ data, interactive }: { data: PrdCardData; interactive: boolean }) {
   const { t } = useTranslation('simpleMode');
@@ -17,8 +18,15 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
   const [isEditing, setIsEditing] = useState(false);
   const phase = useWorkflowOrchestratorStore((s) => s.phase);
   const approvePrd = useWorkflowOrchestratorStore((s) => s.approvePrd);
+  const editablePrd = useWorkflowOrchestratorStore((s) => s.editablePrd);
+  const updateEditableStory = useWorkflowOrchestratorStore((s) => s.updateEditableStory);
 
   const isActive = interactive && phase === 'reviewing_prd';
+
+  // When editing, read stories from the live editablePrd; otherwise use the snapshot card data
+  const displayStories: PrdStoryData[] = isEditing && editablePrd
+    ? editablePrd.stories
+    : data.stories;
 
   const toggleStory = useCallback((storyId: string) => {
     setExpandedStories((prev) => {
@@ -39,7 +47,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
   // Group stories by batch
   const storyBatchMap = new Map<string, number>();
   data.batches.forEach((batch) => {
-    batch.storyIds.forEach((id) => storyBatchMap.set(id, batch.batchIndex));
+    batch.storyIds.forEach((id) => storyBatchMap.set(id, batch.index));
   });
 
   return (
@@ -62,12 +70,12 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
 
       {/* Story list grouped by batch */}
       <div className="divide-y divide-emerald-200/60 dark:divide-emerald-800/60">
-        {data.batches.map((batch) => (
-          <div key={batch.batchIndex}>
+        {data.batches.map((batch, batchIdx) => (
+          <div key={batch.index ?? batchIdx}>
             {/* Batch header */}
             <div className="px-3 py-1 bg-emerald-100/30 dark:bg-emerald-900/20">
               <span className="text-2xs font-medium text-emerald-600 dark:text-emerald-400">
-                {t('workflow.prd.batch', { index: batch.batchIndex + 1 })}
+                {t('workflow.prd.batch', { index: (batch.index ?? batchIdx) + 1 })}
                 <span className="ml-1 text-emerald-500/60 dark:text-emerald-400/60">
                   ({batch.storyIds.length === 1 ? t('workflow.prd.storyCount', { count: batch.storyIds.length }) : t('workflow.prd.storyCountPlural', { count: batch.storyIds.length })})
                 </span>
@@ -76,7 +84,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
 
             {/* Stories in this batch */}
             {batch.storyIds.map((storyId) => {
-              const story = data.stories.find((s) => s.id === storyId);
+              const story = displayStories.find((s) => s.id === storyId);
               if (!story) return null;
               return (
                 <StoryRow
@@ -85,6 +93,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
                   expanded={expandedStories.has(story.id)}
                   onToggle={() => toggleStory(story.id)}
                   isEditing={isEditing}
+                  onUpdate={updateEditableStory}
                 />
               );
             })}
@@ -92,7 +101,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
         ))}
 
         {/* Stories not in any batch (edge case) */}
-        {data.stories
+        {displayStories
           .filter((s) => !storyBatchMap.has(s.id))
           .map((story) => (
             <StoryRow
@@ -101,6 +110,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
               expanded={expandedStories.has(story.id)}
               onToggle={() => toggleStory(story.id)}
               isEditing={isEditing}
+              onUpdate={updateEditableStory}
             />
           ))}
       </div>
@@ -135,12 +145,14 @@ function StoryRow({
   story,
   expanded,
   onToggle,
-  isEditing: _isEditing,
+  isEditing,
+  onUpdate,
 }: {
   story: PrdStoryData;
   expanded: boolean;
   onToggle: () => void;
   isEditing: boolean;
+  onUpdate: (storyId: string, updates: Partial<Pick<TaskStory, 'title' | 'description' | 'priority' | 'acceptanceCriteria'>>) => void;
 }) {
   const { t } = useTranslation('simpleMode');
   const priorityColor = {
@@ -148,6 +160,8 @@ function StoryRow({
     medium: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',
     low: 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400',
   }[story.priority] || 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400';
+
+  const inputClass = 'w-full px-1.5 py-0.5 text-xs rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-800 text-emerald-800 dark:text-emerald-200 focus:outline-none focus:ring-1 focus:ring-emerald-500';
 
   return (
     <div className="px-3 py-1.5">
@@ -171,15 +185,37 @@ function StoryRow({
           {story.id}
         </span>
 
-        <span className="text-xs text-emerald-800 dark:text-emerald-200 flex-1 truncate group-hover:underline">
-          {story.title}
-        </span>
+        {isEditing ? (
+          <input
+            className={clsx(inputClass, 'flex-1')}
+            value={story.title}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => onUpdate(story.id, { title: e.target.value })}
+          />
+        ) : (
+          <span className="text-xs text-emerald-800 dark:text-emerald-200 flex-1 truncate group-hover:underline">
+            {story.title}
+          </span>
+        )}
 
-        <span className={clsx('text-2xs px-1.5 py-0.5 rounded', priorityColor)}>
-          {story.priority}
-        </span>
+        {isEditing ? (
+          <select
+            className="text-2xs px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-800 text-emerald-700 dark:text-emerald-300"
+            value={story.priority}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => onUpdate(story.id, { priority: e.target.value })}
+          >
+            <option value="high">{t('workflow.prd.priorityHigh')}</option>
+            <option value="medium">{t('workflow.prd.priorityMedium')}</option>
+            <option value="low">{t('workflow.prd.priorityLow')}</option>
+          </select>
+        ) : (
+          <span className={clsx('text-2xs px-1.5 py-0.5 rounded', priorityColor)}>
+            {story.priority}
+          </span>
+        )}
 
-        {story.dependencies.length > 0 && (
+        {!isEditing && story.dependencies.length > 0 && (
           <span className="text-2xs text-emerald-500/50 dark:text-emerald-400/50">
             {t('workflow.prd.deps', { deps: story.dependencies.join(', ') })}
           </span>
@@ -188,7 +224,15 @@ function StoryRow({
 
       {expanded && (
         <div className="ml-5 mt-1 space-y-1">
-          <p className="text-xs text-emerald-700/80 dark:text-emerald-300/80">{story.description}</p>
+          {isEditing ? (
+            <textarea
+              className={clsx(inputClass, 'min-h-[3rem] resize-y')}
+              value={story.description}
+              onChange={(e) => onUpdate(story.id, { description: e.target.value })}
+            />
+          ) : (
+            <p className="text-xs text-emerald-700/80 dark:text-emerald-300/80">{story.description}</p>
+          )}
 
           {story.acceptanceCriteria.length > 0 && (
             <div className="space-y-0.5">

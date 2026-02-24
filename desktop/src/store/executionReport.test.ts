@@ -53,8 +53,8 @@ function makePrd(): TaskPrd {
       },
     ],
     batches: [
-      { batchIndex: 0, storyIds: ['story-1', 'story-3'] },
-      { batchIndex: 1, storyIds: ['story-2'] },
+      { index: 0, storyIds: ['story-1', 'story-3'] },
+      { index: 1, storyIds: ['story-2'] },
     ],
   };
 }

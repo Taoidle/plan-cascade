@@ -58,6 +58,7 @@
     "editPlaceholder": "Edit your message...",
     "save": "Save",
     "cancel": "Cancel",
+    "fork": "Fork",
     "contextWarning": "Session will restart. Previous context will be lost."
   },
 
@@ -100,7 +101,8 @@
     "deleteSession": "Delete session",
     "activeSessions": "Active Sessions",
     "switchSession": "Switch to this session",
-    "removeSession": "Remove session"
+    "removeSession": "Remove session",
+    "currentFork": "(current)"
   },
 
   "diffPanel": {
@@ -316,7 +318,10 @@
       "deps": "deps: {{deps}}",
       "approveAndExecute": "Approve & Execute",
       "edit": "Edit",
-      "doneEditing": "Done Editing"
+      "doneEditing": "Done Editing",
+      "priorityHigh": "High",
+      "priorityMedium": "Medium",
+      "priorityLow": "Low"
     },
 
     "execution": {

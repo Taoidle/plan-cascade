@@ -228,7 +228,7 @@ describe('ExecutionReport', () => {
           { id: 's1', title: 'Story 1', description: '', priority: 'high', dependencies: [], acceptanceCriteria: [] },
           { id: 's2', title: 'Story 2', description: '', priority: 'medium', dependencies: [], acceptanceCriteria: [] },
         ],
-        batches: [{ batchIndex: 0, storyIds: ['s1', 's2'] }],
+        batches: [{ index: 0, storyIds: ['s1', 's2'] }],
       },
       executionReport: {
         sessionId: 'test-session',
@@ -269,7 +269,7 @@ describe('ExecutionReport', () => {
         stories: [
           { id: 's1', title: 'Story 1', description: '', priority: 'high', dependencies: [], acceptanceCriteria: [] },
         ],
-        batches: [{ batchIndex: 0, storyIds: ['s1'] }],
+        batches: [{ index: 0, storyIds: ['s1'] }],
       },
       executionReport: {
         sessionId: 'test-session',

@@ -160,6 +160,14 @@ export interface MemoryStats {
   avg_importance: number;
 }
 
+/** Result of automatic memory extraction from a session */
+export interface MemoryExtractionResult {
+  extracted_count: number;
+  inserted_count: number;
+  merged_count: number;
+  skipped_count: number;
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================

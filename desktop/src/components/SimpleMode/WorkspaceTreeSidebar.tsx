@@ -43,6 +43,10 @@ export interface WorkspaceTreeSidebarProps {
   onSwitchSession?: (id: string) => void;
   /** Called when user clicks the remove button on a background session */
   onRemoveSession?: (id: string) => void;
+  /** Parent session ID of the current foreground session (for fork hierarchy display) */
+  foregroundParentSessionId?: string | null;
+  /** bg session ID representing the foreground in the tree (ghost entry) */
+  foregroundBgId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,12 +84,29 @@ interface DirectoryGroup {
   path: string;
   normalizedPath: string;
   sessions: ExecutionHistoryItem[];
+  /** Background sessions belonging to this directory (keyed by ID) */
+  backgroundSessions: Record<string, SessionSnapshot>;
+}
+
+/** Match a path against pinned directories, returning the matching normalized path or null */
+function matchPinnedDirectory(
+  sessionPath: string | null,
+  normalizedPinned: { normalizedPath: string }[]
+): string | null {
+  if (!sessionPath) return null;
+  for (const pin of normalizedPinned) {
+    if (sessionPath === pin.normalizedPath || sessionPath.startsWith(pin.normalizedPath + '/')) {
+      return pin.normalizedPath;
+    }
+  }
+  return null;
 }
 
 function groupSessionsByDirectories(
   history: ExecutionHistoryItem[],
-  pinnedDirectories: string[]
-): { directories: DirectoryGroup[]; other: ExecutionHistoryItem[] } {
+  pinnedDirectories: string[],
+  backgroundSessions: Record<string, SessionSnapshot> = {}
+): { directories: DirectoryGroup[]; other: ExecutionHistoryItem[]; unmatchedBgSessions: Record<string, SessionSnapshot> } {
   const normalizedPinned = pinnedDirectories.map((p) => ({
     path: p,
     normalizedPath: p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase(),
@@ -97,29 +118,32 @@ function groupSessionsByDirectories(
       path: pin.path,
       normalizedPath: pin.normalizedPath,
       sessions: [],
+      backgroundSessions: {},
     });
   }
 
   const other: ExecutionHistoryItem[] = [];
 
+  // Group history sessions
   for (const session of history) {
     const sessionPath = normalizeWorkspacePath(session.workspacePath);
-    if (!sessionPath) {
+    const match = matchPinnedDirectory(sessionPath, normalizedPinned);
+    if (match) {
+      dirMap.get(match)!.sessions.push(session);
+    } else {
       other.push(session);
-      continue;
     }
+  }
 
-    let matched = false;
-    for (const pin of normalizedPinned) {
-      if (sessionPath === pin.normalizedPath || sessionPath.startsWith(pin.normalizedPath + '/')) {
-        dirMap.get(pin.normalizedPath)!.sessions.push(session);
-        matched = true;
-        break;
-      }
-    }
-
-    if (!matched) {
-      other.push(session);
+  // Group background sessions by workspace path
+  const unmatchedBgSessions: Record<string, SessionSnapshot> = {};
+  for (const [id, snapshot] of Object.entries(backgroundSessions)) {
+    const bgPath = normalizeWorkspacePath(snapshot.workspacePath);
+    const match = matchPinnedDirectory(bgPath, normalizedPinned);
+    if (match) {
+      dirMap.get(match)!.backgroundSessions[id] = snapshot;
+    } else {
+      unmatchedBgSessions[id] = snapshot;
     }
   }
 
@@ -127,7 +151,7 @@ function groupSessionsByDirectories(
     .map((pin) => dirMap.get(pin.normalizedPath)!)
     .filter(Boolean);
 
-  return { directories, other };
+  return { directories, other, unmatchedBgSessions };
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +350,11 @@ function DirectoryNode({
   onRestore,
   onDelete,
   onRename,
+  onSwitchSession,
+  onRemoveSession,
+  foregroundParentSessionId,
+  foregroundBgId,
+  currentSessionDescription,
 }: {
   group: DirectoryGroup;
   isActive: boolean;
@@ -336,6 +365,11 @@ function DirectoryNode({
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onSwitchSession?: (id: string) => void;
+  onRemoveSession?: (id: string) => void;
+  foregroundParentSessionId?: string | null;
+  foregroundBgId?: string | null;
+  currentSessionDescription?: string;
 }) {
   const { t } = useTranslation('simpleMode');
 
@@ -354,6 +388,15 @@ function DirectoryNode({
     },
     [onNewTaskInDir]
   );
+
+  // Build tree of background sessions for this directory
+  const bgTree = useMemo(
+    () => buildSessionTree(group.backgroundSessions),
+    [group.backgroundSessions]
+  );
+
+  const bgCount = Object.keys(group.backgroundSessions).length;
+  const totalCount = group.sessions.length + bgCount;
 
   return (
     <div>
@@ -394,9 +437,9 @@ function DirectoryNode({
         </span>
 
         {/* Session count badge */}
-        {group.sessions.length > 0 && (
+        {totalCount > 0 && (
           <span className="text-2xs px-1.5 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 shrink-0">
-            {group.sessions.length}
+            {totalCount}
           </span>
         )}
 
@@ -419,9 +462,24 @@ function DirectoryNode({
         </div>
       </div>
 
-      {/* Child session items */}
-      {isExpanded && group.sessions.length > 0 && (
+      {/* Child items: background sessions (with fork tree) + history sessions */}
+      {isExpanded && totalCount > 0 && (
         <div className="mt-0.5">
+          {/* Background sessions with fork hierarchy */}
+          {onSwitchSession && onRemoveSession && bgTree.map((node) => (
+            <BackgroundSessionTreeItem
+              key={node.id}
+              node={node}
+              depth={2}
+              onSwitch={onSwitchSession}
+              onRemove={onRemoveSession}
+              foregroundParentSessionId={foregroundParentSessionId}
+              foregroundBgId={foregroundBgId}
+              currentSessionDescription={currentSessionDescription}
+            />
+          ))}
+
+          {/* History sessions */}
           {group.sessions.map((session) => (
             <SessionItem
               key={session.id}
@@ -511,7 +569,42 @@ function OtherSessionsGroup({
 }
 
 // ---------------------------------------------------------------------------
-// BackgroundSessionItem
+// Session tree helpers
+// ---------------------------------------------------------------------------
+
+interface SessionTreeNode {
+  id: string;
+  snapshot: SessionSnapshot;
+  children: SessionTreeNode[];
+}
+
+function buildSessionTree(
+  sessions: Record<string, SessionSnapshot>
+): SessionTreeNode[] {
+  const nodeMap = new Map<string, SessionTreeNode>();
+
+  // Create nodes for all sessions
+  for (const [id, snapshot] of Object.entries(sessions)) {
+    nodeMap.set(id, { id, snapshot, children: [] });
+  }
+
+  const roots: SessionTreeNode[] = [];
+
+  for (const [id, node] of nodeMap) {
+    const parentId = node.snapshot.parentSessionId;
+    // Safety: skip self-referencing parents and missing parents
+    if (parentId && parentId !== id && nodeMap.has(parentId)) {
+      nodeMap.get(parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  return roots;
+}
+
+// ---------------------------------------------------------------------------
+// Background session helpers
 // ---------------------------------------------------------------------------
 
 function getStatusDotClasses(status: string): string {
@@ -536,97 +629,211 @@ function truncateLabel(text: string, maxLen = 50): string {
   return text.slice(0, maxLen) + '...';
 }
 
-function BackgroundSessionItem({
-  sessionId,
-  snapshot,
+// ---------------------------------------------------------------------------
+// BackgroundSessionTreeItem (recursive)
+// ---------------------------------------------------------------------------
+
+function BackgroundSessionTreeItem({
+  node,
+  depth,
   onSwitch,
   onRemove,
+  foregroundParentSessionId,
+  foregroundBgId,
+  currentSessionDescription,
 }: {
-  sessionId: string;
-  snapshot: SessionSnapshot;
+  node: SessionTreeNode;
+  depth: number;
   onSwitch: (id: string) => void;
   onRemove: (id: string) => void;
+  foregroundParentSessionId?: string | null;
+  foregroundBgId?: string | null;
+  currentSessionDescription?: string;
 }) {
   const { t } = useTranslation('simpleMode');
+  const [expanded, setExpanded] = useState(true);
 
-  const label = snapshot.taskDescription
-    ? truncateLabel(snapshot.taskDescription)
-    : 'Untitled Session';
+  const isGhost = foregroundBgId === node.id;
+
+  const label = isGhost && currentSessionDescription
+    ? truncateLabel(currentSessionDescription)
+    : node.snapshot.taskDescription
+      ? truncateLabel(node.snapshot.taskDescription)
+      : 'Untitled Session';
 
   const handleRemove = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      onRemove(sessionId);
+      onRemove(node.id);
     },
-    [sessionId, onRemove]
+    [node.id, onRemove]
   );
 
-  return (
-    <div
-      data-testid={`bg-session-item-${sessionId}`}
-      className={clsx(
-        'group flex items-start gap-2 py-1.5 px-2 rounded-md cursor-pointer transition-colors',
-        'hover:bg-gray-50 dark:hover:bg-gray-800'
-      )}
-      onClick={() => onSwitch(sessionId)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onSwitch(sessionId);
-      }}
-      title={t('sidebar.switchSession')}
-    >
-      {/* Status dot */}
-      <span
-        data-testid={`bg-status-dot-${sessionId}`}
-        className={clsx(
-          'mt-1.5 w-2 h-2 rounded-full shrink-0',
-          getStatusDotClasses(snapshot.status)
-        )}
-      />
+  const handleToggle = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setExpanded((prev) => !prev);
+    },
+    []
+  );
 
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-900 dark:text-white line-clamp-1">
-          {label}
-        </p>
-        {(snapshot.llmModel || snapshot.llmBackend) && (
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 line-clamp-1">
-            {snapshot.llmModel || snapshot.llmBackend}
+  // With ghost, the ghost node itself represents the foreground — no separate (current) child indicator
+  const showCurrentFork = !foregroundBgId && foregroundParentSessionId === node.id;
+  const hasChildren = node.children.length > 0 || showCurrentFork;
+
+  return (
+    <div>
+      <div
+        data-testid={`bg-session-item-${node.id}`}
+        className={clsx(
+          'group flex items-start gap-1 py-1.5 pr-2 rounded-md transition-colors',
+          isGhost
+            ? 'bg-primary-50 dark:bg-primary-900/20 cursor-default'
+            : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800'
+        )}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
+        onClick={isGhost ? undefined : () => onSwitch(node.id)}
+        role="button"
+        tabIndex={isGhost ? -1 : 0}
+        onKeyDown={isGhost ? undefined : (e) => {
+          if (e.key === 'Enter' || e.key === ' ') onSwitch(node.id);
+        }}
+        title={isGhost ? undefined : t('sidebar.switchSession')}
+      >
+        {/* Expand/collapse chevron */}
+        {hasChildren ? (
+          <button
+            className="p-0.5 shrink-0 text-gray-400"
+            onClick={handleToggle}
+            tabIndex={-1}
+          >
+            {expanded ? (
+              <ChevronDownIcon className="w-3 h-3" />
+            ) : (
+              <ChevronRightIcon className="w-3 h-3" />
+            )}
+          </button>
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
+
+        {/* Status dot */}
+        <span
+          data-testid={`bg-status-dot-${node.id}`}
+          className={clsx(
+            'mt-1 w-2 h-2 rounded-full shrink-0',
+            isGhost
+              ? 'bg-primary-500 dark:bg-primary-400'
+              : getStatusDotClasses(node.snapshot.status)
+          )}
+        />
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <p className={clsx(
+            'text-xs line-clamp-1',
+            isGhost
+              ? 'text-primary-700 dark:text-primary-300 font-medium'
+              : 'text-gray-900 dark:text-white'
+          )}>
+            {label}
           </p>
+          {isGhost ? (
+            <p className="text-[10px] text-primary-500 dark:text-primary-400">
+              {t('sidebar.currentFork')}
+            </p>
+          ) : (
+            (node.snapshot.llmModel || node.snapshot.llmBackend) && (
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 line-clamp-1">
+                {node.snapshot.llmModel || node.snapshot.llmBackend}
+              </p>
+            )
+          )}
+        </div>
+
+        {/* Remove button (hidden for ghost) */}
+        {!isGhost && (
+          <button
+            data-testid={`bg-remove-btn-${node.id}`}
+            className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+            onClick={handleRemove}
+            title={t('sidebar.removeSession')}
+          >
+            <Cross2Icon className="w-3 h-3" />
+          </button>
         )}
       </div>
 
-      {/* Remove button */}
-      <button
-        data-testid={`bg-remove-btn-${sessionId}`}
-        className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-        onClick={handleRemove}
-        title={t('sidebar.removeSession')}
-      >
-        <Cross2Icon className="w-3 h-3" />
-      </button>
+      {/* Children */}
+      {expanded && hasChildren && (
+        <div>
+          {/* Current foreground as highlighted child (only when no ghost) */}
+          {showCurrentFork && (
+            <div
+              data-testid="current-fork-indicator"
+              className="flex items-center gap-1 py-1 rounded-md"
+              style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
+            >
+              <span className="w-4 shrink-0" />
+              <span className="mt-0.5 w-2 h-2 rounded-full shrink-0 bg-primary-500 dark:bg-primary-400" />
+              <span className="text-xs text-primary-600 dark:text-primary-400 font-medium line-clamp-1">
+                {currentSessionDescription
+                  ? truncateLabel(currentSessionDescription)
+                  : t('sidebar.currentFork')}
+              </span>
+              <span className="text-[10px] text-primary-500 dark:text-primary-400 shrink-0">
+                {t('sidebar.currentFork')}
+              </span>
+            </div>
+          )}
+
+          {/* Recursive child nodes */}
+          {node.children.map((child) => (
+            <BackgroundSessionTreeItem
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              onSwitch={onSwitch}
+              onRemove={onRemove}
+              foregroundParentSessionId={foregroundParentSessionId}
+              foregroundBgId={foregroundBgId}
+              currentSessionDescription={currentSessionDescription}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// BackgroundSessionsSection
+// BackgroundSessionsSection (only for sessions not matched to any directory)
 // ---------------------------------------------------------------------------
 
 function BackgroundSessionsSection({
   backgroundSessions,
   onSwitch,
   onRemove,
+  foregroundParentSessionId,
+  foregroundBgId,
+  currentSessionDescription,
 }: {
   backgroundSessions: Record<string, SessionSnapshot>;
   onSwitch: (id: string) => void;
   onRemove: (id: string) => void;
+  foregroundParentSessionId?: string | null;
+  foregroundBgId?: string | null;
+  currentSessionDescription?: string;
 }) {
   const { t } = useTranslation('simpleMode');
 
   const entries = useMemo(
     () => Object.entries(backgroundSessions),
+    [backgroundSessions]
+  );
+
+  const tree = useMemo(
+    () => buildSessionTree(backgroundSessions),
     [backgroundSessions]
   );
 
@@ -644,15 +851,18 @@ function BackgroundSessionsSection({
         </span>
       </div>
 
-      {/* Session items */}
+      {/* Session tree */}
       <div className="space-y-0.5">
-        {entries.map(([id, snapshot]) => (
-          <BackgroundSessionItem
-            key={id}
-            sessionId={id}
-            snapshot={snapshot}
+        {tree.map((node) => (
+          <BackgroundSessionTreeItem
+            key={node.id}
+            node={node}
+            depth={0}
             onSwitch={onSwitch}
             onRemove={onRemove}
+            foregroundParentSessionId={foregroundParentSessionId}
+            foregroundBgId={foregroundBgId}
+            currentSessionDescription={currentSessionDescription}
           />
         ))}
       </div>
@@ -675,6 +885,8 @@ export function WorkspaceTreeSidebar({
   backgroundSessions = {},
   onSwitchSession,
   onRemoveSession,
+  foregroundParentSessionId,
+  foregroundBgId,
 }: WorkspaceTreeSidebarProps) {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
@@ -725,10 +937,29 @@ export function WorkspaceTreeSidebar({
     });
   }, [workspacePath, pinnedDirectories]);
 
-  // Group sessions by pinned directories
-  const { directories, other } = useMemo(
-    () => groupSessionsByDirectories(history, pinnedDirectories),
-    [history, pinnedDirectories]
+  // Hide history rows that are already represented by active background snapshots
+  const visibleHistory = useMemo(() => {
+    const activeOriginHistoryIds = new Set<string>();
+    const activeSessionIds = new Set<string>();
+    for (const snapshot of Object.values(backgroundSessions)) {
+      if (snapshot.originHistoryId) activeOriginHistoryIds.add(snapshot.originHistoryId);
+      if (snapshot.taskId) {
+        activeSessionIds.add(`claude:${snapshot.taskId}`);
+      } else if (snapshot.standaloneSessionId) {
+        activeSessionIds.add(`standalone:${snapshot.standaloneSessionId}`);
+      }
+    }
+    if (activeOriginHistoryIds.size === 0 && activeSessionIds.size === 0) return history;
+    return history.filter((item) => (
+      !activeOriginHistoryIds.has(item.id)
+      && !(item.sessionId && activeSessionIds.has(item.sessionId))
+    ));
+  }, [history, backgroundSessions]);
+
+  // Group sessions (history + background) by pinned directories
+  const { directories, other, unmatchedBgSessions } = useMemo(
+    () => groupSessionsByDirectories(visibleHistory, pinnedDirectories, backgroundSessions),
+    [visibleHistory, pinnedDirectories, backgroundSessions]
   );
 
   // Compute active normalized path for highlighting
@@ -801,7 +1032,8 @@ export function WorkspaceTreeSidebar({
     [history, setWorkspacePath, onRestore]
   );
 
-  const isEmpty = pinnedDirectories.length === 0 && history.length === 0;
+  const hasBgSessions = Object.keys(backgroundSessions).length > 0;
+  const isEmpty = pinnedDirectories.length === 0 && visibleHistory.length === 0 && !hasBgSessions;
 
   return (
     <div className="min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
@@ -825,12 +1057,15 @@ export function WorkspaceTreeSidebar({
 
       {/* Scrollable tree content */}
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
-        {/* Background sessions section */}
+        {/* Background sessions not matched to any pinned directory */}
         {onSwitchSession && onRemoveSession && (
           <BackgroundSessionsSection
-            backgroundSessions={backgroundSessions}
+            backgroundSessions={unmatchedBgSessions}
             onSwitch={onSwitchSession}
             onRemove={onRemoveSession}
+            foregroundParentSessionId={foregroundParentSessionId}
+            foregroundBgId={foregroundBgId}
+            currentSessionDescription={currentTask || undefined}
           />
         )}
 
@@ -870,6 +1105,11 @@ export function WorkspaceTreeSidebar({
                   onRestore={handleRestore}
                   onDelete={onDelete}
                   onRename={onRename}
+                  onSwitchSession={onSwitchSession}
+                  onRemoveSession={onRemoveSession}
+                  foregroundParentSessionId={foregroundParentSessionId}
+                  foregroundBgId={foregroundBgId}
+                  currentSessionDescription={currentTask || undefined}
                 />
               );
             })}

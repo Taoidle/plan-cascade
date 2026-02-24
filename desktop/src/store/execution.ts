@@ -302,6 +302,71 @@ export interface SessionSnapshot {
   llmProvider: string;
   /** LLM model active when this session was backgrounded */
   llmModel: string;
+  /** Parent session ID for fork hierarchy (undefined = root session) */
+  parentSessionId?: string;
+  /** Workspace path active when this session was backgrounded */
+  workspacePath?: string;
+  /** History entry ID this session originated from (for de-dup in sidebar) */
+  originHistoryId?: string;
+  /** Stable session identity from history (claude:/standalone:) */
+  originSessionId?: string;
+  /** Last mutation timestamp for sort/recovery heuristics */
+  updatedAt?: number;
+}
+
+interface PersistedSessionSnapshot {
+  id: string;
+  taskDescription: string;
+  status: ExecutionStatus;
+  streamingOutput: StreamLine[];
+  streamLineCounter: number;
+  currentTurnStartLineId: number;
+  taskId: string | null;
+  isChatSession: boolean;
+  standaloneTurns: StandaloneTurn[];
+  standaloneSessionId: string | null;
+  latestUsage: BackendUsageStats | null;
+  sessionUsageTotals: BackendUsageStats | null;
+  startedAt: number | null;
+  llmBackend: string;
+  llmProvider: string;
+  llmModel: string;
+  parentSessionId?: string;
+  workspacePath?: string;
+  originHistoryId?: string;
+  originSessionId?: string;
+  updatedAt?: number;
+}
+
+interface PersistedForegroundSnapshot {
+  taskDescription: string;
+  status: ExecutionStatus;
+  streamingOutput: StreamLine[];
+  streamLineCounter: number;
+  currentTurnStartLineId: number;
+  taskId: string | null;
+  isChatSession: boolean;
+  standaloneTurns: StandaloneTurn[];
+  standaloneSessionId: string | null;
+  latestUsage: BackendUsageStats | null;
+  sessionUsageTotals: BackendUsageStats | null;
+  turnUsageTotals: BackendUsageStats | null;
+  startedAt: number | null;
+  llmBackend: string;
+  llmProvider: string;
+  llmModel: string;
+  foregroundParentSessionId: string | null;
+  foregroundBgId: string | null;
+  foregroundOriginHistoryId: string | null;
+  foregroundOriginSessionId: string | null;
+  foregroundDirty: boolean;
+}
+
+interface PersistedSessionStateV1 {
+  version: 1;
+  activeSessionId: string | null;
+  backgroundSessions: Record<string, PersistedSessionSnapshot>;
+  foreground: PersistedForegroundSnapshot | null;
 }
 
 interface BackendStandaloneExecutionResult {
@@ -427,6 +492,21 @@ interface ExecutionState {
   /** Currently active foreground session ID (for tracking which bg session was swapped in) */
   activeSessionId: string | null;
 
+  /** Parent session ID of the current foreground session (set when created via fork) */
+  foregroundParentSessionId: string | null;
+
+  /** bg session ID representing the foreground in the tree (ghost). null if foreground was created fresh (fork/new). */
+  foregroundBgId: string | null;
+
+  /** Source history item ID for the current foreground (used for de-dup and switch heuristics). */
+  foregroundOriginHistoryId: string | null;
+
+  /** Source logical session ID for the current foreground (claude:/standalone:). */
+  foregroundOriginSessionId: string | null;
+
+  /** Whether foreground diverged from its source snapshot/history and should be persisted on switch. */
+  foregroundDirty: boolean;
+
   /** Pending task context to inject into the next sendFollowUp (Claude Code backend) */
   _pendingTaskContext: string | null;
 
@@ -547,9 +627,13 @@ interface ExecutionState {
 
   /** Set pending task context to inject into next sendFollowUp (Claude Code backend) */
   setPendingTaskContext: (context: string) => void;
+
+  /** Fork conversation at a turn: background original session, create truncated foreground copy */
+  forkSessionAtTurn: (userLineId: number) => void;
 }
 
 const HISTORY_KEY = 'plan-cascade-execution-history';
+const SESSION_STATE_KEY = 'plan-cascade-execution-sessions-v1';
 const MAX_HISTORY_ITEMS = 10;
 const DEFAULT_STANDALONE_CONTEXT_TURNS = 8;
 const STANDALONE_CONTEXT_UNLIMITED = -1;
@@ -731,6 +815,233 @@ function buildHistorySessionId(taskId: string | null, standaloneSessionId: strin
   return null;
 }
 
+function hasMeaningfulForegroundContent(state: ExecutionState): boolean {
+  return (
+    state.streamingOutput.length > 0 ||
+    state.taskId != null ||
+    state.standaloneSessionId != null ||
+    state.taskDescription.trim().length > 0
+  );
+}
+
+function normalizeRestoredStatus(status: ExecutionStatus): ExecutionStatus {
+  if (status === 'running' || status === 'paused') return 'idle';
+  return status;
+}
+
+function toPersistedSessionSnapshot(snapshot: SessionSnapshot): PersistedSessionSnapshot {
+  return {
+    id: snapshot.id,
+    taskDescription: snapshot.taskDescription,
+    status: normalizeRestoredStatus(snapshot.status),
+    streamingOutput: [...snapshot.streamingOutput],
+    streamLineCounter: snapshot.streamLineCounter,
+    currentTurnStartLineId: snapshot.currentTurnStartLineId,
+    taskId: null,
+    isChatSession: false,
+    standaloneTurns: [...snapshot.standaloneTurns],
+    standaloneSessionId: snapshot.standaloneSessionId,
+    latestUsage: snapshot.latestUsage ? { ...snapshot.latestUsage } : null,
+    sessionUsageTotals: snapshot.sessionUsageTotals ? { ...snapshot.sessionUsageTotals } : null,
+    startedAt: snapshot.startedAt,
+    llmBackend: snapshot.llmBackend,
+    llmProvider: snapshot.llmProvider,
+    llmModel: snapshot.llmModel,
+    parentSessionId: snapshot.parentSessionId,
+    workspacePath: snapshot.workspacePath,
+    originHistoryId: snapshot.originHistoryId,
+    originSessionId: snapshot.originSessionId,
+    updatedAt: snapshot.updatedAt || Date.now(),
+  };
+}
+
+function fromPersistedSessionSnapshot(snapshot: PersistedSessionSnapshot): SessionSnapshot {
+  return {
+    id: snapshot.id,
+    taskDescription: snapshot.taskDescription,
+    status: normalizeRestoredStatus(snapshot.status),
+    streamingOutput: [...snapshot.streamingOutput],
+    streamLineCounter: snapshot.streamLineCounter,
+    currentTurnStartLineId: snapshot.currentTurnStartLineId,
+    taskId: null,
+    isChatSession: false,
+    standaloneTurns: [...snapshot.standaloneTurns],
+    standaloneSessionId: snapshot.standaloneSessionId,
+    latestUsage: snapshot.latestUsage ? { ...snapshot.latestUsage } : null,
+    sessionUsageTotals: snapshot.sessionUsageTotals ? { ...snapshot.sessionUsageTotals } : null,
+    startedAt: snapshot.startedAt,
+    toolCallFilter: new ToolCallStreamFilter(),
+    llmBackend: snapshot.llmBackend,
+    llmProvider: snapshot.llmProvider,
+    llmModel: snapshot.llmModel,
+    parentSessionId: snapshot.parentSessionId,
+    workspacePath: snapshot.workspacePath,
+    originHistoryId: snapshot.originHistoryId,
+    originSessionId: snapshot.originSessionId,
+    updatedAt: snapshot.updatedAt || Date.now(),
+  };
+}
+
+function createSessionSnapshotFromForeground(
+  state: ExecutionState,
+  settings: ReturnType<typeof useSettingsStore.getState>,
+  id: string,
+): SessionSnapshot {
+  return {
+    id,
+    taskDescription: state.taskDescription,
+    status: state.status,
+    streamingOutput: [...state.streamingOutput],
+    streamLineCounter: state.streamLineCounter,
+    currentTurnStartLineId: state.currentTurnStartLineId,
+    taskId: state.taskId,
+    isChatSession: state.isChatSession,
+    standaloneTurns: [...state.standaloneTurns],
+    standaloneSessionId: state.standaloneSessionId,
+    latestUsage: state.latestUsage ? { ...state.latestUsage } : null,
+    sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
+    startedAt: state.startedAt,
+    toolCallFilter: state.toolCallFilter,
+    llmBackend: settings.backend,
+    llmProvider: settings.provider,
+    llmModel: settings.model,
+    parentSessionId: state.foregroundParentSessionId || undefined,
+    workspacePath: settings.workspacePath || undefined,
+    originHistoryId: state.foregroundOriginHistoryId || undefined,
+    originSessionId:
+      state.foregroundOriginSessionId
+      || buildHistorySessionId(state.taskId, state.standaloneSessionId)
+      || undefined,
+    updatedAt: Date.now(),
+  };
+}
+
+function shouldPersistForegroundBeforeSwitch(state: ExecutionState): boolean {
+  if (!hasMeaningfulForegroundContent(state)) return false;
+  if (state.status === 'running' || state.status === 'paused') return true;
+  if (state.taskId || state.standaloneSessionId) return true;
+  if (state.foregroundDirty) return true;
+  // Restored history sessions should still be represented once in active tree.
+  if (state.foregroundOriginHistoryId || state.foregroundOriginSessionId) return true;
+  return false;
+}
+
+function buildPersistedForegroundSnapshot(state: ExecutionState): PersistedForegroundSnapshot | null {
+  if (!hasMeaningfulForegroundContent(state)) return null;
+  const settings = useSettingsStore.getState();
+  return {
+    taskDescription: state.taskDescription,
+    status: normalizeRestoredStatus(state.status),
+    streamingOutput: [...state.streamingOutput],
+    streamLineCounter: state.streamLineCounter,
+    currentTurnStartLineId: state.currentTurnStartLineId,
+    taskId: null,
+    isChatSession: false,
+    standaloneTurns: [...state.standaloneTurns],
+    standaloneSessionId: state.standaloneSessionId,
+    latestUsage: state.latestUsage ? { ...state.latestUsage } : null,
+    sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
+    turnUsageTotals: state.turnUsageTotals ? { ...state.turnUsageTotals } : null,
+    startedAt: state.startedAt,
+    llmBackend: settings.backend,
+    llmProvider: settings.provider,
+    llmModel: settings.model,
+    foregroundParentSessionId: state.foregroundParentSessionId,
+    foregroundBgId: state.foregroundBgId,
+    foregroundOriginHistoryId: state.foregroundOriginHistoryId,
+    foregroundOriginSessionId:
+      state.foregroundOriginSessionId
+      || buildHistorySessionId(state.taskId, state.standaloneSessionId),
+    foregroundDirty: state.foregroundDirty,
+  };
+}
+
+function persistSessionStateSnapshot(state: ExecutionState): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const persisted: PersistedSessionStateV1 = {
+      version: 1,
+      activeSessionId: state.activeSessionId,
+      backgroundSessions: Object.fromEntries(
+        Object.entries(state.backgroundSessions).map(([id, snapshot]) => [
+          id,
+          toPersistedSessionSnapshot(snapshot),
+        ])
+      ),
+      foreground: buildPersistedForegroundSnapshot(state),
+    };
+    localStorage.setItem(SESSION_STATE_KEY, JSON.stringify(persisted));
+  } catch {
+    // Ignore persistence failures
+  }
+}
+
+function loadPersistedSessionState(): Partial<ExecutionState> | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const raw = localStorage.getItem(SESSION_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedSessionStateV1;
+    if (!parsed || parsed.version !== 1) return null;
+
+    const restoredBackground = Object.fromEntries(
+      Object.entries(parsed.backgroundSessions || {}).map(([id, snapshot]) => [
+        id,
+        fromPersistedSessionSnapshot(snapshot),
+      ])
+    );
+
+    if (!parsed.foreground) {
+      return {
+        backgroundSessions: restoredBackground,
+        activeSessionId: parsed.activeSessionId || null,
+        foregroundParentSessionId: null,
+        foregroundBgId: null,
+        foregroundOriginHistoryId: null,
+        foregroundOriginSessionId: null,
+        foregroundDirty: false,
+      };
+    }
+
+    const fg = parsed.foreground;
+    return {
+      backgroundSessions: restoredBackground,
+      activeSessionId: parsed.activeSessionId || null,
+      taskDescription: fg.taskDescription,
+      status: normalizeRestoredStatus(fg.status),
+      streamingOutput: [...fg.streamingOutput],
+      streamLineCounter: fg.streamLineCounter,
+      currentTurnStartLineId: fg.currentTurnStartLineId,
+      taskId: null,
+      isChatSession: false,
+      standaloneTurns: [...fg.standaloneTurns],
+      standaloneSessionId: fg.standaloneSessionId,
+      latestUsage: fg.latestUsage ? { ...fg.latestUsage } : null,
+      sessionUsageTotals: fg.sessionUsageTotals ? { ...fg.sessionUsageTotals } : null,
+      turnUsageTotals: fg.turnUsageTotals ? { ...fg.turnUsageTotals } : null,
+      startedAt: fg.startedAt,
+      foregroundParentSessionId: fg.foregroundParentSessionId,
+      foregroundBgId: fg.foregroundBgId,
+      foregroundOriginHistoryId: fg.foregroundOriginHistoryId,
+      foregroundOriginSessionId: fg.foregroundOriginSessionId,
+      foregroundDirty: fg.foregroundDirty,
+      toolCallFilter: new ToolCallStreamFilter(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function schedulePersistSessionState(state: ExecutionState): void {
+  if (sessionStatePersistTimer) {
+    clearTimeout(sessionStatePersistTimer);
+  }
+  sessionStatePersistTimer = setTimeout(() => {
+    sessionStatePersistTimer = null;
+    persistSessionStateSnapshot(state);
+  }, 120);
+}
+
 function hasAssistantTextLineSince(lines: StreamLine[], minExclusiveLineId: number): boolean {
   return lines.some(
     (line) =>
@@ -840,9 +1151,74 @@ function restoreSessionLlmSettings(settings: SessionLlmSettings): void {
   });
 }
 
+/**
+ * Fire-and-forget memory extraction after a session completes.
+ *
+ * Frontend responsibility: lightweight filtering and transport.
+ * - Excludes tool_result lines (too verbose, often full file contents)
+ * - Truncates each line to 300 chars
+ * - Total budget ~20K chars — enough raw material for the backend
+ *
+ * Backend responsibility: intelligence.
+ * - If content is long, first uses LLM to create a focused summary
+ *   (user preferences, tech stack, patterns, corrections, etc.)
+ * - Then uses the summary for structured memory extraction
+ */
+async function triggerMemoryExtraction(state: ExecutionState): Promise<void> {
+  try {
+    const projectPath = useSettingsStore.getState().workspacePath;
+    if (!projectPath) return;
+
+    const taskDescription = state.taskDescription;
+    if (!taskDescription) return;
+
+    const MAX_LINE_CHARS = 300;
+    const TOTAL_CHAR_BUDGET = 20000;
+
+    // Collect meaningful lines — exclude tool_result (too verbose, low signal)
+    const meaningfulTypes: Set<string> = new Set(['text', 'info', 'success', 'error']);
+    const lines: string[] = [];
+    let totalChars = 0;
+
+    // Iterate from the end to prioritize recent content within budget
+    for (let i = state.streamingOutput.length - 1; i >= 0; i--) {
+      const line = state.streamingOutput[i];
+      if (!meaningfulTypes.has(line.type) || line.content.trim().length === 0) continue;
+
+      const trimmed = line.content.trim();
+      const truncated = trimmed.length > MAX_LINE_CHARS
+        ? trimmed.slice(0, MAX_LINE_CHARS) + '...'
+        : trimmed;
+
+      if (totalChars + truncated.length + 1 > TOTAL_CHAR_BUDGET) break;
+      lines.unshift(truncated);
+      totalChars += truncated.length + 1;
+    }
+
+    const conversationSummary = lines.join('\n');
+    if (conversationSummary.length < 50) return;
+
+    const sessionId = buildHistorySessionId(state.taskId, state.standaloneSessionId) || undefined;
+
+    const result = await invoke<{ success: boolean; data?: { extracted_count: number } }>('extract_session_memories', {
+      projectPath,
+      taskDescription,
+      conversationSummary,
+      sessionId: sessionId || null,
+    });
+
+    if (result?.success && result.data && result.data.extracted_count > 0) {
+      console.log(`[memory] Extracted ${result.data.extracted_count} memories from session`);
+    }
+  } catch (e) {
+    console.warn('[memory] Auto-extraction failed (non-critical):', e);
+  }
+}
+
 // Track event unlisteners
 let unlisteners: UnlistenFn[] = [];
 let listenerSetupVersion = 0;
+let sessionStatePersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 const initialState = {
   status: 'idle' as ExecutionStatus,
@@ -881,6 +1257,11 @@ const initialState = {
   attachments: [] as FileAttachmentData[],
   backgroundSessions: {} as Record<string, SessionSnapshot>,
   activeSessionId: null as string | null,
+  foregroundParentSessionId: null as string | null,
+  foregroundBgId: null as string | null,
+  foregroundOriginHistoryId: null as string | null,
+  foregroundOriginSessionId: null as string | null,
+  foregroundDirty: false,
   _pendingTaskContext: null as string | null,
 };
 
@@ -888,6 +1269,12 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   ...initialState,
 
   initialize: () => {
+    const persisted = loadPersistedSessionState();
+    if (persisted) {
+      set(persisted);
+      get().addLog('Restored session tree from local cache');
+    }
+
     // In Tauri, we're always "connected" via IPC
     set({ connectionStatus: 'connected' });
     get().addLog('Connected to Rust backend');
@@ -908,6 +1295,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       unlisten();
     }
     unlisteners = [];
+    if (sessionStatePersistTimer) {
+      clearTimeout(sessionStatePersistTimer);
+      sessionStatePersistTimer = null;
+    }
     set({ connectionStatus: 'disconnected' });
   },
 
@@ -958,6 +1349,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       latestUsage: preserveSimpleConversation ? get().latestUsage : null,
       sessionUsageTotals: preserveSimpleConversation ? get().sessionUsageTotals : null,
       turnUsageTotals: null,
+      foregroundParentSessionId: preserveSimpleConversation ? get().foregroundParentSessionId : null,
+      foregroundBgId: null,
+      foregroundOriginHistoryId: preserveSimpleConversation ? get().foregroundOriginHistoryId : null,
+      foregroundOriginSessionId: preserveSimpleConversation ? get().foregroundOriginSessionId : null,
+      foregroundDirty: true,
     });
 
     // Capture session identity for detecting backgrounding during async operations.
@@ -1269,6 +1665,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
                 : `Execution failed: ${execution.error || 'Unknown error'}`
             );
             get().saveToHistory();
+            if (succeeded) void triggerMemoryExtraction(get());
           };
 
           if (get().status === 'running') {
@@ -1345,6 +1742,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       isSubmitting: false,
       apiError: null,
       result: null,
+      foregroundDirty: true,
     });
 
     // Inject pending task context if available (from Task→Chat writeback)
@@ -1475,9 +1873,22 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         history: postBgState.history,
         backgroundSessions: postBgState.backgroundSessions,
         activeSessionId: postBgState.activeSessionId,
+        foregroundParentSessionId: null,
+        foregroundBgId: null,
+        foregroundOriginHistoryId: null,
+        foregroundOriginSessionId: null,
+        foregroundDirty: false,
         toolCallFilter: new ToolCallStreamFilter(),
       });
       return;
+    }
+
+    // If there's a ghost, update it with live foreground state before clearing
+    let bgSessions = state.backgroundSessions;
+    if (state.foregroundBgId && bgSessions[state.foregroundBgId]) {
+      const settingsState = useSettingsStore.getState();
+      const updatedGhost = createSessionSnapshotFromForeground(state, settingsState, state.foregroundBgId);
+      bgSessions = { ...bgSessions, [state.foregroundBgId]: updatedGhost };
     }
 
     // Auto-save conversation to history before clearing
@@ -1489,8 +1900,13 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       ...initialState,
       connectionStatus: state.connectionStatus,
       history: get().history,
-      backgroundSessions: state.backgroundSessions,
+      backgroundSessions: bgSessions,
       activeSessionId: state.activeSessionId,
+      foregroundParentSessionId: null,
+      foregroundBgId: null,
+      foregroundOriginHistoryId: null,
+      foregroundOriginSessionId: null,
+      foregroundDirty: false,
       toolCallFilter: new ToolCallStreamFilter(),
     });
 
@@ -1781,12 +2197,30 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       }
     }
 
+    // If there's a ghost, update it with live foreground state before restoring
+    const currentState = get();
+    let bgSessions = currentState.backgroundSessions;
+    if (currentState.foregroundBgId && bgSessions[currentState.foregroundBgId]) {
+      const curSettings = useSettingsStore.getState();
+      const updatedGhost = createSessionSnapshotFromForeground(
+        currentState,
+        curSettings,
+        currentState.foregroundBgId
+      );
+      bgSessions = { ...bgSessions, [currentState.foregroundBgId]: updatedGhost };
+    }
+
     set({
       ...initialState,
-      connectionStatus: get().connectionStatus,
-      history: get().history,
-      backgroundSessions: get().backgroundSessions,
-      activeSessionId: get().activeSessionId,
+      connectionStatus: currentState.connectionStatus,
+      history: currentState.history,
+      backgroundSessions: bgSessions,
+      activeSessionId: currentState.activeSessionId,
+      foregroundParentSessionId: null,
+      foregroundBgId: null,
+      foregroundOriginHistoryId: historyId,
+      foregroundOriginSessionId: item.sessionId || null,
+      foregroundDirty: false,
       streamingOutput: lines,
       streamLineCounter: counter,
       isChatSession: isClaudeSession,
@@ -1877,6 +2311,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         newLines[newLines.length - 1] = updated;
         return {
           streamingOutput: newLines,
+          foregroundDirty: true,
         };
       }
 
@@ -1893,12 +2328,13 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       return {
         streamingOutput: [...lines, line],
         streamLineCounter: counter,
+        foregroundDirty: true,
       };
     });
   },
 
   clearStreamingOutput: () => {
-    set({ streamingOutput: [], streamLineCounter: 0 });
+    set({ streamingOutput: [], streamLineCounter: 0, foregroundDirty: true });
   },
 
   updateQualityGate: (result) => {
@@ -1960,103 +2396,188 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
   backgroundCurrentSession: () => {
     const state = get();
-
-    // Create a unique ID for this background session
-    const sessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? `bg-${crypto.randomUUID()}`
-      : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
-
-    // Snapshot the current foreground session state (including LLM settings)
     const settingsState = useSettingsStore.getState();
-    const snapshot: SessionSnapshot = {
-      id: sessionId,
-      taskDescription: state.taskDescription,
-      status: state.status,
-      streamingOutput: [...state.streamingOutput],
-      streamLineCounter: state.streamLineCounter,
-      currentTurnStartLineId: state.currentTurnStartLineId,
-      taskId: state.taskId,
-      isChatSession: state.isChatSession,
-      standaloneTurns: [...state.standaloneTurns],
-      standaloneSessionId: state.standaloneSessionId,
-      latestUsage: state.latestUsage ? { ...state.latestUsage } : null,
-      sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
-      startedAt: state.startedAt,
-      toolCallFilter: state.toolCallFilter,
-      llmBackend: settingsState.backend,
-      llmProvider: settingsState.provider,
-      llmModel: settingsState.model,
-    };
 
-    // Add snapshot to backgroundSessions and reset foreground to idle
-    set({
-      backgroundSessions: { ...state.backgroundSessions, [sessionId]: snapshot },
-      activeSessionId: sessionId,
-      // Reset foreground state
-      taskDescription: '',
-      status: 'idle' as ExecutionStatus,
-      streamingOutput: [],
-      streamLineCounter: 0,
-      currentTurnStartLineId: 0,
-      taskId: null,
-      isChatSession: false,
-      standaloneTurns: [],
-      standaloneSessionId: null,
-      latestUsage: null,
-      sessionUsageTotals: null,
-      turnUsageTotals: null,
-      startedAt: null,
-      result: null,
-      apiError: null,
-      isSubmitting: false,
-      toolCallFilter: new ToolCallStreamFilter(),
-      attachments: [],
-    });
+    if (state.foregroundBgId && state.backgroundSessions[state.foregroundBgId]) {
+      // Ghost exists — update ghost snapshot with live foreground state and make it active
+      const updatedGhost = createSessionSnapshotFromForeground(state, settingsState, state.foregroundBgId);
+
+      set({
+        backgroundSessions: { ...state.backgroundSessions, [state.foregroundBgId]: updatedGhost },
+        activeSessionId: state.foregroundBgId,
+        foregroundParentSessionId: null,
+        foregroundBgId: null,
+        foregroundOriginHistoryId: null,
+        foregroundOriginSessionId: null,
+        foregroundDirty: false,
+        // Reset foreground state
+        taskDescription: '',
+        status: 'idle' as ExecutionStatus,
+        streamingOutput: [],
+        streamLineCounter: 0,
+        currentTurnStartLineId: 0,
+        taskId: null,
+        isChatSession: false,
+        standaloneTurns: [],
+        standaloneSessionId: null,
+        latestUsage: null,
+        sessionUsageTotals: null,
+        turnUsageTotals: null,
+        startedAt: null,
+        result: null,
+        apiError: null,
+        isSubmitting: false,
+        toolCallFilter: new ToolCallStreamFilter(),
+        attachments: [],
+      });
+    } else {
+      // No ghost — only create a new bg entry if foreground has meaningful content
+      const hasForegroundContent = hasMeaningfulForegroundContent(state);
+
+      if (hasForegroundContent) {
+        const sessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `bg-${crypto.randomUUID()}`
+          : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+
+        const snapshot = createSessionSnapshotFromForeground(state, settingsState, sessionId);
+
+        set({
+          backgroundSessions: { ...state.backgroundSessions, [sessionId]: snapshot },
+          activeSessionId: sessionId,
+          foregroundParentSessionId: null,
+          foregroundBgId: null,
+          foregroundOriginHistoryId: null,
+          foregroundOriginSessionId: null,
+          foregroundDirty: false,
+          // Reset foreground state
+          taskDescription: '',
+          status: 'idle' as ExecutionStatus,
+          streamingOutput: [],
+          streamLineCounter: 0,
+          currentTurnStartLineId: 0,
+          taskId: null,
+          isChatSession: false,
+          standaloneTurns: [],
+          standaloneSessionId: null,
+          latestUsage: null,
+          sessionUsageTotals: null,
+          turnUsageTotals: null,
+          startedAt: null,
+          result: null,
+          apiError: null,
+          isSubmitting: false,
+          toolCallFilter: new ToolCallStreamFilter(),
+          attachments: [],
+        });
+      } else {
+        // Foreground is empty — just reset without creating a bg entry
+        set({
+          foregroundParentSessionId: null,
+          foregroundBgId: null,
+          foregroundOriginHistoryId: null,
+          foregroundOriginSessionId: null,
+          foregroundDirty: false,
+          taskDescription: '',
+          status: 'idle' as ExecutionStatus,
+          streamingOutput: [],
+          streamLineCounter: 0,
+          currentTurnStartLineId: 0,
+          taskId: null,
+          isChatSession: false,
+          standaloneTurns: [],
+          standaloneSessionId: null,
+          latestUsage: null,
+          sessionUsageTotals: null,
+          turnUsageTotals: null,
+          startedAt: null,
+          result: null,
+          apiError: null,
+          isSubmitting: false,
+          toolCallFilter: new ToolCallStreamFilter(),
+          attachments: [],
+        });
+      }
+    }
   },
 
   switchToSession: (id: string) => {
     const state = get();
+
+    // No-op if already the foreground ghost
+    if (id === state.foregroundBgId) return;
+
     const targetSnapshot = state.backgroundSessions[id];
 
     // No-op if session does not exist
     if (!targetSnapshot) return;
 
-    // Snapshot the current foreground into a new background entry
-    const newBgId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? `bg-${crypto.randomUUID()}`
-      : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
-
-    // Capture current LLM settings before switching
     const currentSettings = useSettingsStore.getState();
-    const currentSnapshot: SessionSnapshot = {
-      id: newBgId,
-      taskDescription: state.taskDescription,
-      status: state.status,
-      streamingOutput: [...state.streamingOutput],
-      streamLineCounter: state.streamLineCounter,
-      currentTurnStartLineId: state.currentTurnStartLineId,
-      taskId: state.taskId,
-      isChatSession: state.isChatSession,
-      standaloneTurns: [...state.standaloneTurns],
-      standaloneSessionId: state.standaloneSessionId,
-      latestUsage: state.latestUsage ? { ...state.latestUsage } : null,
-      sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
-      startedAt: state.startedAt,
-      toolCallFilter: state.toolCallFilter,
-      llmBackend: currentSettings.backend,
-      llmProvider: currentSettings.provider,
-      llmModel: currentSettings.model,
-    };
+    const newBackgroundSessions = { ...state.backgroundSessions };
 
-    // Build new backgroundSessions: remove the target, add the current foreground
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { [id]: _removed, ...remainingBg } = state.backgroundSessions;
-    const newBackgroundSessions = { ...remainingBg, [newBgId]: currentSnapshot };
+    // Handle previous foreground
+    if (state.foregroundBgId && newBackgroundSessions[state.foregroundBgId]) {
+      // Update ghost snapshot with live foreground state (ghost becomes regular bg session again)
+      newBackgroundSessions[state.foregroundBgId] = createSessionSnapshotFromForeground(
+        state,
+        currentSettings,
+        state.foregroundBgId
+      );
+    } else {
+      // No ghost — persist current foreground only when there is meaningful state.
+      // This avoids accidental duplicate forks when switching away from untouched history restores.
+      if (shouldPersistForegroundBeforeSwitch(state)) {
+        // Only merge by origin when foreground is a root session.
+        // For forked foreground sessions (with parentSessionId), we must keep
+        // a distinct background snapshot so the tree lineage is preserved.
+        const canMergeByOrigin = !state.foregroundParentSessionId;
+        const existingOriginMatch = canMergeByOrigin
+          ? Object.values(newBackgroundSessions).find((snap) => (
+            (!!state.foregroundOriginHistoryId && snap.originHistoryId === state.foregroundOriginHistoryId)
+            || (
+              !!state.foregroundOriginSessionId
+              && (snap.originSessionId || buildHistorySessionId(snap.taskId, snap.standaloneSessionId))
+                === state.foregroundOriginSessionId
+            )
+          ))
+          : undefined;
+        const pristineRestoredHistory =
+          !state.foregroundDirty
+          && !state.taskId
+          && state.status !== 'running'
+          && state.status !== 'paused'
+          && !!(state.foregroundOriginHistoryId || state.foregroundOriginSessionId);
 
+        if (existingOriginMatch) {
+          if (state.foregroundDirty || state.status === 'running' || state.status === 'paused') {
+            newBackgroundSessions[existingOriginMatch.id] = createSessionSnapshotFromForeground(
+              state,
+              currentSettings,
+              existingOriginMatch.id
+            );
+          }
+        } else if (!pristineRestoredHistory) {
+          const newBgId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? `bg-${crypto.randomUUID()}`
+            : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+          newBackgroundSessions[newBgId] = createSessionSnapshotFromForeground(state, currentSettings, newBgId);
+        }
+      }
+    }
+
+    // Target stays in backgroundSessions (do NOT remove) — it becomes the ghost
     // Restore the target snapshot into the foreground
     set({
       backgroundSessions: newBackgroundSessions,
-      activeSessionId: newBgId,
+      activeSessionId: state.foregroundBgId || Object.keys(newBackgroundSessions).find(
+        (k) => k !== id && newBackgroundSessions[k].taskId === state.taskId
+      ) || state.activeSessionId,
+      foregroundParentSessionId: targetSnapshot.parentSessionId || null,
+      foregroundBgId: id,
+      foregroundOriginHistoryId: targetSnapshot.originHistoryId || null,
+      foregroundOriginSessionId:
+        targetSnapshot.originSessionId
+        || buildHistorySessionId(targetSnapshot.taskId, targetSnapshot.standaloneSessionId),
+      foregroundDirty: false,
       taskDescription: targetSnapshot.taskDescription,
       status: targetSnapshot.status,
       streamingOutput: [...targetSnapshot.streamingOutput],
@@ -2083,9 +2604,35 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   removeBackgroundSession: (id: string) => {
     set((state) => {
       if (!state.backgroundSessions[id]) return state;
+      const _removed = state.backgroundSessions[id];
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [id]: _removed, ...remaining } = state.backgroundSessions;
-      return { backgroundSessions: remaining };
+      const { [id]: _discarded, ...remaining } = state.backgroundSessions;
+
+      // Re-parent orphaned children to the removed session's parent (preserves hierarchy)
+      const reparented: Record<string, SessionSnapshot> = {};
+      for (const [sid, snap] of Object.entries(remaining)) {
+        if (snap.parentSessionId === id) {
+          reparented[sid] = { ...snap, parentSessionId: _removed.parentSessionId };
+        } else {
+          reparented[sid] = snap;
+        }
+      }
+
+      return {
+        backgroundSessions: reparented,
+        // If the foreground's parent was the removed session, re-parent it too
+        foregroundParentSessionId:
+          state.foregroundParentSessionId === id
+            ? (_removed.parentSessionId || null)
+            : state.foregroundParentSessionId,
+        // Clear ghost if the removed session was the ghost
+        foregroundBgId:
+          state.foregroundBgId === id ? null : state.foregroundBgId,
+        foregroundOriginHistoryId:
+          state.foregroundBgId === id ? null : state.foregroundOriginHistoryId,
+        foregroundOriginSessionId:
+          state.foregroundBgId === id ? null : state.foregroundOriginSessionId,
+      };
     });
   },
 
@@ -2178,9 +2725,73 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       isSubmitting: false,
       apiError: null,
       result: null,
+      foregroundDirty: true,
     });
 
     get().addLog(`Rolled back to turn with userLineId=${userLineId}`);
+  },
+
+  forkSessionAtTurn: (userLineId: number) => {
+    const state = get();
+    const lines = state.streamingOutput;
+    const turns = deriveConversationTurns(lines);
+    const targetTurn = turns.find((t) => t.userLineId === userLineId);
+    if (!targetTurn) return;
+
+    const settingsState = useSettingsStore.getState();
+    const newBackgroundSessions = { ...state.backgroundSessions };
+    let parentId: string;
+
+    if (state.foregroundBgId && newBackgroundSessions[state.foregroundBgId]) {
+      // Ghost exists — update ghost with full pre-fork state; ghost becomes the "original" parent
+      newBackgroundSessions[state.foregroundBgId] = createSessionSnapshotFromForeground(
+        state,
+        settingsState,
+        state.foregroundBgId
+      );
+      parentId = state.foregroundBgId;
+    } else {
+      // No ghost — create new bg entry as parent (original behavior)
+      const sessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `bg-${crypto.randomUUID()}`
+        : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+
+      newBackgroundSessions[sessionId] = createSessionSnapshotFromForeground(state, settingsState, sessionId);
+      parentId = sessionId;
+    }
+
+    // 2. Truncate lines to the fork point
+    const truncatedLines = lines.slice(0, targetTurn.assistantEndIndex + 1);
+    const rebuiltTurns = rebuildStandaloneTurns(truncatedLines);
+
+    // 3. Set foreground to forked state
+    //    The new forked foreground is a child of the parent (ghost or new bg entry)
+    set({
+      backgroundSessions: newBackgroundSessions,
+      activeSessionId: parentId,
+      foregroundParentSessionId: parentId,
+      foregroundBgId: null,
+      foregroundOriginHistoryId: state.foregroundOriginHistoryId,
+      foregroundOriginSessionId: state.foregroundOriginSessionId,
+      foregroundDirty: true,
+      streamingOutput: truncatedLines,
+      streamLineCounter: truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0,
+      standaloneTurns: rebuiltTurns,
+      standaloneSessionId: createStandaloneSessionId(),
+      status: 'idle' as ExecutionStatus,
+      isSubmitting: false,
+      taskId: null,
+      isChatSession: false,
+      latestUsage: null,
+      sessionUsageTotals: null,
+      turnUsageTotals: null,
+      toolCallFilter: new ToolCallStreamFilter(),
+      attachments: [],
+      apiError: null,
+      result: null,
+    });
+
+    get().addLog(`Forked conversation at turn with userLineId=${userLineId}`);
   },
 
   regenerateResponse: async (userLineId: number) => {
@@ -2235,6 +2846,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         isSubmitting: false,
         apiError: null,
         result: null,
+        foregroundDirty: true,
       });
 
       // Reset the tool-call filter for the new turn
@@ -2273,6 +2885,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         isSubmitting: false,
         apiError: null,
         result: null,
+        foregroundDirty: true,
       });
 
       // Reset the tool-call filter for the new turn
@@ -2424,6 +3037,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         isSubmitting: false,
         apiError: null,
         result: null,
+        foregroundDirty: true,
       });
 
       // Reset the tool-call filter
@@ -2460,6 +3074,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         isSubmitting: false,
         apiError: null,
         result: null,
+        foregroundDirty: true,
       });
 
       // Reset the tool-call filter
@@ -2901,11 +3516,11 @@ function handleUnifiedExecutionEvent(
           const updated = lines.filter((_, i) => !otherTextIndices.has(i));
           const newLastIdx = lastTextIdx - otherTextIndices.size;
           updated[newLastIdx] = { ...updated[newLastIdx], content: cleaned };
-          set({ streamingOutput: updated });
+          set({ streamingOutput: updated, foregroundDirty: true });
         } else {
           // Remove all current-turn text lines if cleaned is empty
           const allTextIndices = new Set(textIndices);
-          set({ streamingOutput: lines.filter((_, i) => !allTextIndices.has(i)) });
+          set({ streamingOutput: lines.filter((_, i) => !allTextIndices.has(i)), foregroundDirty: true });
         }
       }
       break;
@@ -3687,6 +4302,7 @@ function appendToBackgroundSession(
     return {
       streamingOutput: [...snapshot.streamingOutput, newLine],
       streamLineCounter: nextId,
+      updatedAt: Date.now(),
     };
   });
 }
@@ -3904,6 +4520,9 @@ async function setupTauriEventListeners(
               estimatedTimeRemaining: 0,
             });
             get().addLog('Response complete — ready for follow-up');
+            if (get().streamingOutput.length > 20) {
+              void triggerMemoryExtraction(get());
+            }
           } else {
             // Non-chat execution: show result view
             const completedStories = get().stories.filter((s) => s.status === 'completed').length;
@@ -3924,6 +4543,7 @@ async function setupTauriEventListeners(
             });
             get().addLog('Execution completed');
             get().saveToHistory();
+            void triggerMemoryExtraction(get());
           }
           break;
         }
@@ -4032,6 +4652,12 @@ async function setupTauriEventListeners(
   } catch (error) {
     console.error('Failed to set up Tauri event listeners:', error);
   }
+}
+
+if (typeof window !== 'undefined') {
+  useExecutionStore.subscribe((state) => {
+    schedulePersistSessionState(state);
+  });
 }
 
 export default useExecutionStore;

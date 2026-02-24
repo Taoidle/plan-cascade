@@ -16,6 +16,7 @@ import {
   CheckIcon,
   Cross2Icon,
   ResetIcon,
+  ScissorsIcon,
 } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 import type { StreamLine } from '../../store/execution';
@@ -34,6 +35,7 @@ export interface MessageActionsProps {
   onRegenerate: (lineId: number) => void;
   onRollback: (lineId: number) => void;
   onCopy: (content: string) => void;
+  onFork?: (lineId: number) => void;
   onEditStart?: (lineId: number) => void;
   onEditCancel?: () => void;
 }
@@ -51,6 +53,7 @@ export const MessageActions = memo(function MessageActions({
   onRegenerate,
   onRollback,
   onCopy,
+  onFork,
   onEditStart,
 }: MessageActionsProps) {
   const { t } = useTranslation('simpleMode');
@@ -75,6 +78,12 @@ export const MessageActions = memo(function MessageActions({
       onRollback(line.id);
     }
   }, [disabled, line.id, onRollback]);
+
+  const handleFork = useCallback(() => {
+    if (!disabled && onFork) {
+      onFork(line.id);
+    }
+  }, [disabled, line.id, onFork]);
 
   const handleEditStart = useCallback(() => {
     if (!disabled && onEditStart) {
@@ -129,6 +138,14 @@ export const MessageActions = memo(function MessageActions({
             disabled={disabled}
             warningTooltip={showContextWarning ? t('messageActions.contextWarning') : undefined}
           />
+          {onFork && (
+            <ActionButton
+              icon={ScissorsIcon}
+              label={t('messageActions.fork')}
+              onClick={handleFork}
+              disabled={disabled}
+            />
+          )}
         </>
       )}
     </div>

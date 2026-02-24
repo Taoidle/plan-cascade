@@ -82,6 +82,7 @@ interface WorkflowOrchestratorState {
   submitInterviewAnswer: (answer: string) => Promise<void>;
   skipInterviewQuestion: () => Promise<void>;
   approvePrd: (editedPrd?: TaskPrd) => Promise<void>;
+  updateEditableStory: (storyId: string, updates: Partial<{ title: string; description: string; priority: string; acceptanceCriteria: string[] }>) => void;
   addPrdFeedback: (feedback: string) => void;
   cancelWorkflow: () => Promise<void>;
   resetWorkflow: () => void;
@@ -523,6 +524,20 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     }
   },
 
+  /** Update a story field in the editable PRD */
+  updateEditableStory: (storyId, updates) => {
+    const { editablePrd } = get();
+    if (!editablePrd) return;
+    set({
+      editablePrd: {
+        ...editablePrd,
+        stories: editablePrd.stories.map((s) =>
+          s.id === storyId ? { ...s, ...updates } : s
+        ),
+      },
+    });
+  },
+
   /** Approve PRD and start execution */
   approvePrd: async (editedPrd?: TaskPrd) => {
     const state = get();
@@ -649,7 +664,7 @@ async function generatePrdPhase(set: SetFn, get: GetFn) {
         acceptanceCriteria: s.acceptanceCriteria,
       })),
       batches: prd.batches.map((b) => ({
-        batchIndex: b.batchIndex,
+        index: b.index,
         storyIds: b.storyIds,
       })),
       isEditable: true,
@@ -685,7 +700,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn) {
       if (state.sessionId && payload.sessionId !== state.sessionId) return;
 
       // Calculate progress percentage
-      const totalStories = Object.keys(payload.storyStatuses).length;
+      const totalStories = Object.keys(payload.storyStatuses ?? {}).length;
       const completedCount = payload.storiesCompleted + payload.storiesFailed;
       const progressPct = totalStories > 0 ? (completedCount / totalStories) * 100 : 0;
 

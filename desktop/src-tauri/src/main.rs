@@ -232,6 +232,7 @@ fn main() {
             plan_cascade_desktop::commands::memory::delete_project_memory,
             plan_cascade_desktop::commands::memory::clear_project_memories,
             plan_cascade_desktop::commands::memory::get_memory_stats,
+            plan_cascade_desktop::commands::memory::extract_session_memories,
             // Skill commands
             plan_cascade_desktop::commands::skills::list_skills,
             plan_cascade_desktop::commands::skills::get_skill,

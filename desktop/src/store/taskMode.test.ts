@@ -104,8 +104,8 @@ function mockPrd(): TaskPrd {
       },
     ],
     batches: [
-      { batchIndex: 0, storyIds: ['story-001'] },
-      { batchIndex: 1, storyIds: ['story-002'] },
+      { index: 0, storyIds: ['story-001'] },
+      { index: 1, storyIds: ['story-002'] },
     ],
   };
 }

@@ -136,6 +136,7 @@ pub use commands::{
     add_project_memory,
     clear_project_memories,
     delete_project_memory,
+    extract_session_memories,
     get_memory_stats,
     list_project_memories,
     search_project_memories,

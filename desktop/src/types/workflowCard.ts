@@ -141,7 +141,7 @@ export interface PrdStoryData {
 }
 
 export interface PrdBatchData {
-  batchIndex: number;
+  index: number;
   storyIds: string[];
 }
 

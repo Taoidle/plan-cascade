@@ -132,7 +132,7 @@ function BatchProgressSection({
 }) {
   const { t } = useTranslation('simpleMode');
   const stories = prd?.stories ?? [];
-  const statusEntries = Object.entries(storyStatuses);
+  const statusEntries = Object.entries(storyStatuses ?? {});
   const completed = statusEntries.filter(([, s]) => s === 'completed').length;
   const failed = statusEntries.filter(([, s]) => s === 'failed').length;
   const running = statusEntries.filter(([, s]) => s === 'running' || s === 'executing').length;

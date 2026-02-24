@@ -30,6 +30,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 import { useExecutionStore } from './execution';
 import type { SessionSnapshot } from './execution';
 import { useSettingsStore } from './settings';
+import { ToolCallStreamFilter } from '../utils/toolCallFilter';
 
 /** Emit a synthetic event to a captured listener. */
 function emitEvent(eventName: string, payload: unknown) {
@@ -42,13 +43,18 @@ function emitEvent(eventName: string, payload: unknown) {
 
 // Helper to reset the store to initial state between tests
 function resetStore() {
+  localStorage.removeItem('plan-cascade-execution-sessions-v1');
   const store = useExecutionStore.getState();
   // Use the internal reset and also clear background sessions
   store.reset();
-  // Manually ensure backgroundSessions and activeSessionId are reset
+  // Manually ensure backgroundSessions, activeSessionId, and foregroundBgId are reset
   useExecutionStore.setState({
     backgroundSessions: {},
     activeSessionId: null,
+    foregroundBgId: null,
+    foregroundOriginHistoryId: null,
+    foregroundOriginSessionId: null,
+    foregroundDirty: false,
   });
 }
 
@@ -59,6 +65,28 @@ function findBgByTaskId(taskId: string): { key: string; snapshot: SessionSnapsho
     if (snapshot.taskId === taskId) return { key, snapshot };
   }
   return undefined;
+}
+
+function createBackgroundSnapshot(id: string, taskDescription: string): SessionSnapshot {
+  return {
+    id,
+    taskDescription,
+    status: 'idle',
+    streamingOutput: [],
+    streamLineCounter: 0,
+    currentTurnStartLineId: 0,
+    taskId: null,
+    isChatSession: false,
+    standaloneTurns: [],
+    standaloneSessionId: null,
+    latestUsage: null,
+    sessionUsageTotals: null,
+    startedAt: Date.now(),
+    toolCallFilter: new ToolCallStreamFilter(),
+    llmBackend: 'openai',
+    llmProvider: 'openai',
+    llmModel: 'gpt-4o',
+  };
 }
 
 describe('Execution Store - Background Session State', () => {
@@ -78,6 +106,67 @@ describe('Execution Store - Background Session State', () => {
     it('should have activeSessionId as null', () => {
       const state = useExecutionStore.getState();
       expect(state.activeSessionId).toBeNull();
+    });
+
+    it('should restore persisted session tree on initialize()', () => {
+      localStorage.setItem('plan-cascade-execution-sessions-v1', JSON.stringify({
+        version: 1,
+        activeSessionId: 'bg-1',
+        backgroundSessions: {
+          'bg-1': {
+            id: 'bg-1',
+            taskDescription: 'Persisted background',
+            status: 'idle',
+            streamingOutput: [],
+            streamLineCounter: 0,
+            currentTurnStartLineId: 0,
+            taskId: null,
+            isChatSession: false,
+            standaloneTurns: [],
+            standaloneSessionId: null,
+            latestUsage: null,
+            sessionUsageTotals: null,
+            startedAt: Date.now(),
+            llmBackend: 'openai',
+            llmProvider: 'openai',
+            llmModel: 'gpt-4o',
+          },
+        },
+        foreground: {
+          taskDescription: 'Persisted foreground',
+          status: 'idle',
+          streamingOutput: [],
+          streamLineCounter: 0,
+          currentTurnStartLineId: 0,
+          taskId: null,
+          isChatSession: false,
+          standaloneTurns: [],
+          standaloneSessionId: null,
+          latestUsage: null,
+          sessionUsageTotals: null,
+          turnUsageTotals: null,
+          startedAt: Date.now(),
+          llmBackend: 'openai',
+          llmProvider: 'openai',
+          llmModel: 'gpt-4o',
+          foregroundParentSessionId: null,
+          foregroundBgId: null,
+          foregroundOriginHistoryId: 'hist-1',
+          foregroundOriginSessionId: 'standalone:sess-1',
+          foregroundDirty: false,
+        },
+      }));
+
+      useExecutionStore.getState().initialize();
+      const state = useExecutionStore.getState();
+
+      expect(state.backgroundSessions['bg-1']).toBeDefined();
+      expect(state.taskDescription).toBe('Persisted foreground');
+      expect(state.foregroundOriginHistoryId).toBe('hist-1');
+      expect(state.activeSessionId).toBe('bg-1');
+      expect(state.connectionStatus).toBe('connected');
+
+      useExecutionStore.getState().cleanup();
     });
   });
 
@@ -285,14 +374,20 @@ describe('Execution Store - Background Session State', () => {
       expect(state.latestUsage).toEqual({ input_tokens: 200, output_tokens: 100 });
       expect(state.startedAt).toBe(5000);
 
-      // The old foreground should now be in backgroundSessions
+      // Ghost: the target remains in backgroundSessions
+      expect(state.foregroundBgId).toBe(bgSessionId);
+      expect(state.backgroundSessions[bgSessionId]).toBeDefined();
+
+      // The old foreground should also be in backgroundSessions (new bg entry)
       const bgKeys = Object.keys(state.backgroundSessions);
-      expect(bgKeys.length).toBe(1);
-      const swappedBg = state.backgroundSessions[bgKeys[0]];
-      expect(swappedBg.taskDescription).toBe('Current foreground task');
-      expect(swappedBg.status).toBe('idle');
-      expect(swappedBg.taskId).toBe('fg-task-id');
-      expect(swappedBg.standaloneSessionId).toBe('standalone-fg');
+      expect(bgKeys.length).toBe(2); // ghost + new bg entry for old foreground
+      const swappedBg = Object.values(state.backgroundSessions).find(
+        (s) => s.taskId === 'fg-task-id'
+      );
+      expect(swappedBg).toBeDefined();
+      expect(swappedBg!.taskDescription).toBe('Current foreground task');
+      expect(swappedBg!.status).toBe('idle');
+      expect(swappedBg!.standaloneSessionId).toBe('standalone-fg');
     });
 
     it('should be a no-op if the session id does not exist', () => {
@@ -309,7 +404,99 @@ describe('Execution Store - Background Session State', () => {
       expect(state.status).toBe('idle');
     });
 
-    it('should remove the restored session from backgroundSessions', () => {
+    it('should not create a duplicate snapshot when switching from untouched restored history', () => {
+      useExecutionStore.setState({
+        history: [
+          {
+            id: 'hist-1',
+            taskDescription: 'Original Session',
+            strategy: null,
+            status: 'completed',
+            startedAt: Date.now() - 2000,
+            completedAt: Date.now() - 1000,
+            duration: 1000,
+            completedStories: 1,
+            totalStories: 1,
+            success: true,
+            conversationLines: [
+              { type: 'info', content: 'hello' },
+              { type: 'text', content: 'world' },
+            ],
+            sessionId: 'standalone:hist-session-1',
+          },
+        ],
+      });
+      useExecutionStore.getState().restoreFromHistory('hist-1');
+
+      useExecutionStore.setState({
+        backgroundSessions: {
+          'bg-target': createBackgroundSnapshot('bg-target', 'Existing Fork'),
+        },
+      });
+
+      useExecutionStore.getState().switchToSession('bg-target');
+      const state = useExecutionStore.getState();
+
+      // Should only keep the existing target snapshot (no synthetic duplicate)
+      expect(Object.keys(state.backgroundSessions)).toEqual(['bg-target']);
+      expect(state.foregroundBgId).toBe('bg-target');
+    });
+
+    it('should not overwrite parent snapshot when switching away from a forked foreground', () => {
+      useExecutionStore.setState({
+        history: [
+          {
+            id: 'hist-root',
+            taskDescription: 'Original Session',
+            strategy: null,
+            status: 'completed',
+            startedAt: Date.now() - 2000,
+            completedAt: Date.now() - 1000,
+            duration: 1000,
+            completedStories: 1,
+            totalStories: 1,
+            success: true,
+            conversationLines: [
+              { type: 'info', content: 'hello' },
+              { type: 'text', content: 'world' },
+            ],
+            sessionId: 'standalone:orig-session',
+          },
+        ],
+      });
+
+      // Foreground now originates from history
+      useExecutionStore.getState().restoreFromHistory('hist-root');
+
+      // Fork from the first turn -> creates parent snapshot in background and keeps fork in foreground
+      useExecutionStore.getState().forkSessionAtTurn(1);
+      const parentId = useExecutionStore.getState().foregroundParentSessionId!;
+      expect(parentId).toBeTruthy();
+
+      // Make fork foreground distinct before switching back to parent
+      useExecutionStore.setState({
+        taskDescription: 'Forked Current Session',
+        foregroundDirty: true,
+      });
+
+      useExecutionStore.getState().switchToSession(parentId);
+      const state = useExecutionStore.getState();
+
+      // Parent snapshot should remain the root (not self-parented/overwritten by child state)
+      expect(state.backgroundSessions[parentId]).toBeDefined();
+      expect(state.backgroundSessions[parentId].parentSessionId).toBeUndefined();
+      expect(state.backgroundSessions[parentId].taskDescription).toBe('Original Session');
+
+      // Fork should be persisted as a distinct child snapshot
+      const childSnapshot = Object.values(state.backgroundSessions).find(
+        (snap) => snap.id !== parentId && snap.parentSessionId === parentId
+      );
+      expect(childSnapshot).toBeDefined();
+      expect(childSnapshot!.taskDescription).toBe('Forked Current Session');
+      expect(state.foregroundBgId).toBe(parentId);
+    });
+
+    it('should keep the restored session in backgroundSessions as ghost', () => {
       // Background a session
       useExecutionStore.setState({
         taskDescription: 'To be restored',
@@ -333,11 +520,12 @@ describe('Execution Store - Background Session State', () => {
       useExecutionStore.getState().switchToSession(bgSessionId);
 
       const state = useExecutionStore.getState();
-      // The original bgSessionId should not be in backgroundSessions
-      expect(state.backgroundSessions[bgSessionId]).toBeUndefined();
+      // The original bgSessionId should remain as ghost in backgroundSessions
+      expect(state.backgroundSessions[bgSessionId]).toBeDefined();
+      expect(state.foregroundBgId).toBe(bgSessionId);
     });
 
-    it('should update activeSessionId when switching', () => {
+    it('should update foregroundBgId and activeSessionId when switching', () => {
       // Background a session
       useExecutionStore.setState({
         taskDescription: 'Session A',
@@ -375,10 +563,11 @@ describe('Execution Store - Background Session State', () => {
       useExecutionStore.getState().switchToSession(bgId);
 
       const state = useExecutionStore.getState();
-      // activeSessionId should reflect the newly backgrounded session
+      // Ghost: target stays, foregroundBgId set
+      expect(state.foregroundBgId).toBe(bgId);
+      // backgroundSessions should contain ghost + new bg entry
       const newBgKeys = Object.keys(state.backgroundSessions);
-      expect(newBgKeys.length).toBe(1);
-      expect(state.activeSessionId).toBe(newBgKeys[0]);
+      expect(newBgKeys.length).toBe(2);
     });
   });
 
@@ -800,6 +989,419 @@ describe('Execution Store - Background Session State', () => {
       expect(settings.backend).toBe('glm');
       expect(settings.provider).toBe('glm');
       expect(settings.model).toBe('glm-4.5');
+    });
+  });
+
+  // ===========================================================================
+  // 8. Ghost Entry (foregroundBgId) lifecycle
+  // ===========================================================================
+  describe('Ghost Entry (foregroundBgId) lifecycle', () => {
+    it('switchToSession should keep target as ghost in backgroundSessions', () => {
+      useExecutionStore.setState({
+        taskDescription: 'Original',
+        status: 'running',
+        taskId: 'task-orig',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bgId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      useExecutionStore.setState({ taskDescription: 'New FG', taskId: 'task-new' });
+      useExecutionStore.getState().switchToSession(bgId);
+
+      const state = useExecutionStore.getState();
+      expect(state.backgroundSessions[bgId]).toBeDefined();
+      expect(state.foregroundBgId).toBe(bgId);
+    });
+
+    it('switchToSession should set foregroundBgId to target id', () => {
+      useExecutionStore.setState({
+        taskDescription: 'Session A',
+        status: 'running',
+        taskId: 'a',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bgId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      useExecutionStore.getState().switchToSession(bgId);
+
+      expect(useExecutionStore.getState().foregroundBgId).toBe(bgId);
+    });
+
+    it('switchToSession should be no-op when switching to current ghost', () => {
+      useExecutionStore.setState({
+        taskDescription: 'Session A',
+        status: 'running',
+        taskId: 'a',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bgId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      useExecutionStore.getState().switchToSession(bgId);
+      const stateAfterFirst = useExecutionStore.getState();
+
+      // Second switch to same ghost should be no-op
+      useExecutionStore.getState().switchToSession(bgId);
+      const stateAfterSecond = useExecutionStore.getState();
+
+      expect(stateAfterSecond.foregroundBgId).toBe(bgId);
+      expect(Object.keys(stateAfterSecond.backgroundSessions).length)
+        .toBe(Object.keys(stateAfterFirst.backgroundSessions).length);
+    });
+
+    it('switchToSession should update previous ghost with live state when switching again', () => {
+      // Create and background Session A
+      useExecutionStore.setState({
+        taskDescription: 'Session A',
+        status: 'running',
+        taskId: 'a',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bgIdA = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      // Create and background Session B
+      useExecutionStore.setState({
+        taskDescription: 'Session B',
+        status: 'running',
+        taskId: 'b',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bgIdB = Object.keys(useExecutionStore.getState().backgroundSessions)
+        .find((k) => k !== bgIdA)!;
+
+      // Switch to A (A becomes ghost)
+      useExecutionStore.getState().switchToSession(bgIdA);
+      expect(useExecutionStore.getState().foregroundBgId).toBe(bgIdA);
+
+      // Modify foreground while A is ghost
+      useExecutionStore.setState({ taskDescription: 'Session A modified' });
+
+      // Switch to B — ghost A should be updated with live state
+      useExecutionStore.getState().switchToSession(bgIdB);
+
+      const state = useExecutionStore.getState();
+      expect(state.foregroundBgId).toBe(bgIdB);
+      expect(state.backgroundSessions[bgIdA].taskDescription).toBe('Session A modified');
+    });
+
+    it('switchToSession should create new bg entry for foreground without ghost', () => {
+      // Background a session
+      useExecutionStore.setState({
+        taskDescription: 'Background',
+        status: 'running',
+        taskId: 'bg-task',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bgId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      // Set up foreground without ghost (foregroundBgId is null)
+      useExecutionStore.setState({
+        taskDescription: 'Fresh foreground',
+        status: 'idle',
+        taskId: 'fg-task',
+      });
+
+      useExecutionStore.getState().switchToSession(bgId);
+
+      const state = useExecutionStore.getState();
+      // Ghost is the target
+      expect(state.foregroundBgId).toBe(bgId);
+      // Old foreground should be saved as new bg entry
+      const freshBg = Object.values(state.backgroundSessions).find(
+        (s) => s.taskId === 'fg-task'
+      );
+      expect(freshBg).toBeDefined();
+      expect(freshBg!.taskDescription).toBe('Fresh foreground');
+    });
+
+    it('switchToSession should not orphan children', () => {
+      // Create parent session
+      useExecutionStore.setState({
+        taskDescription: 'Parent',
+        status: 'running',
+        taskId: 'parent',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const parentId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      // Create child sessions under the parent
+      useExecutionStore.setState({
+        taskDescription: 'Child 1',
+        status: 'idle',
+        taskId: 'child1',
+        foregroundParentSessionId: parentId,
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+
+      useExecutionStore.setState({
+        taskDescription: 'Child 2',
+        status: 'idle',
+        taskId: 'child2',
+        foregroundParentSessionId: parentId,
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+
+      // Switch to parent — parent stays as ghost, children's parentSessionId remains valid
+      useExecutionStore.getState().switchToSession(parentId);
+
+      const state = useExecutionStore.getState();
+      const child1 = Object.values(state.backgroundSessions).find((s) => s.taskId === 'child1');
+      const child2 = Object.values(state.backgroundSessions).find((s) => s.taskId === 'child2');
+
+      expect(child1!.parentSessionId).toBe(parentId);
+      expect(child2!.parentSessionId).toBe(parentId);
+      // Parent is still in backgroundSessions
+      expect(state.backgroundSessions[parentId]).toBeDefined();
+    });
+
+    it('backgroundCurrentSession should update ghost and clear foregroundBgId', () => {
+      // Background a session
+      useExecutionStore.setState({
+        taskDescription: 'Session A',
+        status: 'running',
+        taskId: 'a',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bgId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      // Switch to it (creates ghost)
+      useExecutionStore.getState().switchToSession(bgId);
+      expect(useExecutionStore.getState().foregroundBgId).toBe(bgId);
+
+      // Modify live foreground
+      useExecutionStore.setState({ taskDescription: 'A modified in FG' });
+
+      // Background current session
+      useExecutionStore.getState().backgroundCurrentSession();
+
+      const state = useExecutionStore.getState();
+      // Ghost should be updated with live state and foregroundBgId cleared
+      expect(state.foregroundBgId).toBeNull();
+      expect(state.backgroundSessions[bgId].taskDescription).toBe('A modified in FG');
+      expect(state.activeSessionId).toBe(bgId);
+      // No new bg session created (ghost was reused, and switchToSession
+      // correctly skipped creating a bg entry for the empty foreground)
+      const bgCount = Object.keys(state.backgroundSessions).length;
+      expect(bgCount).toBe(1); // ghost (updated) only — empty foreground was discarded
+    });
+
+    it('backgroundCurrentSession without ghost should work as before', () => {
+      useExecutionStore.setState({
+        taskDescription: 'No ghost session',
+        status: 'running',
+        taskId: 'no-ghost',
+      });
+
+      useExecutionStore.getState().backgroundCurrentSession();
+
+      const state = useExecutionStore.getState();
+      expect(state.foregroundBgId).toBeNull();
+      const bg = Object.values(state.backgroundSessions).find((s) => s.taskId === 'no-ghost');
+      expect(bg).toBeDefined();
+      expect(state.taskDescription).toBe('');
+      expect(state.status).toBe('idle');
+    });
+
+    it('forkSessionAtTurn should update ghost as parent and clear foregroundBgId', () => {
+      // Set up a session with conversation turns
+      useExecutionStore.setState({
+        taskDescription: 'Original',
+        status: 'idle',
+        streamingOutput: [
+          { id: 1, content: 'User message', type: 'info', timestamp: 1000 },
+          { id: 2, content: 'Assistant reply', type: 'text', timestamp: 1001 },
+        ],
+        streamLineCounter: 2,
+        taskId: 'orig',
+        isChatSession: true,
+        standaloneTurns: [{ user: 'User message', assistant: 'Assistant reply', createdAt: 1000 }],
+        standaloneSessionId: 'standalone-orig',
+      });
+
+      // Background and switch to create a ghost
+      useExecutionStore.getState().backgroundCurrentSession();
+      const ghostId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+      useExecutionStore.getState().switchToSession(ghostId);
+      expect(useExecutionStore.getState().foregroundBgId).toBe(ghostId);
+
+      // Fork at the first turn
+      useExecutionStore.getState().forkSessionAtTurn(1);
+
+      const state = useExecutionStore.getState();
+      // Ghost should be used as parent, foregroundBgId cleared
+      expect(state.foregroundBgId).toBeNull();
+      expect(state.foregroundParentSessionId).toBe(ghostId);
+      // Ghost should be updated with full pre-fork state
+      expect(state.backgroundSessions[ghostId]).toBeDefined();
+    });
+
+    it('forkSessionAtTurn without ghost should work as before', () => {
+      useExecutionStore.setState({
+        taskDescription: 'No ghost fork',
+        status: 'idle',
+        streamingOutput: [
+          { id: 1, content: 'User message', type: 'info', timestamp: 1000 },
+          { id: 2, content: 'Reply', type: 'text', timestamp: 1001 },
+        ],
+        streamLineCounter: 2,
+        taskId: 'no-ghost-fork',
+        isChatSession: true,
+        standaloneTurns: [{ user: 'User message', assistant: 'Reply', createdAt: 1000 }],
+        standaloneSessionId: 'standalone-ngf',
+      });
+
+      useExecutionStore.getState().forkSessionAtTurn(1);
+
+      const state = useExecutionStore.getState();
+      expect(state.foregroundBgId).toBeNull();
+      // A new bg entry should be created as the parent
+      const bgKeys = Object.keys(state.backgroundSessions);
+      expect(bgKeys.length).toBe(1);
+      expect(state.foregroundParentSessionId).toBe(bgKeys[0]);
+    });
+
+    it('removeBackgroundSession should clear foregroundBgId when ghost is removed', () => {
+      useExecutionStore.setState({
+        taskDescription: 'Ghost session',
+        status: 'running',
+        taskId: 'ghost-task',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bgId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      useExecutionStore.getState().switchToSession(bgId);
+      expect(useExecutionStore.getState().foregroundBgId).toBe(bgId);
+
+      useExecutionStore.getState().removeBackgroundSession(bgId);
+
+      const state = useExecutionStore.getState();
+      expect(state.foregroundBgId).toBeNull();
+      expect(state.backgroundSessions[bgId]).toBeUndefined();
+    });
+
+    it('removeBackgroundSession should re-parent children to removed session parent', () => {
+      // Create a chain: grandparent → parent → child
+      useExecutionStore.setState({
+        taskDescription: 'Grandparent',
+        status: 'idle',
+        taskId: 'gp',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const gpId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      useExecutionStore.setState({
+        taskDescription: 'Parent',
+        status: 'idle',
+        taskId: 'parent',
+        foregroundParentSessionId: gpId,
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const parentId = Object.values(useExecutionStore.getState().backgroundSessions)
+        .find((s) => s.taskId === 'parent')!.id;
+
+      useExecutionStore.setState({
+        taskDescription: 'Child',
+        status: 'idle',
+        taskId: 'child',
+        foregroundParentSessionId: parentId,
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+
+      // Remove parent
+      useExecutionStore.getState().removeBackgroundSession(parentId);
+
+      const state = useExecutionStore.getState();
+      const child = Object.values(state.backgroundSessions).find((s) => s.taskId === 'child');
+      // Child should be re-parented to grandparent
+      expect(child!.parentSessionId).toBe(gpId);
+    });
+
+    it('reset should handle ghost cleanup', () => {
+      useExecutionStore.setState({
+        taskDescription: 'Ghost test',
+        status: 'idle',
+        taskId: 'gt',
+        isChatSession: true,
+        streamingOutput: [
+          { id: 1, content: 'test', type: 'info', timestamp: 1000 },
+        ],
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bgId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      useExecutionStore.getState().switchToSession(bgId);
+      expect(useExecutionStore.getState().foregroundBgId).toBe(bgId);
+
+      // Modify foreground to verify ghost gets updated on reset
+      useExecutionStore.setState({ taskDescription: 'Modified during ghost' });
+
+      useExecutionStore.getState().reset();
+
+      const state = useExecutionStore.getState();
+      expect(state.foregroundBgId).toBeNull();
+      // Ghost should have been updated with live state before reset
+      expect(state.backgroundSessions[bgId].taskDescription).toBe('Modified during ghost');
+    });
+
+    it('nested fork chain survives switch', () => {
+      // Create A, background it
+      useExecutionStore.setState({
+        taskDescription: 'A',
+        status: 'idle',
+        taskId: 'a',
+        streamingOutput: [
+          { id: 1, content: 'A msg', type: 'info', timestamp: 1000 },
+          { id: 2, content: 'A reply', type: 'text', timestamp: 1001 },
+        ],
+        streamLineCounter: 2,
+        isChatSession: true,
+        standaloneTurns: [{ user: 'A msg', assistant: 'A reply', createdAt: 1000 }],
+        standaloneSessionId: 'sa-a',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const aId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
+
+      // Create B as child of A, background it
+      useExecutionStore.setState({
+        taskDescription: 'B',
+        status: 'idle',
+        taskId: 'b',
+        foregroundParentSessionId: aId,
+        streamingOutput: [
+          { id: 1, content: 'B msg', type: 'info', timestamp: 2000 },
+          { id: 2, content: 'B reply', type: 'text', timestamp: 2001 },
+        ],
+        streamLineCounter: 2,
+        isChatSession: true,
+        standaloneTurns: [{ user: 'B msg', assistant: 'B reply', createdAt: 2000 }],
+        standaloneSessionId: 'sa-b',
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const bId = Object.values(useExecutionStore.getState().backgroundSessions)
+        .find((s) => s.taskId === 'b')!.id;
+
+      // Create C as child of B, background it
+      useExecutionStore.setState({
+        taskDescription: 'C',
+        status: 'idle',
+        taskId: 'c',
+        foregroundParentSessionId: bId,
+      });
+      useExecutionStore.getState().backgroundCurrentSession();
+      const cId = Object.values(useExecutionStore.getState().backgroundSessions)
+        .find((s) => s.taskId === 'c')!.id;
+
+      // Switch to A — A becomes ghost, hierarchy should be intact
+      useExecutionStore.getState().switchToSession(aId);
+
+      const state = useExecutionStore.getState();
+      // A is ghost
+      expect(state.foregroundBgId).toBe(aId);
+      // B is child of A
+      expect(state.backgroundSessions[bId].parentSessionId).toBe(aId);
+      // C is child of B
+      expect(state.backgroundSessions[cId].parentSessionId).toBe(bId);
+      // A is still in backgroundSessions (ghost)
+      expect(state.backgroundSessions[aId]).toBeDefined();
     });
   });
 });

@@ -158,16 +158,30 @@ pub async fn detect_applicable_skills(
 }
 
 /// Toggle a file-based skill's enabled state.
-/// Note: This is persisted in user-local config, not in the skill file itself.
+/// Persists disabled state in the settings table with key `skill_disabled:{id}`.
+/// Only disabled skills are stored (enabled is the default).
 #[tauri::command]
 pub async fn toggle_skill(
-    _id: String,
-    _enabled: bool,
-    _state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+    state: State<'_, AppState>,
 ) -> Result<CommandResponse<()>, String> {
-    // TODO: Persist enabled/disabled state in desktop-local config file
-    // For now, acknowledge the toggle
-    Ok(CommandResponse::ok(()))
+    let result = state
+        .with_database(|db| {
+            if enabled {
+                // Remove the disabled marker (enabled is default)
+                db.delete_setting(&format!("skill_disabled:{}", id))
+            } else {
+                // Store disabled marker
+                db.set_setting(&format!("skill_disabled:{}", id), "1")
+            }
+        })
+        .await;
+
+    match result {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
 }
 
 /// Create a new project-local skill file in .skills/ directory.
@@ -381,9 +395,10 @@ pub async fn get_skills_overview(
 // --- Internal helper functions ---
 
 /// Build a SkillIndex for a project by scanning all sources.
+/// Applies persisted disabled state from the settings table.
 async fn build_skill_index_for_project(
     project_path: &str,
-    _state: &State<'_, AppState>,
+    state: &State<'_, AppState>,
 ) -> Result<SkillIndex, String> {
     let project_root = Path::new(project_path);
 
@@ -396,7 +411,32 @@ async fn build_skill_index_for_project(
         .map_err(|e| format!("Discovery failed: {}", e))?;
 
     // Build the index
-    build_index(discovered).map_err(|e| format!("Index build failed: {}", e))
+    let index = build_index(discovered).map_err(|e| format!("Index build failed: {}", e))?;
+
+    // Apply persisted disabled state from the database
+    let disabled_ids: std::collections::HashSet<String> = state
+        .with_database(|db| {
+            let rows = db.get_settings_by_prefix("skill_disabled:")?;
+            Ok(rows
+                .into_iter()
+                .map(|(key, _)| key.strip_prefix("skill_disabled:").unwrap_or(&key).to_string())
+                .collect())
+        })
+        .await
+        .unwrap_or_default();
+
+    if disabled_ids.is_empty() {
+        return Ok(index);
+    }
+
+    // Rebuild index with disabled skills marked
+    let mut docs = index.skills().to_vec();
+    for doc in &mut docs {
+        if disabled_ids.contains(&doc.id) {
+            doc.enabled = false;
+        }
+    }
+    Ok(SkillIndex::new(docs))
 }
 
 /// Get generated skill summaries from the database.
