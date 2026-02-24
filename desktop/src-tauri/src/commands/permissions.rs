@@ -5,9 +5,9 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use crate::models::response::CommandResponse;
 use crate::services::orchestrator::permission_gate::PermissionGate;
 use crate::services::orchestrator::permissions::{PermissionLevel, PermissionResponse};
-use crate::models::response::CommandResponse;
 
 /// Tauri managed state for the global permission gate singleton.
 pub struct PermissionState {

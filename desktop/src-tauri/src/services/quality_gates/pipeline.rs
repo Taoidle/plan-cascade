@@ -267,10 +267,7 @@ impl PipelineConfig {
             GatePhase::PostValidation.to_string(),
             PhaseGateConfig {
                 mode: GateMode::Soft,
-                gate_ids: vec![
-                    "ai_verify".to_string(),
-                    "code_review".to_string(),
-                ],
+                gate_ids: vec!["ai_verify".to_string(), "code_review".to_string()],
             },
         );
 
@@ -326,7 +323,9 @@ impl PipelineResult {
         short_circuit_phase: Option<GatePhase>,
     ) -> Self {
         let total_duration_ms = phase_results.iter().map(|r| r.duration_ms).sum();
-        let passed = phase_results.iter().all(|r| r.passed || r.mode == GateMode::Soft);
+        let passed = phase_results
+            .iter()
+            .all(|r| r.passed || r.mode == GateMode::Soft);
         Self {
             passed,
             phase_results,
@@ -343,8 +342,11 @@ impl PipelineResult {
 
 /// Callback type for gate execution. Each gate implementor provides a closure
 /// that runs the gate and returns a `PipelineGateResult`.
-pub type GateExecutor =
-    Box<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = PipelineGateResult> + Send>> + Send + Sync>;
+pub type GateExecutor = Box<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = PipelineGateResult> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// The main GatePipeline orchestrator.
 ///
@@ -612,7 +614,11 @@ mod tests {
     use std::sync::Arc;
     use std::time::Instant;
 
-    fn make_passing_gate(gate_id: &str, gate_name: &str, phase: GatePhase) -> (String, GateExecutor) {
+    fn make_passing_gate(
+        gate_id: &str,
+        gate_name: &str,
+        phase: GatePhase,
+    ) -> (String, GateExecutor) {
         let id = gate_id.to_string();
         let name = gate_name.to_string();
         (
@@ -620,14 +626,16 @@ mod tests {
             Box::new(move || {
                 let id = id.clone();
                 let name = name.clone();
-                Box::pin(async move {
-                    PipelineGateResult::passed(&id, &name, phase, 10)
-                })
+                Box::pin(async move { PipelineGateResult::passed(&id, &name, phase, 10) })
             }),
         )
     }
 
-    fn make_failing_gate(gate_id: &str, gate_name: &str, phase: GatePhase) -> (String, GateExecutor) {
+    fn make_failing_gate(
+        gate_id: &str,
+        gate_name: &str,
+        phase: GatePhase,
+    ) -> (String, GateExecutor) {
         let id = gate_id.to_string();
         let name = gate_name.to_string();
         (
@@ -754,7 +762,12 @@ mod tests {
                     let order = order.clone();
                     Box::pin(async move {
                         order.lock().await.push("typecheck");
-                        PipelineGateResult::passed("typecheck", "TypeCheck", GatePhase::Validation, 1)
+                        PipelineGateResult::passed(
+                            "typecheck",
+                            "TypeCheck",
+                            GatePhase::Validation,
+                            1,
+                        )
                     })
                 }),
             );
@@ -769,7 +782,12 @@ mod tests {
                     let order = order.clone();
                     Box::pin(async move {
                         order.lock().await.push("ai_verify");
-                        PipelineGateResult::passed("ai_verify", "AI Verify", GatePhase::PostValidation, 1)
+                        PipelineGateResult::passed(
+                            "ai_verify",
+                            "AI Verify",
+                            GatePhase::PostValidation,
+                            1,
+                        )
                     })
                 }),
             );
@@ -846,7 +864,14 @@ mod tests {
     fn test_phase_result_hard_fail() {
         let gate_results = vec![
             PipelineGateResult::passed("test1", "Test1", GatePhase::Validation, 10),
-            PipelineGateResult::failed("test2", "Test2", GatePhase::Validation, 5, "err".to_string(), vec![]),
+            PipelineGateResult::failed(
+                "test2",
+                "Test2",
+                GatePhase::Validation,
+                5,
+                "err".to_string(),
+                vec![],
+            ),
         ];
         let result = PipelinePhaseResult::new(GatePhase::Validation, GateMode::Hard, gate_results);
         assert!(!result.passed);
@@ -855,10 +880,16 @@ mod tests {
 
     #[test]
     fn test_phase_result_soft_fail() {
-        let gate_results = vec![
-            PipelineGateResult::failed("test", "Test", GatePhase::PreValidation, 5, "err".to_string(), vec![]),
-        ];
-        let result = PipelinePhaseResult::new(GatePhase::PreValidation, GateMode::Soft, gate_results);
+        let gate_results = vec![PipelineGateResult::failed(
+            "test",
+            "Test",
+            GatePhase::PreValidation,
+            5,
+            "err".to_string(),
+            vec![],
+        )];
+        let result =
+            PipelinePhaseResult::new(GatePhase::PreValidation, GateMode::Soft, gate_results);
         assert!(!result.passed);
         assert!(!result.is_hard_fail()); // Soft mode, so not a hard fail
     }
@@ -876,7 +907,10 @@ mod tests {
         assert_eq!(result.gate_id, "git_diff_warning");
         assert_eq!(result.gate_name, "Git Diff");
         assert_eq!(result.phase, GatePhase::PostValidation);
-        assert!(result.passed, "warning result should not block the pipeline");
+        assert!(
+            result.passed,
+            "warning result should not block the pipeline"
+        );
         assert_eq!(result.status, GateStatus::Skipped);
         assert_eq!(result.duration_ms, 0);
         assert_eq!(result.message, "Git diff failed: exit code 128");

@@ -195,10 +195,7 @@ pub fn parse_stories_from_response(response_text: &str) -> Result<Vec<TaskStory>
 }
 
 /// Build the complete TaskPrd from stories, calculating execution batches.
-pub fn build_task_prd(
-    task_description: &str,
-    stories: Vec<TaskStory>,
-) -> Result<TaskPrd, String> {
+pub fn build_task_prd(task_description: &str, stories: Vec<TaskStory>) -> Result<TaskPrd, String> {
     // Convert to ExecutableStory for batch calculation
     let executable_stories: Vec<ExecutableStory> = stories
         .iter()
@@ -243,12 +240,8 @@ pub async fn generate_prd_with_llm(
     let user_message = build_prd_user_message(task_description);
 
     // Build messages with compacted conversation history
-    let mut messages = compact_conversation_history(
-        &provider,
-        conversation_history,
-        max_context_tokens,
-    )
-    .await;
+    let mut messages =
+        compact_conversation_history(&provider, conversation_history, max_context_tokens).await;
     messages.push(Message::user(&user_message));
 
     // First attempt
@@ -371,7 +364,8 @@ async fn compact_conversation_history(
     let mut recent_start = history.len();
     let mut recent_tokens = 0;
     for i in (0..history.len()).rev() {
-        let turn_tokens = estimate_tokens(&history[i].user) + estimate_tokens(&history[i].assistant);
+        let turn_tokens =
+            estimate_tokens(&history[i].user) + estimate_tokens(&history[i].assistant);
         if recent_tokens + turn_tokens > recent_budget {
             break;
         }
@@ -411,18 +405,13 @@ async fn compact_conversation_history(
 
     let summary_messages = vec![Message::user(&summary_prompt)];
     match provider
-        .send_message(
-            summary_messages,
-            None,
-            vec![],
-            LlmRequestOptions::default(),
-        )
+        .send_message(summary_messages, None, vec![], LlmRequestOptions::default())
         .await
     {
         Ok(response) => {
-            let summary = response.content.unwrap_or_else(|| {
-                "Previous conversation context was summarized.".to_string()
-            });
+            let summary = response
+                .content
+                .unwrap_or_else(|| "Previous conversation context was summarized.".to_string());
 
             // Build: [summary as user+assistant pair] + [recent turns verbatim]
             let mut messages = vec![
@@ -500,14 +489,9 @@ pub fn create_provider(
 ///   ]
 /// }
 /// ```
-pub fn convert_compiled_prd_to_task_prd(
-    spec_value: serde_json::Value,
-) -> Result<TaskPrd, String> {
+pub fn convert_compiled_prd_to_task_prd(spec_value: serde_json::Value) -> Result<TaskPrd, String> {
     // Extract prd_json field if present, otherwise treat the value itself as PRD
-    let prd_value = spec_value
-        .get("prd_json")
-        .cloned()
-        .unwrap_or(spec_value);
+    let prd_value = spec_value.get("prd_json").cloned().unwrap_or(spec_value);
 
     // Extract title and description
     let title = prd_value
@@ -1009,7 +993,9 @@ Hope this helps!"#;
         ]"#;
 
         let provider = Arc::new(MockLlmProvider::with_text_response(mock_response));
-        let prd = generate_prd_with_llm(provider, "Build a web service", &[], 200_000).await.unwrap();
+        let prd = generate_prd_with_llm(provider, "Build a web service", &[], 200_000)
+            .await
+            .unwrap();
 
         assert_eq!(prd.stories.len(), 2);
         assert_eq!(prd.stories[0].id, "story-001");
@@ -1057,7 +1043,9 @@ Hope this helps!"#;
             second_response,
         ]));
 
-        let prd = generate_prd_with_llm(provider, "Fix a bug", &[], 200_000).await.unwrap();
+        let prd = generate_prd_with_llm(provider, "Fix a bug", &[], 200_000)
+            .await
+            .unwrap();
         assert_eq!(prd.stories.len(), 1);
         assert_eq!(prd.stories[0].id, "story-001");
     }
@@ -1087,7 +1075,9 @@ Hope this helps!"#;
 
         let result = generate_prd_with_llm(provider, "Some task", &[], 200_000).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to generate PRD after retry"));
+        assert!(result
+            .unwrap_err()
+            .contains("Failed to generate PRD after retry"));
     }
 
     #[tokio::test]
@@ -1132,19 +1122,13 @@ Hope this helps!"#;
     #[test]
     fn test_extract_json_from_markdown_fences() {
         let input = "```json\n[{\"id\": \"s1\"}]\n```";
-        assert_eq!(
-            extract_json_from_response(input),
-            "[{\"id\": \"s1\"}]"
-        );
+        assert_eq!(extract_json_from_response(input), "[{\"id\": \"s1\"}]");
     }
 
     #[test]
     fn test_extract_json_from_text_with_brackets() {
         let input = "Here: [{\"id\": \"s1\"}] end.";
-        assert_eq!(
-            extract_json_from_response(input),
-            "[{\"id\": \"s1\"}]"
-        );
+        assert_eq!(extract_json_from_response(input), "[{\"id\": \"s1\"}]");
     }
 
     // ========================================================================
@@ -1276,7 +1260,8 @@ Hope this helps!"#;
 
     #[tokio::test]
     async fn test_compact_empty_history() {
-        let provider: Arc<dyn LlmProvider> = Arc::new(MockLlmProvider::with_text_response("unused"));
+        let provider: Arc<dyn LlmProvider> =
+            Arc::new(MockLlmProvider::with_text_response("unused"));
         let messages = compact_conversation_history(&provider, &[], 200_000).await;
         assert!(messages.is_empty());
     }
@@ -1291,7 +1276,8 @@ Hope this helps!"#;
 
     #[tokio::test]
     async fn test_compact_history_within_budget() {
-        let provider: Arc<dyn LlmProvider> = Arc::new(MockLlmProvider::with_text_response("unused"));
+        let provider: Arc<dyn LlmProvider> =
+            Arc::new(MockLlmProvider::with_text_response("unused"));
         let history = vec![
             ConversationTurnInput {
                 user: "Hello".to_string(),
@@ -1336,11 +1322,12 @@ Hope this helps!"#;
         ];
 
         // Very small budget forces compaction
-        let messages = compact_conversation_history(&provider, &history, PRD_RESERVED_TOKENS + 100).await;
+        let messages =
+            compact_conversation_history(&provider, &history, PRD_RESERVED_TOKENS + 100).await;
 
         // Should have summary pair + at least one recent turn
         assert!(messages.len() >= 4); // summary pair (2) + at least 1 recent turn (2)
-        // First message should be the context marker
+                                      // First message should be the context marker
         assert_eq!(msg_text(&messages[0]), "[Prior conversation context]");
     }
 

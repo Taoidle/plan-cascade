@@ -98,12 +98,14 @@ impl LspClient {
             .spawn()
             .map_err(|e| anyhow::anyhow!("Failed to spawn LSP server '{}': {}", command, e))?;
 
-        let child_stdin = child.stdin.take().ok_or_else(|| {
-            anyhow::anyhow!("Failed to capture stdin of LSP server")
-        })?;
-        let child_stdout = child.stdout.take().ok_or_else(|| {
-            anyhow::anyhow!("Failed to capture stdout of LSP server")
-        })?;
+        let child_stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stdin of LSP server"))?;
+        let child_stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout of LSP server"))?;
 
         let stdin = Arc::new(tokio::sync::Mutex::new(BufWriter::new(child_stdin)));
         let pending: Arc<DashMap<i64, oneshot::Sender<Value>>> = Arc::new(DashMap::new());
@@ -235,7 +237,8 @@ impl LspClient {
             params: Some(params_value),
         };
 
-        self.send_message(&serde_json::to_value(&notification)?).await
+        self.send_message(&serde_json::to_value(&notification)?)
+            .await
     }
 
     /// Graceful shutdown: shutdown request -> exit notification -> wait.
@@ -288,10 +291,7 @@ impl LspClient {
 
     /// Background reader loop: reads JSON-RPC responses from stdout and
     /// dispatches them to pending request channels.
-    async fn reader_loop(
-        stdout: ChildStdout,
-        pending: Arc<DashMap<i64, oneshot::Sender<Value>>>,
-    ) {
+    async fn reader_loop(stdout: ChildStdout, pending: Arc<DashMap<i64, oneshot::Sender<Value>>>) {
         let mut reader = BufReader::new(stdout);
         let mut header_buf = String::new();
 
@@ -572,7 +572,10 @@ mod tests {
         };
 
         let json = serde_json::to_string(&notif).unwrap();
-        assert!(!json.contains("\"id\""), "Notification should not have id field");
+        assert!(
+            !json.contains("\"id\""),
+            "Notification should not have id field"
+        );
         assert!(json.contains("\"method\":\"initialized\""));
     }
 
@@ -591,7 +594,8 @@ mod tests {
 
     #[test]
     fn test_jsonrpc_response_with_error() {
-        let json = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid Request"}}"#;
+        let json =
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid Request"}}"#;
         let response: JsonRpcResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.id, Some(1));
         assert!(response.result.is_none());

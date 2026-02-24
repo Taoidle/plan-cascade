@@ -170,10 +170,7 @@ impl McpClient {
         })?;
 
         let stdin = process.stdin.take().ok_or_else(|| {
-            AppError::command(format!(
-                "Failed to capture stdin for MCP server '{}'",
-                name
-            ))
+            AppError::command(format!("Failed to capture stdin for MCP server '{}'", name))
         })?;
 
         let stdout = process.stdout.take().ok_or_else(|| {
@@ -393,12 +390,12 @@ impl McpClient {
         stdin: &mut tokio::process::ChildStdin,
         request: &JsonRpcRequest,
     ) -> AppResult<()> {
-        let msg = serde_json::to_string(request)
-            .map_err(|e| AppError::command(format!("Failed to serialize JSON-RPC request: {}", e)))?;
-        stdin
-            .write_all(msg.as_bytes())
-            .await
-            .map_err(|e| AppError::command(format!("Failed to write to MCP server stdin: {}", e)))?;
+        let msg = serde_json::to_string(request).map_err(|e| {
+            AppError::command(format!("Failed to serialize JSON-RPC request: {}", e))
+        })?;
+        stdin.write_all(msg.as_bytes()).await.map_err(|e| {
+            AppError::command(format!("Failed to write to MCP server stdin: {}", e))
+        })?;
         stdin
             .write_all(b"\n")
             .await
@@ -425,9 +422,7 @@ impl McpClient {
                 reader.read_line(&mut line),
             )
             .await
-            .map_err(|_| {
-                AppError::command("Timeout waiting for MCP server response".to_string())
-            })?
+            .map_err(|_| AppError::command("Timeout waiting for MCP server response".to_string()))?
             .map_err(|e| {
                 AppError::command(format!("Failed to read from MCP server stdout: {}", e))
             })?;
@@ -960,9 +955,7 @@ for line in sys.stdin:
 
         let client = McpClient::connect(&config).await.unwrap();
 
-        let result = client
-            .call_tool("nonexistent", serde_json::json!({}))
-            .await;
+        let result = client.call_tool("nonexistent", serde_json::json!({})).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Tool execution failed"), "Error: {}", err);

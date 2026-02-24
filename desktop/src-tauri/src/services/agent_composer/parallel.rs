@@ -76,9 +76,8 @@ impl Agent for ParallelAgent {
             match agent.run(sub_ctx).await {
                 Ok(stream) => {
                     // Tag each event with the agent name
-                    let tagged = stream.map(move |result| {
-                        result.map(|event| tag_event(event, &agent_name))
-                    });
+                    let tagged =
+                        stream.map(move |result| result.map(|event| tag_event(event, &agent_name)));
                     tagged_streams.push(Box::pin(tagged));
                 }
                 Err(e) => {
@@ -148,10 +147,7 @@ impl Agent for ParallelAgent {
                                 } else {
                                     Some(state.outputs.join("\n\n---\n\n"))
                                 };
-                                return Some((
-                                    Ok(AgentEvent::Done { output: combined }),
-                                    state,
-                                ));
+                                return Some((Ok(AgentEvent::Done { output: combined }), state));
                             }
                             return None;
                         }
@@ -308,9 +304,9 @@ mod tests {
 
     fn mock_context() -> AgentContext {
         let provider = Arc::new(MockProvider::new());
-        let tool_executor = Arc::new(
-            crate::services::tools::ToolExecutor::new(&PathBuf::from("/tmp")),
-        );
+        let tool_executor = Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+            "/tmp",
+        )));
         let hooks = Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new());
 
         AgentContext {
@@ -343,13 +339,23 @@ mod tests {
         }
 
         // Should have TextDelta from each agent + final Done
-        assert!(events.len() >= 3, "Expected at least 3 events, got {}", events.len());
+        assert!(
+            events.len() >= 3,
+            "Expected at least 3 events, got {}",
+            events.len()
+        );
 
         // Final event should be Done with combined output
         if let Some(AgentEvent::Done { output }) = events.last() {
             let out = output.as_ref().unwrap();
-            assert!(out.contains("output-A"), "Expected output-A in combined output");
-            assert!(out.contains("output-B"), "Expected output-B in combined output");
+            assert!(
+                out.contains("output-A"),
+                "Expected output-A in combined output"
+            );
+            assert!(
+                out.contains("output-B"),
+                "Expected output-B in combined output"
+            );
         } else {
             panic!("Expected final Done event");
         }

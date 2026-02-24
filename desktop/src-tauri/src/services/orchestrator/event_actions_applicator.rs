@@ -18,8 +18,8 @@ use std::collections::HashMap;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::services::core::event_actions::{EventActions, QualityGateActionResult};
 use crate::services::core::builders::SessionStateKey;
+use crate::services::core::event_actions::{EventActions, QualityGateActionResult};
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::services::timeline::TimelineService;
 use crate::utils::error::{AppError, AppResult};
@@ -79,14 +79,12 @@ pub fn merge_state_delta(
     for key in keys {
         let value = &state_delta[key];
         // Auto-prefix keys without a recognized scope
-        let effective_key = if key.starts_with("user:")
-            || key.starts_with("app:")
-            || key.starts_with("temp:")
-        {
-            key.clone()
-        } else {
-            format!("app:{}", key)
-        };
+        let effective_key =
+            if key.starts_with("user:") || key.starts_with("app:") || key.starts_with("temp:") {
+                key.clone()
+            } else {
+                format!("app:{}", key)
+            };
 
         match SessionStateKey::new(&effective_key) {
             Ok(_validated) => {
@@ -117,12 +115,7 @@ pub fn apply_checkpoint(
     label: &str,
     tracked_files: &[String],
 ) -> AppResult<String> {
-    let checkpoint = timeline.create_checkpoint(
-        project_path,
-        session_id,
-        label,
-        tracked_files,
-    )?;
+    let checkpoint = timeline.create_checkpoint(project_path, session_id, label, tracked_files)?;
     Ok(checkpoint.id)
 }
 
@@ -363,20 +356,11 @@ mod tests {
     #[test]
     fn test_apply_checkpoint_creates_checkpoint() {
         let timeline = TimelineService::new();
-        let temp_dir = std::env::temp_dir().join(format!(
-            "ea_test_{}",
-            uuid::Uuid::new_v4()
-        ));
+        let temp_dir = std::env::temp_dir().join(format!("ea_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let project_path = temp_dir.to_string_lossy().to_string();
 
-        let result = apply_checkpoint(
-            &timeline,
-            &project_path,
-            "test-session",
-            "test-label",
-            &[],
-        );
+        let result = apply_checkpoint(&timeline, &project_path, "test-session", "test-label", &[]);
 
         assert!(result.is_ok());
         let cp_id = result.unwrap();
@@ -440,17 +424,9 @@ mod tests {
         let mut state = HashMap::new();
         let (tx, mut rx) = mpsc::channel(16);
 
-        let result = apply_actions(
-            &actions,
-            &mut state,
-            None,
-            "/tmp",
-            "sess",
-            &[],
-            &tx,
-        )
-        .await
-        .unwrap();
+        let result = apply_actions(&actions, &mut state, None, "/tmp", "sess", &[], &tx)
+            .await
+            .unwrap();
 
         assert_eq!(result.state_entries_merged, 0);
         assert!(!result.checkpoint_created);
@@ -463,22 +439,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_actions_state_delta_only() {
-        let actions = EventActions::none()
-            .with_state("app:step", Value::String("done".to_string()));
+        let actions =
+            EventActions::none().with_state("app:step", Value::String("done".to_string()));
         let mut state = HashMap::new();
         let (tx, _rx) = mpsc::channel(16);
 
-        let result = apply_actions(
-            &actions,
-            &mut state,
-            None,
-            "/tmp",
-            "sess",
-            &[],
-            &tx,
-        )
-        .await
-        .unwrap();
+        let result = apply_actions(&actions, &mut state, None, "/tmp", "sess", &[], &tx)
+            .await
+            .unwrap();
 
         assert_eq!(result.state_entries_merged, 1);
         assert_eq!(state["app:step"], Value::String("done".to_string()));
@@ -486,22 +454,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_actions_quality_gate_emits_event() {
-        let actions = EventActions::none()
-            .with_quality_gate("typecheck", true, None);
+        let actions = EventActions::none().with_quality_gate("typecheck", true, None);
         let mut state = HashMap::new();
         let (tx, mut rx) = mpsc::channel(16);
 
-        let result = apply_actions(
-            &actions,
-            &mut state,
-            None,
-            "/tmp",
-            "sess-1",
-            &[],
-            &tx,
-        )
-        .await
-        .unwrap();
+        let result = apply_actions(&actions, &mut state, None, "/tmp", "sess-1", &[], &tx)
+            .await
+            .unwrap();
 
         assert!(result.quality_gate_recorded);
 
@@ -518,22 +477,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_actions_transfer_recorded_not_executed() {
-        let actions = EventActions::none()
-            .with_transfer("reviewer-agent");
+        let actions = EventActions::none().with_transfer("reviewer-agent");
         let mut state = HashMap::new();
         let (tx, _rx) = mpsc::channel(16);
 
-        let result = apply_actions(
-            &actions,
-            &mut state,
-            None,
-            "/tmp",
-            "sess",
-            &[],
-            &tx,
-        )
-        .await
-        .unwrap();
+        let result = apply_actions(&actions, &mut state, None, "/tmp", "sess", &[], &tx)
+            .await
+            .unwrap();
 
         assert_eq!(result.transfer_target, Some("reviewer-agent".to_string()));
     }
@@ -548,10 +498,7 @@ mod tests {
             .with_transfer("next-agent");
 
         let timeline = TimelineService::new();
-        let temp_dir = std::env::temp_dir().join(format!(
-            "ea_order_test_{}",
-            uuid::Uuid::new_v4()
-        ));
+        let temp_dir = std::env::temp_dir().join(format!("ea_order_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let project_path = temp_dir.to_string_lossy().to_string();
 
@@ -601,14 +548,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_actions_checkpoint_stores_id_in_state() {
-        let actions = EventActions::none()
-            .with_checkpoint_described("milestone", "All tests pass");
+        let actions = EventActions::none().with_checkpoint_described("milestone", "All tests pass");
 
         let timeline = TimelineService::new();
-        let temp_dir = std::env::temp_dir().join(format!(
-            "ea_cp_test_{}",
-            uuid::Uuid::new_v4()
-        ));
+        let temp_dir = std::env::temp_dir().join(format!("ea_cp_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let project_path = temp_dir.to_string_lossy().to_string();
 
@@ -648,14 +591,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_actions_checkpoint_stores_label_and_description() {
-        let actions = EventActions::none()
-            .with_checkpoint_described("phase-complete", "All unit tests pass");
+        let actions =
+            EventActions::none().with_checkpoint_described("phase-complete", "All unit tests pass");
 
         let timeline = TimelineService::new();
-        let temp_dir = std::env::temp_dir().join(format!(
-            "ea_cp_desc_test_{}",
-            uuid::Uuid::new_v4()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("ea_cp_desc_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let project_path = temp_dir.to_string_lossy().to_string();
 
@@ -694,8 +635,8 @@ mod tests {
     fn test_tool_result_with_event_actions() {
         use crate::services::tools::ToolResult;
 
-        let actions = EventActions::none()
-            .with_state("app:tool_status", Value::String("done".to_string()));
+        let actions =
+            EventActions::none().with_state("app:tool_status", Value::String("done".to_string()));
 
         let result = ToolResult::ok("success").with_event_actions(actions);
         assert!(result.event_actions.is_some());
@@ -733,7 +674,9 @@ mod tests {
 
         let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
         match parsed {
-            AgentEvent::Actions { actions: parsed_actions } => {
+            AgentEvent::Actions {
+                actions: parsed_actions,
+            } => {
                 assert!(parsed_actions.has_actions());
                 assert_eq!(parsed_actions.state_delta.len(), 1);
                 assert!(parsed_actions.quality_gate_result.is_some());
@@ -766,17 +709,9 @@ mod tests {
         let mut state = HashMap::new();
         let (tx, _rx) = mpsc::channel(16);
 
-        let result = apply_actions(
-            &actions,
-            &mut state,
-            None,
-            "/tmp",
-            "sess",
-            &[],
-            &tx,
-        )
-        .await
-        .unwrap();
+        let result = apply_actions(&actions, &mut state, None, "/tmp", "sess", &[], &tx)
+            .await
+            .unwrap();
 
         assert_eq!(result.state_entries_merged, 3);
         assert_eq!(state["app:alpha"], Value::Number(1.into()));
@@ -788,23 +723,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_actions_quality_gate_with_details_emits_correctly() {
-        let actions = EventActions::none()
-            .with_quality_gate("test", false, Some("2 failures in module X".to_string()));
+        let actions = EventActions::none().with_quality_gate(
+            "test",
+            false,
+            Some("2 failures in module X".to_string()),
+        );
 
         let mut state = HashMap::new();
         let (tx, mut rx) = mpsc::channel(16);
 
-        let result = apply_actions(
-            &actions,
-            &mut state,
-            None,
-            "/tmp",
-            "sess-qg",
-            &[],
-            &tx,
-        )
-        .await
-        .unwrap();
+        let result = apply_actions(&actions, &mut state, None, "/tmp", "sess-qg", &[], &tx)
+            .await
+            .unwrap();
 
         assert!(result.quality_gate_recorded);
 
@@ -812,9 +742,7 @@ mod tests {
         let event = rx.try_recv().unwrap();
         match event {
             UnifiedStreamEvent::QualityGatesResult {
-                passed,
-                summary,
-                ..
+                passed, summary, ..
             } => {
                 assert!(!passed);
                 assert_eq!(summary["details"], "2 failures in module X");
@@ -828,24 +756,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_actions_checkpoint_without_timeline_no_error() {
-        let actions = EventActions::none()
-            .with_checkpoint("save-point");
+        let actions = EventActions::none().with_checkpoint("save-point");
 
         let mut state = HashMap::new();
         let (tx, _rx) = mpsc::channel(16);
 
         // No timeline service provided
-        let result = apply_actions(
-            &actions,
-            &mut state,
-            None,
-            "/tmp",
-            "sess",
-            &[],
-            &tx,
-        )
-        .await
-        .unwrap();
+        let result = apply_actions(&actions, &mut state, None, "/tmp", "sess", &[], &tx)
+            .await
+            .unwrap();
 
         // Checkpoint should not be created, but no error
         assert!(!result.checkpoint_created);
@@ -856,23 +775,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_actions_only_transfer_no_other_side_effects() {
-        let actions = EventActions::none()
-            .with_transfer("target-agent");
+        let actions = EventActions::none().with_transfer("target-agent");
 
         let mut state = HashMap::new();
         let (tx, mut rx) = mpsc::channel(16);
 
-        let result = apply_actions(
-            &actions,
-            &mut state,
-            None,
-            "/tmp",
-            "sess",
-            &[],
-            &tx,
-        )
-        .await
-        .unwrap();
+        let result = apply_actions(&actions, &mut state, None, "/tmp", "sess", &[], &tx)
+            .await
+            .unwrap();
 
         assert_eq!(result.state_entries_merged, 0);
         assert!(!result.checkpoint_created);

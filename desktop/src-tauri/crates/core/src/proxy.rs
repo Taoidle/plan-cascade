@@ -50,10 +50,23 @@ impl ProxyConfig {
     pub fn url_with_auth(&self) -> String {
         match (&self.username, &self.password) {
             (Some(u), Some(p)) => {
-                format!("{}://{}:{}@{}:{}", self.protocol.scheme(), u, p, self.host, self.port)
+                format!(
+                    "{}://{}:{}@{}:{}",
+                    self.protocol.scheme(),
+                    u,
+                    p,
+                    self.host,
+                    self.port
+                )
             }
             (Some(u), None) => {
-                format!("{}://{}@{}:{}", self.protocol.scheme(), u, self.host, self.port)
+                format!(
+                    "{}://{}@{}:{}",
+                    self.protocol.scheme(),
+                    u,
+                    self.host,
+                    self.port
+                )
             }
             _ => self.url(),
         }

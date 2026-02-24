@@ -74,9 +74,15 @@ mod tests {
         let basic = get_basic_tool_definitions_from_registry();
         let names: Vec<&str> = basic.iter().map(|t| t.name.as_str()).collect();
         assert!(!names.contains(&"Task"), "Basic should not include Task");
-        assert!(!names.contains(&"Analyze"), "Basic should not include Analyze");
+        assert!(
+            !names.contains(&"Analyze"),
+            "Basic should not include Analyze"
+        );
         assert!(names.contains(&"Read"), "Basic should include Read");
-        assert!(names.contains(&"CodebaseSearch"), "Basic should include CodebaseSearch");
+        assert!(
+            names.contains(&"CodebaseSearch"),
+            "Basic should include CodebaseSearch"
+        );
     }
 
     #[test]

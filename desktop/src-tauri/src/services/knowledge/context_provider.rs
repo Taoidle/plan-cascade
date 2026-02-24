@@ -120,11 +120,7 @@ impl KnowledgeContextProvider {
                 }
                 Err(e) => {
                     // Log error but continue with other collections
-                    tracing::warn!(
-                        "Failed to query collection '{}': {}",
-                        collection.name,
-                        e
-                    );
+                    tracing::warn!("Failed to query collection '{}': {}", collection.name, e);
                 }
             }
         }
@@ -267,8 +263,8 @@ mod tests {
 
     #[tokio::test]
     async fn query_for_context_disabled_returns_empty() {
-        use crate::services::knowledge::chunker::ParagraphChunker;
         use crate::services::knowledge::chunker::Chunker;
+        use crate::services::knowledge::chunker::ParagraphChunker;
         use crate::services::knowledge::reranker::{NoopReranker, Reranker};
         use crate::services::orchestrator::embedding_manager::{
             EmbeddingManager, EmbeddingManagerConfig,
@@ -289,7 +285,11 @@ mod tests {
             .expect("pool");
         {
             let conn = pool.get().expect("conn");
-            conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", []).unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+                [],
+            )
+            .unwrap();
         }
         let db = Arc::new(Database::from_pool_for_test(pool));
 
@@ -304,9 +304,8 @@ mod tests {
         let chunker: Arc<dyn Chunker> = Arc::new(ParagraphChunker::new(500));
         let reranker: Option<Arc<dyn Reranker>> = Some(Arc::new(NoopReranker));
 
-        let pipeline = Arc::new(
-            RagPipeline::new(chunker, emb, hnsw, reranker, db).expect("pipeline"),
-        );
+        let pipeline =
+            Arc::new(RagPipeline::new(chunker, emb, hnsw, reranker, db).expect("pipeline"));
 
         let provider = KnowledgeContextProvider::new(pipeline);
         let config = KnowledgeContextConfig {

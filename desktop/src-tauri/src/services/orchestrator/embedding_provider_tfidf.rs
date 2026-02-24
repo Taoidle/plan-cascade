@@ -241,9 +241,7 @@ mod tests {
         let provider = TfIdfEmbeddingProvider::new(Arc::clone(&svc));
 
         // embed_batch (and therefore embed_documents) builds vocab if missing.
-        let result = provider
-            .embed_documents(&["hello world", "foo bar"])
-            .await;
+        let result = provider.embed_documents(&["hello world", "foo bar"]).await;
         assert!(result.is_ok());
         assert!(svc.is_ready());
     }

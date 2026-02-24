@@ -95,7 +95,9 @@ impl AnalyticsState {
     }
 
     /// Get a clone of the tracker's channel sender (for injection into orchestrator)
-    pub async fn get_tracker_sender(&self) -> Option<tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>> {
+    pub async fn get_tracker_sender(
+        &self,
+    ) -> Option<tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>> {
         let guard = self.tracker.read().await;
         guard.as_ref().map(|t| t.sender())
     }

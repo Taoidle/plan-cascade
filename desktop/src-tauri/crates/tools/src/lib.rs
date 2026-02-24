@@ -24,6 +24,4 @@ pub use prompt_fallback::{
     build_tool_call_instructions, extract_text_without_tool_calls, format_tool_result,
     parse_tool_calls, ParsedToolCall,
 };
-pub use trait_def::{
-    FunctionTool, Tool, ToolFilterContext, ToolRegistry, Toolset,
-};
+pub use trait_def::{FunctionTool, Tool, ToolFilterContext, ToolRegistry, Toolset};

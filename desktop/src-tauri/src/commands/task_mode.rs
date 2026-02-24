@@ -16,12 +16,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::models::CommandResponse;
 use crate::services::strategy::analyzer::{analyze_task_for_mode, StrategyAnalysis};
+use crate::services::task_mode::agent_resolver::AgentResolver;
 use crate::services::task_mode::batch_executor::{
     BatchExecutionProgress, BatchExecutionResult, BatchExecutor, ExecutableStory, ExecutionBatch,
     ExecutionConfig, StoryContext, StoryExecutionContext, StoryExecutionOutcome,
     StoryExecutionState, TaskModeProgressEvent, TASK_MODE_EVENT_CHANNEL,
 };
-use crate::services::task_mode::agent_resolver::AgentResolver;
 use crate::services::task_mode::prd_generator;
 
 use crate::state::AppState;
@@ -378,10 +378,12 @@ pub async fn generate_task_prd(
     let (description, status) = {
         let session_guard = state.session.read().await;
         match session_guard.as_ref() {
-            Some(s) if s.session_id == session_id => {
-                (s.description.clone(), s.status.clone())
+            Some(s) if s.session_id == session_id => (s.description.clone(), s.status.clone()),
+            _ => {
+                return Ok(CommandResponse::err(
+                    "Invalid session ID or no active session",
+                ))
             }
-            _ => return Ok(CommandResponse::err("Invalid session ID or no active session")),
         }
     };
 
@@ -412,7 +414,10 @@ pub async fn generate_task_prd(
                 return Ok(CommandResponse::ok(prd));
             }
             Err(e) => {
-                eprintln!("[generate_task_prd] compiled_spec conversion failed, falling back to LLM: {}", e);
+                eprintln!(
+                    "[generate_task_prd] compiled_spec conversion failed, falling back to LLM: {}",
+                    e
+                );
                 // Fall through to LLM generation
             }
         }
@@ -561,10 +566,7 @@ async fn resolve_llm_provider(
 
     if resolved_base_url.is_none() {
         let key = format!("provider_{}_base_url", canonical);
-        if let Ok(Some(db_url)) = app_state
-            .with_database(|db| db.get_setting(&key))
-            .await
-        {
+        if let Ok(Some(db_url)) = app_state.with_database(|db| db.get_setting(&key)).await {
             if !db_url.is_empty() {
                 resolved_base_url = Some(db_url);
             }
@@ -642,10 +644,7 @@ async fn resolve_provider_config(
         .filter(|u| !u.is_empty());
     if resolved_base_url.is_none() {
         let key = format!("provider_{}_base_url", canonical);
-        if let Ok(Some(db_url)) = app_state
-            .with_database(|db| db.get_setting(&key))
-            .await
-        {
+        if let Ok(Some(db_url)) = app_state.with_database(|db| db.get_setting(&key)).await {
             if !db_url.is_empty() {
                 resolved_base_url = Some(db_url);
             }
@@ -696,7 +695,11 @@ pub async fn approve_task_prd(
     let mut session_guard = state.session.write().await;
     let session = match session_guard.as_mut() {
         Some(s) if s.session_id == session_id => s,
-        _ => return Ok(CommandResponse::err("Invalid session ID or no active session")),
+        _ => {
+            return Ok(CommandResponse::err(
+                "Invalid session ID or no active session",
+            ))
+        }
     };
 
     if session.status != TaskModeStatus::ReviewingPrd {
@@ -767,7 +770,10 @@ pub async fn approve_task_prd(
                     match resolve_provider_config(prov, mdl, base_url.clone(), &app_state).await {
                         Ok(cfg) => Some(cfg),
                         Err(e) => {
-                            eprintln!("[approve_task_prd] LLM provider config resolution failed: {}", e);
+                            eprintln!(
+                                "[approve_task_prd] LLM provider config resolution failed: {}",
+                                e
+                            );
                             None
                         }
                     }
@@ -800,11 +806,8 @@ pub async fn approve_task_prd(
             // Spawn background tokio task for batch execution
             let exec_config = config;
             tokio::spawn(async move {
-                let executor = BatchExecutor::new(
-                    stories_for_exec,
-                    exec_config,
-                    cancellation_token,
-                );
+                let executor =
+                    BatchExecutor::new(stories_for_exec, exec_config, cancellation_token);
                 let resolver = match &phase_configs {
                     Some(configs) if !configs.is_empty() => {
                         AgentResolver::new(build_agents_config_from_frontend(configs))
@@ -820,17 +823,13 @@ pub async fn approve_task_prd(
                 };
 
                 // Resolve project path from current working directory
-                let project_path = std::env::current_dir()
-                    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                let project_path =
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
                 // Create story executor that delegates to the appropriate backend.
                 // In CLI mode, spawns external CLI tools. In LLM mode, uses OrchestratorService.
-                let story_executor = build_story_executor(
-                    app_handle.clone(),
-                    mode,
-                    provider_config,
-                    db_pool,
-                );
+                let story_executor =
+                    build_story_executor(app_handle.clone(), mode, provider_config, db_pool);
 
                 let result = executor
                     .execute(&sid, &resolver, project_path, emit, story_executor)
@@ -867,7 +866,10 @@ pub async fn approve_task_prd(
 
             Ok(CommandResponse::ok(true))
         }
-        Err(e) => Ok(CommandResponse::err(format!("PRD validation failed: {}", e))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "PRD validation failed: {}",
+            e
+        ))),
     }
 }
 
@@ -880,23 +882,19 @@ pub async fn get_task_execution_status(
     let session_guard = state.session.read().await;
     let session = match session_guard.as_ref() {
         Some(s) if s.session_id == session_id => s,
-        _ => return Ok(CommandResponse::err("Invalid session ID or no active session")),
+        _ => {
+            return Ok(CommandResponse::err(
+                "Invalid session ID or no active session",
+            ))
+        }
     };
 
     let progress = session.progress.clone().unwrap_or(BatchExecutionProgress {
         current_batch: 0,
-        total_batches: session
-            .prd
-            .as_ref()
-            .map(|p| p.batches.len())
-            .unwrap_or(0),
+        total_batches: session.prd.as_ref().map(|p| p.batches.len()).unwrap_or(0),
         stories_completed: 0,
         stories_failed: 0,
-        total_stories: session
-            .prd
-            .as_ref()
-            .map(|p| p.stories.len())
-            .unwrap_or(0),
+        total_stories: session.prd.as_ref().map(|p| p.stories.len()).unwrap_or(0),
         story_statuses: HashMap::new(),
         current_phase: "idle".to_string(),
     });
@@ -924,7 +922,11 @@ pub async fn cancel_task_execution(
     let session_guard = state.session.read().await;
     let session = match session_guard.as_ref() {
         Some(s) if s.session_id == session_id => s,
-        _ => return Ok(CommandResponse::err("Invalid session ID or no active session")),
+        _ => {
+            return Ok(CommandResponse::err(
+                "Invalid session ID or no active session",
+            ))
+        }
     };
 
     if session.status != TaskModeStatus::Executing {
@@ -953,7 +955,11 @@ pub async fn get_task_execution_report(
     let session_guard = state.session.read().await;
     let session = match session_guard.as_ref() {
         Some(s) if s.session_id == session_id => s,
-        _ => return Ok(CommandResponse::err("Invalid session ID or no active session")),
+        _ => {
+            return Ok(CommandResponse::err(
+                "Invalid session ID or no active session",
+            ))
+        }
     };
 
     if !matches!(
@@ -1014,16 +1020,13 @@ pub async fn get_task_execution_report(
         let max_batch_idx = story_batch_map.values().copied().max().unwrap_or(0);
         let mut batch_start_offsets: Vec<u64> = vec![0; max_batch_idx + 1];
         for i in 1..=max_batch_idx {
-            batch_start_offsets[i] =
-                batch_start_offsets[i - 1] + batch_max_durations.get(&(i - 1)).copied().unwrap_or(0);
+            batch_start_offsets[i] = batch_start_offsets[i - 1]
+                + batch_max_durations.get(&(i - 1)).copied().unwrap_or(0);
         }
 
         for (story_id, story_state) in &result.story_results {
             let batch_idx = story_batch_map.get(story_id).copied().unwrap_or(0);
-            let start_offset_ms = batch_start_offsets
-                .get(batch_idx)
-                .copied()
-                .unwrap_or(0);
+            let start_offset_ms = batch_start_offsets.get(batch_idx).copied().unwrap_or(0);
             let story_title = story_title_map
                 .get(story_id)
                 .cloned()
@@ -1058,10 +1061,7 @@ pub async fn get_task_execution_report(
                         gate_result: gate_summary,
                     });
                 }
-                StoryExecutionState::Failed {
-                    last_agent,
-                    ..
-                } => {
+                StoryExecutionState::Failed { last_agent, .. } => {
                     timeline.push(TimelineEntry {
                         story_id: story_id.clone(),
                         story_title,
@@ -1078,10 +1078,7 @@ pub async fn get_task_execution_report(
                         story_id: story_id.clone(),
                         story_title,
                         batch_index: batch_idx,
-                        agent: agent_assignments
-                            .get(story_id)
-                            .cloned()
-                            .unwrap_or_default(),
+                        agent: agent_assignments.get(story_id).cloned().unwrap_or_default(),
                         duration_ms: 0,
                         start_offset_ms,
                         status: "cancelled".to_string(),
@@ -1102,9 +1099,10 @@ pub async fn get_task_execution_report(
         // Tracks: (assigned, completed, durations_vec)
         let mut agent_stats: HashMap<String, (usize, usize, Vec<u64>)> = HashMap::new();
         for (story_id, assignment) in &result.agent_assignments {
-            let entry = agent_stats
-                .entry(assignment.agent_name.clone())
-                .or_insert((0, 0, Vec::new()));
+            let entry =
+                agent_stats
+                    .entry(assignment.agent_name.clone())
+                    .or_insert((0, 0, Vec::new()));
             entry.0 += 1; // assigned
             if let Some(story_state) = result.story_results.get(story_id) {
                 if let StoryExecutionState::Completed { duration_ms, .. } = story_state {
@@ -1163,7 +1161,8 @@ pub async fn get_task_execution_report(
                     .collect();
 
                 for dim in &quality_dimensions {
-                    let score = compute_quality_dimension_score(dim, &gate_results, pipeline_result.passed);
+                    let score =
+                        compute_quality_dimension_score(dim, &gate_results, pipeline_result.passed);
                     quality_scores.push(QualityDimensionScore {
                         story_id: story_id.clone(),
                         dimension: dim.to_string(),
@@ -1264,7 +1263,9 @@ pub async fn exit_task_mode(
 
             Ok(CommandResponse::ok(true))
         }
-        _ => Ok(CommandResponse::err("Invalid session ID or no active session")),
+        _ => Ok(CommandResponse::err(
+            "Invalid session ID or no active session",
+        )),
     }
 }
 
@@ -1440,7 +1441,11 @@ async fn execute_story_via_agent(
         ),
     };
 
-    eprintln!("[INFO] Spawning agent '{}' in {}", command, project_path.display());
+    eprintln!(
+        "[INFO] Spawning agent '{}' in {}",
+        command,
+        project_path.display()
+    );
 
     let result = Command::new(&command)
         .args(&args)
@@ -2022,12 +2027,8 @@ mod tests {
         );
 
         // Test with matching ai_verify gate that passed
-        let gate2 = PipelineGateResult::passed(
-            "ai_verify",
-            "AI Verify",
-            GatePhase::PostValidation,
-            50,
-        );
+        let gate2 =
+            PipelineGateResult::passed("ai_verify", "AI Verify", GatePhase::PostValidation, 50);
         let results2 = vec![&gate2];
         assert_eq!(
             compute_quality_dimension_score("test_coverage", &results2, true),
@@ -2188,17 +2189,13 @@ mod tests {
         let ctx = load_story_context(tmp.path(), "story-002");
         assert!(ctx.is_some());
         let ctx = ctx.unwrap();
-        assert_eq!(
-            ctx.design_decisions,
-            vec!["ADR-F002: Retry with repair"]
-        );
+        assert_eq!(ctx.design_decisions, vec!["ADR-F002: Retry with repair"]);
     }
 
     #[test]
     fn test_load_story_context_with_invalid_json() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("design_doc.json"), "not valid json {{{")
-            .unwrap();
+        std::fs::write(tmp.path().join("design_doc.json"), "not valid json {{{").unwrap();
 
         let ctx = load_story_context(tmp.path(), "story-001");
         assert!(ctx.is_none());

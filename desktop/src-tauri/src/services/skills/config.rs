@@ -301,11 +301,14 @@ mod tests {
             version: "1.0.0".to_string(),
             sources: {
                 let mut m = HashMap::new();
-                m.insert("vercel".to_string(), SourceDefinition {
-                    source_type: "submodule".to_string(),
-                    path: Some("external-skills/vercel".to_string()),
-                    repository: None,
-                });
+                m.insert(
+                    "vercel".to_string(),
+                    SourceDefinition {
+                        source_type: "submodule".to_string(),
+                        path: Some("external-skills/vercel".to_string()),
+                        repository: None,
+                    },
+                );
                 m
             },
             skills: HashMap::new(),
@@ -315,11 +318,14 @@ mod tests {
         let override_config = SkillsConfig {
             sources: {
                 let mut m = HashMap::new();
-                m.insert("custom".to_string(), SourceDefinition {
-                    source_type: "local".to_string(),
-                    path: Some("/custom/skills".to_string()),
-                    repository: None,
-                });
+                m.insert(
+                    "custom".to_string(),
+                    SourceDefinition {
+                        source_type: "local".to_string(),
+                        path: Some("/custom/skills".to_string()),
+                        repository: None,
+                    },
+                );
                 m
             },
             ..Default::default()
@@ -336,11 +342,14 @@ mod tests {
         let config = SkillsConfig {
             sources: {
                 let mut m = HashMap::new();
-                m.insert("vercel".to_string(), SourceDefinition {
-                    source_type: "submodule".to_string(),
-                    path: Some("external-skills/vercel".to_string()),
-                    repository: None,
-                });
+                m.insert(
+                    "vercel".to_string(),
+                    SourceDefinition {
+                        source_type: "submodule".to_string(),
+                        path: Some("external-skills/vercel".to_string()),
+                        repository: None,
+                    },
+                );
                 m
             },
             ..Default::default()

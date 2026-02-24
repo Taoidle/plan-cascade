@@ -175,9 +175,7 @@ mod tests {
 
     #[test]
     fn test_build_payload_complete_event() {
-        let event = UnifiedStreamEvent::Complete {
-            stop_reason: None,
-        };
+        let event = UnifiedStreamEvent::Complete { stop_reason: None };
 
         let payload = build_payload(
             &event,
@@ -226,9 +224,7 @@ mod tests {
 
     #[test]
     fn test_build_payload_with_remote_source_complete() {
-        let event = UnifiedStreamEvent::Complete {
-            stop_reason: None,
-        };
+        let event = UnifiedStreamEvent::Complete { stop_reason: None };
 
         let payload = build_payload(
             &event,
@@ -242,10 +238,7 @@ mod tests {
         assert!(payload.is_some());
         let p = payload.unwrap();
         assert_eq!(p.event_type, WebhookEventType::TaskComplete);
-        assert_eq!(
-            p.remote_source,
-            Some("via Telegram @testuser".to_string())
-        );
+        assert_eq!(p.remote_source, Some("via Telegram @testuser".to_string()));
         assert!(p.summary.contains("via Telegram @testuser"));
         assert!(p.summary.contains("completed successfully"));
     }
@@ -269,10 +262,7 @@ mod tests {
         assert!(payload.is_some());
         let p = payload.unwrap();
         assert_eq!(p.event_type, WebhookEventType::TaskFailed);
-        assert_eq!(
-            p.remote_source,
-            Some("via Telegram @admin".to_string())
-        );
+        assert_eq!(p.remote_source, Some("via Telegram @admin".to_string()));
         assert!(p.summary.contains("via Telegram @admin"));
         assert!(p.summary.contains("Out of tokens"));
     }

@@ -62,10 +62,7 @@ pub fn inject_skills(
 
 /// Simplified injection that only uses SkillMatch summaries (without full docs).
 /// Uses the body from the skill summary path to reload, or falls back to a description.
-pub fn inject_skill_summaries(
-    matched_skills: &[SkillMatch],
-    policy: &SelectionPolicy,
-) -> String {
+pub fn inject_skill_summaries(matched_skills: &[SkillMatch], policy: &SelectionPolicy) -> String {
     if matched_skills.is_empty() {
         return String::new();
     }
@@ -129,9 +126,7 @@ fn truncate_body(body: &str, max_lines: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::skills::model::{
-        InjectionPhase, MatchReason, SkillSummary, SkillSource,
-    };
+    use crate::services::skills::model::{InjectionPhase, MatchReason, SkillSource, SkillSummary};
     use std::path::PathBuf;
 
     fn make_match(name: &str, source: SkillSource, priority: u32) -> SkillMatch {
@@ -208,11 +203,13 @@ mod tests {
 
     #[test]
     fn test_inject_single_skill() {
-        let matches = vec![
-            make_match("react-best-practices", SkillSource::External {
+        let matches = vec![make_match(
+            "react-best-practices",
+            SkillSource::External {
                 source_name: "vercel".to_string(),
-            }, 100),
-        ];
+            },
+            100,
+        )];
 
         let doc = crate::services::skills::model::SkillDocument {
             id: "react-best-practices-test123".to_string(),
@@ -229,7 +226,9 @@ mod tests {
             license: None,
             metadata: std::collections::HashMap::new(),
             hooks: None,
-            source: SkillSource::External { source_name: "vercel".to_string() },
+            source: SkillSource::External {
+                source_name: "vercel".to_string(),
+            },
             priority: 100,
             detect: None,
             inject_into: vec![],

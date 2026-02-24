@@ -21,8 +21,8 @@ use crate::commands::standalone::{normalize_provider_name, StandaloneState};
 use crate::models::response::CommandResponse;
 use crate::services::agent_composer::{AgentConfig, AgentContext, AgentInput};
 use crate::services::llm::{
-    AnthropicProvider, DeepSeekProvider, GlmProvider, LlmProvider, MinimaxProvider,
-    OllamaProvider, OpenAIProvider, ProviderConfig, ProviderType, QwenProvider,
+    AnthropicProvider, DeepSeekProvider, GlmProvider, LlmProvider, MinimaxProvider, OllamaProvider,
+    OpenAIProvider, ProviderConfig, ProviderType, QwenProvider,
 };
 use crate::services::orchestrator::hooks::AgenticHooks;
 use crate::services::tools::ToolExecutor;
@@ -122,7 +122,10 @@ impl PipelineExecutionState {
 
     /// Check if execution is still active (pending or running).
     pub fn is_active(&self) -> bool {
-        matches!(self.status, ExecutionStatus::Pending | ExecutionStatus::Running)
+        matches!(
+            self.status,
+            ExecutionStatus::Pending | ExecutionStatus::Running
+        )
     }
 }
 
@@ -269,7 +272,11 @@ pub struct PipelineEventPayload {
 
 impl PipelineEventPayload {
     /// Create a status event.
-    pub fn status(execution_id: &str, status: &str, agent_event: Option<serde_json::Value>) -> Self {
+    pub fn status(
+        execution_id: &str,
+        status: &str,
+        agent_event: Option<serde_json::Value>,
+    ) -> Self {
         Self {
             execution_id: execution_id.to_string(),
             event_type: "status".to_string(),
@@ -451,8 +458,8 @@ async fn resolve_provider_config(
         .await
         .map_err(|e| format!("Failed to load app config: {}", e))?;
 
-    let canonical_provider = normalize_provider_name(&app_config.default_provider)
-        .ok_or_else(|| {
+    let canonical_provider =
+        normalize_provider_name(&app_config.default_provider).ok_or_else(|| {
             format!(
                 "Unknown provider in settings: {}",
                 app_config.default_provider
@@ -535,13 +542,11 @@ fn build_agent_context(
 
     // Create an OrchestratorContext from the core crate to provide
     // session state management, memory store, and execution control.
-    let orchestrator_ctx = Arc::new(
-        plan_cascade_core::context::OrchestratorContext::new(
-            execution_id,
-            project_root.clone(),
-            "pipeline-agent",
-        ),
-    );
+    let orchestrator_ctx = Arc::new(plan_cascade_core::context::OrchestratorContext::new(
+        execution_id,
+        project_root.clone(),
+        "pipeline-agent",
+    ));
 
     AgentContext {
         session_id: execution_id.to_string(),
@@ -573,7 +578,9 @@ fn create_checkpointer(
     if let Some(pool) = db_pool {
         match crate::services::graph_workflow::checkpoint_store::SqliteCheckpointer::new(pool) {
             Ok(sqlite_cp) => {
-                tracing::info!("Using SqliteCheckpointer for persistent graph workflow checkpoints");
+                tracing::info!(
+                    "Using SqliteCheckpointer for persistent graph workflow checkpoints"
+                );
                 return Arc::new(sqlite_cp);
             }
             Err(e) => {
@@ -612,9 +619,10 @@ pub async fn execute_agent_pipeline(
     // Look up the pipeline definition from the database
     let pipeline_result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             let pipeline_json = conn.query_row(
                 "SELECT definition FROM agent_pipelines WHERE id = ?1",
@@ -633,9 +641,10 @@ pub async fn execute_agent_pipeline(
                         })?;
                     Ok(pipeline)
                 }
-                Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    Err(AppError::not_found(format!("Pipeline not found: {}", pipeline_id)))
-                }
+                Err(rusqlite::Error::QueryReturnedNoRows) => Err(AppError::not_found(format!(
+                    "Pipeline not found: {}",
+                    pipeline_id
+                ))),
                 Err(e) => Err(AppError::database(e.to_string())),
             }
         })
@@ -819,9 +828,10 @@ pub async fn execute_graph_workflow_run(
     // Look up the workflow definition from the database
     let workflow_result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             let workflow_json = conn.query_row(
                 "SELECT definition FROM graph_workflows WHERE id = ?1",
@@ -840,9 +850,10 @@ pub async fn execute_graph_workflow_run(
                         })?;
                     Ok(workflow)
                 }
-                Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    Err(AppError::not_found(format!("Workflow not found: {}", workflow_id)))
-                }
+                Err(rusqlite::Error::QueryReturnedNoRows) => Err(AppError::not_found(format!(
+                    "Workflow not found: {}",
+                    workflow_id
+                ))),
                 Err(e) => Err(AppError::database(e.to_string())),
             }
         })
@@ -1487,7 +1498,10 @@ mod tests {
 
         let status = registry.get_status(&exec_id).await.unwrap();
         assert_eq!(status.status, ExecutionStatus::Failed);
-        assert_eq!(status.error.as_deref(), Some("Pipeline build error: no steps"));
+        assert_eq!(
+            status.error.as_deref(),
+            Some("Pipeline build error: no steps")
+        );
         assert!(status.completed_at.is_some());
         assert!(!status.is_active());
     }
@@ -1858,7 +1872,9 @@ mod tests {
             Ok(AgentEvent::TextDelta {
                 content: "Start".to_string(),
             }),
-            Err(crate::utils::error::AppError::Internal("Stream failed".to_string())),
+            Err(crate::utils::error::AppError::Internal(
+                "Stream failed".to_string(),
+            )),
         ];
         let _mock_stream: crate::services::agent_composer::AgentEventStream =
             Box::pin(stream::iter(events));
@@ -1987,9 +2003,11 @@ mod tests {
             },
             step: "processing-node".to_string(),
             pending_nodes: vec!["final-node".to_string()],
-            interrupt: Some(crate::services::graph_workflow::checkpointer::Interrupt::Before {
-                node_id: "final-node".to_string(),
-            }),
+            interrupt: Some(
+                crate::services::graph_workflow::checkpointer::Interrupt::Before {
+                    node_id: "final-node".to_string(),
+                },
+            ),
             created_at: "2026-02-19T10:00:00Z".to_string(),
         };
         cp1.save(checkpoint).await.unwrap();
@@ -2009,10 +2027,7 @@ mod tests {
         let loaded = loaded.unwrap();
         assert_eq!(loaded.id, "restart-cp");
         assert_eq!(loaded.step, "processing-node");
-        assert_eq!(
-            loaded.state.get("progress"),
-            Some(&serde_json::json!(50))
-        );
+        assert_eq!(loaded.state.get("progress"), Some(&serde_json::json!(50)));
         assert_eq!(loaded.pending_nodes, vec!["final-node"]);
         assert!(loaded.interrupt.is_some());
     }

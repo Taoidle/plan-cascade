@@ -39,10 +39,7 @@ pub struct OllamaProvider {
 impl OllamaProvider {
     /// Create a new Ollama provider with the given configuration
     pub fn new(config: ProviderConfig) -> Self {
-        let base_url = config
-            .base_url
-            .as_deref()
-            .unwrap_or(OLLAMA_DEFAULT_URL);
+        let base_url = config.base_url.as_deref().unwrap_or(OLLAMA_DEFAULT_URL);
 
         let client = Self::create_client(base_url, config.proxy.as_ref());
 
@@ -167,11 +164,7 @@ impl OllamaProvider {
                     // Tool results go as tool-role messages
                     result.push(ChatMessage::tool(content.clone()));
                 }
-                MessageContent::ToolUse {
-                    id: _,
-                    name,
-                    input,
-                } => {
+                MessageContent::ToolUse { id: _, name, input } => {
                     // Tool use from assistant - create an assistant message with tool_calls
                     let mut msg = ChatMessage::assistant(String::new());
                     msg.tool_calls = vec![ollama_rs::generation::tools::ToolCall {
@@ -186,8 +179,7 @@ impl OllamaProvider {
                     // Include thinking content in text for models that support it
                     text_parts.push(thinking.clone());
                 }
-                MessageContent::Image { .. }
-                | MessageContent::ToolResultMultimodal { .. } => {
+                MessageContent::Image { .. } | MessageContent::ToolResultMultimodal { .. } => {
                     // Images/multimodal not fully supported by Ollama SDK in text mode
                     // Skip or convert to text placeholder
                 }
@@ -343,13 +335,14 @@ impl OllamaProvider {
             // we need to handle it at the content level
             if self.model_supports_thinking() && !*thinking_started {
                 // Check for <think> tags inline
-                let (think, text) = self.extract_thinking_streaming_chunk(
-                    &msg.content,
-                    in_thinking,
-                    thinking_started,
-                    tx,
-                )
-                .await;
+                let (think, text) = self
+                    .extract_thinking_streaming_chunk(
+                        &msg.content,
+                        in_thinking,
+                        thinking_started,
+                        tx,
+                    )
+                    .await;
                 thinking_content = think;
                 text_content = text;
             } else {
@@ -591,35 +584,23 @@ impl LlmProvider for OllamaProvider {
         tools: Vec<ToolDefinition>,
         request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let request = self.build_chat_request(
-            &messages,
-            system.as_deref(),
-            &tools,
-            &request_options,
-        );
+        let request =
+            self.build_chat_request(&messages, system.as_deref(), &tools, &request_options);
 
-        let response = self
-            .client
-            .send_chat_messages(request)
-            .await
-            .map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("connect") || msg.contains("Connection refused") {
-                    LlmError::ProviderUnavailable {
-                        message: format!(
-                            "Cannot connect to Ollama at {}: {}",
-                            self.base_url(),
-                            msg
-                        ),
-                    }
-                } else if msg.contains("not found") || msg.contains("404") {
-                    LlmError::ModelNotFound {
-                        model: self.config.model.clone(),
-                    }
-                } else {
-                    LlmError::NetworkError { message: msg }
+        let response = self.client.send_chat_messages(request).await.map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("connect") || msg.contains("Connection refused") {
+                LlmError::ProviderUnavailable {
+                    message: format!("Cannot connect to Ollama at {}: {}", self.base_url(), msg),
                 }
-            })?;
+            } else if msg.contains("not found") || msg.contains("404") {
+                LlmError::ModelNotFound {
+                    model: self.config.model.clone(),
+                }
+            } else {
+                LlmError::NetworkError { message: msg }
+            }
+        })?;
 
         Ok(self.convert_response(&response))
     }
@@ -632,12 +613,8 @@ impl LlmProvider for OllamaProvider {
         tx: mpsc::Sender<UnifiedStreamEvent>,
         request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let request = self.build_chat_request(
-            &messages,
-            system.as_deref(),
-            &tools,
-            &request_options,
-        );
+        let request =
+            self.build_chat_request(&messages, system.as_deref(), &tools, &request_options);
 
         let mut stream = self
             .client
@@ -741,19 +718,16 @@ impl LlmProvider for OllamaProvider {
 
     async fn health_check(&self) -> LlmResult<()> {
         // Use the SDK's list_local_models as a health check
-        self.client
-            .list_local_models()
-            .await
-            .map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("connect") || msg.contains("Connection refused") {
-                    LlmError::ProviderUnavailable {
-                        message: format!("Cannot connect to Ollama at {}", self.base_url()),
-                    }
-                } else {
-                    LlmError::NetworkError { message: msg }
+        self.client.list_local_models().await.map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("connect") || msg.contains("Connection refused") {
+                LlmError::ProviderUnavailable {
+                    message: format!("Cannot connect to Ollama at {}", self.base_url()),
                 }
-            })?;
+            } else {
+                LlmError::NetworkError { message: msg }
+            }
+        })?;
 
         Ok(())
     }
@@ -763,20 +737,16 @@ impl LlmProvider for OllamaProvider {
     }
 
     async fn list_models(&self) -> LlmResult<Option<Vec<String>>> {
-        let models = self
-            .client
-            .list_local_models()
-            .await
-            .map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("connect") || msg.contains("Connection refused") {
-                    LlmError::ProviderUnavailable {
-                        message: format!("Cannot connect to Ollama at {}", self.base_url()),
-                    }
-                } else {
-                    LlmError::NetworkError { message: msg }
+        let models = self.client.list_local_models().await.map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("connect") || msg.contains("Connection refused") {
+                LlmError::ProviderUnavailable {
+                    message: format!("Cannot connect to Ollama at {}", self.base_url()),
                 }
-            })?;
+            } else {
+                LlmError::NetworkError { message: msg }
+            }
+        })?;
 
         let model_names: Vec<String> = models.into_iter().map(|m| m.name).collect();
 
@@ -885,9 +855,12 @@ mod tests {
                 schema_type: "object".to_string(),
                 description: Some("Read file params".to_string()),
                 properties: Some(
-                    [("path".to_string(), super::super::types::ParameterSchema::string(Some("File path")))]
-                        .into_iter()
-                        .collect(),
+                    [(
+                        "path".to_string(),
+                        super::super::types::ParameterSchema::string(Some("File path")),
+                    )]
+                    .into_iter()
+                    .collect(),
                 ),
                 required: Some(vec!["path".to_string()]),
                 items: None,

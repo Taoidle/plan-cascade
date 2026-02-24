@@ -22,8 +22,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use plan_cascade_llm::types::{ParameterSchema, ToolDefinition};
 use crate::executor::{ReadCacheEntry, ToolResult};
+use plan_cascade_llm::types::{ParameterSchema, ToolDefinition};
 
 /// Context provided to each tool during execution.
 ///
@@ -54,7 +54,6 @@ pub struct ToolExecutionContext {
     pub cancellation_token: tokio_util::sync::CancellationToken,
 
     // --- Service fields: type-erased to avoid orchestrator dependencies ---
-
     /// WebFetch service (always available).
     /// Downcast to `WebFetchService` in the main crate.
     pub web_fetch: Arc<dyn Any + Send + Sync>,
@@ -100,7 +99,9 @@ impl ToolExecutionContext {
     /// ```ignore
     /// let index_store: &IndexStore = ctx.downcast_service(ctx.index_store.as_ref())?;
     /// ```
-    pub fn downcast_service<T: Send + Sync + 'static>(service: Option<&Arc<dyn Any + Send + Sync>>) -> Option<Arc<T>> {
+    pub fn downcast_service<T: Send + Sync + 'static>(
+        service: Option<&Arc<dyn Any + Send + Sync>>,
+    ) -> Option<Arc<T>> {
         service.and_then(|s| s.clone().downcast::<T>().ok())
     }
 }
@@ -210,12 +211,7 @@ impl ToolRegistry {
     /// Execute a tool by name with the given context and arguments.
     ///
     /// Returns `ToolResult::err` if the tool is not found.
-    pub async fn execute(
-        &self,
-        name: &str,
-        ctx: &ToolExecutionContext,
-        args: Value,
-    ) -> ToolResult {
+    pub async fn execute(&self, name: &str, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         match self.tools.get(name) {
             Some(tool) => tool.execute(ctx, args).await,
             None => ToolResult::err(format!("Unknown tool: {}", name)),
@@ -269,7 +265,10 @@ impl Default for ToolRegistry {
 
 /// Type alias for the async handler function used by `FunctionTool`.
 pub type FunctionToolHandler = Box<
-    dyn Fn(&ToolExecutionContext, Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + '_>>
+    dyn Fn(
+            &ToolExecutionContext,
+            Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + '_>>
         + Send
         + Sync,
 >;
@@ -288,9 +287,18 @@ pub struct FunctionTool {
 
 impl FunctionTool {
     /// Create a new FunctionTool from an async closure.
-    pub fn new<F>(name: impl Into<String>, description: impl Into<String>, schema: ParameterSchema, handler: F) -> Self
+    pub fn new<F>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        schema: ParameterSchema,
+        handler: F,
+    ) -> Self
     where
-        F: Fn(&ToolExecutionContext, Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + '_>>
+        F: Fn(
+                &ToolExecutionContext,
+                Value,
+            )
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + '_>>
             + Send
             + Sync
             + 'static,
@@ -388,11 +396,7 @@ mod tests {
         }
 
         fn parameters_schema(&self) -> ParameterSchema {
-            ParameterSchema::object(
-                Some("Mock parameters"),
-                HashMap::new(),
-                vec![],
-            )
+            ParameterSchema::object(Some("Mock parameters"), HashMap::new(), vec![])
         }
 
         async fn execute(&self, _ctx: &ToolExecutionContext, _args: Value) -> ToolResult {
@@ -469,7 +473,10 @@ mod tests {
             let mut cwd = ctx.working_directory.lock().unwrap();
             *cwd = PathBuf::from("/tmp/new-dir");
         }
-        assert_eq!(ctx.working_directory_snapshot(), PathBuf::from("/tmp/new-dir"));
+        assert_eq!(
+            ctx.working_directory_snapshot(),
+            PathBuf::from("/tmp/new-dir")
+        );
     }
 
     #[test]
@@ -739,11 +746,13 @@ mod tests {
         }
 
         fn available_tools(&self, ctx: &ToolFilterContext) -> Vec<Arc<dyn Tool>> {
-            let mut tools: Vec<Arc<dyn Tool>> = vec![
-                Arc::new(MockTool::new("ToolsetA", "Toolset tool A")),
-            ];
+            let mut tools: Vec<Arc<dyn Tool>> =
+                vec![Arc::new(MockTool::new("ToolsetA", "Toolset tool A"))];
             if ctx.project_type.as_deref() == Some("rust") {
-                tools.push(Arc::new(MockTool::new("ToolsetB", "Toolset tool B (rust only)")));
+                tools.push(Arc::new(MockTool::new(
+                    "ToolsetB",
+                    "Toolset tool B (rust only)",
+                )));
             }
             tools
         }

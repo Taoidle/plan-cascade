@@ -128,7 +128,10 @@ impl ToolResult {
     /// Attach EventActions to this tool result.
     ///
     /// The orchestrator will process these actions after handling the tool result.
-    pub fn with_event_actions(mut self, actions: crate::services::core::event_actions::EventActions) -> Self {
+    pub fn with_event_actions(
+        mut self,
+        actions: crate::services::core::event_actions::EventActions,
+    ) -> Self {
         if actions.has_actions() {
             self.event_actions = Some(actions);
         }
@@ -147,7 +150,6 @@ impl ToolResult {
         }
     }
 }
-
 
 /// Tool executor for running tools locally.
 ///
@@ -461,7 +463,9 @@ impl ToolExecutor {
     /// Task tool will return a depth-limit error.
     pub async fn execute(&self, tool_name: &str, arguments: &serde_json::Value) -> ToolResult {
         let ctx = self.build_tool_context();
-        self.registry.execute(tool_name, &ctx, arguments.clone()).await
+        self.registry
+            .execute(tool_name, &ctx, arguments.clone())
+            .await
     }
 
     pub async fn execute_with_context(
@@ -474,9 +478,10 @@ impl ToolExecutor {
             Some(tc) => self.build_tool_context_with_task(tc),
             None => self.build_tool_context(),
         };
-        self.registry.execute(tool_name, &ctx, arguments.clone()).await
+        self.registry
+            .execute(tool_name, &ctx, arguments.clone())
+            .await
     }
-
 
     /// Clear the task deduplication cache (story-005).
     ///
@@ -531,7 +536,6 @@ impl ToolExecutor {
         }
     }
 
-
     /// Get project root (for external access)
     pub fn project_root(&self) -> &Path {
         &self.project_root
@@ -542,7 +546,6 @@ impl ToolExecutor {
         self.project_root = new_root;
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1008,7 +1011,6 @@ mod tests {
         let output = result.output.unwrap();
         assert_eq!(output, dir.path().to_string_lossy().to_string());
     }
-
 
     #[test]
     fn test_tool_result() {
@@ -1612,9 +1614,6 @@ mod tests {
         assert!(cache.is_empty());
     }
 
-
-
-
     #[test]
     fn test_task_dedup_cache_clear() {
         let dir = setup_test_dir();
@@ -1633,7 +1632,6 @@ mod tests {
         let cache = executor.task_dedup_cache.lock().unwrap();
         assert!(cache.is_empty());
     }
-
 
     // =========================================================================
     // CodebaseSearch scope=all semantic tests (feature-004 story-001)
@@ -2029,7 +2027,9 @@ mod tests {
         let output = result.output.unwrap_or_default();
         // Without an index store, it falls back to the "index not available" message
         assert!(
-            output.contains("not available") || output.contains("not indexed") || output.contains("not configured"),
+            output.contains("not available")
+                || output.contains("not indexed")
+                || output.contains("not configured"),
             "should indicate semantic search is not available, got: {}",
             output
         );
@@ -2063,7 +2063,10 @@ mod tests {
 
         // Get the manager for sharing with sub-agent
         let shared_mgr = parent.get_embedding_manager();
-        assert!(shared_mgr.is_some(), "should be able to get manager for sharing");
+        assert!(
+            shared_mgr.is_some(),
+            "should be able to get manager for sharing"
+        );
 
         // Create sub-agent executor and wire the shared manager
         let shared_cache = parent.shared_read_cache();

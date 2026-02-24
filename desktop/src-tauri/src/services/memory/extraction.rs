@@ -72,7 +72,11 @@ pub fn detect_memory_command(user_message: &str) -> Option<MemoryCommand> {
     for pattern in &query_patterns {
         if lower.starts_with(pattern) {
             let rest = &lower[pattern.len()..];
-            let query = rest.trim().trim_end_matches('?').trim_end_matches('.').to_string();
+            let query = rest
+                .trim()
+                .trim_end_matches('?')
+                .trim_end_matches('.')
+                .to_string();
             // For patterns like "what are my preferences" that may have no additional text
             return Some(MemoryCommand::Query {
                 query: if query.is_empty() {
@@ -264,10 +268,7 @@ Rules:
             .strip_prefix("```json")
             .or_else(|| response.trim().strip_prefix("```"))
             .unwrap_or(response.trim());
-        let json_str = json_str
-            .strip_suffix("```")
-            .unwrap_or(json_str)
-            .trim();
+        let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
 
         // Parse JSON array
         let items: Vec<serde_json::Value> = match serde_json::from_str(json_str) {
@@ -490,13 +491,7 @@ mod tests {
 
     #[test]
     fn test_build_extraction_prompt_empty_inputs() {
-        let prompt = MemoryExtractor::build_extraction_prompt(
-            "",
-            &[],
-            &[],
-            "",
-            &[],
-        );
+        let prompt = MemoryExtractor::build_extraction_prompt("", &[], &[], "", &[]);
 
         assert!(prompt.contains("(none)"));
     }
@@ -568,8 +563,7 @@ mod tests {
     fn test_parse_extraction_response_markdown_wrapped() {
         let response = "```json\n[\n  {\n    \"category\": \"convention\",\n    \"content\": \"Tests in __tests__\",\n    \"keywords\": [\"tests\"],\n    \"importance\": 0.6\n  }\n]\n```";
 
-        let entries =
-            MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].category, MemoryCategory::Convention);
@@ -578,40 +572,35 @@ mod tests {
     #[test]
     fn test_parse_extraction_response_empty_array() {
         let response = "[]";
-        let entries =
-            MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
         assert!(entries.is_empty());
     }
 
     #[test]
     fn test_parse_extraction_response_invalid_json() {
         let response = "not valid json";
-        let entries =
-            MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
         assert!(entries.is_empty());
     }
 
     #[test]
     fn test_parse_extraction_response_invalid_category() {
         let response = r#"[{"category": "invalid", "content": "test", "importance": 0.5}]"#;
-        let entries =
-            MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
         assert!(entries.is_empty());
     }
 
     #[test]
     fn test_parse_extraction_response_empty_content_skipped() {
         let response = r#"[{"category": "fact", "content": "", "importance": 0.5}]"#;
-        let entries =
-            MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
         assert!(entries.is_empty());
     }
 
     #[test]
     fn test_parse_extraction_response_clamps_importance() {
         let response = r#"[{"category": "fact", "content": "test", "importance": 1.5}]"#;
-        let entries =
-            MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
         assert_eq!(entries.len(), 1);
         assert!(entries[0].importance <= 1.0);
     }

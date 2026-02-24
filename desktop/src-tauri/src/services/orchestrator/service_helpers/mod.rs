@@ -1,25 +1,25 @@
 use super::*;
 
 // Submodule declarations
-mod session_state;
-mod constructors;
 mod agentic_loop;
 mod analysis_pipeline;
-mod tool_call_parsing;
 mod analysis_prompts;
+mod constructors;
 mod path_utils;
+mod session_state;
+mod tool_call_parsing;
 
 // Import all items from submodules into this module's namespace.
 // Sibling submodules access these via `use super::*;`.
-use session_state::*;
-#[allow(unused_imports)]
-use constructors::*;
 #[allow(unused_imports)]
 use agentic_loop::*;
 use analysis_pipeline::*;
-use tool_call_parsing::*;
 use analysis_prompts::*;
+#[allow(unused_imports)]
+use constructors::*;
 use path_utils::*;
+use session_state::*;
+use tool_call_parsing::*;
 
 // The only pub(crate) export from this module
 pub(crate) use tool_call_parsing::text_describes_pending_action;
@@ -105,15 +105,21 @@ fn track_analytics(
 
     let cost = cost_calculator
         .as_ref()
-        .map(|calc| calc.calculate_cost(
-            provider_name, model_name,
-            usage.input_tokens as i64, usage.output_tokens as i64,
-        ))
+        .map(|calc| {
+            calc.calculate_cost(
+                provider_name,
+                model_name,
+                usage.input_tokens as i64,
+                usage.output_tokens as i64,
+            )
+        })
         .unwrap_or(0);
 
     let mut record = crate::models::analytics::UsageRecord::new(
-        model_name, provider_name,
-        usage.input_tokens as i64, usage.output_tokens as i64,
+        model_name,
+        provider_name,
+        usage.input_tokens as i64,
+        usage.output_tokens as i64,
     )
     .with_cost(cost)
     .with_extended_tokens(

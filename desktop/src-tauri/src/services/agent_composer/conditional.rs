@@ -161,10 +161,18 @@ mod tests {
 
     #[async_trait]
     impl crate::services::llm::LlmProvider for MockProvider {
-        fn name(&self) -> &'static str { "mock" }
-        fn model(&self) -> &str { "mock-model" }
-        fn supports_thinking(&self) -> bool { false }
-        fn supports_tools(&self) -> bool { false }
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+        fn model(&self) -> &str {
+            "mock-model"
+        }
+        fn supports_thinking(&self) -> bool {
+            false
+        }
+        fn supports_tools(&self) -> bool {
+            false
+        }
         async fn send_message(
             &self,
             _messages: Vec<crate::services::llm::Message>,
@@ -184,15 +192,19 @@ mod tests {
         ) -> crate::services::llm::LlmResult<crate::services::llm::LlmResponse> {
             unimplemented!()
         }
-        async fn health_check(&self) -> crate::services::llm::LlmResult<()> { Ok(()) }
-        fn config(&self) -> &crate::services::llm::ProviderConfig { &self.config }
+        async fn health_check(&self) -> crate::services::llm::LlmResult<()> {
+            Ok(())
+        }
+        fn config(&self) -> &crate::services::llm::ProviderConfig {
+            &self.config
+        }
     }
 
     fn mock_context_with_state(state: HashMap<String, Value>) -> AgentContext {
         let provider = Arc::new(MockProvider::new());
-        let tool_executor = Arc::new(
-            crate::services::tools::ToolExecutor::new(&PathBuf::from("/tmp")),
-        );
+        let tool_executor = Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+            "/tmp",
+        )));
         let hooks = Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new());
 
         AgentContext {
@@ -216,10 +228,7 @@ mod tests {
             "yes".to_string(),
             Arc::new(MockBranchAgent::new("yes-agent")),
         );
-        branches.insert(
-            "no".to_string(),
-            Arc::new(MockBranchAgent::new("no-agent")),
-        );
+        branches.insert("no".to_string(), Arc::new(MockBranchAgent::new("no-agent")));
 
         let condition: ConditionFn = Box::new(|state| {
             state
@@ -233,10 +242,7 @@ mod tests {
 
         // Route to "yes" branch
         let mut state = HashMap::new();
-        state.insert(
-            "decision".to_string(),
-            Value::String("yes".to_string()),
-        );
+        state.insert("decision".to_string(), Value::String("yes".to_string()));
         let ctx = mock_context_with_state(state);
 
         let mut stream = agent.run(ctx).await.unwrap();
@@ -265,7 +271,11 @@ mod tests {
         match result {
             Err(e) => {
                 let err = e.to_string();
-                assert!(err.contains("nonexistent"), "Error should mention 'nonexistent': {}", err);
+                assert!(
+                    err.contains("nonexistent"),
+                    "Error should mention 'nonexistent': {}",
+                    err
+                );
             }
             Ok(_) => panic!("Expected error for missing branch"),
         }
@@ -277,8 +287,7 @@ mod tests {
         let condition: ConditionFn = Box::new(|_| "unknown".to_string());
 
         let default_agent = Arc::new(MockBranchAgent::new("default-agent"));
-        let agent = ConditionalAgent::new("cond", condition, branches)
-            .with_default(default_agent);
+        let agent = ConditionalAgent::new("cond", condition, branches).with_default(default_agent);
 
         let ctx = mock_context_with_state(HashMap::new());
 

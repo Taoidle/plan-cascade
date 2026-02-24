@@ -84,8 +84,8 @@ impl Tool for WebSearchTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use std::path::Path;
 
     #[test]

@@ -10,9 +10,7 @@
 //! If precise control over temperature/max_tokens is required, consider using
 //! the OpenAI-compatible endpoint with raw reqwest instead. See findings.md.
 
-use async_dashscope::operation::common::{
-    FunctionBuilder, FunctionCallBuilder, ParametersBuilder,
-};
+use async_dashscope::operation::common::{FunctionBuilder, FunctionCallBuilder, ParametersBuilder};
 use async_dashscope::operation::generation::{GenerationOutput, GenerationParamBuilder};
 use async_dashscope::Client as DashScopeClient;
 use async_trait::async_trait;
@@ -407,7 +405,10 @@ impl QwenProvider {
     fn convert_sdk_error(err: async_dashscope::error::DashScopeError) -> LlmError {
         let msg = err.to_string();
         let msg_lower = msg.to_lowercase();
-        if msg.contains("401") || msg_lower.contains("unauthorized") || msg_lower.contains("invalid api") {
+        if msg.contains("401")
+            || msg_lower.contains("unauthorized")
+            || msg_lower.contains("invalid api")
+        {
             LlmError::AuthenticationFailed {
                 message: format!("qwen: {}", msg),
             }
@@ -594,9 +595,7 @@ impl LlmProvider for QwenProvider {
                                 if in_reasoning {
                                     in_reasoning = false;
                                     let _ = tx
-                                        .send(UnifiedStreamEvent::ThinkingEnd {
-                                            thinking_id: None,
-                                        })
+                                        .send(UnifiedStreamEvent::ThinkingEnd { thinking_id: None })
                                         .await;
                                 }
                                 accumulated_content.push_str(&msg.content);
@@ -628,15 +627,12 @@ impl LlmProvider for QwenProvider {
 
                                         pending_tool_id = Some(tc.id.clone());
                                         if !tc.function.name.is_empty() {
-                                            pending_tool_name =
-                                                Some(tc.function.name.clone());
+                                            pending_tool_name = Some(tc.function.name.clone());
                                         }
                                         pending_tool_args.clear();
                                     }
 
-                                    if pending_tool_name.is_none()
-                                        && !tc.function.name.is_empty()
-                                    {
+                                    if pending_tool_name.is_none() && !tc.function.name.is_empty() {
                                         pending_tool_name = Some(tc.function.name.clone());
                                     }
 
@@ -655,11 +651,8 @@ impl LlmProvider for QwenProvider {
                                     if let (Some(id), Some(name)) =
                                         (pending_tool_id.take(), pending_tool_name.take())
                                     {
-                                        let args =
-                                            std::mem::take(&mut pending_tool_args);
-                                        if let Ok(parsed) =
-                                            serde_json::from_str(&args)
-                                        {
+                                        let args = std::mem::take(&mut pending_tool_args);
+                                        if let Ok(parsed) = serde_json::from_str(&args) {
                                             tool_calls.push(ToolCall {
                                                 id,
                                                 name,
@@ -687,9 +680,7 @@ impl LlmProvider for QwenProvider {
                             if in_reasoning {
                                 in_reasoning = false;
                                 let _ = tx
-                                    .send(UnifiedStreamEvent::ThinkingEnd {
-                                        thinking_id: None,
-                                    })
+                                    .send(UnifiedStreamEvent::ThinkingEnd { thinking_id: None })
                                     .await;
                             }
                             accumulated_content.push_str(text);
@@ -736,9 +727,7 @@ impl LlmProvider for QwenProvider {
 
         if in_reasoning {
             let _ = tx
-                .send(UnifiedStreamEvent::ThinkingEnd {
-                    thinking_id: None,
-                })
+                .send(UnifiedStreamEvent::ThinkingEnd { thinking_id: None })
                 .await;
         }
 
@@ -883,7 +872,10 @@ mod tests {
             ..test_config()
         };
         let provider = QwenProvider::new(config);
-        assert_eq!(provider.default_fallback_mode(), FallbackToolFormatMode::Off);
+        assert_eq!(
+            provider.default_fallback_mode(),
+            FallbackToolFormatMode::Off
+        );
     }
 
     #[test]
@@ -921,7 +913,11 @@ mod tests {
     #[test]
     fn test_input_json_tool_result() {
         let provider = QwenProvider::new(test_config());
-        let messages = vec![Message::tool_result("call_123", "file contents here", false)];
+        let messages = vec![Message::tool_result(
+            "call_123",
+            "file contents here",
+            false,
+        )];
         let json = provider.build_sdk_input_json(&messages, None);
         let msgs = json["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 1);

@@ -116,10 +116,7 @@ pub async fn toggle_plugin(
             if toggled {
                 Ok(CommandResponse::ok(true))
             } else {
-                Ok(CommandResponse::err(format!(
-                    "Plugin not found: {}",
-                    name
-                )))
+                Ok(CommandResponse::err(format!("Plugin not found: {}", name)))
             }
         }
         Err(e) => Ok(CommandResponse::err(e)),
@@ -164,10 +161,7 @@ pub async fn get_plugin_detail(
         .await
     {
         Ok(Some(detail)) => Ok(CommandResponse::ok(detail)),
-        Ok(None) => Ok(CommandResponse::err(format!(
-            "Plugin not found: {}",
-            name
-        ))),
+        Ok(None) => Ok(CommandResponse::err(format!("Plugin not found: {}", name))),
         Err(e) => Ok(CommandResponse::err(e)),
     }
 }
@@ -202,12 +196,7 @@ pub async fn install_plugin(
     };
     let manifest: PluginManifest = match serde_json::from_str(&manifest_content) {
         Ok(m) => m,
-        Err(e) => {
-            return Ok(CommandResponse::err(format!(
-                "Invalid plugin.json: {}",
-                e
-            )))
-        }
+        Err(e) => return Ok(CommandResponse::err(format!("Invalid plugin.json: {}", e))),
     };
 
     // Determine destination
@@ -383,10 +372,7 @@ pub async fn uninstall_plugin(
             )));
         }
         Ok(None) => {
-            return Ok(CommandResponse::err(format!(
-                "Plugin not found: {}",
-                name
-            )));
+            return Ok(CommandResponse::err(format!("Plugin not found: {}", name)));
         }
         Err(e) => return Ok(CommandResponse::err(e)),
     }
@@ -459,14 +445,18 @@ pub async fn add_marketplace(
             .unwrap_or("custom")
             .trim_end_matches(".git")
             .to_string();
-        (MarketplaceSourceType::GitUrl { url: trimmed.to_string() }, name)
-    } else if trimmed.contains('/') && !trimmed.contains(' ') && !std::path::Path::new(trimmed).exists() {
+        (
+            MarketplaceSourceType::GitUrl {
+                url: trimmed.to_string(),
+            },
+            name,
+        )
+    } else if trimmed.contains('/')
+        && !trimmed.contains(' ')
+        && !std::path::Path::new(trimmed).exists()
+    {
         // GitHub shorthand (owner/repo)
-        let name = trimmed
-            .rsplit('/')
-            .next()
-            .unwrap_or("custom")
-            .to_string();
+        let name = trimmed.rsplit('/').next().unwrap_or("custom").to_string();
         (
             MarketplaceSourceType::Github {
                 repo: trimmed.to_string(),
@@ -480,7 +470,12 @@ pub async fn add_marketplace(
             .and_then(|n| n.to_str())
             .unwrap_or("local")
             .to_string();
-        (MarketplaceSourceType::LocalPath { path: trimmed.to_string() }, name)
+        (
+            MarketplaceSourceType::LocalPath {
+                path: trimmed.to_string(),
+            },
+            name,
+        )
     };
 
     let config = MarketplaceConfig {
@@ -572,7 +567,12 @@ pub async fn install_marketplace_plugin(
     // Fetch the marketplace manifest to find the plugin entry
     let manifest = match marketplace::fetch_marketplace_manifest(&marketplace_config).await {
         Ok(m) => m,
-        Err(e) => return Ok(CommandResponse::err(format!("Failed to fetch marketplace: {}", e))),
+        Err(e) => {
+            return Ok(CommandResponse::err(format!(
+                "Failed to fetch marketplace: {}",
+                e
+            )))
+        }
     };
 
     let entry = match manifest.plugins.iter().find(|p| p.name == plugin_name) {
@@ -586,12 +586,11 @@ pub async fn install_marketplace_plugin(
     };
 
     // Install
-    let manifest = match installer::install_from_marketplace(&entry, &marketplace_config, &app)
-        .await
-    {
-        Ok(m) => m,
-        Err(e) => return Ok(CommandResponse::err(e)),
-    };
+    let manifest =
+        match installer::install_from_marketplace(&entry, &marketplace_config, &app).await {
+            Ok(m) => m,
+            Err(e) => return Ok(CommandResponse::err(e)),
+        };
 
     // Refresh plugin manager
     let result = state

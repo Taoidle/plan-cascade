@@ -56,8 +56,8 @@ impl ToolRisk {
 pub fn classify_tool_risk(tool_name: &str, _args: &Value) -> ToolRisk {
     match tool_name {
         // Read-only tools
-        "Read" | "Glob" | "Grep" | "LS" | "Cwd" | "CodebaseSearch" | "WebFetch"
-        | "WebSearch" | "Analyze" => ToolRisk::ReadOnly,
+        "Read" | "Glob" | "Grep" | "LS" | "Cwd" | "CodebaseSearch" | "WebFetch" | "WebSearch"
+        | "Analyze" => ToolRisk::ReadOnly,
 
         // Safe write tools
         "Write" | "Edit" | "NotebookEdit" => ToolRisk::SafeWrite,
@@ -108,7 +108,14 @@ mod tests {
     fn test_classify_read_only_tools() {
         let args = serde_json::json!({});
         for name in &[
-            "Read", "Glob", "Grep", "LS", "Cwd", "CodebaseSearch", "WebFetch", "WebSearch",
+            "Read",
+            "Glob",
+            "Grep",
+            "LS",
+            "Cwd",
+            "CodebaseSearch",
+            "WebFetch",
+            "WebSearch",
             "Analyze",
         ] {
             assert_eq!(
@@ -149,7 +156,10 @@ mod tests {
     #[test]
     fn test_classify_unknown_tool_defaults_to_dangerous() {
         let args = serde_json::json!({});
-        assert_eq!(classify_tool_risk("UnknownTool", &args), ToolRisk::Dangerous);
+        assert_eq!(
+            classify_tool_risk("UnknownTool", &args),
+            ToolRisk::Dangerous
+        );
     }
 
     #[test]
@@ -187,7 +197,11 @@ mod tests {
         assert!(!needs_approval("Read", &args, PermissionLevel::Permissive));
         assert!(!needs_approval("Write", &args, PermissionLevel::Permissive));
         assert!(!needs_approval("Bash", &args, PermissionLevel::Permissive));
-        assert!(!needs_approval("Browser", &args, PermissionLevel::Permissive));
+        assert!(!needs_approval(
+            "Browser",
+            &args,
+            PermissionLevel::Permissive
+        ));
         assert!(!needs_approval("Task", &args, PermissionLevel::Permissive));
     }
 

@@ -19,8 +19,8 @@ use tauri::State;
 
 use crate::models::response::CommandResponse;
 use crate::services::orchestrator::embedding_provider::{
-    EmbeddingProvider, EmbeddingProviderCapability, EmbeddingProviderConfig,
-    EmbeddingProviderType, PersistedEmbeddingConfig, EMBEDDING_CONFIG_SETTING_KEY,
+    EmbeddingProvider, EmbeddingProviderCapability, EmbeddingProviderConfig, EmbeddingProviderType,
+    PersistedEmbeddingConfig, EMBEDDING_CONFIG_SETTING_KEY,
 };
 use crate::state::AppState;
 use crate::storage::KeyringService;
@@ -112,11 +112,8 @@ pub struct GetEmbeddingApiKeyRequest {
 // ---------------------------------------------------------------------------
 
 /// Canonical embedding keyring aliases.
-const EMBEDDING_KEYRING_PROVIDERS: &[&str] = &[
-    "qwen_embedding",
-    "glm_embedding",
-    "openai_embedding",
-];
+const EMBEDDING_KEYRING_PROVIDERS: &[&str] =
+    &["qwen_embedding", "glm_embedding", "openai_embedding"];
 
 /// Parse an `EmbeddingProviderType` from a user-facing string.
 ///
@@ -314,13 +311,11 @@ pub async fn set_embedding_config(
 
     // Load existing persisted config to determine if reindex is needed
     let old_persisted = state
-        .with_database(|db| {
-            match db.get_setting(EMBEDDING_CONFIG_SETTING_KEY) {
-                Ok(Some(json_str)) => Ok(
-                    serde_json::from_str::<PersistedEmbeddingConfig>(&json_str).ok(),
-                ),
-                _ => Ok(None),
+        .with_database(|db| match db.get_setting(EMBEDDING_CONFIG_SETTING_KEY) {
+            Ok(Some(json_str)) => {
+                Ok(serde_json::from_str::<PersistedEmbeddingConfig>(&json_str).ok())
             }
+            _ => Ok(None),
         })
         .await
         .unwrap_or(None);
@@ -660,10 +655,7 @@ mod tests {
             parse_provider_type("qwen"),
             Some(EmbeddingProviderType::Qwen)
         );
-        assert_eq!(
-            parse_provider_type("glm"),
-            Some(EmbeddingProviderType::Glm)
-        );
+        assert_eq!(parse_provider_type("glm"), Some(EmbeddingProviderType::Glm));
         assert_eq!(
             parse_provider_type("open_ai"),
             Some(EmbeddingProviderType::OpenAI)
@@ -747,14 +739,8 @@ mod tests {
 
     #[test]
     fn keyring_alias_none_for_local_providers() {
-        assert_eq!(
-            embedding_keyring_alias(EmbeddingProviderType::TfIdf),
-            None
-        );
-        assert_eq!(
-            embedding_keyring_alias(EmbeddingProviderType::Ollama),
-            None
-        );
+        assert_eq!(embedding_keyring_alias(EmbeddingProviderType::TfIdf), None);
+        assert_eq!(embedding_keyring_alias(EmbeddingProviderType::Ollama), None);
     }
 
     // =====================================================================
@@ -832,7 +818,10 @@ mod tests {
 
         let response = config_to_response(&config, None);
 
-        assert_eq!(response.base_url, Some("http://localhost:11434".to_string()));
+        assert_eq!(
+            response.base_url,
+            Some("http://localhost:11434".to_string())
+        );
     }
 
     // =====================================================================
@@ -915,10 +904,7 @@ mod tests {
 
         assert_eq!(req.provider, "qwen");
         assert_eq!(req.model, Some("text-embedding-v3".to_string()));
-        assert_eq!(
-            req.base_url,
-            Some("https://custom.api.com".to_string())
-        );
+        assert_eq!(req.base_url, Some("https://custom.api.com".to_string()));
         assert_eq!(req.dimension, Some(1024));
         assert_eq!(req.batch_size, Some(25));
         assert_eq!(req.fallback_provider, Some("tf_idf".to_string()));
@@ -957,8 +943,7 @@ mod tests {
         let result = list_embedding_providers().await;
         let providers = result.data.unwrap();
 
-        let types: Vec<EmbeddingProviderType> =
-            providers.iter().map(|p| p.provider_type).collect();
+        let types: Vec<EmbeddingProviderType> = providers.iter().map(|p| p.provider_type).collect();
 
         assert!(types.contains(&EmbeddingProviderType::TfIdf));
         assert!(types.contains(&EmbeddingProviderType::Ollama));

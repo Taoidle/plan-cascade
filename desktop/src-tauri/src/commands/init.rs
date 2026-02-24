@@ -100,16 +100,18 @@ pub async fn init_app(
 
             // Auto-start remote gateway if configured.
             // This is non-blocking: failures are logged but do not prevent app init.
-            let remote_gateway_auto_started =
-                match crate::commands::remote::try_auto_start_gateway(&remote_state, &state)
-                    .await
-                {
-                    Ok(started) => started,
-                    Err(e) => {
-                        tracing::warn!("Remote gateway auto-start failed: {}", e);
-                        false
-                    }
-                };
+            let remote_gateway_auto_started = match crate::commands::remote::try_auto_start_gateway(
+                &remote_state,
+                &state,
+            )
+            .await
+            {
+                Ok(started) => started,
+                Err(e) => {
+                    tracing::warn!("Remote gateway auto-start failed: {}", e);
+                    false
+                }
+            };
 
             let task_count = incomplete_tasks.len();
             let mut message = if task_count > 0 {

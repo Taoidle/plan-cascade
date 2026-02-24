@@ -5,9 +5,9 @@
 
 use async_trait::async_trait;
 
+use super::WebhookChannel;
 use crate::services::proxy::ProxyConfig;
 use crate::services::webhook::types::*;
-use super::WebhookChannel;
 
 /// Feishu/Lark Bot Webhook integration.
 ///
@@ -89,10 +89,7 @@ impl WebhookChannel for FeishuChannel {
         Ok(())
     }
 
-    async fn test(
-        &self,
-        config: &WebhookChannelConfig,
-    ) -> Result<WebhookTestResult, WebhookError> {
+    async fn test(&self, config: &WebhookChannelConfig) -> Result<WebhookTestResult, WebhookError> {
         let test_payload = WebhookPayload {
             event_type: WebhookEventType::TaskComplete,
             summary: "Test notification from Plan Cascade".to_string(),

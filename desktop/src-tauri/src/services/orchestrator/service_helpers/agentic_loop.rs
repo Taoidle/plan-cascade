@@ -731,7 +731,9 @@ impl OrchestratorService {
                         Ok(r) => break 'retry_loop r,
                         Err(e) if e.is_retryable() && attempt < max_retries => {
                             let delay = std::cmp::min(1u64 << attempt, max_delay_secs);
-                            let wait = e.retry_after_secs().map_or(delay, |r| std::cmp::max(r, delay));
+                            let wait = e
+                                .retry_after_secs()
+                                .map_or(delay, |r| std::cmp::max(r, delay));
                             eprintln!(
                                 "[sub-agent:retry] {} on attempt {}/{}, retrying in {}s",
                                 e,
@@ -744,7 +746,9 @@ impl OrchestratorService {
                                 .send(UnifiedStreamEvent::Error {
                                     message: format!(
                                         "Rate limited, retrying in {}s (attempt {}/{})",
-                                        wait, attempt + 1, max_retries
+                                        wait,
+                                        attempt + 1,
+                                        max_retries
                                     ),
                                     code: Some("retrying".to_string()),
                                 })
@@ -771,10 +775,8 @@ impl OrchestratorService {
                     }
                 }
                 // All retries exhausted or non-retryable error
-                let e = last_err.unwrap_or_else(|| {
-                    crate::services::llm::LlmError::Other {
-                        message: "Max retries exhausted".to_string(),
-                    }
+                let e = last_err.unwrap_or_else(|| crate::services::llm::LlmError::Other {
+                    message: "Max retries exhausted".to_string(),
                 });
                 // Emit error event
                 let _ = tx
@@ -830,7 +832,11 @@ impl OrchestratorService {
                 } else {
                     // ADR-F006: Delegate to pluggable compactor trait.
                     // Compactor was selected at construction time based on provider reliability.
-                    match self.compactor.compact(&messages, &self.config.compaction_config).await {
+                    match self
+                        .compactor
+                        .compact(&messages, &self.config.compaction_config)
+                        .await
+                    {
                         Ok(result) if result.messages_removed > 0 => {
                             let removed_count = result.messages_removed;
                             let preserved_count = result.messages_preserved;
@@ -851,7 +857,10 @@ impl OrchestratorService {
 
                             eprintln!(
                                 "[compaction] {} compacted {} messages, preserved {}, tokens {}",
-                                self.compactor.name(), removed_count, preserved_count, compaction_tokens,
+                                self.compactor.name(),
+                                removed_count,
+                                preserved_count,
+                                compaction_tokens,
                             );
                         }
                         Err(e) => {
@@ -970,15 +979,25 @@ impl OrchestratorService {
                     // Process results in original order
                     for (tc_id, effective_tool_name, result) in results {
                         let context_tool_output = tool_output_for_model_context(
-                            &effective_tool_name, &result, analysis_phase,
+                            &effective_tool_name,
+                            &result,
+                            analysis_phase,
                         );
 
                         // Emit tool result event
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolResult {
                                 tool_id: tc_id.clone(),
-                                result: if result.success { result.output.clone() } else { None },
-                                error: if !result.success { result.error.clone() } else { None },
+                                result: if result.success {
+                                    result.output.clone()
+                                } else {
+                                    None
+                                },
+                                error: if !result.success {
+                                    result.error.clone()
+                                } else {
+                                    None
+                                },
                             })
                             .await;
 
@@ -987,29 +1006,53 @@ impl OrchestratorService {
                             let dedup_msg = result.output.as_deref().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
-                            messages.push(Message::tool_result(&tc_id, dedup_msg.to_string(), false));
+                            messages.push(Message::tool_result(
+                                &tc_id,
+                                dedup_msg.to_string(),
+                                false,
+                            ));
                         } else if let Some((mime, b64)) = &result.image_data {
                             if self.provider.supports_multimodal() {
                                 use crate::services::llm::types::ContentBlock;
                                 let blocks = vec![
-                                    ContentBlock::Text { text: context_tool_output.clone() },
-                                    ContentBlock::Image { media_type: mime.clone(), data: b64.clone() },
+                                    ContentBlock::Text {
+                                        text: context_tool_output.clone(),
+                                    },
+                                    ContentBlock::Image {
+                                        media_type: mime.clone(),
+                                        data: b64.clone(),
+                                    },
                                 ];
-                                messages.push(Message::tool_result_multimodal(&tc_id, blocks, !result.success));
+                                messages.push(Message::tool_result_multimodal(
+                                    &tc_id,
+                                    blocks,
+                                    !result.success,
+                                ));
                             } else {
-                                messages.push(Message::tool_result(&tc_id, context_tool_output.clone(), !result.success));
+                                messages.push(Message::tool_result(
+                                    &tc_id,
+                                    context_tool_output.clone(),
+                                    !result.success,
+                                ));
                             }
                         } else {
-                            messages.push(Message::tool_result(&tc_id, context_tool_output.clone(), !result.success));
+                            messages.push(Message::tool_result(
+                                &tc_id,
+                                context_tool_output.clone(),
+                                !result.success,
+                            ));
                         }
 
                         // Loop detection (sequential after collecting results)
-                        let args_str = valid_calls.iter()
+                        let args_str = valid_calls
+                            .iter()
                             .find(|(id, _, _)| id == &tc_id)
                             .map(|(_, _, a)| a.to_string())
                             .unwrap_or_default();
                         if let Some(detection) = loop_detector.record_call(
-                            &effective_tool_name, &args_str, result.is_dedup,
+                            &effective_tool_name,
+                            &args_str,
+                            result.is_dedup,
                         ) {
                             match detection {
                                 LoopDetection::Warning(msg) => {
@@ -1022,9 +1065,20 @@ impl OrchestratorService {
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 (sub-native-parallel): force terminating for {}", effective_tool_name);
-                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::Error {
+                                            message: msg.clone(),
+                                            code: None,
+                                        })
+                                        .await;
                                     emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                    return ExecutionResult {
+                                        response: last_assistant_text,
+                                        usage: total_usage,
+                                        iterations,
+                                        success: false,
+                                        error: Some(msg),
+                                    };
                                 }
                             }
                         }
@@ -1046,7 +1100,11 @@ impl OrchestratorService {
                         // Execute the tool with TaskContext for sub-agent spawning support
                         let result = self
                             .tool_executor
-                            .execute_with_context(effective_tool_name, effective_args, task_ctx.as_ref())
+                            .execute_with_context(
+                                effective_tool_name,
+                                effective_args,
+                                task_ctx.as_ref(),
+                            )
                             .await;
                         let context_tool_output = tool_output_for_model_context(
                             effective_tool_name,
@@ -1058,8 +1116,16 @@ impl OrchestratorService {
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolResult {
                                 tool_id: tc_id.clone(),
-                                result: if result.success { result.output.clone() } else { None },
-                                error: if !result.success { result.error.clone() } else { None },
+                                result: if result.success {
+                                    result.output.clone()
+                                } else {
+                                    None
+                                },
+                                error: if !result.success {
+                                    result.error.clone()
+                                } else {
+                                    None
+                                },
                             })
                             .await;
 
@@ -1068,20 +1134,41 @@ impl OrchestratorService {
                             let dedup_msg = result.output.as_deref().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
-                            messages.push(Message::tool_result(tc_id, dedup_msg.to_string(), false));
+                            messages.push(Message::tool_result(
+                                tc_id,
+                                dedup_msg.to_string(),
+                                false,
+                            ));
                         } else if let Some((mime, b64)) = &result.image_data {
                             if self.provider.supports_multimodal() {
                                 use crate::services::llm::types::ContentBlock;
                                 let blocks = vec![
-                                    ContentBlock::Text { text: context_tool_output.clone() },
-                                    ContentBlock::Image { media_type: mime.clone(), data: b64.clone() },
+                                    ContentBlock::Text {
+                                        text: context_tool_output.clone(),
+                                    },
+                                    ContentBlock::Image {
+                                        media_type: mime.clone(),
+                                        data: b64.clone(),
+                                    },
                                 ];
-                                messages.push(Message::tool_result_multimodal(tc_id, blocks, !result.success));
+                                messages.push(Message::tool_result_multimodal(
+                                    tc_id,
+                                    blocks,
+                                    !result.success,
+                                ));
                             } else {
-                                messages.push(Message::tool_result(tc_id, context_tool_output.clone(), !result.success));
+                                messages.push(Message::tool_result(
+                                    tc_id,
+                                    context_tool_output.clone(),
+                                    !result.success,
+                                ));
                             }
                         } else {
-                            messages.push(Message::tool_result(tc_id, context_tool_output.clone(), !result.success));
+                            messages.push(Message::tool_result(
+                                tc_id,
+                                context_tool_output.clone(),
+                                !result.success,
+                            ));
                         }
 
                         // Check for tool call loop
@@ -1092,7 +1179,10 @@ impl OrchestratorService {
                         ) {
                             match detection {
                                 LoopDetection::Warning(msg) => {
-                                    eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
+                                    eprintln!(
+                                        "[loop-detector] Level 1 escalation: {}",
+                                        effective_tool_name
+                                    );
                                     messages.push(Message::user(msg));
                                 }
                                 LoopDetection::StripTools(msg, _tools) => {
@@ -1101,9 +1191,20 @@ impl OrchestratorService {
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", effective_tool_name);
-                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::Error {
+                                            message: msg.clone(),
+                                            code: None,
+                                        })
+                                        .await;
                                     emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                    return ExecutionResult {
+                                        response: last_assistant_text,
+                                        usage: total_usage,
+                                        iterations,
+                                        success: false,
+                                        error: Some(msg),
+                                    };
                                 }
                             }
                         }
@@ -1235,13 +1336,23 @@ impl OrchestratorService {
                     // Process results in original order
                     for (tool_id, effective_tool_name, result) in results {
                         let context_tool_output = tool_output_for_model_context(
-                            &effective_tool_name, &result, analysis_phase,
+                            &effective_tool_name,
+                            &result,
+                            analysis_phase,
                         );
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolResult {
                                 tool_id: tool_id.clone(),
-                                result: if result.success { result.output.clone() } else { None },
-                                error: if !result.success { result.error.clone() } else { None },
+                                result: if result.success {
+                                    result.output.clone()
+                                } else {
+                                    None
+                                },
+                                error: if !result.success {
+                                    result.error.clone()
+                                } else {
+                                    None
+                                },
                             })
                             .await;
 
@@ -1249,17 +1360,32 @@ impl OrchestratorService {
                             let dedup_msg = result.output.as_deref().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
-                            tool_results.push(format_tool_result(&effective_tool_name, &tool_id, dedup_msg, false));
+                            tool_results.push(format_tool_result(
+                                &effective_tool_name,
+                                &tool_id,
+                                dedup_msg,
+                                false,
+                            ));
                         } else {
-                            tool_results.push(format_tool_result(&effective_tool_name, &tool_id, &context_tool_output, !result.success));
+                            tool_results.push(format_tool_result(
+                                &effective_tool_name,
+                                &tool_id,
+                                &context_tool_output,
+                                !result.success,
+                            ));
                         }
 
                         // Loop detection (sequential after collecting results)
-                        let args_str = valid_fallback_calls.iter()
+                        let args_str = valid_fallback_calls
+                            .iter()
                             .find(|(id, _, _)| id == &tool_id)
                             .map(|(_, _, a)| a.to_string())
                             .unwrap_or_default();
-                        if let Some(detection) = loop_detector.record_call(&effective_tool_name, &args_str, result.is_dedup) {
+                        if let Some(detection) = loop_detector.record_call(
+                            &effective_tool_name,
+                            &args_str,
+                            result.is_dedup,
+                        ) {
                             match detection {
                                 LoopDetection::Warning(msg) => {
                                     eprintln!("[loop-detector] Level 1 escalation (fallback-parallel): {}", effective_tool_name);
@@ -1271,9 +1397,20 @@ impl OrchestratorService {
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 escalation (fallback-parallel): force terminating for {}", effective_tool_name);
-                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::Error {
+                                            message: msg.clone(),
+                                            code: None,
+                                        })
+                                        .await;
                                     emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                    return ExecutionResult {
+                                        response: last_assistant_text,
+                                        usage: total_usage,
+                                        iterations,
+                                        success: false,
+                                        error: Some(msg),
+                                    };
                                 }
                             }
                         }
@@ -1293,7 +1430,11 @@ impl OrchestratorService {
 
                         let result = self
                             .tool_executor
-                            .execute_with_context(effective_tool_name, effective_args, task_ctx.as_ref())
+                            .execute_with_context(
+                                effective_tool_name,
+                                effective_args,
+                                task_ctx.as_ref(),
+                            )
                             .await;
                         let context_tool_output = tool_output_for_model_context(
                             effective_tool_name,
@@ -1304,8 +1445,16 @@ impl OrchestratorService {
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolResult {
                                 tool_id: tool_id.clone(),
-                                result: if result.success { result.output.clone() } else { None },
-                                error: if !result.success { result.error.clone() } else { None },
+                                result: if result.success {
+                                    result.output.clone()
+                                } else {
+                                    None
+                                },
+                                error: if !result.success {
+                                    result.error.clone()
+                                } else {
+                                    None
+                                },
                             })
                             .await;
 
@@ -1313,15 +1462,32 @@ impl OrchestratorService {
                             let dedup_msg = result.output.as_deref().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
-                            tool_results.push(format_tool_result(effective_tool_name, tool_id, dedup_msg, false));
+                            tool_results.push(format_tool_result(
+                                effective_tool_name,
+                                tool_id,
+                                dedup_msg,
+                                false,
+                            ));
                         } else {
-                            tool_results.push(format_tool_result(effective_tool_name, tool_id, &context_tool_output, !result.success));
+                            tool_results.push(format_tool_result(
+                                effective_tool_name,
+                                tool_id,
+                                &context_tool_output,
+                                !result.success,
+                            ));
                         }
 
-                        if let Some(detection) = loop_detector.record_call(effective_tool_name, &effective_args.to_string(), result.is_dedup) {
+                        if let Some(detection) = loop_detector.record_call(
+                            effective_tool_name,
+                            &effective_args.to_string(),
+                            result.is_dedup,
+                        ) {
                             match detection {
                                 LoopDetection::Warning(msg) => {
-                                    eprintln!("[loop-detector] Level 1 escalation (fallback): {}", effective_tool_name);
+                                    eprintln!(
+                                        "[loop-detector] Level 1 escalation (fallback): {}",
+                                        effective_tool_name
+                                    );
                                     tool_results.push(msg);
                                 }
                                 LoopDetection::StripTools(msg, _tools) => {
@@ -1330,9 +1496,20 @@ impl OrchestratorService {
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 escalation (fallback): force terminating for {}", effective_tool_name);
-                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::Error {
+                                            message: msg.clone(),
+                                            code: None,
+                                        })
+                                        .await;
                                     emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                    return ExecutionResult {
+                                        response: last_assistant_text,
+                                        usage: total_usage,
+                                        iterations,
+                                        success: false,
+                                        error: Some(msg),
+                                    };
                                 }
                             }
                         }
@@ -1392,7 +1569,8 @@ impl OrchestratorService {
 
                 // Sub-agents that have already executed tools are producing a
                 // final summary — do NOT repair-hint their report text.
-                let sub_agent_final_summary = is_sub_agent && has_executed_tools && !content_is_empty;
+                let sub_agent_final_summary =
+                    is_sub_agent && has_executed_tools && !content_is_empty;
 
                 let needs_repair = repair_retry_count < 2
                     && !sub_agent_final_summary
@@ -1484,14 +1662,21 @@ impl OrchestratorService {
             // Track consecutive Task-only iterations to prevent infinite delegation.
             if task_ctx.is_some() {
                 let tool_names: Vec<&str> = if has_native_tool_calls {
-                    response.tool_calls.iter().map(|tc| tc.name.as_str()).collect()
+                    response
+                        .tool_calls
+                        .iter()
+                        .map(|tc| tc.name.as_str())
+                        .collect()
                 } else if !parsed_fallback.calls.is_empty() {
-                    parsed_fallback.calls.iter().map(|ptc| ptc.tool_name.as_str()).collect()
+                    parsed_fallback
+                        .calls
+                        .iter()
+                        .map(|ptc| ptc.tool_name.as_str())
+                        .collect()
                 } else {
                     vec![]
                 };
-                let all_task = !tool_names.is_empty()
-                    && tool_names.iter().all(|n| *n == "Task");
+                let all_task = !tool_names.is_empty() && tool_names.iter().all(|n| *n == "Task");
                 if all_task {
                     consecutive_task_only_iterations += 1;
                 } else {
@@ -1505,7 +1690,8 @@ impl OrchestratorService {
                     messages.push(Message::user(
                         "[DELEGATION LIMIT] You have delegated to sub-agents multiple times \
                          without doing direct work. Use tools directly (Read, Grep, LS, etc.) \
-                         before delegating again.".to_string(),
+                         before delegating again."
+                            .to_string(),
                     ));
                     consecutive_task_only_iterations = 0;
                 }
@@ -1519,32 +1705,33 @@ impl OrchestratorService {
     /// For coordinator sub-agents (sub_agent_depth is Some(n)), depth is n.
     /// When sub_agent_depth is None AND this is a sub-agent (task_type is set),
     /// TaskContext is NOT created, making the Task tool unavailable (leaf node).
-    fn build_task_context(
-        &self,
-        tx: &mpsc::Sender<UnifiedStreamEvent>,
-    ) -> Option<TaskContext> {
+    fn build_task_context(&self, tx: &mpsc::Sender<UnifiedStreamEvent>) -> Option<TaskContext> {
         let current_depth = self.config.sub_agent_depth.unwrap_or(0);
-        let is_leaf_subagent = self.config.sub_agent_depth.is_none()
-            && self.config.task_type.is_some();
+        let is_leaf_subagent =
+            self.config.sub_agent_depth.is_none() && self.config.task_type.is_some();
         if is_leaf_subagent {
             return None;
         }
 
         // Capture read-only snapshots from the parent for sub-agent injection.
-        let skills_snapshot = self.selected_skills
+        let skills_snapshot = self
+            .selected_skills
             .as_ref()
             .and_then(|lock| lock.try_read().ok())
             .map(|guard| guard.clone())
             .unwrap_or_default();
 
-        let memories_snapshot = self.loaded_memories
+        let memories_snapshot = self
+            .loaded_memories
             .as_ref()
             .and_then(|lock| lock.try_read().ok())
             .map(|guard| guard.clone())
             .unwrap_or_default();
 
-        let knowledge_block_snapshot = self.cached_knowledge_block
-            .lock().ok()
+        let knowledge_block_snapshot = self
+            .cached_knowledge_block
+            .lock()
+            .ok()
             .and_then(|guard| guard.clone());
 
         let task_spawner = Arc::new(OrchestratorTaskSpawner {
@@ -1644,7 +1831,10 @@ impl OrchestratorService {
         if let Some(first_msg) = messages.first_mut() {
             for content in first_msg.content.iter_mut() {
                 if let MessageContent::Text { text } = content {
-                    let modified = self.hooks.fire_on_user_message(&hook_ctx, text.clone()).await;
+                    let modified = self
+                        .hooks
+                        .fire_on_user_message(&hook_ctx, text.clone())
+                        .await;
                     if modified != *text {
                         *text = modified;
                     }
@@ -1654,7 +1844,8 @@ impl OrchestratorService {
         }
 
         // Populate knowledge context from RAG pipeline (if configured)
-        self.populate_knowledge_context(&user_message_for_knowledge).await;
+        self.populate_knowledge_context(&user_message_for_knowledge)
+            .await;
 
         loop {
             // Check for cancellation
@@ -1867,7 +2058,9 @@ impl OrchestratorService {
             );
 
             // Hook: on_after_llm
-            self.hooks.fire_on_after_llm(&hook_ctx, response.content.clone()).await;
+            self.hooks
+                .fire_on_after_llm(&hook_ctx, response.content.clone())
+                .await;
 
             // Check for context compaction before processing tool calls (ADR-F006).
             // Delegates to pluggable compactor selected at construction time.
@@ -1886,10 +2079,16 @@ impl OrchestratorService {
                             })
                         })
                         .collect();
-                    self.hooks.fire_on_compaction(&hook_ctx, compaction_snippets).await;
+                    self.hooks
+                        .fire_on_compaction(&hook_ctx, compaction_snippets)
+                        .await;
                 }
                 // ADR-F006: Delegate to pluggable compactor trait.
-                match self.compactor.compact(&messages, &self.config.compaction_config).await {
+                match self
+                    .compactor
+                    .compact(&messages, &self.config.compaction_config)
+                    .await
+                {
                     Ok(result) if result.messages_removed > 0 => {
                         let removed_count = result.messages_removed;
                         let preserved_count = result.messages_preserved;
@@ -1910,7 +2109,10 @@ impl OrchestratorService {
 
                         eprintln!(
                             "[compaction] {} compacted {} messages, preserved {}, tokens {}",
-                            self.compactor.name(), removed_count, preserved_count, compaction_tokens,
+                            self.compactor.name(),
+                            removed_count,
+                            preserved_count,
+                            compaction_tokens,
                         );
                     }
                     Err(e) => {
@@ -1961,11 +2163,7 @@ impl OrchestratorService {
                 // Step 1: Validate all tool calls
                 let mut valid_calls: Vec<(String, String, serde_json::Value)> = Vec::new(); // (tc_id, name, args)
                 for tc in &response.tool_calls {
-                    match prepare_tool_call_for_execution(
-                        &tc.name,
-                        &tc.arguments,
-                        None,
-                    ) {
+                    match prepare_tool_call_for_execution(&tc.name, &tc.arguments, None) {
                         Ok((name, args)) => valid_calls.push((tc.id.clone(), name, args)),
                         Err(error_message) => {
                             let _ = tx
@@ -2047,22 +2245,30 @@ impl OrchestratorService {
                             .await;
 
                         // Hook: on_after_tool
-                        self.hooks.fire_on_after_tool(
-                            &hook_ctx,
-                            &effective_tool_name,
-                            result.success,
-                            result.output.as_ref().map(|o| truncate_for_log(o, 200)),
-                        ).await;
+                        self.hooks
+                            .fire_on_after_tool(
+                                &hook_ctx,
+                                &effective_tool_name,
+                                result.success,
+                                result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                            )
+                            .await;
 
                         // Add to messages
                         if result.is_dedup {
                             let dedup_msg = result.output.as_deref().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
-                            messages.push(Message::tool_result(&tc_id, dedup_msg.to_string(), false));
+                            messages.push(Message::tool_result(
+                                &tc_id,
+                                dedup_msg.to_string(),
+                                false,
+                            ));
                         } else {
-                            let context_content =
-                                truncate_tool_output_for_context(&effective_tool_name, &result.to_content());
+                            let context_content = truncate_tool_output_for_context(
+                                &effective_tool_name,
+                                &result.to_content(),
+                            );
                             if let Some((mime, b64)) = &result.image_data {
                                 if self.provider.supports_multimodal() {
                                     use crate::services::llm::types::ContentBlock;
@@ -2097,7 +2303,8 @@ impl OrchestratorService {
                         }
 
                         // Loop detection (sequential, after collecting results)
-                        let args_str = valid_calls.iter()
+                        let args_str = valid_calls
+                            .iter()
                             .find(|(id, _, _)| id == &tc_id)
                             .map(|(_, _, a)| a.to_string())
                             .unwrap_or_default();
@@ -2108,7 +2315,10 @@ impl OrchestratorService {
                         ) {
                             match detection {
                                 LoopDetection::Warning(msg) => {
-                                    eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
+                                    eprintln!(
+                                        "[loop-detector] Level 1 escalation: {}",
+                                        effective_tool_name
+                                    );
                                     messages.push(Message::user(msg));
                                 }
                                 LoopDetection::StripTools(msg, _tools) => {
@@ -2149,12 +2359,18 @@ impl OrchestratorService {
                             .await;
 
                         // Hook: on_before_tool - can skip tool execution
-                        if let Some(skip_result) = self.hooks.fire_on_before_tool(
-                            &hook_ctx,
-                            effective_tool_name,
-                            &effective_args.to_string(),
-                        ).await {
-                            let skip_msg = skip_result.skip_reason.unwrap_or_else(|| "Skipped by hook".to_string());
+                        if let Some(skip_result) = self
+                            .hooks
+                            .fire_on_before_tool(
+                                &hook_ctx,
+                                effective_tool_name,
+                                &effective_args.to_string(),
+                            )
+                            .await
+                        {
+                            let skip_msg = skip_result
+                                .skip_reason
+                                .unwrap_or_else(|| "Skipped by hook".to_string());
                             let _ = tx
                                 .send(UnifiedStreamEvent::ToolResult {
                                     tool_id: tc_id.clone(),
@@ -2166,17 +2382,22 @@ impl OrchestratorService {
                             continue;
                         }
 
-                        let (result, nested_usage, nested_iterations) = if effective_tool_name == "Analyze" {
-                            self.execute_analyze_tool_result(effective_args, &tx).await
-                        } else {
-                            (
-                                self.tool_executor
-                                    .execute_with_context(effective_tool_name, effective_args, task_ctx.as_ref())
-                                    .await,
-                                UsageStats::default(),
-                                0,
-                            )
-                        };
+                        let (result, nested_usage, nested_iterations) =
+                            if effective_tool_name == "Analyze" {
+                                self.execute_analyze_tool_result(effective_args, &tx).await
+                            } else {
+                                (
+                                    self.tool_executor
+                                        .execute_with_context(
+                                            effective_tool_name,
+                                            effective_args,
+                                            task_ctx.as_ref(),
+                                        )
+                                        .await,
+                                    UsageStats::default(),
+                                    0,
+                                )
+                            };
                         merge_usage(&mut total_usage, &nested_usage);
                         iterations += nested_iterations;
 
@@ -2198,12 +2419,14 @@ impl OrchestratorService {
                             .await;
 
                         // Hook: on_after_tool
-                        self.hooks.fire_on_after_tool(
-                            &hook_ctx,
-                            effective_tool_name,
-                            result.success,
-                            result.output.as_ref().map(|o| truncate_for_log(o, 200)),
-                        ).await;
+                        self.hooks
+                            .fire_on_after_tool(
+                                &hook_ctx,
+                                effective_tool_name,
+                                result.success,
+                                result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                            )
+                            .await;
 
                         // Apply EventActions if the tool declared any side effects.
                         if let Some(ref actions) = result.event_actions {
@@ -2219,17 +2442,23 @@ impl OrchestratorService {
                                 ).await;
                                 match apply_result {
                                     Ok(ref action_outcome) => {
-                                        if let Some(ref target_agent) = action_outcome.transfer_target {
+                                        if let Some(ref target_agent) =
+                                            action_outcome.transfer_target
+                                        {
                                             self.handle_agent_transfer(
                                                 target_agent,
                                                 &hook_ctx.session_id,
                                                 &event_actions_state,
                                                 &tx,
-                                            ).await;
+                                            )
+                                            .await;
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("[event-actions] Failed to apply actions from {}: {}", effective_tool_name, e);
+                                        eprintln!(
+                                            "[event-actions] Failed to apply actions from {}: {}",
+                                            effective_tool_name, e
+                                        );
                                     }
                                 }
                             }
@@ -2240,10 +2469,16 @@ impl OrchestratorService {
                             let dedup_msg = result.output.as_deref().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
-                            messages.push(Message::tool_result(tc_id, dedup_msg.to_string(), false));
+                            messages.push(Message::tool_result(
+                                tc_id,
+                                dedup_msg.to_string(),
+                                false,
+                            ));
                         } else {
-                            let context_content =
-                                truncate_tool_output_for_context(effective_tool_name, &result.to_content());
+                            let context_content = truncate_tool_output_for_context(
+                                effective_tool_name,
+                                &result.to_content(),
+                            );
                             if let Some((mime, b64)) = &result.image_data {
                                 if self.provider.supports_multimodal() {
                                     use crate::services::llm::types::ContentBlock;
@@ -2285,7 +2520,10 @@ impl OrchestratorService {
                         ) {
                             match detection {
                                 LoopDetection::Warning(msg) => {
-                                    eprintln!("[loop-detector] Level 1 escalation: {}", effective_tool_name);
+                                    eprintln!(
+                                        "[loop-detector] Level 1 escalation: {}",
+                                        effective_tool_name
+                                    );
                                     messages.push(Message::user(msg));
                                 }
                                 LoopDetection::StripTools(msg, _tools) => {
@@ -2378,7 +2616,12 @@ impl OrchestratorService {
                                     error: Some(error_message.clone()),
                                 })
                                 .await;
-                            tool_results.push(format_tool_result(&ptc.tool_name, &tool_id, &error_message, true));
+                            tool_results.push(format_tool_result(
+                                &ptc.tool_name,
+                                &tool_id,
+                                &error_message,
+                                true,
+                            ));
                         }
                     }
                 }
@@ -2434,46 +2677,93 @@ impl OrchestratorService {
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolResult {
                                 tool_id: tool_id.clone(),
-                                result: if result.success { result.output.clone() } else { None },
-                                error: if !result.success { result.error.clone() } else { None },
+                                result: if result.success {
+                                    result.output.clone()
+                                } else {
+                                    None
+                                },
+                                error: if !result.success {
+                                    result.error.clone()
+                                } else {
+                                    None
+                                },
                             })
                             .await;
 
                         // Hook: on_after_tool (parallel-safe tools have minimal hooks)
-                        self.hooks.fire_on_after_tool(
-                            &hook_ctx, &effective_tool_name, result.success,
-                            result.output.as_ref().map(|o| truncate_for_log(o, 200)),
-                        ).await;
+                        self.hooks
+                            .fire_on_after_tool(
+                                &hook_ctx,
+                                &effective_tool_name,
+                                result.success,
+                                result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                            )
+                            .await;
 
                         if result.is_dedup {
                             let dedup_msg = result.output.as_deref().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
-                            tool_results.push(format_tool_result(&effective_tool_name, &tool_id, dedup_msg, false));
+                            tool_results.push(format_tool_result(
+                                &effective_tool_name,
+                                &tool_id,
+                                dedup_msg,
+                                false,
+                            ));
                         } else {
-                            let context_content = truncate_tool_output_for_context(&effective_tool_name, &result.to_content());
-                            tool_results.push(format_tool_result(&effective_tool_name, &tool_id, &context_content, !result.success));
+                            let context_content = truncate_tool_output_for_context(
+                                &effective_tool_name,
+                                &result.to_content(),
+                            );
+                            tool_results.push(format_tool_result(
+                                &effective_tool_name,
+                                &tool_id,
+                                &context_content,
+                                !result.success,
+                            ));
                         }
 
-                        let args_str = valid_fallback_calls.iter()
+                        let args_str = valid_fallback_calls
+                            .iter()
                             .find(|(id, _, _)| id == &tool_id)
                             .map(|(_, _, a)| a.to_string())
                             .unwrap_or_default();
-                        if let Some(detection) = loop_detector.record_call(&effective_tool_name, &args_str, result.is_dedup) {
+                        if let Some(detection) = loop_detector.record_call(
+                            &effective_tool_name,
+                            &args_str,
+                            result.is_dedup,
+                        ) {
                             match detection {
                                 LoopDetection::Warning(msg) => {
-                                    eprintln!("[loop-detector] Level 1 (fallback-parallel): {}", effective_tool_name);
+                                    eprintln!(
+                                        "[loop-detector] Level 1 (fallback-parallel): {}",
+                                        effective_tool_name
+                                    );
                                     tool_results.push(msg);
                                 }
                                 LoopDetection::StripTools(msg, _) => {
-                                    eprintln!("[loop-detector] Level 2 (fallback-parallel): {}", effective_tool_name);
+                                    eprintln!(
+                                        "[loop-detector] Level 2 (fallback-parallel): {}",
+                                        effective_tool_name
+                                    );
                                     tool_results.push(msg);
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 (fallback-parallel): force terminating {}", effective_tool_name);
-                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::Error {
+                                            message: msg.clone(),
+                                            code: None,
+                                        })
+                                        .await;
                                     emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                    return ExecutionResult {
+                                        response: last_assistant_text,
+                                        usage: total_usage,
+                                        iterations,
+                                        success: false,
+                                        error: Some(msg),
+                                    };
                                 }
                             }
                         }
@@ -2492,39 +2782,71 @@ impl OrchestratorService {
                             .await;
 
                         // Hook: on_before_tool (fallback path)
-                        if let Some(skip_result) = self.hooks.fire_on_before_tool(
-                            &hook_ctx, effective_tool_name, &effective_args.to_string(),
-                        ).await {
-                            let skip_msg = skip_result.skip_reason.unwrap_or_else(|| "Skipped by hook".to_string());
-                            tool_results.push(format_tool_result(effective_tool_name, tool_id, &skip_msg, true));
+                        if let Some(skip_result) = self
+                            .hooks
+                            .fire_on_before_tool(
+                                &hook_ctx,
+                                effective_tool_name,
+                                &effective_args.to_string(),
+                            )
+                            .await
+                        {
+                            let skip_msg = skip_result
+                                .skip_reason
+                                .unwrap_or_else(|| "Skipped by hook".to_string());
+                            tool_results.push(format_tool_result(
+                                effective_tool_name,
+                                tool_id,
+                                &skip_msg,
+                                true,
+                            ));
                             continue;
                         }
 
-                        let (result, nested_usage, nested_iterations) = if effective_tool_name == "Analyze" {
-                            self.execute_analyze_tool_result(effective_args, &tx).await
-                        } else {
-                            (
-                                self.tool_executor.execute_with_context(effective_tool_name, effective_args, task_ctx.as_ref()).await,
-                                UsageStats::default(),
-                                0,
-                            )
-                        };
+                        let (result, nested_usage, nested_iterations) =
+                            if effective_tool_name == "Analyze" {
+                                self.execute_analyze_tool_result(effective_args, &tx).await
+                            } else {
+                                (
+                                    self.tool_executor
+                                        .execute_with_context(
+                                            effective_tool_name,
+                                            effective_args,
+                                            task_ctx.as_ref(),
+                                        )
+                                        .await,
+                                    UsageStats::default(),
+                                    0,
+                                )
+                            };
                         merge_usage(&mut total_usage, &nested_usage);
                         iterations += nested_iterations;
 
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolResult {
                                 tool_id: tool_id.clone(),
-                                result: if result.success { result.output.clone() } else { None },
-                                error: if !result.success { result.error.clone() } else { None },
+                                result: if result.success {
+                                    result.output.clone()
+                                } else {
+                                    None
+                                },
+                                error: if !result.success {
+                                    result.error.clone()
+                                } else {
+                                    None
+                                },
                             })
                             .await;
 
                         // Hook: on_after_tool (fallback path)
-                        self.hooks.fire_on_after_tool(
-                            &hook_ctx, effective_tool_name, result.success,
-                            result.output.as_ref().map(|o| truncate_for_log(o, 200)),
-                        ).await;
+                        self.hooks
+                            .fire_on_after_tool(
+                                &hook_ctx,
+                                effective_tool_name,
+                                result.success,
+                                result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                            )
+                            .await;
 
                         // Apply EventActions if the tool declared any side effects
                         if let Some(ref actions) = result.event_actions {
@@ -2536,8 +2858,16 @@ impl OrchestratorService {
                                 ).await;
                                 match apply_result {
                                     Ok(ref action_outcome) => {
-                                        if let Some(ref target_agent) = action_outcome.transfer_target {
-                                            self.handle_agent_transfer(target_agent, &hook_ctx.session_id, &event_actions_state, &tx).await;
+                                        if let Some(ref target_agent) =
+                                            action_outcome.transfer_target
+                                        {
+                                            self.handle_agent_transfer(
+                                                target_agent,
+                                                &hook_ctx.session_id,
+                                                &event_actions_state,
+                                                &tx,
+                                            )
+                                            .await;
                                         }
                                     }
                                     Err(e) => {
@@ -2551,16 +2881,36 @@ impl OrchestratorService {
                             let dedup_msg = result.output.as_deref().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
-                            tool_results.push(format_tool_result(effective_tool_name, tool_id, dedup_msg, false));
+                            tool_results.push(format_tool_result(
+                                effective_tool_name,
+                                tool_id,
+                                dedup_msg,
+                                false,
+                            ));
                         } else {
-                            let context_content = truncate_tool_output_for_context(effective_tool_name, &result.to_content());
-                            tool_results.push(format_tool_result(effective_tool_name, tool_id, &context_content, !result.success));
+                            let context_content = truncate_tool_output_for_context(
+                                effective_tool_name,
+                                &result.to_content(),
+                            );
+                            tool_results.push(format_tool_result(
+                                effective_tool_name,
+                                tool_id,
+                                &context_content,
+                                !result.success,
+                            ));
                         }
 
-                        if let Some(detection) = loop_detector.record_call(effective_tool_name, &effective_args.to_string(), result.is_dedup) {
+                        if let Some(detection) = loop_detector.record_call(
+                            effective_tool_name,
+                            &effective_args.to_string(),
+                            result.is_dedup,
+                        ) {
                             match detection {
                                 LoopDetection::Warning(msg) => {
-                                    eprintln!("[loop-detector] Level 1 (fallback): {}", effective_tool_name);
+                                    eprintln!(
+                                        "[loop-detector] Level 1 (fallback): {}",
+                                        effective_tool_name
+                                    );
                                     tool_results.push(msg);
                                 }
                                 LoopDetection::StripTools(msg, _) => {
@@ -2569,9 +2919,20 @@ impl OrchestratorService {
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 (fallback): force terminating for {}", effective_tool_name);
-                                    let _ = tx.send(UnifiedStreamEvent::Error { message: msg.clone(), code: None }).await;
+                                    let _ = tx
+                                        .send(UnifiedStreamEvent::Error {
+                                            message: msg.clone(),
+                                            code: None,
+                                        })
+                                        .await;
                                     emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult { response: last_assistant_text, usage: total_usage, iterations, success: false, error: Some(msg) };
+                                    return ExecutionResult {
+                                        response: last_assistant_text,
+                                        usage: total_usage,
+                                        iterations,
+                                        success: false,
+                                        error: Some(msg),
+                                    };
                                 }
                             }
                         }
@@ -2627,9 +2988,8 @@ impl OrchestratorService {
                 // When the model has already executed tools and now provides a
                 // substantial text response (>80 chars), treat it as a final
                 // answer rather than a repair-worthy narration.
-                let likely_final_answer = has_executed_tools
-                    && !content_is_empty
-                    && response_text.len() > 80;
+                let likely_final_answer =
+                    has_executed_tools && !content_is_empty && response_text.len() > 80;
 
                 let needs_repair = repair_retry_count < 2
                     && !likely_final_answer
@@ -2717,7 +3077,9 @@ impl OrchestratorService {
 
                 // Hook: on_session_end
                 {
-                    let files_read = self.tool_executor.get_read_file_summary()
+                    let files_read = self
+                        .tool_executor
+                        .get_read_file_summary()
                         .iter()
                         .map(|(path, _, _)| path.clone())
                         .collect::<Vec<_>>();
@@ -2736,9 +3098,16 @@ impl OrchestratorService {
                         })
                         .collect();
                     let key_findings = extract_key_findings(&recent_snippets);
-                    let task_desc = messages.first()
+                    let task_desc = messages
+                        .first()
                         .and_then(|m| m.content.first())
-                        .and_then(|c| if let MessageContent::Text { text } = c { Some(truncate_for_log(text, 200)) } else { None })
+                        .and_then(|c| {
+                            if let MessageContent::Text { text } = c {
+                                Some(truncate_for_log(text, 200))
+                            } else {
+                                None
+                            }
+                        })
                         .unwrap_or_default();
                     let summary = crate::services::orchestrator::hooks::SessionSummary {
                         task_description: task_desc,
@@ -2785,14 +3154,21 @@ impl OrchestratorService {
             // each Task call has different arguments (different prompts).
             {
                 let tool_names: Vec<&str> = if has_native_tool_calls {
-                    response.tool_calls.iter().map(|tc| tc.name.as_str()).collect()
+                    response
+                        .tool_calls
+                        .iter()
+                        .map(|tc| tc.name.as_str())
+                        .collect()
                 } else if !parsed_fallback.calls.is_empty() {
-                    parsed_fallback.calls.iter().map(|ptc| ptc.tool_name.as_str()).collect()
+                    parsed_fallback
+                        .calls
+                        .iter()
+                        .map(|ptc| ptc.tool_name.as_str())
+                        .collect()
                 } else {
                     vec![]
                 };
-                let all_task = !tool_names.is_empty()
-                    && tool_names.iter().all(|n| *n == "Task");
+                let all_task = !tool_names.is_empty() && tool_names.iter().all(|n| *n == "Task");
                 if all_task {
                     consecutive_task_only_iterations += 1;
                 } else {
@@ -3329,7 +3705,9 @@ impl OrchestratorService {
                 Ok(r) => return Ok(r),
                 Err(e) if e.is_retryable() && attempt < max_retries => {
                     let delay = std::cmp::min(1u64 << attempt, max_delay_secs);
-                    let wait = e.retry_after_secs().map_or(delay, |r| std::cmp::max(r, delay));
+                    let wait = e
+                        .retry_after_secs()
+                        .map_or(delay, |r| std::cmp::max(r, delay));
                     eprintln!(
                         "[llm:retry] {} on attempt {}/{}, retrying in {}s",
                         e,
@@ -3381,7 +3759,9 @@ impl OrchestratorService {
                 Ok(r) => return Ok(r),
                 Err(e) if e.is_retryable() && attempt < max_retries => {
                     let delay = std::cmp::min(1u64 << attempt, max_delay_secs);
-                    let wait = e.retry_after_secs().map_or(delay, |r| std::cmp::max(r, delay));
+                    let wait = e
+                        .retry_after_secs()
+                        .map_or(delay, |r| std::cmp::max(r, delay));
                     eprintln!(
                         "[llm:retry] {} on attempt {}/{}, retrying in {}s",
                         e,
@@ -3552,8 +3932,10 @@ impl OrchestratorService {
         event_actions_state: &std::collections::HashMap<String, serde_json::Value>,
         tx: &mpsc::Sender<UnifiedStreamEvent>,
     ) {
+        use crate::services::agent_composer::types::{
+            AgentConfig, AgentContext, AgentEvent, AgentInput,
+        };
         use crate::services::orchestrator::transfer::TransferHandler;
-        use crate::services::agent_composer::types::{AgentContext, AgentConfig, AgentInput, AgentEvent};
         use futures_util::StreamExt;
 
         // Require a ComposerRegistry to be configured
@@ -3581,7 +3963,8 @@ impl OrchestratorService {
         // the memory store from the current event_actions_state.
         let transfer_orch_ctx = {
             let initial_state: std::collections::HashMap<String, serde_json::Value> =
-                event_actions_state.iter()
+                event_actions_state
+                    .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
             Arc::new(
@@ -3589,7 +3972,8 @@ impl OrchestratorService {
                     session_id,
                     &self.config.project_root,
                     target_agent,
-                ).with_initial_state(initial_state)
+                )
+                .with_initial_state(initial_state),
             )
         };
 
@@ -3597,7 +3981,9 @@ impl OrchestratorService {
             session_id: session_id.to_string(),
             project_root: self.config.project_root.clone(),
             provider: Arc::clone(&self.provider),
-            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(&self.config.project_root)),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(
+                &self.config.project_root,
+            )),
             plugin_manager: None,
             hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
             input: AgentInput::Text(format!("Transfer to agent '{}'", target_agent)),
@@ -3665,7 +4051,8 @@ impl OrchestratorService {
                                     // they are handled by TransferHandler's chain/depth logic.
                                     tracing::info!(
                                         "[transfer] Sub-agent requests nested transfer to '{}': {}",
-                                        target, message
+                                        target,
+                                        message
                                     );
                                     None
                                 }
@@ -3696,7 +4083,10 @@ impl OrchestratorService {
                         error: if transfer_success {
                             None
                         } else {
-                            Some(format!("Transfer to '{}' encountered an error in event stream", target_agent))
+                            Some(format!(
+                                "Transfer to '{}' encountered an error in event stream",
+                                target_agent
+                            ))
                         },
                     })
                     .await;

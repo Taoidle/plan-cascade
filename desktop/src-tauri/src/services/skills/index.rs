@@ -29,11 +29,7 @@ pub fn build_index(skills: Vec<DiscoveredSkill>) -> AppResult<SkillIndex> {
         let parsed = match parse_skill_file(&skill.path, &skill.content) {
             Ok(p) => p,
             Err(e) => {
-                tracing::warn!(
-                    "Failed to parse skill file {}: {}",
-                    skill.path.display(),
-                    e
-                );
+                tracing::warn!("Failed to parse skill file {}: {}", skill.path.display(), e);
                 continue;
             }
         };
@@ -106,11 +102,7 @@ pub fn generate_skill_id(name: &str, hash: &str) -> String {
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
         .collect::<String>();
 
-    let hash_prefix = if hash.len() >= 12 {
-        &hash[..12]
-    } else {
-        hash
-    };
+    let hash_prefix = if hash.len() >= 12 { &hash[..12] } else { hash };
 
     format!("{}-{}", normalized, hash_prefix)
 }
@@ -192,7 +184,7 @@ mod tests {
     fn test_compute_sha256() {
         let hash = compute_sha256("hello world");
         assert_eq!(hash.len(), 64); // 32 bytes = 64 hex chars
-        // Known SHA-256 of "hello world"
+                                    // Known SHA-256 of "hello world"
         assert_eq!(
             hash,
             "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
@@ -201,10 +193,7 @@ mod tests {
 
     #[test]
     fn test_generate_skill_id() {
-        let id = generate_skill_id(
-            "React Best Practices",
-            "abcdef123456789012345678",
-        );
+        let id = generate_skill_id("React Best Practices", "abcdef123456789012345678");
         assert_eq!(id, "react-best-practices-abcdef123456");
     }
 
@@ -375,7 +364,15 @@ mod tests {
 
         let skills_data = vec![
             ("a", SkillSource::Builtin, 10, true, true),
-            ("b", SkillSource::External { source_name: "v".to_string() }, 80, true, false),
+            (
+                "b",
+                SkillSource::External {
+                    source_name: "v".to_string(),
+                },
+                80,
+                true,
+                false,
+            ),
             ("c", SkillSource::ProjectLocal, 201, false, false),
         ];
 

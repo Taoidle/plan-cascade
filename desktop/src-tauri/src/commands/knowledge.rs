@@ -57,10 +57,10 @@ impl KnowledgeState {
             cache_enabled: false,
             cache_max_entries: 0,
         };
-        let embedding_manager = Arc::new(
-            EmbeddingManager::from_config(emb_config)
-                .map_err(|e| AppError::internal(format!("Failed to create EmbeddingManager: {}", e)))?,
-        );
+        let embedding_manager =
+            Arc::new(EmbeddingManager::from_config(emb_config).map_err(|e| {
+                AppError::internal(format!("Failed to create EmbeddingManager: {}", e))
+            })?);
 
         // Store HNSW index under ~/.plan-cascade/knowledge-hnsw
         let hnsw_dir = dirs::home_dir()
@@ -71,7 +71,8 @@ impl KnowledgeState {
 
         let reranker: Option<Arc<dyn Reranker>> = Some(Arc::new(NoopReranker));
 
-        let pipeline = RagPipeline::new(chunker, embedding_manager, hnsw_index, reranker, database)?;
+        let pipeline =
+            RagPipeline::new(chunker, embedding_manager, hnsw_index, reranker, database)?;
         *guard = Some(Arc::new(pipeline));
 
         Ok(())
@@ -88,9 +89,9 @@ impl KnowledgeState {
     /// Get the initialized pipeline, or an error if not yet initialized.
     pub async fn get_pipeline(&self) -> AppResult<Arc<RagPipeline>> {
         let guard = self.pipeline.read().await;
-        guard
-            .clone()
-            .ok_or_else(|| AppError::internal("Knowledge pipeline not initialized. Call initialize() first."))
+        guard.clone().ok_or_else(|| {
+            AppError::internal("Knowledge pipeline not initialized. Call initialize() first.")
+        })
     }
 
     /// Check whether the pipeline has been initialized.
@@ -177,7 +178,10 @@ pub async fn rag_ingest_documents(
 
     let desc = description.as_deref().unwrap_or("");
 
-    match pipeline.ingest(&collection_name, &project_id, desc, docs).await {
+    match pipeline
+        .ingest(&collection_name, &project_id, desc, docs)
+        .await
+    {
         Ok(collection) => Ok(CommandResponse::ok(collection)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -202,7 +206,10 @@ pub async fn rag_query(
 
     let k = top_k.unwrap_or(5);
 
-    match pipeline.query(&collection_name, &project_id, &query, k).await {
+    match pipeline
+        .query(&collection_name, &project_id, &query, k)
+        .await
+    {
         Ok(result) => Ok(CommandResponse::ok(result)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -243,7 +250,10 @@ pub async fn rag_delete_collection(
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
-    match pipeline.delete_collection(&collection_name, &project_id).await {
+    match pipeline
+        .delete_collection(&collection_name, &project_id)
+        .await
+    {
         Ok(()) => Ok(CommandResponse::ok(true)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -422,7 +432,10 @@ mod tests {
 
         let pipeline = state.get_pipeline().await.unwrap();
         let collections = pipeline.list_collections("test-project").unwrap();
-        assert!(collections.is_empty(), "New pipeline should have no collections");
+        assert!(
+            collections.is_empty(),
+            "New pipeline should have no collections"
+        );
     }
 
     // ======================================================================
@@ -570,7 +583,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(chunks.is_empty(), "Disabled config should return no context");
+        assert!(
+            chunks.is_empty(),
+            "Disabled config should return no context"
+        );
     }
 
     #[tokio::test]

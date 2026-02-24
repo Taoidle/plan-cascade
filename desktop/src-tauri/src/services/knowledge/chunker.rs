@@ -257,13 +257,7 @@ impl Chunker for ParagraphChunker {
         // Each natural segment (paragraph or header section) becomes a chunk.
         let mut chunks = Vec::new();
         for (offset, text) in segments {
-            self.add_chunk(
-                &mut chunks,
-                &document.id,
-                &text,
-                offset,
-                &document.metadata,
-            );
+            self.add_chunk(&mut chunks, &document.id, &text, offset, &document.metadata);
         }
 
         // Step 3: Split oversized chunks at sentence boundaries.
@@ -566,14 +560,13 @@ impl Chunker for SemanticChunker {
             current_sentences.push(sentences[i]);
             sentences_since_boundary += 1;
 
-            let should_split = if i + 1 < sentences.len()
-                && sentences_since_boundary >= self.min_sentences
-            {
-                let sim = Self::cosine_sim(&embeddings[i], &embeddings[i + 1]);
-                sim < self.threshold
-            } else {
-                false
-            };
+            let should_split =
+                if i + 1 < sentences.len() && sentences_since_boundary >= self.min_sentences {
+                    let sim = Self::cosine_sim(&embeddings[i], &embeddings[i + 1]);
+                    sim < self.threshold
+                } else {
+                    false
+                };
 
             if should_split || i + 1 == sentences.len() {
                 let text: String = current_sentences
@@ -613,7 +606,9 @@ fn split_into_sentences(text: &str) -> Vec<(usize, &str)> {
     while i < len {
         let b = bytes[i];
         // Detect sentence-ending punctuation followed by whitespace or end
-        if (b == b'.' || b == b'!' || b == b'?') && (i + 1 >= len || bytes[i + 1].is_ascii_whitespace()) {
+        if (b == b'.' || b == b'!' || b == b'?')
+            && (i + 1 >= len || bytes[i + 1].is_ascii_whitespace())
+        {
             let end = i + 1;
             let sentence = text[start..end].trim();
             if !sentence.is_empty() {
@@ -682,22 +677,46 @@ mod tests {
     #[test]
     fn paragraph_chunker_splits_on_headers() {
         let chunker = ParagraphChunker::new(1000);
-        let doc = Document::new("d1", "# Introduction\n\nFirst paragraph.\n\n# Methods\n\nSecond paragraph.");
+        let doc = Document::new(
+            "d1",
+            "# Introduction\n\nFirst paragraph.\n\n# Methods\n\nSecond paragraph.",
+        );
         let chunks = chunker.chunk(&doc).unwrap();
-        assert!(chunks.len() >= 2, "Should split on headers, got {} chunks", chunks.len());
+        assert!(
+            chunks.len() >= 2,
+            "Should split on headers, got {} chunks",
+            chunks.len()
+        );
         assert!(chunks[0].content.contains("Introduction"));
         // Verify that "# Methods" and "Second paragraph." appear in chunks
-        let all_text: String = chunks.iter().map(|c| c.content.clone()).collect::<Vec<_>>().join(" ");
-        assert!(all_text.contains("Methods"), "Should contain Methods header");
-        assert!(all_text.contains("Second paragraph"), "Should contain second paragraph");
+        let all_text: String = chunks
+            .iter()
+            .map(|c| c.content.clone())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            all_text.contains("Methods"),
+            "Should contain Methods header"
+        );
+        assert!(
+            all_text.contains("Second paragraph"),
+            "Should contain second paragraph"
+        );
     }
 
     #[test]
     fn paragraph_chunker_splits_on_double_newlines() {
         let chunker = ParagraphChunker::new(1000);
-        let doc = Document::new("d1", "Paragraph one text.\n\nParagraph two text.\n\nParagraph three text.");
+        let doc = Document::new(
+            "d1",
+            "Paragraph one text.\n\nParagraph two text.\n\nParagraph three text.",
+        );
         let chunks = chunker.chunk(&doc).unwrap();
-        assert!(chunks.len() >= 2, "Should split on double newlines, got {} chunks", chunks.len());
+        assert!(
+            chunks.len() >= 2,
+            "Should split on double newlines, got {} chunks",
+            chunks.len()
+        );
     }
 
     #[test]
@@ -735,7 +754,8 @@ mod tests {
     fn paragraph_chunker_preserves_metadata() {
         let chunker = ParagraphChunker::new(1000);
         let mut doc = Document::new("d1", "Para one.\n\nPara two.");
-        doc.metadata.insert("author".to_string(), "test".to_string());
+        doc.metadata
+            .insert("author".to_string(), "test".to_string());
         let chunks = chunker.chunk(&doc).unwrap();
         for chunk in &chunks {
             assert_eq!(chunk.metadata.get("author"), Some(&"test".to_string()));
@@ -765,7 +785,11 @@ mod tests {
         // Chunk 0: [0..5] = one two three four five
         // Chunk 1: [3..8] = four five six seven eight
         // Chunk 2: [6..10] = seven eight nine ten
-        assert!(chunks.len() >= 3, "Should have overlapping chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() >= 3,
+            "Should have overlapping chunks, got {}",
+            chunks.len()
+        );
 
         // Verify overlap: last 2 tokens of chunk 0 should be first 2 of chunk 1
         let c0_words: Vec<&str> = chunks[0].content.split_whitespace().collect();
@@ -896,7 +920,9 @@ mod tests {
 
     #[test]
     fn chunker_config_paragraph_build() {
-        let config = ChunkerConfig::Paragraph { max_chunk_size: 500 };
+        let config = ChunkerConfig::Paragraph {
+            max_chunk_size: 500,
+        };
         let chunker = config.build();
         let doc = Document::new("d1", "Hello.\n\nWorld.");
         let chunks = chunker.chunk(&doc).unwrap();
@@ -942,7 +968,10 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: ChunkerConfig = serde_json::from_str(&json).unwrap();
         match deserialized {
-            ChunkerConfig::Token { token_count, overlap_tokens } => {
+            ChunkerConfig::Token {
+                token_count,
+                overlap_tokens,
+            } => {
                 assert_eq!(token_count, 100);
                 assert_eq!(overlap_tokens, 20);
             }

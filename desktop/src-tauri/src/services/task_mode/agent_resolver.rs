@@ -236,10 +236,7 @@ impl Default for AgentsConfig {
                 name: "claude-haiku".to_string(),
                 description: "Claude Haiku - fastest, best for simple tasks".to_string(),
                 available: true,
-                suitable_phases: vec![
-                    ExecutionPhase::Implementation,
-                    ExecutionPhase::Retry,
-                ],
+                suitable_phases: vec![ExecutionPhase::Implementation, ExecutionPhase::Retry],
             },
         );
 
@@ -414,10 +411,7 @@ impl AgentResolver {
                     agent_name: phase_agent.clone(),
                     phase,
                     resolution_level: ResolutionLevel::PhaseOverride,
-                    reasoning: format!(
-                        "Phase override for {} to '{}'",
-                        phase, phase_agent
-                    ),
+                    reasoning: format!("Phase override for {} to '{}'", phase, phase_agent),
                 };
             }
         }
@@ -429,10 +423,7 @@ impl AgentResolver {
                     agent_name: story_agent.clone(),
                     phase,
                     resolution_level: ResolutionLevel::StoryLevel,
-                    reasoning: format!(
-                        "Story-level agent assignment to '{}'",
-                        story_agent
-                    ),
+                    reasoning: format!("Story-level agent assignment to '{}'", story_agent),
                 };
             }
         }
@@ -466,10 +457,7 @@ impl AgentResolver {
                         agent_name: default_agent.clone(),
                         phase,
                         resolution_level: ResolutionLevel::PhaseDefault,
-                        reasoning: format!(
-                            "Phase default for {} is '{}'",
-                            phase, default_agent
-                        ),
+                        reasoning: format!("Phase default for {} is '{}'", phase, default_agent),
                     };
                 }
             }
@@ -495,10 +483,7 @@ impl AgentResolver {
             agent_name: self.config.default_agent.clone(),
             phase,
             resolution_level: ResolutionLevel::DefaultAgent,
-            reasoning: format!(
-                "Using default agent '{}'",
-                self.config.default_agent
-            ),
+            reasoning: format!("Using default agent '{}'", self.config.default_agent),
         }
     }
 
@@ -623,11 +608,7 @@ mod tests {
             agent.available = false;
         }
         // But keep the default available
-        config
-            .agents
-            .get_mut("claude-sonnet")
-            .unwrap()
-            .available = true;
+        config.agents.get_mut("claude-sonnet").unwrap().available = true;
 
         // Clear phase defaults
         config.phase_defaults.clear();
@@ -700,11 +681,7 @@ mod tests {
     fn test_fallback_chain() {
         let mut config = AgentsConfig::default();
         // Make the default planning agent unavailable
-        config
-            .agents
-            .get_mut("claude-opus")
-            .unwrap()
-            .available = false;
+        config.agents.get_mut("claude-opus").unwrap().available = false;
 
         let resolver = AgentResolver::new(config);
         let assignment = resolver.resolve(&test_story(), ExecutionPhase::Planning);
@@ -741,10 +718,8 @@ mod tests {
     #[test]
     fn test_retry_phase_uses_different_agent() {
         let resolver = AgentResolver::with_defaults();
-        let impl_assignment =
-            resolver.resolve(&test_story(), ExecutionPhase::Implementation);
-        let retry_assignment =
-            resolver.resolve(&test_story(), ExecutionPhase::Retry);
+        let impl_assignment = resolver.resolve(&test_story(), ExecutionPhase::Implementation);
+        let retry_assignment = resolver.resolve(&test_story(), ExecutionPhase::Retry);
 
         // By default, implementation uses sonnet, retry uses opus
         assert_eq!(impl_assignment.agent_name, "claude-sonnet");

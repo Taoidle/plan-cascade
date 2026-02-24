@@ -135,10 +135,8 @@ impl GlmProvider {
                 })
                 .collect();
             body["tools"] = serde_json::json!(api_tools);
-            let thinking_active =
-                self.config.enable_thinking && self.model_supports_reasoning();
-            if matches!(request_options.tool_call_mode, ToolCallMode::Required)
-                && !thinking_active
+            let thinking_active = self.config.enable_thinking && self.model_supports_reasoning();
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) && !thinking_active
             {
                 // GLM thinking models may not support tool_choice "required" --
                 // skip it and let the model default to "auto".
@@ -376,9 +374,7 @@ impl GlmProvider {
                 input_tokens: u.prompt_tokens().unwrap_or(0),
                 output_tokens: u.completion_tokens().unwrap_or(0),
                 thinking_tokens: None, // zai-rs Usage does not expose reasoning_tokens
-                cache_read_tokens: u
-                    .prompt_tokens_details()
-                    .and_then(|d| d.cached_tokens()),
+                cache_read_tokens: u.prompt_tokens_details().and_then(|d| d.cached_tokens()),
                 cache_creation_tokens: None,
             })
             .unwrap_or_default()
@@ -850,7 +846,10 @@ mod tests {
         }"#;
         let zai_resp: ZaiResponse = serde_json::from_str(json_str).unwrap();
         let response = provider.parse_zai_response(&zai_resp);
-        assert_eq!(response.content, Some("Hello! How can I help you?".to_string()));
+        assert_eq!(
+            response.content,
+            Some("Hello! How can I help you?".to_string())
+        );
         assert_eq!(response.stop_reason, StopReason::EndTurn);
         assert_eq!(response.usage.input_tokens, 10);
         assert_eq!(response.usage.output_tokens, 8);

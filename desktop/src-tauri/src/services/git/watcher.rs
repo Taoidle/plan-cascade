@@ -68,10 +68,7 @@ impl GitWatcher {
                     }
 
                     let path = &event.path;
-                    let file_name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("");
+                    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
                     let (event_name, change_kind) = if file_name == "index" {
                         (EVENT_GIT_STATUS_CHANGED, "index")

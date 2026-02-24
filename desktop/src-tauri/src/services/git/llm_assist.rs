@@ -8,7 +8,9 @@
 
 use std::sync::Arc;
 
-use crate::services::llm::types::{LlmRequestOptions, Message, ToolCallMode, FallbackToolFormatMode};
+use crate::services::llm::types::{
+    FallbackToolFormatMode, LlmRequestOptions, Message, ToolCallMode,
+};
 use crate::services::llm::LlmProvider;
 use crate::utils::error::{AppError, AppResult};
 
@@ -50,11 +52,15 @@ impl GitLlmAssist {
                 no_tools_options(),
             )
             .await
-            .map_err(|e| AppError::command(format!("LLM error generating commit message: {}", e)))?;
+            .map_err(|e| {
+                AppError::command(format!("LLM error generating commit message: {}", e))
+            })?;
 
         response
             .content
-            .ok_or_else(|| AppError::command("LLM returned empty response for commit message".to_string()))
+            .ok_or_else(|| {
+                AppError::command("LLM returned empty response for commit message".to_string())
+            })
             .map(|s| s.trim().to_string())
     }
 
@@ -82,11 +88,15 @@ impl GitLlmAssist {
                 no_tools_options(),
             )
             .await
-            .map_err(|e| AppError::command(format!("LLM error suggesting conflict resolution: {}", e)))?;
+            .map_err(|e| {
+                AppError::command(format!("LLM error suggesting conflict resolution: {}", e))
+            })?;
 
         response
             .content
-            .ok_or_else(|| AppError::command("LLM returned empty response for conflict resolution".to_string()))
+            .ok_or_else(|| {
+                AppError::command("LLM returned empty response for conflict resolution".to_string())
+            })
             .map(|s| strip_code_fences(&s))
     }
 
@@ -96,7 +106,8 @@ impl GitLlmAssist {
                        Review the following diff and provide constructive feedback. \
                        Focus on: bugs, security issues, performance problems, and code quality. \
                        Be concise and actionable. Use bullet points. \
-                       If the code looks good, say so briefly.".to_string();
+                       If the code looks good, say so briefly."
+            .to_string();
 
         let user_content = format!(
             "Review this diff:\n\n```diff\n{}\n```",
@@ -116,7 +127,9 @@ impl GitLlmAssist {
 
         response
             .content
-            .ok_or_else(|| AppError::command("LLM returned empty response for diff review".to_string()))
+            .ok_or_else(|| {
+                AppError::command("LLM returned empty response for diff review".to_string())
+            })
             .map(|s| s.trim().to_string())
     }
 
@@ -126,9 +139,11 @@ impl GitLlmAssist {
         commit_messages: &[String],
         diff_summary: Option<&str>,
     ) -> AppResult<String> {
-        let system = "You are a helpful assistant that writes clear, concise summaries of code changes. \
+        let system =
+            "You are a helpful assistant that writes clear, concise summaries of code changes. \
                        Summarize what changed, why, and any notable impacts. \
-                       Use bullet points. Keep it brief (3-5 bullet points for most cases).".to_string();
+                       Use bullet points. Keep it brief (3-5 bullet points for most cases)."
+                .to_string();
 
         let mut user_content = String::from("Summarize these changes:\n\nCommit messages:\n");
         for msg in commit_messages {
@@ -155,7 +170,9 @@ impl GitLlmAssist {
 
         response
             .content
-            .ok_or_else(|| AppError::command("LLM returned empty response for change summary".to_string()))
+            .ok_or_else(|| {
+                AppError::command("LLM returned empty response for change summary".to_string())
+            })
             .map(|s| s.trim().to_string())
     }
 }
@@ -263,10 +280,7 @@ mod tests {
 
     #[test]
     fn test_strip_code_fences_with_whitespace() {
-        assert_eq!(
-            strip_code_fences("  ```\n  code  \n```  "),
-            "code"
-        );
+        assert_eq!(strip_code_fences("  ```\n  code  \n```  "), "code");
     }
 
     #[test]

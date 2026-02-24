@@ -124,10 +124,8 @@ impl FileChangeTracker {
             return Ok(hash);
         }
 
-        fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create CAS dir: {e}"))?;
-        fs::write(&blob_path, content)
-            .map_err(|e| format!("Failed to write CAS blob: {e}"))?;
+        fs::create_dir_all(&dir).map_err(|e| format!("Failed to create CAS dir: {e}"))?;
+        fs::write(&blob_path, content).map_err(|e| format!("Failed to write CAS blob: {e}"))?;
         Ok(hash)
     }
 
@@ -138,8 +136,7 @@ impl FileChangeTracker {
         }
         let (prefix, _) = hash.split_at(2);
         let blob_path = self.cas_dir.join(prefix).join(hash);
-        fs::read(&blob_path)
-            .map_err(|e| format!("CAS blob not found ({hash}): {e}"))
+        fs::read(&blob_path).map_err(|e| format!("CAS blob not found ({hash}): {e}"))
     }
 
     // ── Before/After Capture ────────────────────────────────────────────
@@ -210,11 +207,7 @@ impl FileChangeTracker {
         let mut result: Vec<TurnChanges> = by_turn
             .into_iter()
             .map(|(turn_index, changes)| {
-                let timestamp = changes
-                    .iter()
-                    .map(|c| c.timestamp)
-                    .min()
-                    .unwrap_or(0);
+                let timestamp = changes.iter().map(|c| c.timestamp).min().unwrap_or(0);
                 TurnChanges {
                     turn_index,
                     changes,
@@ -321,19 +314,13 @@ impl FileChangeTracker {
     }
 
     /// Restore a single file to a specific CAS version.
-    pub fn restore_single_file(
-        &self,
-        file_path: &str,
-        target_hash: &str,
-    ) -> Result<bool, String> {
+    pub fn restore_single_file(&self, file_path: &str, target_hash: &str) -> Result<bool, String> {
         let content = self.get_content(target_hash)?;
         let full_path = self.project_root.join(file_path);
         if let Some(parent) = full_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create dirs: {e}"))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create dirs: {e}"))?;
         }
-        fs::write(&full_path, &content)
-            .map_err(|e| format!("Failed to restore file: {e}"))?;
+        fs::write(&full_path, &content).map_err(|e| format!("Failed to restore file: {e}"))?;
         Ok(true)
     }
 
@@ -350,13 +337,11 @@ impl FileChangeTracker {
     pub fn persist(&self) -> Result<(), String> {
         let path = self.changes_file_path();
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create changes dir: {e}"))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create changes dir: {e}"))?;
         }
         let json = serde_json::to_string_pretty(&self.changes)
             .map_err(|e| format!("Failed to serialize changes: {e}"))?;
-        fs::write(&path, json)
-            .map_err(|e| format!("Failed to write changes file: {e}"))?;
+        fs::write(&path, json).map_err(|e| format!("Failed to write changes file: {e}"))?;
         Ok(())
     }
 
@@ -497,7 +482,14 @@ mod tests {
         tracker.set_turn_index(0);
         tracker.record_change("tc1", "Write", "src/a.rs", None, "hash_a", "Wrote 10 lines");
         tracker.set_turn_index(1);
-        tracker.record_change("tc2", "Edit", "src/b.rs", Some("hash_b0".to_string()), "hash_b1", "Edited 1 occurrence");
+        tracker.record_change(
+            "tc2",
+            "Edit",
+            "src/b.rs",
+            Some("hash_b0".to_string()),
+            "hash_b1",
+            "Edited 1 occurrence",
+        );
 
         let turns = tracker.get_changes_by_turn();
         assert_eq!(turns.len(), 2);
@@ -526,7 +518,14 @@ mod tests {
         tracker.set_turn_index(1);
         let edit_after = tracker.store_content(b"modified").unwrap();
         fs::write(&existing, "modified").unwrap();
-        tracker.record_change("tc2", "Edit", "existing.txt", Some(before_hash), &edit_after, "Edited");
+        tracker.record_change(
+            "tc2",
+            "Edit",
+            "existing.txt",
+            Some(before_hash),
+            &edit_after,
+            "Edited",
+        );
 
         // Restore to before turn 1 — should restore existing.txt, keep new.txt
         let restored = tracker.restore_to_before_turn(1).unwrap();

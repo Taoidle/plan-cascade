@@ -483,8 +483,7 @@ impl Database {
         // These columns are populated asynchronously by the LspEnricher after
         // Tree-sitter indexing completes. Defaults preserve backward compatibility.
         {
-            let has_resolved_type =
-                Self::table_has_column(&conn, "file_symbols", "resolved_type");
+            let has_resolved_type = Self::table_has_column(&conn, "file_symbols", "resolved_type");
             if !has_resolved_type {
                 let _ = conn.execute_batch(
                     "ALTER TABLE file_symbols ADD COLUMN resolved_type TEXT;
@@ -669,7 +668,7 @@ impl Database {
                 content='',
                 contentless_delete=1,
                 tokenize=\"unicode61 remove_diacritics 2 tokenchars '_'\"
-            )"
+            )",
         )?;
 
         // File path FTS5 virtual table (contentless mode)
@@ -684,7 +683,7 @@ impl Database {
                 content='',
                 contentless_delete=1,
                 tokenize=\"unicode61 tokenchars '_'\"
-            )"
+            )",
         )?;
 
         // ====================================================================
@@ -878,7 +877,7 @@ impl Database {
         conn.execute_batch(
             "INSERT INTO filepath_fts (rowid, file_path, component, language)
              SELECT id, file_path, component, language
-             FROM file_index"
+             FROM file_index",
         )?;
 
         Ok(())
@@ -1656,10 +1655,9 @@ impl Database {
         let created_at: String = row.get(9)?;
         let updated_at: String = row.get(10)?;
 
-        let channel_type = crate::services::webhook::types::WebhookChannelType::from_str_value(
-            &channel_type_str,
-        )
-        .unwrap_or(crate::services::webhook::types::WebhookChannelType::Custom);
+        let channel_type =
+            crate::services::webhook::types::WebhookChannelType::from_str_value(&channel_type_str)
+                .unwrap_or(crate::services::webhook::types::WebhookChannelType::Custom);
 
         let scope = match scope_type.as_str() {
             "sessions" => {
@@ -1798,11 +1796,13 @@ mod tests {
         ).unwrap();
 
         // Query it back
-        let content: String = conn.query_row(
-            "SELECT content FROM project_memories WHERE id = 'mem-001'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let content: String = conn
+            .query_row(
+                "SELECT content FROM project_memories WHERE id = 'mem-001'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(content, "Use pnpm not npm");
 
         // Verify category constraint
@@ -1823,7 +1823,8 @@ mod tests {
             "INSERT INTO project_memories (id, project_path, category, content)
              VALUES ('mem-001', '/test/project', 'fact', 'This is a Tauri app')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Same project_path + content should fail with UNIQUE constraint
         let result = conn.execute(
@@ -1831,7 +1832,10 @@ mod tests {
              VALUES ('mem-002', '/test/project', 'fact', 'This is a Tauri app')",
             [],
         );
-        assert!(result.is_err(), "Duplicate project_path+content should be rejected");
+        assert!(
+            result.is_err(),
+            "Duplicate project_path+content should be rejected"
+        );
     }
 
     #[test]
@@ -1845,14 +1849,17 @@ mod tests {
                 "INSERT INTO project_memories (id, project_path, category, content)
                  VALUES (?1, '/test', ?2, ?3)",
                 params![format!("mem-{}", i), *cat, format!("test content {}", i)],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM project_memories WHERE project_path = '/test'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM project_memories WHERE project_path = '/test'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 5);
     }
 
@@ -1867,11 +1874,13 @@ mod tests {
             [],
         ).unwrap();
 
-        let task: String = conn.query_row(
-            "SELECT task_summary FROM episodic_records WHERE id = 'ep-001'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let task: String = conn
+            .query_row(
+                "SELECT task_summary FROM episodic_records WHERE id = 'ep-001'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(task, "Fix bug");
 
         // Verify record_type constraint
@@ -1897,11 +1906,13 @@ mod tests {
             ).unwrap();
         }
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM episodic_records WHERE project_path = '/test'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM episodic_records WHERE project_path = '/test'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 3);
     }
 
@@ -1911,10 +1922,13 @@ mod tests {
         let conn = db.get_connection().unwrap();
 
         // Check indexes via pragma
-        let mut stmt = conn.prepare(
-            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='project_memories'"
-        ).unwrap();
-        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='project_memories'",
+            )
+            .unwrap();
+        let indexes: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
             .unwrap()
             .filter_map(|r| r.ok())
             .collect();
@@ -1929,10 +1943,13 @@ mod tests {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
-        let mut stmt = conn.prepare(
-            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='episodic_records'"
-        ).unwrap();
-        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='episodic_records'",
+            )
+            .unwrap();
+        let indexes: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
             .unwrap()
             .filter_map(|r| r.ok())
             .collect();
@@ -1950,9 +1967,21 @@ mod tests {
         let conn = db.get_connection().unwrap();
 
         // Verify the LSP columns exist
-        assert!(Database::table_has_column(&conn, "file_symbols", "resolved_type"));
-        assert!(Database::table_has_column(&conn, "file_symbols", "reference_count"));
-        assert!(Database::table_has_column(&conn, "file_symbols", "is_exported"));
+        assert!(Database::table_has_column(
+            &conn,
+            "file_symbols",
+            "resolved_type"
+        ));
+        assert!(Database::table_has_column(
+            &conn,
+            "file_symbols",
+            "reference_count"
+        ));
+        assert!(Database::table_has_column(
+            &conn,
+            "file_symbols",
+            "is_exported"
+        ));
     }
 
     #[test]
@@ -1965,13 +1994,16 @@ mod tests {
             "INSERT INTO file_index (project_path, file_path, content_hash)
              VALUES ('/test', 'src/main.rs', 'hash1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
-        let file_id: i64 = conn.query_row(
-            "SELECT id FROM file_index WHERE file_path = 'src/main.rs'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let file_id: i64 = conn
+            .query_row(
+                "SELECT id FROM file_index WHERE file_path = 'src/main.rs'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
 
         conn.execute(
             "INSERT INTO file_symbols (file_index_id, name, kind, line_number, start_line, end_line)
@@ -1986,7 +2018,10 @@ mod tests {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).unwrap();
 
-        assert!(resolved_type.is_none(), "resolved_type should default to NULL");
+        assert!(
+            resolved_type.is_none(),
+            "resolved_type should default to NULL"
+        );
         assert_eq!(reference_count, 0, "reference_count should default to 0");
         assert_eq!(is_exported, 0, "is_exported should default to 0");
     }
@@ -1996,11 +2031,13 @@ mod tests {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cross_references'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cross_references'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1, "cross_references table should exist");
     }
 
@@ -2015,15 +2052,26 @@ mod tests {
              target_file, target_line, target_symbol, reference_kind)
              VALUES ('/test', 'src/main.rs', 10, 'call_foo', 'src/lib.rs', 5, 'foo', 'call')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Query it back
-        let (sf, sl, tf, tl, kind): (String, i64, String, i64, String) = conn.query_row(
-            "SELECT source_file, source_line, target_file, target_line, reference_kind
+        let (sf, sl, tf, tl, kind): (String, i64, String, i64, String) = conn
+            .query_row(
+                "SELECT source_file, source_line, target_file, target_line, reference_kind
              FROM cross_references WHERE project_path = '/test'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-        ).unwrap();
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
 
         assert_eq!(sf, "src/main.rs");
         assert_eq!(sl, 10);
@@ -2049,7 +2097,10 @@ mod tests {
              VALUES ('/test', 'a.rs', 1, 'b.rs', 5)",
             [],
         );
-        assert!(result.is_err(), "Duplicate cross-reference should be rejected");
+        assert!(
+            result.is_err(),
+            "Duplicate cross-reference should be rejected"
+        );
     }
 
     #[test]
@@ -2057,10 +2108,13 @@ mod tests {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
-        let mut stmt = conn.prepare(
-            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='cross_references'"
-        ).unwrap();
-        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='cross_references'",
+            )
+            .unwrap();
+        let indexes: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
             .unwrap()
             .filter_map(|r| r.ok())
             .collect();
@@ -2074,11 +2128,13 @@ mod tests {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='lsp_servers'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='lsp_servers'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1, "lsp_servers table should exist");
     }
 
@@ -2092,7 +2148,8 @@ mod tests {
             "INSERT INTO lsp_servers (language, binary_path, server_name, version)
              VALUES ('rust', '/usr/bin/rust-analyzer', 'rust-analyzer', '2024-01-01')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Query
         let (lang, path, name): (String, String, String) = conn.query_row(
@@ -2110,13 +2167,16 @@ mod tests {
             "INSERT OR REPLACE INTO lsp_servers (language, binary_path, server_name, version)
              VALUES ('rust', '/new/path/rust-analyzer', 'rust-analyzer', '2024-02-01')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
-        let new_path: String = conn.query_row(
-            "SELECT binary_path FROM lsp_servers WHERE language = 'rust'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let new_path: String = conn
+            .query_row(
+                "SELECT binary_path FROM lsp_servers WHERE language = 'rust'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(new_path, "/new/path/rust-analyzer");
     }
 
@@ -2128,13 +2188,19 @@ mod tests {
 
         let conn = db.get_connection().unwrap();
         // Tables should still exist
-        assert!(Database::table_has_column(&conn, "file_symbols", "resolved_type"));
+        assert!(Database::table_has_column(
+            &conn,
+            "file_symbols",
+            "resolved_type"
+        ));
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cross_references'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cross_references'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
     }
 
@@ -2148,11 +2214,13 @@ mod tests {
         let conn = db.get_connection().unwrap();
 
         // Verify symbol_fts exists by querying sqlite_master
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='symbol_fts'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='symbol_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1, "symbol_fts virtual table should exist");
     }
 
@@ -2162,11 +2230,13 @@ mod tests {
         let conn = db.get_connection().unwrap();
 
         // Verify filepath_fts exists by querying sqlite_master
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='filepath_fts'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='filepath_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1, "filepath_fts virtual table should exist");
     }
 
@@ -2184,11 +2254,13 @@ mod tests {
 
         // Query via MATCH — in contentless mode, column values are NULL,
         // so we verify by counting matches and checking rowid
-        let rowid: i64 = conn.query_row(
-            "SELECT rowid FROM symbol_fts WHERE symbol_fts MATCH '\"UserController\"*'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let rowid: i64 = conn
+            .query_row(
+                "SELECT rowid FROM symbol_fts WHERE symbol_fts MATCH '\"UserController\"*'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(rowid, 1);
     }
 
@@ -2202,15 +2274,18 @@ mod tests {
             "INSERT INTO filepath_fts (rowid, file_path, component, language)
              VALUES (1, 'src/services/auth.rs', 'backend', 'rust')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Query via MATCH — in contentless mode, column values are NULL,
         // so we verify by counting matches and checking rowid
-        let rowid: i64 = conn.query_row(
-            "SELECT rowid FROM filepath_fts WHERE filepath_fts MATCH '\"auth\"*'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let rowid: i64 = conn
+            .query_row(
+                "SELECT rowid FROM filepath_fts WHERE filepath_fts MATCH '\"auth\"*'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(rowid, 1);
     }
 
@@ -2222,11 +2297,13 @@ mod tests {
         db.init_schema().unwrap();
 
         let conn = db.get_connection().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='symbol_fts'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='symbol_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1, "symbol_fts should still exist after double init");
     }
 
@@ -2244,11 +2321,13 @@ mod tests {
                 [],
             ).unwrap();
 
-            let file_id: i64 = conn.query_row(
-                "SELECT id FROM file_index WHERE file_path = 'src/main.rs'",
-                [],
-                |row| row.get(0),
-            ).unwrap();
+            let file_id: i64 = conn
+                .query_row(
+                    "SELECT id FROM file_index WHERE file_path = 'src/main.rs'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
 
             conn.execute(
                 "INSERT INTO file_symbols (file_index_id, name, kind, line_number, signature, doc_comment, start_line, end_line)
@@ -2262,20 +2341,30 @@ mod tests {
 
         // Verify symbol_fts was populated
         let conn = db.get_connection().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM symbol_fts WHERE symbol_fts MATCH '\"main\"*'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert!(count > 0, "symbol_fts should have been populated from existing data");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM symbol_fts WHERE symbol_fts MATCH '\"main\"*'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            count > 0,
+            "symbol_fts should have been populated from existing data"
+        );
 
         // Verify filepath_fts was populated
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM filepath_fts WHERE filepath_fts MATCH '\"main\"*'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert!(count > 0, "filepath_fts should have been populated from existing data");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM filepath_fts WHERE filepath_fts MATCH '\"main\"*'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            count > 0,
+            "filepath_fts should have been populated from existing data"
+        );
     }
 
     // =========================================================================
@@ -2287,11 +2376,13 @@ mod tests {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='guardrail_rules'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='guardrail_rules'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1, "guardrail_rules table should exist");
     }
 
@@ -2305,14 +2396,17 @@ mod tests {
             "INSERT INTO guardrail_rules (id, name, pattern, action, enabled)
              VALUES ('rule-1', 'No TODOs', 'TODO', 'warn', 1)",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Query
-        let (name, pattern, action): (String, String, String) = conn.query_row(
-            "SELECT name, pattern, action FROM guardrail_rules WHERE id = 'rule-1'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        ).unwrap();
+        let (name, pattern, action): (String, String, String) = conn
+            .query_row(
+                "SELECT name, pattern, action FROM guardrail_rules WHERE id = 'rule-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
         assert_eq!(name, "No TODOs");
         assert_eq!(pattern, "TODO");
         assert_eq!(action, "warn");
@@ -2321,22 +2415,24 @@ mod tests {
         conn.execute(
             "UPDATE guardrail_rules SET enabled = 0 WHERE id = 'rule-1'",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
-        let enabled: i32 = conn.query_row(
-            "SELECT enabled FROM guardrail_rules WHERE id = 'rule-1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let enabled: i32 = conn
+            .query_row(
+                "SELECT enabled FROM guardrail_rules WHERE id = 'rule-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(enabled, 0);
 
         // Delete
-        conn.execute("DELETE FROM guardrail_rules WHERE id = 'rule-1'", []).unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM guardrail_rules",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        conn.execute("DELETE FROM guardrail_rules WHERE id = 'rule-1'", [])
+            .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM guardrail_rules", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -2384,7 +2480,8 @@ mod tests {
         let mut stmt = conn.prepare(
             "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='guardrail_trigger_log'"
         ).unwrap();
-        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+        let indexes: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
             .unwrap()
             .filter_map(|r| r.ok())
             .collect();
@@ -2399,12 +2496,17 @@ mod tests {
         db.init_schema().unwrap(); // second call
 
         let conn = db.get_connection().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='guardrail_rules'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(count, 1, "guardrail_rules should still exist after double init");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='guardrail_rules'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "guardrail_rules should still exist after double init"
+        );
     }
 
     // =========================================================================
@@ -2416,11 +2518,13 @@ mod tests {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_channels'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_channels'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1, "webhook_channels table should exist");
     }
 
@@ -2445,7 +2549,8 @@ mod tests {
         let mut stmt = conn.prepare(
             "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='webhook_deliveries'"
         ).unwrap();
-        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+        let indexes: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
             .unwrap()
             .filter_map(|r| r.ok())
             .collect();
@@ -2670,13 +2775,17 @@ mod tests {
         }
 
         // Verify deliveries exist
-        let deliveries = db.list_webhook_deliveries(Some("ch-cascade"), 10, 0).unwrap();
+        let deliveries = db
+            .list_webhook_deliveries(Some("ch-cascade"), 10, 0)
+            .unwrap();
         assert_eq!(deliveries.len(), 3);
 
         // Delete channel — deliveries should cascade
         db.delete_webhook_channel("ch-cascade").unwrap();
 
-        let deliveries = db.list_webhook_deliveries(Some("ch-cascade"), 10, 0).unwrap();
+        let deliveries = db
+            .list_webhook_deliveries(Some("ch-cascade"), 10, 0)
+            .unwrap();
         assert_eq!(deliveries.len(), 0);
     }
 
@@ -2730,19 +2839,27 @@ mod tests {
         db.init_schema().unwrap(); // second call
 
         let conn = db.get_connection().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_channels'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(count, 1, "webhook_channels should still exist after double init");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_channels'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "webhook_channels should still exist after double init"
+        );
 
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_deliveries'",
             [],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(count, 1, "webhook_deliveries should still exist after double init");
+        assert_eq!(
+            count, 1,
+            "webhook_deliveries should still exist after double init"
+        );
     }
 
     // =========================================================================
@@ -2802,7 +2919,10 @@ mod tests {
              VALUES (123, 789, 'telegram', 'sess-2', 'ClaudeCode', '2026-02-18T14:31:00Z', '2026-02-18T14:31:00Z')",
             [],
         );
-        assert!(result.is_err(), "Duplicate PRIMARY KEY (adapter_type, chat_id) should be rejected");
+        assert!(
+            result.is_err(),
+            "Duplicate PRIMARY KEY (adapter_type, chat_id) should be rejected"
+        );
 
         // Different adapter_type with same chat_id should succeed
         conn.execute(
@@ -2817,11 +2937,13 @@ mod tests {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='remote_audit_log'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='remote_audit_log'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1, "remote_audit_log table should exist");
     }
 
@@ -2854,11 +2976,13 @@ mod tests {
             [],
         ).unwrap();
 
-        let error_msg: Option<String> = conn.query_row(
-            "SELECT error_message FROM remote_audit_log WHERE id = 'audit-002'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let error_msg: Option<String> = conn
+            .query_row(
+                "SELECT error_message FROM remote_audit_log WHERE id = 'audit-002'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(error_msg, Some("Unauthorized path".to_string()));
     }
 
@@ -2867,16 +2991,21 @@ mod tests {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
-        let mut stmt = conn.prepare(
-            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='remote_audit_log'"
-        ).unwrap();
-        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0))
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='remote_audit_log'",
+            )
+            .unwrap();
+        let indexes: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
             .unwrap()
             .filter_map(|r| r.ok())
             .collect();
 
-        assert!(indexes.contains(&"idx_remote_audit_created".to_string()),
-            "idx_remote_audit_created index should exist");
+        assert!(
+            indexes.contains(&"idx_remote_audit_created".to_string()),
+            "idx_remote_audit_created index should exist"
+        );
     }
 
     #[test]
@@ -2894,10 +3023,11 @@ mod tests {
         }
 
         // Query with limit and offset
-        let mut stmt = conn.prepare(
-            "SELECT id FROM remote_audit_log ORDER BY created_at DESC LIMIT 2 OFFSET 1"
-        ).unwrap();
-        let ids: Vec<String> = stmt.query_map([], |row| row.get(0))
+        let mut stmt = conn
+            .prepare("SELECT id FROM remote_audit_log ORDER BY created_at DESC LIMIT 2 OFFSET 1")
+            .unwrap();
+        let ids: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
             .unwrap()
             .filter_map(|r| r.ok())
             .collect();
@@ -2915,13 +3045,21 @@ mod tests {
             [],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(count, 1, "remote_session_mappings should still exist after double init");
+        assert_eq!(
+            count, 1,
+            "remote_session_mappings should still exist after double init"
+        );
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='remote_audit_log'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(count, 1, "remote_audit_log should still exist after double init");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='remote_audit_log'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "remote_audit_log should still exist after double init"
+        );
     }
 }

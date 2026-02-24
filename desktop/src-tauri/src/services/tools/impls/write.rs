@@ -71,7 +71,11 @@ impl Tool for WriteTool {
             None => return ToolResult::err(missing_param_error("content")),
         };
 
-        let path = match validate_path(file_path, &ctx.working_directory_snapshot(), &ctx.project_root) {
+        let path = match validate_path(
+            file_path,
+            &ctx.working_directory_snapshot(),
+            &ctx.project_root,
+        ) {
             Ok(p) => p,
             Err(e) => return ToolResult::err(e),
         };
@@ -135,8 +139,8 @@ impl Tool for WriteTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use tempfile::TempDir;
 
     #[tokio::test]

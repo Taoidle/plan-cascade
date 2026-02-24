@@ -11,9 +11,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::services::skills::model::{
-    HookAction, ParsedSkill, SkillHooks, ToolHookRule,
-};
+use crate::services::skills::model::{HookAction, ParsedSkill, SkillHooks, ToolHookRule};
 use crate::utils::error::{AppError, AppResult};
 
 /// Parse any skill file (Format A, B, or C) and return a ParsedSkill.
@@ -85,10 +83,12 @@ fn find_closing_delimiter(text: &str) -> Option<usize> {
 fn parse_with_frontmatter(frontmatter: &str, body: &str, path: &Path) -> AppResult<ParsedSkill> {
     let fields = parse_yaml_fields(frontmatter);
 
-    let name = fields.get("name")
+    let name = fields
+        .get("name")
         .map(|v| extract_string(v))
         .unwrap_or_default();
-    let description = fields.get("description")
+    let description = fields
+        .get("description")
         .map(|v| extract_string(v))
         .unwrap_or_default();
 
@@ -106,14 +106,17 @@ fn parse_with_frontmatter(frontmatter: &str, body: &str, path: &Path) -> AppResu
     }
 
     let version = fields.get("version").map(|v| extract_string(v));
-    let tags = fields.get("tags")
+    let tags = fields
+        .get("tags")
         .map(|v| extract_string_list(v))
         .unwrap_or_default();
-    let user_invocable = fields.get("user-invocable")
+    let user_invocable = fields
+        .get("user-invocable")
         .or_else(|| fields.get("user_invocable"))
         .map(|v| extract_bool(v))
         .unwrap_or(false);
-    let allowed_tools = fields.get("allowed-tools")
+    let allowed_tools = fields
+        .get("allowed-tools")
         .or_else(|| fields.get("allowed_tools"))
         .map(|v| extract_string_list(v))
         .unwrap_or_default();
@@ -125,10 +128,17 @@ fn parse_with_frontmatter(frontmatter: &str, body: &str, path: &Path) -> AppResu
     // Collect metadata from known metadata field and unknown top-level fields
     let mut metadata = HashMap::new();
     let known_fields = [
-        "name", "description", "version", "tags",
-        "user-invocable", "user_invocable",
-        "allowed-tools", "allowed_tools",
-        "license", "hooks", "metadata",
+        "name",
+        "description",
+        "version",
+        "tags",
+        "user-invocable",
+        "user_invocable",
+        "allowed-tools",
+        "allowed_tools",
+        "license",
+        "hooks",
+        "metadata",
     ];
 
     // Parse explicit metadata field
@@ -491,8 +501,10 @@ fn parse_hooks(fields: &HashMap<String, YamlValue>) -> Option<SkillHooks> {
 
     match hooks_val {
         YamlValue::Map(map) => {
-            let pre_tool_use = parse_hook_rules(map.get("PreToolUse").or_else(|| map.get("pre_tool_use")));
-            let post_tool_use = parse_hook_rules(map.get("PostToolUse").or_else(|| map.get("post_tool_use")));
+            let pre_tool_use =
+                parse_hook_rules(map.get("PreToolUse").or_else(|| map.get("pre_tool_use")));
+            let post_tool_use =
+                parse_hook_rules(map.get("PostToolUse").or_else(|| map.get("post_tool_use")));
             let stop = parse_stop_hooks(map.get("Stop").or_else(|| map.get("stop")));
 
             if pre_tool_use.is_empty() && post_tool_use.is_empty() && stop.is_empty() {
@@ -566,7 +578,10 @@ This skill provides hybrid architecture planning.
         assert_eq!(skill.allowed_tools, vec!["Read", "Write", "Edit", "Bash"]);
         assert_eq!(skill.license.as_deref(), Some("MIT"));
         assert_eq!(skill.tags, vec!["planning", "architecture"]);
-        assert_eq!(skill.metadata.get("author").map(|s| s.as_str()), Some("vercel"));
+        assert_eq!(
+            skill.metadata.get("author").map(|s| s.as_str()),
+            Some("vercel")
+        );
         assert!(skill.body.contains("# Hybrid Ralph"));
         assert!(skill.body.contains("## Workflow"));
     }
@@ -650,7 +665,10 @@ description: A skill without a name
 "#;
         let result = parse_skill_file(&PathBuf::from("/skills/test.md"), content);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("missing required 'name'"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("missing required 'name'"));
     }
 
     #[test]
@@ -663,7 +681,10 @@ name: no-desc
 "#;
         let result = parse_skill_file(&PathBuf::from("/skills/test.md"), content);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("missing required 'description'"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("missing required 'description'"));
     }
 
     #[test]
@@ -709,7 +730,10 @@ name: no-desc
         let fields = parse_yaml_fields(yaml);
 
         assert_eq!(extract_string(fields.get("name").unwrap()), "test-skill");
-        assert_eq!(extract_string(fields.get("description").unwrap()), "A test skill");
+        assert_eq!(
+            extract_string(fields.get("description").unwrap()),
+            "A test skill"
+        );
         assert_eq!(extract_string(fields.get("version").unwrap()), "1.0.0");
     }
 
@@ -755,8 +779,14 @@ another: thing
 # Body
 "#;
         let result = parse_skill_file(&PathBuf::from("/test/SKILL.md"), content).unwrap();
-        assert_eq!(result.metadata.get("custom-field").map(|s| s.as_str()), Some("some-value"));
-        assert_eq!(result.metadata.get("another").map(|s| s.as_str()), Some("thing"));
+        assert_eq!(
+            result.metadata.get("custom-field").map(|s| s.as_str()),
+            Some("some-value")
+        );
+        assert_eq!(
+            result.metadata.get("another").map(|s| s.as_str()),
+            Some("thing")
+        );
     }
 
     #[test]

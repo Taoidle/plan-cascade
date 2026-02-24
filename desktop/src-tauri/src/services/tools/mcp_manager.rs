@@ -177,10 +177,7 @@ impl McpManager {
 
         let mut servers = Vec::new();
         for (name, client) in clients.iter() {
-            let qualified_names = server_tools
-                .get(name)
-                .cloned()
-                .unwrap_or_default();
+            let qualified_names = server_tools.get(name).cloned().unwrap_or_default();
 
             let tool_names: Vec<String> = qualified_names
                 .iter()
@@ -229,9 +226,10 @@ impl McpManager {
                 }
             }
             crate::models::McpServerType::Sse => {
-                let base_url = server.url.clone().ok_or_else(|| {
-                    AppError::validation("SSE server requires a URL".to_string())
-                })?;
+                let base_url = server
+                    .url
+                    .clone()
+                    .ok_or_else(|| AppError::validation("SSE server requires a URL".to_string()))?;
                 McpTransportConfig::Http {
                     base_url,
                     headers: server.headers.clone(),
@@ -285,7 +283,9 @@ mod tests {
     async fn test_disconnect_nonexistent_server() {
         let manager = McpManager::new();
         let mut registry = ToolRegistry::new();
-        let result = manager.disconnect_server("nonexistent", &mut registry).await;
+        let result = manager
+            .disconnect_server("nonexistent", &mut registry)
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not connected"));
     }
@@ -398,10 +398,7 @@ mod tests {
         let info = ConnectedServerInfo {
             server_name: "test".to_string(),
             tool_names: vec!["echo".to_string(), "read".to_string()],
-            qualified_tool_names: vec![
-                "mcp:test:echo".to_string(),
-                "mcp:test:read".to_string(),
-            ],
+            qualified_tool_names: vec!["mcp:test:echo".to_string(), "mcp:test:read".to_string()],
             protocol_version: "2024-11-05".to_string(),
         };
 
@@ -480,7 +477,10 @@ for line in sys.stdin:
         assert!(registry.is_empty());
 
         // Connect
-        let info = manager.connect_server(&config, &mut registry).await.unwrap();
+        let info = manager
+            .connect_server(&config, &mut registry)
+            .await
+            .unwrap();
         assert_eq!(info.server_name, "lifecycle-test");
         assert_eq!(info.tool_names, vec!["tool_a", "tool_b"]);
         assert_eq!(info.qualified_tool_names.len(), 2);

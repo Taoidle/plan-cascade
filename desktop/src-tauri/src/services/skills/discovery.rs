@@ -213,10 +213,7 @@ fn walk_skill_directory(dir: &Path, files: &mut Vec<PathBuf>) {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            let dir_name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if !IGNORED_DIRS.contains(&dir_name) {
                 walk_skill_directory(&path, files);
             }
@@ -309,7 +306,11 @@ mod tests {
 
         fs::write(dir.path().join("CLAUDE.md"), "# CLAUDE.md\nGuidance").unwrap();
         fs::write(dir.path().join("AGENTS.md"), "# AGENTS.md\nConfig").unwrap();
-        fs::write(dir.path().join("README.md"), "# README\nNot a convention file").unwrap();
+        fs::write(
+            dir.path().join("README.md"),
+            "# README\nNot a convention file",
+        )
+        .unwrap();
 
         let result = discover_project_skills(dir.path()).unwrap();
         assert_eq!(result.len(), 2); // CLAUDE.md and AGENTS.md, not README.md
@@ -333,16 +334,8 @@ mod tests {
         let node_modules = skills_dir.join("node_modules");
         fs::create_dir_all(&node_modules).unwrap();
 
-        fs::write(
-            skills_dir.join("good.md"),
-            "# Good skill",
-        )
-        .unwrap();
-        fs::write(
-            node_modules.join("bad.md"),
-            "# Should be ignored",
-        )
-        .unwrap();
+        fs::write(skills_dir.join("good.md"), "# Good skill").unwrap();
+        fs::write(node_modules.join("bad.md"), "# Should be ignored").unwrap();
 
         let result = discover_project_skills(dir.path()).unwrap();
         assert_eq!(result.len(), 1);

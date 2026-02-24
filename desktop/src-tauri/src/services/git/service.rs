@@ -135,10 +135,7 @@ impl GitService {
 
     /// Get diff of unstaged changes.
     pub fn diff_unstaged(&self, repo_path: &Path) -> AppResult<DiffOutput> {
-        let output = self
-            .git
-            .execute(repo_path, &["diff"])?
-            .into_result()?;
+        let output = self.git.execute(repo_path, &["diff"])?.into_result()?;
         Ok(parse_unified_diff(&output))
     }
 
@@ -172,8 +169,7 @@ impl GitService {
         all_branches: bool,
     ) -> AppResult<Vec<CommitNode>> {
         let count_arg = format!("-{}", count);
-        let format_arg =
-            "--format=%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%s%x00%D";
+        let format_arg = "--format=%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%s%x00%D";
 
         let mut args = vec!["log", &count_arg, format_arg];
         if all_branches {
@@ -206,22 +202,12 @@ impl GitService {
     }
 
     /// Create a new branch from a base.
-    pub fn create_branch(
-        &self,
-        repo_path: &Path,
-        name: &str,
-        base: &str,
-    ) -> AppResult<()> {
+    pub fn create_branch(&self, repo_path: &Path, name: &str, base: &str) -> AppResult<()> {
         self.git.create_branch(repo_path, name, base)
     }
 
     /// Delete a branch.
-    pub fn delete_branch(
-        &self,
-        repo_path: &Path,
-        name: &str,
-        force: bool,
-    ) -> AppResult<()> {
+    pub fn delete_branch(&self, repo_path: &Path, name: &str, force: bool) -> AppResult<()> {
         self.git.delete_branch(repo_path, name, force)
     }
 
@@ -231,12 +217,7 @@ impl GitService {
     }
 
     /// Rename a branch.
-    pub fn rename_branch(
-        &self,
-        repo_path: &Path,
-        old_name: &str,
-        new_name: &str,
-    ) -> AppResult<()> {
+    pub fn rename_branch(&self, repo_path: &Path, old_name: &str, new_name: &str) -> AppResult<()> {
         self.git
             .execute(repo_path, &["branch", "-m", old_name, new_name])?
             .into_result()?;
@@ -244,14 +225,8 @@ impl GitService {
     }
 
     /// Merge a branch into the current branch.
-    pub fn merge_branch(
-        &self,
-        repo_path: &Path,
-        branch: &str,
-    ) -> AppResult<MergeBranchResult> {
-        let result = self
-            .git
-            .execute(repo_path, &["merge", "--no-ff", branch])?;
+    pub fn merge_branch(&self, repo_path: &Path, branch: &str) -> AppResult<MergeBranchResult> {
+        let result = self.git.execute(repo_path, &["merge", "--no-ff", branch])?;
 
         if result.success {
             Ok(MergeBranchResult {
@@ -331,9 +306,8 @@ impl GitService {
     /// Read file content (for conflict resolution).
     pub fn read_file_content(&self, repo_path: &Path, file_path: &str) -> AppResult<String> {
         let full_path = repo_path.join(file_path);
-        std::fs::read_to_string(&full_path).map_err(|e| {
-            AppError::command(format!("Failed to read file {}: {}", file_path, e))
-        })
+        std::fs::read_to_string(&full_path)
+            .map_err(|e| AppError::command(format!("Failed to read file {}: {}", file_path, e)))
     }
 
     /// Write resolved content and stage the file.
@@ -344,9 +318,8 @@ impl GitService {
         content: &str,
     ) -> AppResult<()> {
         let full_path = repo_path.join(file_path);
-        std::fs::write(&full_path, content).map_err(|e| {
-            AppError::command(format!("Failed to write file {}: {}", file_path, e))
-        })?;
+        std::fs::write(&full_path, content)
+            .map_err(|e| AppError::command(format!("Failed to write file {}: {}", file_path, e)))?;
         self.git.add(repo_path, &[file_path])?;
         Ok(())
     }
@@ -369,10 +342,7 @@ impl GitService {
     pub fn list_stashes(&self, repo_path: &Path) -> AppResult<Vec<StashEntry>> {
         let output = self
             .git
-            .execute(
-                repo_path,
-                &["stash", "list", "--format=%gd%x00%gs%x00%ai"],
-            )?
+            .execute(repo_path, &["stash", "list", "--format=%gd%x00%gs%x00%ai"])?
             .into_result()?;
 
         Ok(parse_stash_list(&output))
@@ -507,7 +477,12 @@ impl GitService {
     }
 
     /// Pull from remote.
-    pub fn pull(&self, repo_path: &Path, remote: Option<&str>, branch: Option<&str>) -> AppResult<()> {
+    pub fn pull(
+        &self,
+        repo_path: &Path,
+        remote: Option<&str>,
+        branch: Option<&str>,
+    ) -> AppResult<()> {
         let mut args = vec!["pull"];
         if let Some(r) = remote {
             args.push(r);
@@ -809,11 +784,7 @@ pub fn parse_unified_diff(output: &str) -> DiffOutput {
         } else if line.starts_with("rename from ") {
             if let Some(ref mut file) = current_file {
                 file.is_renamed = true;
-                file.old_path = Some(
-                    line.strip_prefix("rename from ")
-                        .unwrap_or("")
-                        .to_string(),
-                );
+                file.old_path = Some(line.strip_prefix("rename from ").unwrap_or("").to_string());
             }
         } else if line.starts_with("@@ ") {
             // Flush previous hunk
@@ -1377,7 +1348,10 @@ index ghi..jkl 100644
     #[test]
     fn test_parse_hunk_header() {
         assert_eq!(parse_hunk_header("@@ -1,5 +1,7 @@"), (1, 5, 1, 7));
-        assert_eq!(parse_hunk_header("@@ -10,3 +12,5 @@ fn main()"), (10, 3, 12, 5));
+        assert_eq!(
+            parse_hunk_header("@@ -10,3 +12,5 @@ fn main()"),
+            (10, 3, 12, 5)
+        );
         assert_eq!(parse_hunk_header("@@ -0,0 +1,2 @@"), (0, 0, 1, 2));
     }
 
@@ -1417,7 +1391,13 @@ index ghi..jkl 100644
 
     #[test]
     fn test_parse_diff_header_path() {
-        assert_eq!(parse_diff_header_path("diff --git a/src/main.rs b/src/main.rs"), "src/main.rs");
-        assert_eq!(parse_diff_header_path("diff --git a/file.txt b/file.txt"), "file.txt");
+        assert_eq!(
+            parse_diff_header_path("diff --git a/src/main.rs b/src/main.rs"),
+            "src/main.rs"
+        );
+        assert_eq!(
+            parse_diff_header_path("diff --git a/file.txt b/file.txt"),
+            "file.txt"
+        );
     }
 }

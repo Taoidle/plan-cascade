@@ -108,11 +108,7 @@ impl CodeReviewResult {
 
     /// Check if the review should block based on score and critical findings.
     pub fn should_block(&self) -> bool {
-        self.total_score < 70
-            || self
-                .findings
-                .iter()
-                .any(|f| f.severity == "critical")
+        self.total_score < 70 || self.findings.iter().any(|f| f.severity == "critical")
     }
 }
 
@@ -271,7 +267,8 @@ Git diff to review:
                     GatePhase::PostValidation,
                     0,
                 );
-                result.message = "Could not parse AI review response - passing with warning".to_string();
+                result.message =
+                    "Could not parse AI review response - passing with warning".to_string();
                 result
             }
         }

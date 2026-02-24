@@ -7,7 +7,9 @@ use tauri::State;
 
 use crate::models::response::CommandResponse;
 use crate::services::agent_composer::eval_types::*;
-use crate::services::agent_composer::evaluation::{ensure_evaluation_tables, load_reports, persist_report};
+use crate::services::agent_composer::evaluation::{
+    ensure_evaluation_tables, load_reports, persist_report,
+};
 use crate::state::AppState;
 use crate::utils::error::{AppError, AppResult};
 
@@ -18,15 +20,15 @@ pub async fn list_evaluators(
 ) -> Result<CommandResponse<Vec<EvaluatorInfo>>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_evaluation_tables(&conn)?;
 
-            let mut stmt = conn.prepare(
-                "SELECT id, name, definition FROM evaluators ORDER BY name ASC",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT id, name, definition FROM evaluators ORDER BY name ASC")?;
 
             let evaluators: Vec<EvaluatorInfo> = stmt
                 .query_map([], |row| {
@@ -74,9 +76,10 @@ pub async fn create_evaluator(
 ) -> Result<CommandResponse<Evaluator>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_evaluation_tables(&conn)?;
 
@@ -116,9 +119,10 @@ pub async fn delete_evaluator(
 ) -> Result<CommandResponse<bool>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_evaluation_tables(&conn)?;
 
@@ -189,9 +193,10 @@ pub async fn list_evaluation_runs(
 ) -> Result<CommandResponse<Vec<EvaluationRunInfo>>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_evaluation_tables(&conn)?;
 
@@ -245,9 +250,10 @@ pub async fn get_evaluation_reports(
 ) -> Result<CommandResponse<Vec<EvaluationReport>>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_evaluation_tables(&conn)?;
             load_reports(&conn, &run_id)
@@ -268,9 +274,10 @@ pub async fn delete_evaluation_run(
 ) -> Result<CommandResponse<bool>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_evaluation_tables(&conn)?;
 

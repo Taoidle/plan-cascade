@@ -229,14 +229,8 @@ impl TransferHandler {
         // Update shared state with transfer metadata
         {
             let mut shared = new_ctx.shared_state.write().await;
-            shared.insert(
-                "__transfer_from".to_string(),
-                serde_json::json!(from_agent),
-            );
-            shared.insert(
-                "__transfer_message".to_string(),
-                serde_json::json!(message),
-            );
+            shared.insert("__transfer_from".to_string(), serde_json::json!(from_agent));
+            shared.insert("__transfer_message".to_string(), serde_json::json!(message));
             shared.insert(
                 "__transfer_depth".to_string(),
                 serde_json::json!(self.chain.depth()),
@@ -343,15 +337,9 @@ mod tests {
     #[test]
     fn test_transfer_chain_depth_limit() {
         let mut chain = TransferChain::with_max_depth(3);
-        chain
-            .record_transfer("a", "b", "1")
-            .unwrap();
-        chain
-            .record_transfer("b", "c", "2")
-            .unwrap();
-        chain
-            .record_transfer("c", "d", "3")
-            .unwrap();
+        chain.record_transfer("a", "b", "1").unwrap();
+        chain.record_transfer("b", "c", "2").unwrap();
+        chain.record_transfer("c", "d", "3").unwrap();
 
         // Fourth transfer should exceed depth limit
         let result = chain.record_transfer("d", "e", "4");
@@ -363,12 +351,8 @@ mod tests {
     #[test]
     fn test_transfer_chain_entries() {
         let mut chain = TransferChain::new();
-        chain
-            .record_transfer("agent-a", "agent-b", "msg1")
-            .unwrap();
-        chain
-            .record_transfer("agent-b", "agent-c", "msg2")
-            .unwrap();
+        chain.record_transfer("agent-a", "agent-b", "msg1").unwrap();
+        chain.record_transfer("agent-b", "agent-c", "msg2").unwrap();
 
         let entries = chain.entries();
         assert_eq!(entries.len(), 2);
@@ -474,10 +458,18 @@ mod tests {
         }
         #[async_trait::async_trait]
         impl crate::services::llm::LlmProvider for MockProv {
-            fn name(&self) -> &'static str { "mock" }
-            fn model(&self) -> &str { "mock" }
-            fn supports_thinking(&self) -> bool { false }
-            fn supports_tools(&self) -> bool { false }
+            fn name(&self) -> &'static str {
+                "mock"
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
+            fn supports_thinking(&self) -> bool {
+                false
+            }
+            fn supports_tools(&self) -> bool {
+                false
+            }
             async fn send_message(
                 &self,
                 _: Vec<crate::services::llm::Message>,
@@ -497,15 +489,21 @@ mod tests {
             ) -> crate::services::llm::LlmResult<crate::services::llm::LlmResponse> {
                 unimplemented!()
             }
-            async fn health_check(&self) -> crate::services::llm::LlmResult<()> { Ok(()) }
-            fn config(&self) -> &crate::services::llm::ProviderConfig { &self.config }
+            async fn health_check(&self) -> crate::services::llm::LlmResult<()> {
+                Ok(())
+            }
+            fn config(&self) -> &crate::services::llm::ProviderConfig {
+                &self.config
+            }
         }
 
         let ctx = AgentContext {
             session_id: "test".to_string(),
             project_root: PathBuf::from("/tmp"),
             provider: Arc::new(MockProv::new()),
-            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from("/tmp"))),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+                "/tmp",
+            ))),
             plugin_manager: None,
             hooks: Arc::new(AgenticHooks::new()),
             input: AgentInput::Text("test".to_string()),

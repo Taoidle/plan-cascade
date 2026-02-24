@@ -348,7 +348,10 @@ their content
             start_line: 1,
             end_line: 5,
         };
-        assert_eq!(resolve_conflict(&region, ConflictStrategy::Ours), "our code");
+        assert_eq!(
+            resolve_conflict(&region, ConflictStrategy::Ours),
+            "our code"
+        );
     }
 
     #[test]
@@ -557,8 +560,7 @@ theirs
         std::fs::write(repo.join(file_path), conflict_content).unwrap();
 
         // Get conflict files
-        let files =
-            get_conflict_files(repo, &[file_path.to_string()]).unwrap();
+        let files = get_conflict_files(repo, &[file_path.to_string()]).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "conflict.txt");
         assert_eq!(files[0].conflict_count, 1);
@@ -577,11 +579,7 @@ theirs
     #[test]
     fn test_get_conflict_files_nonexistent() {
         let tmp = tempfile::tempdir().unwrap();
-        let files = get_conflict_files(
-            tmp.path(),
-            &["nonexistent.txt".to_string()],
-        )
-        .unwrap();
+        let files = get_conflict_files(tmp.path(), &["nonexistent.txt".to_string()]).unwrap();
         assert!(files.is_empty());
     }
 }

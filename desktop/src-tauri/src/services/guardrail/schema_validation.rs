@@ -135,11 +135,7 @@ impl SchemaValidationGuardrail {
     }
 
     /// Validate a JSON value against a schema, returning detailed errors.
-    fn validate_json_against_schema(
-        &self,
-        json_value: &Value,
-        schema: &Value,
-    ) -> Vec<String> {
+    fn validate_json_against_schema(&self, json_value: &Value, schema: &Value) -> Vec<String> {
         let mut errors = Vec::new();
 
         // Check required fields
@@ -171,11 +167,10 @@ impl SchemaValidationGuardrail {
                     // Check items type for arrays
                     if value.is_array() {
                         if let Some(items_schema) = prop_schema.get("items") {
-                            if let Some(item_type) = items_schema.get("type").and_then(|v| v.as_str())
+                            if let Some(item_type) =
+                                items_schema.get("type").and_then(|v| v.as_str())
                             {
-                                for (idx, item) in
-                                    value.as_array().unwrap().iter().enumerate()
-                                {
+                                for (idx, item) in value.as_array().unwrap().iter().enumerate() {
                                     let item_actual_type = json_type_name(item);
                                     if item_actual_type != item_type {
                                         errors.push(format!(
@@ -201,11 +196,16 @@ impl SchemaValidationGuardrail {
                                     }
 
                                     // Check property constraints in array items
-                                    if let Some(item_props) = items_schema.get("properties").and_then(|v| v.as_object()) {
+                                    if let Some(item_props) =
+                                        items_schema.get("properties").and_then(|v| v.as_object())
+                                    {
                                         for (item_prop_name, item_prop_schema) in item_props {
                                             if let Some(item_value) = item.get(item_prop_name) {
                                                 // Type check
-                                                if let Some(exp_type) = item_prop_schema.get("type").and_then(|v| v.as_str()) {
+                                                if let Some(exp_type) = item_prop_schema
+                                                    .get("type")
+                                                    .and_then(|v| v.as_str())
+                                                {
                                                     let act_type = json_type_name(item_value);
                                                     if act_type != exp_type {
                                                         errors.push(format!(
@@ -215,7 +215,10 @@ impl SchemaValidationGuardrail {
                                                     }
                                                 }
                                                 // Pattern check
-                                                if let Some(pat) = item_prop_schema.get("pattern").and_then(|v| v.as_str()) {
+                                                if let Some(pat) = item_prop_schema
+                                                    .get("pattern")
+                                                    .and_then(|v| v.as_str())
+                                                {
                                                     if let Some(sv) = item_value.as_str() {
                                                         if let Ok(re) = regex::Regex::new(pat) {
                                                             if !re.is_match(sv) {
@@ -228,7 +231,10 @@ impl SchemaValidationGuardrail {
                                                     }
                                                 }
                                                 // minLength check
-                                                if let Some(ml) = item_prop_schema.get("minLength").and_then(|v| v.as_u64()) {
+                                                if let Some(ml) = item_prop_schema
+                                                    .get("minLength")
+                                                    .and_then(|v| v.as_u64())
+                                                {
                                                     if let Some(sv) = item_value.as_str() {
                                                         if (sv.len() as u64) < ml {
                                                             errors.push(format!(
@@ -547,9 +553,7 @@ mod tests {
             ]
         });
 
-        let result = g
-            .validate(&valid_prd.to_string(), Direction::Output)
-            .await;
+        let result = g.validate(&valid_prd.to_string(), Direction::Output).await;
         assert!(result.is_pass(), "Valid PRD should pass, got: {:?}", result);
     }
 
@@ -824,7 +828,11 @@ mod tests {
             .validate(&multiple_errors.to_string(), Direction::Output)
             .await;
         if let GuardrailResult::Block { reason } = result {
-            assert!(reason.contains("errors"), "Should mention error count: {}", reason);
+            assert!(
+                reason.contains("errors"),
+                "Should mention error count: {}",
+                reason
+            );
             assert!(
                 reason.contains("stories") || reason.contains("goal"),
                 "Should mention specific fields: {}",

@@ -80,10 +80,7 @@ impl ValidationGate {
                     gate_id,
                     &gate_display_name,
                     GatePhase::Validation,
-                    &format!(
-                        "No {} validator for {}",
-                        gate_id, detection.project_type
-                    ),
+                    &format!("No {} validator for {}", gate_id, detection.project_type),
                 );
             }
         };
@@ -138,10 +135,7 @@ impl ValidationGate {
                         &gate_name,
                         GatePhase::Validation,
                         duration_ms,
-                        format!(
-                            "Exited with code {}",
-                            output.status.code().unwrap_or(-1)
-                        ),
+                        format!("Exited with code {}", output.status.code().unwrap_or(-1)),
                         findings,
                     )
                 }

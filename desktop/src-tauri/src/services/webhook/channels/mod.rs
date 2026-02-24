@@ -10,7 +10,9 @@ pub mod telegram;
 
 use async_trait::async_trait;
 
-use super::types::{WebhookChannelConfig, WebhookChannelType, WebhookError, WebhookPayload, WebhookTestResult};
+use super::types::{
+    WebhookChannelConfig, WebhookChannelType, WebhookError, WebhookPayload, WebhookTestResult,
+};
 
 /// Async trait for webhook channel implementations.
 ///
@@ -30,10 +32,7 @@ pub trait WebhookChannel: Send + Sync {
     ) -> Result<(), WebhookError>;
 
     /// Test the channel connection by sending a test notification.
-    async fn test(
-        &self,
-        config: &WebhookChannelConfig,
-    ) -> Result<WebhookTestResult, WebhookError>;
+    async fn test(&self, config: &WebhookChannelConfig) -> Result<WebhookTestResult, WebhookError>;
 
     /// Format the payload into a platform-specific message string/JSON.
     fn format_message(&self, payload: &WebhookPayload, template: Option<&str>) -> String;

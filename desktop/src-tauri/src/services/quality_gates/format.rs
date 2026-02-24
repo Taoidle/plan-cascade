@@ -116,10 +116,7 @@ impl FormatGate {
                     // cached results for typecheck/test/lint stale.
                     if let Some(ref cache) = self.cache {
                         if let Err(e) = cache.invalidate_all() {
-                            tracing::warn!(
-                                "FormatGate: failed to invalidate cache: {}",
-                                e
-                            );
+                            tracing::warn!("FormatGate: failed to invalidate cache: {}", e);
                         }
                     }
 
@@ -136,7 +133,10 @@ impl FormatGate {
                         "Format Gate",
                         GatePhase::PreValidation,
                         duration_ms,
-                        format!("Formatter exited with code {}", output.status.code().unwrap_or(-1)),
+                        format!(
+                            "Formatter exited with code {}",
+                            output.status.code().unwrap_or(-1)
+                        ),
                         vec![stderr],
                     )
                 }
@@ -169,10 +169,7 @@ impl FormatGate {
     /// Get the formatter command and arguments for a project type.
     fn get_formatter_command(&self, project_type: ProjectType) -> Option<(String, Vec<String>)> {
         match project_type {
-            ProjectType::Rust => Some((
-                "cargo".to_string(),
-                vec!["fmt".to_string()],
-            )),
+            ProjectType::Rust => Some(("cargo".to_string(), vec!["fmt".to_string()])),
             ProjectType::NodeJs => Some((
                 "npx".to_string(),
                 vec![
@@ -185,10 +182,7 @@ impl FormatGate {
                 "ruff".to_string(),
                 vec!["format".to_string(), ".".to_string()],
             )),
-            ProjectType::Go => Some((
-                "gofmt".to_string(),
-                vec!["-w".to_string(), ".".to_string()],
-            )),
+            ProjectType::Go => Some(("gofmt".to_string(), vec!["-w".to_string(), ".".to_string()])),
             ProjectType::Unknown => None,
         }
     }
@@ -197,9 +191,9 @@ impl FormatGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use r2d2::Pool;
     use r2d2_sqlite::SqliteConnectionManager;
+    use std::fs;
     use tempfile::TempDir;
 
     fn create_rust_project() -> TempDir {
@@ -271,7 +265,10 @@ edition = "2021"
         let gate = FormatGate::new(temp.path());
         let result = gate.run().await;
         assert!(result.passed); // Skipped counts as passed
-        assert_eq!(result.status, crate::models::quality_gates::GateStatus::Skipped);
+        assert_eq!(
+            result.status,
+            crate::models::quality_gates::GateStatus::Skipped
+        );
     }
 
     #[test]
@@ -314,9 +311,14 @@ edition = "2021"
             commit_hash: "abc123".to_string(),
             tree_hash: "def456".to_string(),
         };
-        let result = PipelineGateResult::passed("typecheck", "TypeCheck", GatePhase::Validation, 100);
+        let result =
+            PipelineGateResult::passed("typecheck", "TypeCheck", GatePhase::Validation, 100);
         cache.put(&key, &result).unwrap();
-        assert_eq!(cache.count().unwrap(), 1, "Cache should have 1 entry before formatting");
+        assert_eq!(
+            cache.count().unwrap(),
+            1,
+            "Cache should have 1 entry before formatting"
+        );
 
         // Run FormatGate with the cache attached
         let gate = FormatGate::new(temp.path()).with_cache(cache.clone());

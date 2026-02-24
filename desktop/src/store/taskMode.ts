@@ -160,15 +160,18 @@ interface CommandResponse<T> {
   error: string | null;
 }
 
-/** Tauri event payload for task mode progress */
+/** Tauri event payload for task mode progress — matches Rust TaskModeProgressEvent */
 interface TaskModeProgressPayload {
   sessionId: string;
+  eventType: string;
   currentBatch: number;
   totalBatches: number;
-  storyStatuses: Record<string, string>;
-  storiesCompleted: number;
-  storiesFailed: number;
-  qualityGateResults?: Record<string, StoryQualityGateResults>;
+  storyId: string | null;
+  storyStatus: string | null;
+  agentName: string | null;
+  gateResults: GateResult[] | null;
+  error: string | null;
+  progressPct: number;
 }
 
 // ============================================================================
@@ -502,29 +505,27 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         'task-mode-progress',
         (event) => {
           const payload = event.payload;
-          const { sessionId } = get();
+          const { sessionId, storyStatuses: prevStatuses } = get();
           // Only process events for our session
           if (payload.sessionId !== sessionId) return;
 
           const updates: Partial<TaskModeState> = {
             currentBatch: payload.currentBatch,
             totalBatches: payload.totalBatches,
-            storyStatuses: payload.storyStatuses,
           };
 
-          // Determine session status from progress
-          if (payload.storiesCompleted + payload.storiesFailed >= payload.totalBatches) {
-            // Check if all stories in all batches are done
-            const totalStoryCount = Object.keys(payload.storyStatuses).length;
-            const completedCount = payload.storiesCompleted + payload.storiesFailed;
-            if (totalStoryCount > 0 && completedCount >= totalStoryCount) {
-              updates.sessionStatus =
-                payload.storiesFailed > 0 ? 'failed' : 'completed';
-            }
+          // Accumulate story statuses from individual events
+          if (payload.storyId && payload.storyStatus) {
+            updates.storyStatuses = { ...prevStatuses, [payload.storyId]: payload.storyStatus };
           }
 
-          if (payload.qualityGateResults) {
-            updates.qualityGateResults = payload.qualityGateResults;
+          // Determine session status from event type
+          if (payload.eventType === 'execution_completed') {
+            const allStatuses = updates.storyStatuses ?? prevStatuses;
+            const failedCount = Object.values(allStatuses).filter((s) => s === 'failed').length;
+            updates.sessionStatus = failedCount > 0 ? 'failed' : 'completed';
+          } else if (payload.eventType === 'execution_cancelled') {
+            updates.sessionStatus = 'cancelled';
           }
 
           set(updates);

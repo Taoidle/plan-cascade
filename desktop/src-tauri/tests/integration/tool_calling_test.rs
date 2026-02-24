@@ -17,7 +17,6 @@ use tempfile::TempDir;
 // Tool Definition Tests
 // ============================================================================
 
-
 #[test]
 fn test_all_tool_names_present() {
     let tools = get_tool_definitions_from_registry();

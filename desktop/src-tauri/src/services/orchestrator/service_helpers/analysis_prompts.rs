@@ -106,7 +106,10 @@ pub(super) fn analysis_phase_system_prompt_with_quota(
     )
 }
 
-pub(super) fn evaluate_analysis_quota(capture: &PhaseCapture, quota: &AnalysisToolQuota) -> Vec<String> {
+pub(super) fn evaluate_analysis_quota(
+    capture: &PhaseCapture,
+    quota: &AnalysisToolQuota,
+) -> Vec<String> {
     let mut failures = Vec::new();
 
     if capture.tool_calls < quota.min_total_calls {
@@ -142,7 +145,10 @@ pub(super) fn evaluate_analysis_quota(capture: &PhaseCapture, quota: &AnalysisTo
     failures
 }
 
-pub(super) fn build_phase_summary_from_evidence(phase: AnalysisPhase, capture: &PhaseCapture) -> String {
+pub(super) fn build_phase_summary_from_evidence(
+    phase: AnalysisPhase,
+    capture: &PhaseCapture,
+) -> String {
     let mut summary_lines = Vec::new();
     summary_lines.push(format!("### {} (Evidence Fallback)", phase.title()));
     summary_lines.push(format!(
@@ -242,7 +248,10 @@ pub(super) fn build_synthesis_phase_block(
     truncate_for_log(&blocks.join("\n\n"), max_chars.max(300))
 }
 
-pub(super) fn build_synthesis_chunk_block(chunk_summaries: &[ChunkSummaryRecord], max_chars: usize) -> String {
+pub(super) fn build_synthesis_chunk_block(
+    chunk_summaries: &[ChunkSummaryRecord],
+    max_chars: usize,
+) -> String {
     if chunk_summaries.is_empty() {
         return "No chunk summaries were produced.".to_string();
     }
@@ -352,7 +361,11 @@ pub(super) fn build_synthesis_rewrite_prompt(user_request: &str, draft: &str) ->
     )
 }
 
-pub(super) fn sample_paths_with_prefix(paths: &HashSet<String>, prefix: &str, limit: usize) -> Vec<String> {
+pub(super) fn sample_paths_with_prefix(
+    paths: &HashSet<String>,
+    prefix: &str,
+    limit: usize,
+) -> Vec<String> {
     let normalized_prefix = prefix
         .trim()
         .replace('\\', "/")

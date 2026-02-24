@@ -34,9 +34,10 @@ pub async fn discover_agent(
         return Err(A2aError::HttpError { status, body });
     }
 
-    let card: AgentCard = response.json().await.map_err(|e| {
-        A2aError::InvalidResponse(format!("Failed to parse agent card: {}", e))
-    })?;
+    let card: AgentCard = response
+        .json()
+        .await
+        .map_err(|e| A2aError::InvalidResponse(format!("Failed to parse agent card: {}", e)))?;
 
     card.validate()?;
 

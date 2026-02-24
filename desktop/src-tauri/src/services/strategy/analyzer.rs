@@ -580,8 +580,7 @@ pub fn analyze_task_for_mode(
     };
 
     let has_dependencies = decision.estimated_stories > 1
-        && (decision.dimension_scores.scope >= 0.3
-            || decision.dimension_scores.complexity >= 0.4);
+        && (decision.dimension_scores.scope >= 0.3 || decision.dimension_scores.complexity >= 0.4);
 
     // Extract functional areas from complexity indicators
     let functional_areas = decision
@@ -673,7 +672,10 @@ mod tests {
             "implement payment billing system with database schema migration for production deploy with breaking changes",
             None,
         );
-        assert!(matches!(analysis.risk_level, RiskLevel::Medium | RiskLevel::High));
+        assert!(matches!(
+            analysis.risk_level,
+            RiskLevel::Medium | RiskLevel::High
+        ));
     }
 
     #[test]

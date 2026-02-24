@@ -73,10 +73,7 @@ impl DoRGate {
             .filter(|c| c.trim().is_empty())
             .count();
         if empty_criteria > 0 {
-            failures.push(format!(
-                "{} acceptance criteria are empty",
-                empty_criteria
-            ));
+            failures.push(format!("{} acceptance criteria are empty", empty_criteria));
         }
 
         // Check dependencies are resolved
@@ -98,19 +95,18 @@ impl DoRGate {
         }
 
         if failures.is_empty() {
-            PipelineGateResult::passed(
-                "dor",
-                "Definition of Ready",
-                GatePhase::PreValidation,
-                0,
-            )
+            PipelineGateResult::passed("dor", "Definition of Ready", GatePhase::PreValidation, 0)
         } else {
             PipelineGateResult::failed(
                 "dor",
                 "Definition of Ready",
                 GatePhase::PreValidation,
                 0,
-                format!("Story '{}' is not ready: {} issues found", self.story.id, failures.len()),
+                format!(
+                    "Story '{}' is not ready: {} issues found",
+                    self.story.id,
+                    failures.len()
+                ),
                 failures,
             )
         }

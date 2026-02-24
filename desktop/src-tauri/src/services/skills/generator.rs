@@ -164,10 +164,7 @@ impl SkillGeneratorStore {
     pub fn delete_generated_skill(&self, id: &str) -> AppResult<()> {
         let conn = self.db.get_connection()?;
 
-        let rows = conn.execute(
-            "DELETE FROM skill_library WHERE id = ?1",
-            params![id],
-        )?;
+        let rows = conn.execute("DELETE FROM skill_library WHERE id = ?1", params![id])?;
 
         if rows == 0 {
             return Err(AppError::not_found(format!(
@@ -225,12 +222,10 @@ struct GeneratedSkillRow {
 
 impl GeneratedSkillRow {
     fn into_record(self) -> AppResult<GeneratedSkillRecord> {
-        let tags: Vec<String> = serde_json::from_str(&self.tags_json)
-            .unwrap_or_default();
-        let source_session_ids: Vec<String> = serde_json::from_str(&self.session_ids_json)
-            .unwrap_or_default();
-        let keywords: Vec<String> = serde_json::from_str(&self.keywords_json)
-            .unwrap_or_default();
+        let tags: Vec<String> = serde_json::from_str(&self.tags_json).unwrap_or_default();
+        let source_session_ids: Vec<String> =
+            serde_json::from_str(&self.session_ids_json).unwrap_or_default();
+        let keywords: Vec<String> = serde_json::from_str(&self.keywords_json).unwrap_or_default();
 
         Ok(GeneratedSkillRecord {
             id: self.id,
@@ -298,9 +293,15 @@ mod tests {
     fn test_list_generated_skills() {
         let store = setup_store();
 
-        store.save_generated_skill("/test/project", &make_generated_skill("skill-a")).unwrap();
-        store.save_generated_skill("/test/project", &make_generated_skill("skill-b")).unwrap();
-        store.save_generated_skill("/other/project", &make_generated_skill("skill-c")).unwrap();
+        store
+            .save_generated_skill("/test/project", &make_generated_skill("skill-a"))
+            .unwrap();
+        store
+            .save_generated_skill("/test/project", &make_generated_skill("skill-b"))
+            .unwrap();
+        store
+            .save_generated_skill("/other/project", &make_generated_skill("skill-c"))
+            .unwrap();
 
         let all = store.list_generated_skills("/test/project", true).unwrap();
         assert_eq!(all.len(), 2);
@@ -316,8 +317,12 @@ mod tests {
     fn test_list_generated_skills_filter_disabled() {
         let store = setup_store();
 
-        let saved = store.save_generated_skill("/test/project", &make_generated_skill("skill-a")).unwrap();
-        store.save_generated_skill("/test/project", &make_generated_skill("skill-b")).unwrap();
+        let saved = store
+            .save_generated_skill("/test/project", &make_generated_skill("skill-a"))
+            .unwrap();
+        store
+            .save_generated_skill("/test/project", &make_generated_skill("skill-b"))
+            .unwrap();
 
         // Disable one
         store.toggle_generated_skill(&saved.id, false).unwrap();
@@ -333,7 +338,9 @@ mod tests {
     #[test]
     fn test_toggle_generated_skill() {
         let store = setup_store();
-        let saved = store.save_generated_skill("/test/project", &make_generated_skill("test")).unwrap();
+        let saved = store
+            .save_generated_skill("/test/project", &make_generated_skill("test"))
+            .unwrap();
 
         // Initially enabled
         let fetched = store.get_generated_skill(&saved.id).unwrap().unwrap();
@@ -360,7 +367,9 @@ mod tests {
     #[test]
     fn test_delete_generated_skill() {
         let store = setup_store();
-        let saved = store.save_generated_skill("/test/project", &make_generated_skill("to-delete")).unwrap();
+        let saved = store
+            .save_generated_skill("/test/project", &make_generated_skill("to-delete"))
+            .unwrap();
 
         store.delete_generated_skill(&saved.id).unwrap();
         let fetched = store.get_generated_skill(&saved.id).unwrap();
@@ -377,7 +386,9 @@ mod tests {
     #[test]
     fn test_increment_usage() {
         let store = setup_store();
-        let saved = store.save_generated_skill("/test/project", &make_generated_skill("test")).unwrap();
+        let saved = store
+            .save_generated_skill("/test/project", &make_generated_skill("test"))
+            .unwrap();
         assert_eq!(saved.usage_count, 0);
 
         store.increment_usage(&saved.id).unwrap();
@@ -393,8 +404,12 @@ mod tests {
 
         assert_eq!(store.count_generated_skills("/test/project").unwrap(), 0);
 
-        store.save_generated_skill("/test/project", &make_generated_skill("a")).unwrap();
-        store.save_generated_skill("/test/project", &make_generated_skill("b")).unwrap();
+        store
+            .save_generated_skill("/test/project", &make_generated_skill("a"))
+            .unwrap();
+        store
+            .save_generated_skill("/test/project", &make_generated_skill("b"))
+            .unwrap();
 
         assert_eq!(store.count_generated_skills("/test/project").unwrap(), 2);
     }

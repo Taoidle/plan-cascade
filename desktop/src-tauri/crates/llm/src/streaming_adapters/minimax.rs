@@ -115,9 +115,7 @@ mod tests {
     fn test_message_stop() {
         let mut adapter = MinimaxAdapter::new("MiniMax-M2");
 
-        let events = adapter
-            .adapt(r#"data: {"type": "message_stop"}"#)
-            .unwrap();
+        let events = adapter.adapt(r#"data: {"type": "message_stop"}"#).unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
             UnifiedStreamEvent::Complete { .. } => {}
@@ -183,9 +181,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         match &events[0] {
             UnifiedStreamEvent::ToolStart {
-                tool_id,
-                tool_name,
-                ..
+                tool_id, tool_name, ..
             } => {
                 assert_eq!(tool_id, "toolu_abc");
                 assert_eq!(tool_name, "Read");
@@ -258,6 +254,9 @@ mod tests {
         let events = adapter
             .adapt(r#"data: {"type": "content_block_stop", "index": 0}"#)
             .unwrap();
-        assert!(events.is_empty(), "After reset, no pending tool should be flushed");
+        assert!(
+            events.is_empty(),
+            "After reset, no pending tool should be flushed"
+        );
     }
 }

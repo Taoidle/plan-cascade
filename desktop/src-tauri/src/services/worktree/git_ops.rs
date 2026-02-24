@@ -61,7 +61,12 @@ impl GitOps {
     }
 
     /// Execute a git command with stdin input piped in.
-    pub fn execute_with_stdin(&self, cwd: &Path, args: &[&str], stdin_data: &[u8]) -> AppResult<GitResult> {
+    pub fn execute_with_stdin(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        stdin_data: &[u8],
+    ) -> AppResult<GitResult> {
         use std::io::Write;
 
         let mut child = Command::new("git")

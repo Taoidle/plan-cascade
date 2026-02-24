@@ -5,8 +5,8 @@
 //! - `checkpointer.rs` - Checkpointer trait and InMemoryCheckpointer
 //! - `checkpoint_store.rs` - SqliteCheckpointer for production persistence
 
-pub mod checkpointer;
 pub mod checkpoint_store;
+pub mod checkpointer;
 
-pub use checkpointer::{Checkpointer, GraphCheckpoint, InMemoryCheckpointer, Interrupt};
 pub use checkpoint_store::SqliteCheckpointer;
+pub use checkpointer::{Checkpointer, GraphCheckpoint, InMemoryCheckpointer, Interrupt};

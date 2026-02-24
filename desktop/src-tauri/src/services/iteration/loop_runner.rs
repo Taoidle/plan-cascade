@@ -1378,8 +1378,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_quality_gate_failure_triggers_retry() {
-        let call_count: Arc<tokio::sync::Mutex<u32>> =
-            Arc::new(tokio::sync::Mutex::new(0));
+        let call_count: Arc<tokio::sync::Mutex<u32>> = Arc::new(tokio::sync::Mutex::new(0));
         let count_clone = call_count.clone();
 
         let gate_runner: QualityGateRunnerFn = Arc::new(move |_ctx: QualityGateContext| {
@@ -1468,8 +1467,7 @@ mod tests {
     #[tokio::test]
     async fn test_quality_gate_not_called_when_gates_disabled() {
         // When run_quality_gates is false, gate runner should NOT be called
-        let call_count: Arc<tokio::sync::Mutex<u32>> =
-            Arc::new(tokio::sync::Mutex::new(0));
+        let call_count: Arc<tokio::sync::Mutex<u32>> = Arc::new(tokio::sync::Mutex::new(0));
         let count_clone = call_count.clone();
 
         let gate_runner: QualityGateRunnerFn = Arc::new(move |_ctx: QualityGateContext| {
@@ -1514,9 +1512,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_quality_gate_events_emitted() {
-        let gate_runner: QualityGateRunnerFn = Arc::new(|_ctx: QualityGateContext| {
-            Box::pin(async { QualityGateResult::pass() })
-        });
+        let gate_runner: QualityGateRunnerFn =
+            Arc::new(|_ctx: QualityGateContext| Box::pin(async { QualityGateResult::pass() }));
 
         let mut prd = Prd::new("Test PRD");
         prd.add_story(Story::new("S001", "Gate Events Story"));
@@ -1548,11 +1545,16 @@ mod tests {
         }
 
         // Should have QualityGatesStarted and QualityGatesCompleted events
-        let gate_started = events.iter().any(|e| matches!(e, IterationEvent::QualityGatesStarted { story_id } if story_id == "S001"));
+        let gate_started = events.iter().any(
+            |e| matches!(e, IterationEvent::QualityGatesStarted { story_id } if story_id == "S001"),
+        );
         let gate_completed = events.iter().any(|e| matches!(e, IterationEvent::QualityGatesCompleted { story_id, passed } if story_id == "S001" && *passed));
 
         assert!(gate_started, "Expected QualityGatesStarted event for S001");
-        assert!(gate_completed, "Expected QualityGatesCompleted(passed=true) event for S001");
+        assert!(
+            gate_completed,
+            "Expected QualityGatesCompleted(passed=true) event for S001"
+        );
 
         rx.close();
     }

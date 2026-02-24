@@ -266,6 +266,10 @@ export interface StandaloneTurn {
   user: string;
   assistant: string;
   createdAt: number;
+  metadata?: {
+    source?: string;
+    type?: string;
+  };
 }
 
 interface LegacyTaskStartData {

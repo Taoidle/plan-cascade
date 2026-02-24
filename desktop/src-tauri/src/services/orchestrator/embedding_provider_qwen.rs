@@ -226,11 +226,13 @@ impl QwenEmbeddingProvider {
         let status_code = status.as_u16();
 
         // Read the response body
-        let response_text = http_response.text().await.map_err(|e| {
-            EmbeddingError::NetworkError {
-                message: format!("failed to read DashScope response body: {}", e),
-            }
-        })?;
+        let response_text =
+            http_response
+                .text()
+                .await
+                .map_err(|e| EmbeddingError::NetworkError {
+                    message: format!("failed to read DashScope response body: {}", e),
+                })?;
 
         // Check for HTTP-level errors first
         if !status.is_success() {
@@ -422,7 +424,6 @@ impl QwenEmbeddingProvider {
             },
         }
     }
-
 }
 
 #[async_trait]
@@ -456,9 +457,12 @@ impl EmbeddingProvider for QwenEmbeddingProvider {
         );
 
         let results = self.call_dashscope(&[query], "query").await?;
-        results.into_iter().next().ok_or_else(|| EmbeddingError::ParseError {
-            message: "DashScope returned empty embeddings for query".to_string(),
-        })
+        results
+            .into_iter()
+            .next()
+            .ok_or_else(|| EmbeddingError::ParseError {
+                message: "DashScope returned empty embeddings for query".to_string(),
+            })
     }
 
     fn dimension(&self) -> usize {
@@ -739,7 +743,13 @@ mod tests {
     fn map_http_error_500() {
         let provider = QwenEmbeddingProvider::new(&default_config());
         let err = provider.map_http_error(500, "Internal Server Error");
-        assert!(matches!(err, EmbeddingError::ServerError { status: Some(500), .. }));
+        assert!(matches!(
+            err,
+            EmbeddingError::ServerError {
+                status: Some(500),
+                ..
+            }
+        ));
         assert!(err.is_retryable());
     }
 
@@ -957,11 +967,7 @@ mod tests {
         let provider = QwenEmbeddingProvider::new(&config);
         let docs = vec!["hello world", "foo bar baz", "rust programming language"];
         let result = provider.embed_documents(&docs).await;
-        assert!(
-            result.is_ok(),
-            "embed_documents failed: {:?}",
-            result.err()
-        );
+        assert!(result.is_ok(), "embed_documents failed: {:?}", result.err());
 
         let embeddings = result.unwrap();
         assert_eq!(embeddings.len(), 3);

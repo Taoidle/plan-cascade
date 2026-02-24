@@ -116,18 +116,8 @@ pub fn generate_typescript(workflow: &GraphWorkflow) -> String {
                 branches,
                 default_branch,
             } => {
-                writeln!(
-                    out,
-                    "graph.addConditionalEdge(\"{}\", (state) => {{",
-                    from
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "  switch (state[\"{}\"])",
-                    condition.condition_key
-                )
-                .unwrap();
+                writeln!(out, "graph.addConditionalEdge(\"{}\", (state) => {{", from).unwrap();
+                writeln!(out, "  switch (state[\"{}\"])", condition.condition_key).unwrap();
                 writeln!(out, "  {{").unwrap();
 
                 // Sort branch keys for deterministic output
@@ -204,10 +194,8 @@ fn write_typescript_agent_definition(out: &mut String, node_id: &str, step: &Age
             writeln!(out, "  conditionKey: \"{}\",", condition_key).unwrap();
             let mut branch_keys: Vec<&String> = branches.keys().collect();
             branch_keys.sort();
-            let branch_strs: Vec<String> = branch_keys
-                .iter()
-                .map(|k| format!("\"{}\"", k))
-                .collect();
+            let branch_strs: Vec<String> =
+                branch_keys.iter().map(|k| format!("\"{}\"", k)).collect();
             writeln!(out, "  branches: [{}],", branch_strs.join(", ")).unwrap();
             writeln!(out, "}});").unwrap();
         }
@@ -335,34 +323,24 @@ pub fn generate_rust(workflow: &GraphWorkflow) -> String {
 
             // Interrupt-point comments
             if node.interrupt_before {
-                writeln!(
-                    out,
-                    "    // INTERRUPT: pause before node \"{}\"",
-                    node_id
-                )
-                .unwrap();
+                writeln!(out, "    // INTERRUPT: pause before node \"{}\"", node_id).unwrap();
             }
 
-            writeln!(out, "    nodes.insert(\"{}\".to_string(), GraphNode {{", node_id).unwrap();
+            writeln!(
+                out,
+                "    nodes.insert(\"{}\".to_string(), GraphNode {{",
+                node_id
+            )
+            .unwrap();
             writeln!(out, "        id: \"{}\".to_string(),", node_id).unwrap();
             write_rust_agent_step(&mut out, &node.agent_step, "        ");
             writeln!(out, "        position: None,").unwrap();
-            writeln!(
-                out,
-                "        interrupt_before: {},",
-                node.interrupt_before
-            )
-            .unwrap();
+            writeln!(out, "        interrupt_before: {},", node.interrupt_before).unwrap();
             writeln!(out, "        interrupt_after: {},", node.interrupt_after).unwrap();
             writeln!(out, "    }});").unwrap();
 
             if node.interrupt_after {
-                writeln!(
-                    out,
-                    "    // INTERRUPT: pause after node \"{}\"",
-                    node_id
-                )
-                .unwrap();
+                writeln!(out, "    // INTERRUPT: pause after node \"{}\"", node_id).unwrap();
             }
         }
     }
@@ -441,12 +419,7 @@ pub fn generate_rust(workflow: &GraphWorkflow) -> String {
     writeln!(out, "        name: \"{}\".to_string(),", workflow.name).unwrap();
     match &workflow.description {
         Some(desc) => {
-            writeln!(
-                out,
-                "        description: Some(\"{}\".to_string()),",
-                desc
-            )
-            .unwrap();
+            writeln!(out, "        description: Some(\"{}\".to_string()),", desc).unwrap();
         }
         None => {
             writeln!(out, "        description: None,").unwrap();
@@ -471,7 +444,12 @@ pub fn generate_rust(workflow: &GraphWorkflow) -> String {
 fn write_rust_agent_step(out: &mut String, step: &AgentStep, indent: &str) {
     match step {
         AgentStep::LlmStep(config) => {
-            writeln!(out, "{}agent_step: AgentStep::LlmStep(LlmStepConfig {{", indent).unwrap();
+            writeln!(
+                out,
+                "{}agent_step: AgentStep::LlmStep(LlmStepConfig {{",
+                indent
+            )
+            .unwrap();
             writeln!(out, "{}    name: \"{}\".to_string(),", indent, config.name).unwrap();
             match &config.instruction {
                 Some(instruction) => {
@@ -488,12 +466,7 @@ fn write_rust_agent_step(out: &mut String, step: &AgentStep, indent: &str) {
             }
             match &config.model {
                 Some(model) => {
-                    writeln!(
-                        out,
-                        "{}    model: Some(\"{}\".to_string()),",
-                        indent, model
-                    )
-                    .unwrap();
+                    writeln!(out, "{}    model: Some(\"{}\".to_string()),", indent, model).unwrap();
                 }
                 None => {
                     writeln!(out, "{}    model: None,", indent).unwrap();
@@ -504,20 +477,27 @@ fn write_rust_agent_step(out: &mut String, step: &AgentStep, indent: &str) {
             writeln!(out, "{}}}),", indent).unwrap();
         }
         AgentStep::SequentialStep { name, steps } => {
+            writeln!(out, "{}agent_step: AgentStep::SequentialStep {{", indent).unwrap();
+            writeln!(out, "{}    name: \"{}\".to_string(),", indent, name).unwrap();
             writeln!(
                 out,
-                "{}agent_step: AgentStep::SequentialStep {{",
-                indent
+                "{}    steps: vec![/* {} sub-steps */],",
+                indent,
+                steps.len()
             )
             .unwrap();
-            writeln!(out, "{}    name: \"{}\".to_string(),", indent, name).unwrap();
-            writeln!(out, "{}    steps: vec![/* {} sub-steps */],", indent, steps.len()).unwrap();
             writeln!(out, "{}}},", indent).unwrap();
         }
         AgentStep::ParallelStep { name, steps } => {
             writeln!(out, "{}agent_step: AgentStep::ParallelStep {{", indent).unwrap();
             writeln!(out, "{}    name: \"{}\".to_string(),", indent, name).unwrap();
-            writeln!(out, "{}    steps: vec![/* {} sub-steps */],", indent, steps.len()).unwrap();
+            writeln!(
+                out,
+                "{}    steps: vec![/* {} sub-steps */],",
+                indent,
+                steps.len()
+            )
+            .unwrap();
             writeln!(out, "{}}},", indent).unwrap();
         }
         AgentStep::ConditionalStep {
@@ -526,12 +506,7 @@ fn write_rust_agent_step(out: &mut String, step: &AgentStep, indent: &str) {
             branches,
             default_branch: _,
         } => {
-            writeln!(
-                out,
-                "{}agent_step: AgentStep::ConditionalStep {{",
-                indent
-            )
-            .unwrap();
+            writeln!(out, "{}agent_step: AgentStep::ConditionalStep {{", indent).unwrap();
             writeln!(out, "{}    name: \"{}\".to_string(),", indent, name).unwrap();
             writeln!(
                 out,
@@ -539,8 +514,13 @@ fn write_rust_agent_step(out: &mut String, step: &AgentStep, indent: &str) {
                 indent, condition_key
             )
             .unwrap();
-            writeln!(out, "{}    branches: HashMap::new(), // {} branches", indent, branches.len())
-                .unwrap();
+            writeln!(
+                out,
+                "{}    branches: HashMap::new(), // {} branches",
+                indent,
+                branches.len()
+            )
+            .unwrap();
             writeln!(out, "{}    default_branch: None,", indent).unwrap();
             writeln!(out, "{}}},", indent).unwrap();
         }
@@ -649,7 +629,13 @@ fn write_rust_state_schema(out: &mut String, schema: &StateSchema) {
 fn agent_step_var_name(node_id: &str) -> String {
     let sanitized: String = node_id
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("agent_{}", sanitized)
 }
@@ -835,21 +821,33 @@ mod tests {
 
         // Import statement
         assert!(
-            ts.contains("import { GraphWorkflow, AgentNode, Edge, StateSchema } from \"plan-cascade\";"),
+            ts.contains(
+                "import { GraphWorkflow, AgentNode, Edge, StateSchema } from \"plan-cascade\";"
+            ),
             "Missing import statement"
         );
 
         // Workflow comment
-        assert!(ts.contains("// Workflow: Direct Flow"), "Missing workflow name comment");
+        assert!(
+            ts.contains("// Workflow: Direct Flow"),
+            "Missing workflow name comment"
+        );
         assert!(
             ts.contains("// A simple two-node flow"),
             "Missing workflow description comment"
         );
 
         // Agent definitions — sorted by ID: a before b
-        let pos_a = ts.find("const agent_a =").expect("Missing agent_a definition");
-        let pos_b = ts.find("const agent_b =").expect("Missing agent_b definition");
-        assert!(pos_a < pos_b, "Nodes not sorted by ID: a should come before b");
+        let pos_a = ts
+            .find("const agent_a =")
+            .expect("Missing agent_a definition");
+        let pos_b = ts
+            .find("const agent_b =")
+            .expect("Missing agent_b definition");
+        assert!(
+            pos_a < pos_b,
+            "Nodes not sorted by ID: a should come before b"
+        );
 
         // Agent a properties
         assert!(ts.contains("name: \"agent-a\""), "Missing agent-a name");
@@ -898,12 +896,21 @@ mod tests {
         );
 
         // State schema
-        assert!(ts.contains("const stateSchema: StateSchema = {"), "Missing state schema");
-        assert!(ts.contains("\"messages\": { type: \"array\", default: [] }"), "Missing channel");
+        assert!(
+            ts.contains("const stateSchema: StateSchema = {"),
+            "Missing state schema"
+        );
+        assert!(
+            ts.contains("\"messages\": { type: \"array\", default: [] }"),
+            "Missing channel"
+        );
         assert!(ts.contains("\"messages\": \"append\""), "Missing reducer");
 
         // Invocation
-        assert!(ts.contains("const app = graph.compile();"), "Missing compile");
+        assert!(
+            ts.contains("const app = graph.compile();"),
+            "Missing compile"
+        );
         assert!(ts.contains("await app.invoke({});"), "Missing invoke");
     }
 
@@ -999,7 +1006,9 @@ mod tests {
             "Missing HashMap use"
         );
         assert!(
-            rs.contains("use plan_cascade_core::graph::{GraphWorkflow, GraphNode, Edge, ConditionConfig};"),
+            rs.contains(
+                "use plan_cascade_core::graph::{GraphWorkflow, GraphNode, Edge, ConditionConfig};"
+            ),
             "Missing graph use"
         );
         assert!(
@@ -1034,7 +1043,10 @@ mod tests {
         let pos_b = rs
             .find("nodes.insert(\"b\".to_string()")
             .expect("Missing node b insertion");
-        assert!(pos_a < pos_b, "Nodes not sorted by ID: a should come before b");
+        assert!(
+            pos_a < pos_b,
+            "Nodes not sorted by ID: a should come before b"
+        );
 
         // Agent step for node a
         assert!(
@@ -1068,10 +1080,7 @@ mod tests {
         );
 
         // Direct edge
-        assert!(
-            rs.contains("Edge::Direct {"),
-            "Missing Direct edge variant"
-        );
+        assert!(rs.contains("Edge::Direct {"), "Missing Direct edge variant");
         assert!(
             rs.contains("from: \"a\".to_string()"),
             "Missing edge from field"
@@ -1086,10 +1095,7 @@ mod tests {
             rs.contains("channel_type: \"array\".to_string()"),
             "Missing channel type"
         );
-        assert!(
-            rs.contains("Reducer::Append"),
-            "Missing Append reducer"
-        );
+        assert!(rs.contains("Reducer::Append"), "Missing Append reducer");
 
         // GraphWorkflow struct
         assert!(
@@ -1195,10 +1201,7 @@ mod tests {
         );
 
         // Description is None
-        assert!(
-            rs.contains("description: None"),
-            "Missing None description"
-        );
+        assert!(rs.contains("description: None"), "Missing None description");
 
         // Entry node
         assert!(
@@ -1229,10 +1232,7 @@ mod tests {
     fn test_generate_typescript_conditional_step_node() {
         let mut nodes = HashMap::new();
         let mut branches = HashMap::new();
-        branches.insert(
-            "yes".to_string(),
-            sample_llm_step("yes-handler"),
-        );
+        branches.insert("yes".to_string(), sample_llm_step("yes-handler"));
 
         nodes.insert(
             "cond".to_string(),
@@ -1260,8 +1260,14 @@ mod tests {
         };
 
         let ts = generate_typescript(&workflow);
-        assert!(ts.contains("type: \"conditional\""), "Missing conditional type");
-        assert!(ts.contains("conditionKey: \"decision\""), "Missing conditionKey");
+        assert!(
+            ts.contains("type: \"conditional\""),
+            "Missing conditional type"
+        );
+        assert!(
+            ts.contains("conditionKey: \"decision\""),
+            "Missing conditionKey"
+        );
         assert!(ts.contains("branches: [\"yes\"]"), "Missing branches array");
     }
 
@@ -1269,10 +1275,7 @@ mod tests {
     fn test_generate_rust_conditional_step_node() {
         let mut nodes = HashMap::new();
         let mut branches = HashMap::new();
-        branches.insert(
-            "yes".to_string(),
-            sample_llm_step("yes-handler"),
-        );
+        branches.insert("yes".to_string(), sample_llm_step("yes-handler"));
 
         nodes.insert(
             "cond".to_string(),
@@ -1300,11 +1303,17 @@ mod tests {
         };
 
         let rs = generate_rust(&workflow);
-        assert!(rs.contains("AgentStep::ConditionalStep"), "Missing ConditionalStep");
+        assert!(
+            rs.contains("AgentStep::ConditionalStep"),
+            "Missing ConditionalStep"
+        );
         assert!(
             rs.contains("condition_key: \"decision\".to_string()"),
             "Missing condition_key"
         );
-        assert!(rs.contains("// 1 branches"), "Missing branches count comment");
+        assert!(
+            rs.contains("// 1 branches"),
+            "Missing branches count comment"
+        );
     }
 }

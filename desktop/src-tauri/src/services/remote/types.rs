@@ -587,10 +587,7 @@ mod tests {
         let parsed: RemoteSessionMapping = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.chat_id, 123456789);
         assert_eq!(parsed.user_id, 111222333);
-        assert_eq!(
-            parsed.local_session_id,
-            Some("session-abc-123".to_string())
-        );
+        assert_eq!(parsed.local_session_id, Some("session-abc-123".to_string()));
     }
 
     #[test]

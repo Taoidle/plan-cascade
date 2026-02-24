@@ -134,9 +134,7 @@ impl IndexStore {
 
         // Collect old symbol rowids before deleting (for FTS cleanup)
         let old_symbol_ids: Vec<i64> = {
-            let mut id_stmt = tx.prepare(
-                "SELECT id FROM file_symbols WHERE file_index_id = ?1",
-            )?;
+            let mut id_stmt = tx.prepare("SELECT id FROM file_symbols WHERE file_index_id = ?1")?;
             let mapped = id_stmt
                 .query_map(params![file_index_id], |row| row.get::<_, i64>(0))?
                 .filter_map(|r| r.ok())
@@ -147,9 +145,7 @@ impl IndexStore {
         // Delete old FTS entries for these symbols (contentless mode: DELETE by rowid)
         if !old_symbol_ids.is_empty() {
             {
-                let mut fts_del = tx.prepare(
-                    "DELETE FROM symbol_fts WHERE rowid = ?1",
-                )?;
+                let mut fts_del = tx.prepare("DELETE FROM symbol_fts WHERE rowid = ?1")?;
                 for id in &old_symbol_ids {
                     let _ = fts_del.execute(params![id]);
                 }
@@ -424,9 +420,7 @@ impl IndexStore {
 
         // Collect file_index IDs and symbol IDs for FTS cleanup before deletion
         let file_ids: Vec<i64> = {
-            let mut stmt = tx.prepare(
-                "SELECT id FROM file_index WHERE project_path = ?1",
-            )?;
+            let mut stmt = tx.prepare("SELECT id FROM file_index WHERE project_path = ?1")?;
             let mapped = stmt
                 .query_map(params![project_path], |row| row.get::<_, i64>(0))?
                 .filter_map(|r| r.ok())
@@ -437,12 +431,9 @@ impl IndexStore {
         // Delete symbol_fts and filepath_fts entries
         if !file_ids.is_empty() {
             {
-                let mut sym_id_stmt = tx.prepare(
-                    "SELECT id FROM file_symbols WHERE file_index_id = ?1",
-                )?;
-                let mut fts_del = tx.prepare(
-                    "DELETE FROM symbol_fts WHERE rowid = ?1",
-                )?;
+                let mut sym_id_stmt =
+                    tx.prepare("SELECT id FROM file_symbols WHERE file_index_id = ?1")?;
+                let mut fts_del = tx.prepare("DELETE FROM symbol_fts WHERE rowid = ?1")?;
                 for file_id in &file_ids {
                     let sym_ids: Vec<i64> = sym_id_stmt
                         .query_map(params![file_id], |row| row.get::<_, i64>(0))?
@@ -456,9 +447,7 @@ impl IndexStore {
 
             // Delete filepath_fts entries (by file_index rowids)
             {
-                let mut fp_del = tx.prepare(
-                    "DELETE FROM filepath_fts WHERE rowid = ?1",
-                )?;
+                let mut fp_del = tx.prepare("DELETE FROM filepath_fts WHERE rowid = ?1")?;
                 for file_id in &file_ids {
                     let _ = fp_del.execute(params![file_id]);
                 }
@@ -497,7 +486,9 @@ impl IndexStore {
             "SELECT file_path FROM file_index WHERE project_path = ?1 AND file_path LIKE ?2",
         )?;
         let paths = stmt
-            .query_map(params![project_path, pattern], |row| row.get::<_, String>(0))?
+            .query_map(params![project_path, pattern], |row| {
+                row.get::<_, String>(0)
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(paths)
@@ -509,9 +500,7 @@ impl IndexStore {
     /// difference between currently-existing files and indexed files.
     pub fn get_indexed_file_paths(&self, project_path: &str) -> AppResult<Vec<String>> {
         let conn = self.get_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT file_path FROM file_index WHERE project_path = ?1",
-        )?;
+        let mut stmt = conn.prepare("SELECT file_path FROM file_index WHERE project_path = ?1")?;
         let paths = stmt
             .query_map(params![project_path], |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
@@ -588,9 +577,8 @@ impl IndexStore {
         // Collect symbol IDs and delete their FTS entries.
         {
             let symbol_ids: Vec<i64> = {
-                let mut stmt = tx.prepare(
-                    "SELECT id FROM file_symbols WHERE file_index_id = ?1",
-                )?;
+                let mut stmt =
+                    tx.prepare("SELECT id FROM file_symbols WHERE file_index_id = ?1")?;
                 let mapped = stmt
                     .query_map(params![file_index_id], |row| row.get::<_, i64>(0))?
                     .filter_map(|r| r.ok())
@@ -955,10 +943,7 @@ impl IndexStore {
     /// Returns a list of distinct `(provider_type, provider_model, embedding_dimension)`
     /// combinations found in the stored embeddings. Useful for checking compatibility
     /// when deciding whether to re-embed or reuse existing vectors.
-    pub fn get_embedding_metadata(
-        &self,
-        project_path: &str,
-    ) -> AppResult<Vec<EmbeddingMetadata>> {
+    pub fn get_embedding_metadata(&self, project_path: &str) -> AppResult<Vec<EmbeddingMetadata>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
             "SELECT DISTINCT provider_type, provider_model, embedding_dimension
@@ -1066,9 +1051,8 @@ impl IndexStore {
     ) -> AppResult<Vec<(usize, Vec<f32>)>> {
         let conn = self.get_connection()?;
 
-        let mut stmt = conn.prepare(
-            "SELECT rowid, embedding FROM file_embeddings WHERE project_path = ?1",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT rowid, embedding FROM file_embeddings WHERE project_path = ?1")?;
 
         let rows: Vec<(usize, Vec<f32>)> = stmt
             .query_map(params![project_path], |row| {
@@ -1085,10 +1069,7 @@ impl IndexStore {
     /// Retrieve chunk metadata (file_path, chunk_text) for a given ROWID.
     ///
     /// Used by HNSW search to fetch display data for matched embedding IDs.
-    pub fn get_embedding_by_rowid(
-        &self,
-        rowid: usize,
-    ) -> AppResult<Option<(String, i64, String)>> {
+    pub fn get_embedding_by_rowid(&self, rowid: usize) -> AppResult<Option<(String, i64, String)>> {
         let conn = self.get_connection()?;
 
         let result = conn.query_row(
@@ -1213,11 +1194,7 @@ impl IndexStore {
     /// Returns up to `limit` results.
     ///
     /// Returns an empty Vec for empty queries without error.
-    pub fn fts_search_symbols(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> AppResult<Vec<SymbolMatch>> {
+    pub fn fts_search_symbols(&self, query: &str, limit: usize) -> AppResult<Vec<SymbolMatch>> {
         let sanitized = sanitize_fts_query(query);
         if sanitized.is_empty() {
             return Ok(Vec::new());
@@ -2926,10 +2903,14 @@ mod tests {
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         // Verify FTS has entries for these symbols
-        assert!(fts_symbol_count(&store, "\"UserController\"*") > 0,
-            "UserController should be in symbol_fts");
-        assert!(fts_symbol_count(&store, "\"handle_request\"*") > 0,
-            "handle_request should be in symbol_fts");
+        assert!(
+            fts_symbol_count(&store, "\"UserController\"*") > 0,
+            "UserController should be in symbol_fts"
+        );
+        assert!(
+            fts_symbol_count(&store, "\"handle_request\"*") > 0,
+            "handle_request should be in symbol_fts"
+        );
     }
 
     #[test]
@@ -2939,8 +2920,10 @@ mod tests {
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         // Verify FTS has entry for this file path
-        assert!(fts_filepath_count(&store, "\"auth\"*") > 0,
-            "auth should be in filepath_fts");
+        assert!(
+            fts_filepath_count(&store, "\"auth\"*") > 0,
+            "auth should be in filepath_fts"
+        );
     }
 
     #[test]
@@ -2952,7 +2935,11 @@ mod tests {
             "src/service.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("old_function".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "old_function".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         store.upsert_file_index("/project", &item_v1, "h1").unwrap();
         assert!(fts_symbol_count(&store, "\"old_function\"*") > 0);
@@ -2962,15 +2949,24 @@ mod tests {
             "src/service.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("new_function".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "new_function".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         store.upsert_file_index("/project", &item_v2, "h2").unwrap();
 
         // Old symbol should be gone from FTS, new one present
-        assert_eq!(fts_symbol_count(&store, "\"old_function\"*"), 0,
-            "old_function should be removed from symbol_fts after update");
-        assert!(fts_symbol_count(&store, "\"new_function\"*") > 0,
-            "new_function should be in symbol_fts after update");
+        assert_eq!(
+            fts_symbol_count(&store, "\"old_function\"*"),
+            0,
+            "old_function should be removed from symbol_fts after update"
+        );
+        assert!(
+            fts_symbol_count(&store, "\"new_function\"*") > 0,
+            "new_function should be in symbol_fts after update"
+        );
     }
 
     #[test]
@@ -2981,7 +2977,11 @@ mod tests {
             "src/main.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "main".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
@@ -2993,10 +2993,16 @@ mod tests {
         store.delete_project_index("/project").unwrap();
 
         // FTS entries should be cleared
-        assert_eq!(fts_symbol_count(&store, "\"main\"*"), 0,
-            "symbol_fts should be cleared after delete_project_index");
-        assert_eq!(fts_filepath_count(&store, "\"main\"*"), 0,
-            "filepath_fts should be cleared after delete_project_index");
+        assert_eq!(
+            fts_symbol_count(&store, "\"main\"*"),
+            0,
+            "symbol_fts should be cleared after delete_project_index"
+        );
+        assert_eq!(
+            fts_filepath_count(&store, "\"main\"*"),
+            0,
+            "filepath_fts should be cleared after delete_project_index"
+        );
     }
 
     #[test]
@@ -3007,25 +3013,42 @@ mod tests {
             "src/main.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("main_a".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "main_a".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         let item_b = make_item(
             "src/main.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("main_b".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "main_b".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
 
-        store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
-        store.upsert_file_index("/project-b", &item_b, "hb").unwrap();
+        store
+            .upsert_file_index("/project-a", &item_a, "ha")
+            .unwrap();
+        store
+            .upsert_file_index("/project-b", &item_b, "hb")
+            .unwrap();
 
         // Delete project-a should only remove its FTS entries
         store.delete_project_index("/project-a").unwrap();
 
-        assert_eq!(fts_symbol_count(&store, "\"main_a\"*"), 0,
-            "main_a should be removed from symbol_fts");
-        assert!(fts_symbol_count(&store, "\"main_b\"*") > 0,
-            "main_b should remain in symbol_fts");
+        assert_eq!(
+            fts_symbol_count(&store, "\"main_a\"*"),
+            0,
+            "main_a should be removed from symbol_fts"
+        );
+        assert!(
+            fts_symbol_count(&store, "\"main_b\"*") > 0,
+            "main_b should remain in symbol_fts"
+        );
     }
 
     // =========================================================================
@@ -3077,7 +3100,11 @@ mod tests {
             "src/handler.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("request_handler".to_string(), SymbolKind::Struct, 1)],
+            vec![SymbolInfo::basic(
+                "request_handler".to_string(),
+                SymbolKind::Struct,
+                1,
+            )],
         );
 
         store.upsert_file_index("/project", &item1, "h1").unwrap();
@@ -3104,14 +3131,21 @@ mod tests {
             "src/service.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("user_controller".to_string(), SymbolKind::Struct, 1)],
+            vec![SymbolInfo::basic(
+                "user_controller".to_string(),
+                SymbolKind::Struct,
+                1,
+            )],
         );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         // "user" should match "user_controller" via prefix matching
         // (with tokenchars='_', user_controller is a single token; "user"* matches prefix)
         let results = store.fts_search_symbols("user", 10).unwrap();
-        assert!(!results.is_empty(), "Prefix 'user' should match 'user_controller'");
+        assert!(
+            !results.is_empty(),
+            "Prefix 'user' should match 'user_controller'"
+        );
         assert_eq!(results[0].symbol_name, "user_controller");
     }
 
@@ -3123,12 +3157,19 @@ mod tests {
             "src/main.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "main".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         let results = store.fts_search_symbols("", 10).unwrap();
-        assert!(results.is_empty(), "Empty query should return empty results");
+        assert!(
+            results.is_empty(),
+            "Empty query should return empty results"
+        );
     }
 
     #[test]
@@ -3138,11 +3179,19 @@ mod tests {
         let item_a = make_item("src/auth.rs", "backend", "rust", vec![]);
         let item_b = make_item("src/auth.rs", "backend", "rust", vec![]);
 
-        store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
-        store.upsert_file_index("/project-b", &item_b, "hb").unwrap();
+        store
+            .upsert_file_index("/project-a", &item_a, "ha")
+            .unwrap();
+        store
+            .upsert_file_index("/project-b", &item_b, "hb")
+            .unwrap();
 
         let results = store.fts_search_files("auth", "/project-a", 10).unwrap();
-        assert_eq!(results.len(), 1, "Should find exactly one match for project-a");
+        assert_eq!(
+            results.len(),
+            1,
+            "Should find exactly one match for project-a"
+        );
         assert_eq!(results[0].project_path, "/project-a");
     }
 
@@ -3154,7 +3203,10 @@ mod tests {
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         let results = store.fts_search_files("", "/project", 10).unwrap();
-        assert!(results.is_empty(), "Empty query should return empty results");
+        assert!(
+            results.is_empty(),
+            "Empty query should return empty results"
+        );
     }
 
     #[test]
@@ -3165,7 +3217,11 @@ mod tests {
             "src/main.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("main".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "main".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
@@ -3317,7 +3373,11 @@ mod tests {
             "src/app.py",
             "backend",
             "python",
-            vec![SymbolInfo::basic("py_fn".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "py_fn".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         store.upsert_file_index("/test", &item2, "h2").unwrap();
 
@@ -3367,7 +3427,10 @@ mod tests {
         }
 
         let refs = store.get_cross_references("/test", "src/main.rs").unwrap();
-        assert!(refs.is_empty(), "cross_references should be empty after clear");
+        assert!(
+            refs.is_empty(),
+            "cross_references should be empty after clear"
+        );
     }
 
     #[test]
@@ -3375,7 +3438,12 @@ mod tests {
         let store = create_test_store();
 
         store
-            .upsert_lsp_server("rust", "/usr/bin/rust-analyzer", "rust-analyzer", Some("v1.0"))
+            .upsert_lsp_server(
+                "rust",
+                "/usr/bin/rust-analyzer",
+                "rust-analyzer",
+                Some("v1.0"),
+            )
             .unwrap();
 
         let servers = store.get_lsp_servers().unwrap();
@@ -3411,7 +3479,12 @@ mod tests {
             .upsert_lsp_server("go", "/usr/bin/gopls", "gopls", None)
             .unwrap();
         store
-            .upsert_lsp_server("rust", "/usr/bin/rust-analyzer", "rust-analyzer", Some("v1"))
+            .upsert_lsp_server(
+                "rust",
+                "/usr/bin/rust-analyzer",
+                "rust-analyzer",
+                Some("v1"),
+            )
             .unwrap();
 
         let servers = store.get_lsp_servers().unwrap();
@@ -3433,13 +3506,21 @@ mod tests {
             "src/a.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("fn_a".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "fn_a".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         let item_b = make_item(
             "src/b.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("fn_b".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "fn_b".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         store.upsert_file_index("/project", &item_a, "ha").unwrap();
         store.upsert_file_index("/project", &item_b, "hb").unwrap();
@@ -3468,14 +3549,20 @@ mod tests {
             "src/target.rs",
             "backend",
             "rust",
-            vec![SymbolInfo::basic("target_fn".to_string(), SymbolKind::Function, 1)],
+            vec![SymbolInfo::basic(
+                "target_fn".to_string(),
+                SymbolKind::Function,
+                1,
+            )],
         );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         assert!(fts_symbol_count(&store, "\"target_fn\"*") > 0);
         assert!(fts_filepath_count(&store, "\"target\"*") > 0);
 
-        store.delete_file_index("/project", "src/target.rs").unwrap();
+        store
+            .delete_file_index("/project", "src/target.rs")
+            .unwrap();
 
         assert_eq!(fts_symbol_count(&store, "\"target_fn\"*"), 0);
         assert_eq!(fts_filepath_count(&store, "\"target\"*"), 0);

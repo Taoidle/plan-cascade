@@ -27,9 +27,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::services::memory::store::ProjectMemoryStore;
 use crate::services::memory::retrieval::search_memories;
-use crate::services::memory::store::{MemorySearchRequest, NewMemoryEntry, MemoryCategory};
+use crate::services::memory::store::ProjectMemoryStore;
+use crate::services::memory::store::{MemoryCategory, MemorySearchRequest, NewMemoryEntry};
 use crate::services::skills::model::{InjectionPhase, SelectionPolicy, SkillIndex, SkillMatch};
 use crate::services::skills::select::select_skills_for_session;
 
@@ -86,20 +86,26 @@ impl Default for BeforeToolResult {
 // ============================================================================
 
 /// Hook fired at session start. Receives session context.
-pub type OnSessionStartHook =
-    Box<dyn Fn(HookContext) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync>;
+pub type OnSessionStartHook = Box<
+    dyn Fn(HookContext) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync,
+>;
 
 /// Hook fired on user message. Returns Option<modified_message>.
 /// If None, the original message is used unchanged.
 pub type OnUserMessageHook = Box<
-    dyn Fn(HookContext, String) -> Pin<Box<dyn Future<Output = Result<Option<String>, String>> + Send>>
+    dyn Fn(
+            HookContext,
+            String,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, String>> + Send>>
         + Send
         + Sync,
 >;
 
 /// Hook fired before each LLM call. Receives current iteration count.
 pub type OnBeforeLlmHook = Box<
-    dyn Fn(HookContext, u32) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync,
+    dyn Fn(HookContext, u32) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+        + Send
+        + Sync,
 >;
 
 /// Hook fired after each LLM response. Receives the response text (if any).
@@ -111,14 +117,23 @@ pub type OnAfterLlmHook = Box<
 
 /// Hook fired before tool execution. Returns BeforeToolResult to optionally skip.
 pub type OnBeforeToolHook = Box<
-    dyn Fn(HookContext, String, String) -> Pin<Box<dyn Future<Output = Result<BeforeToolResult, String>> + Send>>
+    dyn Fn(
+            HookContext,
+            String,
+            String,
+        ) -> Pin<Box<dyn Future<Output = Result<BeforeToolResult, String>> + Send>>
         + Send
         + Sync,
 >;
 
 /// Hook fired after tool execution. Receives tool name, success flag, and output snippet.
 pub type OnAfterToolHook = Box<
-    dyn Fn(HookContext, String, bool, Option<String>) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+    dyn Fn(
+            HookContext,
+            String,
+            bool,
+            Option<String>,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
         + Send
         + Sync,
 >;
@@ -265,10 +280,7 @@ impl AgenticHooks {
     pub async fn fire_on_session_start(&self, ctx: &HookContext) {
         for (i, hook) in self.on_session_start.iter().enumerate() {
             if let Err(e) = hook(ctx.clone()).await {
-                eprintln!(
-                    "[hooks] on_session_start hook {} failed: {}",
-                    i, e
-                );
+                eprintln!("[hooks] on_session_start hook {} failed: {}", i, e);
             }
         }
     }
@@ -278,11 +290,7 @@ impl AgenticHooks {
     /// Each hook can optionally modify the message. If a hook returns
     /// `Ok(Some(modified))`, the modified message is passed to subsequent
     /// hooks and ultimately used in place of the original.
-    pub async fn fire_on_user_message(
-        &self,
-        ctx: &HookContext,
-        message: String,
-    ) -> String {
+    pub async fn fire_on_user_message(&self, ctx: &HookContext, message: String) -> String {
         let mut current_message = message;
         for (i, hook) in self.on_user_message.iter().enumerate() {
             match hook(ctx.clone(), current_message.clone()).await {
@@ -293,10 +301,7 @@ impl AgenticHooks {
                     // No modification
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[hooks] on_user_message hook {} failed: {}",
-                        i, e
-                    );
+                    eprintln!("[hooks] on_user_message hook {} failed: {}", i, e);
                 }
             }
         }
@@ -307,26 +312,16 @@ impl AgenticHooks {
     pub async fn fire_on_before_llm(&self, ctx: &HookContext, iteration: u32) {
         for (i, hook) in self.on_before_llm.iter().enumerate() {
             if let Err(e) = hook(ctx.clone(), iteration).await {
-                eprintln!(
-                    "[hooks] on_before_llm hook {} failed: {}",
-                    i, e
-                );
+                eprintln!("[hooks] on_before_llm hook {} failed: {}", i, e);
             }
         }
     }
 
     /// Fire all on_after_llm hooks sequentially.
-    pub async fn fire_on_after_llm(
-        &self,
-        ctx: &HookContext,
-        response_text: Option<String>,
-    ) {
+    pub async fn fire_on_after_llm(&self, ctx: &HookContext, response_text: Option<String>) {
         for (i, hook) in self.on_after_llm.iter().enumerate() {
             if let Err(e) = hook(ctx.clone(), response_text.clone()).await {
-                eprintln!(
-                    "[hooks] on_after_llm hook {} failed: {}",
-                    i, e
-                );
+                eprintln!("[hooks] on_after_llm hook {} failed: {}", i, e);
             }
         }
     }
@@ -350,10 +345,7 @@ impl AgenticHooks {
                     // No skip requested
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[hooks] on_before_tool hook {} failed: {}",
-                        i, e
-                    );
+                    eprintln!("[hooks] on_before_tool hook {} failed: {}", i, e);
                 }
             }
         }
@@ -377,42 +369,25 @@ impl AgenticHooks {
             )
             .await
             {
-                eprintln!(
-                    "[hooks] on_after_tool hook {} failed: {}",
-                    i, e
-                );
+                eprintln!("[hooks] on_after_tool hook {} failed: {}", i, e);
             }
         }
     }
 
     /// Fire all on_session_end hooks sequentially.
-    pub async fn fire_on_session_end(
-        &self,
-        ctx: &HookContext,
-        summary: SessionSummary,
-    ) {
+    pub async fn fire_on_session_end(&self, ctx: &HookContext, summary: SessionSummary) {
         for (i, hook) in self.on_session_end.iter().enumerate() {
             if let Err(e) = hook(ctx.clone(), summary.clone()).await {
-                eprintln!(
-                    "[hooks] on_session_end hook {} failed: {}",
-                    i, e
-                );
+                eprintln!("[hooks] on_session_end hook {} failed: {}", i, e);
             }
         }
     }
 
     /// Fire all on_compaction hooks sequentially.
-    pub async fn fire_on_compaction(
-        &self,
-        ctx: &HookContext,
-        compacted_snippets: Vec<String>,
-    ) {
+    pub async fn fire_on_compaction(&self, ctx: &HookContext, compacted_snippets: Vec<String>) {
         for (i, hook) in self.on_compaction.iter().enumerate() {
             if let Err(e) = hook(ctx.clone(), compacted_snippets.clone()).await {
-                eprintln!(
-                    "[hooks] on_compaction hook {} failed: {}",
-                    i, e
-                );
+                eprintln!("[hooks] on_compaction hook {} failed: {}", i, e);
             }
         }
     }
@@ -853,20 +828,20 @@ mod tests {
         hooks.fire_on_session_start(&ctx).await;
 
         let result = order.lock().unwrap().clone();
-        assert_eq!(result, vec![1, 2], "Hooks should execute in registration order");
+        assert_eq!(
+            result,
+            vec![1, 2],
+            "Hooks should execute in registration order"
+        );
     }
 
     #[tokio::test]
     async fn test_fire_on_user_message_no_modification() {
         let mut hooks = AgenticHooks::new();
-        hooks.register_on_user_message(Box::new(|_ctx, _msg| {
-            Box::pin(async move { Ok(None) })
-        }));
+        hooks.register_on_user_message(Box::new(|_ctx, _msg| Box::pin(async move { Ok(None) })));
 
         let ctx = test_context();
-        let result = hooks
-            .fire_on_user_message(&ctx, "hello".to_string())
-            .await;
+        let result = hooks.fire_on_user_message(&ctx, "hello".to_string()).await;
         assert_eq!(result, "hello");
     }
 
@@ -874,15 +849,11 @@ mod tests {
     async fn test_fire_on_user_message_with_modification() {
         let mut hooks = AgenticHooks::new();
         hooks.register_on_user_message(Box::new(|_ctx, msg| {
-            Box::pin(async move {
-                Ok(Some(format!("[enhanced] {}", msg)))
-            })
+            Box::pin(async move { Ok(Some(format!("[enhanced] {}", msg))) })
         }));
 
         let ctx = test_context();
-        let result = hooks
-            .fire_on_user_message(&ctx, "hello".to_string())
-            .await;
+        let result = hooks.fire_on_user_message(&ctx, "hello".to_string()).await;
         assert_eq!(result, "[enhanced] hello");
     }
 
@@ -890,20 +861,14 @@ mod tests {
     async fn test_fire_on_user_message_chained_modifications() {
         let mut hooks = AgenticHooks::new();
         hooks.register_on_user_message(Box::new(|_ctx, msg| {
-            Box::pin(async move {
-                Ok(Some(format!("[hook1] {}", msg)))
-            })
+            Box::pin(async move { Ok(Some(format!("[hook1] {}", msg))) })
         }));
         hooks.register_on_user_message(Box::new(|_ctx, msg| {
-            Box::pin(async move {
-                Ok(Some(format!("[hook2] {}", msg)))
-            })
+            Box::pin(async move { Ok(Some(format!("[hook2] {}", msg))) })
         }));
 
         let ctx = test_context();
-        let result = hooks
-            .fire_on_user_message(&ctx, "hello".to_string())
-            .await;
+        let result = hooks.fire_on_user_message(&ctx, "hello".to_string()).await;
         assert_eq!(result, "[hook2] [hook1] hello");
     }
 
@@ -940,15 +905,11 @@ mod tests {
         let ctx = test_context();
 
         // Non-blocked tool should pass
-        let result = hooks
-            .fire_on_before_tool(&ctx, "Read", "{}")
-            .await;
+        let result = hooks.fire_on_before_tool(&ctx, "Read", "{}").await;
         assert!(result.is_none());
 
         // Blocked tool should be skipped
-        let result = hooks
-            .fire_on_before_tool(&ctx, "Bash", "{}")
-            .await;
+        let result = hooks.fire_on_before_tool(&ctx, "Bash", "{}").await;
         assert!(result.is_some());
         let result = result.unwrap();
         assert!(result.skip);
@@ -1013,10 +974,7 @@ mod tests {
         hooks
             .fire_on_after_llm(&ctx, Some("response text".to_string()))
             .await;
-        assert_eq!(
-            *received.lock().unwrap(),
-            Some("response text".to_string())
-        );
+        assert_eq!(*received.lock().unwrap(), Some("response text".to_string()));
     }
 
     #[tokio::test]
@@ -1062,10 +1020,7 @@ mod tests {
 
         let ctx = test_context();
         hooks
-            .fire_on_compaction(
-                &ctx,
-                vec!["snippet1".to_string(), "snippet2".to_string()],
-            )
+            .fire_on_compaction(&ctx, vec!["snippet1".to_string(), "snippet2".to_string()])
             .await;
         assert_eq!(snippet_count.load(Ordering::SeqCst), 2);
     }
@@ -1111,14 +1066,10 @@ mod tests {
         let mut hooks = AgenticHooks::new();
         assert_eq!(hooks.total_hooks(), 0);
 
-        hooks.register_on_session_start(Box::new(|_ctx| {
-            Box::pin(async move { Ok(()) })
-        }));
+        hooks.register_on_session_start(Box::new(|_ctx| Box::pin(async move { Ok(()) })));
         assert_eq!(hooks.total_hooks(), 1);
 
-        hooks.register_on_before_llm(Box::new(|_ctx, _iter| {
-            Box::pin(async move { Ok(()) })
-        }));
+        hooks.register_on_before_llm(Box::new(|_ctx, _iter| Box::pin(async move { Ok(()) })));
         assert_eq!(hooks.total_hooks(), 2);
     }
 
@@ -1187,8 +1138,13 @@ mod tests {
 
         let ctx = test_context();
         // user_message hook should not modify the message
-        let result = hooks.fire_on_user_message(&ctx, "test message".to_string()).await;
-        assert_eq!(result, "test message", "Skill hook should not modify the user message");
+        let result = hooks
+            .fire_on_user_message(&ctx, "test message".to_string())
+            .await;
+        assert_eq!(
+            result, "test message",
+            "Skill hook should not modify the user message"
+        );
     }
 
     // ========================================================================
@@ -1197,9 +1153,8 @@ mod tests {
 
     fn create_test_memory_store() -> Arc<ProjectMemoryStore> {
         let db = crate::storage::database::Database::new_in_memory().unwrap();
-        let embedding_service = Arc::new(
-            crate::services::orchestrator::embedding_service::EmbeddingService::new(),
-        );
+        let embedding_service =
+            Arc::new(crate::services::orchestrator::embedding_service::EmbeddingService::new());
         Arc::new(ProjectMemoryStore::from_database(&db, embedding_service))
     }
 
@@ -1275,7 +1230,9 @@ mod tests {
 
         // Verify memories were extracted from key_findings
         let project_path = ctx.project_path.to_string_lossy().to_string();
-        let memories = store.list_memories(&project_path, None, 0, 100).unwrap_or_default();
+        let memories = store
+            .list_memories(&project_path, None, 0, 100)
+            .unwrap_or_default();
         assert_eq!(
             memories.len(),
             2,
@@ -1302,7 +1259,9 @@ mod tests {
 
         // Only the substantial snippet should be stored
         let project_path = ctx.project_path.to_string_lossy().to_string();
-        let memories = store.list_memories(&project_path, None, 0, 100).unwrap_or_default();
+        let memories = store
+            .list_memories(&project_path, None, 0, 100)
+            .unwrap_or_default();
         assert_eq!(
             memories.len(),
             1,
@@ -1353,12 +1312,7 @@ mod tests {
         let skill_index = Arc::new(RwLock::new(SkillIndex::new(vec![])));
         let policy = SelectionPolicy::default();
         let selected_skills: Arc<RwLock<Vec<SkillMatch>>> = Arc::new(RwLock::new(Vec::new()));
-        register_skill_hooks(
-            &mut hooks,
-            skill_index,
-            policy,
-            selected_skills.clone(),
-        );
+        register_skill_hooks(&mut hooks, skill_index, policy, selected_skills.clone());
 
         // Memory setup
         let store = create_test_memory_store();
@@ -1366,7 +1320,11 @@ mod tests {
             Arc::new(RwLock::new(Vec::new()));
         register_memory_hooks(&mut hooks, store.clone(), loaded_memories.clone());
 
-        assert_eq!(hooks.total_hooks(), 8, "defaults(3) + skill(2) + memory(3) = 8");
+        assert_eq!(
+            hooks.total_hooks(),
+            8,
+            "defaults(3) + skill(2) + memory(3) = 8"
+        );
 
         let ctx = test_context();
 
@@ -1385,7 +1343,10 @@ mod tests {
         let msg = hooks
             .fire_on_user_message(&ctx, "implement the Rust module".to_string())
             .await;
-        assert_eq!(msg, "implement the Rust module", "Message should not be modified");
+        assert_eq!(
+            msg, "implement the Rust module",
+            "Message should not be modified"
+        );
 
         // 4. Fire session_end -> memories extracted
         let summary = SessionSummary {
@@ -1408,7 +1369,9 @@ mod tests {
 
         // Verify memories were stored
         let project_path = ctx.project_path.to_string_lossy().to_string();
-        let stored = store.list_memories(&project_path, None, 0, 100).unwrap_or_default();
+        let stored = store
+            .list_memories(&project_path, None, 0, 100)
+            .unwrap_or_default();
         assert_eq!(
             stored.len(),
             2,
@@ -1421,7 +1384,9 @@ mod tests {
         ];
         hooks.fire_on_compaction(&ctx, snippets).await;
 
-        let stored_after = store.list_memories(&project_path, None, 0, 100).unwrap_or_default();
+        let stored_after = store
+            .list_memories(&project_path, None, 0, 100)
+            .unwrap_or_default();
         assert_eq!(
             stored_after.len(),
             3,

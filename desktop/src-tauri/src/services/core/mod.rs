@@ -32,7 +32,9 @@ pub use plan_cascade_core::context::{ExecutionContext, OrchestratorContext, Tool
 
 // Unified tool traits
 pub use plan_cascade_core::tool_trait;
-pub use plan_cascade_core::tool_trait::{ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry};
+pub use plan_cascade_core::tool_trait::{
+    ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry,
+};
 
 // Adapters (Core <-> Existing Layer Bridge)
 pub use adapter::{import_legacy_tools, ToolAdapter, UnifiedToolAdapter};
@@ -44,8 +46,8 @@ pub use event_actions::{
 
 // Pluggable Compaction
 pub use compaction::{
-    CompactionConfig, CompactionResult, CompactionStrategy, ContextCompactor,
-    LlmSummaryCompactor, SlidingWindowCompactor,
+    CompactionConfig, CompactionResult, CompactionStrategy, ContextCompactor, LlmSummaryCompactor,
+    SlidingWindowCompactor,
 };
 
 // Builder Pattern & Session State

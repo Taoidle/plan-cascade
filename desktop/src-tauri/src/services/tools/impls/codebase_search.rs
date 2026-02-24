@@ -70,10 +70,7 @@ impl CodebaseSearchTool {
                         .take(15)
                         .map(|c| c.name.as_str())
                         .collect();
-                    hint.push_str(&format!(
-                        "\nAvailable components: {}",
-                        names.join(", ")
-                    ));
+                    hint.push_str(&format!("\nAvailable components: {}", names.join(", ")));
                 }
             }
             return Ok(hint);
@@ -81,7 +78,10 @@ impl CodebaseSearchTool {
 
         // Apply component filter if specified
         let results: Vec<&HybridSearchResult> = if let Some(comp) = component {
-            results.iter().filter(|r| r.file_path.contains(comp)).collect()
+            results
+                .iter()
+                .filter(|r| r.file_path.contains(comp))
+                .collect()
         } else {
             results.iter().collect()
         };
@@ -119,8 +119,11 @@ impl CodebaseSearchTool {
         }
 
         if !outcome.active_channels.is_empty() {
-            let ch_names: Vec<String> =
-                outcome.active_channels.iter().map(|c| format!("{}", c)).collect();
+            let ch_names: Vec<String> = outcome
+                .active_channels
+                .iter()
+                .map(|c| format!("{}", c))
+                .collect();
             output.push_str(&format!("> Channels: {}\n", ch_names.join(", ")));
         }
         output.push('\n');
@@ -206,9 +209,7 @@ impl CodebaseSearchTool {
                 let filtered: Vec<_> = if let Some(comp) = component {
                     symbols
                         .into_iter()
-                        .filter(|s| {
-                            s.file_path.contains(comp) || s.project_path == *project_path
-                        })
+                        .filter(|s| s.file_path.contains(comp) || s.project_path == *project_path)
                         .collect()
                 } else {
                     symbols
@@ -285,7 +286,9 @@ impl CodebaseSearchTool {
                     if !filtered.is_empty() {
                         let mut section = format!(
                             "## Files matching '{}' in component '{}' ({} results)\n",
-                            query, comp, filtered.len()
+                            query,
+                            comp,
+                            filtered.len()
                         );
                         for file in filtered.iter().take(50) {
                             section.push_str(&format!(
@@ -294,8 +297,7 @@ impl CodebaseSearchTool {
                             ));
                         }
                         if filtered.len() > 50 {
-                            section
-                                .push_str(&format!("  ... and {} more\n", filtered.len() - 50));
+                            section.push_str(&format!("  ... and {} more\n", filtered.len() - 50));
                         }
                         output_sections.push(section);
                     } else if scope == "files" {
@@ -325,10 +327,7 @@ impl CodebaseSearchTool {
                         ));
                     }
                     if fts_results.len() > 50 {
-                        section.push_str(&format!(
-                            "  ... and {} more\n",
-                            fts_results.len() - 50
-                        ));
+                        section.push_str(&format!("  ... and {} more\n", fts_results.len() - 50));
                     }
                     output_sections.push(section);
                 }
@@ -366,13 +365,11 @@ impl CodebaseSearchTool {
                                     section.push('\n');
                                 }
                                 if count > 50 {
-                                    section
-                                        .push_str(&format!("  ... and {} more\n", count - 50));
+                                    section.push_str(&format!("  ... and {} more\n", count - 50));
                                 }
                                 output_sections.push(section);
                             } else if scope == "files" {
-                                output_sections
-                                    .push(format!("No files matching '{}'.", query));
+                                output_sections.push(format!("No files matching '{}'.", query));
                             }
                         }
                         Err(e) => {
@@ -458,8 +455,7 @@ impl CodebaseSearchTool {
                                     Ok(Vec::new())
                                 }
                             } else {
-                                index_store
-                                    .semantic_search(&query_embedding, project_path, 10)
+                                index_store.semantic_search(&query_embedding, project_path, 10)
                             }
                         } else {
                             index_store.semantic_search(&query_embedding, project_path, 10)
@@ -513,9 +509,8 @@ impl CodebaseSearchTool {
                         .to_string(),
                 );
             } else {
-                output_sections.push(
-                    "Semantic search: not available (vocabulary not built)".to_string(),
-                );
+                output_sections
+                    .push("Semantic search: not available (vocabulary not built)".to_string());
             }
         } else {
             // Neither EmbeddingManager nor EmbeddingService configured
@@ -630,10 +625,7 @@ impl Tool for CodebaseSearchTool {
             None => return ToolResult::err("Missing required parameter: query"),
         };
 
-        let scope = args
-            .get("scope")
-            .and_then(|v| v.as_str())
-            .unwrap_or("all");
+        let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("all");
 
         let component = args.get("component").and_then(|v| v.as_str());
 
@@ -694,7 +686,15 @@ impl Tool for CodebaseSearchTool {
 
         // --- Semantic search ---
         if scope == "semantic" || scope == "all" {
-            Self::search_semantic_channel(ctx, query, &project_path, scope, index_store, &mut output_sections).await;
+            Self::search_semantic_channel(
+                ctx,
+                query,
+                &project_path,
+                scope,
+                index_store,
+                &mut output_sections,
+            )
+            .await;
         }
 
         if output_sections.is_empty() {
@@ -714,10 +714,7 @@ impl Tool for CodebaseSearchTool {
                         .take(15)
                         .map(|c| c.name.as_str())
                         .collect();
-                    hint.push_str(&format!(
-                        "\nAvailable components: {}",
-                        names.join(", ")
-                    ));
+                    hint.push_str(&format!("\nAvailable components: {}", names.join(", ")));
                 }
             }
             ToolResult::ok(hint)
@@ -729,8 +726,8 @@ impl Tool for CodebaseSearchTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use std::path::Path;
 
     #[test]
@@ -769,11 +766,7 @@ mod tests {
         let args = serde_json::json!({"query": "test_function"});
         let result = tool.execute(&ctx, args).await;
         assert!(result.success);
-        assert!(result
-            .output
-            .as_ref()
-            .unwrap()
-            .contains("not been indexed"));
+        assert!(result.output.as_ref().unwrap().contains("not been indexed"));
     }
 
     #[tokio::test]

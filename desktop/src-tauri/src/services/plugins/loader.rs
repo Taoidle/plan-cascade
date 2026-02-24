@@ -42,8 +42,13 @@ pub fn load_plugin_from_dir(dir: &Path, source: PluginSource) -> AppResult<Loade
 
     // Read and parse manifest
     let manifest_content = std::fs::read_to_string(&manifest_path)?;
-    let manifest: PluginManifest = serde_json::from_str(&manifest_content)
-        .map_err(|e| AppError::parse(format!("Invalid plugin.json at {}: {}", manifest_path.display(), e)))?;
+    let manifest: PluginManifest = serde_json::from_str(&manifest_content).map_err(|e| {
+        AppError::parse(format!(
+            "Invalid plugin.json at {}: {}",
+            manifest_path.display(),
+            e
+        ))
+    })?;
 
     // Discover skills
     let skills = discover_skills(dir);
@@ -135,7 +140,10 @@ pub fn discover_plugin_dirs(parent: &Path) -> Vec<PathBuf> {
 /// The `install_path` is the version root directory. The manifest is read from
 /// `.claude-plugin/plugin.json`, while skills, commands, hooks, and instructions
 /// are discovered from the version root.
-pub fn load_plugin_from_install_path(install_path: &Path, source: PluginSource) -> AppResult<LoadedPlugin> {
+pub fn load_plugin_from_install_path(
+    install_path: &Path,
+    source: PluginSource,
+) -> AppResult<LoadedPlugin> {
     let manifest_path = install_path.join(".claude-plugin").join("plugin.json");
     if !manifest_path.exists() {
         return Err(AppError::not_found(format!(
@@ -146,8 +154,13 @@ pub fn load_plugin_from_install_path(install_path: &Path, source: PluginSource) 
 
     // Read and parse manifest
     let manifest_content = std::fs::read_to_string(&manifest_path)?;
-    let manifest: PluginManifest = serde_json::from_str(&manifest_content)
-        .map_err(|e| AppError::parse(format!("Invalid plugin.json at {}: {}", manifest_path.display(), e)))?;
+    let manifest: PluginManifest = serde_json::from_str(&manifest_content).map_err(|e| {
+        AppError::parse(format!(
+            "Invalid plugin.json at {}: {}",
+            manifest_path.display(),
+            e
+        ))
+    })?;
 
     // Discover skills, commands, hooks, instructions from the version root
     let skills = discover_skills(install_path);
@@ -214,7 +227,10 @@ pub fn discover_installed_plugins() -> Vec<LoadedPlugin> {
         Some(h) => h,
         None => return Vec::new(),
     };
-    let installed_json_path = home.join(".claude").join("plugins").join("installed_plugins.json");
+    let installed_json_path = home
+        .join(".claude")
+        .join("plugins")
+        .join("installed_plugins.json");
     discover_installed_plugins_from(&installed_json_path)
 }
 
@@ -283,7 +299,10 @@ pub fn discover_all_plugins(project_root: &Path) -> Vec<LoadedPlugin> {
 }
 
 /// Internal implementation that accepts an explicit home dir for testability.
-pub(crate) fn discover_all_plugins_with_home(project_root: &Path, home: Option<PathBuf>) -> Vec<LoadedPlugin> {
+pub(crate) fn discover_all_plugins_with_home(
+    project_root: &Path,
+    home: Option<PathBuf>,
+) -> Vec<LoadedPlugin> {
     let mut plugins_by_name: HashMap<String, LoadedPlugin> = HashMap::new();
 
     // Source 3 (lowest priority): ~/.plan-cascade/plugins/
@@ -298,7 +317,10 @@ pub(crate) fn discover_all_plugins_with_home(project_root: &Path, home: Option<P
 
     // Source 2 (medium priority): ~/.claude/plugins/ via installed_plugins.json
     if let Some(ref home) = home {
-        let installed_json = home.join(".claude").join("plugins").join("installed_plugins.json");
+        let installed_json = home
+            .join(".claude")
+            .join("plugins")
+            .join("installed_plugins.json");
         for plugin in discover_installed_plugins_from(&installed_json) {
             plugins_by_name.insert(plugin.manifest.name.clone(), plugin);
         }
@@ -700,7 +722,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let result = load_plugin_from_dir(dir.path(), PluginSource::ClaudeCode);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("plugin.json not found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("plugin.json not found"));
     }
 
     #[test]
@@ -767,7 +792,11 @@ mod tests {
 
         // Instructions
         assert!(plugin.instructions.is_some());
-        assert!(plugin.instructions.as_ref().unwrap().contains("lint before committing"));
+        assert!(plugin
+            .instructions
+            .as_ref()
+            .unwrap()
+            .contains("lint before committing"));
 
         // Permissions
         assert_eq!(plugin.permissions.allow, vec!["Read", "Write", "Bash"]);
@@ -798,11 +827,7 @@ mod tests {
     #[test]
     fn test_discover_plugin_dirs_self_is_plugin() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("plugin.json"),
-            r#"{"name": "self-plugin"}"#,
-        )
-        .unwrap();
+        fs::write(dir.path().join("plugin.json"), r#"{"name": "self-plugin"}"#).unwrap();
 
         let dirs = discover_plugin_dirs(dir.path());
         assert_eq!(dirs.len(), 1);
@@ -846,7 +871,10 @@ mod tests {
         assert_eq!(pre_tool_hooks[0].matcher.as_deref(), Some("Write|Edit"));
         assert_eq!(pre_tool_hooks[0].timeout, 5000);
 
-        let stop_hooks: Vec<_> = hooks.iter().filter(|h| h.event == HookEvent::Stop).collect();
+        let stop_hooks: Vec<_> = hooks
+            .iter()
+            .filter(|h| h.event == HookEvent::Stop)
+            .collect();
         assert_eq!(stop_hooks.len(), 1);
         assert!(stop_hooks[0].async_hook);
     }
@@ -911,11 +939,7 @@ mod tests {
             "# Build\n\nRun the build process.\n",
         )
         .unwrap();
-        fs::write(
-            commands_dir.join("test.md"),
-            "# Test\n\nRun all tests.\n",
-        )
-        .unwrap();
+        fs::write(commands_dir.join("test.md"), "# Test\n\nRun all tests.\n").unwrap();
         // Non-md file should be ignored
         fs::write(commands_dir.join("readme.txt"), "Not a command").unwrap();
 
@@ -1015,9 +1039,7 @@ mod tests {
         let plugins = discover_all_plugins_with_home(project_root, Some(dir.path().to_path_buf()));
         assert!(!plugins.is_empty());
 
-        let project_plugin = plugins
-            .iter()
-            .find(|p| p.manifest.name == "project-plugin");
+        let project_plugin = plugins.iter().find(|p| p.manifest.name == "project-plugin");
         assert!(project_plugin.is_some());
         assert_eq!(project_plugin.unwrap().source, PluginSource::ClaudeCode);
     }
@@ -1059,11 +1081,7 @@ mod tests {
         .unwrap();
 
         // Also need plugin.json
-        fs::write(
-            dir.path().join("plugin.json"),
-            r#"{"name": "hooks-test"}"#,
-        )
-        .unwrap();
+        fs::write(dir.path().join("plugin.json"), r#"{"name": "hooks-test"}"#).unwrap();
 
         let plugin = load_plugin_from_dir(dir.path(), PluginSource::ClaudeCode).unwrap();
         assert_eq!(plugin.hooks.len(), 1);
@@ -1118,7 +1136,11 @@ mod tests {
         assert_eq!(plugin.commands.len(), 1);
         assert_eq!(plugin.commands[0].name, "deploy");
         assert!(plugin.instructions.is_some());
-        assert!(plugin.instructions.as_ref().unwrap().contains("Follow these rules"));
+        assert!(plugin
+            .instructions
+            .as_ref()
+            .unwrap()
+            .contains("Follow these rules"));
     }
 
     #[test]
@@ -1126,7 +1148,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let result = load_plugin_from_install_path(dir.path(), PluginSource::Installed);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains(".claude-plugin/plugin.json not found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains(".claude-plugin/plugin.json not found"));
     }
 
     #[test]
@@ -1149,7 +1174,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         // Create a fake plugin at a fake installPath
-        let install_path = dir.path().join("cache").join("org").join("my-plugin").join("1.0.0");
+        let install_path = dir
+            .path()
+            .join("cache")
+            .join("org")
+            .join("my-plugin")
+            .join("1.0.0");
         fs::create_dir_all(install_path.join(".claude-plugin")).unwrap();
         fs::write(
             install_path.join(".claude-plugin").join("plugin.json"),
@@ -1171,7 +1201,11 @@ mod tests {
                 ]
             }
         });
-        fs::write(&installed_json, serde_json::to_string_pretty(&json_content).unwrap()).unwrap();
+        fs::write(
+            &installed_json,
+            serde_json::to_string_pretty(&json_content).unwrap(),
+        )
+        .unwrap();
 
         let plugins = discover_installed_plugins_from(&installed_json);
         assert_eq!(plugins.len(), 1);
@@ -1182,7 +1216,8 @@ mod tests {
 
     #[test]
     fn test_discover_installed_plugins_from_nonexistent() {
-        let plugins = discover_installed_plugins_from(Path::new("/nonexistent/installed_plugins.json"));
+        let plugins =
+            discover_installed_plugins_from(Path::new("/nonexistent/installed_plugins.json"));
         assert!(plugins.is_empty());
     }
 
@@ -1190,11 +1225,7 @@ mod tests {
     fn test_discover_installed_plugins_from_empty_plugins() {
         let dir = TempDir::new().unwrap();
         let installed_json = dir.path().join("installed_plugins.json");
-        fs::write(
-            &installed_json,
-            r#"{"version": 2, "plugins": {}}"#,
-        )
-        .unwrap();
+        fs::write(&installed_json, r#"{"version": 2, "plugins": {}}"#).unwrap();
 
         let plugins = discover_installed_plugins_from(&installed_json);
         assert!(plugins.is_empty());

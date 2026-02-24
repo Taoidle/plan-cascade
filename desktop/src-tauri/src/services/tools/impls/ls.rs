@@ -58,7 +58,9 @@ impl Tool for LsTool {
         let mut properties = HashMap::new();
         properties.insert(
             "path".to_string(),
-            ParameterSchema::string(Some("The directory path to list. Absolute or relative to working directory.")),
+            ParameterSchema::string(Some(
+                "The directory path to list. Absolute or relative to working directory.",
+            )),
         );
         properties.insert(
             "show_hidden".to_string(),
@@ -86,7 +88,11 @@ impl Tool for LsTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let path = match validate_path(dir_path, &ctx.working_directory_snapshot(), &ctx.project_root) {
+        let path = match validate_path(
+            dir_path,
+            &ctx.working_directory_snapshot(),
+            &ctx.project_root,
+        ) {
             Ok(p) => p,
             Err(e) => return ToolResult::err(e),
         };
@@ -174,8 +180,8 @@ impl Tool for LsTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use tempfile::TempDir;
 
     #[tokio::test]

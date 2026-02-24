@@ -36,15 +36,15 @@ pub async fn list_graph_workflows(
 ) -> Result<CommandResponse<Vec<GraphWorkflowInfo>>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_graph_workflows_table(&conn)?;
 
-            let mut stmt = conn.prepare(
-                "SELECT id, name, definition FROM graph_workflows ORDER BY name ASC",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT id, name, definition FROM graph_workflows ORDER BY name ASC")?;
 
             let workflows: Vec<GraphWorkflowInfo> = stmt
                 .query_map([], |row| {
@@ -87,9 +87,10 @@ pub async fn get_graph_workflow(
 ) -> Result<CommandResponse<Option<GraphWorkflow>>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_graph_workflows_table(&conn)?;
 
@@ -128,9 +129,10 @@ pub async fn create_graph_workflow(
 ) -> Result<CommandResponse<GraphWorkflow>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_graph_workflows_table(&conn)?;
 
@@ -334,9 +336,10 @@ pub async fn delete_graph_workflow(
 ) -> Result<CommandResponse<bool>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_graph_workflows_table(&conn)?;
 

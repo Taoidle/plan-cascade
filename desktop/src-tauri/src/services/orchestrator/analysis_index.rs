@@ -243,9 +243,11 @@ pub fn build_file_inventory_with_limits(
                         format!("{:x}", hasher.finalize())
                     };
                     let syms = match String::from_utf8(bytes) {
-                        Ok(content) => {
-                            extract_symbols_from_str(&content, &language, limits.max_symbols_per_file)
-                        }
+                        Ok(content) => extract_symbols_from_str(
+                            &content,
+                            &language,
+                            limits.max_symbols_per_file,
+                        ),
                         Err(_) => Vec::new(),
                     };
                     (syms, Some(hash))
@@ -528,7 +530,11 @@ pub fn extract_symbols(path: &Path, language: &str, max_symbols: usize) -> Vec<S
 ///
 /// Uses tree-sitter for accurate parsing when the language is supported,
 /// falling back to regex-based extraction for unsupported languages.
-pub fn extract_symbols_from_str(content: &str, language: &str, max_symbols: usize) -> Vec<SymbolInfo> {
+pub fn extract_symbols_from_str(
+    content: &str,
+    language: &str,
+    max_symbols: usize,
+) -> Vec<SymbolInfo> {
     // Try tree-sitter first for supported languages
     if super::tree_sitter_parser::is_language_supported(language) {
         let symbols = super::tree_sitter_parser::parse_symbols(content, language, max_symbols);

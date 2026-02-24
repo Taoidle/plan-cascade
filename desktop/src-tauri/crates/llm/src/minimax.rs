@@ -166,7 +166,8 @@ impl MinimaxProvider {
             body["tools"] = serde_json::json!(api_tools);
 
             // tool_choice (not allowed with thinking active)
-            if matches!(request_options.tool_call_mode, ToolCallMode::Required) && !thinking_active {
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) && !thinking_active
+            {
                 body["tool_choice"] = serde_json::json!({"type": "any"});
             }
         }
@@ -224,9 +225,7 @@ impl MinimaxProvider {
                     }
                 }
                 MessageContent::Image { .. } => {
-                    tracing::warn!(
-                        "MiniMax: Skipping image content - not supported"
-                    );
+                    tracing::warn!("MiniMax: Skipping image content - not supported");
                     None
                 }
                 MessageContent::ToolResultMultimodal {
@@ -355,7 +354,11 @@ impl MinimaxProvider {
                             .get("input")
                             .cloned()
                             .unwrap_or(serde_json::Value::Object(Default::default()));
-                        tool_calls.push(ToolCall { id, name, arguments: input });
+                        tool_calls.push(ToolCall {
+                            id,
+                            name,
+                            arguments: input,
+                        });
                     }
                     other => {
                         tracing::debug!("MiniMax: skipping unknown content block type: {}", other);
@@ -370,8 +373,9 @@ impl MinimaxProvider {
             .map(StopReason::from)
             .unwrap_or(StopReason::EndTurn);
 
-        let usage = raw.get("usage").map(|u| {
-            UsageStats {
+        let usage = raw
+            .get("usage")
+            .map(|u| UsageStats {
                 input_tokens: u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                 output_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                 thinking_tokens: None,
@@ -383,8 +387,8 @@ impl MinimaxProvider {
                     .get("cache_creation_input_tokens")
                     .and_then(|v| v.as_u64())
                     .map(|v| v as u32),
-            }
-        }).unwrap_or_default();
+            })
+            .unwrap_or_default();
 
         let model = raw
             .get("model")
@@ -495,7 +499,9 @@ impl LlmProvider for MinimaxProvider {
         if status != 200 {
             tracing::warn!(
                 "MiniMax API error: HTTP {} from {} — {}",
-                status, url, body_text
+                status,
+                url,
+                body_text
             );
             return Err(parse_http_error(status, &body_text, "minimax"));
         }
@@ -523,13 +529,8 @@ impl LlmProvider for MinimaxProvider {
             return Err(missing_api_key_error("minimax"));
         }
 
-        let body = self.build_request_body(
-            &messages,
-            system.as_deref(),
-            &tools,
-            true,
-            &request_options,
-        );
+        let body =
+            self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
 
         let headers = self
             .anthropic_config
@@ -560,7 +561,9 @@ impl LlmProvider for MinimaxProvider {
             })?;
             tracing::warn!(
                 "MiniMax API error: HTTP {} from {} — {}",
-                status, url, body_text
+                status,
+                url,
+                body_text
             );
             return Err(parse_http_error(status, &body_text, "minimax"));
         }
@@ -844,7 +847,10 @@ mod tests {
             ..test_config()
         };
         let provider = MinimaxProvider::new(config);
-        assert_eq!(provider.default_fallback_mode(), FallbackToolFormatMode::Soft);
+        assert_eq!(
+            provider.default_fallback_mode(),
+            FallbackToolFormatMode::Soft
+        );
     }
 
     #[test]
@@ -854,7 +860,10 @@ mod tests {
             ..test_config()
         };
         let provider = MinimaxProvider::new(config);
-        assert_eq!(provider.default_fallback_mode(), FallbackToolFormatMode::Off);
+        assert_eq!(
+            provider.default_fallback_mode(),
+            FallbackToolFormatMode::Off
+        );
     }
 
     #[test]
@@ -939,13 +948,8 @@ mod tests {
     fn test_build_request_body_basic() {
         let provider = MinimaxProvider::new(test_config());
         let messages = vec![Message::user("test")];
-        let body = provider.build_request_body(
-            &messages,
-            None,
-            &[],
-            false,
-            &LlmRequestOptions::default(),
-        );
+        let body =
+            provider.build_request_body(&messages, None, &[], false, &LlmRequestOptions::default());
         assert_eq!(body["model"], "MiniMax-M2.5");
         assert_eq!(body["stream"], false);
         assert!(body.get("system").is_none());
@@ -998,13 +1002,8 @@ mod tests {
             Message::user("Hello"),
             Message::assistant("Hi there"),
         ];
-        let body = provider.build_request_body(
-            &messages,
-            None,
-            &[],
-            false,
-            &LlmRequestOptions::default(),
-        );
+        let body =
+            provider.build_request_body(&messages, None, &[], false, &LlmRequestOptions::default());
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 2); // System message filtered out
     }

@@ -19,8 +19,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::error::{CoreError, CoreResult};
 use crate::context::ToolContext;
+use crate::error::{CoreError, CoreResult};
 
 // ============================================================================
 // Trait Definitions
@@ -219,12 +219,7 @@ impl UnifiedToolRegistry {
     /// Execute a tool by name.
     ///
     /// Returns `Err(CoreError::NotFound)` if the tool is not registered.
-    pub async fn execute(
-        &self,
-        name: &str,
-        ctx: &ToolContext,
-        args: Value,
-    ) -> CoreResult<Value> {
+    pub async fn execute(&self, name: &str, ctx: &ToolContext, args: Value) -> CoreResult<Value> {
         match self.tools.get(name) {
             Some(tool) => tool.execute(ctx, args).await,
             None => Err(CoreError::not_found(format!("Tool not found: {}", name))),
@@ -362,8 +357,8 @@ mod tests {
 
     #[test]
     fn test_tool_definition_custom_permissions() {
-        let tool = MockUnifiedTool::new("Read", "Read a file")
-            .with_permissions(vec!["filesystem:read"]);
+        let tool =
+            MockUnifiedTool::new("Read", "Read a file").with_permissions(vec!["filesystem:read"]);
         assert_eq!(tool.required_permissions(), vec!["filesystem:read"]);
     }
 
@@ -375,8 +370,7 @@ mod tests {
 
     #[test]
     fn test_tool_definition_long_running() {
-        let tool = MockUnifiedTool::new("Bash", "Execute commands")
-            .with_long_running(true);
+        let tool = MockUnifiedTool::new("Bash", "Execute commands").with_long_running(true);
         assert!(tool.is_long_running());
     }
 
@@ -503,8 +497,7 @@ mod tests {
     fn test_registry_definitions() {
         let mut registry = UnifiedToolRegistry::new();
         registry.register(Arc::new(
-            MockUnifiedTool::new("Read", "Read a file")
-                .with_permissions(vec!["filesystem:read"]),
+            MockUnifiedTool::new("Read", "Read a file").with_permissions(vec!["filesystem:read"]),
         ));
         registry.register(Arc::new(
             MockUnifiedTool::new("Bash", "Execute commands")
@@ -529,12 +522,10 @@ mod tests {
     fn test_registry_tools_with_permission() {
         let mut registry = UnifiedToolRegistry::new();
         registry.register(Arc::new(
-            MockUnifiedTool::new("Read", "Read")
-                .with_permissions(vec!["filesystem:read"]),
+            MockUnifiedTool::new("Read", "Read").with_permissions(vec!["filesystem:read"]),
         ));
         registry.register(Arc::new(
-            MockUnifiedTool::new("Write", "Write")
-                .with_permissions(vec!["filesystem:write"]),
+            MockUnifiedTool::new("Write", "Write").with_permissions(vec!["filesystem:write"]),
         ));
         registry.register(Arc::new(
             MockUnifiedTool::new("Bash", "Execute")

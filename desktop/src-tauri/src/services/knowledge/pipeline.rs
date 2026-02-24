@@ -15,7 +15,7 @@ use crate::services::knowledge::chunker::{Chunk, Chunker, Document};
 use crate::services::knowledge::reranker::{Reranker, SearchResult};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::{
-    cosine_similarity, embedding_to_bytes, bytes_to_embedding,
+    bytes_to_embedding, cosine_similarity, embedding_to_bytes,
 };
 use crate::services::orchestrator::hnsw_index::HnswIndex;
 use crate::storage::database::Database;
@@ -108,7 +108,9 @@ impl RagPipeline {
             )",
             [],
         )
-        .map_err(|e| AppError::database(format!("Failed to create knowledge_collections: {}", e)))?;
+        .map_err(|e| {
+            AppError::database(format!("Failed to create knowledge_collections: {}", e))
+        })?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS knowledge_chunks (
@@ -180,7 +182,8 @@ impl RagPipeline {
         description: &str,
         documents: Vec<Document>,
     ) -> AppResult<KnowledgeCollection> {
-        let collection_id = self.get_or_create_collection(collection_name, project_id, description)?;
+        let collection_id =
+            self.get_or_create_collection(collection_name, project_id, description)?;
 
         // Chunk all documents (sync)
         let mut all_chunks: Vec<Chunk> = Vec::new();
@@ -420,10 +423,7 @@ impl RagPipeline {
                     |row| row.get(0),
                 )
                 .map_err(|_| {
-                    AppError::not_found(format!(
-                        "Collection '{}' not found",
-                        collection_name
-                    ))
+                    AppError::not_found(format!("Collection '{}' not found", collection_name))
                 })?;
 
             let mut stmt = conn
@@ -535,9 +535,8 @@ mod tests {
             cache_enabled: false,
             cache_max_entries: 0,
         };
-        let embedding_manager = Arc::new(
-            EmbeddingManager::from_config(config).expect("create embedding manager"),
-        );
+        let embedding_manager =
+            Arc::new(EmbeddingManager::from_config(config).expect("create embedding manager"));
 
         let hnsw_index = Arc::new(HnswIndex::new(dir.path().join("hnsw"), 8192));
 
@@ -586,8 +585,14 @@ mod tests {
         let (pipeline, _dir) = create_test_pipeline().await;
 
         let docs = vec![
-            Document::new("d1", "First document about Rust programming.\n\nIt has multiple paragraphs."),
-            Document::new("d2", "Second document about Python programming.\n\nAlso multiple paragraphs."),
+            Document::new(
+                "d1",
+                "First document about Rust programming.\n\nIt has multiple paragraphs.",
+            ),
+            Document::new(
+                "d2",
+                "Second document about Python programming.\n\nAlso multiple paragraphs.",
+            ),
         ];
 
         let collection = pipeline
@@ -596,7 +601,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(collection.name, "test-col");
-        assert!(collection.chunk_count >= 2, "Should have at least 2 chunks from 2 docs");
+        assert!(
+            collection.chunk_count >= 2,
+            "Should have at least 2 chunks from 2 docs"
+        );
     }
 
     #[tokio::test]
@@ -615,7 +623,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(collection.chunk_count >= 2, "Should have chunks from both ingests");
+        assert!(
+            collection.chunk_count >= 2,
+            "Should have chunks from both ingests"
+        );
     }
 
     // ======================================================================
@@ -626,9 +637,7 @@ mod tests {
     async fn query_nonexistent_collection_errors() {
         let (pipeline, _dir) = create_test_pipeline().await;
 
-        let result = pipeline
-            .query("nonexistent", "proj-1", "query", 5)
-            .await;
+        let result = pipeline.query("nonexistent", "proj-1", "query", 5).await;
 
         assert!(result.is_err());
     }
@@ -663,9 +672,7 @@ mod tests {
     async fn delete_nonexistent_collection_errors() {
         let (pipeline, _dir) = create_test_pipeline().await;
 
-        let result = pipeline
-            .delete_collection("nonexistent", "proj-1")
-            .await;
+        let result = pipeline.delete_collection("nonexistent", "proj-1").await;
 
         assert!(result.is_err());
     }

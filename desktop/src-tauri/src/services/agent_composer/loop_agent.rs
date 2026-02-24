@@ -48,11 +48,7 @@ pub struct LoopAgent {
 
 impl LoopAgent {
     /// Create a new LoopAgent with the given name, sub-agent, and condition.
-    pub fn new(
-        name: impl Into<String>,
-        agent: Arc<dyn Agent>,
-        condition: LoopConditionFn,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, agent: Arc<dyn Agent>, condition: LoopConditionFn) -> Self {
         Self {
             name: name.into(),
             description: "Repeatedly executes a sub-agent until a condition is met".to_string(),
@@ -93,9 +89,8 @@ impl Agent for LoopAgent {
             let shared_state = ctx.shared_state.read().await;
             if !condition(&shared_state) {
                 // Condition is already false; emit Done with no output
-                let stream = futures_util::stream::iter(vec![Ok(AgentEvent::Done {
-                    output: None,
-                })]);
+                let stream =
+                    futures_util::stream::iter(vec![Ok(AgentEvent::Done { output: None })]);
                 return Ok(Box::pin(stream));
             }
         }
@@ -141,8 +136,7 @@ impl Agent for LoopAgent {
                                         }
 
                                         // Check condition for next iteration
-                                        let shared_state =
-                                            state.base_ctx.shared_state.read().await;
+                                        let shared_state = state.base_ctx.shared_state.read().await;
                                         let should_continue = (state.condition)(&shared_state);
                                         drop(shared_state);
 
@@ -268,12 +262,12 @@ struct LoopState {
 /// - If the key is present and its value is falsy (`false`, `0`, `""`, `null`,
 ///   empty array, empty object), the loop stops.
 pub fn build_loop_condition(condition_key: String) -> LoopConditionFn {
-    Box::new(move |state: &HashMap<String, Value>| {
-        match state.get(&condition_key) {
+    Box::new(
+        move |state: &HashMap<String, Value>| match state.get(&condition_key) {
             None => true,
             Some(value) => is_truthy(value),
-        }
-    })
+        },
+    )
 }
 
 /// Determine if a JSON value is "truthy".
@@ -421,10 +415,7 @@ mod tests {
 
             // Read current counter and decrement
             let mut shared = ctx.shared_state.write().await;
-            let counter = shared
-                .get("counter")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(3);
+            let counter = shared.get("counter").and_then(|v| v.as_i64()).unwrap_or(3);
             let new_counter = counter - 1;
             shared.insert("counter".to_string(), serde_json::json!(new_counter));
 
@@ -509,9 +500,9 @@ mod tests {
     /// Create a minimal AgentContext with pre-populated shared state.
     fn mock_context_with_state(state: HashMap<String, Value>) -> AgentContext {
         let provider = Arc::new(MockProvider::new());
-        let tool_executor = Arc::new(crate::services::tools::ToolExecutor::new(
-            &PathBuf::from("/tmp"),
-        ));
+        let tool_executor = Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+            "/tmp",
+        )));
         let hooks = Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new());
 
         AgentContext {
@@ -536,15 +527,12 @@ mod tests {
     async fn test_loop_terminates_on_condition() {
         let sub_agent = Arc::new(CountdownAgent::new("countdown")) as Arc<dyn Agent>;
 
-        let condition: LoopConditionFn = Box::new(|state| {
-            match state.get("loop_continue") {
-                Some(v) => is_truthy(v),
-                None => true,
-            }
+        let condition: LoopConditionFn = Box::new(|state| match state.get("loop_continue") {
+            Some(v) => is_truthy(v),
+            None => true,
         });
 
-        let loop_agent = LoopAgent::new("test-loop", sub_agent, condition)
-            .with_max_iterations(10);
+        let loop_agent = LoopAgent::new("test-loop", sub_agent, condition).with_max_iterations(10);
 
         let mut initial_state = HashMap::new();
         initial_state.insert("counter".to_string(), serde_json::json!(3));
@@ -586,8 +574,7 @@ mod tests {
         // Condition always returns true -- loop limited by max_iterations
         let condition: LoopConditionFn = Box::new(|_| true);
 
-        let loop_agent = LoopAgent::new("max-loop", sub_agent, condition)
-            .with_max_iterations(3);
+        let loop_agent = LoopAgent::new("max-loop", sub_agent, condition).with_max_iterations(3);
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -607,7 +594,11 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, AgentEvent::Done { .. }))
             .collect();
-        assert_eq!(done_events.len(), 1, "Should have exactly one final Done event");
+        assert_eq!(
+            done_events.len(),
+            1,
+            "Should have exactly one final Done event"
+        );
     }
 
     // ========================================================================
@@ -620,8 +611,7 @@ mod tests {
 
         let condition: LoopConditionFn = Box::new(|_| true);
 
-        let loop_agent = LoopAgent::new("chain-loop", sub_agent, condition)
-            .with_max_iterations(3);
+        let loop_agent = LoopAgent::new("chain-loop", sub_agent, condition).with_max_iterations(3);
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -653,8 +643,7 @@ mod tests {
 
         let condition: LoopConditionFn = Box::new(|_| true);
 
-        let loop_agent = LoopAgent::new("prefix-loop", sub_agent, condition)
-            .with_max_iterations(2);
+        let loop_agent = LoopAgent::new("prefix-loop", sub_agent, condition).with_max_iterations(2);
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -682,8 +671,7 @@ mod tests {
 
         let condition: LoopConditionFn = Box::new(|_| false);
 
-        let loop_agent = LoopAgent::new("no-loop", sub_agent, condition)
-            .with_max_iterations(10);
+        let loop_agent = LoopAgent::new("no-loop", sub_agent, condition).with_max_iterations(10);
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -765,8 +753,7 @@ mod tests {
 
         let condition: LoopConditionFn = Box::new(|_| true);
 
-        let loop_agent = LoopAgent::new("fwd-loop", sub_agent, condition)
-            .with_max_iterations(1);
+        let loop_agent = LoopAgent::new("fwd-loop", sub_agent, condition).with_max_iterations(1);
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -792,8 +779,7 @@ mod tests {
 
         let condition: LoopConditionFn = Box::new(|_| true);
 
-        let loop_agent = LoopAgent::new("single-loop", sub_agent, condition)
-            .with_max_iterations(1);
+        let loop_agent = LoopAgent::new("single-loop", sub_agent, condition).with_max_iterations(1);
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();

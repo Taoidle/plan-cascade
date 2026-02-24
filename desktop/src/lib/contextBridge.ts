@@ -63,7 +63,10 @@ export function synthesizePlanningTurn(
     lines.push(`- ${s.id}: ${s.title} [${s.priority}]`);
   }
 
-  appendSyntheticTurn(`[Task Mode] ${description}`, lines.join('\n'));
+  appendSyntheticTurn(`[Task Mode] ${description}`, lines.join('\n'), {
+    source: 'task-synthesized',
+    type: 'planning',
+  });
 }
 
 /**
@@ -79,7 +82,11 @@ export function synthesizeExecutionTurn(
   const outcome = success ? 'completed successfully' : 'completed with failures';
   appendSyntheticTurn(
     '[Task Execution] Execute approved PRD',
-    `Execution ${outcome}: ${completedCount}/${totalCount} stories completed.`
+    `Execution ${outcome}: ${completedCount}/${totalCount} stories completed.`,
+    {
+      source: 'task-synthesized',
+      type: 'execution',
+    }
   );
 }
 
@@ -97,11 +104,16 @@ export function setPendingTaskContext(context: string): void {
 // Internal
 // ============================================================================
 
-function appendSyntheticTurn(userMessage: string, assistantMessage: string): void {
+function appendSyntheticTurn(
+  userMessage: string,
+  assistantMessage: string,
+  metadata?: { source?: string; type?: string }
+): void {
   const turn: StandaloneTurn = {
     user: userMessage,
     assistant: assistantMessage,
     createdAt: Date.now(),
+    metadata,
   };
   useExecutionStore.getState().appendStandaloneTurn(turn);
 

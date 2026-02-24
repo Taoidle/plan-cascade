@@ -168,7 +168,8 @@ mod tests {
 
     #[test]
     fn test_tool_result_ok_with_image() {
-        let result = ToolResult::ok_with_image("desc", "image/png".to_string(), "base64data".to_string());
+        let result =
+            ToolResult::ok_with_image("desc", "image/png".to_string(), "base64data".to_string());
         assert!(result.success);
         assert!(result.image_data.is_some());
         let (mime, data) = result.image_data.unwrap();

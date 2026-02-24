@@ -115,8 +115,8 @@ impl RemoteAdapter for TelegramAdapter {
         let cancel = self.cancel_token.clone();
 
         tokio::spawn(async move {
-            let handler = Update::filter_message().endpoint(
-                move |msg: Message, _bot: teloxide::Bot| {
+            let handler =
+                Update::filter_message().endpoint(move |msg: Message, _bot: teloxide::Bot| {
                     let tx = command_tx.clone();
                     let allowed_chats = allowed_chat_ids.clone();
                     let allowed_users = allowed_user_ids.clone();
@@ -139,10 +139,7 @@ impl RemoteAdapter for TelegramAdapter {
                                 adapter_type: RemoteAdapterType::Telegram,
                                 chat_id,
                                 user_id,
-                                username: msg
-                                    .from
-                                    .as_ref()
-                                    .and_then(|u| u.username.clone()),
+                                username: msg.from.as_ref().and_then(|u| u.username.clone()),
                                 text: text.to_string(),
                                 message_id: msg.id.0 as i64,
                                 timestamp: chrono::Utc::now(),
@@ -151,8 +148,7 @@ impl RemoteAdapter for TelegramAdapter {
                         }
                         Ok(())
                     }
-                },
-            );
+                });
 
             // Build and run dispatcher
             let mut dispatcher = Dispatcher::builder(bot, handler)

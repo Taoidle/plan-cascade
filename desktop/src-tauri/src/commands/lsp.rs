@@ -105,10 +105,7 @@ pub async fn trigger_lsp_enrichment(
     app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<EnrichmentReport>, String> {
     // Get the IndexStore from app state
-    let pool = match app_state
-        .with_database(|db| Ok(db.pool().clone()))
-        .await
-    {
+    let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
         Ok(pool) => pool,
         Err(e) => {
             return Ok(CommandResponse {
@@ -159,11 +156,31 @@ pub async fn get_enrichment_report(
 /// Build the full server status list for all 5 supported languages.
 fn build_server_statuses(detected: &HashMap<String, String>) -> Vec<LspServerStatus> {
     let languages = [
-        ("rust", "rust-analyzer", "Install via rustup: `rustup component add rust-analyzer`"),
-        ("python", "pyright", "Install: `npm i -g pyright` or `pip install pyright`"),
-        ("go", "gopls", "Install: `go install golang.org/x/tools/gopls@latest`"),
-        ("typescript", "vtsls", "Install: `npm i -g @vtsls/language-server` or `npm i -g typescript-language-server`"),
-        ("java", "jdtls", "Install: `brew install jdtls` (macOS) or download from Eclipse"),
+        (
+            "rust",
+            "rust-analyzer",
+            "Install via rustup: `rustup component add rust-analyzer`",
+        ),
+        (
+            "python",
+            "pyright",
+            "Install: `npm i -g pyright` or `pip install pyright`",
+        ),
+        (
+            "go",
+            "gopls",
+            "Install: `go install golang.org/x/tools/gopls@latest`",
+        ),
+        (
+            "typescript",
+            "vtsls",
+            "Install: `npm i -g @vtsls/language-server` or `npm i -g typescript-language-server`",
+        ),
+        (
+            "java",
+            "jdtls",
+            "Install: `brew install jdtls` (macOS) or download from Eclipse",
+        ),
     ];
 
     languages

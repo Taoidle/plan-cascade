@@ -300,10 +300,7 @@ impl PluginLifecycleHooks {
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[lifecycle] before_execution hook {} failed: {}",
-                        i, e
-                    );
+                    eprintln!("[lifecycle] before_execution hook {} failed: {}", i, e);
                     if self.short_circuit_on_error {
                         return Err(e);
                     }
@@ -340,10 +337,7 @@ impl PluginLifecycleHooks {
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[lifecycle] on_message hook {} failed: {}",
-                        i, e
-                    );
+                    eprintln!("[lifecycle] on_message hook {} failed: {}", i, e);
                     if self.short_circuit_on_error {
                         return Err(e);
                     }
@@ -376,10 +370,7 @@ impl PluginLifecycleHooks {
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[lifecycle] on_event hook {} failed: {}",
-                        i, e
-                    );
+                    eprintln!("[lifecycle] on_event hook {} failed: {}", i, e);
                     if self.short_circuit_on_error {
                         return Err(e);
                     }
@@ -406,10 +397,7 @@ impl PluginLifecycleHooks {
                     results.push(result);
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[lifecycle] after_execution hook {} failed: {}",
-                        i, e
-                    );
+                    eprintln!("[lifecycle] after_execution hook {} failed: {}", i, e);
                     if self.short_circuit_on_error {
                         break;
                     }
@@ -946,10 +934,7 @@ mod tests {
         let ctx = test_lifecycle_context();
         let results = hooks.fire_after_execution(&ctx, true).await;
         assert_eq!(results.len(), 1);
-        assert_eq!(
-            results[0].notes.as_deref(),
-            Some("Execution success: true")
-        );
+        assert_eq!(results[0].notes.as_deref(), Some("Execution success: true"));
     }
 
     #[tokio::test]
@@ -1044,9 +1029,7 @@ mod tests {
         }));
 
         let ctx = test_lifecycle_context();
-        let result = hooks
-            .fire_on_message(&ctx, "hello".to_string())
-            .await;
+        let result = hooks.fire_on_message(&ctx, "hello".to_string()).await;
         assert!(result.is_err());
     }
 

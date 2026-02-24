@@ -473,10 +473,7 @@ impl HnswIndex {
     /// Builds a new Hnsw graph in `spawn_blocking` (CPU-bound), then swaps it
     /// into `inner` under a single write lock.  Concurrent `search()` calls
     /// always see either the old or the new index, never an empty one.
-    pub async fn rebuild_from_vectors(
-        &self,
-        vectors: &[(usize, Vec<f32>)],
-    ) -> Result<(), String> {
+    pub async fn rebuild_from_vectors(&self, vectors: &[(usize, Vec<f32>)]) -> Result<(), String> {
         if vectors.is_empty() {
             self.initialize().await;
             return Ok(());
@@ -660,10 +657,7 @@ mod tests {
         let results = idx.search(&query, 1).await;
 
         assert!(!results.is_empty(), "should return at least one result");
-        assert_eq!(
-            results[0].0, 42,
-            "top-1 should be the exact match (id=42)"
-        );
+        assert_eq!(results[0].0, 42, "top-1 should be the exact match (id=42)");
         assert!(
             results[0].1 < 0.01,
             "distance to self should be near zero, got {}",
@@ -1017,9 +1011,8 @@ mod tests {
         assert_eq!(idx.get_stale_count().await, 1);
 
         // Rebuild with a different set of vectors
-        let new_vectors: Vec<(usize, Vec<f32>)> = (10..13)
-            .map(|i| (i, make_embedding(dim, i)))
-            .collect();
+        let new_vectors: Vec<(usize, Vec<f32>)> =
+            (10..13).map(|i| (i, make_embedding(dim, i))).collect();
         idx.rebuild_from_vectors(&new_vectors)
             .await
             .expect("rebuild should succeed");

@@ -92,7 +92,11 @@ impl PluginManager {
                 plugin.manifest.name,
                 plugin.manifest.version,
                 plugin.source,
-                if plugin.enabled { "enabled" } else { "disabled" }
+                if plugin.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
             );
         }
     }
@@ -124,10 +128,7 @@ impl PluginManager {
             }
         }
 
-        eprintln!(
-            "[plugins] Refreshed: {} plugins found",
-            self.plugins.len()
-        );
+        eprintln!("[plugins] Refreshed: {} plugins found", self.plugins.len());
     }
 
     /// Register hooks from all enabled plugins into AgenticHooks.
@@ -266,10 +267,7 @@ impl PluginManager {
 ///
 /// This is a convenience function for wiring plugin hooks into the
 /// OrchestratorService's hook system alongside skill and memory hooks.
-pub fn register_plugin_hooks_on_agentic_hooks(
-    hooks: &mut AgenticHooks,
-    manager: &PluginManager,
-) {
+pub fn register_plugin_hooks_on_agentic_hooks(hooks: &mut AgenticHooks, manager: &PluginManager) {
     manager.register_hooks(hooks);
 }
 
@@ -284,7 +282,13 @@ mod tests {
     use tempfile::TempDir;
 
     /// Create a plugin directory with given properties.
-    fn create_plugin(dir: &Path, name: &str, with_skills: bool, with_hooks: bool, with_instructions: bool) {
+    fn create_plugin(
+        dir: &Path,
+        name: &str,
+        with_skills: bool,
+        with_hooks: bool,
+        with_instructions: bool,
+    ) {
         fs::write(
             dir.join("plugin.json"),
             serde_json::json!({
@@ -415,7 +419,10 @@ mod tests {
         manager.toggle_plugin("disabled-plugin", false);
 
         let skills = manager.collect_skills();
-        assert!(skills.is_empty(), "Disabled plugins should not contribute skills");
+        assert!(
+            skills.is_empty(),
+            "Disabled plugins should not contribute skills"
+        );
     }
 
     #[test]
@@ -469,7 +476,10 @@ mod tests {
         manager.toggle_plugin("disabled-inst", false);
 
         let instructions = manager.collect_instructions();
-        assert!(instructions.is_empty(), "Disabled plugin instructions should not be collected");
+        assert!(
+            instructions.is_empty(),
+            "Disabled plugin instructions should not be collected"
+        );
     }
 
     #[test]
@@ -503,7 +513,11 @@ mod tests {
         let mut hooks = AgenticHooks::new();
         manager.register_hooks(&mut hooks);
 
-        assert_eq!(hooks.total_hooks(), 0, "Disabled plugin hooks should not be registered");
+        assert_eq!(
+            hooks.total_hooks(),
+            0,
+            "Disabled plugin hooks should not be registered"
+        );
     }
 
     #[test]

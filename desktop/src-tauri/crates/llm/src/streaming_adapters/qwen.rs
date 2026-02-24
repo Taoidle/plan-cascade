@@ -362,7 +362,9 @@ mod tests {
             .unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            UnifiedStreamEvent::ToolStart { tool_id, tool_name, .. } => {
+            UnifiedStreamEvent::ToolStart {
+                tool_id, tool_name, ..
+            } => {
                 assert_eq!(tool_id, "call_abc123");
                 assert_eq!(tool_name, "Read");
             }
@@ -380,7 +382,11 @@ mod tests {
         let events = adapter.adapt("data: [DONE]").unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            UnifiedStreamEvent::ToolComplete { tool_id, tool_name, arguments } => {
+            UnifiedStreamEvent::ToolComplete {
+                tool_id,
+                tool_name,
+                arguments,
+            } => {
                 assert_eq!(tool_id, "call_abc123");
                 assert_eq!(tool_name, "Read");
                 assert!(arguments.contains("file_path"));
@@ -399,7 +405,11 @@ mod tests {
             .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "call_xyz", "type": "function", "function": {"name": "", "arguments": "{\"path\":"}}]}}]}"#)
             .unwrap();
         // No ToolStart because tool_name is empty and gets filtered to None
-        assert!(events.is_empty(), "Expected no events when tool name is empty, got: {:?}", events);
+        assert!(
+            events.is_empty(),
+            "Expected no events when tool name is empty, got: {:?}",
+            events
+        );
 
         // Continuation chunk with arguments
         let events = adapter
@@ -410,7 +420,11 @@ mod tests {
         // Done: flush_pending_tool requires both tool_id and tool_name to be Some.
         // Since tool_name was filtered to None, no ToolComplete should be emitted.
         let events = adapter.adapt("data: [DONE]").unwrap();
-        assert!(events.is_empty(), "Expected no ToolComplete with empty tool name, got: {:?}", events);
+        assert!(
+            events.is_empty(),
+            "Expected no ToolComplete with empty tool name, got: {:?}",
+            events
+        );
     }
 
     #[test]
@@ -423,7 +437,9 @@ mod tests {
             .unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            UnifiedStreamEvent::ToolStart { tool_id, tool_name, .. } => {
+            UnifiedStreamEvent::ToolStart {
+                tool_id, tool_name, ..
+            } => {
                 assert_eq!(tool_id, "call_omni_1");
                 assert_eq!(tool_name, "Bash");
             }
@@ -435,16 +451,29 @@ mod tests {
         let events = adapter
             .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "call_omni_1", "function": {"arguments": " \"ls -la\"}"}}]}}]}"#)
             .unwrap();
-        assert!(events.is_empty(), "Same-id continuation should not produce events, got: {:?}", events);
+        assert!(
+            events.is_empty(),
+            "Same-id continuation should not produce events, got: {:?}",
+            events
+        );
 
         // Flush via finish_reason
         let events = adapter
             .adapt(r#"data: {"choices": [{"finish_reason": "tool_calls"}]}"#)
             .unwrap();
         // Should get ToolComplete then Complete
-        assert_eq!(events.len(), 2, "Expected ToolComplete + Complete, got: {:?}", events);
+        assert_eq!(
+            events.len(),
+            2,
+            "Expected ToolComplete + Complete, got: {:?}",
+            events
+        );
         match &events[0] {
-            UnifiedStreamEvent::ToolComplete { tool_id, tool_name, arguments } => {
+            UnifiedStreamEvent::ToolComplete {
+                tool_id,
+                tool_name,
+                arguments,
+            } => {
                 assert_eq!(tool_id, "call_omni_1");
                 assert_eq!(tool_name, "Bash");
                 assert_eq!(arguments, r#"{"cmd": "ls -la"}"#);
@@ -469,7 +498,9 @@ mod tests {
             .unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            UnifiedStreamEvent::ToolStart { tool_id, tool_name, .. } => {
+            UnifiedStreamEvent::ToolStart {
+                tool_id, tool_name, ..
+            } => {
                 assert_eq!(tool_id, "call_first");
                 assert_eq!(tool_name, "Read");
             }
@@ -481,9 +512,18 @@ mod tests {
             .adapt(r#"data: {"choices": [{"delta": {"tool_calls": [{"id": "call_second", "type": "function", "function": {"name": "Bash", "arguments": "{\"cmd\": \"echo hi\"}"}}]}}]}"#)
             .unwrap();
         // Should get ToolComplete (flushed first tool) + ToolStart (new tool)
-        assert_eq!(events.len(), 2, "Expected ToolComplete + ToolStart, got: {:?}", events);
+        assert_eq!(
+            events.len(),
+            2,
+            "Expected ToolComplete + ToolStart, got: {:?}",
+            events
+        );
         match &events[0] {
-            UnifiedStreamEvent::ToolComplete { tool_id, tool_name, arguments } => {
+            UnifiedStreamEvent::ToolComplete {
+                tool_id,
+                tool_name,
+                arguments,
+            } => {
                 assert_eq!(tool_id, "call_first");
                 assert_eq!(tool_name, "Read");
                 assert!(arguments.contains("a.rs"));
@@ -491,7 +531,9 @@ mod tests {
             _ => panic!("Expected ToolComplete for first tool, got {:?}", events[0]),
         }
         match &events[1] {
-            UnifiedStreamEvent::ToolStart { tool_id, tool_name, .. } => {
+            UnifiedStreamEvent::ToolStart {
+                tool_id, tool_name, ..
+            } => {
                 assert_eq!(tool_id, "call_second");
                 assert_eq!(tool_name, "Bash");
             }
@@ -502,7 +544,11 @@ mod tests {
         let events = adapter.adapt("data: [DONE]").unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            UnifiedStreamEvent::ToolComplete { tool_id, tool_name, arguments } => {
+            UnifiedStreamEvent::ToolComplete {
+                tool_id,
+                tool_name,
+                arguments,
+            } => {
                 assert_eq!(tool_id, "call_second");
                 assert_eq!(tool_name, "Bash");
                 assert!(arguments.contains("echo hi"));

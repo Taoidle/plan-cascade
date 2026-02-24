@@ -9,9 +9,7 @@
 
 use rusqlite::params;
 
-use crate::services::memory::store::{
-    bytes_to_embedding, embedding_to_bytes, ProjectMemoryStore,
-};
+use crate::services::memory::store::{bytes_to_embedding, embedding_to_bytes, ProjectMemoryStore};
 use crate::services::orchestrator::embedding_service::cosine_similarity;
 use crate::utils::error::AppResult;
 
@@ -33,7 +31,9 @@ impl MemoryMaintenance {
         }
 
         let candidates: Vec<DecayCandidate> = {
-            let conn = store.pool().get().map_err(|e| crate::utils::error::AppError::database(format!("Failed to get connection: {}", e)))?;
+            let conn = store.pool().get().map_err(|e| {
+                crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
+            })?;
             let mut stmt = conn.prepare(
                 "SELECT id, importance, julianday('now') - julianday(last_accessed_at)
                  FROM project_memories
@@ -64,7 +64,12 @@ impl MemoryMaintenance {
             let new_importance = (candidate.importance as f64 * decay_factor) as f32;
 
             if (new_importance - candidate.importance).abs() > f32::EPSILON {
-                let conn = store.pool().get().map_err(|e| crate::utils::error::AppError::database(format!("Failed to get connection: {}", e)))?;
+                let conn = store.pool().get().map_err(|e| {
+                    crate::utils::error::AppError::database(format!(
+                        "Failed to get connection: {}",
+                        e
+                    ))
+                })?;
                 conn.execute(
                     "UPDATE project_memories SET importance = ?2, updated_at = datetime('now') WHERE id = ?1",
                     params![candidate.id, new_importance],
@@ -84,7 +89,9 @@ impl MemoryMaintenance {
         project_path: &str,
         min_importance: f32,
     ) -> AppResult<usize> {
-        let conn = store.pool().get().map_err(|e| crate::utils::error::AppError::database(format!("Failed to get connection: {}", e)))?;
+        let conn = store.pool().get().map_err(|e| {
+            crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
+        })?;
 
         let deleted = conn.execute(
             "DELETE FROM project_memories WHERE project_path = ?1 AND importance < ?2",
@@ -114,7 +121,9 @@ impl MemoryMaintenance {
         }
 
         let memories: Vec<MemWithEmb> = {
-            let conn = store.pool().get().map_err(|e| crate::utils::error::AppError::database(format!("Failed to get connection: {}", e)))?;
+            let conn = store.pool().get().map_err(|e| {
+                crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
+            })?;
             let mut stmt = conn.prepare(
                 "SELECT id, content, importance, keywords, embedding
                  FROM project_memories
@@ -195,7 +204,12 @@ impl MemoryMaintenance {
 
                         // Update the kept memory
                         {
-                            let conn = store.pool().get().map_err(|e| crate::utils::error::AppError::database(format!("Failed to get connection: {}", e)))?;
+                            let conn = store.pool().get().map_err(|e| {
+                                crate::utils::error::AppError::database(format!(
+                                    "Failed to get connection: {}",
+                                    e
+                                ))
+                            })?;
                             let merged_kw_json =
                                 serde_json::to_string(&merged_keywords).unwrap_or_default();
                             conn.execute(
@@ -219,12 +233,11 @@ impl MemoryMaintenance {
 
         // Delete merged entries
         if !to_delete.is_empty() {
-            let conn = store.pool().get().map_err(|e| crate::utils::error::AppError::database(format!("Failed to get connection: {}", e)))?;
+            let conn = store.pool().get().map_err(|e| {
+                crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
+            })?;
             for id in &to_delete {
-                conn.execute(
-                    "DELETE FROM project_memories WHERE id = ?1",
-                    params![id],
-                )?;
+                conn.execute("DELETE FROM project_memories WHERE id = ?1", params![id])?;
             }
         }
 
@@ -281,7 +294,9 @@ mod tests {
         let store = create_test_store();
 
         // Insert a memory and manually set its last_accessed_at to 14 days ago
-        let mem = store.add_memory(sample_entry("Test decay entry", 0.8)).unwrap();
+        let mem = store
+            .add_memory(sample_entry("Test decay entry", 0.8))
+            .unwrap();
 
         {
             let conn = store.pool().get().map_err(|e| format!("{}", e)).unwrap();
@@ -335,10 +350,18 @@ mod tests {
     fn test_prune_removes_low_importance() {
         let store = create_test_store();
 
-        store.add_memory(sample_entry("High importance", 0.9)).unwrap();
-        store.add_memory(sample_entry("Medium importance", 0.5)).unwrap();
-        store.add_memory(sample_entry("Low importance", 0.1)).unwrap();
-        store.add_memory(sample_entry("Very low importance", 0.05)).unwrap();
+        store
+            .add_memory(sample_entry("High importance", 0.9))
+            .unwrap();
+        store
+            .add_memory(sample_entry("Medium importance", 0.5))
+            .unwrap();
+        store
+            .add_memory(sample_entry("Low importance", 0.1))
+            .unwrap();
+        store
+            .add_memory(sample_entry("Very low importance", 0.05))
+            .unwrap();
 
         let deleted = MemoryMaintenance::prune_memories(&store, "/test/project", 0.3).unwrap();
         assert_eq!(deleted, 2, "Should have pruned 2 memories below 0.3");

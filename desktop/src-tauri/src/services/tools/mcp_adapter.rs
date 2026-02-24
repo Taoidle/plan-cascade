@@ -120,9 +120,9 @@ impl Tool for McpToolAdapter {
                 match result {
                     Value::String(s) => ToolResult::ok(s),
                     Value::Null => ToolResult::ok("(no output)"),
-                    other => ToolResult::ok(serde_json::to_string_pretty(&other).unwrap_or_else(
-                        |_| other.to_string(),
-                    )),
+                    other => ToolResult::ok(
+                        serde_json::to_string_pretty(&other).unwrap_or_else(|_| other.to_string()),
+                    ),
                 }
             }
             Err(e) => ToolResult::err(format!(
@@ -319,9 +319,7 @@ for line in sys.stdin:
             file_change_tracker: None,
         };
 
-        let result = adapter
-            .execute(&ctx, json!({"name": "Rust"}))
-            .await;
+        let result = adapter.execute(&ctx, json!({"name": "Rust"})).await;
         assert!(result.success, "Error: {:?}", result.error);
         assert_eq!(result.output.unwrap(), "Hello, Rust!");
 

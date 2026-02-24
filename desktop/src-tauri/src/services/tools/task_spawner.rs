@@ -44,7 +44,7 @@ impl SubAgentType {
             "explore" => Self::Explore,
             "plan" => Self::Plan,
             "bash" => Self::Bash,
-            "analyze" => Self::Plan,           // backward compat
+            "analyze" => Self::Plan,             // backward compat
             "implement" => Self::GeneralPurpose, // backward compat
             _ => Self::Explore,
         }
@@ -59,11 +59,31 @@ impl SubAgentType {
     pub fn allowed_tools(&self) -> &'static [&'static str] {
         match self {
             Self::GeneralPurpose => &[
-                "Read", "Write", "Edit", "Bash", "Glob", "Grep", "LS", "Cwd",
-                "Task", "WebFetch", "WebSearch", "NotebookEdit", "CodebaseSearch", "Browser",
+                "Read",
+                "Write",
+                "Edit",
+                "Bash",
+                "Glob",
+                "Grep",
+                "LS",
+                "Cwd",
+                "Task",
+                "WebFetch",
+                "WebSearch",
+                "NotebookEdit",
+                "CodebaseSearch",
+                "Browser",
             ],
             Self::Explore | Self::Plan => &[
-                "Read", "Glob", "Grep", "LS", "Cwd", "CodebaseSearch", "Bash", "WebFetch", "WebSearch",
+                "Read",
+                "Glob",
+                "Grep",
+                "LS",
+                "Cwd",
+                "CodebaseSearch",
+                "Bash",
+                "WebFetch",
+                "WebSearch",
             ],
             Self::Bash => &["Bash", "Cwd"],
         }

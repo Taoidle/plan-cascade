@@ -430,18 +430,12 @@ mod tests {
             registry.get_adapter("python").unwrap().server_name(),
             "pyright"
         );
-        assert_eq!(
-            registry.get_adapter("go").unwrap().server_name(),
-            "gopls"
-        );
+        assert_eq!(registry.get_adapter("go").unwrap().server_name(), "gopls");
         assert_eq!(
             registry.get_adapter("typescript").unwrap().server_name(),
             "vtsls"
         );
-        assert_eq!(
-            registry.get_adapter("java").unwrap().server_name(),
-            "jdtls"
-        );
+        assert_eq!(registry.get_adapter("java").unwrap().server_name(), "jdtls");
     }
 
     #[test]

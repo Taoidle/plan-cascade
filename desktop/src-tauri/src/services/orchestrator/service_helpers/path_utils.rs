@@ -436,7 +436,10 @@ pub(super) fn observed_root_segments(observed: &HashSet<String>) -> HashSet<Stri
     roots
 }
 
-pub(super) fn is_concrete_path_reference(candidate: &str, observed_roots: &HashSet<String>) -> bool {
+pub(super) fn is_concrete_path_reference(
+    candidate: &str,
+    observed_roots: &HashSet<String>,
+) -> bool {
     let normalized = match normalize_candidate_path(candidate) {
         Some(path) => path,
         None => return false,
@@ -518,4 +521,3 @@ pub(super) fn find_unverified_paths(text: &str, observed: &HashSet<String>) -> V
         .filter(|path| !is_observed_path(path, observed))
         .collect()
 }
-

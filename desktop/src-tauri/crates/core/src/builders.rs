@@ -298,9 +298,7 @@ impl AgentConfigBuilder {
             return Err(CoreError::validation("max_iterations must be > 0"));
         }
         if max_iterations > 10_000 {
-            return Err(CoreError::validation(
-                "max_iterations must be <= 10000",
-            ));
+            return Err(CoreError::validation("max_iterations must be <= 10000"));
         }
         if max_total_tokens == 0 {
             return Err(CoreError::validation("max_total_tokens must be > 0"));
@@ -632,10 +630,7 @@ mod tests {
         let key = SessionStateKey::user("name").unwrap();
         state.set(key.clone(), Value::String("Alice".to_string()));
         assert_eq!(state.len(), 1);
-        assert_eq!(
-            state.get(&key),
-            Some(&Value::String("Alice".to_string()))
-        );
+        assert_eq!(state.get(&key), Some(&Value::String("Alice".to_string())));
     }
 
     #[test]
@@ -662,8 +657,12 @@ mod tests {
         assert_eq!(state.len(), 2);
 
         // User and app keys preserved
-        assert!(state.get(&SessionStateKey::user("persist").unwrap()).is_some());
-        assert!(state.get(&SessionStateKey::app("persist2").unwrap()).is_some());
+        assert!(state
+            .get(&SessionStateKey::user("persist").unwrap())
+            .is_some());
+        assert!(state
+            .get(&SessionStateKey::app("persist2").unwrap())
+            .is_some());
     }
 
     #[test]
@@ -776,18 +775,14 @@ mod tests {
 
     #[test]
     fn test_execution_config_builder_missing_session_id() {
-        let result = ExecutionConfigBuilder::new()
-            .project_root("/proj")
-            .build();
+        let result = ExecutionConfigBuilder::new().project_root("/proj").build();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("session_id"));
     }
 
     #[test]
     fn test_execution_config_builder_missing_project_root() {
-        let result = ExecutionConfigBuilder::new()
-            .session_id("s-1")
-            .build();
+        let result = ExecutionConfigBuilder::new().session_id("s-1").build();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("project_root"));
     }

@@ -35,16 +35,12 @@ impl FileChangesState {
         }
         // Slow path: write lock and create
         let mut trackers = self.trackers.write().await;
-        Arc::clone(
-            trackers
-                .entry(session_id.to_string())
-                .or_insert_with(|| {
-                    Arc::new(Mutex::new(FileChangeTracker::new(
-                        session_id,
-                        PathBuf::from(project_root),
-                    )))
-                }),
-        )
+        Arc::clone(trackers.entry(session_id.to_string()).or_insert_with(|| {
+            Arc::new(Mutex::new(FileChangeTracker::new(
+                session_id,
+                PathBuf::from(project_root),
+            )))
+        }))
     }
 
     /// Get an existing tracker (returns None if not found).

@@ -381,6 +381,9 @@ mod tests {
     fn test_default_patterns_compiled() {
         // Verify all default patterns compile successfully
         let patterns = default_patterns();
-        assert!(patterns.len() >= 9, "Should have at least 9 default patterns");
+        assert!(
+            patterns.len() >= 9,
+            "Should have at least 9 default patterns"
+        );
     }
 }

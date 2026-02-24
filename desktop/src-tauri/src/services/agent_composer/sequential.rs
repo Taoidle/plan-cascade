@@ -80,9 +80,12 @@ impl Agent for SequentialAgent {
 
                                         // If this was the last agent, emit Done
                                         if state.current_index >= state.agents.len() {
-                                            return Some((Ok(AgentEvent::Done {
-                                                output: state.last_output.clone(),
-                                            }), state));
+                                            return Some((
+                                                Ok(AgentEvent::Done {
+                                                    output: state.last_output.clone(),
+                                                }),
+                                                state,
+                                            ));
                                         }
 
                                         // Otherwise, don't emit the intermediate Done,
@@ -112,9 +115,12 @@ impl Agent for SequentialAgent {
                                 state.current_index += 1;
 
                                 if state.current_index >= state.agents.len() {
-                                    return Some((Ok(AgentEvent::Done {
-                                        output: state.last_output.clone(),
-                                    }), state));
+                                    return Some((
+                                        Ok(AgentEvent::Done {
+                                            output: state.last_output.clone(),
+                                        }),
+                                        state,
+                                    ));
                                 }
                                 continue;
                             }
@@ -235,9 +241,9 @@ mod tests {
         // We need a real LlmProvider for the context, but we won't call it.
         // Use a mock approach by creating a struct that implements the trait.
         let provider = Arc::new(MockProvider::new());
-        let tool_executor = Arc::new(
-            crate::services::tools::ToolExecutor::new(&PathBuf::from("/tmp")),
-        );
+        let tool_executor = Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+            "/tmp",
+        )));
         let hooks = Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new());
 
         AgentContext {
@@ -324,7 +330,11 @@ mod tests {
         }
 
         // Should have: TextDelta from agent1, TextDelta from agent2, Done
-        assert!(events.len() >= 3, "Expected at least 3 events, got {}", events.len());
+        assert!(
+            events.len() >= 3,
+            "Expected at least 3 events, got {}",
+            events.len()
+        );
 
         // Final Done should have chained output
         if let Some(AgentEvent::Done { output }) = events.last() {

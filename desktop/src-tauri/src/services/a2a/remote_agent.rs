@@ -94,21 +94,15 @@ fn map_a2a_event_to_agent_event(
     event: Result<A2aStreamEvent, A2aError>,
 ) -> Option<AppResult<AgentEvent>> {
     match event {
-        Ok(A2aStreamEvent::TextDelta { content }) => {
-            Some(Ok(AgentEvent::TextDelta { content }))
-        }
-        Ok(A2aStreamEvent::TaskComplete { task_id: _, result }) => {
-            Some(Ok(AgentEvent::Done {
-                output: result.output,
-            }))
-        }
-        Ok(A2aStreamEvent::TaskError { task_id, error }) => {
-            Some(Ok(AgentEvent::Failed {
-                run_id: task_id,
-                error,
-                duration_ms: 0,
-            }))
-        }
+        Ok(A2aStreamEvent::TextDelta { content }) => Some(Ok(AgentEvent::TextDelta { content })),
+        Ok(A2aStreamEvent::TaskComplete { task_id: _, result }) => Some(Ok(AgentEvent::Done {
+            output: result.output,
+        })),
+        Ok(A2aStreamEvent::TaskError { task_id, error }) => Some(Ok(AgentEvent::Failed {
+            run_id: task_id,
+            error,
+            duration_ms: 0,
+        })),
         Ok(A2aStreamEvent::StatusUpdate { .. }) => {
             // Status updates are informational; skip them in the agent event stream
             None
@@ -137,7 +131,11 @@ impl Agent for RemoteA2aAgent {
         let input_text = build_input_text(&ctx.input);
 
         // Build a streaming JSON-RPC task request
-        let request = A2aTaskRequest::send_task_streaming(task_id.as_str(), input_text.as_str(), task_id.clone());
+        let request = A2aTaskRequest::send_task_streaming(
+            task_id.as_str(),
+            input_text.as_str(),
+            task_id.clone(),
+        );
 
         // Send the request and get the SSE stream
         let a2a_stream = self
@@ -147,9 +145,8 @@ impl Agent for RemoteA2aAgent {
             .map_err(|e| AppError::internal(format!("A2A request failed: {}", e)))?;
 
         // Map A2aStreamEvents to AgentEvents, filtering out StatusUpdate events
-        let agent_stream = a2a_stream.filter_map(|event| {
-            futures_util::future::ready(map_a2a_event_to_agent_event(event))
-        });
+        let agent_stream = a2a_stream
+            .filter_map(|event| futures_util::future::ready(map_a2a_event_to_agent_event(event)));
 
         Ok(Box::pin(agent_stream))
     }
@@ -414,11 +411,10 @@ mod tests {
         ];
 
         let a2a_stream = futures_util::stream::iter(a2a_events);
-        let mut agent_stream = Box::pin(
-            a2a_stream.filter_map(|event| {
+        let mut agent_stream =
+            Box::pin(a2a_stream.filter_map(|event| {
                 futures_util::future::ready(map_a2a_event_to_agent_event(event))
-            }),
-        );
+            }));
 
         // First event: TextDelta "Reviewing " (StatusUpdate was filtered)
         let ev1 = agent_stream.next().await.unwrap().unwrap();
@@ -458,11 +454,10 @@ mod tests {
         ];
 
         let a2a_stream = futures_util::stream::iter(a2a_events);
-        let mut agent_stream = Box::pin(
-            a2a_stream.filter_map(|event| {
+        let mut agent_stream =
+            Box::pin(a2a_stream.filter_map(|event| {
                 futures_util::future::ready(map_a2a_event_to_agent_event(event))
-            }),
-        );
+            }));
 
         // First: TextDelta
         let ev1 = agent_stream.next().await.unwrap();
@@ -491,11 +486,10 @@ mod tests {
         ];
 
         let a2a_stream = futures_util::stream::iter(a2a_events);
-        let mut agent_stream = Box::pin(
-            a2a_stream.filter_map(|event| {
+        let mut agent_stream =
+            Box::pin(a2a_stream.filter_map(|event| {
                 futures_util::future::ready(map_a2a_event_to_agent_event(event))
-            }),
-        );
+            }));
 
         // First: TextDelta
         let ev1 = agent_stream.next().await.unwrap().unwrap();
@@ -586,10 +580,7 @@ mod tests {
             agent.description(),
             "Runs integration tests on Kubernetes clusters"
         );
-        assert_eq!(
-            agent.endpoint(),
-            "https://k8s-tester.internal/api/v1/tasks"
-        );
+        assert_eq!(agent.endpoint(), "https://k8s-tester.internal/api/v1/tasks");
         assert!(agent.agent_card().auth_required);
     }
 
@@ -610,11 +601,10 @@ mod tests {
         ];
 
         let a2a_stream = futures_util::stream::iter(a2a_events);
-        let mut agent_stream = Box::pin(
-            a2a_stream.filter_map(|event| {
+        let mut agent_stream =
+            Box::pin(a2a_stream.filter_map(|event| {
                 futures_util::future::ready(map_a2a_event_to_agent_event(event))
-            }),
-        );
+            }));
 
         // Should produce no events
         assert!(agent_stream.next().await.is_none());

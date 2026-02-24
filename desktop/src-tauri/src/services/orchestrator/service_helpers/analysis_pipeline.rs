@@ -1,6 +1,5 @@
 use super::*;
 
-
 #[derive(Debug, Clone, Default)]
 pub(super) struct PhaseCapture {
     pub(super) tool_calls: usize,

@@ -51,10 +51,7 @@ impl SessionBridge {
             text.push_str(&format!(
                 "  Chat {} -> {} ({})\n",
                 cid,
-                mapping
-                    .local_session_id
-                    .as_deref()
-                    .unwrap_or("no session"),
+                mapping.local_session_id.as_deref().unwrap_or("no session"),
                 mapping.session_type
             ));
         }
@@ -68,10 +65,7 @@ impl SessionBridge {
             Some(mapping) => {
                 format!(
                     "Session: {}\nType: {}\nCreated: {}",
-                    mapping
-                        .local_session_id
-                        .as_deref()
-                        .unwrap_or("none"),
+                    mapping.local_session_id.as_deref().unwrap_or("none"),
                     mapping.session_type,
                     mapping.created_at
                 )
@@ -139,7 +133,16 @@ impl SessionBridge {
         _provider: Option<&str>,
         _model: Option<&str>,
     ) -> Result<String, RemoteError> {
-        self.create_session_with_source(chat_id, user_id, _project_path, _provider, _model, None, None).await
+        self.create_session_with_source(
+            chat_id,
+            user_id,
+            _project_path,
+            _provider,
+            _model,
+            None,
+            None,
+        )
+        .await
     }
 
     /// Create a new session with remote source tracking.

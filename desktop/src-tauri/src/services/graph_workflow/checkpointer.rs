@@ -285,13 +285,7 @@ mod tests {
 
     #[test]
     fn test_graph_checkpoint_serialization() {
-        let cp = GraphCheckpoint::new(
-            "thread-1",
-            HashMap::new(),
-            "node-a",
-            vec![],
-            None,
-        );
+        let cp = GraphCheckpoint::new("thread-1", HashMap::new(), "node-a", vec![], None);
 
         let json = serde_json::to_string(&cp).unwrap();
         let parsed: GraphCheckpoint = serde_json::from_str(&json).unwrap();
@@ -334,13 +328,7 @@ mod tests {
     async fn test_in_memory_save_and_load() {
         let cp_store = InMemoryCheckpointer::new();
 
-        let cp = GraphCheckpoint::new(
-            "thread-1",
-            HashMap::new(),
-            "node-a",
-            vec![],
-            None,
-        );
+        let cp = GraphCheckpoint::new("thread-1", HashMap::new(), "node-a", vec![], None);
         let cp_id = cp.id.clone();
 
         cp_store.save(cp).await.unwrap();
@@ -363,13 +351,7 @@ mod tests {
     async fn test_in_memory_load_by_id() {
         let cp_store = InMemoryCheckpointer::new();
 
-        let cp = GraphCheckpoint::new(
-            "thread-1",
-            HashMap::new(),
-            "node-a",
-            vec![],
-            None,
-        );
+        let cp = GraphCheckpoint::new("thread-1", HashMap::new(), "node-a", vec![], None);
         let cp_id = cp.id.clone();
 
         cp_store.save(cp).await.unwrap();
@@ -469,13 +451,7 @@ mod tests {
     async fn test_in_memory_delete() {
         let cp_store = InMemoryCheckpointer::new();
 
-        let cp = GraphCheckpoint::new(
-            "thread-1",
-            HashMap::new(),
-            "node-a",
-            vec![],
-            None,
-        );
+        let cp = GraphCheckpoint::new("thread-1", HashMap::new(), "node-a", vec![], None);
         let cp_id = cp.id.clone();
 
         cp_store.save(cp).await.unwrap();

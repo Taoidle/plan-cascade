@@ -59,18 +59,14 @@ pub fn sanitize_schema(schema: &mut Value) {
 
                     for item in arr {
                         if let Some(item_obj) = item.as_object() {
-                            if let Some(props) = item_obj
-                                .get("properties")
-                                .and_then(|v| v.as_object())
+                            if let Some(props) =
+                                item_obj.get("properties").and_then(|v| v.as_object())
                             {
                                 for (k, v) in props {
                                     merged_properties.insert(k.clone(), v.clone());
                                 }
                             }
-                            if let Some(req) = item_obj
-                                .get("required")
-                                .and_then(|v| v.as_array())
-                            {
+                            if let Some(req) = item_obj.get("required").and_then(|v| v.as_array()) {
                                 for r in req {
                                     if let Some(s) = r.as_str() {
                                         if !merged_required.contains(&s.to_string()) {
@@ -89,7 +85,9 @@ pub fn sanitize_schema(schema: &mut Value) {
                     if !merged_properties.is_empty() {
                         obj.entry("properties")
                             .or_insert_with(|| Value::Object(serde_json::Map::new()));
-                        if let Some(existing) = obj.get_mut("properties").and_then(|v| v.as_object_mut()) {
+                        if let Some(existing) =
+                            obj.get_mut("properties").and_then(|v| v.as_object_mut())
+                        {
                             for (k, v) in merged_properties {
                                 existing.insert(k, v);
                             }
@@ -152,19 +150,13 @@ pub fn sanitize_schema(schema: &mut Value) {
                         if !types.is_empty() {
                             let type_desc = format!("One of: {}", types.join(", "));
                             if !obj.contains_key("description") {
-                                obj.insert(
-                                    "description".to_string(),
-                                    Value::String(type_desc),
-                                );
+                                obj.insert("description".to_string(), Value::String(type_desc));
                             }
                         }
 
                         // Default to string type if no type is set
                         if !obj.contains_key("type") {
-                            obj.insert(
-                                "type".to_string(),
-                                Value::String("string".to_string()),
-                            );
+                            obj.insert("type".to_string(), Value::String("string".to_string()));
                         }
                     }
                 }
@@ -237,14 +229,11 @@ pub fn json_schema_to_parameter_schema(
         .get("items")
         .map(|v| Box::new(json_schema_to_parameter_schema(v)));
 
-    let enum_values = schema
-        .get("enum")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect::<Vec<String>>()
-        });
+    let enum_values = schema.get("enum").and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect::<Vec<String>>()
+    });
 
     let default = schema.get("default").cloned();
 
@@ -519,10 +508,7 @@ mod tests {
         let props = param_schema.properties.unwrap();
         assert_eq!(props["name"].schema_type, "string");
         assert_eq!(props["count"].schema_type, "integer");
-        assert_eq!(
-            param_schema.required,
-            Some(vec!["name".to_string()])
-        );
+        assert_eq!(param_schema.required, Some(vec!["name".to_string()]));
     }
 
     #[test]

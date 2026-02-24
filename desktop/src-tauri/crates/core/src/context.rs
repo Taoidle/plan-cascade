@@ -192,14 +192,18 @@ impl OrchestratorContext {
     /// Get a mutable reference to the session state.
     ///
     /// Allows the orchestrator to read and write session state entries.
-    pub fn session_mut(&self) -> CoreResult<std::sync::RwLockWriteGuard<'_, HashMap<String, Value>>> {
+    pub fn session_mut(
+        &self,
+    ) -> CoreResult<std::sync::RwLockWriteGuard<'_, HashMap<String, Value>>> {
         self.session_state
             .write()
             .map_err(|e| CoreError::internal(format!("Session state lock poisoned: {}", e)))
     }
 
     /// Get a read reference to the session state.
-    pub fn session_ref(&self) -> CoreResult<std::sync::RwLockReadGuard<'_, HashMap<String, Value>>> {
+    pub fn session_ref(
+        &self,
+    ) -> CoreResult<std::sync::RwLockReadGuard<'_, HashMap<String, Value>>> {
         self.session_state
             .read()
             .map_err(|e| CoreError::internal(format!("Session state lock poisoned: {}", e)))
@@ -214,10 +218,7 @@ impl OrchestratorContext {
 
     /// Check if execution has been signaled to end.
     pub fn should_end(&self) -> bool {
-        self.should_end
-            .read()
-            .map(|v| *v)
-            .unwrap_or(false)
+        self.should_end.read().map(|v| *v).unwrap_or(false)
     }
 
     /// Create a `ToolContext` from this orchestrator context for a specific tool call.
@@ -237,9 +238,10 @@ impl OrchestratorContext {
 
     /// Write a value to the memory store (shared with tool contexts).
     pub fn set_memory(&self, key: impl Into<String>, value: Value) -> CoreResult<()> {
-        let mut store = self.memory_store.write().map_err(|e| {
-            CoreError::internal(format!("Memory store lock poisoned: {}", e))
-        })?;
+        let mut store = self
+            .memory_store
+            .write()
+            .map_err(|e| CoreError::internal(format!("Memory store lock poisoned: {}", e)))?;
         store.insert(key.into(), value);
         Ok(())
     }
@@ -298,8 +300,8 @@ mod tests {
 
     #[test]
     fn test_tool_context_with_execution_tag() {
-        let ctx = ToolContext::new("sess-1", "/project", "agent", "tc-001")
-            .with_execution_tag("chat");
+        let ctx =
+            ToolContext::new("sess-1", "/project", "agent", "tc-001").with_execution_tag("chat");
         assert_eq!(ctx.execution_tag(), Some("chat"));
     }
 
@@ -314,8 +316,8 @@ mod tests {
 
     #[test]
     fn test_orchestrator_context_with_execution_tag() {
-        let ctx = OrchestratorContext::new("sess-2", "/project", "agent")
-            .with_execution_tag("task");
+        let ctx =
+            OrchestratorContext::new("sess-2", "/project", "agent").with_execution_tag("task");
         assert_eq!(ctx.execution_tag(), Some("task"));
     }
 
@@ -339,13 +341,18 @@ mod tests {
         let store = Arc::new(RwLock::new(HashMap::new()));
         {
             let mut s = store.write().unwrap();
-            s.insert("file:main.rs".to_string(), Value::String("content".to_string()));
-            s.insert("file:lib.rs".to_string(), Value::String("lib content".to_string()));
+            s.insert(
+                "file:main.rs".to_string(),
+                Value::String("content".to_string()),
+            );
+            s.insert(
+                "file:lib.rs".to_string(),
+                Value::String("lib content".to_string()),
+            );
             s.insert("meta:version".to_string(), Value::String("1.0".to_string()));
         }
 
-        let ctx = ToolContext::new("sess-1", "/project", "agent", "tc-1")
-            .with_memory_store(store);
+        let ctx = ToolContext::new("sess-1", "/project", "agent", "tc-1").with_memory_store(store);
 
         let results = ctx.search_memory("file:");
         assert_eq!(results.len(), 2);
@@ -391,8 +398,8 @@ mod tests {
 
     #[test]
     fn test_orchestrator_create_tool_context() {
-        let ctx = OrchestratorContext::new("sess-1", "/project", "my-agent")
-            .with_execution_tag("chat");
+        let ctx =
+            OrchestratorContext::new("sess-1", "/project", "my-agent").with_execution_tag("chat");
 
         // Set memory in orchestrator
         ctx.set_memory("shared-key", Value::Bool(true)).unwrap();
@@ -417,11 +424,15 @@ mod tests {
 
         // Set memory
         ctx.set_memory("key1", Value::Number(42.into())).unwrap();
-        ctx.set_memory("key2", Value::String("hello".to_string())).unwrap();
+        ctx.set_memory("key2", Value::String("hello".to_string()))
+            .unwrap();
 
         // Get memory
         assert_eq!(ctx.get_memory("key1"), Some(Value::Number(42.into())));
-        assert_eq!(ctx.get_memory("key2"), Some(Value::String("hello".to_string())));
+        assert_eq!(
+            ctx.get_memory("key2"),
+            Some(Value::String("hello".to_string()))
+        );
         assert_eq!(ctx.get_memory("nonexistent"), None);
     }
 

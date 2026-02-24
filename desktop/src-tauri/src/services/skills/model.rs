@@ -396,7 +396,13 @@ mod tests {
     fn test_skill_index_with_skills() {
         let skills = vec![
             make_test_skill("alpha", SkillSource::Builtin, 10),
-            make_test_skill("beta", SkillSource::External { source_name: "vercel".to_string() }, 80),
+            make_test_skill(
+                "beta",
+                SkillSource::External {
+                    source_name: "vercel".to_string(),
+                },
+                80,
+            ),
             make_test_skill("gamma", SkillSource::ProjectLocal, 201),
         ];
         let index = SkillIndex::new(skills);
@@ -408,9 +414,7 @@ mod tests {
 
     #[test]
     fn test_skill_index_summaries() {
-        let skills = vec![
-            make_test_skill("alpha", SkillSource::Builtin, 10),
-        ];
+        let skills = vec![make_test_skill("alpha", SkillSource::Builtin, 10)];
         let index = SkillIndex::new(skills);
         let summaries = index.summaries();
 
@@ -423,9 +427,13 @@ mod tests {
 
     #[test]
     fn test_skill_index_detected_skills() {
-        let mut skill_with_detect = make_test_skill("react", SkillSource::External {
-            source_name: "vercel".to_string(),
-        }, 100);
+        let mut skill_with_detect = make_test_skill(
+            "react",
+            SkillSource::External {
+                source_name: "vercel".to_string(),
+            },
+            100,
+        );
         skill_with_detect.detect = Some(SkillDetection {
             files: vec!["package.json".to_string()],
             patterns: vec!["\"react\"".to_string()],
@@ -442,9 +450,13 @@ mod tests {
 
     #[test]
     fn test_skill_index_detected_skills_disabled() {
-        let mut skill = make_test_skill("react", SkillSource::External {
-            source_name: "vercel".to_string(),
-        }, 100);
+        let mut skill = make_test_skill(
+            "react",
+            SkillSource::External {
+                source_name: "vercel".to_string(),
+            },
+            100,
+        );
         skill.detect = Some(SkillDetection {
             files: vec!["package.json".to_string()],
             patterns: vec!["\"react\"".to_string()],
@@ -460,22 +472,33 @@ mod tests {
         let skills = vec![
             make_test_skill("alpha", SkillSource::Builtin, 10),
             make_test_skill("beta", SkillSource::Builtin, 20),
-            make_test_skill("gamma", SkillSource::External { source_name: "vercel".to_string() }, 80),
+            make_test_skill(
+                "gamma",
+                SkillSource::External {
+                    source_name: "vercel".to_string(),
+                },
+                80,
+            ),
             make_test_skill("delta", SkillSource::ProjectLocal, 201),
         ];
         let index = SkillIndex::new(skills);
 
         assert_eq!(index.skills_by_source(&SkillSource::Builtin).len(), 2);
-        assert_eq!(index.skills_by_source(&SkillSource::External { source_name: String::new() }).len(), 1);
+        assert_eq!(
+            index
+                .skills_by_source(&SkillSource::External {
+                    source_name: String::new()
+                })
+                .len(),
+            1
+        );
         assert_eq!(index.skills_by_source(&SkillSource::ProjectLocal).len(), 1);
         assert_eq!(index.skills_by_source(&SkillSource::User).len(), 0);
     }
 
     #[test]
     fn test_skill_index_get_by_id() {
-        let skills = vec![
-            make_test_skill("alpha", SkillSource::Builtin, 10),
-        ];
+        let skills = vec![make_test_skill("alpha", SkillSource::Builtin, 10)];
         let index = SkillIndex::new(skills);
 
         assert!(index.get_by_id("alpha-abc123").is_some());
@@ -499,7 +522,9 @@ mod tests {
         let json = serde_json::to_string(&builtin).unwrap();
         assert_eq!(json, "\"builtin\"");
 
-        let external = SkillSource::External { source_name: "vercel".to_string() };
+        let external = SkillSource::External {
+            source_name: "vercel".to_string(),
+        };
         let json = serde_json::to_string(&external).unwrap();
         assert!(json.contains("vercel"));
 
@@ -525,7 +550,9 @@ mod tests {
         let json = serde_json::to_string(&auto).unwrap();
         assert_eq!(json, "\"auto_detected\"");
 
-        let lexical = MatchReason::LexicalMatch { query: "react hooks".to_string() };
+        let lexical = MatchReason::LexicalMatch {
+            query: "react hooks".to_string(),
+        };
         let json = serde_json::to_string(&lexical).unwrap();
         assert!(json.contains("react hooks"));
     }

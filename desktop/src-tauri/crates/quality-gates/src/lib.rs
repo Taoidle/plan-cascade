@@ -12,9 +12,9 @@
 //! Heavy-dependency features (SQLite-backed cache, SQLite-backed runner,
 //! AI-powered gates) live in the main crate's `services::quality_gates` module.
 
+pub mod detector;
 pub mod models;
 pub mod pipeline;
-pub mod detector;
 pub mod validators;
 
 // Re-export core model types

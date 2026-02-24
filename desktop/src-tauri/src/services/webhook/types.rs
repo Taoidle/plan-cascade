@@ -387,9 +387,18 @@ mod tests {
         assert_eq!(DeliveryStatus::Failed.to_string(), "failed");
         assert_eq!(DeliveryStatus::Retrying.to_string(), "retrying");
 
-        assert_eq!(DeliveryStatus::from_str_value("pending"), DeliveryStatus::Pending);
-        assert_eq!(DeliveryStatus::from_str_value("success"), DeliveryStatus::Success);
-        assert_eq!(DeliveryStatus::from_str_value("unknown"), DeliveryStatus::Failed);
+        assert_eq!(
+            DeliveryStatus::from_str_value("pending"),
+            DeliveryStatus::Pending
+        );
+        assert_eq!(
+            DeliveryStatus::from_str_value("success"),
+            DeliveryStatus::Success
+        );
+        assert_eq!(
+            DeliveryStatus::from_str_value("unknown"),
+            DeliveryStatus::Failed
+        );
     }
 
     #[test]
@@ -453,10 +462,7 @@ mod tests {
         assert!(json.contains("via Telegram @user"));
 
         let parsed: WebhookPayload = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            parsed.remote_source,
-            Some("via Telegram @user".to_string())
-        );
+        assert_eq!(parsed.remote_source, Some("via Telegram @user".to_string()));
     }
 
     #[test]

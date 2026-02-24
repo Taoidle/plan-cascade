@@ -35,7 +35,9 @@ impl Agent for GraphWorkflow {
     }
 
     fn description(&self) -> &str {
-        self.description.as_deref().unwrap_or("Graph workflow agent")
+        self.description
+            .as_deref()
+            .unwrap_or("Graph workflow agent")
     }
 
     async fn run(&self, ctx: AgentContext) -> AppResult<AgentEventStream> {
@@ -181,11 +183,7 @@ impl GraphExecutionState {
 /// This is a helper that constructs a `GraphCheckpoint` from the current
 /// execution state and persists it. Errors from the checkpointer are logged
 /// but do not abort the workflow (best-effort persistence).
-async fn save_checkpoint(
-    state: &GraphExecutionState,
-    step: &str,
-    interrupt: Option<Interrupt>,
-) {
+async fn save_checkpoint(state: &GraphExecutionState, step: &str, interrupt: Option<Interrupt>) {
     if let Some(ref checkpointer) = state.checkpointer {
         let next_nodes: Vec<String> = state.current_node.iter().cloned().collect();
         let checkpoint = GraphCheckpoint::new(
@@ -210,9 +208,7 @@ async fn execute_next_node(state: &mut GraphExecutionState) -> AppResult<()> {
             // No more nodes to execute
             state.done = true;
             state.pending_events.push_back(AgentEvent::Done {
-                output: Some(
-                    serde_json::to_string(&state.graph_state).unwrap_or_default(),
-                ),
+                output: Some(serde_json::to_string(&state.graph_state).unwrap_or_default()),
             });
             return Ok(());
         }
@@ -233,9 +229,7 @@ async fn execute_next_node(state: &mut GraphExecutionState) -> AppResult<()> {
         .workflow
         .nodes
         .get(&node_id)
-        .ok_or_else(|| {
-            AppError::not_found(format!("Graph node not found: {}", node_id))
-        })?
+        .ok_or_else(|| AppError::not_found(format!("Graph node not found: {}", node_id)))?
         .clone();
 
     // ── interrupt_before: save checkpoint and pause ──────────────────────
@@ -250,31 +244,34 @@ async fn execute_next_node(state: &mut GraphExecutionState) -> AppResult<()> {
             }),
         )
         .await;
-        state.pending_events.push_back(AgentEvent::HumanReviewRequired {
-            node_id: node_id.clone(),
-            context: format!(
-                "Interrupt before node '{}': human review required",
-                node_id
-            ),
-        });
+        state
+            .pending_events
+            .push_back(AgentEvent::HumanReviewRequired {
+                node_id: node_id.clone(),
+                context: format!("Interrupt before node '{}': human review required", node_id),
+            });
         state.done = true;
         return Ok(());
     }
 
     // Check for human review node (legacy __human_review sentinel)
     if is_human_review_node(&node.agent_step) {
-        state.pending_events.push_back(AgentEvent::HumanReviewRequired {
-            node_id: node_id.clone(),
-            context: format!("Human review required at node '{}'", node_id),
-        });
+        state
+            .pending_events
+            .push_back(AgentEvent::HumanReviewRequired {
+                node_id: node_id.clone(),
+                context: format!("Human review required at node '{}'", node_id),
+            });
         state.done = true;
         return Ok(());
     }
 
     // Emit GraphNodeStarted
-    state.pending_events.push_back(AgentEvent::GraphNodeStarted {
-        node_id: node_id.clone(),
-    });
+    state
+        .pending_events
+        .push_back(AgentEvent::GraphNodeStarted {
+            node_id: node_id.clone(),
+        });
 
     // Build and execute the agent for this node
     let registry = ComposerRegistry::new();
@@ -351,13 +348,12 @@ async fn execute_next_node(state: &mut GraphExecutionState) -> AppResult<()> {
             }),
         )
         .await;
-        state.pending_events.push_back(AgentEvent::HumanReviewRequired {
-            node_id: node_id.clone(),
-            context: format!(
-                "Interrupt after node '{}': human review required",
-                node_id
-            ),
-        });
+        state
+            .pending_events
+            .push_back(AgentEvent::HumanReviewRequired {
+                node_id: node_id.clone(),
+                context: format!("Interrupt after node '{}': human review required", node_id),
+            });
         state.done = true;
         return Ok(());
     }
@@ -366,9 +362,7 @@ async fn execute_next_node(state: &mut GraphExecutionState) -> AppResult<()> {
     if state.current_node.is_none() {
         state.done = true;
         state.pending_events.push_back(AgentEvent::Done {
-            output: Some(
-                serde_json::to_string(&state.graph_state).unwrap_or_default(),
-            ),
+            output: Some(serde_json::to_string(&state.graph_state).unwrap_or_default()),
         });
     }
 
@@ -485,9 +479,7 @@ fn apply_reducer(
             let existing = state
                 .entry(key.to_string())
                 .or_insert_with(|| Value::Number(serde_json::Number::from(0)));
-            if let (Some(existing_num), Some(new_num)) =
-                (existing.as_f64(), value.as_f64())
-            {
+            if let (Some(existing_num), Some(new_num)) = (existing.as_f64(), value.as_f64()) {
                 *existing = serde_json::json!(existing_num + new_num);
             }
         }
@@ -566,10 +558,18 @@ mod tests {
 
     #[async_trait]
     impl crate::services::llm::LlmProvider for MockProvider {
-        fn name(&self) -> &'static str { "mock" }
-        fn model(&self) -> &str { "mock-model" }
-        fn supports_thinking(&self) -> bool { false }
-        fn supports_tools(&self) -> bool { false }
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+        fn model(&self) -> &str {
+            "mock-model"
+        }
+        fn supports_thinking(&self) -> bool {
+            false
+        }
+        fn supports_tools(&self) -> bool {
+            false
+        }
         async fn send_message(
             &self,
             _messages: Vec<crate::services::llm::Message>,
@@ -589,15 +589,19 @@ mod tests {
         ) -> crate::services::llm::LlmResult<crate::services::llm::LlmResponse> {
             unimplemented!()
         }
-        async fn health_check(&self) -> crate::services::llm::LlmResult<()> { Ok(()) }
-        fn config(&self) -> &crate::services::llm::ProviderConfig { &self.config }
+        async fn health_check(&self) -> crate::services::llm::LlmResult<()> {
+            Ok(())
+        }
+        fn config(&self) -> &crate::services::llm::ProviderConfig {
+            &self.config
+        }
     }
 
     fn mock_context() -> AgentContext {
         let provider = Arc::new(MockProvider::new());
-        let tool_executor = Arc::new(
-            crate::services::tools::ToolExecutor::new(&PathBuf::from("/tmp")),
-        );
+        let tool_executor = Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+            "/tmp",
+        )));
         let hooks = Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new());
 
         AgentContext {

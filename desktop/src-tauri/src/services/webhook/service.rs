@@ -43,9 +43,7 @@ impl WebhookService {
 
         channels.insert(
             WebhookChannelType::Slack,
-            Box::new(SlackChannel::new(
-                proxy_resolver("webhook_slack").as_ref(),
-            )),
+            Box::new(SlackChannel::new(proxy_resolver("webhook_slack").as_ref())),
         );
         channels.insert(
             WebhookChannelType::Feishu,

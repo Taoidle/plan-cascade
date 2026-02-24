@@ -44,11 +44,15 @@ impl Tool for GlobTool {
         let mut properties = HashMap::new();
         properties.insert(
             "pattern".to_string(),
-            ParameterSchema::string(Some("The glob pattern to match (e.g., '**/*.rs', 'src/**/*.ts')")),
+            ParameterSchema::string(Some(
+                "The glob pattern to match (e.g., '**/*.rs', 'src/**/*.ts')",
+            )),
         );
         properties.insert(
             "path".to_string(),
-            ParameterSchema::string(Some("The directory to search in (defaults to current working directory)")),
+            ParameterSchema::string(Some(
+                "The directory to search in (defaults to current working directory)",
+            )),
         );
         ParameterSchema::object(
             Some("Glob parameters"),
@@ -111,7 +115,11 @@ impl Tool for GlobTool {
                     .filter(|(p, _)| {
                         !apply_default_excludes || !is_default_scan_excluded(&base_path, p)
                     })
-                    .take(if head_limit > 0 { head_limit } else { usize::MAX })
+                    .take(if head_limit > 0 {
+                        head_limit
+                    } else {
+                        usize::MAX
+                    })
                     .map(|(p, _)| p.to_string_lossy().to_string())
                     .collect();
 
@@ -128,8 +136,8 @@ impl Tool for GlobTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use tempfile::TempDir;
 
     #[tokio::test]

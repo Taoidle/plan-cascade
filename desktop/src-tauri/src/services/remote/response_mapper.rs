@@ -29,10 +29,7 @@ impl ResponseMapper {
 
     /// Format session created message.
     pub fn format_session_created(session_id: &str, project_path: &str) -> String {
-        format!(
-            "Session created: {}\nProject: {}",
-            session_id, project_path
-        )
+        format!("Session created: {}\nProject: {}", session_id, project_path)
     }
 
     /// Format session list for display.
@@ -45,10 +42,7 @@ impl ResponseMapper {
             text.push_str(&format!(
                 "  Chat {} -> {} ({})\n",
                 mapping.chat_id,
-                mapping
-                    .local_session_id
-                    .as_deref()
-                    .unwrap_or("no session"),
+                mapping.local_session_id.as_deref().unwrap_or("no session"),
                 mapping.session_type
             ));
         }
@@ -59,12 +53,13 @@ impl ResponseMapper {
     pub fn format_status(mapping: &RemoteSessionMapping, gateway: &GatewayStatus) -> String {
         format!(
             "Session: {}\nType: {}\nGateway: {}\nCommands processed: {}",
-            mapping
-                .local_session_id
-                .as_deref()
-                .unwrap_or("none"),
+            mapping.local_session_id.as_deref().unwrap_or("none"),
             mapping.session_type,
-            if gateway.running { "Running" } else { "Stopped" },
+            if gateway.running {
+                "Running"
+            } else {
+                "Stopped"
+            },
             gateway.total_commands_processed
         )
     }
@@ -133,8 +128,7 @@ mod tests {
 
     #[test]
     fn test_format_session_created() {
-        let formatted =
-            ResponseMapper::format_session_created("sess-123", "~/projects/myapp");
+        let formatted = ResponseMapper::format_session_created("sess-123", "~/projects/myapp");
         assert!(formatted.contains("sess-123"));
         assert!(formatted.contains("~/projects/myapp"));
     }

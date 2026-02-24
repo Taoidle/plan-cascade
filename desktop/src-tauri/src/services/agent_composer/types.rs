@@ -159,13 +159,9 @@ impl AgentInput {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
     /// Execution started (lifecycle event from executor).
-    Started {
-        run_id: String,
-    },
+    Started { run_id: String },
     /// Text content delta from the model.
-    TextDelta {
-        content: String,
-    },
+    TextDelta { content: String },
     /// Start of a tool call.
     ToolCall {
         name: String,
@@ -189,33 +185,20 @@ pub enum AgentEvent {
         is_error: Option<bool>,
     },
     /// Thinking/reasoning content delta.
-    ThinkingDelta {
-        content: String,
-    },
+    ThinkingDelta { content: String },
     /// State update — agents can write key-value pairs to shared state.
-    StateUpdate {
-        key: String,
-        value: Value,
-    },
+    StateUpdate { key: String, value: Value },
     /// Request to transfer execution to another agent.
-    AgentTransfer {
-        target: String,
-        message: String,
-    },
+    AgentTransfer { target: String, message: String },
     /// A graph node has started execution.
-    GraphNodeStarted {
-        node_id: String,
-    },
+    GraphNodeStarted { node_id: String },
     /// A graph node has completed execution.
     GraphNodeCompleted {
         node_id: String,
         output: Option<String>,
     },
     /// A human review is required before continuing execution.
-    HumanReviewRequired {
-        node_id: String,
-        context: String,
-    },
+    HumanReviewRequired { node_id: String, context: String },
     /// Rich content for dynamic UI rendering.
     ///
     /// Agents can emit structured data that the frontend renders as
@@ -257,19 +240,14 @@ pub enum AgentEvent {
         duration_ms: u64,
     },
     /// Execution was cancelled (lifecycle event from executor).
-    Cancelled {
-        run_id: String,
-        duration_ms: u64,
-    },
+    Cancelled { run_id: String, duration_ms: u64 },
     /// Token usage update (lifecycle event from executor).
     Usage {
         input_tokens: u32,
         output_tokens: u32,
     },
     /// Agent execution completed successfully with optional output.
-    Done {
-        output: Option<String>,
-    },
+    Done { output: Option<String> },
 }
 
 // ============================================================================
@@ -360,15 +338,9 @@ pub enum AgentStep {
     /// An LLM-backed agent step.
     LlmStep(LlmStepConfig),
     /// A sequential composition of sub-steps.
-    SequentialStep {
-        name: String,
-        steps: Vec<AgentStep>,
-    },
+    SequentialStep { name: String, steps: Vec<AgentStep> },
     /// A parallel composition of sub-steps.
-    ParallelStep {
-        name: String,
-        steps: Vec<AgentStep>,
-    },
+    ParallelStep { name: String, steps: Vec<AgentStep> },
     /// A conditional branching step.
     ConditionalStep {
         name: String,
@@ -881,7 +853,10 @@ mod tests {
         let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
         match parsed {
             AgentEvent::ToolCall {
-                name, args, id, input,
+                name,
+                args,
+                id,
+                input,
             } => {
                 assert_eq!(name, "read_file");
                 assert!(args.contains("/foo"));
@@ -899,7 +874,10 @@ mod tests {
         let parsed: AgentEvent = serde_json::from_str(json).unwrap();
         match parsed {
             AgentEvent::ToolCall {
-                name, args, id, input,
+                name,
+                args,
+                id,
+                input,
             } => {
                 assert_eq!(name, "grep");
                 assert!(args.contains("test"));
@@ -937,7 +915,10 @@ mod tests {
         let parsed: AgentEvent = serde_json::from_str(&json).unwrap();
         match parsed {
             AgentEvent::ToolResult {
-                name, result, id, is_error,
+                name,
+                result,
+                id,
+                is_error,
             } => {
                 assert_eq!(name, "read_file");
                 assert_eq!(result, "file contents");
@@ -955,7 +936,10 @@ mod tests {
         let parsed: AgentEvent = serde_json::from_str(json).unwrap();
         match parsed {
             AgentEvent::ToolResult {
-                name, result, id, is_error,
+                name,
+                result,
+                id,
+                is_error,
             } => {
                 assert_eq!(name, "grep");
                 assert_eq!(result, "found 3 matches");
@@ -1020,9 +1004,9 @@ mod tests {
             session_id: "test".to_string(),
             project_root: PathBuf::from("/tmp"),
             provider: Arc::new(MockProvider::new()),
-            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(
-                &PathBuf::from("/tmp"),
-            )),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+                "/tmp",
+            ))),
             plugin_manager: None,
             hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
             input: AgentInput::Text("test".to_string()),
@@ -1043,9 +1027,9 @@ mod tests {
             session_id: "sess-1".to_string(),
             project_root: PathBuf::from("/project"),
             provider: Arc::new(MockProvider::new()),
-            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(
-                &PathBuf::from("/project"),
-            )),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+                "/project",
+            ))),
             plugin_manager: None,
             hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
             input: AgentInput::Text("test".to_string()),
@@ -1084,9 +1068,9 @@ mod tests {
             session_id: "sess-1".to_string(),
             project_root: PathBuf::from("/project"),
             provider: Arc::new(MockProvider::new()),
-            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(
-                &PathBuf::from("/project"),
-            )),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+                "/project",
+            ))),
             plugin_manager: None,
             hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
             input: AgentInput::Text("test".to_string()),
@@ -1133,9 +1117,9 @@ mod tests {
             session_id: "sess-1".to_string(),
             project_root: PathBuf::from("/project"),
             provider: Arc::new(MockProvider::new()),
-            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(
-                &PathBuf::from("/project"),
-            )),
+            tool_executor: Arc::new(crate::services::tools::ToolExecutor::new(&PathBuf::from(
+                "/project",
+            ))),
             plugin_manager: None,
             hooks: Arc::new(crate::services::orchestrator::hooks::AgenticHooks::new()),
             input: AgentInput::Text("test".to_string()),

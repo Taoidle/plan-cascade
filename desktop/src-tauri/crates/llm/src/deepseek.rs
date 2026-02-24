@@ -94,10 +94,8 @@ impl DeepSeekProvider {
             let api_tools: Vec<serde_json::Value> =
                 tools.iter().map(|t| self.tool_to_deepseek(t)).collect();
             body["tools"] = serde_json::json!(api_tools);
-            let thinking_active =
-                self.config.enable_thinking && self.model_supports_thinking();
-            if matches!(request_options.tool_call_mode, ToolCallMode::Required)
-                && !thinking_active
+            let thinking_active = self.config.enable_thinking && self.model_supports_thinking();
+            if matches!(request_options.tool_call_mode, ToolCallMode::Required) && !thinking_active
             {
                 // DeepSeek R1 (thinking model) does not reliably support
                 // tool_choice "required" — skip it and let the model default

@@ -263,8 +263,7 @@ impl GlmEmbeddingProvider {
             },
             429 => {
                 // Parse retry-after header if available
-                let retry_after = error_code
-                    .and_then(|c| c.parse::<u32>().ok());
+                let retry_after = error_code.and_then(|c| c.parse::<u32>().ok());
                 EmbeddingError::RateLimited {
                     message: format!("ZhipuAI rate limit exceeded: {}", error_message),
                     retry_after,
@@ -275,10 +274,7 @@ impl GlmEmbeddingProvider {
                 if let Some(code) = error_code {
                     if code == "1210" {
                         return EmbeddingError::InvalidConfig {
-                            message: format!(
-                                "ZhipuAI invalid parameter: {}",
-                                error_message
-                            ),
+                            message: format!("ZhipuAI invalid parameter: {}", error_message),
                         };
                     }
                 }
@@ -580,8 +576,7 @@ mod tests {
     #[test]
     fn build_request_body_batch_input() {
         let provider = GlmEmbeddingProvider::new(&default_config());
-        let body =
-            provider.build_request_body(serde_json::json!(["hello", "world"]));
+        let body = provider.build_request_body(serde_json::json!(["hello", "world"]));
 
         assert_eq!(body["model"], "embedding-3");
         assert_eq!(body["input"], serde_json::json!(["hello", "world"]));
@@ -740,7 +735,10 @@ mod tests {
 
         let result = provider.extract_embeddings(response, 3);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), EmbeddingError::ParseError { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            EmbeddingError::ParseError { .. }
+        ));
     }
 
     // =====================================================================
@@ -847,7 +845,7 @@ mod tests {
 
         let embedding = result.unwrap();
         assert_eq!(embedding.len(), 2048); // default dimension
-        // Verify non-zero values
+                                           // Verify non-zero values
         assert!(embedding.iter().any(|&v| v != 0.0));
     }
 
@@ -862,11 +860,7 @@ mod tests {
 
         let docs = vec!["hello world", "foo bar baz", "rust programming language"];
         let result = provider.embed_documents(&docs).await;
-        assert!(
-            result.is_ok(),
-            "embed_documents failed: {:?}",
-            result.err()
-        );
+        assert!(result.is_ok(), "embed_documents failed: {:?}", result.err());
 
         let embeddings = result.unwrap();
         assert_eq!(embeddings.len(), 3);

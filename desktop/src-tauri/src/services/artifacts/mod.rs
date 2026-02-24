@@ -600,8 +600,8 @@ mod tests {
     async fn create_test_service() -> (DefaultArtifactService, tempfile::TempDir) {
         let dir = tempdir().expect("tempdir");
         let db = Arc::new(Database::new_in_memory().expect("test db"));
-        let service = DefaultArtifactService::new(db, dir.path().join("artifacts"))
-            .expect("create service");
+        let service =
+            DefaultArtifactService::new(db, dir.path().join("artifacts")).expect("create service");
         (service, dir)
     }
 
@@ -816,7 +816,10 @@ mod tests {
         }
 
         // At least some saves should succeed
-        assert!(!versions_seen.is_empty(), "At least one save should succeed");
+        assert!(
+            !versions_seen.is_empty(),
+            "At least one save should succeed"
+        );
     }
 
     // ======================================================================

@@ -103,7 +103,10 @@ mod tests {
             "fn main() {\n    println!(\"hello\");\n}\n\nfn helper() -> i32 {\n    42\n}\n",
         );
         let chunks = chunker.chunk(&doc).unwrap();
-        assert!(!chunks.is_empty(), "Should produce non-empty chunks for Rust code");
+        assert!(
+            !chunks.is_empty(),
+            "Should produce non-empty chunks for Rust code"
+        );
         for (i, chunk) in chunks.iter().enumerate() {
             assert_eq!(chunk.chunk_id, format!("test-rs:{}", i));
             assert_eq!(chunk.document_id, "test-rs");
@@ -115,7 +118,10 @@ mod tests {
     #[test]
     fn code_chunker_infers_language_from_metadata() {
         let chunker = CodeChunker::new();
-        let mut doc = Document::new("test-py", "def foo():\n    pass\n\ndef bar():\n    return 1\n");
+        let mut doc = Document::new(
+            "test-py",
+            "def foo():\n    pass\n\ndef bar():\n    return 1\n",
+        );
         doc.metadata
             .insert("language".to_string(), "python".to_string());
         let chunks = chunker.chunk(&doc).unwrap();
@@ -137,7 +143,10 @@ mod tests {
     #[test]
     fn code_chunker_fallback_for_unknown_language() {
         let chunker = CodeChunker::with_language("brainfuck");
-        let doc = Document::new("bf", "some random content\nmore lines\n".repeat(50).as_str());
+        let doc = Document::new(
+            "bf",
+            "some random content\nmore lines\n".repeat(50).as_str(),
+        );
         let chunks = chunker.chunk(&doc).unwrap();
         // Should still produce chunks via the fixed-window fallback
         assert!(!chunks.is_empty());

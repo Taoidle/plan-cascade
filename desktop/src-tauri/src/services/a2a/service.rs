@@ -92,13 +92,17 @@ impl A2aService {
     /// Register a remote agent in the database.
     ///
     /// If an agent with the same base_url already exists, it is updated.
-    pub async fn register(&self, base_url: &str, card: &AgentCard) -> AppResult<RegisteredRemoteAgent> {
+    pub async fn register(
+        &self,
+        base_url: &str,
+        card: &AgentCard,
+    ) -> AppResult<RegisteredRemoteAgent> {
         let normalized_url = base_url.trim_end_matches('/').to_string();
         let id = uuid::Uuid::new_v4().to_string();
-        let capabilities_json = serde_json::to_string(&card.capabilities)
-            .unwrap_or_else(|_| "[]".to_string());
-        let supported_inputs_json = serde_json::to_string(&card.supported_inputs)
-            .unwrap_or_else(|_| "[]".to_string());
+        let capabilities_json =
+            serde_json::to_string(&card.capabilities).unwrap_or_else(|_| "[]".to_string());
+        let supported_inputs_json =
+            serde_json::to_string(&card.supported_inputs).unwrap_or_else(|_| "[]".to_string());
 
         // Scope the connection so it is returned to the pool before get_by_url
         {
@@ -132,8 +136,9 @@ impl A2aService {
         }
 
         // Fetch the inserted/updated row (connection returned to pool above)
-        self.get_by_url(&normalized_url)
-            .and_then(|opt| opt.ok_or_else(|| AppError::database("Failed to fetch registered agent after insert")))
+        self.get_by_url(&normalized_url).and_then(|opt| {
+            opt.ok_or_else(|| AppError::database("Failed to fetch registered agent after insert"))
+        })
     }
 
     /// List all registered remote agents.
@@ -145,24 +150,26 @@ impl A2aService {
              ORDER BY created_at DESC"
         )?;
 
-        let agents = stmt.query_map([], |row| {
-            let capabilities_str: String = row.get(4)?;
-            let supported_inputs_str: String = row.get(8)?;
-            Ok(RegisteredRemoteAgent {
-                id: row.get(0)?,
-                base_url: row.get(1)?,
-                name: row.get(2)?,
-                description: row.get(3)?,
-                capabilities: serde_json::from_str(&capabilities_str).unwrap_or_default(),
-                endpoint: row.get(5)?,
-                version: row.get(6)?,
-                auth_required: row.get::<_, i32>(7)? != 0,
-                supported_inputs: serde_json::from_str(&supported_inputs_str).unwrap_or_default(),
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+        let agents = stmt
+            .query_map([], |row| {
+                let capabilities_str: String = row.get(4)?;
+                let supported_inputs_str: String = row.get(8)?;
+                Ok(RegisteredRemoteAgent {
+                    id: row.get(0)?,
+                    base_url: row.get(1)?,
+                    name: row.get(2)?,
+                    description: row.get(3)?,
+                    capabilities: serde_json::from_str(&capabilities_str).unwrap_or_default(),
+                    endpoint: row.get(5)?,
+                    version: row.get(6)?,
+                    auth_required: row.get::<_, i32>(7)? != 0,
+                    supported_inputs: serde_json::from_str(&supported_inputs_str)
+                        .unwrap_or_default(),
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(agents)
     }
@@ -205,10 +212,7 @@ impl A2aService {
     /// Remove a registered remote agent by its ID.
     pub fn remove(&self, id: &str) -> AppResult<bool> {
         let conn = self.get_conn()?;
-        let deleted = conn.execute(
-            "DELETE FROM remote_agents WHERE id = ?1",
-            params![id],
-        )?;
+        let deleted = conn.execute("DELETE FROM remote_agents WHERE id = ?1", params![id])?;
         Ok(deleted > 0)
     }
 }
@@ -244,7 +248,10 @@ mod tests {
         let service = A2aService::new(test_pool());
         let card = test_card();
 
-        let registered = service.register("https://agent.example.com", &card).await.unwrap();
+        let registered = service
+            .register("https://agent.example.com", &card)
+            .await
+            .unwrap();
         assert_eq!(registered.name, "test-agent");
         assert_eq!(registered.base_url, "https://agent.example.com");
         assert_eq!(registered.capabilities, vec!["code_review", "testing"]);
@@ -259,12 +266,18 @@ mod tests {
         let service = A2aService::new(test_pool());
 
         let card1 = test_card();
-        service.register("https://agent.example.com", &card1).await.unwrap();
+        service
+            .register("https://agent.example.com", &card1)
+            .await
+            .unwrap();
 
         // Register with same URL but different name
         let mut card2 = test_card();
         card2.name = "updated-agent".to_string();
-        let updated = service.register("https://agent.example.com", &card2).await.unwrap();
+        let updated = service
+            .register("https://agent.example.com", &card2)
+            .await
+            .unwrap();
         assert_eq!(updated.name, "updated-agent");
 
         // Should still be only one agent
@@ -278,7 +291,10 @@ mod tests {
         let service = A2aService::new(test_pool());
         let card = test_card();
 
-        let registered = service.register("https://agent.example.com", &card).await.unwrap();
+        let registered = service
+            .register("https://agent.example.com", &card)
+            .await
+            .unwrap();
         assert!(service.remove(&registered.id).unwrap());
 
         let agents = service.list().unwrap();
@@ -294,7 +310,9 @@ mod tests {
     #[test]
     fn test_get_by_url_not_found() {
         let service = A2aService::new(test_pool());
-        let result = service.get_by_url("https://nonexistent.example.com").unwrap();
+        let result = service
+            .get_by_url("https://nonexistent.example.com")
+            .unwrap();
         assert!(result.is_none());
     }
 
@@ -303,7 +321,10 @@ mod tests {
         let service = A2aService::new(test_pool());
         let card = test_card();
 
-        service.register("https://agent.example.com/", &card).await.unwrap();
+        service
+            .register("https://agent.example.com/", &card)
+            .await
+            .unwrap();
 
         // Trailing slash should be normalized
         let result = service.get_by_url("https://agent.example.com").unwrap();
@@ -335,8 +356,14 @@ mod tests {
             supported_inputs: vec!["application/json".to_string()],
         };
 
-        service.register("https://one.example.com", &card1).await.unwrap();
-        service.register("https://two.example.com", &card2).await.unwrap();
+        service
+            .register("https://one.example.com", &card1)
+            .await
+            .unwrap();
+        service
+            .register("https://two.example.com", &card2)
+            .await
+            .unwrap();
 
         let agents = service.list().unwrap();
         assert_eq!(agents.len(), 2);

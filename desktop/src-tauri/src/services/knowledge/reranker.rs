@@ -36,7 +36,8 @@ pub struct SearchResult {
 #[async_trait]
 pub trait Reranker: Send + Sync {
     /// Rerank results based on the query, returning reordered results.
-    async fn rerank(&self, query: &str, results: Vec<SearchResult>) -> AppResult<Vec<SearchResult>>;
+    async fn rerank(&self, query: &str, results: Vec<SearchResult>)
+        -> AppResult<Vec<SearchResult>>;
 }
 
 /// No-op reranker that preserves original order.
@@ -44,7 +45,11 @@ pub struct NoopReranker;
 
 #[async_trait]
 impl Reranker for NoopReranker {
-    async fn rerank(&self, _query: &str, results: Vec<SearchResult>) -> AppResult<Vec<SearchResult>> {
+    async fn rerank(
+        &self,
+        _query: &str,
+        results: Vec<SearchResult>,
+    ) -> AppResult<Vec<SearchResult>> {
         Ok(results)
     }
 }
@@ -153,7 +158,11 @@ impl Default for LlmReranker {
 
 #[async_trait]
 impl Reranker for LlmReranker {
-    async fn rerank(&self, query: &str, mut results: Vec<SearchResult>) -> AppResult<Vec<SearchResult>> {
+    async fn rerank(
+        &self,
+        query: &str,
+        mut results: Vec<SearchResult>,
+    ) -> AppResult<Vec<SearchResult>> {
         if results.is_empty() {
             return Ok(results);
         }
@@ -187,17 +196,26 @@ impl Reranker for LlmReranker {
                             return Ok(results);
                         }
                     }
-                    tracing::warn!("Failed to parse LLM reranking response, falling back to heuristic");
+                    tracing::warn!(
+                        "Failed to parse LLM reranking response, falling back to heuristic"
+                    );
                 }
                 Err(e) => {
-                    tracing::warn!("LLM reranking call failed, falling back to heuristic: {}", e);
+                    tracing::warn!(
+                        "LLM reranking call failed, falling back to heuristic: {}",
+                        e
+                    );
                 }
             }
         }
 
         // Fallback: keyword-overlap heuristic
         Self::rerank_heuristic(query, &mut results);
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         Ok(results)
     }
 }
@@ -223,10 +241,7 @@ mod tests {
     #[tokio::test]
     async fn noop_reranker_preserves_order() {
         let reranker = NoopReranker;
-        let results = vec![
-            make_result("first", 0.9),
-            make_result("second", 0.8),
-        ];
+        let results = vec![make_result("first", 0.9), make_result("second", 0.8)];
 
         let reranked = reranker.rerank("query", results).await.unwrap();
         assert_eq!(reranked.len(), 2);

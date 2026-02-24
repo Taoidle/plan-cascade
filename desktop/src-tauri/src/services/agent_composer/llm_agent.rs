@@ -393,15 +393,11 @@ mod tests {
         assert!(convert_stream_event(&event).is_none());
 
         // ThinkingStart should return None
-        let event = UnifiedStreamEvent::ThinkingStart {
-            thinking_id: None,
-        };
+        let event = UnifiedStreamEvent::ThinkingStart { thinking_id: None };
         assert!(convert_stream_event(&event).is_none());
 
         // ThinkingEnd should return None
-        let event = UnifiedStreamEvent::ThinkingEnd {
-            thinking_id: None,
-        };
+        let event = UnifiedStreamEvent::ThinkingEnd { thinking_id: None };
         assert!(convert_stream_event(&event).is_none());
 
         // ContextCompaction should return None

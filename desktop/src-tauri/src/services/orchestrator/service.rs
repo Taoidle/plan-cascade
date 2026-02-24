@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
@@ -31,10 +31,17 @@ use super::embedding_manager::EmbeddingManager;
 use super::embedding_service::EmbeddingService;
 use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
-use crate::services::agent_composer::registry::ComposerRegistry;
 use crate::models::orchestrator::{
     ExecutionProgress, ExecutionSession, ExecutionSessionSummary, ExecutionStatus,
     StoryExecutionState,
+};
+use crate::services::agent_composer::registry::ComposerRegistry;
+use crate::services::core::compaction::{
+    CompactionConfig, CompactionResult, ContextCompactor, LlmSummaryCompactor,
+    SlidingWindowCompactor,
+};
+use crate::services::knowledge::context_provider::{
+    KnowledgeContextConfig, KnowledgeContextProvider,
 };
 use crate::services::llm::{
     AnthropicProvider, DeepSeekProvider, FallbackToolFormatMode, GlmProvider, LlmProvider,
@@ -42,23 +49,17 @@ use crate::services::llm::{
     OpenAIProvider, ProviderConfig, ProviderType, QwenProvider, ToolCallMode, ToolCallReliability,
     ToolDefinition, UsageStats,
 };
-use crate::services::core::compaction::{
-    CompactionConfig, CompactionResult, ContextCompactor, LlmSummaryCompactor,
-    SlidingWindowCompactor,
-};
 use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 use crate::services::streaming::UnifiedStreamEvent;
 #[allow(deprecated)]
 use crate::services::tools::{
     build_memory_section, build_project_summary, build_skills_section,
-    build_sub_agent_tool_guidance, build_system_prompt_with_memories,
-    build_tool_call_instructions, detect_language, extract_text_without_tool_calls,
-    format_tool_result, get_basic_tool_definitions_from_registry,
-    get_tool_definitions_from_registry, merge_system_prompts,
-    parse_tool_calls, ParsedToolCall, SubAgentType, TaskContext, TaskExecutionResult,
-    TaskSpawner, ToolExecutor, MAX_SUB_AGENT_DEPTH,
+    build_sub_agent_tool_guidance, build_system_prompt_with_memories, build_tool_call_instructions,
+    detect_language, extract_text_without_tool_calls, format_tool_result,
+    get_basic_tool_definitions_from_registry, get_tool_definitions_from_registry,
+    merge_system_prompts, parse_tool_calls, ParsedToolCall, SubAgentType, TaskContext,
+    TaskExecutionResult, TaskSpawner, ToolExecutor, MAX_SUB_AGENT_DEPTH,
 };
-use crate::services::knowledge::context_provider::{KnowledgeContextConfig, KnowledgeContextProvider};
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::paths::ensure_plan_cascade_dir;
 
@@ -584,9 +585,7 @@ impl AnalysisPhasePolicy {
 ///   `SummarizeFn` closure captures the provider `Arc` and calls it for summarization.
 /// - **Unreliable / None** providers (Ollama, Qwen, DeepSeek, GLM) get
 ///   `SlidingWindowCompactor` which is deterministic and makes no LLM calls.
-fn build_compactor(
-    provider: &Arc<dyn LlmProvider>,
-) -> Box<dyn ContextCompactor> {
+fn build_compactor(provider: &Arc<dyn LlmProvider>) -> Box<dyn ContextCompactor> {
     match provider.tool_call_reliability() {
         ToolCallReliability::Reliable => {
             let provider_clone = Arc::clone(provider);
@@ -692,11 +691,9 @@ fn build_compactor(
                             ))
                         })?;
 
-                    Ok(response
-                        .content
-                        .unwrap_or_else(|| {
-                            "Previous conversation context was compacted.".to_string()
-                        }))
+                    Ok(response.content.unwrap_or_else(|| {
+                        "Previous conversation context was compacted.".to_string()
+                    }))
                 })
             }))
         }

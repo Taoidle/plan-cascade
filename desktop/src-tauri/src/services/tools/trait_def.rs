@@ -51,7 +51,6 @@ pub struct ToolExecutionContext {
     pub cancellation_token: tokio_util::sync::CancellationToken,
 
     // --- New fields: shared services from executor ---
-
     /// WebFetch service for fetching web pages (always available)
     pub web_fetch: Arc<WebFetchService>,
     /// WebSearch service (None if no search provider configured)
@@ -225,12 +224,7 @@ impl ToolRegistry {
     /// return a `ToolResult::err` without executing.
     ///
     /// Returns `ToolResult::err` if the tool is not found.
-    pub async fn execute(
-        &self,
-        name: &str,
-        ctx: &ToolExecutionContext,
-        args: Value,
-    ) -> ToolResult {
+    pub async fn execute(&self, name: &str, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         // Permission gate check
         if let Some(ref gate) = ctx.permission_gate {
             if let Err(reason) = gate.check(&ctx.session_id, name, &args).await {
@@ -302,7 +296,10 @@ impl Default for ToolRegistry {
 /// The handler receives a reference to `ToolExecutionContext` and the
 /// JSON arguments, and returns a `ToolResult`.
 pub type FunctionToolHandler = Box<
-    dyn Fn(&ToolExecutionContext, Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + '_>>
+    dyn Fn(
+            &ToolExecutionContext,
+            Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + '_>>
         + Send
         + Sync,
 >;
@@ -336,9 +333,18 @@ pub struct FunctionTool {
 
 impl FunctionTool {
     /// Create a new FunctionTool from an async closure.
-    pub fn new<F>(name: impl Into<String>, description: impl Into<String>, schema: ParameterSchema, handler: F) -> Self
+    pub fn new<F>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        schema: ParameterSchema,
+        handler: F,
+    ) -> Self
     where
-        F: Fn(&ToolExecutionContext, Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + '_>>
+        F: Fn(
+                &ToolExecutionContext,
+                Value,
+            )
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + '_>>
             + Send
             + Sync
             + 'static,
@@ -445,11 +451,7 @@ mod tests {
         }
 
         fn parameters_schema(&self) -> ParameterSchema {
-            ParameterSchema::object(
-                Some("Mock parameters"),
-                HashMap::new(),
-                vec![],
-            )
+            ParameterSchema::object(Some("Mock parameters"), HashMap::new(), vec![])
         }
 
         async fn execute(&self, _ctx: &ToolExecutionContext, _args: Value) -> ToolResult {
@@ -532,7 +534,10 @@ mod tests {
             let mut cwd = ctx.working_directory.lock().unwrap();
             *cwd = PathBuf::from("/tmp/new-dir");
         }
-        assert_eq!(ctx.working_directory_snapshot(), PathBuf::from("/tmp/new-dir"));
+        assert_eq!(
+            ctx.working_directory_snapshot(),
+            PathBuf::from("/tmp/new-dir")
+        );
     }
 
     #[test]
@@ -808,12 +813,14 @@ mod tests {
         }
 
         fn available_tools(&self, ctx: &ToolFilterContext) -> Vec<Arc<dyn Tool>> {
-            let mut tools: Vec<Arc<dyn Tool>> = vec![
-                Arc::new(MockTool::new("ToolsetA", "Toolset tool A")),
-            ];
+            let mut tools: Vec<Arc<dyn Tool>> =
+                vec![Arc::new(MockTool::new("ToolsetA", "Toolset tool A"))];
             // Only include ToolsetB for "rust" projects
             if ctx.project_type.as_deref() == Some("rust") {
-                tools.push(Arc::new(MockTool::new("ToolsetB", "Toolset tool B (rust only)")));
+                tools.push(Arc::new(MockTool::new(
+                    "ToolsetB",
+                    "Toolset tool B (rust only)",
+                )));
             }
             tools
         }

@@ -94,9 +94,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_custom_warn_rule() {
-        let guard =
-            CustomGuardrail::new("r1".to_string(), "No TODO".to_string(), r"TODO", GuardrailAction::Warn)
-                .unwrap();
+        let guard = CustomGuardrail::new(
+            "r1".to_string(),
+            "No TODO".to_string(),
+            r"TODO",
+            GuardrailAction::Warn,
+        )
+        .unwrap();
         let result = guard.validate("// TODO: fix this", Direction::Output).await;
         assert!(result.is_warn());
         if let GuardrailResult::Warn { message } = result {
@@ -129,9 +133,7 @@ mod tests {
             GuardrailAction::Redact,
         )
         .unwrap();
-        let result = guard
-            .validate("Ticket: INT-123456", Direction::Input)
-            .await;
+        let result = guard.validate("Ticket: INT-123456", Direction::Input).await;
         assert!(result.is_redact());
         if let GuardrailResult::Redact {
             redacted_content,
@@ -152,9 +154,7 @@ mod tests {
             GuardrailAction::Block,
         )
         .unwrap();
-        let result = guard
-            .validate("normal content", Direction::Input)
-            .await;
+        let result = guard.validate("normal content", Direction::Input).await;
         assert!(result.is_pass());
     }
 

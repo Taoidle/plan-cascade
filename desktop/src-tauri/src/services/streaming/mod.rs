@@ -12,7 +12,7 @@ pub mod service;
 pub mod unified;
 
 // Re-export main types (from core, for backward compatibility)
+pub use factory::AdapterFactory;
 pub use plan_cascade_core::streaming::StreamAdapter;
 pub use plan_cascade_core::streaming::{AdapterError, UnifiedStreamEvent};
-pub use factory::AdapterFactory;
 pub use service::UnifiedStreamingService;

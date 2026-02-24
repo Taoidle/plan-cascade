@@ -98,11 +98,11 @@ pub(super) fn is_rhetorical_offer(text: &str) -> bool {
 
     // Conditional offers: "如果...", "是否...", "你想...", "你需要...", "需要我..."
     let zh_conditional_markers = [
-        "\u{5982}\u{679C}",             // 如果
-        "\u{662F}\u{5426}",             // 是否
-        "\u{4F60}\u{60F3}",             // 你想
-        "\u{4F60}\u{9700}\u{8981}",     // 你需要
-        "\u{9700}\u{8981}\u{6211}",     // 需要我
+        "\u{5982}\u{679C}",         // 如果
+        "\u{662F}\u{5426}",         // 是否
+        "\u{4F60}\u{60F3}",         // 你想
+        "\u{4F60}\u{9700}\u{8981}", // 你需要
+        "\u{9700}\u{8981}\u{6211}", // 需要我
     ];
 
     // Question suffixes that indicate rhetorical question
@@ -125,8 +125,8 @@ pub(super) fn is_rhetorical_offer(text: &str) -> bool {
     // Pattern: invitation markers like "可以告诉我", "请告诉我", "可以进一步"
     let zh_invitation_markers = [
         "\u{53EF}\u{4EE5}\u{544A}\u{8BC9}\u{6211}", // 可以告诉我
-        "\u{8BF7}\u{544A}\u{8BC9}\u{6211}",          // 请告诉我
-        "\u{53EF}\u{4EE5}\u{8FDB}\u{4E00}\u{6B65}",  // 可以进一步
+        "\u{8BF7}\u{544A}\u{8BC9}\u{6211}",         // 请告诉我
+        "\u{53EF}\u{4EE5}\u{8FDB}\u{4E00}\u{6B65}", // 可以进一步
     ];
 
     if has_question_suffix && zh_invitation_markers.iter().any(|m| trimmed.contains(m)) {
@@ -629,7 +629,10 @@ pub(super) fn analysis_excluded_roots_for_message(message: &str) -> Vec<String> 
     excludes
 }
 
-pub(super) fn is_valid_analysis_tool_start(tool_name: &str, args: Option<&serde_json::Value>) -> bool {
+pub(super) fn is_valid_analysis_tool_start(
+    tool_name: &str,
+    args: Option<&serde_json::Value>,
+) -> bool {
     match tool_name {
         "Cwd" => true,
         "LS" => args

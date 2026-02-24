@@ -164,9 +164,7 @@ impl OpenAIEmbeddingProvider {
         // (text-embedding-3-small, text-embedding-3-large).
         // For text-embedding-ada-002 and compatible APIs, omit it to use
         // the model's native dimension.
-        if self.dimension != DEFAULT_DIMENSION
-            || self.model.contains("text-embedding-3")
-        {
+        if self.dimension != DEFAULT_DIMENSION || self.model.contains("text-embedding-3") {
             body["dimensions"] = serde_json::json!(self.dimension);
         }
 

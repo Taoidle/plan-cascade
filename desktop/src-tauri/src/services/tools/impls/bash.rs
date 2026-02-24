@@ -100,7 +100,9 @@ impl Tool for BashTool {
         );
         properties.insert(
             "timeout".to_string(),
-            ParameterSchema::integer(Some("Timeout in milliseconds (default: 120000, max: 600000)")),
+            ParameterSchema::integer(Some(
+                "Timeout in milliseconds (default: 120000, max: 600000)",
+            )),
         );
         properties.insert(
             "working_dir".to_string(),
@@ -210,8 +212,8 @@ impl Tool for BashTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use tempfile::TempDir;
 
     #[tokio::test]

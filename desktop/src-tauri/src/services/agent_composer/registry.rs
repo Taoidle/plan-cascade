@@ -9,9 +9,9 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::conditional::{ConditionalAgent, ConditionFn};
+use super::conditional::{ConditionFn, ConditionalAgent};
 use super::llm_agent::LlmAgent;
-use super::loop_agent::{LoopAgent, build_loop_condition};
+use super::loop_agent::{build_loop_condition, LoopAgent};
 use super::parallel::ParallelAgent;
 use super::sequential::SequentialAgent;
 use super::types::{Agent, AgentPipeline, AgentStep, LlmStepConfig};
@@ -91,10 +91,7 @@ impl ComposerRegistry {
     /// creates an `LlmAgent`. For `SequentialStep` and `ParallelStep`,
     /// recursively builds sub-steps. For `ConditionalStep`, creates a
     /// condition function based on the `condition_key`.
-    pub fn build_from_pipeline(
-        &self,
-        pipeline: &AgentPipeline,
-    ) -> AppResult<Arc<dyn Agent>> {
+    pub fn build_from_pipeline(&self, pipeline: &AgentPipeline) -> AppResult<Arc<dyn Agent>> {
         if pipeline.steps.is_empty() {
             return Err(AppError::validation("Pipeline has no steps"));
         }
@@ -160,8 +157,7 @@ impl ComposerRegistry {
                         .unwrap_or_default()
                 });
 
-                let mut cond_agent =
-                    ConditionalAgent::new(name.clone(), condition, branch_agents);
+                let mut cond_agent = ConditionalAgent::new(name.clone(), condition, branch_agents);
 
                 if let Some(default_step) = default_branch {
                     let default_agent = self.build_step(default_step)?;
@@ -268,10 +264,7 @@ mod tests {
     #[test]
     fn test_registry_list() {
         let mut registry = ComposerRegistry::new();
-        registry.register(
-            "agent-1",
-            Arc::new(MockNamedAgent::new("agent-1", "First")),
-        );
+        registry.register("agent-1", Arc::new(MockNamedAgent::new("agent-1", "First")));
         registry.register(
             "agent-2",
             Arc::new(MockNamedAgent::new("agent-2", "Second")),

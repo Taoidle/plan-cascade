@@ -27,10 +27,7 @@ pub fn managed_plugins_dir() -> Option<PathBuf> {
 /// 3. Moves to `~/.plan-cascade/plugins/<name>/`
 /// 4. Removes `.git/` directory to save space
 /// 5. Emits `plugin:install-progress` events throughout
-pub async fn install_from_git(
-    git_url: &str,
-    app: &AppHandle,
-) -> Result<PluginManifest, String> {
+pub async fn install_from_git(git_url: &str, app: &AppHandle) -> Result<PluginManifest, String> {
     let plugins_dir =
         managed_plugins_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
 
@@ -41,8 +38,8 @@ pub async fn install_from_git(
     // Phase 1: Clone to temp directory
     emit_progress(app, "unknown", "cloning", "Cloning repository...", 0.1);
 
-    let temp_dir = tempfile::tempdir()
-        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+    let temp_dir =
+        tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {}", e))?;
     let clone_path = temp_dir.path().join("plugin");
 
     let output = tokio::process::Command::new("git")
@@ -170,7 +167,13 @@ async fn install_relative_from_marketplace(
         .map_err(|e| format!("Failed to create plugins directory: {}", e))?;
 
     // Clone the marketplace repo
-    emit_progress(app, plugin_name, "cloning", "Cloning marketplace repository...", 0.1);
+    emit_progress(
+        app,
+        plugin_name,
+        "cloning",
+        "Cloning marketplace repository...",
+        0.1,
+    );
 
     let git_url = match &marketplace.source {
         MarketplaceSourceType::Github { repo } => {
@@ -198,8 +201,8 @@ async fn install_relative_from_marketplace(
         }
     };
 
-    let temp_dir = tempfile::tempdir()
-        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+    let temp_dir =
+        tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {}", e))?;
     let clone_path = temp_dir.path().join("marketplace");
 
     let output = tokio::process::Command::new("git")
@@ -238,8 +241,7 @@ async fn install_relative_from_marketplace(
 
     emit_progress(app, plugin_name, "installing", "Installing plugin...", 0.6);
 
-    copy_dir_recursive(&plugin_src, &dest)
-        .map_err(|e| format!("Failed to copy plugin: {}", e))?;
+    copy_dir_recursive(&plugin_src, &dest).map_err(|e| format!("Failed to copy plugin: {}", e))?;
 
     // Remove .git/ if present
     let git_dir = dest.join(".git");
@@ -268,8 +270,8 @@ fn read_plugin_manifest(
     let content = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("Failed to read plugin.json: {}", e))?;
 
-    let manifest: PluginManifest = serde_json::from_str(&content)
-        .map_err(|e| format!("Invalid plugin.json: {}", e))?;
+    let manifest: PluginManifest =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid plugin.json: {}", e))?;
 
     emit_progress(
         app,

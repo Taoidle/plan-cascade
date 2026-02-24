@@ -5,8 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
-use plan_cascade_core::{CoreError, CoreResult};
 use crate::models::{ProjectDetectionResult, ProjectMetadata, ProjectType};
+use plan_cascade_core::{CoreError, CoreResult};
 
 /// Project type detector
 pub struct ProjectDetector {

@@ -245,7 +245,10 @@ impl EmbeddingManager {
         }
 
         // Try primary first, fallback on retryable errors.
-        match self.embed_documents_with_provider(&*self.primary, documents).await {
+        match self
+            .embed_documents_with_provider(&*self.primary, documents)
+            .await
+        {
             Ok(results) => Ok(results),
             Err(err) if err.is_retryable() && self.fallback.is_some() => {
                 tracing::warn!(
@@ -923,15 +926,17 @@ mod tests {
         let config = test_config(false);
         let manager = EmbeddingManager::new(Box::new(primary), None, config);
 
-        let docs: Vec<&str> = (0..7).map(|i| match i {
-            0 => "a",
-            1 => "b",
-            2 => "c",
-            3 => "d",
-            4 => "e",
-            5 => "f",
-            _ => "g",
-        }).collect();
+        let docs: Vec<&str> = (0..7)
+            .map(|i| match i {
+                0 => "a",
+                1 => "b",
+                2 => "c",
+                3 => "d",
+                4 => "e",
+                5 => "f",
+                _ => "g",
+            })
+            .collect();
 
         let result = manager.embed_documents(&docs).await;
         assert!(result.is_ok());
@@ -992,10 +997,7 @@ mod tests {
         assert_eq!(manager.cache_entry_count(), 2);
 
         // Second call: "alpha" cached, "gamma" is new
-        let r2 = manager
-            .embed_documents(&["alpha", "gamma"])
-            .await
-            .unwrap();
+        let r2 = manager.embed_documents(&["alpha", "gamma"]).await.unwrap();
         assert_eq!(manager.cache_entry_count(), 3);
 
         // "alpha" should produce the same embedding in both calls
@@ -1032,8 +1034,7 @@ mod tests {
 
     #[tokio::test]
     async fn fallback_used_on_retryable_error() {
-        let primary = MockProvider::new("primary", EmbeddingProviderType::TfIdf)
-            .with_failure(true); // retryable
+        let primary = MockProvider::new("primary", EmbeddingProviderType::TfIdf).with_failure(true); // retryable
         let fallback = MockProvider::new("fallback", EmbeddingProviderType::Ollama);
         let config = test_config(false);
         let manager = EmbeddingManager::new(Box::new(primary), Some(Box::new(fallback)), config);
@@ -1044,8 +1045,8 @@ mod tests {
 
     #[tokio::test]
     async fn fallback_not_used_on_nonretryable_error() {
-        let primary = MockProvider::new("primary", EmbeddingProviderType::TfIdf)
-            .with_failure(false); // non-retryable
+        let primary =
+            MockProvider::new("primary", EmbeddingProviderType::TfIdf).with_failure(false); // non-retryable
         let fallback = MockProvider::new("fallback", EmbeddingProviderType::Ollama);
         let config = test_config(false);
         let manager = EmbeddingManager::new(Box::new(primary), Some(Box::new(fallback)), config);
@@ -1060,8 +1061,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_fallback_returns_primary_error() {
-        let primary = MockProvider::new("primary", EmbeddingProviderType::TfIdf)
-            .with_failure(true); // retryable, but no fallback
+        let primary = MockProvider::new("primary", EmbeddingProviderType::TfIdf).with_failure(true); // retryable, but no fallback
         let config = test_config(false);
         let manager = EmbeddingManager::new(Box::new(primary), None, config);
 
@@ -1075,8 +1075,7 @@ mod tests {
 
     #[tokio::test]
     async fn fallback_used_for_documents_on_retryable_error() {
-        let primary = MockProvider::new("primary", EmbeddingProviderType::TfIdf)
-            .with_failure(true); // retryable
+        let primary = MockProvider::new("primary", EmbeddingProviderType::TfIdf).with_failure(true); // retryable
         let fallback = MockProvider::new("fallback", EmbeddingProviderType::Ollama);
         let config = test_config(false);
         let manager = EmbeddingManager::new(Box::new(primary), Some(Box::new(fallback)), config);
@@ -1154,8 +1153,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_check_fails_when_primary_unhealthy() {
-        let primary =
-            MockProvider::new("primary", EmbeddingProviderType::TfIdf).with_failure(true);
+        let primary = MockProvider::new("primary", EmbeddingProviderType::TfIdf).with_failure(true);
         let config = test_config(false);
         let manager = EmbeddingManager::new(Box::new(primary), None, config);
 
@@ -1165,8 +1163,8 @@ mod tests {
     #[tokio::test]
     async fn health_check_fails_when_fallback_unhealthy() {
         let primary = MockProvider::new("primary", EmbeddingProviderType::TfIdf);
-        let fallback = MockProvider::new("fallback", EmbeddingProviderType::Ollama)
-            .with_failure(true);
+        let fallback =
+            MockProvider::new("fallback", EmbeddingProviderType::Ollama).with_failure(true);
         let config = test_config(false);
         let manager = EmbeddingManager::new(Box::new(primary), Some(Box::new(fallback)), config);
 

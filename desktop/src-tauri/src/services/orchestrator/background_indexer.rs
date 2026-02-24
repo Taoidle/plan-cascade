@@ -223,9 +223,18 @@ impl BackgroundIndexer {
 
             // --- Phase 1b: Generate embeddings ---
             // Prefer EmbeddingManager over direct EmbeddingService when both are set.
-            let embedding_stats: Option<EmbeddingPassStats> = if let Some(ref emb_mgr) = embedding_manager {
+            let embedding_stats: Option<EmbeddingPassStats> = if let Some(ref emb_mgr) =
+                embedding_manager
+            {
                 info!("background indexer: starting embedding generation (via EmbeddingManager)");
-                match run_embedding_pass_managed(&project_root, &index_store, emb_mgr, hnsw_index.as_ref()).await {
+                match run_embedding_pass_managed(
+                    &project_root,
+                    &index_store,
+                    emb_mgr,
+                    hnsw_index.as_ref(),
+                )
+                .await
+                {
                     Ok(stats) => {
                         if stats.has_failures() {
                             warn!(
@@ -248,7 +257,10 @@ impl BackgroundIndexer {
                 }
             } else if let Some(ref emb_svc) = embedding_service {
                 info!("background indexer: starting embedding generation");
-                if let Err(e) = run_embedding_pass(&project_root, &index_store, emb_svc, hnsw_index.as_ref()).await {
+                if let Err(e) =
+                    run_embedding_pass(&project_root, &index_store, emb_svc, hnsw_index.as_ref())
+                        .await
+                {
                     warn!(
                         error = %e,
                         "background indexer: embedding generation failed"
@@ -482,9 +494,9 @@ async fn run_incremental_loop(
         }
 
         // Detect .gitignore changes in this batch and rebuild the matcher.
-        let gitignore_changed = batch.iter().any(|p| {
-            p.file_name().and_then(|n| n.to_str()) == Some(".gitignore")
-        });
+        let gitignore_changed = batch
+            .iter()
+            .any(|p| p.file_name().and_then(|n| n.to_str()) == Some(".gitignore"));
         if gitignore_changed {
             gitignore = build_gitignore_matcher(project_root);
             info!("background indexer: .gitignore changed, rebuilt matcher");
@@ -522,8 +534,8 @@ async fn run_incremental_loop(
                     for rel_path in &child_rel_paths {
                         if let Some(hnsw) = hnsw_index {
                             if hnsw.is_ready().await {
-                                if let Ok(rowids) =
-                                    index_store.get_embedding_rowids_for_file(&project_path, rel_path)
+                                if let Ok(rowids) = index_store
+                                    .get_embedding_rowids_for_file(&project_path, rel_path)
                                 {
                                     for rowid in rowids {
                                         hnsw.mark_stale(rowid).await;
@@ -923,8 +935,11 @@ fn run_full_index(
     {
         use std::collections::HashSet;
 
-        let current_paths: HashSet<&str> =
-            inventory.items.iter().map(|item| item.path.as_str()).collect();
+        let current_paths: HashSet<&str> = inventory
+            .items
+            .iter()
+            .map(|item| item.path.as_str())
+            .collect();
 
         if let Ok(indexed_paths) = index_store.get_indexed_file_paths(&project_path) {
             let mut stale_count = 0usize;
@@ -1015,8 +1030,8 @@ fn run_incremental_index(
     }
 
     // Convert the already-read bytes to UTF-8 string.
-    let content = String::from_utf8(bytes)
-        .map_err(|_| format!("non-UTF-8 file: {:?}", changed_path))?;
+    let content =
+        String::from_utf8(bytes).map_err(|_| format!("non-UTF-8 file: {:?}", changed_path))?;
     let file_size = content.len() as u64;
 
     let ext = changed_path
@@ -1296,8 +1311,7 @@ async fn run_embedding_pass(
 
     // Group chunks and embeddings by file path
     let mut file_groups: HashMap<&str, Vec<(usize, &FileChunk, &Vec<f32>)>> = HashMap::new();
-    for (i, ((rel_path, chunk), embedding)) in
-        all_chunks.iter().zip(embeddings.iter()).enumerate()
+    for (i, ((rel_path, chunk), embedding)) in all_chunks.iter().zip(embeddings.iter()).enumerate()
     {
         file_groups
             .entry(rel_path.as_str())
@@ -1306,8 +1320,10 @@ async fn run_embedding_pass(
     }
 
     for (rel_path, group) in &file_groups {
-        let embedding_bytes: Vec<Vec<u8>> =
-            group.iter().map(|(_, _, emb)| embedding_to_bytes(emb)).collect();
+        let embedding_bytes: Vec<Vec<u8>> = group
+            .iter()
+            .map(|(_, _, emb)| embedding_to_bytes(emb))
+            .collect();
         let batch: Vec<(i64, &str, &[u8])> = group
             .iter()
             .zip(embedding_bytes.iter())
@@ -1401,8 +1417,7 @@ async fn run_incremental_embedding(
     // We need to capture the ROWIDs before deleting.
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await {
-            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, &rel_str)
-            {
+            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, &rel_str) {
                 for rowid in rowids {
                     hnsw.mark_stale(rowid).await;
                 }
@@ -1475,9 +1490,7 @@ async fn run_incremental_embedding(
     // stale ID accumulation (>10%)
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await && (dim_mismatch || hnsw.needs_rebuild().await) {
-            info!(
-                "background indexer: HNSW stale ratio exceeded 10%, triggering full rebuild"
-            );
+            info!("background indexer: HNSW stale ratio exceeded 10%, triggering full rebuild");
             if let Err(e) = rebuild_hnsw_after_embedding(index_store, &project_path, hnsw).await {
                 warn!(
                     error = %e,
@@ -1629,9 +1642,7 @@ async fn run_incremental_embedding_with_content(
     // for N files in a batch.
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await && (dim_mismatch || hnsw.needs_rebuild().await) {
-            info!(
-                "background indexer: HNSW stale ratio exceeded 10%, triggering full rebuild"
-            );
+            info!("background indexer: HNSW stale ratio exceeded 10%, triggering full rebuild");
             if let Err(e) = rebuild_hnsw_after_embedding(index_store, &project_path, hnsw).await {
                 warn!(
                     error = %e,
@@ -1737,8 +1748,7 @@ async fn run_embedding_pass_managed(
                     })
                     .collect();
 
-                let provider_type_str =
-                    format!("{:?}", manager.provider_type()).to_lowercase();
+                let provider_type_str = format!("{:?}", manager.provider_type()).to_lowercase();
                 let provider_model = manager.display_name().to_string();
                 let dim = embeddings.first().map(|e| e.len() as i64).unwrap_or(0);
 
@@ -1851,8 +1861,7 @@ async fn run_incremental_embedding_managed(
     // Mark old embeddings for this file as stale in HNSW before deleting from SQLite
     if let Some(hnsw) = hnsw_index {
         if hnsw.is_ready().await {
-            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, &rel_str)
-            {
+            if let Ok(rowids) = index_store.get_embedding_rowids_for_file(&project_path, &rel_str) {
                 for rowid in rowids {
                     hnsw.mark_stale(rowid).await;
                 }
@@ -2208,9 +2217,9 @@ async fn rebuild_hnsw_after_embedding(
     hnsw.rebuild_from_vectors(&all_embeddings).await?;
 
     // Save to disk
-    hnsw.save_to_disk().await.map_err(|e| {
-        format!("failed to save HNSW index to disk: {}", e)
-    })?;
+    hnsw.save_to_disk()
+        .await
+        .map_err(|e| format!("failed to save HNSW index to disk: {}", e))?;
 
     info!(
         vectors = all_embeddings.len() - mismatched_count,
@@ -2989,10 +2998,7 @@ pub fn process_config(config: &Config) -> String {
             run_incremental_embedding_managed(dir.path(), &store, &manager, &changed_path, None)
                 .await;
         assert!(result.is_ok(), "should succeed even without vocab in DB");
-        assert!(
-            !tfidf.is_ready(),
-            "TF-IDF provider should remain not-ready"
-        );
+        assert!(!tfidf.is_ready(), "TF-IDF provider should remain not-ready");
     }
 
     #[tokio::test]
@@ -3112,7 +3118,10 @@ pub fn process_config(config: &Config) -> String {
         // Generate a query embedding
         let query_text = "pub fn main";
         let query_embedding = emb_svc.embed_text(query_text);
-        assert!(!query_embedding.is_empty(), "query embedding should not be empty");
+        assert!(
+            !query_embedding.is_empty(),
+            "query embedding should not be empty"
+        );
 
         let top_k = all_embeddings.len(); // Request all results to measure recall
 
@@ -3129,10 +3138,7 @@ pub fn process_config(config: &Config) -> String {
             !brute_results.is_empty(),
             "brute force should return results"
         );
-        assert!(
-            !hnsw_results.is_empty(),
-            "HNSW should return results"
-        );
+        assert!(!hnsw_results.is_empty(), "HNSW should return results");
 
         // Both should return the same number of results
         assert_eq!(
@@ -3144,16 +3150,14 @@ pub fn process_config(config: &Config) -> String {
         // Check recall: all brute-force files should appear in HNSW results.
         // Since HNSW is approximate, we check that recall is >= 95%.
         let hnsw_rowids: Vec<usize> = hnsw_results.iter().map(|(id, _)| *id).collect();
-        let hnsw_metadata = store.get_embeddings_by_rowids(&hnsw_rowids).expect("metadata");
-        let hnsw_files: std::collections::HashSet<&String> = hnsw_metadata
-            .values()
-            .map(|(fp, _, _)| fp)
-            .collect();
+        let hnsw_metadata = store
+            .get_embeddings_by_rowids(&hnsw_rowids)
+            .expect("metadata");
+        let hnsw_files: std::collections::HashSet<&String> =
+            hnsw_metadata.values().map(|(fp, _, _)| fp).collect();
 
-        let brute_files: std::collections::HashSet<&String> = brute_results
-            .iter()
-            .map(|r| &r.file_path)
-            .collect();
+        let brute_files: std::collections::HashSet<&String> =
+            brute_results.iter().map(|r| &r.file_path).collect();
 
         // All files found by brute-force should also appear in HNSW results
         let recall_files = brute_files
@@ -3241,7 +3245,9 @@ pub fn process_config(config: &Config) -> String {
 
         // Identify which rowids belong to main.rs
         let all_rowids: Vec<usize> = all_embeddings.iter().map(|(id, _)| *id).collect();
-        let all_metadata = store.get_embeddings_by_rowids(&all_rowids).expect("metadata");
+        let all_metadata = store
+            .get_embeddings_by_rowids(&all_rowids)
+            .expect("metadata");
         let main_rs_rowids: Vec<usize> = all_metadata
             .iter()
             .filter(|(_, (fp, _, _))| fp.contains("main.rs"))
@@ -3304,7 +3310,10 @@ pub fn process_config(config: &Config) -> String {
         hnsw.insert(new_id, &new_embedding).await;
 
         let results_with_new = hnsw.search(&new_embedding, 1).await;
-        assert!(!results_with_new.is_empty(), "should find the new embedding");
+        assert!(
+            !results_with_new.is_empty(),
+            "should find the new embedding"
+        );
         assert_eq!(
             results_with_new[0].0, new_id,
             "top result should be the newly inserted embedding"
@@ -3357,7 +3366,10 @@ pub fn process_config(config: &Config) -> String {
         hnsw.batch_insert(&all_embeddings).await;
 
         let total_before = hnsw.get_count().await;
-        assert!(!hnsw.needs_rebuild().await, "should not need rebuild initially");
+        assert!(
+            !hnsw.needs_rebuild().await,
+            "should not need rebuild initially"
+        );
 
         // Mark >10% as stale manually
         let stale_target = (total_before as f64 * 0.11).ceil() as usize;
@@ -3465,7 +3477,11 @@ pub fn process_config(config: &Config) -> String {
 
         // Create matching and non-matching files
         fs::create_dir_all(root.join("node_modules/pkg")).expect("mkdir");
-        fs::write(root.join("node_modules/pkg/index.js"), "module.exports = {}").expect("write");
+        fs::write(
+            root.join("node_modules/pkg/index.js"),
+            "module.exports = {}",
+        )
+        .expect("write");
         fs::create_dir_all(root.join("dist")).expect("mkdir");
         fs::write(root.join("dist/bundle.js"), "var a=1;").expect("write");
         fs::create_dir_all(root.join("src")).expect("mkdir");
@@ -3496,7 +3512,11 @@ pub fn process_config(config: &Config) -> String {
         fs::create_dir_all(root.join("src")).expect("mkdir");
         fs::write(root.join("src/main.rs"), "fn main() {}").expect("write");
         fs::create_dir_all(root.join("node_modules/pkg")).expect("mkdir");
-        fs::write(root.join("node_modules/pkg/index.js"), "module.exports = {}").expect("write");
+        fs::write(
+            root.join("node_modules/pkg/index.js"),
+            "module.exports = {}",
+        )
+        .expect("write");
 
         let matcher = build_gitignore_matcher(root);
 
@@ -3527,13 +3547,15 @@ pub fn process_config(config: &Config) -> String {
         let (tx, rx) = tokio::sync::mpsc::channel::<PathBuf>(16);
 
         // Use start_watch_only to test only the incremental loop (no full index)
-        let indexer = BackgroundIndexer::new(root.to_path_buf(), store.clone())
-            .with_change_receiver(rx);
+        let indexer =
+            BackgroundIndexer::new(root.to_path_buf(), store.clone()).with_change_receiver(rx);
 
         let handle = indexer.start_watch_only().await;
 
         // Send an ignored path — it should be skipped
-        tx.send(root.join("node_modules/foo.js")).await.expect("send");
+        tx.send(root.join("node_modules/foo.js"))
+            .await
+            .expect("send");
 
         // Send a normal file change
         tx.send(root.join("main.py")).await.expect("send");
@@ -3545,7 +3567,9 @@ pub fn process_config(config: &Config) -> String {
         let project_path = root.to_string_lossy().to_string();
 
         // main.py should be indexed
-        let symbols = store.get_file_symbols(&project_path, "main.py").expect("symbols");
+        let symbols = store
+            .get_file_symbols(&project_path, "main.py")
+            .expect("symbols");
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "main");
 

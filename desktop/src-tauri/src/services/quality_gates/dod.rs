@@ -12,9 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::services::quality_gates::code_review::CodeReviewResult;
-use crate::services::quality_gates::pipeline::{
-    GatePhase, PipelineGateResult, PipelineResult,
-};
+use crate::services::quality_gates::pipeline::{GatePhase, PipelineGateResult, PipelineResult};
 
 /// DoD validation input.
 #[derive(Debug, Clone)]
@@ -147,10 +145,8 @@ Git diff:
                     Ok(response) => {
                         if let Some(content) = &response.content {
                             let checks = self.parse_criteria_response(content);
-                            let unaddressed: Vec<_> = checks
-                                .iter()
-                                .filter(|c| !c.addressed)
-                                .collect();
+                            let unaddressed: Vec<_> =
+                                checks.iter().filter(|c| !c.addressed).collect();
 
                             for check in &unaddressed {
                                 failures.push(format!(
@@ -171,12 +167,7 @@ Git diff:
         }
 
         if failures.is_empty() {
-            PipelineGateResult::passed(
-                "dod",
-                "Definition of Done",
-                GatePhase::PostValidation,
-                0,
-            )
+            PipelineGateResult::passed("dod", "Definition of Done", GatePhase::PostValidation, 0)
         } else {
             PipelineGateResult::failed(
                 "dod",
@@ -229,12 +220,7 @@ Git diff:
         }
 
         if failures.is_empty() {
-            PipelineGateResult::passed(
-                "dod",
-                "Definition of Done",
-                GatePhase::PostValidation,
-                0,
-            )
+            PipelineGateResult::passed("dod", "Definition of Done", GatePhase::PostValidation, 0)
         } else {
             PipelineGateResult::failed(
                 "dod",
@@ -281,7 +267,8 @@ Git diff:
             .map(|c| CriterionCheck {
                 criterion: c.clone(),
                 addressed: false,
-                reasoning: "Unable to verify - verification failed due to unparseable LLM response".to_string(),
+                reasoning: "Unable to verify - verification failed due to unparseable LLM response"
+                    .to_string(),
             })
             .collect()
     }
@@ -291,17 +278,12 @@ Git diff:
 mod tests {
     use super::*;
     use crate::services::quality_gates::code_review::ReviewFinding;
-    use crate::services::quality_gates::pipeline::{
-        GateMode, PipelinePhaseResult,
-    };
+    use crate::services::quality_gates::pipeline::{GateMode, PipelinePhaseResult};
 
     fn basic_input() -> DoDInput {
         DoDInput {
             story_id: "story-001".to_string(),
-            acceptance_criteria: vec![
-                "Feature X works".to_string(),
-                "Tests pass".to_string(),
-            ],
+            acceptance_criteria: vec!["Feature X works".to_string(), "Tests pass".to_string()],
             pipeline_result: None,
             code_review_result: None,
             diff_content: None,
@@ -350,10 +332,7 @@ mod tests {
         let gate = DoDGate::new(input);
         let result = gate.run_heuristic();
         assert!(!result.passed);
-        assert!(result
-            .findings
-            .iter()
-            .any(|f| f.contains("Quality gate")));
+        assert!(result.findings.iter().any(|f| f.contains("Quality gate")));
     }
 
     #[test]
@@ -438,7 +417,9 @@ mod tests {
         assert_eq!(checks.len(), 2);
         // All should be marked as NOT addressed in fallback (fail-safe)
         assert!(checks.iter().all(|c| !c.addressed));
-        assert!(checks.iter().all(|c| c.reasoning.contains("unparseable LLM response")));
+        assert!(checks
+            .iter()
+            .all(|c| c.reasoning.contains("unparseable LLM response")));
     }
 
     /// Mock LLM provider that returns a fixed (unparseable) response for testing.
@@ -464,7 +445,8 @@ mod tests {
             _system: Option<String>,
             _tools: Vec<crate::services::llm::types::ToolDefinition>,
             _request_options: LlmRequestOptions,
-        ) -> crate::services::llm::types::LlmResult<crate::services::llm::types::LlmResponse> {
+        ) -> crate::services::llm::types::LlmResult<crate::services::llm::types::LlmResponse>
+        {
             Ok(crate::services::llm::types::LlmResponse {
                 content: Some("This is not valid JSON at all".to_string()),
                 thinking: None,
@@ -487,7 +469,8 @@ mod tests {
             _tools: Vec<crate::services::llm::types::ToolDefinition>,
             _tx: tokio::sync::mpsc::Sender<crate::services::streaming::UnifiedStreamEvent>,
             _request_options: LlmRequestOptions,
-        ) -> crate::services::llm::types::LlmResult<crate::services::llm::types::LlmResponse> {
+        ) -> crate::services::llm::types::LlmResult<crate::services::llm::types::LlmResponse>
+        {
             unimplemented!()
         }
         async fn health_check(&self) -> crate::services::llm::types::LlmResult<()> {
@@ -509,7 +492,10 @@ mod tests {
 
         // The DoD gate should fail because the unparseable response causes
         // all criteria to be marked as not addressed
-        assert!(!result.passed, "DoD gate should fail when LLM response is unparseable");
+        assert!(
+            !result.passed,
+            "DoD gate should fail when LLM response is unparseable"
+        );
         assert!(
             result.findings.iter().any(|f| f.contains("not addressed")),
             "Failures should mention unaddressed criteria, got: {:?}",
@@ -517,7 +503,10 @@ mod tests {
         );
         // Both criteria should be reported as unaddressed
         assert!(
-            result.findings.iter().any(|f| f.contains("Feature X works")),
+            result
+                .findings
+                .iter()
+                .any(|f| f.contains("Feature X works")),
             "Should report 'Feature X works' as unaddressed"
         );
         assert!(

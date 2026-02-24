@@ -234,10 +234,7 @@ impl ProjectMemoryStore {
             .ok_or_else(|| AppError::NotFound(format!("Memory not found: {}", id)))?;
 
         let new_content = updates.content.as_deref().unwrap_or(&existing.content);
-        let new_category = updates
-            .category
-            .as_ref()
-            .unwrap_or(&existing.category);
+        let new_category = updates.category.as_ref().unwrap_or(&existing.category);
         let new_importance = updates.importance.unwrap_or(existing.importance);
         let new_keywords = updates.keywords.as_ref().unwrap_or(&existing.keywords);
 
@@ -418,10 +415,9 @@ impl ProjectMemoryStore {
                 .to_string();
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt
-                .query_map(
-                    params![project_path, limit as i64, offset as i64],
-                    |row| row_to_memory_entry(row),
-                )?
+                .query_map(params![project_path, limit as i64, offset as i64], |row| {
+                    row_to_memory_entry(row)
+                })?
                 .filter_map(|r| r.ok())
                 .collect();
             Ok(rows)
@@ -449,12 +445,11 @@ impl ProjectMemoryStore {
             |row| row.get(0),
         )?;
 
-        let avg_importance: f64 = conn
-            .query_row(
-                "SELECT COALESCE(AVG(importance), 0.0) FROM project_memories WHERE project_path = ?1",
-                params![project_path],
-                |row| row.get(0),
-            )?;
+        let avg_importance: f64 = conn.query_row(
+            "SELECT COALESCE(AVG(importance), 0.0) FROM project_memories WHERE project_path = ?1",
+            params![project_path],
+            |row| row.get(0),
+        )?;
 
         // Category counts
         let mut stmt = conn.prepare(
@@ -559,10 +554,7 @@ fn row_to_memory_entry(row: &rusqlite::Row) -> rusqlite::Result<MemoryEntry> {
 
 /// Serialize f32 embedding vector to bytes for SQLite BLOB storage
 pub fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
-    embedding
-        .iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect()
+    embedding.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 
 /// Deserialize bytes from SQLite BLOB back to f32 embedding vector

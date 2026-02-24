@@ -121,7 +121,13 @@ impl LspEnricher {
         for language in &languages {
             let index_language = language_map
                 .iter()
-                .find_map(|(&k, &v)| if v == language.as_str() { Some(k) } else { None })
+                .find_map(|(&k, &v)| {
+                    if v == language.as_str() {
+                        Some(k)
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(language.as_str());
 
             let symbols = match self
@@ -157,10 +163,11 @@ impl LspEnricher {
             // Group symbols by file_path
             let mut files: HashMap<String, Vec<(i64, String, i64)>> = HashMap::new();
             for (rowid, file_path, symbol_name, line, _lang) in &symbols {
-                files
-                    .entry(file_path.clone())
-                    .or_default()
-                    .push((*rowid, symbol_name.clone(), *line));
+                files.entry(file_path.clone()).or_default().push((
+                    *rowid,
+                    symbol_name.clone(),
+                    *line,
+                ));
             }
 
             // Rate limiting: track request count within each second
@@ -236,13 +243,12 @@ impl LspEnricher {
                     // Hover -> extract type
                     match client
                         .request::<lsp_types::request::HoverRequest>(lsp_types::HoverParams {
-                            text_document_position_params:
-                                lsp_types::TextDocumentPositionParams {
-                                    text_document: lsp_types::TextDocumentIdentifier {
-                                        uri: uri.clone(),
-                                    },
-                                    position,
+                            text_document_position_params: lsp_types::TextDocumentPositionParams {
+                                text_document: lsp_types::TextDocumentIdentifier {
+                                    uri: uri.clone(),
                                 },
+                                position,
+                            },
                             work_done_progress_params: lsp_types::WorkDoneProgressParams {
                                 work_done_token: None,
                             },
@@ -251,8 +257,7 @@ impl LspEnricher {
                     {
                         Ok(Some(hover)) => {
                             if let Some(type_str) = extract_type_from_hover(&hover) {
-                                let _ =
-                                    self.index_store.update_symbol_type(*rowid, &type_str);
+                                let _ = self.index_store.update_symbol_type(*rowid, &type_str);
                                 report.symbols_enriched += 1;
                             }
                         }
@@ -411,9 +416,7 @@ fn extract_type_from_hover(hover: &lsp_types::Hover) -> Option<String> {
 
 /// Convert a file:// URI string to a relative path from the project root.
 fn uri_to_relative_path(uri_str: &str, project_path: &str) -> String {
-    let path = uri_str
-        .strip_prefix("file://")
-        .unwrap_or(uri_str);
+    let path = uri_str.strip_prefix("file://").unwrap_or(uri_str);
 
     if let Some(relative) = path.strip_prefix(project_path) {
         let relative = relative.strip_prefix('/').unwrap_or(relative);

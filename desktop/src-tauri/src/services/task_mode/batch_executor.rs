@@ -196,10 +196,7 @@ pub enum StoryExecutionState {
     /// Waiting to be executed
     Pending,
     /// Currently running
-    Running {
-        agent: String,
-        attempt: u32,
-    },
+    Running { agent: String, attempt: u32 },
     /// Completed successfully
     Completed {
         agent: String,
@@ -381,11 +378,7 @@ impl TaskModeProgressEvent {
     }
 
     /// Create an execution_completed event.
-    pub fn execution_completed(
-        session_id: &str,
-        total_batches: usize,
-        progress_pct: f64,
-    ) -> Self {
+    pub fn execution_completed(session_id: &str, total_batches: usize, progress_pct: f64) -> Self {
         Self {
             session_id: session_id.to_string(),
             event_type: "execution_completed".to_string(),
@@ -514,10 +507,7 @@ pub fn calculate_batches(
         }
 
         // Split into sub-batches if exceeding max_parallel
-        let chunks: Vec<Vec<&str>> = ready
-            .chunks(max_parallel)
-            .map(|c| c.to_vec())
-            .collect();
+        let chunks: Vec<Vec<&str>> = ready.chunks(max_parallel).map(|c| c.to_vec()).collect();
 
         for chunk in chunks {
             let batch_index = batches.len();
@@ -692,8 +682,7 @@ impl BatchExecutor {
     /// Record an agent assignment.
     pub async fn record_agent_assignment(&self, story_id: &str, assignment: AgentAssignment) {
         let mut s = self.state.write().await;
-        s.agent_assignments
-            .insert(story_id.to_string(), assignment);
+        s.agent_assignments.insert(story_id.to_string(), assignment);
     }
 
     /// Update the current batch index.
@@ -923,7 +912,9 @@ impl BatchExecutor {
         let duration_ms = start.elapsed().as_millis() as u64;
         let result = self.build_result(duration_ms).await;
 
-        let final_pct = if result.success { 100.0 } else {
+        let final_pct = if result.success {
+            100.0
+        } else {
             if total_stories > 0 {
                 (result.completed as f64 / total_stories as f64) * 100.0
             } else {
@@ -1009,10 +1000,7 @@ impl BatchExecutor {
             match dor_mode {
                 GateMode::Hard => {
                     // DoR hard failure -- skip execution entirely
-                    let failure_reason = format!(
-                        "DoR pre-flight failed: {}",
-                        dor_result.message
-                    );
+                    let failure_reason = format!("DoR pre-flight failed: {}", dor_result.message);
                     tracing::error!(
                         story_id = %story_id,
                         findings = ?dor_result.findings,
@@ -1108,8 +1096,9 @@ impl BatchExecutor {
             let outcome = story_executor(ctx).await;
 
             if !outcome.success {
-                last_error =
-                    outcome.error.unwrap_or_else(|| "Story execution failed".to_string());
+                last_error = outcome
+                    .error
+                    .unwrap_or_else(|| "Story execution failed".to_string());
                 previous_agent = current_agent.clone();
                 // On retry, switch to a different agent
                 if attempt < max_attempts {
@@ -1119,8 +1108,7 @@ impl BatchExecutor {
                         description: story.description.clone(),
                         agent: None,
                     };
-                    let retry_assignment =
-                        resolver.resolve(&story_info, ExecutionPhase::Retry);
+                    let retry_assignment = resolver.resolve(&story_info, ExecutionPhase::Retry);
                     current_agent = retry_assignment.agent_name.clone();
 
                     // Record the retry agent assignment
@@ -1178,14 +1166,12 @@ impl BatchExecutor {
                         (String::from_utf8_lossy(&output.stdout).to_string(), None)
                     }
                     Ok(output) => {
-                        let stderr =
-                            String::from_utf8_lossy(&output.stderr).to_string();
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                         let exit_code = output
                             .status
                             .code()
                             .map_or("unknown".to_string(), |c| c.to_string());
-                        let reason =
-                            format!("Git diff failed: exit code {}", exit_code);
+                        let reason = format!("Git diff failed: exit code {}", exit_code);
                         tracing::warn!(
                             story_id = %story_id,
                             exit_code = %exit_code,
@@ -1257,8 +1243,7 @@ impl BatchExecutor {
             match gate_result {
                 Ok(pipeline_result) => {
                     // Collect all gate results: DoR + pipeline gates + diff warning
-                    let mut gate_results: Vec<PipelineGateResult> =
-                        vec![dor_gate_result.clone()];
+                    let mut gate_results: Vec<PipelineGateResult> = vec![dor_gate_result.clone()];
                     gate_results.extend(
                         pipeline_result
                             .phase_results
@@ -1308,23 +1293,19 @@ impl BatchExecutor {
                                     last_gate_results = Some(gate_results);
 
                                     if attempt < max_attempts {
-                                        let resolver =
-                                            AgentResolver::new(agents_config.clone());
+                                        let resolver = AgentResolver::new(agents_config.clone());
                                         let story_info = StoryInfo {
                                             title: story.title.clone(),
                                             description: story.description.clone(),
                                             agent: None,
                                         };
-                                        let retry_assignment = resolver
-                                            .resolve(&story_info, ExecutionPhase::Retry);
-                                        current_agent =
-                                            retry_assignment.agent_name.clone();
+                                        let retry_assignment =
+                                            resolver.resolve(&story_info, ExecutionPhase::Retry);
+                                        current_agent = retry_assignment.agent_name.clone();
 
                                         let mut s = state.write().await;
-                                        s.agent_assignments.insert(
-                                            story_id.to_string(),
-                                            retry_assignment,
-                                        );
+                                        s.agent_assignments
+                                            .insert(story_id.to_string(), retry_assignment);
                                     }
                                     continue;
                                 }
@@ -1451,7 +1432,14 @@ mod tests {
            + Send
            + Sync
            + Clone {
-        |_ctx| Box::pin(async { StoryExecutionOutcome { success: true, error: None } })
+        |_ctx| {
+            Box::pin(async {
+                StoryExecutionOutcome {
+                    success: true,
+                    error: None,
+                }
+            })
+        }
     }
 
     // ========================================================================
@@ -1460,7 +1448,11 @@ mod tests {
 
     #[test]
     fn test_no_dependencies() {
-        let stories = vec![story("s1", vec![]), story("s2", vec![]), story("s3", vec![])];
+        let stories = vec![
+            story("s1", vec![]),
+            story("s2", vec![]),
+            story("s3", vec![]),
+        ];
         let batches = calculate_batches(&stories, 10).unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].story_ids.len(), 3);
@@ -1531,10 +1523,7 @@ mod tests {
     #[test]
     fn test_external_dependency_treated_as_resolved() {
         // s1 depends on "external" which is not in the story set
-        let stories = vec![
-            story("s1", vec!["external"]),
-            story("s2", vec!["s1"]),
-        ];
+        let stories = vec![story("s1", vec!["external"]), story("s2", vec!["s1"])];
         let batches = calculate_batches(&stories, 10).unwrap();
         assert_eq!(batches.len(), 2);
     }
@@ -1740,9 +1729,8 @@ mod tests {
 
     #[test]
     fn test_progress_event_story_started() {
-        let event = TaskModeProgressEvent::story_started(
-            "sess-1", 0, 3, "s1", "claude-sonnet", 33.3,
-        );
+        let event =
+            TaskModeProgressEvent::story_started("sess-1", 0, 3, "s1", "claude-sonnet", 33.3);
         assert_eq!(event.event_type, "story_started");
         assert_eq!(event.story_id, Some("s1".to_string()));
         assert_eq!(event.story_status, Some("running".to_string()));
@@ -1751,11 +1739,20 @@ mod tests {
 
     #[test]
     fn test_progress_event_story_completed() {
-        let gate_results = vec![
-            PipelineGateResult::passed("format", "Format", GatePhase::PreValidation, 10),
-        ];
+        let gate_results = vec![PipelineGateResult::passed(
+            "format",
+            "Format",
+            GatePhase::PreValidation,
+            10,
+        )];
         let event = TaskModeProgressEvent::story_completed(
-            "sess-1", 0, 3, "s1", "claude-sonnet", gate_results.clone(), 50.0,
+            "sess-1",
+            0,
+            3,
+            "s1",
+            "claude-sonnet",
+            gate_results.clone(),
+            50.0,
         );
         assert_eq!(event.event_type, "story_completed");
         assert_eq!(event.story_status, Some("completed".to_string()));
@@ -1766,7 +1763,14 @@ mod tests {
     #[test]
     fn test_progress_event_story_failed() {
         let event = TaskModeProgressEvent::story_failed(
-            "sess-1", 0, 3, "s1", "claude-sonnet", "tests failed", None, 25.0,
+            "sess-1",
+            0,
+            3,
+            "s1",
+            "claude-sonnet",
+            "tests failed",
+            None,
+            25.0,
         );
         assert_eq!(event.event_type, "story_failed");
         assert_eq!(event.story_status, Some("failed".to_string()));
@@ -1796,9 +1800,8 @@ mod tests {
 
     #[test]
     fn test_progress_event_serialization() {
-        let event = TaskModeProgressEvent::story_started(
-            "sess-1", 0, 3, "s1", "claude-sonnet", 25.0,
-        );
+        let event =
+            TaskModeProgressEvent::story_started("sess-1", 0, 3, "s1", "claude-sonnet", 25.0);
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"sessionId\""));
         assert!(json.contains("\"eventType\""));
@@ -1847,7 +1850,13 @@ mod tests {
         };
 
         let result = executor
-            .execute("test-session", &resolver, std::path::PathBuf::from("/tmp"), emit, mock_story_executor())
+            .execute(
+                "test-session",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                mock_story_executor(),
+            )
             .await
             .unwrap();
 
@@ -1872,7 +1881,10 @@ mod tests {
             .iter()
             .filter(|e| e.event_type == "story_completed")
             .count();
-        assert_eq!(story_completed_count, 4, "Should have 4 story_completed events");
+        assert_eq!(
+            story_completed_count, 4,
+            "Should have 4 story_completed events"
+        );
 
         let execution_completed = emitted
             .iter()
@@ -1907,7 +1919,13 @@ mod tests {
         };
 
         let result = executor
-            .execute("test-session", &resolver, std::path::PathBuf::from("/tmp"), emit, mock_story_executor())
+            .execute(
+                "test-session",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                mock_story_executor(),
+            )
             .await
             .unwrap();
 
@@ -1924,12 +1942,14 @@ mod tests {
         assert!(
             s1_batch.unwrap() < s2_batch.unwrap(),
             "s1 (batch {:?}) must execute before s2 (batch {:?})",
-            s1_batch, s2_batch,
+            s1_batch,
+            s2_batch,
         );
         assert!(
             s2_batch.unwrap() < s3_batch.unwrap(),
             "s2 (batch {:?}) must execute before s3 (batch {:?})",
-            s2_batch, s3_batch,
+            s2_batch,
+            s3_batch,
         );
     }
 
@@ -1970,7 +1990,13 @@ mod tests {
         };
 
         let result = executor
-            .execute("test-session", &resolver, std::path::PathBuf::from("/tmp"), emit, mock_story_executor())
+            .execute(
+                "test-session",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                mock_story_executor(),
+            )
             .await
             .unwrap();
 
@@ -1978,10 +2004,7 @@ mod tests {
 
         // s3 should be cancelled (not completed)
         let s3_state = result.story_results.get("s3");
-        assert!(
-            s3_state.is_some(),
-            "s3 should be in results"
-        );
+        assert!(s3_state.is_some(), "s3 should be in results");
         assert!(
             matches!(s3_state.unwrap(), StoryExecutionState::Cancelled),
             "s3 should be cancelled, got: {:?}",
@@ -2000,7 +2023,13 @@ mod tests {
         let emit = |_: TaskModeProgressEvent| {};
 
         let result = executor
-            .execute("test-session", &resolver, std::path::PathBuf::from("/tmp"), emit, mock_story_executor())
+            .execute(
+                "test-session",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                mock_story_executor(),
+            )
             .await
             .unwrap();
 
@@ -2029,7 +2058,13 @@ mod tests {
         let emit = |_: TaskModeProgressEvent| {};
 
         let result = executor
-            .execute("test-session", &resolver, std::path::PathBuf::from("/tmp"), emit, mock_story_executor())
+            .execute(
+                "test-session",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                mock_story_executor(),
+            )
             .await
             .unwrap();
 
@@ -2060,7 +2095,13 @@ mod tests {
         };
 
         let result = executor
-            .execute("test-session", &resolver, std::path::PathBuf::from("/tmp"), emit, mock_story_executor())
+            .execute(
+                "test-session",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                mock_story_executor(),
+            )
             .await
             .unwrap();
 
@@ -2100,7 +2141,13 @@ mod tests {
         };
 
         let _ = executor
-            .execute("sess-123", &resolver, std::path::PathBuf::from("/tmp"), emit, mock_story_executor())
+            .execute(
+                "sess-123",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                mock_story_executor(),
+            )
             .await
             .unwrap();
 
@@ -2222,10 +2269,7 @@ mod tests {
                 name: "default-agent".to_string(),
                 description: "Default agent".to_string(),
                 available: true,
-                suitable_phases: vec![
-                    ExecutionPhase::Implementation,
-                    ExecutionPhase::Retry,
-                ],
+                suitable_phases: vec![ExecutionPhase::Implementation, ExecutionPhase::Retry],
             },
         );
         agents.insert(
@@ -2301,8 +2345,7 @@ mod tests {
         > {
             let counter = counter_clone.clone();
             Box::pin(async move {
-                let attempt =
-                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                let attempt = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                 if attempt == 1 {
                     StoryExecutionOutcome {
                         success: false,
@@ -2444,7 +2487,13 @@ mod tests {
         };
 
         let result = executor
-            .execute("test-dor-hard", &resolver, std::path::PathBuf::from("/tmp"), emit, se)
+            .execute(
+                "test-dor-hard",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                se,
+            )
             .await
             .unwrap();
 
@@ -2459,8 +2508,14 @@ mod tests {
 
         let s1_state = result.story_results.get("s1").unwrap();
         match s1_state {
-            StoryExecutionState::Failed { reason, attempts, .. } => {
-                assert!(reason.contains("DoR"), "Failure reason should mention DoR: {}", reason);
+            StoryExecutionState::Failed {
+                reason, attempts, ..
+            } => {
+                assert!(
+                    reason.contains("DoR"),
+                    "Failure reason should mention DoR: {}",
+                    reason
+                );
                 assert_eq!(*attempts, 0, "No execution attempts should have been made");
             }
             other => panic!("Expected Failed state, got: {:?}", other),
@@ -2515,7 +2570,13 @@ mod tests {
         };
 
         let result = executor
-            .execute("test-dor-soft", &resolver, std::path::PathBuf::from("/tmp"), emit, se)
+            .execute(
+                "test-dor-soft",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                se,
+            )
             .await
             .unwrap();
 
@@ -2566,7 +2627,13 @@ mod tests {
         let emit = |_: TaskModeProgressEvent| {};
 
         let _result = executor
-            .execute("test-dor-pass", &resolver, std::path::PathBuf::from("/tmp"), emit, se)
+            .execute(
+                "test-dor-pass",
+                &resolver,
+                std::path::PathBuf::from("/tmp"),
+                emit,
+                se,
+            )
             .await
             .unwrap();
 
@@ -2709,7 +2776,10 @@ mod tests {
             diff_content: None,
         };
         let result = DoDGate::new(input).run_heuristic();
-        assert!(result.passed, "DoD should pass when pipeline is None and AC are present");
+        assert!(
+            result.passed,
+            "DoD should pass when pipeline is None and AC are present"
+        );
         assert_eq!(result.gate_id, "dod");
 
         let input_no_ac = DoDInput {
@@ -2720,6 +2790,9 @@ mod tests {
             diff_content: None,
         };
         let result = DoDGate::new(input_no_ac).run_heuristic();
-        assert!(!result.passed, "DoD should fail when no acceptance criteria");
+        assert!(
+            !result.passed,
+            "DoD should fail when no acceptance criteria"
+        );
     }
 }

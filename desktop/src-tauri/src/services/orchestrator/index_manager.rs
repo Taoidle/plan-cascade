@@ -189,15 +189,11 @@ impl IndexManager {
                 // vocabulary restore above is visible through the manager.
                 {
                     let mut managers = self.embedding_managers.write().await;
-                    managers
-                        .entry(project_path.to_string())
-                        .or_insert_with(|| {
-                            let (mgr, _is_tfidf) =
-                                self.build_embedding_manager_from_config(
-                                    Arc::clone(&embedding_svc),
-                                );
-                            mgr
-                        });
+                    managers.entry(project_path.to_string()).or_insert_with(|| {
+                        let (mgr, _is_tfidf) =
+                            self.build_embedding_manager_from_config(Arc::clone(&embedding_svc));
+                        mgr
+                    });
                 }
 
                 // Load or rebuild HNSW index for fast semantic search.
@@ -216,7 +212,9 @@ impl IndexManager {
 
                 let embedding_provider_name = {
                     let managers = self.embedding_managers.read().await;
-                    managers.get(project_path).map(|m| m.display_name().to_string())
+                    managers
+                        .get(project_path)
+                        .map(|m| m.display_name().to_string())
                 };
                 let event = IndexStatusEvent {
                     project_path: project_path.to_string(),
@@ -384,7 +382,10 @@ impl IndexManager {
                     // Distinguish "indexed" (has embeddings) from
                     // "indexed_no_embedding" (file index OK but embedding failed).
                     let (status, error_msg) = if summary.total_files == 0 {
-                        ("error".to_string(), Some("No files were indexed".to_string()))
+                        (
+                            "error".to_string(),
+                            Some("No files were indexed".to_string()),
+                        )
                     } else if summary.embedding_chunks == 0 {
                         let err = embedding_stats.as_ref().and_then(|s| {
                             if s.has_failures() {
@@ -509,7 +510,9 @@ impl IndexManager {
             Ok(summary) if summary.total_files > 0 => {
                 let embedding_provider_name = {
                     let managers = self.embedding_managers.read().await;
-                    managers.get(project_path).map(|m| m.display_name().to_string())
+                    managers
+                        .get(project_path)
+                        .map(|m| m.display_name().to_string())
                 };
                 IndexStatusEvent {
                     project_path: project_path.to_string(),
@@ -572,10 +575,7 @@ impl IndexManager {
     /// The returned manager wraps the same `EmbeddingService` (via
     /// `TfIdfEmbeddingProvider`) and provides the dispatch-layer API with
     /// caching, batching, and optional fallback support.
-    pub async fn get_embedding_manager(
-        &self,
-        project_path: &str,
-    ) -> Option<Arc<EmbeddingManager>> {
+    pub async fn get_embedding_manager(&self, project_path: &str) -> Option<Arc<EmbeddingManager>> {
         let managers = self.embedding_managers.read().await;
         managers.get(project_path).cloned()
     }
@@ -636,10 +636,7 @@ impl IndexManager {
             let root = PathBuf::from(project_path);
             match notify_debouncer_mini::new_debouncer(
                 Duration::from_millis(200),
-                move |events: Result<
-                    Vec<notify_debouncer_mini::DebouncedEvent>,
-                    notify::Error,
-                >| {
+                move |events: Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify::Error>| {
                     if let Ok(events) = events {
                         for event in events {
                             // Do NOT filter by is_file() here: deletion events
@@ -868,9 +865,9 @@ impl IndexManager {
         primary_config.proxy = self.resolve_embedding_proxy(persisted.provider);
 
         // Build optional fallback config (TF-IDF fallback is common).
-        let fallback_config = persisted.fallback_provider.map(|fb_type| {
-            EmbeddingProviderConfig::new(fb_type)
-        });
+        let fallback_config = persisted
+            .fallback_provider
+            .map(|fb_type| EmbeddingProviderConfig::new(fb_type));
 
         let manager_config = EmbeddingManagerConfig {
             primary: primary_config,
@@ -981,11 +978,7 @@ impl IndexManager {
     ///
     /// If no disk files exist and embeddings are present in SQLite, rebuilds
     /// the HNSW index from the stored embeddings.
-    async fn get_or_create_hnsw(
-        &self,
-        project_path: &str,
-        dimension: usize,
-    ) -> Arc<HnswIndex> {
+    async fn get_or_create_hnsw(&self, project_path: &str, dimension: usize) -> Arc<HnswIndex> {
         // Check if we already have one
         {
             let indexes = self.hnsw_indexes.read().await;
@@ -1066,7 +1059,10 @@ impl IndexManager {
         // Mixed dimensions can occur when the embedding provider changes —
         // rebuild_from_vectors filters mismatched vectors internally.
         let actual_dim = vectors[0].1.len();
-        let mismatched_count = vectors.iter().filter(|(_, v)| v.len() != actual_dim).count();
+        let mismatched_count = vectors
+            .iter()
+            .filter(|(_, v)| v.len() != actual_dim)
+            .count();
         if mismatched_count > 0 {
             warn!(
                 expected_dim = actual_dim,

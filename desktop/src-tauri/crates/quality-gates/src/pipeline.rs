@@ -239,10 +239,7 @@ impl PipelineConfig {
             GatePhase::PostValidation.to_string(),
             PhaseGateConfig {
                 mode: GateMode::Soft,
-                gate_ids: vec![
-                    "ai_verify".to_string(),
-                    "code_review".to_string(),
-                ],
+                gate_ids: vec!["ai_verify".to_string(), "code_review".to_string()],
             },
         );
 
@@ -298,7 +295,9 @@ impl PipelineResult {
         short_circuit_phase: Option<GatePhase>,
     ) -> Self {
         let total_duration_ms = phase_results.iter().map(|r| r.duration_ms).sum();
-        let passed = phase_results.iter().all(|r| r.passed || r.mode == GateMode::Soft);
+        let passed = phase_results
+            .iter()
+            .all(|r| r.passed || r.mode == GateMode::Soft);
         Self {
             passed,
             phase_results,
@@ -329,8 +328,11 @@ pub trait GateCacheLookup: Send + Sync {
 // ============================================================================
 
 /// Callback type for gate execution.
-pub type GateExecutor =
-    Box<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = PipelineGateResult> + Send>> + Send + Sync>;
+pub type GateExecutor = Box<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = PipelineGateResult> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// The main GatePipeline orchestrator.
 ///
@@ -562,7 +564,11 @@ async fn resolve_git_hashes(project_path: &PathBuf) -> Option<(String, String)> 
 mod tests {
     use super::*;
 
-    fn make_passing_gate(gate_id: &str, gate_name: &str, phase: GatePhase) -> (String, GateExecutor) {
+    fn make_passing_gate(
+        gate_id: &str,
+        gate_name: &str,
+        phase: GatePhase,
+    ) -> (String, GateExecutor) {
         let id = gate_id.to_string();
         let name = gate_name.to_string();
         (
@@ -570,14 +576,16 @@ mod tests {
             Box::new(move || {
                 let id = id.clone();
                 let name = name.clone();
-                Box::pin(async move {
-                    PipelineGateResult::passed(&id, &name, phase, 10)
-                })
+                Box::pin(async move { PipelineGateResult::passed(&id, &name, phase, 10) })
             }),
         )
     }
 
-    fn make_failing_gate(gate_id: &str, gate_name: &str, phase: GatePhase) -> (String, GateExecutor) {
+    fn make_failing_gate(
+        gate_id: &str,
+        gate_name: &str,
+        phase: GatePhase,
+    ) -> (String, GateExecutor) {
         let id = gate_id.to_string();
         let name = gate_name.to_string();
         (
@@ -687,8 +695,12 @@ mod tests {
         assert_eq!(passed.status, GateStatus::Passed);
 
         let failed = PipelineGateResult::failed(
-            "test", "Test", GatePhase::Validation, 50,
-            "Error".to_string(), vec!["Finding".to_string()],
+            "test",
+            "Test",
+            GatePhase::Validation,
+            50,
+            "Error".to_string(),
+            vec!["Finding".to_string()],
         );
         assert!(!failed.passed);
         assert_eq!(failed.status, GateStatus::Failed);
@@ -700,15 +712,25 @@ mod tests {
 
     #[test]
     fn test_phase_result_hard_fail() {
-        let results = vec![
-            PipelineGateResult::failed("a", "A", GatePhase::Validation, 10, "err".to_string(), vec![]),
-        ];
+        let results = vec![PipelineGateResult::failed(
+            "a",
+            "A",
+            GatePhase::Validation,
+            10,
+            "err".to_string(),
+            vec![],
+        )];
         let phase = PipelinePhaseResult::new(GatePhase::Validation, GateMode::Hard, results);
         assert!(phase.is_hard_fail());
 
-        let results2 = vec![
-            PipelineGateResult::failed("b", "B", GatePhase::Validation, 10, "err".to_string(), vec![]),
-        ];
+        let results2 = vec![PipelineGateResult::failed(
+            "b",
+            "B",
+            GatePhase::Validation,
+            10,
+            "err".to_string(),
+            vec![],
+        )];
         let phase2 = PipelinePhaseResult::new(GatePhase::Validation, GateMode::Soft, results2);
         assert!(!phase2.is_hard_fail());
     }

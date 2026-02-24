@@ -23,13 +23,11 @@ pub async fn search_project_memories(
     top_k: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<MemorySearchResult>>, String> {
-    let parsed_categories = categories
-        .as_ref()
-        .map(|cats| {
-            cats.iter()
-                .filter_map(|c| MemoryCategory::from_str(c).ok())
-                .collect::<Vec<_>>()
-        });
+    let parsed_categories = categories.as_ref().map(|cats| {
+        cats.iter()
+            .filter_map(|c| MemoryCategory::from_str(c).ok())
+            .collect::<Vec<_>>()
+    });
 
     let request = MemorySearchRequest {
         project_path,
@@ -40,9 +38,7 @@ pub async fn search_project_memories(
     };
 
     match state
-        .with_memory_store(|store| {
-            search_memories(store, &request)
-        })
+        .with_memory_store(|store| search_memories(store, &request))
         .await
     {
         Ok(results) => Ok(CommandResponse::ok(results)),
@@ -238,10 +234,8 @@ pub async fn extract_session_memories(
     // Stage 1: If conversation is long, use LLM to create a focused summary
     // that emphasizes user preferences, tech stack, patterns, etc.
     let effective_summary = if conversation_summary.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
-        let summarize_prompt = MemoryExtractor::build_summarization_prompt(
-            &task_description,
-            &conversation_summary,
-        );
+        let summarize_prompt =
+            MemoryExtractor::build_summarization_prompt(&task_description, &conversation_summary);
         let messages = vec![Message::user(summarize_prompt)];
         match provider
             .send_message(messages, None, vec![], LlmRequestOptions::default())

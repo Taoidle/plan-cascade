@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, RwLock};
 
+use crate::commands::proxy::resolve_provider_proxy;
 use crate::models::orchestrator::{
     ExecuteWithSessionRequest, ExecutionProgress, ExecutionSession, ExecutionSessionSummary,
     ExecutionStatus, ResumeExecutionRequest, StandaloneStatus,
@@ -20,7 +21,6 @@ use crate::services::orchestrator::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, SessionExecutionResult,
 };
 use crate::services::streaming::UnifiedStreamEvent;
-use crate::commands::proxy::resolve_provider_proxy;
 use crate::state::AppState;
 use crate::storage::KeyringService;
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -159,7 +159,15 @@ fn provider_key_candidates(provider: &str) -> &'static [&'static str] {
 }
 
 fn canonical_providers() -> &'static [&'static str] {
-    &["anthropic", "openai", "deepseek", "glm", "qwen", "minimax", "ollama"]
+    &[
+        "anthropic",
+        "openai",
+        "deepseek",
+        "glm",
+        "qwen",
+        "minimax",
+        "ollama",
+    ]
 }
 
 pub(crate) fn get_api_key_with_aliases(
@@ -404,9 +412,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                 },
             ],
             requires_api_key: true,
-            default_base_url: Some(
-                "https://api.minimax.io/anthropic".to_string(),
-            ),
+            default_base_url: Some("https://api.minimax.io/anthropic".to_string()),
         },
         ProviderInfo {
             provider_type: "ollama".to_string(),
@@ -563,7 +569,12 @@ pub async fn check_provider_health(
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&provider) {
         Some(p) => p,
-        None => return Ok(CommandResponse::err(format!("Unknown provider: {}", provider))),
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                provider
+            )))
+        }
     };
 
     // Get API key
@@ -580,7 +591,12 @@ pub async fn check_provider_health(
 
     let provider_type = match provider_type_from_name(canonical_provider) {
         Some(p) => p,
-        None => return Ok(CommandResponse::err(format!("Unknown provider: {}", provider))),
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                provider
+            )))
+        }
     };
 
     if provider_type != ProviderType::Ollama && api_key.is_none() {
@@ -836,10 +852,12 @@ pub async fn semantic_search(
     let mgr_lock = standalone_state.index_manager.read().await;
     let mgr = match &*mgr_lock {
         Some(mgr) => mgr,
-        None => return Ok(CommandResponse::err(
-            "Semantic search not available: IndexManager not initialized. \
-             No embedding provider is configured for this project."
-        )),
+        None => {
+            return Ok(CommandResponse::err(
+                "Semantic search not available: IndexManager not initialized. \
+             No embedding provider is configured for this project.",
+            ))
+        }
     };
 
     let index_store = mgr.index_store();
@@ -911,9 +929,12 @@ pub async fn semantic_search(
                                         .collect();
                                     return Ok(CommandResponse::ok(results));
                                 }
-                                Err(e) => return Ok(CommandResponse::err(format!(
-                                    "HNSW semantic search failed to fetch metadata: {}", e
-                                ))),
+                                Err(e) => {
+                                    return Ok(CommandResponse::err(format!(
+                                        "HNSW semantic search failed to fetch metadata: {}",
+                                        e
+                                    )))
+                                }
                             }
                         }
                         // HNSW returned empty, fall through to brute-force
@@ -923,9 +944,12 @@ pub async fn semantic_search(
                 // Brute-force fallback
                 match index_store.semantic_search(&query_embedding, &dir, k) {
                     Ok(results) => return Ok(CommandResponse::ok(results)),
-                    Err(e) => return Ok(CommandResponse::err(format!(
-                        "Semantic search failed: {}", e
-                    ))),
+                    Err(e) => {
+                        return Ok(CommandResponse::err(format!(
+                            "Semantic search failed: {}",
+                            e
+                        )))
+                    }
                 }
             }
             Ok(_) => {
@@ -1006,7 +1030,12 @@ pub async fn execute_standalone(
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&provider) {
         Some(p) => p,
-        None => return Ok(CommandResponse::err(format!("Unknown provider: {}", provider))),
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                provider
+            )))
+        }
     };
     let provided_api_key = api_key
         .or(apiKey)
@@ -1017,7 +1046,10 @@ pub async fn execute_standalone(
     let mut api_key = match get_api_key_with_aliases(&keyring, canonical_provider) {
         Ok(key) => key,
         Err(e) => {
-            return Ok(CommandResponse::err(format!("Failed to get API key: {}", e)));
+            return Ok(CommandResponse::err(format!(
+                "Failed to get API key: {}",
+                e
+            )));
         }
     };
 
@@ -1032,7 +1064,12 @@ pub async fn execute_standalone(
 
     let provider_type = match provider_type_from_name(canonical_provider) {
         Some(p) => p,
-        None => return Ok(CommandResponse::err(format!("Unknown provider: {}", provider))),
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unknown provider: {}",
+                provider
+            )))
+        }
     };
 
     // Validate API key for non-Ollama providers
@@ -1052,10 +1089,7 @@ pub async fn execute_standalone(
     if resolved_base_url.is_none() {
         // Fallback: read from database settings
         let key = format!("provider_{}_base_url", canonical_provider);
-        if let Ok(Some(db_url)) = app_state
-            .with_database(|db| db.get_setting(&key))
-            .await
-        {
+        if let Ok(Some(db_url)) = app_state.with_database(|db| db.get_setting(&key)).await {
             if !db_url.is_empty() {
                 resolved_base_url = Some(db_url);
             }
@@ -1086,9 +1120,7 @@ pub async fn execute_standalone(
         .filter(|s| !s.is_empty());
 
     // Clone session_id before it's moved into orchestrator_config
-    let event_session_id = analysis_session_id
-        .clone()
-        .unwrap_or_default();
+    let event_session_id = analysis_session_id.clone().unwrap_or_default();
 
     let orchestrator_config = OrchestratorConfig {
         provider: config,
@@ -1130,7 +1162,10 @@ pub async fn execute_standalone(
             orchestrator = orchestrator.with_database(pool);
         }
         Err(e) => {
-            eprintln!("[execute_standalone] Database not available, CodebaseSearch will be disabled: {}", e);
+            eprintln!(
+                "[execute_standalone] Database not available, CodebaseSearch will be disabled: {}",
+                e
+            );
         }
     }
 
@@ -1211,7 +1246,9 @@ pub async fn save_output_export(path: String, content: String) -> CommandRespons
 /// Deprecated: Use the new analytics system (`services/analytics/`) via
 /// `get_dashboard_summary` or `list_usage_records` commands instead.
 /// This function queries the legacy `analytics` table which is no longer written to.
-#[deprecated(note = "Use services/analytics/ commands (get_dashboard_summary, list_usage_records) instead")]
+#[deprecated(
+    note = "Use services/analytics/ commands (get_dashboard_summary, list_usage_records) instead"
+)]
 #[tauri::command]
 pub async fn get_usage_stats(
     provider: Option<String>,

@@ -95,9 +95,10 @@ where
     match value {
         None => Ok(None),
         Some(serde_json::Value::String(s)) => Ok(Some(s)),
-        Some(serde_json::Value::Object(map)) => {
-            Ok(map.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()))
-        }
+        Some(serde_json::Value::Object(map)) => Ok(map
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())),
         Some(_) => Ok(None),
     }
 }
@@ -698,9 +699,10 @@ impl MarketplacePluginEntry {
     pub fn author_string(&self) -> Option<String> {
         match &self.author {
             Some(serde_json::Value::String(s)) => Some(s.clone()),
-            Some(serde_json::Value::Object(map)) => {
-                map.get("name").and_then(|v| v.as_str()).map(|s| s.to_string())
-            }
+            Some(serde_json::Value::Object(map)) => map
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             _ => None,
         }
     }
@@ -795,10 +797,7 @@ mod tests {
             HookEvent::from_str_loose("SessionStart"),
             Some(HookEvent::SessionStart)
         );
-        assert_eq!(
-            HookEvent::from_str_loose("Stop"),
-            Some(HookEvent::Stop)
-        );
+        assert_eq!(HookEvent::from_str_loose("Stop"), Some(HookEvent::Stop));
         assert_eq!(HookEvent::from_str_loose("invalid"), None);
     }
 
@@ -1001,7 +1000,8 @@ mod tests {
 
     #[test]
     fn test_plugin_manifest_author_object() {
-        let json = r#"{"name": "test", "author": {"name": "John Doe", "url": "https://example.com"}}"#;
+        let json =
+            r#"{"name": "test", "author": {"name": "John Doe", "url": "https://example.com"}}"#;
         let manifest: PluginManifest = serde_json::from_str(json).unwrap();
         assert_eq!(manifest.author.as_deref(), Some("John Doe"));
     }

@@ -6,12 +6,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use uuid::Uuid;
 
-use super::permissions::{
-    PermissionLevel, PermissionResponse, classify_tool_risk, needs_approval,
-};
+use super::permissions::{classify_tool_risk, needs_approval, PermissionLevel, PermissionResponse};
 use crate::services::streaming::UnifiedStreamEvent;
 
 /// Central permission gate shared across the orchestrator and its sub-agents.
@@ -149,10 +147,7 @@ impl PermissionGate {
                 if response.allowed {
                     Ok(())
                 } else {
-                    Err(format!(
-                        "Tool '{}' execution denied by user",
-                        tool_name
-                    ))
+                    Err(format!("Tool '{}' execution denied by user", tool_name))
                 }
             }
             Err(_) => {

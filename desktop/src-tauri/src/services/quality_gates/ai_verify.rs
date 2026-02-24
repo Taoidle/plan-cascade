@@ -173,7 +173,10 @@ Git diff to analyze:
                     // Empty response: fall through to heuristic
                 }
                 Err(e) => {
-                    tracing::warn!("AI verification LLM call failed, falling back to heuristic: {}", e);
+                    tracing::warn!(
+                        "AI verification LLM call failed, falling back to heuristic: {}",
+                        e
+                    );
                 }
             }
         }
@@ -190,7 +193,10 @@ Git diff to analyze:
         let skeleton_patterns = [
             ("todo!()", "Contains todo!() macro"),
             ("unimplemented!()", "Contains unimplemented!() macro"),
-            ("panic!(\"not implemented\")", "Contains not-implemented panic"),
+            (
+                "panic!(\"not implemented\")",
+                "Contains not-implemented panic",
+            ),
             ("raise NotImplementedError", "Raises NotImplementedError"),
             ("pass  # TODO", "Contains pass with TODO"),
             ("...", "Contains ellipsis placeholder"),

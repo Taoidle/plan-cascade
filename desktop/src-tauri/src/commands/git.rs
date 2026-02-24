@@ -10,8 +10,6 @@ use tokio::sync::RwLock;
 
 use crate::commands::standalone::normalize_provider_name;
 use crate::models::response::CommandResponse;
-use crate::state::AppState;
-use crate::storage::KeyringService;
 use crate::services::git::conflict;
 use crate::services::git::graph::compute_graph_layout;
 use crate::services::git::llm_assist::GitLlmAssist;
@@ -19,9 +17,11 @@ use crate::services::git::service::GitService;
 use crate::services::git::types::*;
 use crate::services::git::watcher::GitWatcher;
 use crate::services::llm::{
-    AnthropicProvider, DeepSeekProvider, GlmProvider, LlmProvider, MinimaxProvider,
-    OllamaProvider, OpenAIProvider, ProviderConfig, ProviderType, QwenProvider,
+    AnthropicProvider, DeepSeekProvider, GlmProvider, LlmProvider, MinimaxProvider, OllamaProvider,
+    OpenAIProvider, ProviderConfig, ProviderType, QwenProvider,
 };
+use crate::state::AppState;
+use crate::storage::KeyringService;
 
 /// State for the git service, managed by Tauri.
 pub struct GitState {
@@ -726,9 +726,7 @@ pub async fn git_review_diff(
     };
 
     if diff.files.is_empty() {
-        return Ok(CommandResponse::err(
-            "No changes to review".to_string(),
-        ));
+        return Ok(CommandResponse::err("No changes to review".to_string()));
     }
 
     let diff_text = diff_output_to_text(&diff);
@@ -794,10 +792,10 @@ pub async fn git_summarize_commit(
     };
 
     // Get commit message for the specific SHA using git log -1 <sha>
-    let commit_message = match service.git_ops().execute(
-        &path,
-        &["log", "-1", "--format=%s%n%n%b", &sha],
-    ) {
+    let commit_message = match service
+        .git_ops()
+        .execute(&path, &["log", "-1", "--format=%s%n%n%b", &sha])
+    {
         Ok(output) => output.into_result().unwrap_or_default().trim().to_string(),
         Err(_) => String::new(),
     };
@@ -932,9 +930,7 @@ pub async fn git_configure_llm(
     let proxy = app_state
         .with_database(|db| {
             Ok(crate::commands::proxy::resolve_provider_proxy(
-                &keyring,
-                db,
-                canonical,
+                &keyring, db, canonical,
             ))
         })
         .await

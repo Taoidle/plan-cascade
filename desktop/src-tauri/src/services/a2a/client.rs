@@ -11,9 +11,7 @@ use std::time::Duration;
 use futures_util::{Stream, StreamExt};
 
 use super::discovery::discover_agent;
-use super::types::{
-    A2aError, A2aStreamEvent, A2aTaskRequest, A2aTaskResponse, AgentCard,
-};
+use super::types::{A2aError, A2aStreamEvent, A2aTaskRequest, A2aTaskResponse, AgentCard};
 
 /// Default request timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -90,9 +88,7 @@ impl A2aClient {
         endpoint: &str,
         request: A2aTaskRequest,
     ) -> Result<A2aTaskResponse, A2aError> {
-        let mut req_builder = self.client
-            .post(endpoint)
-            .json(&request);
+        let mut req_builder = self.client.post(endpoint).json(&request);
 
         if let Some(ref token) = self.config.auth_token {
             req_builder = req_builder.bearer_auth(token);
@@ -126,10 +122,9 @@ impl A2aClient {
         &self,
         endpoint: &str,
         request: A2aTaskRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<A2aStreamEvent, A2aError>> + Send>>, A2aError> {
-        let mut req_builder = self.client
-            .post(endpoint)
-            .json(&request);
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<A2aStreamEvent, A2aError>> + Send>>, A2aError>
+    {
+        let mut req_builder = self.client.post(endpoint).json(&request);
 
         if let Some(ref token) = self.config.auth_token {
             req_builder = req_builder.bearer_auth(token);
@@ -164,7 +159,9 @@ impl A2aClient {
 ///
 /// data: [DONE]
 /// ```
-fn parse_byte_stream_as_sse<S>(byte_stream: S) -> impl Stream<Item = Result<A2aStreamEvent, A2aError>> + Send
+fn parse_byte_stream_as_sse<S>(
+    byte_stream: S,
+) -> impl Stream<Item = Result<A2aStreamEvent, A2aError>> + Send
 where
     S: Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send + 'static,
 {
@@ -253,9 +250,10 @@ fn parse_sse_line(line: &str) -> Option<Result<A2aStreamEvent, A2aError>> {
         }
         match serde_json::from_str::<A2aStreamEvent>(data) {
             Ok(event) => Some(Ok(event)),
-            Err(e) => Some(Err(A2aError::InvalidResponse(
-                format!("Failed to parse SSE event: {} (data: {})", e, data),
-            ))),
+            Err(e) => Some(Err(A2aError::InvalidResponse(format!(
+                "Failed to parse SSE event: {} (data: {})",
+                e, data
+            )))),
         }
     } else {
         // Ignore non-data SSE fields (event:, id:, retry:)
@@ -386,7 +384,9 @@ mod tests {
         assert!(result.is_some());
         let event = result.unwrap().unwrap();
         match event {
-            A2aStreamEvent::StatusUpdate { task_id, status, .. } => {
+            A2aStreamEvent::StatusUpdate {
+                task_id, status, ..
+            } => {
                 assert_eq!(task_id, "t-1");
                 assert_eq!(status, "in_progress");
             }
@@ -441,9 +441,9 @@ mod tests {
     #[tokio::test]
     async fn test_byte_stream_sse_valid_events() {
         let data = b"data: {\"type\":\"text_delta\",\"content\":\"Hello\"}\n\ndata: {\"type\":\"text_delta\",\"content\":\" World\"}\n\ndata: [DONE]\n";
-        let chunk_stream = futures_util::stream::iter(vec![
-            Ok::<bytes::Bytes, reqwest::Error>(bytes::Bytes::copy_from_slice(data)),
-        ]);
+        let chunk_stream = futures_util::stream::iter(vec![Ok::<bytes::Bytes, reqwest::Error>(
+            bytes::Bytes::copy_from_slice(data),
+        )]);
 
         let mut event_stream = Box::pin(parse_byte_stream_as_sse(chunk_stream));
         let mut events = Vec::new();
@@ -466,8 +466,12 @@ mod tests {
     async fn test_byte_stream_sse_split_chunks() {
         // Data split across two chunks
         let chunks = vec![
-            Ok::<bytes::Bytes, reqwest::Error>(bytes::Bytes::from_static(b"data: {\"type\":\"text_")),
-            Ok(bytes::Bytes::from_static(b"delta\",\"content\":\"Hi\"}\n\n")),
+            Ok::<bytes::Bytes, reqwest::Error>(bytes::Bytes::from_static(
+                b"data: {\"type\":\"text_",
+            )),
+            Ok(bytes::Bytes::from_static(
+                b"delta\",\"content\":\"Hi\"}\n\n",
+            )),
         ];
         let chunk_stream = futures_util::stream::iter(chunks);
 
@@ -486,10 +490,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_byte_stream_sse_skips_comments_and_empty() {
-        let data = b": this is a comment\n\n\ndata: {\"type\":\"text_delta\",\"content\":\"ok\"}\n\n";
-        let chunk_stream = futures_util::stream::iter(vec![
-            Ok::<bytes::Bytes, reqwest::Error>(bytes::Bytes::copy_from_slice(data)),
-        ]);
+        let data =
+            b": this is a comment\n\n\ndata: {\"type\":\"text_delta\",\"content\":\"ok\"}\n\n";
+        let chunk_stream = futures_util::stream::iter(vec![Ok::<bytes::Bytes, reqwest::Error>(
+            bytes::Bytes::copy_from_slice(data),
+        )]);
 
         let mut event_stream = Box::pin(parse_byte_stream_as_sse(chunk_stream));
         let mut events = Vec::new();
@@ -503,9 +508,9 @@ mod tests {
     #[tokio::test]
     async fn test_byte_stream_sse_invalid_json() {
         let data = b"data: not-valid-json\n\n";
-        let chunk_stream = futures_util::stream::iter(vec![
-            Ok::<bytes::Bytes, reqwest::Error>(bytes::Bytes::copy_from_slice(data)),
-        ]);
+        let chunk_stream = futures_util::stream::iter(vec![Ok::<bytes::Bytes, reqwest::Error>(
+            bytes::Bytes::copy_from_slice(data),
+        )]);
 
         let mut event_stream = Box::pin(parse_byte_stream_as_sse(chunk_stream));
         let result = event_stream.next().await;
@@ -516,9 +521,9 @@ mod tests {
     #[tokio::test]
     async fn test_byte_stream_sse_ignores_non_data_fields() {
         let data = b"event: message\nid: 123\nretry: 5000\ndata: {\"type\":\"text_delta\",\"content\":\"hello\"}\n\n";
-        let chunk_stream = futures_util::stream::iter(vec![
-            Ok::<bytes::Bytes, reqwest::Error>(bytes::Bytes::copy_from_slice(data)),
-        ]);
+        let chunk_stream = futures_util::stream::iter(vec![Ok::<bytes::Bytes, reqwest::Error>(
+            bytes::Bytes::copy_from_slice(data),
+        )]);
 
         let mut event_stream = Box::pin(parse_byte_stream_as_sse(chunk_stream));
         let mut events = Vec::new();
@@ -536,9 +541,9 @@ mod tests {
     #[tokio::test]
     async fn test_byte_stream_sse_multiple_events_in_single_chunk() {
         let data = b"data: {\"type\":\"status_update\",\"task_id\":\"t-1\",\"status\":\"in_progress\"}\n\ndata: {\"type\":\"text_delta\",\"content\":\"working...\"}\n\ndata: {\"type\":\"task_complete\",\"task_id\":\"t-1\",\"result\":{\"task_id\":\"t-1\",\"status\":\"completed\",\"output\":\"done\"}}\n\n";
-        let chunk_stream = futures_util::stream::iter(vec![
-            Ok::<bytes::Bytes, reqwest::Error>(bytes::Bytes::copy_from_slice(data)),
-        ]);
+        let chunk_stream = futures_util::stream::iter(vec![Ok::<bytes::Bytes, reqwest::Error>(
+            bytes::Bytes::copy_from_slice(data),
+        )]);
 
         let mut event_stream = Box::pin(parse_byte_stream_as_sse(chunk_stream));
         let mut events = Vec::new();

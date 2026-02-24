@@ -10,9 +10,8 @@ use crate::services::orchestrator::hooks::AgenticHooks;
 use crate::storage::database::Database;
 
 use super::{
-    CodeSecurityGuardrail, CustomGuardrail, Direction, Guardrail, GuardrailAction,
-    GuardrailInfo, GuardrailResult, SchemaValidationGuardrail, SensitiveDataGuardrail,
-    TriggerLogEntry,
+    CodeSecurityGuardrail, CustomGuardrail, Direction, Guardrail, GuardrailAction, GuardrailInfo,
+    GuardrailResult, SchemaValidationGuardrail, SensitiveDataGuardrail, TriggerLogEntry,
 };
 
 /// Managed guardrail entry with enabled state.
@@ -73,9 +72,8 @@ impl GuardrailRegistry {
     /// Remove a custom guardrail by name.
     pub fn remove_custom(&mut self, name: &str) -> bool {
         let before = self.entries.len();
-        self.entries.retain(|e| {
-            !(e.guardrail_type == "custom" && e.guardrail.name() == name)
-        });
+        self.entries
+            .retain(|e| !(e.guardrail_type == "custom" && e.guardrail.name() == name));
         self.entries.len() < before
     }
 
@@ -132,12 +130,7 @@ impl GuardrailRegistry {
 
             // Log trigger if not pass
             if !result.is_pass() {
-                self.log_trigger(
-                    entry.guardrail.name(),
-                    direction,
-                    &result,
-                    content,
-                );
+                self.log_trigger(entry.guardrail.name(), direction, &result, content);
             }
 
             match &result {
@@ -255,7 +248,8 @@ impl GuardrailRegistry {
             Err(_) => return false,
         };
 
-        conn.execute("DELETE FROM guardrail_trigger_log", []).is_ok()
+        conn.execute("DELETE FROM guardrail_trigger_log", [])
+            .is_ok()
     }
 
     /// Save a custom rule to the database.
@@ -316,12 +310,11 @@ impl GuardrailRegistry {
             Err(_) => return,
         };
 
-        let mut stmt = match conn.prepare(
-            "SELECT id, name, pattern, action, enabled FROM guardrail_rules",
-        ) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let mut stmt =
+            match conn.prepare("SELECT id, name, pattern, action, enabled FROM guardrail_rules") {
+                Ok(s) => s,
+                Err(_) => return,
+            };
 
         let rules: Vec<(String, String, String, String, bool)> = stmt
             .query_map([], |row| {

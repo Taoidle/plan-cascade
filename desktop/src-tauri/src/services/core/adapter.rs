@@ -18,13 +18,15 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::Value;
 
-use plan_cascade_core::context::ToolContext;
-use plan_cascade_core::tool_trait::{ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry};
-use plan_cascade_core::error::{CoreError, CoreResult};
+use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext, ToolRegistry};
-use crate::services::llm::types::ParameterSchema;
 use crate::utils::error::{AppError, AppResult};
+use plan_cascade_core::context::ToolContext;
+use plan_cascade_core::error::{CoreError, CoreResult};
+use plan_cascade_core::tool_trait::{
+    ToolDefinitionTrait, ToolExecutable, UnifiedTool, UnifiedToolRegistry,
+};
 
 // ============================================================================
 // Conversion Utilities
@@ -49,9 +51,8 @@ pub fn parameter_schema_to_value(schema: &ParameterSchema) -> Value {
 ///
 /// Best-effort conversion: if deserialization fails, returns a minimal object schema.
 pub fn value_to_parameter_schema(value: &Value) -> ParameterSchema {
-    serde_json::from_value::<ParameterSchema>(value.clone()).unwrap_or_else(|_| {
-        ParameterSchema::object(None, HashMap::new(), vec![])
-    })
+    serde_json::from_value::<ParameterSchema>(value.clone())
+        .unwrap_or_else(|_| ParameterSchema::object(None, HashMap::new(), vec![]))
 }
 
 /// Convert a `ToolResult` (old system) to `CoreResult<Value>` (new system).
@@ -60,12 +61,12 @@ pub fn value_to_parameter_schema(value: &Value) -> ParameterSchema {
 /// `Err(CoreError::Command(...))`.
 pub fn tool_result_to_core_result(result: ToolResult) -> CoreResult<Value> {
     if result.success {
-        Ok(Value::String(
-            result.output.unwrap_or_default(),
-        ))
+        Ok(Value::String(result.output.unwrap_or_default()))
     } else {
         Err(CoreError::command(
-            result.error.unwrap_or_else(|| "Unknown tool error".to_string()),
+            result
+                .error
+                .unwrap_or_else(|| "Unknown tool error".to_string()),
         ))
     }
 }
@@ -76,12 +77,12 @@ pub fn tool_result_to_core_result(result: ToolResult) -> CoreResult<Value> {
 /// `Err(AppError::Command(...))`.
 pub fn tool_result_to_app_result(result: ToolResult) -> AppResult<Value> {
     if result.success {
-        Ok(Value::String(
-            result.output.unwrap_or_default(),
-        ))
+        Ok(Value::String(result.output.unwrap_or_default()))
     } else {
         Err(AppError::command(
-            result.error.unwrap_or_else(|| "Unknown tool error".to_string()),
+            result
+                .error
+                .unwrap_or_else(|| "Unknown tool error".to_string()),
         ))
     }
 }
@@ -302,8 +303,8 @@ pub fn import_legacy_tools(registry: &mut UnifiedToolRegistry, legacy: &ToolRegi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use plan_cascade_core::context::ExecutionContext;
+    use std::path::PathBuf;
 
     // ── Mock Old Tool ──────────────────────────────────────────────────
 
@@ -523,7 +524,10 @@ mod tests {
         let result = ToolResult::ok("hello world");
         let app_result = tool_result_to_app_result(result);
         assert!(app_result.is_ok());
-        assert_eq!(app_result.unwrap(), Value::String("hello world".to_string()));
+        assert_eq!(
+            app_result.unwrap(),
+            Value::String("hello world".to_string())
+        );
     }
 
     #[test]
@@ -573,7 +577,10 @@ mod tests {
         let old_ctx = tool_context_to_tool_execution_context(&new_ctx);
         assert_eq!(old_ctx.session_id, "test-session");
         assert_eq!(old_ctx.project_root, PathBuf::from("/tmp/test"));
-        assert_eq!(old_ctx.working_directory_snapshot(), PathBuf::from("/tmp/test"));
+        assert_eq!(
+            old_ctx.working_directory_snapshot(),
+            PathBuf::from("/tmp/test")
+        );
         assert!(old_ctx.web_search.is_none());
         assert!(old_ctx.index_store.is_none());
         assert!(old_ctx.task_context.is_none());
@@ -629,7 +636,10 @@ mod tests {
         let args = serde_json::json!({"input": "hello"});
         let result = adapter.execute(&ctx, args).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::String("old-Echo: hello".to_string()));
+        assert_eq!(
+            result.unwrap(),
+            Value::String("old-Echo: hello".to_string())
+        );
     }
 
     #[tokio::test]
@@ -766,7 +776,8 @@ mod tests {
     #[tokio::test]
     async fn test_new_to_old_to_new_roundtrip() {
         // New tool -> UnifiedToolAdapter -> ToolAdapter -> used as UnifiedTool
-        let new_tool: Arc<dyn UnifiedTool> = Arc::new(MockNewTool::new("Roundtrip2", "Test roundtrip"));
+        let new_tool: Arc<dyn UnifiedTool> =
+            Arc::new(MockNewTool::new("Roundtrip2", "Test roundtrip"));
         let as_old: Arc<dyn Tool> = Arc::new(UnifiedToolAdapter::new(new_tool));
         let back_to_new = ToolAdapter::new(as_old);
 
@@ -776,7 +787,10 @@ mod tests {
         let args = serde_json::json!({"input": "rt2"});
         let result = back_to_new.execute(&ctx, args).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::String("new-Roundtrip2: rt2".to_string()));
+        assert_eq!(
+            result.unwrap(),
+            Value::String("new-Roundtrip2: rt2".to_string())
+        );
     }
 
     // ── Send + Sync tests ──────────────────────────────────────────────

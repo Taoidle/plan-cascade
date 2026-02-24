@@ -25,11 +25,7 @@ impl CommandRouter {
         let text = text.trim();
 
         if text.starts_with("/new ") || text == "/new" {
-            let args_str = if text.len() > 5 {
-                text[5..].trim()
-            } else {
-                ""
-            };
+            let args_str = if text.len() > 5 { text[5..].trim() } else { "" };
             let args: Vec<&str> = args_str.splitn(3, ' ').collect();
             RemoteCommand::NewSession {
                 project_path: args.first().unwrap_or(&"").to_string(),

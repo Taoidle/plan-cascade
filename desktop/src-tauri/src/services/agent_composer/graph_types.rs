@@ -84,10 +84,7 @@ pub struct NodePosition {
 #[serde(tag = "edge_type", rename_all = "snake_case")]
 pub enum Edge {
     /// Unconditional edge from one node to another.
-    Direct {
-        from: String,
-        to: String,
-    },
+    Direct { from: String, to: String },
     /// Conditional edge that routes based on a state key's value.
     Conditional {
         from: String,
@@ -342,10 +339,7 @@ mod tests {
         let append = Reducer::Append;
         let sum = Reducer::Sum;
 
-        assert_eq!(
-            serde_json::to_string(&overwrite).unwrap(),
-            "\"overwrite\""
-        );
+        assert_eq!(serde_json::to_string(&overwrite).unwrap(), "\"overwrite\"");
         assert_eq!(serde_json::to_string(&append).unwrap(), "\"append\"");
         assert_eq!(serde_json::to_string(&sum).unwrap(), "\"sum\"");
 
@@ -408,7 +402,10 @@ mod tests {
 
     #[test]
     fn test_node_position_serialization() {
-        let pos = NodePosition { x: 123.45, y: 678.9 };
+        let pos = NodePosition {
+            x: 123.45,
+            y: 678.9,
+        };
         let json = serde_json::to_string(&pos).unwrap();
         let parsed: NodePosition = serde_json::from_str(&json).unwrap();
         assert!((parsed.x - 123.45).abs() < f64::EPSILON);

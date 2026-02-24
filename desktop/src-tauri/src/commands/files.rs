@@ -128,17 +128,11 @@ pub async fn read_file_for_attachment(
 
     // Validate file exists
     if !file_path.exists() {
-        return Ok(CommandResponse::err(format!(
-            "File not found: {}",
-            path
-        )));
+        return Ok(CommandResponse::err(format!("File not found: {}", path)));
     }
 
     if !file_path.is_file() {
-        return Ok(CommandResponse::err(format!(
-            "Not a file: {}",
-            path
-        )));
+        return Ok(CommandResponse::err(format!("Not a file: {}", path)));
     }
 
     // Check file size
@@ -154,8 +148,7 @@ pub async fn read_file_for_attachment(
     }
 
     // Read file bytes
-    let data = std::fs::read(&file_path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let data = std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
     let ext = get_extension(&file_path);
     let is_binary = is_binary_content(&data);
@@ -183,9 +176,8 @@ pub async fn read_file_for_attachment(
     }
 
     // Text file
-    let content = String::from_utf8(data).map_err(|_| {
-        "File contains invalid UTF-8 encoding".to_string()
-    })?;
+    let content =
+        String::from_utf8(data).map_err(|_| "File contains invalid UTF-8 encoding".to_string())?;
 
     let mime = mime_type_from_extension(&ext);
 
@@ -207,9 +199,7 @@ pub async fn list_workspace_files(
 ) -> Result<CommandResponse<Vec<WorkspaceFileResult>>, String> {
     let dir_path = PathBuf::from(&path);
     let max = max_results.unwrap_or(50);
-    let search_query = query
-        .as_deref()
-        .map(|q| q.to_lowercase());
+    let search_query = query.as_deref().map(|q| q.to_lowercase());
 
     if !dir_path.exists() {
         return Ok(CommandResponse::err(format!(
@@ -219,10 +209,7 @@ pub async fn list_workspace_files(
     }
 
     if !dir_path.is_dir() {
-        return Ok(CommandResponse::err(format!(
-            "Not a directory: {}",
-            path
-        )));
+        return Ok(CommandResponse::err(format!("Not a directory: {}", path)));
     }
 
     let mut results: Vec<WorkspaceFileResult> = Vec::new();

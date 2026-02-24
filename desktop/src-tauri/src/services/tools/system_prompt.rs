@@ -461,7 +461,11 @@ pub fn merge_system_prompts(tool_prompt: &str, user_prompt: Option<&str>) -> Str
 /// The `task_type` parameter differentiates guidance:
 /// - `Some("explore")`: LS and CodebaseSearch are equally recommended (broad exploration)
 /// - Other values / `None`: CodebaseSearch is preferred for initial file discovery
-pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool, task_type: Option<&str>) -> String {
+pub fn build_sub_agent_tool_guidance(
+    has_index: bool,
+    has_semantic: bool,
+    task_type: Option<&str>,
+) -> String {
     if !has_index {
         // No index — CodebaseSearch won't work, so no special guidance needed.
         return String::new();
@@ -478,48 +482,33 @@ pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool, task_t
                 "A pre-built codebase index is available. Choose tools based on your goal:"
                     .to_string(),
             );
-            lines.push(
-                "已有预构建的代码索引。请根据目标选择工具：".to_string(),
-            );
+            lines.push("已有预构建的代码索引。请根据目标选择工具：".to_string());
             lines.push(String::new());
             lines.push(
-                "- **LS** — Understand directory structure, list files in a folder."
-                    .to_string(),
+                "- **LS** — Understand directory structure, list files in a folder.".to_string(),
             );
-            lines.push(
-                "  使用 LS 了解目录结构、列出文件夹内容。".to_string(),
-            );
+            lines.push("  使用 LS 了解目录结构、列出文件夹内容。".to_string());
             lines.push(
                 "- **CodebaseSearch** (scope=\"all\") — Find symbols, locate files by keyword."
                     .to_string(),
             );
-            lines.push(
-                "  使用 CodebaseSearch 查找符号、按关键词定位文件。".to_string(),
-            );
+            lines.push("  使用 CodebaseSearch 查找符号、按关键词定位文件。".to_string());
 
             if has_semantic {
                 lines.push(
                     "- **CodebaseSearch** (scope=\"semantic\") — Natural-language conceptual queries."
                         .to_string(),
                 );
-                lines.push(
-                    "  使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string(),
-                );
+                lines.push("  使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string());
             }
 
-            lines.push(
-                "- **Read** — Read specific files after discovery.".to_string(),
-            );
-            lines.push(
-                "  使用 Read 读取发现的具体文件。".to_string(),
-            );
+            lines.push("- **Read** — Read specific files after discovery.".to_string());
+            lines.push("  使用 Read 读取发现的具体文件。".to_string());
             lines.push(
                 "- **Grep** — Full-text regex search when CodebaseSearch doesn't cover it."
                     .to_string(),
             );
-            lines.push(
-                "  使用 Grep 进行 CodebaseSearch 无法覆盖的全文正则搜索。".to_string(),
-            );
+            lines.push("  使用 Grep 进行 CodebaseSearch 无法覆盖的全文正则搜索。".to_string());
             lines.push(String::new());
             lines.push(
                 "**Query tips**: Use short, focused queries (1-2 keywords). Make separate calls for different concepts."
@@ -535,9 +524,7 @@ pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool, task_t
                 "A pre-built codebase index is available. You MUST follow this priority order:"
                     .to_string(),
             );
-            lines.push(
-                "已有预构建的代码索引，你必须按以下优先级选择工具：".to_string(),
-            );
+            lines.push("已有预构建的代码索引，你必须按以下优先级选择工具：".to_string());
             lines.push(String::new());
             lines.push(
                 "1. **CodebaseSearch** (scope=\"all\") — Use first for finding symbols, \
@@ -554,9 +541,7 @@ pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool, task_t
                  or struct definitions by name."
                     .to_string(),
             );
-            lines.push(
-                "   使用 scope=\"symbols\" 按名称查找函数、类或结构体定义。".to_string(),
-            );
+            lines.push("   使用 scope=\"symbols\" 按名称查找函数、类或结构体定义。".to_string());
 
             if has_semantic {
                 lines.push(
@@ -564,9 +549,7 @@ pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool, task_t
                      queries when you need semantic matches."
                         .to_string(),
                 );
-                lines.push(
-                    "   使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string(),
-                );
+                lines.push("   使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string());
             }
 
             lines.push(String::new());
@@ -574,9 +557,7 @@ pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool, task_t
                 "Use **Read** after CodebaseSearch to read specific files you discovered."
                     .to_string(),
             );
-            lines.push(
-                "使用 Read 读取通过 CodebaseSearch 发现的具体文件。".to_string(),
-            );
+            lines.push("使用 Read 读取通过 CodebaseSearch 发现的具体文件。".to_string());
             lines.push(
                 "Use **Grep** ONLY for full-text regex search or when CodebaseSearch reports index unavailable."
                     .to_string(),
@@ -589,7 +570,8 @@ pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool, task_t
                     .to_string(),
             );
             lines.push(
-                "建议优先使用 CodebaseSearch 而非 LS/Glob 进行初始文件发现——索引更快更全面。".to_string(),
+                "建议优先使用 CodebaseSearch 而非 LS/Glob 进行初始文件发现——索引更快更全面。"
+                    .to_string(),
             );
         }
     }
@@ -604,7 +586,9 @@ pub fn build_sub_agent_tool_guidance(has_index: bool, has_semantic: bool, task_t
 ///
 /// This function is designed to be used alongside `build_system_prompt` without
 /// modifying its signature, keeping backward compatibility.
-pub fn build_skills_section(matched_skills: &[crate::services::skills::model::SkillMatch]) -> String {
+pub fn build_skills_section(
+    matched_skills: &[crate::services::skills::model::SkillMatch],
+) -> String {
     if matched_skills.is_empty() {
         return String::new();
     }
@@ -620,7 +604,9 @@ pub fn build_skills_section(matched_skills: &[crate::services::skills::model::Sk
                 format!("{} (external)", source_name)
             }
             crate::services::skills::model::SkillSource::User => "user".to_string(),
-            crate::services::skills::model::SkillSource::ProjectLocal => "project-local".to_string(),
+            crate::services::skills::model::SkillSource::ProjectLocal => {
+                "project-local".to_string()
+            }
             crate::services::skills::model::SkillSource::Generated => "auto-generated".to_string(),
         };
 
@@ -684,7 +670,14 @@ mod tests {
     #[test]
     fn test_build_system_prompt_contains_tools() {
         let tools = get_tool_definitions_from_registry();
-        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, None, "TestProvider", "test-model", "en");
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test/project"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
 
         // Should contain working directory
         assert!(prompt.contains("/test/project"));
@@ -708,7 +701,14 @@ mod tests {
     #[test]
     fn test_build_system_prompt_contains_decision_tree() {
         let tools = get_tool_definitions_from_registry();
-        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
 
         assert!(prompt.contains("Decision Tree"));
         assert!(prompt.contains("Do NOT use Analyze when"));
@@ -719,7 +719,14 @@ mod tests {
     #[test]
     fn test_build_system_prompt_no_workflow_pattern() {
         let tools = get_tool_definitions_from_registry();
-        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
 
         // The old "Workflow Pattern" section should be gone
         assert!(!prompt.contains("Workflow Pattern"));
@@ -882,7 +889,14 @@ mod tests {
     fn test_build_system_prompt_with_summary() {
         let tools = get_tool_definitions_from_registry();
         let summary = make_test_summary();
-        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, Some(&summary), "TestProvider", "test-model", "en");
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test/project"),
+            &tools,
+            Some(&summary),
+            "TestProvider",
+            "test-model",
+            "en",
+        );
 
         // Summary should be present
         assert!(prompt.contains("## Project Structure"));
@@ -907,7 +921,14 @@ mod tests {
     #[test]
     fn test_build_system_prompt_without_summary() {
         let tools = get_tool_definitions_from_registry();
-        let prompt = build_system_prompt(&PathBuf::from("/test/project"), &tools, None, "TestProvider", "test-model", "en");
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test/project"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
 
         // Should not crash and should not contain summary section
         assert!(!prompt.contains("## Project Structure"));
@@ -922,7 +943,14 @@ mod tests {
     #[test]
     fn test_system_prompt_recommends_codebase_search_for_exploration() {
         let tools = get_tool_definitions_from_registry();
-        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
 
         assert!(
             prompt.contains("CodebaseSearch"),
@@ -1314,10 +1342,7 @@ mod tests {
             guidance.contains("scope=\"all\""),
             "Should recommend scope=all"
         );
-        assert!(
-            guidance.contains("Grep"),
-            "Should mention Grep as fallback"
-        );
+        assert!(guidance.contains("Grep"), "Should mention Grep as fallback");
         // No semantic search
         assert!(
             !guidance.contains("semantic"),
@@ -1403,7 +1428,14 @@ mod tests {
     #[test]
     fn test_system_prompt_simplified_routing_no_project_size_table() {
         let tools = get_tool_definitions_from_registry();
-        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
 
         // Old project-size routing table should be gone
         assert!(
@@ -1470,7 +1502,14 @@ mod tests {
     #[test]
     fn test_system_prompt_contains_autonomous_decomposition() {
         let tools = get_tool_definitions_from_registry();
-        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
 
         assert!(
             prompt.contains("Autonomous Task Decomposition"),
@@ -1484,10 +1523,7 @@ mod tests {
             prompt.contains("How to Decompose"),
             "Should contain the 4-step decomposition strategy"
         );
-        assert!(
-            prompt.contains("Step A: Analyze"),
-            "Should contain Step A"
-        );
+        assert!(prompt.contains("Step A: Analyze"), "Should contain Step A");
         assert!(
             prompt.contains("Step D: Synthesize"),
             "Should contain Step D"
@@ -1501,7 +1537,14 @@ mod tests {
     #[test]
     fn test_system_prompt_step3_has_scope_assessment() {
         let tools = get_tool_definitions_from_registry();
-        let prompt = build_system_prompt(&PathBuf::from("/test"), &tools, None, "TestProvider", "test-model", "en");
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
 
         assert!(
             prompt.contains("assess the scope"),

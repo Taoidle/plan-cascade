@@ -19,13 +19,13 @@
 //! 2. **Trait-based abstractions** - enables mocking, testing, and future crate splitting
 //! 3. **Unidirectional dependency** - this crate depends on nothing else in the workspace
 
-pub mod error;
-pub mod context;
-pub mod tool_trait;
 pub mod builders;
+pub mod context;
+pub mod error;
+pub mod event_actions;
 pub mod proxy;
 pub mod streaming;
-pub mod event_actions;
+pub mod tool_trait;
 
 // ── Error Types ────────────────────────────────────────────────────────
 pub use error::{CoreError, CoreResult};

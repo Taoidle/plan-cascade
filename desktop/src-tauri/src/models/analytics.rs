@@ -82,7 +82,12 @@ impl UsageRecord {
     }
 
     /// Set extended token counts (thinking, cache read, cache creation)
-    pub fn with_extended_tokens(mut self, thinking: i64, cache_read: i64, cache_creation: i64) -> Self {
+    pub fn with_extended_tokens(
+        mut self,
+        thinking: i64,
+        cache_read: i64,
+        cache_creation: i64,
+    ) -> Self {
         self.thinking_tokens = thinking;
         self.cache_read_tokens = cache_read;
         self.cache_creation_tokens = cache_creation;

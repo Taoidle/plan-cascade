@@ -219,10 +219,7 @@ impl EvaluationEngine {
 // ============================================================================
 
 /// Score tool trajectory by comparing actual tool calls against expected.
-pub fn score_tool_trajectory(
-    actual_tools: &[String],
-    config: &ToolTrajectoryConfig,
-) -> f32 {
+pub fn score_tool_trajectory(actual_tools: &[String], config: &ToolTrajectoryConfig) -> f32 {
     if config.expected_tools.is_empty() {
         return 1.0;
     }
@@ -257,10 +254,7 @@ pub fn score_tool_trajectory(
 }
 
 /// Score response similarity using Levenshtein distance.
-pub fn score_response_similarity(
-    response: &str,
-    config: &ResponseSimilarityConfig,
-) -> f32 {
+pub fn score_response_similarity(response: &str, config: &ResponseSimilarityConfig) -> f32 {
     let reference = &config.reference_response;
     let distance = levenshtein_distance(response, reference);
     let max_len = response.len().max(reference.len());
@@ -409,8 +403,7 @@ pub fn load_reports(
     let reports = stmt
         .query_map(rusqlite::params![run_id], |row| {
             let results_json: String = row.get(7)?;
-            let results: Vec<TestResult> =
-                serde_json::from_str(&results_json).unwrap_or_default();
+            let results: Vec<TestResult> = serde_json::from_str(&results_json).unwrap_or_default();
 
             Ok(EvaluationReport {
                 run_id: row.get(0)?,

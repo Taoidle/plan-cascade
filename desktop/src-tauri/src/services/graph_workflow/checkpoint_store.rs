@@ -24,9 +24,9 @@ impl SqliteCheckpointer {
     ///
     /// Automatically creates the checkpoints table if it does not exist.
     pub fn new(pool: Arc<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>) -> AppResult<Self> {
-        let conn = pool.get().map_err(|e| {
-            AppError::database(format!("Failed to get connection: {}", e))
-        })?;
+        let conn = pool
+            .get()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS graph_checkpoints (
@@ -61,14 +61,15 @@ impl Checkpointer for SqliteCheckpointer {
         let cp = checkpoint;
 
         tokio::task::spawn_blocking(move || {
-            let conn = pool.get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = pool
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             let state_json = serde_json::to_string(&cp.state)
                 .map_err(|e| AppError::parse(format!("Failed to serialize state: {}", e)))?;
-            let pending_json = serde_json::to_string(&cp.pending_nodes)
-                .map_err(|e| AppError::parse(format!("Failed to serialize pending_nodes: {}", e)))?;
+            let pending_json = serde_json::to_string(&cp.pending_nodes).map_err(|e| {
+                AppError::parse(format!("Failed to serialize pending_nodes: {}", e))
+            })?;
             let interrupt_json = cp
                 .interrupt
                 .as_ref()
@@ -103,9 +104,9 @@ impl Checkpointer for SqliteCheckpointer {
         let tid = thread_id.to_string();
 
         tokio::task::spawn_blocking(move || {
-            let conn = pool.get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = pool
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             let result = conn.query_row(
                 "SELECT id, thread_id, state, step, pending_nodes, interrupt, created_at
@@ -130,7 +131,10 @@ impl Checkpointer for SqliteCheckpointer {
             match result {
                 Ok(raw) => Ok(Some(parse_checkpoint_row(raw)?)),
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                Err(e) => Err(AppError::database(format!("Failed to load checkpoint: {}", e))),
+                Err(e) => Err(AppError::database(format!(
+                    "Failed to load checkpoint: {}",
+                    e
+                ))),
             }
         })
         .await
@@ -142,9 +146,9 @@ impl Checkpointer for SqliteCheckpointer {
         let cid = checkpoint_id.to_string();
 
         tokio::task::spawn_blocking(move || {
-            let conn = pool.get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = pool
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             let result = conn.query_row(
                 "SELECT id, thread_id, state, step, pending_nodes, interrupt, created_at
@@ -167,7 +171,10 @@ impl Checkpointer for SqliteCheckpointer {
             match result {
                 Ok(raw) => Ok(Some(parse_checkpoint_row(raw)?)),
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                Err(e) => Err(AppError::database(format!("Failed to load checkpoint: {}", e))),
+                Err(e) => Err(AppError::database(format!(
+                    "Failed to load checkpoint: {}",
+                    e
+                ))),
             }
         })
         .await
@@ -179,9 +186,9 @@ impl Checkpointer for SqliteCheckpointer {
         let tid = thread_id.to_string();
 
         tokio::task::spawn_blocking(move || {
-            let conn = pool.get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = pool
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             let mut stmt = conn
                 .prepare(
@@ -224,9 +231,9 @@ impl Checkpointer for SqliteCheckpointer {
         let cid = checkpoint_id.to_string();
 
         tokio::task::spawn_blocking(move || {
-            let conn = pool.get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = pool
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             let deleted = conn
                 .execute(
@@ -604,7 +611,10 @@ mod tests {
 
             // Load by thread_id - should find the checkpoint saved by the first instance
             let loaded = cp_store2.load("persist-thread").await.unwrap();
-            assert!(loaded.is_some(), "Checkpoint should survive checkpointer recreation");
+            assert!(
+                loaded.is_some(),
+                "Checkpoint should survive checkpointer recreation"
+            );
             let loaded = loaded.unwrap();
 
             assert_eq!(loaded.id, "persist-cp-1");
@@ -614,10 +624,7 @@ mod tests {
                 loaded.state.get("workflow_step"),
                 Some(&serde_json::json!("analyze"))
             );
-            assert_eq!(
-                loaded.state.get("iteration"),
-                Some(&serde_json::json!(3))
-            );
+            assert_eq!(loaded.state.get("iteration"), Some(&serde_json::json!(3)));
             assert_eq!(
                 loaded.pending_nodes,
                 vec!["review-node".to_string(), "output-node".to_string()]

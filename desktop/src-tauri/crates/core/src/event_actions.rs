@@ -7,9 +7,9 @@
 //! and are used by the tools crate to attach side-effect declarations to
 //! `ToolResult` without depending on the full orchestrator.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// Actions that can be declared alongside an immutable event.
 ///
@@ -166,7 +166,10 @@ mod tests {
     fn test_event_actions_with_state() {
         let actions = EventActions::none().with_state("progress", serde_json::json!(0.75));
         assert!(actions.has_actions());
-        assert_eq!(actions.state_delta.get("progress").unwrap(), &serde_json::json!(0.75));
+        assert_eq!(
+            actions.state_delta.get("progress").unwrap(),
+            &serde_json::json!(0.75)
+        );
     }
 
     #[test]
@@ -180,13 +183,22 @@ mod tests {
     fn test_event_actions_with_checkpoint() {
         let actions = EventActions::none().with_checkpoint("after-lint");
         assert!(actions.has_actions());
-        assert_eq!(actions.checkpoint_request.as_ref().unwrap().label, "after-lint");
-        assert!(actions.checkpoint_request.as_ref().unwrap().description.is_none());
+        assert_eq!(
+            actions.checkpoint_request.as_ref().unwrap().label,
+            "after-lint"
+        );
+        assert!(actions
+            .checkpoint_request
+            .as_ref()
+            .unwrap()
+            .description
+            .is_none());
     }
 
     #[test]
     fn test_event_actions_with_checkpoint_described() {
-        let actions = EventActions::none().with_checkpoint_described("after-lint", "All lint checks passed");
+        let actions =
+            EventActions::none().with_checkpoint_described("after-lint", "All lint checks passed");
         assert!(actions.has_actions());
         let cp = actions.checkpoint_request.as_ref().unwrap();
         assert_eq!(cp.label, "after-lint");

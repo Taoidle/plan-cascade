@@ -154,10 +154,7 @@ fn detect_applicable_skills(
     }
 
     // Sort by score desc
-    matches.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     matches
 }
@@ -197,11 +194,7 @@ pub fn lexical_score_skills(
 
         let name_tokens: HashSet<String> = tokenize(&skill.name);
         let desc_tokens: HashSet<String> = tokenize(&skill.description);
-        let tag_tokens: HashSet<String> = skill
-            .tags
-            .iter()
-            .flat_map(|t| tokenize(t))
-            .collect();
+        let tag_tokens: HashSet<String> = skill.tags.iter().flat_map(|t| tokenize(t)).collect();
         let body_tokens: HashSet<String> = tokenize(&skill.body);
 
         let body_token_count = body_tokens.len().max(1);
@@ -259,9 +252,7 @@ fn tokenize(text: &str) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::skills::model::{
-        SkillDetection, SkillDocument, SkillIndex, SkillSource,
-    };
+    use crate::services::skills::model::{SkillDetection, SkillDocument, SkillIndex, SkillSource};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -316,9 +307,14 @@ mod tests {
 
     #[test]
     fn test_lexical_score_empty_query() {
-        let index = SkillIndex::new(vec![
-            make_doc("test", "A test skill", SkillSource::Builtin, 10, None, vec![]),
-        ]);
+        let index = SkillIndex::new(vec![make_doc(
+            "test",
+            "A test skill",
+            SkillSource::Builtin,
+            10,
+            None,
+            vec![],
+        )]);
         let results = lexical_score_skills(&index, "", &InjectionPhase::Always);
         assert!(results.is_empty());
     }
@@ -326,8 +322,22 @@ mod tests {
     #[test]
     fn test_lexical_score_name_match_highest() {
         let index = SkillIndex::new(vec![
-            make_doc("react-hooks", "Hooks for React components", SkillSource::Builtin, 10, None, vec!["react"]),
-            make_doc("vue-setup", "Vue composition API setup", SkillSource::Builtin, 10, None, vec!["vue"]),
+            make_doc(
+                "react-hooks",
+                "Hooks for React components",
+                SkillSource::Builtin,
+                10,
+                None,
+                vec!["react"],
+            ),
+            make_doc(
+                "vue-setup",
+                "Vue composition API setup",
+                SkillSource::Builtin,
+                10,
+                None,
+                vec!["vue"],
+            ),
         ]);
 
         let results = lexical_score_skills(&index, "react hooks", &InjectionPhase::Always);
@@ -339,8 +349,22 @@ mod tests {
     #[test]
     fn test_lexical_score_tag_match() {
         let index = SkillIndex::new(vec![
-            make_doc("skill-a", "Generic skill", SkillSource::Builtin, 10, None, vec!["typescript", "testing"]),
-            make_doc("skill-b", "Another skill", SkillSource::Builtin, 10, None, vec!["python"]),
+            make_doc(
+                "skill-a",
+                "Generic skill",
+                SkillSource::Builtin,
+                10,
+                None,
+                vec!["typescript", "testing"],
+            ),
+            make_doc(
+                "skill-b",
+                "Another skill",
+                SkillSource::Builtin,
+                10,
+                None,
+                vec!["python"],
+            ),
         ]);
 
         let results = lexical_score_skills(&index, "typescript testing", &InjectionPhase::Always);
@@ -361,12 +385,18 @@ mod tests {
     #[test]
     fn test_detect_applicable_skills_file_match() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("package.json"), r#"{"dependencies": {"react": "18"}}"#).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies": {"react": "18"}}"#,
+        )
+        .unwrap();
 
         let doc = make_doc(
             "react-best-practices",
             "React best practices",
-            SkillSource::External { source_name: "vercel".to_string() },
+            SkillSource::External {
+                source_name: "vercel".to_string(),
+            },
             100,
             Some(SkillDetection {
                 files: vec!["package.json".to_string()],
@@ -376,7 +406,8 @@ mod tests {
         );
 
         let index = SkillIndex::new(vec![doc]);
-        let detected = detect_applicable_skills(&index, dir.path(), &InjectionPhase::Implementation);
+        let detected =
+            detect_applicable_skills(&index, dir.path(), &InjectionPhase::Implementation);
         assert_eq!(detected.len(), 1);
     }
 
@@ -388,7 +419,9 @@ mod tests {
         let doc = make_doc(
             "react-best-practices",
             "React best practices",
-            SkillSource::External { source_name: "vercel".to_string() },
+            SkillSource::External {
+                source_name: "vercel".to_string(),
+            },
             100,
             Some(SkillDetection {
                 files: vec!["package.json".to_string()],
@@ -398,19 +431,26 @@ mod tests {
         );
 
         let index = SkillIndex::new(vec![doc]);
-        let detected = detect_applicable_skills(&index, dir.path(), &InjectionPhase::Implementation);
+        let detected =
+            detect_applicable_skills(&index, dir.path(), &InjectionPhase::Implementation);
         assert!(detected.is_empty());
     }
 
     #[test]
     fn test_detect_applicable_skills_file_exists_pattern_no_match() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("package.json"), r#"{"dependencies": {"vue": "3"}}"#).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies": {"vue": "3"}}"#,
+        )
+        .unwrap();
 
         let doc = make_doc(
             "react-best-practices",
             "React best practices",
-            SkillSource::External { source_name: "vercel".to_string() },
+            SkillSource::External {
+                source_name: "vercel".to_string(),
+            },
             100,
             Some(SkillDetection {
                 files: vec!["package.json".to_string()],
@@ -420,7 +460,8 @@ mod tests {
         );
 
         let index = SkillIndex::new(vec![doc]);
-        let detected = detect_applicable_skills(&index, dir.path(), &InjectionPhase::Implementation);
+        let detected =
+            detect_applicable_skills(&index, dir.path(), &InjectionPhase::Implementation);
         assert!(detected.is_empty());
     }
 
@@ -432,7 +473,9 @@ mod tests {
         let doc = make_doc(
             "rust-guidelines",
             "Rust coding guidelines",
-            SkillSource::External { source_name: "community".to_string() },
+            SkillSource::External {
+                source_name: "community".to_string(),
+            },
             100,
             Some(SkillDetection {
                 files: vec!["Cargo.toml".to_string()],
@@ -442,19 +485,26 @@ mod tests {
         );
 
         let index = SkillIndex::new(vec![doc]);
-        let detected = detect_applicable_skills(&index, dir.path(), &InjectionPhase::Implementation);
+        let detected =
+            detect_applicable_skills(&index, dir.path(), &InjectionPhase::Implementation);
         assert_eq!(detected.len(), 1);
     }
 
     #[test]
     fn test_select_skills_auto_detected_included() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("package.json"), r#"{"dependencies": {"react": "18"}}"#).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies": {"react": "18"}}"#,
+        )
+        .unwrap();
 
         let doc = make_doc(
             "react",
             "React best practices",
-            SkillSource::External { source_name: "vercel".to_string() },
+            SkillSource::External {
+                source_name: "vercel".to_string(),
+            },
             100,
             Some(SkillDetection {
                 files: vec!["package.json".to_string()],
@@ -518,8 +568,22 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         let index = SkillIndex::new(vec![
-            make_doc("react-skill", "React skill", SkillSource::ProjectLocal, 201, None, vec!["react"]),
-            make_doc("vue-skill", "Vue skill", SkillSource::ProjectLocal, 201, None, vec!["vue"]),
+            make_doc(
+                "react-skill",
+                "React skill",
+                SkillSource::ProjectLocal,
+                201,
+                None,
+                vec!["react"],
+            ),
+            make_doc(
+                "vue-skill",
+                "Vue skill",
+                SkillSource::ProjectLocal,
+                201,
+                None,
+                vec!["vue"],
+            ),
         ]);
 
         let policy = SelectionPolicy {
@@ -537,7 +601,9 @@ mod tests {
             &policy,
         );
 
-        assert!(results.iter().all(|r| r.skill.tags.contains(&"react".to_string())));
+        assert!(results
+            .iter()
+            .all(|r| r.skill.tags.contains(&"react".to_string())));
     }
 
     #[test]
@@ -545,8 +611,22 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         let index = SkillIndex::new(vec![
-            make_doc("react-skill", "React skill", SkillSource::ProjectLocal, 201, None, vec!["react"]),
-            make_doc("vue-skill", "Vue skill", SkillSource::ProjectLocal, 201, None, vec!["vue"]),
+            make_doc(
+                "react-skill",
+                "React skill",
+                SkillSource::ProjectLocal,
+                201,
+                None,
+                vec!["react"],
+            ),
+            make_doc(
+                "vue-skill",
+                "Vue skill",
+                SkillSource::ProjectLocal,
+                201,
+                None,
+                vec!["vue"],
+            ),
         ]);
 
         let policy = SelectionPolicy {
@@ -564,6 +644,8 @@ mod tests {
             &policy,
         );
 
-        assert!(results.iter().all(|r| !r.skill.tags.contains(&"vue".to_string())));
+        assert!(results
+            .iter()
+            .all(|r| !r.skill.tags.contains(&"vue".to_string())));
     }
 }

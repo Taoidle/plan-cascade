@@ -20,8 +20,8 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use plan_cascade_core::error::{CoreError, CoreResult};
 use crate::services::llm::types::{Message, MessageRole};
+use plan_cascade_core::error::{CoreError, CoreResult};
 
 // ============================================================================
 // CompactionStrategy Enum
@@ -294,7 +294,10 @@ impl ContextCompactor for SlidingWindowCompactor {
 /// a summary string. This allows the compactor to be used without
 /// directly depending on LLM provider types.
 pub type SummarizeFn = Box<
-    dyn Fn(Vec<Message>) -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<String>> + Send>>
+    dyn Fn(
+            Vec<Message>,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<String>> + Send>>
         + Send
         + Sync,
 >;
@@ -316,7 +319,10 @@ impl LlmSummaryCompactor {
     /// Create a new LlmSummaryCompactor with the given summarization function.
     pub fn new<F>(summarize: F) -> Self
     where
-        F: Fn(Vec<Message>) -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<String>> + Send>>
+        F: Fn(
+                Vec<Message>,
+            )
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<String>> + Send>>
             + Send
             + Sync
             + 'static,
@@ -424,7 +430,10 @@ mod tests {
 
     #[test]
     fn test_compaction_strategy_default() {
-        assert_eq!(CompactionStrategy::default(), CompactionStrategy::LlmSummary);
+        assert_eq!(
+            CompactionStrategy::default(),
+            CompactionStrategy::LlmSummary
+        );
     }
 
     #[test]
@@ -542,15 +551,21 @@ mod tests {
         assert_eq!(result.compaction_tokens, 0);
 
         // Verify head preserved
-        assert!(extract_text(&result.messages[0]).unwrap().contains("Message 0"));
-        assert!(extract_text(&result.messages[1]).unwrap().contains("Message 1"));
+        assert!(extract_text(&result.messages[0])
+            .unwrap()
+            .contains("Message 0"));
+        assert!(extract_text(&result.messages[1])
+            .unwrap()
+            .contains("Message 1"));
 
         // Verify marker inserted
         let marker_text = extract_text(&result.messages[2]).unwrap();
         assert!(marker_text.contains("14 messages removed"));
 
         // Verify tail preserved
-        assert!(extract_text(&result.messages[3]).unwrap().contains("Message 16"));
+        assert!(extract_text(&result.messages[3])
+            .unwrap()
+            .contains("Message 16"));
     }
 
     #[tokio::test]
@@ -629,9 +644,7 @@ mod tests {
     #[tokio::test]
     async fn test_llm_summary_basic_compaction() {
         let compactor = LlmSummaryCompactor::new(|msgs| {
-            Box::pin(async move {
-                Ok(format!("Summary of {} messages", msgs.len()))
-            })
+            Box::pin(async move { Ok(format!("Summary of {} messages", msgs.len())) })
         });
 
         let messages = make_messages(15);
@@ -656,9 +669,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_llm_summary_too_few_messages() {
-        let compactor = LlmSummaryCompactor::new(|_msgs| {
-            Box::pin(async move { Ok("summary".to_string()) })
-        });
+        let compactor =
+            LlmSummaryCompactor::new(|_msgs| Box::pin(async move { Ok("summary".to_string()) }));
 
         let messages = make_messages(5);
         let config = CompactionConfig {
@@ -709,9 +721,7 @@ mod tests {
 
     #[test]
     fn test_llm_summary_name() {
-        let compactor = LlmSummaryCompactor::new(|_| {
-            Box::pin(async { Ok(String::new()) })
-        });
+        let compactor = LlmSummaryCompactor::new(|_| Box::pin(async { Ok(String::new()) }));
         assert_eq!(compactor.name(), "LlmSummaryCompactor");
     }
 

@@ -15,7 +15,7 @@ import { create } from 'zustand';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import i18n from '../i18n';
 import { useExecutionStore } from './execution';
-import { useTaskModeStore, type TaskPrd, type StrategyAnalysis, type StoryQualityGateResults } from './taskMode';
+import { useTaskModeStore, type TaskPrd, type StrategyAnalysis, type GateResult } from './taskMode';
 import { useSpecInterviewStore, type InterviewQuestion } from './specInterview';
 import { useSettingsStore } from './settings';
 import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
@@ -679,91 +679,173 @@ async function generatePrdPhase(set: SetFn, get: GetFn) {
 
 /**
  * Subscribe to task-mode-progress events for execution tracking.
+ *
+ * Rust emits individual per-story events (batch_started, story_started,
+ * story_completed, story_failed, execution_completed, execution_cancelled, error).
+ * We accumulate story statuses locally and inject appropriate UI cards.
  */
 async function subscribeToProgressEvents(set: SetFn, get: GetFn) {
   // Unsubscribe from existing
   const existing = get()._unlistenFn;
   if (existing) existing();
 
+  // Accumulated story statuses from individual events
+  const accumulatedStatuses: Record<string, string> = {};
+
   try {
     const unlisten = await listen<{
       sessionId: string;
+      eventType: string;
       currentBatch: number;
       totalBatches: number;
-      storyStatuses: Record<string, string>;
-      storiesCompleted: number;
-      storiesFailed: number;
-      qualityGateResults?: Record<string, StoryQualityGateResults>;
+      storyId: string | null;
+      storyStatus: string | null;
+      agentName: string | null;
+      gateResults: GateResult[] | null;
+      error: string | null;
+      progressPct: number;
     }>('task-mode-progress', (event) => {
       const payload = event.payload;
       const state = get();
       if (state.sessionId && payload.sessionId !== state.sessionId) return;
 
-      // Calculate progress percentage
-      const totalStories = Object.keys(payload.storyStatuses ?? {}).length;
-      const completedCount = payload.storiesCompleted + payload.storiesFailed;
-      const progressPct = totalStories > 0 ? (completedCount / totalStories) * 100 : 0;
-
-      // Inject execution update card for meaningful events
-      const updateData: ExecutionUpdateCardData = {
-        eventType: 'batch_complete',
-        currentBatch: payload.currentBatch,
-        totalBatches: payload.totalBatches,
-        storyId: null,
-        storyTitle: null,
-        status: `${payload.storiesCompleted} completed, ${payload.storiesFailed} failed`,
-        agent: null,
-        progressPct,
-      };
-      injectCard('execution_update', updateData);
-
-      // Inject quality gate results if present
-      if (payload.qualityGateResults) {
-        for (const [storyId, result] of Object.entries(payload.qualityGateResults)) {
-          const gateData: GateResultCardData = {
-            storyId,
-            storyTitle: storyId,
-            overallStatus: result.overallStatus,
-            gates: result.gates,
-            codeReviewScores: result.codeReviewScores || [],
-          };
-          injectCard('gate_result', gateData);
-        }
+      // Accumulate story status
+      if (payload.storyId && payload.storyStatus) {
+        accumulatedStatuses[payload.storyId] = payload.storyStatus;
       }
 
-      // Check for completion
-      if (totalStories > 0 && completedCount >= totalStories) {
-        const success = payload.storiesFailed === 0;
-        const reportData: CompletionReportCardData = {
-          success,
-          totalStories,
-          completed: payload.storiesCompleted,
-          failed: payload.storiesFailed,
-          duration: 0, // Will be fetched from report
-          agentAssignments: {},
-        };
-        injectCard('completion_report', reportData);
+      // Resolve story title from editablePrd
+      const storyTitle = payload.storyId
+        ? state.editablePrd?.stories.find((s) => s.id === payload.storyId)?.title ?? payload.storyId
+        : null;
 
-        set({ phase: success ? 'completed' : 'failed' });
+      switch (payload.eventType) {
+        case 'batch_started': {
+          injectCard('execution_update', {
+            eventType: 'batch_start',
+            currentBatch: payload.currentBatch,
+            totalBatches: payload.totalBatches,
+            storyId: null,
+            storyTitle: null,
+            status: i18n.t('workflow.execution.batchLabel', { ns: 'simpleMode', current: payload.currentBatch + 1, total: payload.totalBatches }),
+            agent: null,
+            progressPct: payload.progressPct,
+          } as ExecutionUpdateCardData);
+          break;
+        }
 
-        // Synthesize execution result into conversation history (Task → Chat writeback)
-        synthesizeExecutionTurn(payload.storiesCompleted, totalStories, success);
+        case 'story_started': {
+          injectCard('execution_update', {
+            eventType: 'story_start',
+            currentBatch: payload.currentBatch,
+            totalBatches: payload.totalBatches,
+            storyId: payload.storyId,
+            storyTitle,
+            status: 'running',
+            agent: payload.agentName,
+            progressPct: payload.progressPct,
+          } as ExecutionUpdateCardData);
+          break;
+        }
 
-        // Fetch full report for duration/agent data
-        useTaskModeStore.getState().fetchReport().then(() => {
-          const report = useTaskModeStore.getState().report;
-          if (report) {
-            const fullReport: CompletionReportCardData = {
-              success: report.success,
-              totalStories: report.totalStories,
-              completed: report.storiesCompleted,
-              failed: report.storiesFailed,
-              duration: report.totalDurationMs,
-              agentAssignments: report.agentAssignments,
-            };
-            injectCard('completion_report', fullReport);
+        case 'story_completed': {
+          injectCard('execution_update', {
+            eventType: 'story_complete',
+            currentBatch: payload.currentBatch,
+            totalBatches: payload.totalBatches,
+            storyId: payload.storyId,
+            storyTitle,
+            status: 'completed',
+            agent: payload.agentName,
+            progressPct: payload.progressPct,
+          } as ExecutionUpdateCardData);
+
+          // Inject gate results if present
+          if (payload.gateResults && payload.gateResults.length > 0 && payload.storyId) {
+            injectCard('gate_result', {
+              storyId: payload.storyId,
+              storyTitle: storyTitle ?? payload.storyId,
+              overallStatus: payload.gateResults.every((g) => g.status === 'passed') ? 'passed' : 'failed',
+              gates: payload.gateResults,
+              codeReviewScores: [],
+            } as GateResultCardData);
           }
-        });
+          break;
+        }
+
+        case 'story_failed': {
+          injectCard('execution_update', {
+            eventType: 'story_failed',
+            currentBatch: payload.currentBatch,
+            totalBatches: payload.totalBatches,
+            storyId: payload.storyId,
+            storyTitle,
+            status: payload.error ?? 'failed',
+            agent: payload.agentName,
+            progressPct: payload.progressPct,
+          } as ExecutionUpdateCardData);
+
+          // Inject gate results if present
+          if (payload.gateResults && payload.gateResults.length > 0 && payload.storyId) {
+            injectCard('gate_result', {
+              storyId: payload.storyId,
+              storyTitle: storyTitle ?? payload.storyId,
+              overallStatus: 'failed',
+              gates: payload.gateResults,
+              codeReviewScores: [],
+            } as GateResultCardData);
+          }
+          break;
+        }
+
+        case 'execution_completed': {
+          const totalStories = Object.keys(accumulatedStatuses).length;
+          const completedCount = Object.values(accumulatedStatuses).filter((s) => s === 'completed').length;
+          const failedCount = Object.values(accumulatedStatuses).filter((s) => s === 'failed').length;
+          const success = failedCount === 0;
+
+          injectCard('completion_report', {
+            success,
+            totalStories,
+            completed: completedCount,
+            failed: failedCount,
+            duration: 0,
+            agentAssignments: {},
+          } as CompletionReportCardData);
+
+          set({ phase: success ? 'completed' : 'failed' });
+
+          // Synthesize execution result into conversation history (Task → Chat writeback)
+          synthesizeExecutionTurn(completedCount, totalStories, success);
+
+          // Fetch full report for duration/agent data
+          useTaskModeStore.getState().fetchReport().then(() => {
+            const report = useTaskModeStore.getState().report;
+            if (report) {
+              injectCard('completion_report', {
+                success: report.success,
+                totalStories: report.totalStories,
+                completed: report.storiesCompleted,
+                failed: report.storiesFailed,
+                duration: report.totalDurationMs,
+                agentAssignments: report.agentAssignments,
+              } as CompletionReportCardData);
+            }
+          });
+          break;
+        }
+
+        case 'execution_cancelled': {
+          set({ phase: 'cancelled' });
+          break;
+        }
+
+        case 'error': {
+          if (payload.error) {
+            injectError('Execution Error', payload.error);
+          }
+          break;
+        }
       }
     });
 

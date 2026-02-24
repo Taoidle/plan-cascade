@@ -192,7 +192,11 @@ impl HybridSearchEngine {
         index_store: Arc<IndexStore>,
         embedding_manager: Option<Arc<EmbeddingManager>>,
     ) -> Self {
-        Self::new(index_store, embedding_manager, HybridSearchConfig::default())
+        Self::new(
+            index_store,
+            embedding_manager,
+            HybridSearchConfig::default(),
+        )
     }
 
     /// Set the HNSW index for fast approximate nearest neighbor search.
@@ -228,11 +232,7 @@ impl HybridSearchEngine {
     ///
     /// A vector of `HybridSearchResult` sorted by RRF score descending, then
     /// file path ascending for deterministic tie-breaking.
-    pub async fn search(
-        &self,
-        query: &str,
-        project_path: &str,
-    ) -> AppResult<HybridSearchOutcome> {
+    pub async fn search(&self, query: &str, project_path: &str) -> AppResult<HybridSearchOutcome> {
         let mut channel_results: Vec<(SearchChannel, Vec<ChannelEntry>)> = Vec::new();
         let mut semantic_degraded = false;
         let mut semantic_error: Option<String> = None;
@@ -251,10 +251,7 @@ impl HybridSearchEngine {
 
         // --- Channel 3: Semantic search ---
         if let Some(ref emb_mgr) = self.embedding_manager {
-            match self
-                .search_semantic(query, project_path, emb_mgr)
-                .await
-            {
+            match self.search_semantic(query, project_path, emb_mgr).await {
                 Ok(semantic_entries) if !semantic_entries.is_empty() => {
                     channel_results.push((SearchChannel::Semantic, semantic_entries));
                 }
@@ -323,7 +320,10 @@ impl HybridSearchEngine {
     /// if FTS returns empty results or encounters an error (graceful degradation).
     fn search_symbols(&self, query: &str) -> AppResult<Vec<ChannelEntry>> {
         // Try FTS5 first for BM25-ranked results
-        match self.index_store.fts_search_symbols(query, self.config.channel_max_results) {
+        match self
+            .index_store
+            .fts_search_symbols(query, self.config.channel_max_results)
+        {
             Ok(fts_results) if !fts_results.is_empty() => {
                 let entries: Vec<ChannelEntry> = fts_results
                     .into_iter()
@@ -366,13 +366,13 @@ impl HybridSearchEngine {
     ///
     /// Attempts FTS5 BM25-ranked search first. Falls back to LIKE-based search
     /// if FTS returns empty results or encounters an error (graceful degradation).
-    fn search_file_paths(
-        &self,
-        query: &str,
-        project_path: &str,
-    ) -> AppResult<Vec<ChannelEntry>> {
+    fn search_file_paths(&self, query: &str, project_path: &str) -> AppResult<Vec<ChannelEntry>> {
         // Try FTS5 first for BM25-ranked results
-        match self.index_store.fts_search_files(query, project_path, self.config.channel_max_results) {
+        match self.index_store.fts_search_files(
+            query,
+            project_path,
+            self.config.channel_max_results,
+        ) {
             Ok(fts_results) if !fts_results.is_empty() => {
                 let entries: Vec<ChannelEntry> = fts_results
                     .into_iter()
@@ -395,7 +395,9 @@ impl HybridSearchEngine {
 
         // Fallback: LIKE-based search
         let pattern = format!("%{}%", query);
-        let files = self.index_store.query_files_by_path(project_path, &pattern)?;
+        let files = self
+            .index_store
+            .query_files_by_path(project_path, &pattern)?;
 
         let entries: Vec<ChannelEntry> = files
             .into_iter()
@@ -437,11 +439,7 @@ impl HybridSearchEngine {
             if hnsw.is_ready().await {
                 tracing::debug!("Hybrid search: using HNSW for semantic channel");
                 return self
-                    .search_semantic_hnsw(
-                        &query_embedding,
-                        hnsw,
-                        self.config.channel_max_results,
-                    )
+                    .search_semantic_hnsw(&query_embedding, hnsw, self.config.channel_max_results)
                     .await;
             } else {
                 tracing::debug!("Hybrid search: HNSW not ready, falling back to brute-force");
@@ -492,18 +490,20 @@ impl HybridSearchEngine {
         let entries: Vec<ChannelEntry> = hnsw_results
             .into_iter()
             .filter_map(|(id, distance)| {
-                metadata.get(&id).map(|(file_path, _chunk_index, chunk_text)| {
-                    // Convert DistCosine distance to similarity:
-                    // DistCosine distance = 1 - cosine_similarity
-                    // so similarity = 1 - distance
-                    let similarity = 1.0 - distance;
-                    ChannelEntry {
-                        file_path: file_path.clone(),
-                        symbol_name: None,
-                        chunk_text: Some(chunk_text.clone()),
-                        semantic_similarity: Some(similarity),
-                    }
-                })
+                metadata
+                    .get(&id)
+                    .map(|(file_path, _chunk_index, chunk_text)| {
+                        // Convert DistCosine distance to similarity:
+                        // DistCosine distance = 1 - cosine_similarity
+                        // so similarity = 1 - distance
+                        let similarity = 1.0 - distance;
+                        ChannelEntry {
+                            file_path: file_path.clone(),
+                            symbol_name: None,
+                            chunk_text: Some(chunk_text.clone()),
+                            semantic_similarity: Some(similarity),
+                        }
+                    })
             })
             .collect();
 
@@ -533,16 +533,17 @@ impl HybridSearchEngine {
                 let rank = idx + 1; // 1-based rank
                 let rrf_contribution = 1.0 / (self.config.rrf_k + rank as f64);
 
-                let acc = score_map
-                    .entry(entry.file_path.clone())
-                    .or_insert_with(|| FusionAccumulator {
-                        file_path: entry.file_path.clone(),
-                        score: 0.0,
-                        provenance: Vec::new(),
-                        symbol_name: None,
-                        chunk_text: None,
-                        semantic_similarity: None,
-                    });
+                let acc =
+                    score_map
+                        .entry(entry.file_path.clone())
+                        .or_insert_with(|| FusionAccumulator {
+                            file_path: entry.file_path.clone(),
+                            score: 0.0,
+                            provenance: Vec::new(),
+                            symbol_name: None,
+                            chunk_text: None,
+                            semantic_similarity: None,
+                        });
 
                 acc.score += rrf_contribution;
                 acc.provenance.push(ChannelContribution {
@@ -789,11 +790,7 @@ mod tests {
     #[test]
     fn rrf_k_zero() {
         // k=0 makes the formula score = 1/rank
-        let lists = vec![vec![
-            "A".to_string(),
-            "B".to_string(),
-            "C".to_string(),
-        ]];
+        let lists = vec![vec!["A".to_string(), "B".to_string(), "C".to_string()]];
         let results = compute_rrf_scores(&lists, 0.0);
 
         assert!((results[0].1 - 1.0).abs() < 1e-10); // 1/1
@@ -808,10 +805,7 @@ mod tests {
     #[test]
     fn rrf_deterministic_tiebreaking_by_path() {
         // Two documents with exactly equal scores (same rank in one list each)
-        let lists = vec![
-            vec!["B_file".to_string()],
-            vec!["A_file".to_string()],
-        ];
+        let lists = vec![vec!["B_file".to_string()], vec!["A_file".to_string()]];
         let results = compute_rrf_scores(&lists, 60.0);
 
         // Both have score 1/61. Tie broken by alphabetical order.
@@ -992,10 +986,7 @@ mod tests {
 
         // Verify merged metadata
         assert_eq!(results[0].symbol_name.as_deref(), Some("main"));
-        assert_eq!(
-            results[0].chunk_text.as_deref(),
-            Some("fn main() { ... }")
-        );
+        assert_eq!(results[0].chunk_text.as_deref(), Some("fn main() { ... }"));
         assert_eq!(results[0].semantic_similarity, Some(0.95));
 
         // src/lib.rs should only have Symbol provenance
@@ -1133,9 +1124,7 @@ mod tests {
             ],
             content_hash: None,
         };
-        store
-            .upsert_file_index("/project", &item, "hash1")
-            .unwrap();
+        store.upsert_file_index("/project", &item, "hash1").unwrap();
 
         let engine = HybridSearchEngine::with_defaults(store, None);
         let results = engine.search_symbols("Controller").unwrap();
@@ -1367,13 +1356,12 @@ mod tests {
 
         // Engine with HNSW via builder
         let hnsw = Arc::new(HnswIndex::new("/tmp/test_hnsw", 128));
-        let engine = HybridSearchEngine::with_defaults(store.clone(), None)
-            .with_hnsw_index(Some(hnsw));
+        let engine =
+            HybridSearchEngine::with_defaults(store.clone(), None).with_hnsw_index(Some(hnsw));
         assert!(engine.hnsw_index.is_some());
 
         // Engine with None HNSW via builder
-        let engine = HybridSearchEngine::with_defaults(store, None)
-            .with_hnsw_index(None);
+        let engine = HybridSearchEngine::with_defaults(store, None).with_hnsw_index(None);
         assert!(engine.hnsw_index.is_none());
     }
 
@@ -1394,8 +1382,8 @@ mod tests {
 
     #[tokio::test]
     async fn search_semantic_hnsw_returns_entries() {
-        use crate::storage::database::Database;
         use super::super::embedding_service::embedding_to_bytes;
+        use crate::storage::database::Database;
         use tempfile::tempdir;
 
         let db = Database::new_in_memory().expect("in-memory db");
@@ -1403,21 +1391,25 @@ mod tests {
 
         // Insert some embeddings into SQLite so we can look them up by ROWID
         let dim = 8;
-        let embeddings: Vec<Vec<f32>> = (0..5).map(|i| {
-            let mut v = vec![0.0f32; dim];
-            v[i % dim] = 1.0;
-            v
-        }).collect();
+        let embeddings: Vec<Vec<f32>> = (0..5)
+            .map(|i| {
+                let mut v = vec![0.0f32; dim];
+                v[i % dim] = 1.0;
+                v
+            })
+            .collect();
 
         for (i, emb) in embeddings.iter().enumerate() {
             let emb_bytes = embedding_to_bytes(emb);
-            store.upsert_chunk_embedding(
-                "/test",
-                &format!("src/file_{}.rs", i),
-                i as i64,
-                &format!("chunk text {}", i),
-                &emb_bytes,
-            ).unwrap();
+            store
+                .upsert_chunk_embedding(
+                    "/test",
+                    &format!("src/file_{}.rs", i),
+                    i as i64,
+                    &format!("chunk text {}", i),
+                    &emb_bytes,
+                )
+                .unwrap();
         }
 
         // Create HNSW index and insert the same embeddings
@@ -1433,8 +1425,8 @@ mod tests {
         }
 
         // Build engine with HNSW
-        let engine = HybridSearchEngine::with_defaults(store, None)
-            .with_hnsw_index(Some(hnsw.clone()));
+        let engine =
+            HybridSearchEngine::with_defaults(store, None).with_hnsw_index(Some(hnsw.clone()));
 
         // Search for the first embedding
         let results = engine
@@ -1463,14 +1455,11 @@ mod tests {
         let hnsw = Arc::new(HnswIndex::new(dir.path().join("hnsw"), 8));
         hnsw.initialize().await;
 
-        let engine = HybridSearchEngine::with_defaults(store, None)
-            .with_hnsw_index(Some(hnsw.clone()));
+        let engine =
+            HybridSearchEngine::with_defaults(store, None).with_hnsw_index(Some(hnsw.clone()));
 
         let query = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let results = engine
-            .search_semantic_hnsw(&query, &hnsw, 5)
-            .await
-            .unwrap();
+        let results = engine.search_semantic_hnsw(&query, &hnsw, 5).await.unwrap();
 
         assert!(results.is_empty(), "Empty HNSW should return empty results");
     }
@@ -1508,7 +1497,10 @@ mod tests {
 
         // Search for "auth" - should use FTS and find auth_handler
         let results = engine.search_symbols("auth").unwrap();
-        assert!(!results.is_empty(), "FTS should find symbols matching 'auth'");
+        assert!(
+            !results.is_empty(),
+            "FTS should find symbols matching 'auth'"
+        );
         assert_eq!(results[0].symbol_name.as_deref(), Some("auth_handler"));
     }
 
@@ -1546,14 +1538,19 @@ mod tests {
         ];
 
         for (i, item) in items.iter().enumerate() {
-            store.upsert_file_index("/project", item, &format!("hash{}", i)).unwrap();
+            store
+                .upsert_file_index("/project", item, &format!("hash{}", i))
+                .unwrap();
         }
 
         let engine = HybridSearchEngine::with_defaults(store, None);
 
         // Search for "auth" in file paths
         let results = engine.search_file_paths("auth", "/project").unwrap();
-        assert!(!results.is_empty(), "FTS should find file paths matching 'auth'");
+        assert!(
+            !results.is_empty(),
+            "FTS should find file paths matching 'auth'"
+        );
         assert_eq!(results[0].file_path, "src/services/auth.rs");
     }
 
@@ -1573,9 +1570,7 @@ mod tests {
             size_bytes: 1024,
             line_count: 50,
             is_test: false,
-            symbols: vec![
-                SymbolInfo::basic("x".to_string(), SymbolKind::Function, 1),
-            ],
+            symbols: vec![SymbolInfo::basic("x".to_string(), SymbolKind::Function, 1)],
             content_hash: None,
         };
         store.upsert_file_index("/project", &item, "hash1").unwrap();
@@ -1605,9 +1600,11 @@ mod tests {
             size_bytes: 1024,
             line_count: 50,
             is_test: false,
-            symbols: vec![
-                SymbolInfo::basic("auth_handler".to_string(), SymbolKind::Function, 5),
-            ],
+            symbols: vec![SymbolInfo::basic(
+                "auth_handler".to_string(),
+                SymbolKind::Function,
+                5,
+            )],
             content_hash: None,
         };
         store.upsert_file_index("/project", &item, "hash1").unwrap();
@@ -1619,8 +1616,14 @@ mod tests {
         let filepath_results = engine.search_file_paths("auth", "/project").unwrap();
 
         // Both channels should have results
-        assert!(!symbol_results.is_empty(), "Symbol channel should find auth");
-        assert!(!filepath_results.is_empty(), "FilePath channel should find auth");
+        assert!(
+            !symbol_results.is_empty(),
+            "Symbol channel should find auth"
+        );
+        assert!(
+            !filepath_results.is_empty(),
+            "FilePath channel should find auth"
+        );
 
         // src/auth.rs should appear in both, meaning it would get a boosted
         // RRF score during fusion

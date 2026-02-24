@@ -220,24 +220,20 @@ impl EmbeddingProvider for OllamaEmbeddingProvider {
 
     async fn health_check(&self) -> EmbeddingResult<()> {
         // Step 1: Check if Ollama server is reachable by listing models
-        let models = self
-            .client
-            .list_local_models()
-            .await
-            .map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("connect") || msg.contains("Connection refused") {
-                    EmbeddingError::ProviderUnavailable {
-                        message: format!(
-                            "Cannot connect to Ollama at {}. Is the Ollama server running? \
+        let models = self.client.list_local_models().await.map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("connect") || msg.contains("Connection refused") {
+                EmbeddingError::ProviderUnavailable {
+                    message: format!(
+                        "Cannot connect to Ollama at {}. Is the Ollama server running? \
                              Start it with: ollama serve",
-                            self.base_url
-                        ),
-                    }
-                } else {
-                    EmbeddingError::NetworkError { message: msg }
+                        self.base_url
+                    ),
                 }
-            })?;
+            } else {
+                EmbeddingError::NetworkError { message: msg }
+            }
+        })?;
 
         // Step 2: Check if the configured model is available locally
         let model_base = self.model.split(':').next().unwrap_or(&self.model);
@@ -506,11 +502,7 @@ mod tests {
         let provider = OllamaEmbeddingProvider::new(&default_config());
         let docs = vec!["hello world", "foo bar baz", "rust programming language"];
         let result = provider.embed_documents(&docs).await;
-        assert!(
-            result.is_ok(),
-            "embed_documents failed: {:?}",
-            result.err()
-        );
+        assert!(result.is_ok(), "embed_documents failed: {:?}", result.err());
 
         let embeddings = result.unwrap();
         assert_eq!(embeddings.len(), 3);

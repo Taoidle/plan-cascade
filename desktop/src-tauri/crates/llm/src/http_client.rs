@@ -29,7 +29,7 @@ pub fn build_http_client(proxy: Option<&ProxyConfig>) -> reqwest::Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plan_cascade_core::proxy::{ProxyProtocol};
+    use plan_cascade_core::proxy::ProxyProtocol;
 
     #[test]
     fn test_build_http_client_no_proxy() {

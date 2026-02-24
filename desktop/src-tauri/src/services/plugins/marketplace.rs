@@ -82,8 +82,8 @@ async fn fetch_github_marketplace(repo: &str) -> Result<MarketplaceManifest, Str
 
 /// Fetch marketplace.json from a generic git URL by cloning to temp.
 async fn fetch_git_marketplace(url: &str) -> Result<MarketplaceManifest, String> {
-    let temp_dir = tempfile::tempdir()
-        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+    let temp_dir =
+        tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {}", e))?;
     let clone_path = temp_dir.path().join("marketplace");
 
     let output = tokio::process::Command::new("git")
@@ -123,8 +123,7 @@ async fn fetch_git_marketplace(url: &str) -> Result<MarketplaceManifest, String>
     let content = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("Failed to read marketplace.json: {}", e))?;
 
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse marketplace.json: {}", e))
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse marketplace.json: {}", e))
 }
 
 /// Fetch marketplace.json from a local path.
@@ -142,8 +141,7 @@ fn fetch_local_marketplace(path: &str) -> Result<MarketplaceManifest, String> {
     let content = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("Failed to read marketplace.json: {}", e))?;
 
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse marketplace.json: {}", e))
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse marketplace.json: {}", e))
 }
 
 /// Fetch manifests from all enabled marketplaces.
@@ -205,8 +203,7 @@ pub fn resolve_install_source(
                         marketplace: marketplace.clone(),
                     });
                 }
-                if s.starts_with("https://") || s.starts_with("http://") || s.starts_with("git@")
-                {
+                if s.starts_with("https://") || s.starts_with("http://") || s.starts_with("git@") {
                     return Ok(InstallSource::GitUrl(s.clone()));
                 }
                 // Assume it's a relative path

@@ -79,7 +79,9 @@ pub async fn execute_browser_action(
         Ok(CommandResponse::ok(action_result))
     } else {
         Ok(CommandResponse::err(
-            result.error.unwrap_or_else(|| "Unknown browser error".to_string()),
+            result
+                .error
+                .unwrap_or_else(|| "Unknown browser error".to_string()),
         ))
     }
 }

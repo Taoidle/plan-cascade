@@ -19,8 +19,7 @@ use chrono::{NaiveDateTime, Utc};
 use rusqlite::params;
 
 use crate::services::memory::store::{
-    bytes_to_embedding, MemoryCategory, MemorySearchRequest, MemorySearchResult,
-    ProjectMemoryStore,
+    bytes_to_embedding, MemoryCategory, MemorySearchRequest, MemorySearchResult, ProjectMemoryStore,
 };
 use crate::services::orchestrator::embedding_service::cosine_similarity;
 use crate::utils::error::AppResult;
@@ -47,10 +46,7 @@ pub fn compute_relevance_score(
     days_since_last_access: f64,
 ) -> f32 {
     let recency = 1.0 / (1.0 + days_since_last_access as f32 * 0.1);
-    0.40 * embedding_similarity
-        + 0.25 * keyword_overlap
-        + 0.20 * importance
-        + 0.15 * recency
+    0.40 * embedding_similarity + 0.25 * keyword_overlap + 0.20 * importance + 0.15 * recency
 }
 
 /// Compute Jaccard coefficient between two keyword sets.
@@ -116,17 +112,16 @@ pub fn search_memories(
     let query_keywords = extract_query_keywords(&request.query);
 
     // Step 2: Retrieve candidates from DB
-    let conn = store.pool().get().map_err(|e| crate::utils::error::AppError::database(format!("Failed to get connection: {}", e)))?;
+    let conn = store.pool().get().map_err(|e| {
+        crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
+    })?;
 
     // Build category filter clause
     let category_filter = if let Some(ref cats) = request.categories {
         if cats.is_empty() {
             String::new()
         } else {
-            let cat_strs: Vec<String> = cats
-                .iter()
-                .map(|c| format!("'{}'", c.as_str()))
-                .collect();
+            let cat_strs: Vec<String> = cats.iter().map(|c| format!("'{}'", c.as_str())).collect();
             format!(" AND category IN ({})", cat_strs.join(","))
         }
     } else {
@@ -162,23 +157,26 @@ pub fn search_memories(
     }
 
     let candidates: Vec<Candidate> = stmt
-        .query_map(params![request.project_path, request.min_importance], |row| {
-            Ok(Candidate {
-                id: row.get(0)?,
-                project_path: row.get(1)?,
-                category: row.get(2)?,
-                content: row.get(3)?,
-                keywords_json: row.get(4)?,
-                importance: row.get(5)?,
-                access_count: row.get(6)?,
-                source_session_id: row.get(7)?,
-                source_context: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-                last_accessed_at: row.get(11)?,
-                embedding_bytes: row.get(12)?,
-            })
-        })?
+        .query_map(
+            params![request.project_path, request.min_importance],
+            |row| {
+                Ok(Candidate {
+                    id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    category: row.get(2)?,
+                    content: row.get(3)?,
+                    keywords_json: row.get(4)?,
+                    importance: row.get(5)?,
+                    access_count: row.get(6)?,
+                    source_session_id: row.get(7)?,
+                    source_context: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                    last_accessed_at: row.get(11)?,
+                    embedding_bytes: row.get(12)?,
+                })
+            },
+        )?
         .filter_map(|r| r.ok())
         .collect();
 
@@ -213,8 +211,7 @@ pub fn search_memories(
             // Combine scores
             let score = compute_relevance_score(emb_sim, kw_overlap, c.importance, days);
 
-            let category =
-                MemoryCategory::from_str(&c.category).unwrap_or(MemoryCategory::Fact);
+            let category = MemoryCategory::from_str(&c.category).unwrap_or(MemoryCategory::Fact);
 
             MemorySearchResult {
                 entry: crate::services::memory::store::MemoryEntry {
@@ -242,7 +239,9 @@ pub fn search_memories(
 
     // Step 7: Bump access_count and last_accessed_at for returned entries
     if !scored_results.is_empty() {
-        let conn = store.pool().get().map_err(|e| crate::utils::error::AppError::database(format!("Failed to get connection: {}", e)))?;
+        let conn = store.pool().get().map_err(|e| {
+            crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
+        })?;
         for result in &scored_results {
             let _ = conn.execute(
                 "UPDATE project_memories SET access_count = access_count + 1, last_accessed_at = datetime('now') WHERE id = ?1",

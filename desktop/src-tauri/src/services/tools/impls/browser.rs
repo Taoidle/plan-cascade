@@ -266,8 +266,8 @@ mod backend {
     use super::*;
     use base64::Engine;
     use chromiumoxide::browser::{Browser, BrowserConfig};
-    use chromiumoxide::page::ScreenshotParams;
     use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
+    use chromiumoxide::page::ScreenshotParams;
     use futures::StreamExt;
     use std::sync::Arc;
     use std::time::Duration;
@@ -362,9 +362,9 @@ mod backend {
             action: &BrowserAction,
         ) -> Result<BrowserActionResult, String> {
             let mut guard = self.ensure_initialized().await?;
-            let state = guard
-                .as_mut()
-                .ok_or_else(|| "Browser state unexpectedly None after initialization".to_string())?;
+            let state = guard.as_mut().ok_or_else(|| {
+                "Browser state unexpectedly None after initialization".to_string()
+            })?;
 
             match action {
                 BrowserAction::Navigate { url } => {
@@ -376,9 +376,7 @@ mod backend {
                 BrowserAction::TypeText { selector, text } => {
                     Self::action_type_text(&mut state.page, selector, text).await
                 }
-                BrowserAction::Screenshot => {
-                    Self::action_screenshot(&mut state.page).await
-                }
+                BrowserAction::Screenshot => Self::action_screenshot(&mut state.page).await,
                 BrowserAction::ExtractText { selector } => {
                     Self::action_extract_text(&mut state.page, selector).await
                 }
@@ -391,11 +389,13 @@ mod backend {
 
         /// Execute a screenshot action and return the raw PNG bytes as well.
         /// Used by BrowserTool to provide multimodal image data.
-        pub async fn execute_screenshot_raw(&self) -> Result<(BrowserActionResult, Vec<u8>), String> {
+        pub async fn execute_screenshot_raw(
+            &self,
+        ) -> Result<(BrowserActionResult, Vec<u8>), String> {
             let mut guard = self.ensure_initialized().await?;
-            let state = guard
-                .as_mut()
-                .ok_or_else(|| "Browser state unexpectedly None after initialization".to_string())?;
+            let state = guard.as_mut().ok_or_else(|| {
+                "Browser state unexpectedly None after initialization".to_string()
+            })?;
 
             let page = &mut state.page;
 
@@ -425,10 +425,7 @@ mod backend {
             let size = screenshot_bytes.len();
             let result = BrowserActionResult {
                 success: true,
-                output: Some(format!(
-                    "Screenshot captured ({} bytes, PNG format)",
-                    size
-                )),
+                output: Some(format!("Screenshot captured ({} bytes, PNG format)", size)),
                 current_url: Some(url),
                 page_title: Some(title),
             };
@@ -946,11 +943,10 @@ impl Tool for BrowserTool {
             if matches!(action, BrowserAction::Screenshot) {
                 match self.backend.execute_screenshot_raw().await {
                     Ok((result, png_bytes)) => {
-                        let base64_data =
-                            base64::Engine::encode(
-                                &base64::engine::general_purpose::STANDARD,
-                                &png_bytes,
-                            );
+                        let base64_data = base64::Engine::encode(
+                            &base64::engine::general_purpose::STANDARD,
+                            &png_bytes,
+                        );
                         let output = serde_json::to_string_pretty(&result)
                             .unwrap_or_else(|_| format!("{:?}", result));
                         return ToolResult::ok_with_image(
@@ -998,8 +994,8 @@ impl Tool for BrowserTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use std::path::Path;
 
     fn make_ctx() -> ToolExecutionContext {
@@ -1088,7 +1084,9 @@ mod tests {
             browser_detected: true,
             browser_path: Some(PathBuf::from("/usr/bin/chromium")),
         };
-        assert!(avail_browser_only.status_message().contains("--features browser"));
+        assert!(avail_browser_only
+            .status_message()
+            .contains("--features browser"));
 
         let avail_neither = BrowserAvailability {
             feature_compiled: false,
@@ -1165,8 +1163,7 @@ mod tests {
     #[test]
     fn test_browser_tool_registered_in_registry() {
         // Verify BrowserTool is in the static registry
-        let registry =
-            crate::services::tools::executor::ToolExecutor::build_registry_static();
+        let registry = crate::services::tools::executor::ToolExecutor::build_registry_static();
         let browser = registry.get("Browser");
         assert!(
             browser.is_some(),

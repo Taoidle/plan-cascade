@@ -125,10 +125,7 @@ pub async fn start_remote_gateway(
             let keyring = KeyringService::new();
             if let Some(ref mut tg) = telegram_config {
                 tg.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
-                tg.access_password = keyring
-                    .get_api_key(KEYRING_ACCESS_PASSWORD)
-                    .ok()
-                    .flatten();
+                tg.access_password = keyring.get_api_key(KEYRING_ACCESS_PASSWORD).ok().flatten();
             }
 
             // Resolve proxy for remote_telegram provider
@@ -144,9 +141,7 @@ pub async fn start_remote_gateway(
     };
 
     // Get database for gateway
-    let db_result = app_state
-        .with_database(|db| Ok(Arc::new(db.clone())))
-        .await;
+    let db_result = app_state.with_database(|db| Ok(Arc::new(db.clone()))).await;
 
     let db = match db_result {
         Ok(d) => d,
@@ -193,9 +188,7 @@ pub async fn stop_remote_gateway(
             Ok(()) => Ok(CommandResponse::ok(())),
             Err(e) => Ok(CommandResponse::err(e.to_string())),
         },
-        None => Ok(CommandResponse::err(
-            "Gateway is not running".to_string(),
-        )),
+        None => Ok(CommandResponse::err("Gateway is not running".to_string())),
     }
 }
 
@@ -429,9 +422,7 @@ pub async fn disconnect_remote_session(
             Ok(()) => Ok(CommandResponse::ok(())),
             Err(e) => Ok(CommandResponse::err(e.to_string())),
         },
-        None => Ok(CommandResponse::err(
-            "Gateway is not running".to_string(),
-        )),
+        None => Ok(CommandResponse::err("Gateway is not running".to_string())),
     }
 }
 
@@ -560,10 +551,7 @@ pub async fn try_auto_start_gateway(
             let keyring = KeyringService::new();
             if let Some(ref mut tg) = telegram_config {
                 tg.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
-                tg.access_password = keyring
-                    .get_api_key(KEYRING_ACCESS_PASSWORD)
-                    .ok()
-                    .flatten();
+                tg.access_password = keyring.get_api_key(KEYRING_ACCESS_PASSWORD).ok().flatten();
             }
 
             let proxy = resolve_provider_proxy(&keyring, db, "remote_telegram");
@@ -581,9 +569,7 @@ pub async fn try_auto_start_gateway(
     };
 
     // Get database for gateway
-    let db_result = app_state
-        .with_database(|db| Ok(Arc::new(db.clone())))
-        .await;
+    let db_result = app_state.with_database(|db| Ok(Arc::new(db.clone()))).await;
 
     let db = match db_result {
         Ok(d) => d,

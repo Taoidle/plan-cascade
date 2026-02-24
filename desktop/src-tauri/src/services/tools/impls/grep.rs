@@ -300,8 +300,8 @@ impl Tool for GrepTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use tempfile::TempDir;
 
     #[tokio::test]

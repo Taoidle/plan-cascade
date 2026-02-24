@@ -19,9 +19,9 @@
 //! - Defaults to `None` for backward compatibility
 //! - Existing code that doesn't use actions is unaffected
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 
 // ============================================================================
 // EventActions
@@ -265,8 +265,7 @@ mod tests {
 
     #[test]
     fn test_event_actions_with_state() {
-        let actions = EventActions::none()
-            .with_state("progress", Value::Number(75.into()));
+        let actions = EventActions::none().with_state("progress", Value::Number(75.into()));
         assert!(actions.has_actions());
         assert_eq!(actions.state_delta.len(), 1);
         assert_eq!(actions.state_delta["progress"], Value::Number(75.into()));
@@ -282,8 +281,7 @@ mod tests {
 
     #[test]
     fn test_event_actions_with_transfer() {
-        let actions = EventActions::none()
-            .with_transfer("reviewer-agent");
+        let actions = EventActions::none().with_transfer("reviewer-agent");
         assert!(actions.has_actions());
         assert_eq!(
             actions.transfer_to_agent,
@@ -293,8 +291,7 @@ mod tests {
 
     #[test]
     fn test_event_actions_with_checkpoint() {
-        let actions = EventActions::none()
-            .with_checkpoint("after-lint");
+        let actions = EventActions::none().with_checkpoint("after-lint");
         assert!(actions.has_actions());
         let cp = actions.checkpoint_request.unwrap();
         assert_eq!(cp.label, "after-lint");
@@ -303,8 +300,8 @@ mod tests {
 
     #[test]
     fn test_event_actions_with_checkpoint_described() {
-        let actions = EventActions::none()
-            .with_checkpoint_described("milestone-1", "All tests pass");
+        let actions =
+            EventActions::none().with_checkpoint_described("milestone-1", "All tests pass");
         let cp = actions.checkpoint_request.unwrap();
         assert_eq!(cp.label, "milestone-1");
         assert_eq!(cp.description, Some("All tests pass".to_string()));
@@ -312,8 +309,7 @@ mod tests {
 
     #[test]
     fn test_event_actions_with_quality_gate_pass() {
-        let actions = EventActions::none()
-            .with_quality_gate("typecheck", true, None);
+        let actions = EventActions::none().with_quality_gate("typecheck", true, None);
         assert!(actions.has_actions());
         let qg = actions.quality_gate_result.unwrap();
         assert_eq!(qg.gate_name, "typecheck");
@@ -323,8 +319,11 @@ mod tests {
 
     #[test]
     fn test_event_actions_with_quality_gate_fail() {
-        let actions = EventActions::none()
-            .with_quality_gate("lint", false, Some("3 warnings found".to_string()));
+        let actions = EventActions::none().with_quality_gate(
+            "lint",
+            false,
+            Some("3 warnings found".to_string()),
+        );
         let qg = actions.quality_gate_result.unwrap();
         assert!(!qg.passed);
         assert_eq!(qg.details, Some("3 warnings found".to_string()));
@@ -354,7 +353,7 @@ mod tests {
             .with_state("key2", Value::Bool(false));
 
         let b = EventActions::none()
-            .with_state("key2", Value::Bool(true))  // overrides
+            .with_state("key2", Value::Bool(true)) // overrides
             .with_state("key3", Value::Number(42.into()));
 
         let merged = a.merge(b);
@@ -396,8 +395,7 @@ mod tests {
 
     #[test]
     fn test_event_actions_serialization_with_state() {
-        let actions = EventActions::none()
-            .with_state("key", Value::String("value".to_string()));
+        let actions = EventActions::none().with_state("key", Value::String("value".to_string()));
         let json = serde_json::to_string(&actions).unwrap();
         assert!(json.contains("state_delta"));
         assert!(json.contains("\"key\":\"value\""));
@@ -524,8 +522,7 @@ mod tests {
             key: "result".to_string(),
             value: serde_json::json!(42),
         };
-        let actions = EventActions::none()
-            .with_transfer("next-agent");
+        let actions = EventActions::none().with_transfer("next-agent");
 
         let wrapped = AgentEventWithActions::with_actions(event, actions);
         let json = serde_json::to_string(&wrapped).unwrap();

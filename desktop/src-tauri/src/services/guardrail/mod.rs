@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 // Re-export key types
 pub use code_security::CodeSecurityGuardrail;
 pub use custom::CustomGuardrail;
-pub use registry::{GuardrailRegistry, register_guardrail_hooks};
+pub use registry::{register_guardrail_hooks, GuardrailRegistry};
 pub use schema_validation::SchemaValidationGuardrail;
 pub use sensitive_data::SensitiveDataGuardrail;
 
@@ -317,8 +317,14 @@ mod tests {
     #[test]
     fn test_guardrail_action_from_str() {
         assert_eq!(GuardrailAction::parse("warn"), Some(GuardrailAction::Warn));
-        assert_eq!(GuardrailAction::parse("BLOCK"), Some(GuardrailAction::Block));
-        assert_eq!(GuardrailAction::parse("Redact"), Some(GuardrailAction::Redact));
+        assert_eq!(
+            GuardrailAction::parse("BLOCK"),
+            Some(GuardrailAction::Block)
+        );
+        assert_eq!(
+            GuardrailAction::parse("Redact"),
+            Some(GuardrailAction::Redact)
+        );
         assert_eq!(GuardrailAction::parse("invalid"), None);
     }
 

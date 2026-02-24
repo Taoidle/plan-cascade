@@ -18,9 +18,10 @@ pub async fn list_agent_pipelines(
 ) -> Result<CommandResponse<Vec<AgentPipelineInfo>>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_agent_pipelines_table(&conn)?;
 
@@ -32,16 +33,14 @@ pub async fn list_agent_pipelines(
             let pipelines: Vec<AgentPipelineInfo> = stmt
                 .query_map([], |row| {
                     let definition_json: String = row.get(3)?;
-                    let pipeline: AgentPipeline =
-                        serde_json::from_str(&definition_json).unwrap_or_else(|_| {
-                            AgentPipeline {
-                                pipeline_id: row.get::<_, String>(0).unwrap_or_default(),
-                                name: row.get::<_, String>(1).unwrap_or_default(),
-                                description: row.get::<_, Option<String>>(2).ok().flatten(),
-                                steps: vec![],
-                                created_at: row.get::<_, String>(4).unwrap_or_default(),
-                                updated_at: row.get::<_, Option<String>>(5).ok().flatten(),
-                            }
+                    let pipeline: AgentPipeline = serde_json::from_str(&definition_json)
+                        .unwrap_or_else(|_| AgentPipeline {
+                            pipeline_id: row.get::<_, String>(0).unwrap_or_default(),
+                            name: row.get::<_, String>(1).unwrap_or_default(),
+                            description: row.get::<_, Option<String>>(2).ok().flatten(),
+                            steps: vec![],
+                            created_at: row.get::<_, String>(4).unwrap_or_default(),
+                            updated_at: row.get::<_, Option<String>>(5).ok().flatten(),
                         });
                     Ok(AgentPipelineInfo::from(&pipeline))
                 })?
@@ -66,9 +65,10 @@ pub async fn get_agent_pipeline(
 ) -> Result<CommandResponse<Option<AgentPipeline>>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_agent_pipelines_table(&conn)?;
 
@@ -224,9 +224,10 @@ pub async fn delete_agent_pipeline(
 ) -> Result<CommandResponse<bool>, String> {
     let result = state
         .with_database(|db| {
-            let conn = db.pool().get().map_err(|e| {
-                AppError::database(format!("Failed to get connection: {}", e))
-            })?;
+            let conn = db
+                .pool()
+                .get()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             ensure_agent_pipelines_table(&conn)?;
 
@@ -298,15 +299,13 @@ mod tests {
             pipeline_id: "p-1".to_string(),
             name: "My Pipeline".to_string(),
             description: Some("desc".to_string()),
-            steps: vec![
-                AgentStep::LlmStep(LlmStepConfig {
-                    name: "s1".to_string(),
-                    instruction: None,
-                    model: None,
-                    tools: None,
-                    config: AgentConfig::default(),
-                }),
-            ],
+            steps: vec![AgentStep::LlmStep(LlmStepConfig {
+                name: "s1".to_string(),
+                instruction: None,
+                model: None,
+                tools: None,
+                config: AgentConfig::default(),
+            })],
             created_at: "2026-01-01".to_string(),
             updated_at: None,
         };

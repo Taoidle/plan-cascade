@@ -66,7 +66,10 @@ impl Tool for AnalyzeTool {
         // The Analyze tool requires IndexStore access which is managed by ToolExecutor.
         // When called through the registry, we return a helpful message.
         // In practice, ToolExecutor intercepts "Analyze" calls before they reach here.
-        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("(no query)");
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(no query)");
         ToolResult::ok(format!(
             "Analyze tool received query '{}'. Note: Analysis requires the codebase index. Use Grep, Glob, or LS for direct file exploration.",
             query
@@ -76,8 +79,8 @@ impl Tool for AnalyzeTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use tempfile::TempDir;
 
     #[tokio::test]

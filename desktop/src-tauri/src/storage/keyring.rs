@@ -51,19 +51,15 @@ impl SecureStore {
             // First run: generate a random encryption key
             let mut key = vec![0u8; KEY_SIZE];
             OsRng.fill_bytes(&mut key);
-            std::fs::write(&key_path, &key).map_err(|e| {
-                AppError::keyring(format!("Failed to write encryption key: {}", e))
-            })?;
+            std::fs::write(&key_path, &key)
+                .map_err(|e| AppError::keyring(format!("Failed to write encryption key: {}", e)))?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(
-                    &key_path,
-                    std::fs::Permissions::from_mode(0o600),
-                )
-                .map_err(|e| {
-                    AppError::keyring(format!("Failed to set key file permissions: {}", e))
-                })?;
+                std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+                    .map_err(|e| {
+                        AppError::keyring(format!("Failed to set key file permissions: {}", e))
+                    })?;
             }
             key
         };
@@ -143,10 +139,8 @@ impl SecureStore {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
-                &self.store_path,
-                std::fs::Permissions::from_mode(0o600),
-            );
+            let _ =
+                std::fs::set_permissions(&self.store_path, std::fs::Permissions::from_mode(0o600));
         }
 
         Ok(())

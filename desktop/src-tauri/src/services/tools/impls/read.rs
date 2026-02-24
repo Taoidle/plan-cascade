@@ -4,13 +4,13 @@
 //! and rich format parsing (PDF, DOCX, XLSX, Jupyter, images).
 //! Includes content-aware deduplication via the shared read cache.
 
+use crate::services::llm::types::ParameterSchema;
+use crate::services::tools::executor::{ReadCacheEntry, ToolResult};
+use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use crate::services::llm::types::ParameterSchema;
-use crate::services::tools::executor::{ReadCacheEntry, ToolResult};
-use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
 
 use super::text_utils::decode_read_text;
 
@@ -36,7 +36,11 @@ fn missing_param_error(param: &str) -> String {
 }
 
 /// Validate and resolve a file path relative to a working directory and project root.
-pub(crate) fn validate_path(path_str: &str, working_dir: &Path, _project_root: &Path) -> Result<PathBuf, String> {
+pub(crate) fn validate_path(
+    path_str: &str,
+    working_dir: &Path,
+    _project_root: &Path,
+) -> Result<PathBuf, String> {
     let path = Path::new(path_str);
     let abs_path = if path.is_absolute() {
         path.to_path_buf()
@@ -107,7 +111,11 @@ impl Tool for ReadTool {
             None => return ToolResult::err(missing_param_error("file_path")),
         };
 
-        let path = match validate_path(file_path, &ctx.working_directory_snapshot(), &ctx.project_root) {
+        let path = match validate_path(
+            file_path,
+            &ctx.working_directory_snapshot(),
+            &ctx.project_root,
+        ) {
             Ok(p) => p,
             Err(e) => return ToolResult::err(e),
         };
@@ -156,7 +164,8 @@ impl Tool for ReadTool {
                 Ok(content) => return ToolResult::ok(content),
                 Err(e) => return parser_error_result(e),
             },
-            "xlsx" | "xls" | "ods" => match crate::services::tools::file_parsers::parse_xlsx(&path) {
+            "xlsx" | "xls" | "ods" => match crate::services::tools::file_parsers::parse_xlsx(&path)
+            {
                 Ok(content) => return ToolResult::ok(content),
                 Err(e) => return parser_error_result(e),
             },
@@ -171,10 +180,11 @@ impl Tool for ReadTool {
                 ));
             }
             "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" => {
-                let metadata = match crate::services::tools::file_parsers::read_image_metadata(&path) {
-                    Ok(m) => m,
-                    Err(e) => return ToolResult::err(e),
-                };
+                let metadata =
+                    match crate::services::tools::file_parsers::read_image_metadata(&path) {
+                        Ok(m) => m,
+                        Err(e) => return ToolResult::err(e),
+                    };
                 match crate::services::tools::file_parsers::encode_image_base64(&path) {
                     Ok((mime, b64)) => return ToolResult::ok_with_image(metadata, mime, b64),
                     Err(_) => return ToolResult::ok(metadata),
@@ -310,8 +320,8 @@ impl Tool for ReadTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use tempfile::TempDir;
 
     #[tokio::test]

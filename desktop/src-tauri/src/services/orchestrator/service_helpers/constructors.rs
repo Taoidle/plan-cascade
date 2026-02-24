@@ -15,13 +15,27 @@ fn is_narrow_scope_prompt(prompt: &str) -> bool {
     let lower = prompt.to_lowercase();
 
     // Check for path-like patterns with known prefixes
-    let path_prefixes = ["src/", "lib/", "crates/", "packages/", "apps/", "cmd/", "internal/", "pkg/", "./", "../"];
+    let path_prefixes = [
+        "src/",
+        "lib/",
+        "crates/",
+        "packages/",
+        "apps/",
+        "cmd/",
+        "internal/",
+        "pkg/",
+        "./",
+        "../",
+    ];
     if path_prefixes.iter().any(|p| lower.contains(p)) {
         return true;
     }
 
     // Check for file extensions
-    let extensions = [".rs", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".java", ".toml", ".json", ".yaml", ".yml"];
+    let extensions = [
+        ".rs", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".java", ".toml", ".json", ".yaml",
+        ".yml",
+    ];
     if extensions.iter().any(|ext| lower.contains(ext)) {
         return true;
     }
@@ -68,7 +82,8 @@ fn should_escalate_explore(
         _ => (100, 5),
     };
 
-    let is_large = summary.total_files > file_threshold || summary.components.len() > component_threshold;
+    let is_large =
+        summary.total_files > file_threshold || summary.components.len() > component_threshold;
     if !is_large {
         return false;
     }
@@ -115,16 +130,23 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         // ── Auto-routing: detect broad explore on large projects ────────
         let (effective_type, effective_prompt) = if subagent_type == SubAgentType::Explore {
             if let Some(store) = &self.shared_index_store {
-                let summary = store.get_project_summary(
-                    &self.project_root.to_string_lossy(),
-                );
+                let summary = store.get_project_summary(&self.project_root.to_string_lossy());
                 if let Ok(summary) = summary {
-                    if should_escalate_explore(&prompt, &summary, depth, &self.provider_config.provider) {
+                    if should_escalate_explore(
+                        &prompt,
+                        &summary,
+                        depth,
+                        &self.provider_config.provider,
+                    ) {
                         eprintln!(
                             "[task-routing] Escalating explore -> coordinator (files={}, components={}, depth={})",
                             summary.total_files, summary.components.len(), depth
                         );
-                        let enriched = build_escalated_explore_prompt(&prompt, &summary, &self.provider_config);
+                        let enriched = build_escalated_explore_prompt(
+                            &prompt,
+                            &summary,
+                            &self.provider_config,
+                        );
                         (SubAgentType::GeneralPurpose, enriched)
                     } else {
                         (subagent_type, prompt)
@@ -140,10 +162,17 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         };
 
         // 1. Build type-specific system prompt
-        let task_prefix = build_subagent_prompt(effective_type, depth, &self.detected_language, &self.provider_config.provider, &self.provider_config);
+        let task_prefix = build_subagent_prompt(
+            effective_type,
+            depth,
+            &self.detected_language,
+            &self.provider_config.provider,
+            &self.provider_config,
+        );
 
         // 2. Get tools filtered by sub-agent type
-        let tools = crate::services::tools::definitions::get_tool_definitions_for_subagent(effective_type);
+        let tools =
+            crate::services::tools::definitions::get_tool_definitions_for_subagent(effective_type);
 
         // 3. Configure sub-agent
         let mut sub_provider = self.provider_config.clone();
@@ -193,8 +222,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         });
 
         // Give each sub-agent a fresh read cache.
-        let isolated_read_cache =
-            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let isolated_read_cache = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_agent = OrchestratorService::new_sub_agent_with_shared_state(
             sub_config,
             cancellation_token,
@@ -213,7 +241,9 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         sub_agent.analytics_cost_calculator = self.shared_analytics_cost_calculator.clone();
         // Propagate permission gate to sub-agent so tool calls are approved
         if let Some(ref gate) = self.shared_permission_gate {
-            sub_agent.tool_executor.set_permission_gate(Arc::clone(gate));
+            sub_agent
+                .tool_executor
+                .set_permission_gate(Arc::clone(gate));
             sub_agent.permission_gate = Some(Arc::clone(gate));
         }
 
@@ -342,8 +372,11 @@ fn build_subagent_prompt(
     // parallel Task execution example so they don't serialize Task calls.
     if subagent_type == SubAgentType::GeneralPurpose {
         match provider_type {
-            ProviderType::Qwen | ProviderType::DeepSeek | ProviderType::Glm
-            | ProviderType::Ollama | ProviderType::Minimax => {
+            ProviderType::Qwen
+            | ProviderType::DeepSeek
+            | ProviderType::Glm
+            | ProviderType::Ollama
+            | ProviderType::Minimax => {
                 prompt.push_str(
                     "\n\n## CRITICAL: Parallel Task Execution\n\
                      You MUST emit multiple Task tool calls in a SINGLE response. Example:\n\n\
@@ -418,13 +451,19 @@ impl OrchestratorService {
     }
 
     /// Wire an analytics tracker channel for persisting per-call usage to the analytics database.
-    pub fn with_analytics_tracker(mut self, tx: tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>) -> Self {
+    pub fn with_analytics_tracker(
+        mut self,
+        tx: tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>,
+    ) -> Self {
         self.analytics_tx = Some(tx);
         self
     }
 
     /// Wire a cost calculator for analytics tracking.
-    pub fn with_analytics_cost_calculator(mut self, calc: Arc<crate::services::analytics::CostCalculator>) -> Self {
+    pub fn with_analytics_cost_calculator(
+        mut self,
+        calc: Arc<crate::services::analytics::CostCalculator>,
+    ) -> Self {
         self.analytics_cost_calculator = Some(calc);
         self
     }
@@ -434,7 +473,10 @@ impl OrchestratorService {
     /// Sub-agents use empty hooks (`AgenticHooks::new()`) because they have
     /// independent context windows and should not inherit the parent's
     /// memory/skill lifecycle hooks.
-    pub(super) fn new_sub_agent(config: OrchestratorConfig, cancellation_token: CancellationToken) -> Self {
+    pub(super) fn new_sub_agent(
+        config: OrchestratorConfig,
+        cancellation_token: CancellationToken,
+    ) -> Self {
         let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
             ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config.provider.clone())),
@@ -571,8 +613,7 @@ impl OrchestratorService {
         mut self,
         gate: Arc<crate::services::orchestrator::permission_gate::PermissionGate>,
     ) -> Self {
-        self.tool_executor
-            .set_permission_gate(Arc::clone(&gate));
+        self.tool_executor.set_permission_gate(Arc::clone(&gate));
         self.permission_gate = Some(gate);
         self
     }
@@ -625,9 +666,13 @@ impl OrchestratorService {
     /// state, which is also retained by the orchestrator for system prompt injection.
     pub fn with_skill_hooks(
         mut self,
-        skill_index: std::sync::Arc<tokio::sync::RwLock<crate::services::skills::model::SkillIndex>>,
+        skill_index: std::sync::Arc<
+            tokio::sync::RwLock<crate::services::skills::model::SkillIndex>,
+        >,
         policy: crate::services::skills::model::SelectionPolicy,
-        selected_skills: std::sync::Arc<tokio::sync::RwLock<Vec<crate::services::skills::model::SkillMatch>>>,
+        selected_skills: std::sync::Arc<
+            tokio::sync::RwLock<Vec<crate::services::skills::model::SkillMatch>>,
+        >,
     ) -> Self {
         crate::services::orchestrator::hooks::register_skill_hooks(
             &mut self.hooks,
@@ -651,7 +696,9 @@ impl OrchestratorService {
     pub fn with_memory_hooks(
         mut self,
         memory_store: std::sync::Arc<crate::services::memory::store::ProjectMemoryStore>,
-        loaded_memories: std::sync::Arc<tokio::sync::RwLock<Vec<crate::services::memory::store::MemoryEntry>>>,
+        loaded_memories: std::sync::Arc<
+            tokio::sync::RwLock<Vec<crate::services::memory::store::MemoryEntry>>,
+        >,
     ) -> Self {
         crate::services::orchestrator::hooks::register_memory_hooks(
             &mut self.hooks,
@@ -692,17 +739,13 @@ impl OrchestratorService {
         }
 
         // Derive project_id from config or project_root
-        let project_id = self
-            .config
-            .project_id
-            .clone()
-            .unwrap_or_else(|| {
-                self.config
-                    .project_root
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "default".to_string())
-            });
+        let project_id = self.config.project_id.clone().unwrap_or_else(|| {
+            self.config
+                .project_root
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "default".to_string())
+        });
 
         match provider
             .query_for_context(&project_id, user_query, &self.knowledge_context_config)
@@ -729,12 +772,11 @@ impl OrchestratorService {
     /// - `on_after_tool` validates tool output (may warn)
     pub fn with_guardrail_hooks(
         mut self,
-        registry: std::sync::Arc<tokio::sync::RwLock<crate::services::guardrail::GuardrailRegistry>>,
+        registry: std::sync::Arc<
+            tokio::sync::RwLock<crate::services::guardrail::GuardrailRegistry>,
+        >,
     ) -> Self {
-        crate::services::guardrail::register_guardrail_hooks(
-            &mut self.hooks,
-            registry,
-        );
+        crate::services::guardrail::register_guardrail_hooks(&mut self.hooks, registry);
         self
     }
 
@@ -1420,8 +1462,14 @@ mod escalation_tests {
             total_files: 30,
             languages: vec!["rust".to_string()],
             components: vec![
-                ComponentSummary { name: "src".into(), count: 20 },
-                ComponentSummary { name: "tests".into(), count: 10 },
+                ComponentSummary {
+                    name: "src".into(),
+                    count: 20,
+                },
+                ComponentSummary {
+                    name: "tests".into(),
+                    count: 10,
+                },
             ],
             key_entry_points: vec!["src/main.rs".into()],
             total_symbols: 50,
@@ -1434,16 +1482,46 @@ mod escalation_tests {
             total_files: 500,
             languages: vec!["rust".to_string(), "typescript".to_string()],
             components: vec![
-                ComponentSummary { name: "backend".into(), count: 100 },
-                ComponentSummary { name: "frontend".into(), count: 120 },
-                ComponentSummary { name: "shared".into(), count: 30 },
-                ComponentSummary { name: "api".into(), count: 40 },
-                ComponentSummary { name: "cli".into(), count: 25 },
-                ComponentSummary { name: "tools".into(), count: 35 },
-                ComponentSummary { name: "core".into(), count: 50 },
-                ComponentSummary { name: "tests".into(), count: 40 },
-                ComponentSummary { name: "docs".into(), count: 30 },
-                ComponentSummary { name: "scripts".into(), count: 30 },
+                ComponentSummary {
+                    name: "backend".into(),
+                    count: 100,
+                },
+                ComponentSummary {
+                    name: "frontend".into(),
+                    count: 120,
+                },
+                ComponentSummary {
+                    name: "shared".into(),
+                    count: 30,
+                },
+                ComponentSummary {
+                    name: "api".into(),
+                    count: 40,
+                },
+                ComponentSummary {
+                    name: "cli".into(),
+                    count: 25,
+                },
+                ComponentSummary {
+                    name: "tools".into(),
+                    count: 35,
+                },
+                ComponentSummary {
+                    name: "core".into(),
+                    count: 50,
+                },
+                ComponentSummary {
+                    name: "tests".into(),
+                    count: 40,
+                },
+                ComponentSummary {
+                    name: "docs".into(),
+                    count: 30,
+                },
+                ComponentSummary {
+                    name: "scripts".into(),
+                    count: 30,
+                },
             ],
             key_entry_points: vec!["src/main.rs".into(), "src/index.ts".into()],
             total_symbols: 1200,
@@ -1456,9 +1534,18 @@ mod escalation_tests {
             total_files,
             languages: vec!["rust".to_string()],
             components: vec![
-                ComponentSummary { name: "src".into(), count: total_files / 2 },
-                ComponentSummary { name: "tests".into(), count: total_files / 4 },
-                ComponentSummary { name: "lib".into(), count: total_files / 4 },
+                ComponentSummary {
+                    name: "src".into(),
+                    count: total_files / 2,
+                },
+                ComponentSummary {
+                    name: "tests".into(),
+                    count: total_files / 4,
+                },
+                ComponentSummary {
+                    name: "lib".into(),
+                    count: total_files / 4,
+                },
             ],
             key_entry_points: vec!["src/main.rs".into()],
             total_symbols: 200,
@@ -1470,7 +1557,12 @@ mod escalation_tests {
     fn test_small_project_no_escalation() {
         let summary = make_small_summary();
         assert!(
-            !should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Anthropic),
+            !should_escalate_explore(
+                "What does this project do?",
+                &summary,
+                0,
+                &ProviderType::Anthropic
+            ),
             "Small project should not escalate"
         );
         assert!(
@@ -1483,11 +1575,21 @@ mod escalation_tests {
     fn test_large_project_broad_prompt_escalates() {
         let summary = make_large_summary();
         assert!(
-            should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Anthropic),
+            should_escalate_explore(
+                "What does this project do?",
+                &summary,
+                0,
+                &ProviderType::Anthropic
+            ),
             "Large project with broad prompt should escalate"
         );
         assert!(
-            should_escalate_explore("Analyze the architecture of this codebase", &summary, 0, &ProviderType::OpenAI),
+            should_escalate_explore(
+                "Analyze the architecture of this codebase",
+                &summary,
+                0,
+                &ProviderType::OpenAI
+            ),
             "Large project with broad architecture question should escalate"
         );
         assert!(
@@ -1500,11 +1602,21 @@ mod escalation_tests {
     fn test_large_project_narrow_prompt_no_escalation() {
         let summary = make_large_summary();
         assert!(
-            !should_escalate_explore("Explore src/services/auth.rs", &summary, 0, &ProviderType::Anthropic),
+            !should_escalate_explore(
+                "Explore src/services/auth.rs",
+                &summary,
+                0,
+                &ProviderType::Anthropic
+            ),
             "Narrow prompt with file path should not escalate"
         );
         assert!(
-            !should_escalate_explore("How does the lib/core module work?", &summary, 0, &ProviderType::Anthropic),
+            !should_escalate_explore(
+                "How does the lib/core module work?",
+                &summary,
+                0,
+                &ProviderType::Anthropic
+            ),
             "Narrow prompt targeting specific module should not escalate"
         );
     }
@@ -1514,15 +1626,30 @@ mod escalation_tests {
         // 150 files: below Anthropic threshold (200) but above Qwen threshold (100)
         let summary = make_medium_summary(150);
         assert!(
-            !should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Anthropic),
+            !should_escalate_explore(
+                "What does this project do?",
+                &summary,
+                0,
+                &ProviderType::Anthropic
+            ),
             "150 files should NOT escalate for Anthropic (threshold 200)"
         );
         assert!(
-            should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Qwen),
+            should_escalate_explore(
+                "What does this project do?",
+                &summary,
+                0,
+                &ProviderType::Qwen
+            ),
             "150 files should escalate for Qwen (threshold 100)"
         );
         assert!(
-            should_escalate_explore("What does this project do?", &summary, 0, &ProviderType::Ollama),
+            should_escalate_explore(
+                "What does this project do?",
+                &summary,
+                0,
+                &ProviderType::Ollama
+            ),
             "150 files should escalate for Ollama (threshold 100)"
         );
     }
@@ -1532,12 +1659,22 @@ mod escalation_tests {
         let summary = make_large_summary();
         // depth=1, MAX_SUB_AGENT_DEPTH=3 → depth+2=3 >= 3, no room
         assert!(
-            !should_escalate_explore("What does this project do?", &summary, 1, &ProviderType::Anthropic),
+            !should_escalate_explore(
+                "What does this project do?",
+                &summary,
+                1,
+                &ProviderType::Anthropic
+            ),
             "depth=1 with MAX_DEPTH=3 should not escalate (no room for children)"
         );
         // depth=2 definitely no room
         assert!(
-            !should_escalate_explore("What does this project do?", &summary, 2, &ProviderType::Anthropic),
+            !should_escalate_explore(
+                "What does this project do?",
+                &summary,
+                2,
+                &ProviderType::Anthropic
+            ),
             "depth=2 with MAX_DEPTH=3 should not escalate"
         );
     }
@@ -1546,7 +1683,9 @@ mod escalation_tests {
     fn test_is_narrow_scope_with_path() {
         assert!(is_narrow_scope_prompt("Explore src/services/auth.rs"));
         assert!(is_narrow_scope_prompt("What's in lib/core?"));
-        assert!(is_narrow_scope_prompt("Explain crates/llm/src/anthropic.rs"));
+        assert!(is_narrow_scope_prompt(
+            "Explain crates/llm/src/anthropic.rs"
+        ));
         assert!(is_narrow_scope_prompt("How does ./config.toml work?"));
         assert!(is_narrow_scope_prompt("Read the main.ts file"));
         assert!(is_narrow_scope_prompt("Analyze packages/frontend"));
@@ -1608,7 +1747,10 @@ mod escalation_tests {
         let escalated = build_escalated_explore_prompt("Explain this project", &summary, &provider);
         let max_concurrent = provider.effective_max_concurrent_subagents();
         assert!(
-            escalated.contains(&format!("at most {} tasks run simultaneously", max_concurrent)),
+            escalated.contains(&format!(
+                "at most {} tasks run simultaneously",
+                max_concurrent
+            )),
             "Escalated prompt should show actual max_concurrent value"
         );
 
@@ -1617,7 +1759,8 @@ mod escalation_tests {
             provider: ProviderType::Glm,
             ..Default::default()
         };
-        let escalated_glm = build_escalated_explore_prompt("Explain this project", &summary, &glm_provider);
+        let escalated_glm =
+            build_escalated_explore_prompt("Explain this project", &summary, &glm_provider);
         let glm_max = glm_provider.effective_max_concurrent_subagents();
         assert!(
             escalated_glm.contains(&format!("at most {} tasks run simultaneously", glm_max)),

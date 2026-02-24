@@ -97,8 +97,9 @@ impl GateCache {
 
         match result {
             Ok(json) => {
-                let gate_result: PipelineGateResult = serde_json::from_str(&json)
-                    .map_err(|e| AppError::parse(format!("Failed to parse cached result: {}", e)))?;
+                let gate_result: PipelineGateResult = serde_json::from_str(&json).map_err(|e| {
+                    AppError::parse(format!("Failed to parse cached result: {}", e))
+                })?;
                 Ok(Some(gate_result))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -165,11 +166,9 @@ impl GateCache {
             .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM quality_gate_cache",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM quality_gate_cache", [], |row| {
+            row.get(0)
+        })?;
 
         Ok(count as u64)
     }
@@ -300,7 +299,8 @@ mod tests {
     fn test_cache_upsert() {
         let cache = create_test_cache();
         let key = create_test_key();
-        let passed_result = PipelineGateResult::passed("typecheck", "TypeCheck", GatePhase::Validation, 100);
+        let passed_result =
+            PipelineGateResult::passed("typecheck", "TypeCheck", GatePhase::Validation, 100);
         let failed_result = PipelineGateResult::failed(
             "typecheck",
             "TypeCheck",

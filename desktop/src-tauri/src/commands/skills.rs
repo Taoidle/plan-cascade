@@ -245,9 +245,7 @@ pub async fn create_skill_file(
         )));
     }
 
-    Ok(CommandResponse::ok(
-        file_path.to_string_lossy().to_string(),
-    ))
+    Ok(CommandResponse::ok(file_path.to_string_lossy().to_string()))
 }
 
 /// Delete a skill. For file-based skills, deletes the file.
@@ -294,7 +292,10 @@ pub async fn delete_skill(
 
     match result {
         Ok(()) => Ok(CommandResponse::ok(())),
-        Err(e) => Ok(CommandResponse::err(format!("Skill not found: {} ({})", id, e))),
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Skill not found: {} ({})",
+            id, e
+        ))),
     }
 }
 
@@ -368,10 +369,8 @@ pub async fn get_skills_overview(
         &InjectionPhase::Implementation,
         &policy,
     );
-    let detected_skills: Vec<SkillSummary> = detected_matches
-        .into_iter()
-        .map(|m| m.skill)
-        .collect();
+    let detected_skills: Vec<SkillSummary> =
+        detected_matches.into_iter().map(|m| m.skill).collect();
 
     // Collect source names
     let sources: Vec<String> = index
@@ -419,7 +418,11 @@ async fn build_skill_index_for_project(
             let rows = db.get_settings_by_prefix("skill_disabled:")?;
             Ok(rows
                 .into_iter()
-                .map(|(key, _)| key.strip_prefix("skill_disabled:").unwrap_or(&key).to_string())
+                .map(|(key, _)| {
+                    key.strip_prefix("skill_disabled:")
+                        .unwrap_or(&key)
+                        .to_string()
+                })
                 .collect())
         })
         .await

@@ -30,11 +30,7 @@ impl Tool for CwdTool {
     }
 
     fn parameters_schema(&self) -> ParameterSchema {
-        ParameterSchema::object(
-            Some("No parameters required"),
-            HashMap::new(),
-            vec![],
-        )
+        ParameterSchema::object(Some("No parameters required"), HashMap::new(), vec![])
     }
 
     fn is_parallel_safe(&self) -> bool {
@@ -42,14 +38,18 @@ impl Tool for CwdTool {
     }
 
     async fn execute(&self, ctx: &ToolExecutionContext, _args: Value) -> ToolResult {
-        ToolResult::ok(ctx.working_directory_snapshot().to_string_lossy().to_string())
+        ToolResult::ok(
+            ctx.working_directory_snapshot()
+                .to_string_lossy()
+                .to_string(),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -60,7 +60,10 @@ mod tests {
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
         assert!(result.success);
-        assert_eq!(result.output.unwrap(), dir.path().to_string_lossy().to_string());
+        assert_eq!(
+            result.output.unwrap(),
+            dir.path().to_string_lossy().to_string()
+        );
     }
 
     #[test]

@@ -179,9 +179,7 @@ impl Tool for TaskTool {
         let _permit = match task_ctx.llm_semaphore.acquire().await {
             Ok(permit) => permit,
             Err(_) => {
-                return ToolResult::err(
-                    "Sub-agent concurrency semaphore closed unexpectedly",
-                );
+                return ToolResult::err("Sub-agent concurrency semaphore closed unexpectedly");
             }
         };
 
@@ -244,8 +242,8 @@ impl Tool for TaskTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_ctx;
+    use super::*;
     use std::path::Path;
 
     #[test]
@@ -335,16 +333,31 @@ mod tests {
 
     #[test]
     fn test_subagent_type_parsing() {
-        assert_eq!(SubAgentType::from_str_compat("explore"), SubAgentType::Explore);
+        assert_eq!(
+            SubAgentType::from_str_compat("explore"),
+            SubAgentType::Explore
+        );
         assert_eq!(SubAgentType::from_str_compat("plan"), SubAgentType::Plan);
-        assert_eq!(SubAgentType::from_str_compat("general-purpose"), SubAgentType::GeneralPurpose);
-        assert_eq!(SubAgentType::from_str_compat("general_purpose"), SubAgentType::GeneralPurpose);
+        assert_eq!(
+            SubAgentType::from_str_compat("general-purpose"),
+            SubAgentType::GeneralPurpose
+        );
+        assert_eq!(
+            SubAgentType::from_str_compat("general_purpose"),
+            SubAgentType::GeneralPurpose
+        );
         assert_eq!(SubAgentType::from_str_compat("bash"), SubAgentType::Bash);
         // Backward compat
         assert_eq!(SubAgentType::from_str_compat("analyze"), SubAgentType::Plan);
-        assert_eq!(SubAgentType::from_str_compat("implement"), SubAgentType::GeneralPurpose);
+        assert_eq!(
+            SubAgentType::from_str_compat("implement"),
+            SubAgentType::GeneralPurpose
+        );
         // Unknown defaults to Explore
-        assert_eq!(SubAgentType::from_str_compat("unknown"), SubAgentType::Explore);
+        assert_eq!(
+            SubAgentType::from_str_compat("unknown"),
+            SubAgentType::Explore
+        );
     }
 
     #[test]

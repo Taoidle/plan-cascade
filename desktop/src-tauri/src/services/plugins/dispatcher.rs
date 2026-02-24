@@ -112,10 +112,7 @@ pub async fn execute_shell_hook(
         Err(_) => ShellResult {
             exit_code: 1,
             stdout: String::new(),
-            stderr: format!(
-                "Hook command timed out after {}ms",
-                timeout_ms
-            ),
+            stderr: format!("Hook command timed out after {}ms", timeout_ms),
         },
     }
 }
@@ -208,18 +205,9 @@ fn build_base_env(
     plugin_name: &str,
 ) -> HashMap<String, String> {
     let mut env = HashMap::new();
-    env.insert(
-        "CLAUDE_PROJECT_DIR".to_string(),
-        project_path.to_string(),
-    );
-    env.insert(
-        "CLAUDE_PLUGIN_ROOT".to_string(),
-        plugin_root.to_string(),
-    );
-    env.insert(
-        "CLAUDE_PLUGIN_NAME".to_string(),
-        plugin_name.to_string(),
-    );
+    env.insert("CLAUDE_PROJECT_DIR".to_string(), project_path.to_string());
+    env.insert("CLAUDE_PLUGIN_ROOT".to_string(), plugin_root.to_string());
+    env.insert("CLAUDE_PLUGIN_NAME".to_string(), plugin_name.to_string());
     env
 }
 
@@ -251,8 +239,7 @@ fn register_session_start_hook(
 
             if is_async {
                 tokio::spawn(async move {
-                    let result =
-                        execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                    let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
                     if !result.is_success() {
                         eprintln!(
                             "[plugin:{}] Async SessionStart hook failed: {}",
@@ -262,8 +249,7 @@ fn register_session_start_hook(
                 });
                 Ok(())
             } else {
-                let result =
-                    execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
                 if !result.is_success() {
                     eprintln!(
                         "[plugin:{}] SessionStart hook failed: {}",
@@ -300,8 +286,7 @@ fn register_user_message_hook(
             })
             .to_string();
 
-            let result =
-                execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+            let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
             if result.is_success() && !result.stdout.trim().is_empty() {
                 // If the hook returned non-empty stdout, use it as the modified message
                 Ok(Some(result.stdout.trim().to_string()))
@@ -357,8 +342,7 @@ fn register_before_tool_hook(
             })
             .to_string();
 
-            let result =
-                execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+            let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
 
             if result.is_block() {
                 // Exit code 2 = block the tool
@@ -405,72 +389,65 @@ fn register_after_tool_hook(
     let timeout = plugin_hook.timeout;
     let matcher_pattern = plugin_hook.matcher.clone();
 
-    hooks.register_on_after_tool(Box::new(
-        move |ctx, tool_name, success, output_snippet| {
-            let cmd = command.clone();
-            let name = plugin_name.clone();
-            let root = plugin_root.clone();
-            let timeout_ms = timeout;
-            let matcher = matcher_pattern.clone();
-            let project_path = ctx.project_path.to_string_lossy().to_string();
+    hooks.register_on_after_tool(Box::new(move |ctx, tool_name, success, output_snippet| {
+        let cmd = command.clone();
+        let name = plugin_name.clone();
+        let root = plugin_root.clone();
+        let timeout_ms = timeout;
+        let matcher = matcher_pattern.clone();
+        let project_path = ctx.project_path.to_string_lossy().to_string();
 
-            Box::pin(async move {
-                // Check matcher regex
-                if let Some(ref pattern) = matcher {
-                    match Regex::new(pattern) {
-                        Ok(re) => {
-                            if !re.is_match(&tool_name) {
-                                return Ok(());
-                            }
+        Box::pin(async move {
+            // Check matcher regex
+            if let Some(ref pattern) = matcher {
+                match Regex::new(pattern) {
+                    Ok(re) => {
+                        if !re.is_match(&tool_name) {
+                            return Ok(());
                         }
-                        Err(_) => return Ok(()),
                     }
+                    Err(_) => return Ok(()),
                 }
+            }
 
-                let mut env = build_base_env(&project_path, &root, &name);
-                env.insert("TOOL_NAME".to_string(), tool_name.clone());
-                env.insert(
-                    "TOOL_SUCCESS".to_string(),
-                    success.to_string(),
-                );
-                if let Some(ref output) = output_snippet {
-                    env.insert("TOOL_OUTPUT".to_string(), output.clone());
-                }
+            let mut env = build_base_env(&project_path, &root, &name);
+            env.insert("TOOL_NAME".to_string(), tool_name.clone());
+            env.insert("TOOL_SUCCESS".to_string(), success.to_string());
+            if let Some(ref output) = output_snippet {
+                env.insert("TOOL_OUTPUT".to_string(), output.clone());
+            }
 
-                let stdin = serde_json::json!({
-                    "session_id": ctx.session_id,
-                    "tool_name": tool_name,
-                    "success": success,
-                    "output": output_snippet,
-                })
-                .to_string();
+            let stdin = serde_json::json!({
+                "session_id": ctx.session_id,
+                "tool_name": tool_name,
+                "success": success,
+                "output": output_snippet,
+            })
+            .to_string();
 
-                if is_async {
-                    tokio::spawn(async move {
-                        let result =
-                            execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
-                        if !result.is_success() {
-                            eprintln!(
-                                "[plugin:{}] Async PostToolUse hook failed: {}",
-                                name, result.stderr
-                            );
-                        }
-                    });
-                } else {
-                    let result =
-                        execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+            if is_async {
+                tokio::spawn(async move {
+                    let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
                     if !result.is_success() {
                         eprintln!(
-                            "[plugin:{}] PostToolUse hook failed: {}",
+                            "[plugin:{}] Async PostToolUse hook failed: {}",
                             name, result.stderr
                         );
                     }
+                });
+            } else {
+                let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                if !result.is_success() {
+                    eprintln!(
+                        "[plugin:{}] PostToolUse hook failed: {}",
+                        name, result.stderr
+                    );
                 }
+            }
 
-                Ok(())
-            })
-        },
-    ));
+            Ok(())
+        })
+    }));
 }
 
 fn register_session_end_hook(
@@ -502,8 +479,7 @@ fn register_session_end_hook(
 
             if is_async {
                 tokio::spawn(async move {
-                    let result =
-                        execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                    let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
                     if !result.is_success() {
                         eprintln!(
                             "[plugin:{}] Async SessionEnd hook failed: {}",
@@ -512,8 +488,7 @@ fn register_session_end_hook(
                     }
                 });
             } else {
-                let result =
-                    execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
                 if !result.is_success() {
                     eprintln!(
                         "[plugin:{}] SessionEnd hook failed: {}",
@@ -551,8 +526,7 @@ fn register_compaction_hook(
             })
             .to_string();
 
-            let result =
-                execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+            let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
             if !result.is_success() {
                 eprintln!(
                     "[plugin:{}] PreCompact hook failed: {}",
@@ -598,8 +572,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("TEST_VAR".to_string(), "test_value".to_string());
 
-        let result =
-            execute_shell_hook("echo $TEST_VAR", &env, None, 5000).await;
+        let result = execute_shell_hook("echo $TEST_VAR", &env, None, 5000).await;
         assert!(result.is_success());
         assert_eq!(result.stdout.trim(), "test_value");
     }
@@ -634,8 +607,7 @@ mod tests {
     async fn test_execute_shell_hook_with_stdin() {
         let env = HashMap::new();
         let stdin_json = r#"{"tool": "test"}"#;
-        let result =
-            execute_shell_hook("cat", &env, Some(stdin_json), 5000).await;
+        let result = execute_shell_hook("cat", &env, Some(stdin_json), 5000).await;
         assert!(result.is_success());
         assert!(result.stdout.contains("tool"));
     }
@@ -643,8 +615,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_shell_hook_stderr() {
         let env = HashMap::new();
-        let result =
-            execute_shell_hook("echo error >&2 && exit 1", &env, None, 5000).await;
+        let result = execute_shell_hook("echo error >&2 && exit 1", &env, None, 5000).await;
         assert!(!result.is_success());
         assert!(result.stderr.contains("error"));
     }
@@ -792,7 +763,10 @@ mod tests {
         let result = hooks
             .fire_on_before_tool(&ctx, "Read", r#"{"path": "/tmp/file"}"#)
             .await;
-        assert!(result.is_none(), "Read should NOT be blocked by Bash matcher");
+        assert!(
+            result.is_none(),
+            "Read should NOT be blocked by Bash matcher"
+        );
     }
 
     #[tokio::test]
@@ -816,9 +790,7 @@ mod tests {
         );
 
         let ctx = test_hook_context();
-        let result = hooks
-            .fire_on_before_tool(&ctx, "Read", "{}")
-            .await;
+        let result = hooks.fire_on_before_tool(&ctx, "Read", "{}").await;
         assert!(result.is_none(), "exit 0 should continue execution");
     }
 
@@ -946,9 +918,7 @@ mod tests {
 
         let ctx = test_hook_context();
         // Just verify it runs without error
-        let result = hooks
-            .fire_on_before_tool(&ctx, "Read", "{}")
-            .await;
+        let result = hooks.fire_on_before_tool(&ctx, "Read", "{}").await;
         assert!(result.is_none()); // exit 0 -> no block
     }
 

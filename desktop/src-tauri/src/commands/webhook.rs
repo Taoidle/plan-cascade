@@ -31,7 +31,10 @@ impl WebhookState {
         // Provide a dummy service; will be replaced on init
         Self {
             service: Arc::new(WebhookService::new(
-                Arc::new(crate::storage::Database::new_in_memory().expect("in-memory DB for placeholder")),
+                Arc::new(
+                    crate::storage::Database::new_in_memory()
+                        .expect("in-memory DB for placeholder"),
+                ),
                 Arc::new(KeyringService::new()),
                 |_| None,
             )),
@@ -79,9 +82,7 @@ pub struct UpdateWebhookRequest {
 pub async fn list_webhook_channels(
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<WebhookChannelConfig>>, String> {
-    let result = state
-        .with_database(|db| db.list_webhook_channels())
-        .await;
+    let result = state.with_database(|db| db.list_webhook_channels()).await;
 
     match result {
         Ok(channels) => Ok(CommandResponse::ok(channels)),
@@ -147,9 +148,7 @@ pub async fn update_webhook_channel(
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<WebhookChannelConfig>, String> {
     // Load existing config
-    let existing = state
-        .with_database(|db| db.get_webhook_channel(&id))
-        .await;
+    let existing = state.with_database(|db| db.get_webhook_channel(&id)).await;
 
     let existing = match existing {
         Ok(Some(config)) => config,
@@ -232,9 +231,7 @@ pub async fn test_webhook_channel(
     webhook_state: State<'_, WebhookState>,
 ) -> Result<CommandResponse<WebhookTestResult>, String> {
     // Load channel config
-    let config = state
-        .with_database(|db| db.get_webhook_channel(&id))
-        .await;
+    let config = state.with_database(|db| db.get_webhook_channel(&id)).await;
 
     let mut config = match config {
         Ok(Some(c)) => c,

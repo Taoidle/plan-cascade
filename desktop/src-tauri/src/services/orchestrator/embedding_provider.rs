@@ -405,10 +405,7 @@ impl EmbeddingProviderConfig {
             }
 
             // If model presets exist, try model-specific validation first.
-            let model_preset = capability
-                .models
-                .iter()
-                .find(|m| m.model_id == self.model);
+            let model_preset = capability.models.iter().find(|m| m.model_id == self.model);
 
             let effective_supported = model_preset
                 .and_then(|m| m.supported_dimensions.as_ref())
@@ -576,9 +573,12 @@ pub trait EmbeddingProvider: Send + Sync {
     /// A single embedding vector.
     async fn embed_query(&self, query: &str) -> EmbeddingResult<Vec<f32>> {
         let results = self.embed_documents(&[query]).await?;
-        results.into_iter().next().ok_or_else(|| EmbeddingError::Other {
-            message: "embed_documents returned empty results for single query".to_string(),
-        })
+        results
+            .into_iter()
+            .next()
+            .ok_or_else(|| EmbeddingError::Other {
+                message: "embed_documents returned empty results for single query".to_string(),
+            })
     }
 
     /// Returns the dimensionality of the embedding vectors produced.
@@ -929,7 +929,10 @@ mod tests {
         let deserialized: EmbeddingError = serde_json::from_str(&json).unwrap();
         assert!(matches!(
             deserialized,
-            EmbeddingError::ServerError { status: Some(500), .. }
+            EmbeddingError::ServerError {
+                status: Some(500),
+                ..
+            }
         ));
     }
 
@@ -975,7 +978,11 @@ mod tests {
     #[test]
     fn model_preset_v4_has_matryoshka_dimensions() {
         let cap = EmbeddingProviderType::Qwen.default_capability();
-        let v4 = cap.models.iter().find(|m| m.model_id == "text-embedding-v4").unwrap();
+        let v4 = cap
+            .models
+            .iter()
+            .find(|m| m.model_id == "text-embedding-v4")
+            .unwrap();
         let dims = v4.supported_dimensions.as_ref().unwrap();
         assert!(dims.contains(&1024));
         assert!(dims.contains(&2048));
@@ -985,7 +992,11 @@ mod tests {
     #[test]
     fn model_preset_v2_has_fixed_dimension() {
         let cap = EmbeddingProviderType::Qwen.default_capability();
-        let v2 = cap.models.iter().find(|m| m.model_id == "text-embedding-v2").unwrap();
+        let v2 = cap
+            .models
+            .iter()
+            .find(|m| m.model_id == "text-embedding-v2")
+            .unwrap();
         assert!(v2.supported_dimensions.is_none());
         assert_eq!(v2.default_dimension, 1536);
     }

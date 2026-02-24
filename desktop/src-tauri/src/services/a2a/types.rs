@@ -102,7 +102,11 @@ impl A2aTaskRequest {
     }
 
     /// Creates a `tasks/send` request (non-streaming).
-    pub fn send_task(task_id: impl Into<String>, input: impl Into<String>, id: impl Into<Value>) -> Self {
+    pub fn send_task(
+        task_id: impl Into<String>,
+        input: impl Into<String>,
+        id: impl Into<Value>,
+    ) -> Self {
         Self::new(
             "tasks/send",
             A2aTaskParams {
@@ -116,7 +120,11 @@ impl A2aTaskRequest {
     }
 
     /// Creates a `tasks/sendSubscribe` request (streaming via SSE).
-    pub fn send_task_streaming(task_id: impl Into<String>, input: impl Into<String>, id: impl Into<Value>) -> Self {
+    pub fn send_task_streaming(
+        task_id: impl Into<String>,
+        input: impl Into<String>,
+        id: impl Into<Value>,
+    ) -> Self {
         Self::new(
             "tasks/sendSubscribe",
             A2aTaskParams {
@@ -190,9 +198,9 @@ impl A2aTaskResponse {
                 message: err.message,
             });
         }
-        self.result.ok_or_else(|| A2aError::InvalidResponse(
-            "response contains neither result nor error".to_string(),
-        ))
+        self.result.ok_or_else(|| {
+            A2aError::InvalidResponse("response contains neither result nor error".to_string())
+        })
     }
 }
 
@@ -219,10 +227,7 @@ pub enum A2aStreamEvent {
         result: A2aTaskResult,
     },
     /// Task failed with error.
-    TaskError {
-        task_id: String,
-        error: String,
-    },
+    TaskError { task_id: String, error: String },
 }
 
 // ============================================================================
@@ -524,7 +529,9 @@ mod tests {
         let parsed: A2aStreamEvent = serde_json::from_str(&json).unwrap();
         match parsed {
             A2aStreamEvent::StatusUpdate {
-                task_id, status, message,
+                task_id,
+                status,
+                message,
             } => {
                 assert_eq!(task_id, "task-1");
                 assert_eq!(status, "in_progress");

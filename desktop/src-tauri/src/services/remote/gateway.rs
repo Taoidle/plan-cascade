@@ -233,10 +233,8 @@ impl RemoteGatewayService {
         let command_type = Self::command_type_name(&command);
 
         // Build remote source identifier for webhook notifications
-        let remote_source = format_remote_source(
-            &msg.adapter_type.to_string(),
-            msg.username.as_deref(),
-        );
+        let remote_source =
+            format_remote_source(&msg.adapter_type.to_string(), msg.username.as_deref());
 
         // Track whether this is a task-producing command for webhook dispatch
         let mut should_dispatch_webhook = false;
@@ -261,9 +259,7 @@ impl RemoteGatewayService {
                     )
                     .await
                 {
-                    Ok(id) => {
-                        ResponseMapper::format_session_created(&id, &project_path)
-                    }
+                    Ok(id) => ResponseMapper::format_session_created(&id, &project_path),
                     Err(e) => ResponseMapper::format_error(&e),
                 }
             }
@@ -444,7 +440,11 @@ impl RemoteGatewayService {
 
         if let Some(attempt) = should_reconnect {
             let delay = self.reconnect_config.delay_for_attempt(attempt - 1);
-            tracing::info!("Waiting {}ms before reconnect attempt {}...", delay, attempt);
+            tracing::info!(
+                "Waiting {}ms before reconnect attempt {}...",
+                delay,
+                attempt
+            );
             tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
 
             match self.start(None).await {

@@ -253,10 +253,9 @@ pub async fn set_provider_proxy_strategy(
     if request.strategy == ProxyStrategy::Custom {
         let keyring = KeyringService::new();
         if let Some(ref password) = request.custom_password {
-            if let Err(e) = keyring.set_api_key(
-                &format!("{}{}", KEYRING_PREFIX, request.provider),
-                password,
-            ) {
+            if let Err(e) =
+                keyring.set_api_key(&format!("{}{}", KEYRING_PREFIX, request.provider), password)
+            {
                 return Ok(CommandResponse::err(format!(
                     "Failed to store custom proxy password: {}",
                     e
@@ -304,7 +303,9 @@ pub async fn set_provider_proxy_strategy(
 
 /// Test proxy connectivity by making a request through the proxy.
 #[tauri::command]
-pub async fn test_proxy(request: TestProxyRequest) -> Result<CommandResponse<ProxyTestResult>, String> {
+pub async fn test_proxy(
+    request: TestProxyRequest,
+) -> Result<CommandResponse<ProxyTestResult>, String> {
     let mut proxy = request.proxy;
     proxy.password = request.password;
 

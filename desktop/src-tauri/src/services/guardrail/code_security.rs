@@ -304,6 +304,9 @@ mod tests {
     #[test]
     fn test_default_rules_compiled() {
         let rules = default_rules();
-        assert!(rules.len() >= 5, "Should have at least 5 default security rules");
+        assert!(
+            rules.len() >= 5,
+            "Should have at least 5 default security rules"
+        );
     }
 }
