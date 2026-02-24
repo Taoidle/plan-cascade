@@ -14,6 +14,7 @@ import type { StreamEventPayload } from '../lib/claudeCodeClient';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
 import { deriveConversationTurns, rebuildStandaloneTurns, buildPromptWithAttachments } from '../lib/conversationUtils';
 import type { FileAttachmentData } from '../types/attachment';
+import { useAgentsStore } from './agents';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
@@ -510,6 +511,12 @@ interface ExecutionState {
 
   /** Whether foreground diverged from its source snapshot/history and should be persisted on switch. */
   foregroundDirty: boolean;
+
+  /** Active agent ID for the current session */
+  activeAgentId: string | null;
+
+  /** Active agent name for display */
+  activeAgentName: string | null;
 
   /** Pending task context to inject into the next sendFollowUp (Claude Code backend) */
   _pendingTaskContext: string | null;
@@ -1269,6 +1276,8 @@ const initialState = {
   foregroundOriginHistoryId: null as string | null,
   foregroundOriginSessionId: null as string | null,
   foregroundDirty: false,
+  activeAgentId: null as string | null,
+  activeAgentName: null as string | null,
   _pendingTaskContext: null as string | null,
 };
 
@@ -1314,6 +1323,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     if (get().status === 'running') {
       get().backgroundCurrentSession();
     }
+
+    // Read agent context
+    const agentStore = useAgentsStore.getState();
+    const activeAgent = agentStore.activeAgentForSession;
 
     const settingsSnapshot = useSettingsStore.getState();
     const backendSnapshot = String((settingsSnapshot as { backend?: unknown }).backend || '');
@@ -1361,6 +1374,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       foregroundOriginHistoryId: preserveSimpleConversation ? get().foregroundOriginHistoryId : null,
       foregroundOriginSessionId: preserveSimpleConversation ? get().foregroundOriginSessionId : null,
       foregroundDirty: true,
+      activeAgentId: activeAgent?.id ?? null,
+      activeAgentName: activeAgent?.name ?? null,
     });
 
     // Capture session identity for detecting backgrounding during async operations.
@@ -1416,7 +1431,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       } else {
         // Use standalone LLM execution
         const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
-        const model = settings.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
+        const effectiveModel = activeAgent?.model || settings.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
+        const model = effectiveModel;
         const providerApiKey = getLocalProviderApiKey(provider);
         const isSimpleStandalone = mode === 'simple';
         const turnStartLineId = get().streamLineCounter;
@@ -1460,6 +1476,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settings.enableThinking ?? false,
           maxIterations: settings.maxIterations ?? undefined,
           maxConcurrentSubagents: settings.maxConcurrentSubagents || undefined,
+          systemPrompt: activeAgent?.system_prompt ?? null,
         });
 
         if (!result.success || !result.data) {
@@ -1920,6 +1937,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     import('./toolPermission').then(({ useToolPermissionStore }) => {
       useToolPermissionStore.getState().reset();
     });
+
+    // Clear active agent for session
+    useAgentsStore.getState().clearActiveAgent();
   },
 
   updateStory: (storyId, updates) => {

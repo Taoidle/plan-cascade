@@ -34,6 +34,18 @@ interface AgentsState {
   /** Search query for filtering agents */
   searchQuery: string;
 
+  /** UI panel state */
+  panelOpen: boolean;
+
+  /** Dialog open state */
+  dialogOpen: boolean;
+
+  /** Agent being edited in dialog */
+  editingAgent: Agent | null;
+
+  /** Active agent for the current session */
+  activeAgentForSession: Agent | null;
+
   /** Loading states */
   loading: {
     agents: boolean;
@@ -63,6 +75,12 @@ interface AgentsState {
   importAgents: (json: string) => Promise<Agent[] | null>;
   setSearchQuery: (query: string) => void;
   clearError: () => void;
+
+  togglePanel: () => void;
+  openDialog: (agent?: Agent | null) => void;
+  closeDialog: () => void;
+  setActiveAgentForSession: (agent: Agent | null) => void;
+  clearActiveAgent: () => void;
 }
 
 export const useAgentsStore = create<AgentsState>((set, get) => ({
@@ -71,6 +89,10 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   runHistory: null,
   selectedAgentStats: null,
   searchQuery: '',
+  panelOpen: false,
+  dialogOpen: false,
+  editingAgent: null,
+  activeAgentForSession: null,
   loading: {
     agents: false,
     agent: false,
@@ -393,6 +415,12 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   clearError: () => {
     set({ error: null });
   },
+
+  togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
+  openDialog: (agent = null) => set({ dialogOpen: true, editingAgent: agent ?? null }),
+  closeDialog: () => set({ dialogOpen: false, editingAgent: null }),
+  setActiveAgentForSession: (agent) => set({ activeAgentForSession: agent }),
+  clearActiveAgent: () => set({ activeAgentForSession: null }),
 }));
 
 /** Get filtered agents based on search query */

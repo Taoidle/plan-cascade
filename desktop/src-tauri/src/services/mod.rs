@@ -30,6 +30,7 @@ pub mod orchestrator;
 pub mod phase;
 pub mod plugins;
 pub mod project;
+pub mod prompt;
 pub mod proxy;
 pub mod quality_gates;
 pub mod recovery;

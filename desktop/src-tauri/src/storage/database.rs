@@ -411,6 +411,36 @@ impl Database {
             [],
         )?;
 
+        // Create prompts table for prompt library
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS prompts (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                description TEXT,
+                category TEXT NOT NULL DEFAULT 'custom',
+                tags TEXT NOT NULL DEFAULT '[]',
+                variables TEXT NOT NULL DEFAULT '[]',
+                is_builtin INTEGER NOT NULL DEFAULT 0,
+                is_pinned INTEGER NOT NULL DEFAULT 0,
+                use_count INTEGER NOT NULL DEFAULT 0,
+                last_used_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_prompts_category ON prompts(category)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_prompts_pinned ON prompts(is_pinned DESC, use_count DESC)",
+            [],
+        )?;
+
         // Create file_embeddings table for vector embedding storage (feature-003)
         // provider_type, provider_model, embedding_dimension added in story-012
         conn.execute(

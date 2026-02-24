@@ -88,6 +88,8 @@
     "addDirectory": "Add Directory",
     "skills": "Skills",
     "plugins": "Plugins",
+    "agents": "Agents",
+    "prompts": "Prompts",
     "removeDirectory": "Remove from sidebar",
     "newTaskInDir": "New task in this directory",
     "otherSessions": "Other",
@@ -414,5 +416,74 @@
       "configUpdated": "Config updated: {{details}}",
       "enhancingAnalysis": "Enhancing analysis with AI..."
     }
+  },
+
+  "agentPanel": {
+    "title": "Agents",
+    "manageAll": "Manage All...",
+    "loading": "Loading agents...",
+    "noAgents": "No agents yet",
+    "startChat": "Start Chat",
+    "edit": "Edit",
+    "newAgent": "New Agent",
+    "deleteConfirm": "Delete this agent?"
+  },
+
+  "agentDialog": {
+    "title": "Manage Agents",
+    "searchPlaceholder": "Search agents...",
+    "newAgent": "New Agent",
+    "name": "Name",
+    "namePlaceholder": "Agent name",
+    "description": "Description",
+    "descriptionPlaceholder": "What does this agent do?",
+    "model": "Model",
+    "systemPrompt": "System Prompt",
+    "systemPromptPlaceholder": "Define the agent's behavior...",
+    "allowedTools": "Allowed Tools",
+    "allTools": "All tools allowed",
+    "save": "Save",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this agent?",
+    "export": "Export",
+    "import": "Import",
+    "selectOrCreate": "Select or create an agent",
+    "unsupportedBackend": "Agent system prompts are not supported with Claude Code backend"
+  },
+
+  "promptPanel": {
+    "title": "Prompts",
+    "manageAll": "Manage All...",
+    "loading": "Loading prompts...",
+    "noPrompts": "No prompts yet",
+    "insert": "Insert"
+  },
+
+  "promptDialog": {
+    "title": "Manage Prompts",
+    "searchPlaceholder": "Search prompts...",
+    "newPrompt": "New Prompt",
+    "titleLabel": "Title",
+    "titlePlaceholder": "Prompt title",
+    "category": "Category",
+    "description": "Description",
+    "descriptionPlaceholder": "Brief description (optional)",
+    "content": "Content",
+    "contentPlaceholder": "Write your prompt template...",
+    "variableHint": "Use {{variable_name}} as placeholders",
+    "variables": "Variables",
+    "tags": "Tags",
+    "tagsPlaceholder": "Comma-separated tags",
+    "save": "Save",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this prompt?",
+    "duplicate": "Duplicate as Custom",
+    "selectOrCreate": "Select or create a prompt"
+  },
+
+  "promptPalette": {
+    "title": "/ Prompts",
+    "back": "Back",
+    "insertPrompt": "Insert Prompt"
   }
 }

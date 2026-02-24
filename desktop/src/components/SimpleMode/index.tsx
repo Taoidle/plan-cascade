@@ -38,6 +38,7 @@ import { PermissionSelector } from './PermissionSelector';
 import { WorkflowProgressPanel } from './WorkflowProgressPanel';
 import { useToolPermissionStore } from '../../store/toolPermission';
 import { useGitStore } from '../../store/git';
+import { useAgentsStore } from '../../store/agents';
 import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
 import type { CardPayload } from '../../types/workflowCard';
 import { useToast } from '../shared/Toast';
@@ -87,6 +88,7 @@ export function SimpleMode() {
     foregroundParentSessionId,
     foregroundBgId,
   } = useExecutionStore();
+  const activeAgentName = useExecutionStore((s) => s.activeAgentName);
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
@@ -442,6 +444,11 @@ export function SimpleMode() {
                     onAttach={addAttachment}
                     onRemoveAttachment={removeAttachment}
                     workspacePath={workspacePath}
+                    activeAgentName={activeAgentName}
+                    onClearAgent={() => {
+                      useAgentsStore.getState().clearActiveAgent();
+                      useExecutionStore.setState({ activeAgentId: null, activeAgentName: null });
+                    }}
                   />
                 </div>
               )}

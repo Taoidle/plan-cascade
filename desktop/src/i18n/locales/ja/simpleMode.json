@@ -88,6 +88,8 @@
     "addDirectory": "ディレクトリ追加",
     "skills": "スキル",
     "plugins": "プラグイン",
+    "agents": "エージェント",
+    "prompts": "プロンプト",
     "removeDirectory": "サイドバーから削除",
     "newTaskInDir": "このディレクトリで新規タスク",
     "otherSessions": "その他",
@@ -414,5 +416,74 @@
       "configUpdated": "設定が更新されました：{{details}}",
       "enhancingAnalysis": "AIで分析を強化中..."
     }
+  },
+
+  "agentPanel": {
+    "title": "エージェント",
+    "manageAll": "すべて管理...",
+    "loading": "エージェントを読み込み中...",
+    "noAgents": "エージェントがありません",
+    "startChat": "チャットを開始",
+    "edit": "編集",
+    "newAgent": "新規エージェント",
+    "deleteConfirm": "このエージェントを削除しますか？"
+  },
+
+  "agentDialog": {
+    "title": "エージェント管理",
+    "searchPlaceholder": "エージェントを検索...",
+    "newAgent": "新規エージェント",
+    "name": "名前",
+    "namePlaceholder": "エージェント名",
+    "description": "説明",
+    "descriptionPlaceholder": "このエージェントの役割は？",
+    "model": "モデル",
+    "systemPrompt": "システムプロンプト",
+    "systemPromptPlaceholder": "エージェントの動作を定義...",
+    "allowedTools": "許可するツール",
+    "allTools": "すべてのツールを許可",
+    "save": "保存",
+    "delete": "削除",
+    "deleteConfirm": "このエージェントを削除しますか？",
+    "export": "エクスポート",
+    "import": "インポート",
+    "selectOrCreate": "エージェントを選択または作成",
+    "unsupportedBackend": "Claude Code バックエンドではエージェントのシステムプロンプトはサポートされていません"
+  },
+
+  "promptPanel": {
+    "title": "プロンプト",
+    "manageAll": "すべて管理...",
+    "loading": "プロンプトを読み込み中...",
+    "noPrompts": "プロンプトがありません",
+    "insert": "挿入"
+  },
+
+  "promptDialog": {
+    "title": "プロンプト管理",
+    "searchPlaceholder": "プロンプトを検索...",
+    "newPrompt": "新規プロンプト",
+    "titleLabel": "タイトル",
+    "titlePlaceholder": "プロンプトのタイトル",
+    "category": "カテゴリ",
+    "description": "説明",
+    "descriptionPlaceholder": "簡単な説明（任意）",
+    "content": "内容",
+    "contentPlaceholder": "プロンプトテンプレートを記述...",
+    "variableHint": "{{variable_name}} をプレースホルダーとして使用",
+    "variables": "変数",
+    "tags": "タグ",
+    "tagsPlaceholder": "カンマ区切りのタグ",
+    "save": "保存",
+    "delete": "削除",
+    "deleteConfirm": "このプロンプトを削除しますか？",
+    "duplicate": "カスタムとして複製",
+    "selectOrCreate": "プロンプトを選択または作成"
+  },
+
+  "promptPalette": {
+    "title": "/ プロンプト",
+    "back": "戻る",
+    "insertPrompt": "プロンプトを挿入"
   }
 }

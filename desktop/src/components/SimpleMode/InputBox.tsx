@@ -30,7 +30,10 @@ import {
   Pencil1Icon,
 } from '@radix-ui/react-icons';
 import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
+import { PromptPalette } from './PromptPalette';
+import { usePromptsStore } from '../../store/prompts';
 import type { FileAttachmentData } from '../../types/attachment';
+import { PersonIcon } from '@radix-ui/react-icons';
 
 // ============================================================================
 // Types
@@ -47,6 +50,8 @@ interface InputBoxProps {
   onAttach?: (file: FileAttachmentData) => void;
   onRemoveAttachment?: (id: string) => void;
   workspacePath?: string | null;
+  activeAgentName?: string | null;
+  onClearAgent?: () => void;
 }
 
 interface WorkspaceFileResult {
@@ -122,6 +127,8 @@ export function InputBox({
   onAttach,
   onRemoveAttachment,
   workspacePath,
+  activeAgentName,
+  onClearAgent,
 }: InputBoxProps) {
   const { t } = useTranslation('simpleMode');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -134,6 +141,11 @@ export function InputBox({
 
   // Preview mode state
   const [isPreview, setIsPreview] = useState(false);
+
+  // Prompt palette state (/ trigger)
+  const [isPromptPaletteOpen, setIsPromptPaletteOpen] = useState(false);
+  const [promptPaletteQuery, setPromptPaletteQuery] = useState('');
+  const [slashTriggerPos, setSlashTriggerPos] = useState(-1);
 
   // Drag & drop state
   const [isDragging, setIsDragging] = useState(false);
@@ -156,6 +168,20 @@ export function InputBox({
       return () => clearTimeout(timer);
     }
   }, [fileError]);
+
+  // Consume pending prompt insert from PromptPanel (store-driven)
+  useEffect(() => {
+    const unsub = usePromptsStore.subscribe((state) => {
+      if (state.pendingInsertContent) {
+        const content = state.pendingInsertContent;
+        state.clearPendingInsert();
+        const current = value;
+        const newValue = current ? current + '\n' + content : content;
+        onChange(newValue);
+      }
+    });
+    return unsub;
+  }, [value, onChange]);
 
   // Close autocomplete on outside click
   useEffect(() => {
@@ -431,16 +457,35 @@ export function InputBox({
     ]
   );
 
-  // Detect @ triggers when text changes
+  // Detect @ and / triggers when text changes
   const handleTextChange = useCallback(
     (newValue: string) => {
       onChange(newValue);
 
+      // Check for "/" trigger: only at line start or after whitespace
+      const textarea = textareaRef.current;
+      if (textarea) {
+        const cursorPos = textarea.selectionStart;
+        const textBeforeCursor = newValue.substring(0, cursorPos);
+        const lastNewlineIdx = textBeforeCursor.lastIndexOf('\n');
+        const currentLine = textBeforeCursor.slice(lastNewlineIdx + 1);
+
+        if (currentLine.match(/^\s*\//) && !currentLine.includes(' ', currentLine.indexOf('/') + 1)) {
+          const slashIdx = lastNewlineIdx + 1 + currentLine.indexOf('/');
+          setSlashTriggerPos(slashIdx);
+          setPromptPaletteQuery(currentLine.slice(currentLine.indexOf('/') + 1));
+          setIsPromptPaletteOpen(true);
+        } else if (isPromptPaletteOpen) {
+          setIsPromptPaletteOpen(false);
+        }
+      }
+
       if (!workspacePath || !onAttach) return;
 
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const cursorPos = textarea.selectionStart;
+      {
+      const textarea2 = textareaRef.current;
+      if (!textarea2) return;
+      const cursorPos = textarea2.selectionStart;
 
       // Find the last @ before cursor
       const beforeCursor = newValue.substring(0, cursorPos);
@@ -462,9 +507,11 @@ export function InputBox({
       if (isAutocompleteOpen) {
         closeAutocomplete();
       }
+      }
     },
     [
       onChange,
+      isPromptPaletteOpen,
       workspacePath,
       onAttach,
       isAutocompleteOpen,
@@ -487,6 +534,20 @@ export function InputBox({
   // ============================================================================
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Handle prompt palette keyboard navigation
+    if (isPromptPaletteOpen) {
+      // PromptPalette handles its own key events via document listener
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsPromptPaletteOpen(false);
+        return;
+      }
+      if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+        // Let PromptPalette handle Enter
+        return;
+      }
+    }
+
     // Handle autocomplete keyboard navigation
     if (isAutocompleteOpen && autocompleteFiles.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -569,6 +630,19 @@ export function InputBox({
         </div>
       )}
 
+      {/* Agent badge */}
+      {activeAgentName && (
+        <div className="flex items-center gap-1.5 mx-3 mt-2 px-2.5 py-1.5 bg-primary-50 dark:bg-primary-900/20 rounded-md text-xs">
+          <PersonIcon className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" />
+          <span className="text-primary-700 dark:text-primary-300 font-medium">{activeAgentName}</span>
+          {onClearAgent && (
+            <button onClick={onClearAgent} className="ml-auto p-0.5 rounded hover:bg-primary-100 dark:hover:bg-primary-800">
+              <Cross2Icon className="w-3 h-3 text-primary-500" />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* File chips */}
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-3 pt-2 pb-1">
@@ -636,6 +710,20 @@ export function InputBox({
                 disabled && 'cursor-not-allowed'
               )}
             />
+
+            {/* / Prompt palette */}
+            {isPromptPaletteOpen && (
+              <PromptPalette
+                query={promptPaletteQuery}
+                onSelect={(resolvedText) => {
+                  const before = value.substring(0, slashTriggerPos);
+                  const after = value.substring(slashTriggerPos + 1 + promptPaletteQuery.length);
+                  onChange(before + resolvedText + after);
+                  setIsPromptPaletteOpen(false);
+                }}
+                onClose={() => setIsPromptPaletteOpen(false)}
+              />
+            )}
 
             {/* @ Autocomplete dropdown */}
             {isAutocompleteOpen && autocompleteFiles.length > 0 && (

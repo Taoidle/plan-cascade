@@ -88,6 +88,8 @@
     "addDirectory": "添加目录",
     "skills": "技能",
     "plugins": "插件",
+    "agents": "智能体",
+    "prompts": "提示词",
     "removeDirectory": "从侧边栏移除",
     "newTaskInDir": "在此目录下新建任务",
     "otherSessions": "其他",
@@ -414,5 +416,74 @@
       "configUpdated": "配置已更新：{{details}}",
       "enhancingAnalysis": "正在使用AI增强分析..."
     }
+  },
+
+  "agentPanel": {
+    "title": "智能体",
+    "manageAll": "管理全部...",
+    "loading": "加载智能体中...",
+    "noAgents": "暂无智能体",
+    "startChat": "开始对话",
+    "edit": "编辑",
+    "newAgent": "新建智能体",
+    "deleteConfirm": "确定删除此智能体？"
+  },
+
+  "agentDialog": {
+    "title": "管理智能体",
+    "searchPlaceholder": "搜索智能体...",
+    "newAgent": "新建智能体",
+    "name": "名称",
+    "namePlaceholder": "智能体名称",
+    "description": "描述",
+    "descriptionPlaceholder": "这个智能体做什么？",
+    "model": "模型",
+    "systemPrompt": "系统提示词",
+    "systemPromptPlaceholder": "定义智能体的行为...",
+    "allowedTools": "允许的工具",
+    "allTools": "允许所有工具",
+    "save": "保存",
+    "delete": "删除",
+    "deleteConfirm": "确定删除此智能体？",
+    "export": "导出",
+    "import": "导入",
+    "selectOrCreate": "选择或创建智能体",
+    "unsupportedBackend": "Claude Code 后端不支持智能体系统提示词"
+  },
+
+  "promptPanel": {
+    "title": "提示词",
+    "manageAll": "管理全部...",
+    "loading": "加载提示词中...",
+    "noPrompts": "暂无提示词",
+    "insert": "插入"
+  },
+
+  "promptDialog": {
+    "title": "管理提示词",
+    "searchPlaceholder": "搜索提示词...",
+    "newPrompt": "新建提示词",
+    "titleLabel": "标题",
+    "titlePlaceholder": "提示词标题",
+    "category": "分类",
+    "description": "描述",
+    "descriptionPlaceholder": "简要描述（可选）",
+    "content": "内容",
+    "contentPlaceholder": "编写你的提示词模板...",
+    "variableHint": "使用 {{variable_name}} 作为占位符",
+    "variables": "变量",
+    "tags": "标签",
+    "tagsPlaceholder": "用逗号分隔的标签",
+    "save": "保存",
+    "delete": "删除",
+    "deleteConfirm": "确定删除此提示词？",
+    "duplicate": "复制为自定义",
+    "selectOrCreate": "选择或创建提示词"
+  },
+
+  "promptPalette": {
+    "title": "/ 提示词",
+    "back": "返回",
+    "insertPrompt": "插入提示词"
   }
 }

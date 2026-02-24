@@ -253,6 +253,13 @@ fn main() {
             plan_cascade_desktop::commands::embedding::check_embedding_provider_health,
             plan_cascade_desktop::commands::embedding::set_embedding_api_key,
             plan_cascade_desktop::commands::embedding::get_embedding_api_key,
+            // Prompt commands
+            plan_cascade_desktop::commands::prompts::list_prompts,
+            plan_cascade_desktop::commands::prompts::create_prompt,
+            plan_cascade_desktop::commands::prompts::update_prompt,
+            plan_cascade_desktop::commands::prompts::delete_prompt,
+            plan_cascade_desktop::commands::prompts::record_prompt_use,
+            plan_cascade_desktop::commands::prompts::toggle_prompt_pin,
             // Plugin commands
             plan_cascade_desktop::commands::plugins::list_plugins,
             plan_cascade_desktop::commands::plugins::toggle_plugin,

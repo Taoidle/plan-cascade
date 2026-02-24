@@ -19,10 +19,16 @@ import { type ExecutionHistoryItem, type SessionSnapshot } from '../../store/exe
 import { useSettingsStore } from '../../store/settings';
 import { useSkillMemoryStore } from '../../store/skillMemory';
 import { usePluginStore } from '../../store/plugins';
+import { useAgentsStore } from '../../store/agents';
+import { usePromptsStore } from '../../store/prompts';
 import { SkillMemoryPanel } from './SkillMemoryPanel';
 import { PluginPanel } from './PluginPanel';
+import { AgentPanel } from './AgentPanel';
+import { PromptPanel } from './PromptPanel';
 import { SkillMemoryDialog } from '../SkillMemory/SkillMemoryDialog';
 import { PluginDialog } from '../Plugins/PluginDialog';
+import { AgentDialog } from '../Agents/AgentDialog';
+import { PromptDialog } from '../Prompts/PromptDialog';
 import { SkillMemoryToast } from '../SkillMemory/SkillMemoryToast';
 
 // ---------------------------------------------------------------------------
@@ -163,15 +169,23 @@ function SidebarToolbar({
   onAddDirectory,
   onSkillsClick,
   onPluginsClick,
+  onAgentsClick,
+  onPromptsClick,
   skillCount,
   pluginCount,
+  agentCount,
+  promptCount,
 }: {
   onNewTask: () => void;
   onAddDirectory: () => void;
   onSkillsClick: () => void;
   onPluginsClick: () => void;
+  onAgentsClick: () => void;
+  onPromptsClick: () => void;
   skillCount: number;
   pluginCount: number;
+  agentCount: number;
+  promptCount: number;
 }) {
   const { t } = useTranslation('simpleMode');
 
@@ -234,6 +248,44 @@ function SidebarToolbar({
           {pluginCount > 0 && (
             <span className="text-2xs px-1 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 min-w-[1.2rem] text-center">
               {pluginCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button
+          data-testid="agents-button"
+          onClick={onAgentsClick}
+          className={clsx(
+            'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
+            'text-gray-600 dark:text-gray-400',
+            'hover:bg-gray-100 dark:hover:bg-gray-800'
+          )}
+          title={t('sidebar.agents', { defaultValue: 'Agents' })}
+        >
+          {t('sidebar.agents', { defaultValue: 'Agents' })}
+          {agentCount > 0 && (
+            <span className="text-2xs px-1 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 min-w-[1.2rem] text-center">
+              {agentCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          data-testid="prompts-button"
+          onClick={onPromptsClick}
+          className={clsx(
+            'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
+            'text-gray-600 dark:text-gray-400',
+            'hover:bg-gray-100 dark:hover:bg-gray-800'
+          )}
+          title={t('sidebar.prompts', { defaultValue: 'Prompts' })}
+        >
+          {t('sidebar.prompts', { defaultValue: 'Prompts' })}
+          {promptCount > 0 && (
+            <span className="text-2xs px-1 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 min-w-[1.2rem] text-center">
+              {promptCount}
             </span>
           )}
         </button>
@@ -898,6 +950,10 @@ export function WorkspaceTreeSidebar({
   const togglePanel = useSkillMemoryStore((s) => s.togglePanel);
   const plugins = usePluginStore((s) => s.plugins);
   const togglePluginPanel = usePluginStore((s) => s.togglePanel);
+  const agentCount = useAgentsStore((s) => s.agents.length);
+  const toggleAgentPanel = useAgentsStore((s) => s.togglePanel);
+  const promptCount = usePromptsStore((s) => s.prompts.length);
+  const togglePromptPanel = usePromptsStore((s) => s.togglePanel);
 
   // Count of detected/enabled skills for badge
   const detectedSkillCount = useMemo(
@@ -1043,8 +1099,12 @@ export function WorkspaceTreeSidebar({
         onAddDirectory={handleAddDirectory}
         onSkillsClick={togglePanel}
         onPluginsClick={togglePluginPanel}
+        onAgentsClick={toggleAgentPanel}
+        onPromptsClick={togglePromptPanel}
         skillCount={detectedSkillCount}
         pluginCount={pluginCount}
+        agentCount={agentCount}
+        promptCount={promptCount}
       />
 
       {/* Current task indicator */}
@@ -1133,6 +1193,12 @@ export function WorkspaceTreeSidebar({
       {/* Plugin Panel */}
       <PluginPanel />
 
+      {/* Agent Panel */}
+      <AgentPanel />
+
+      {/* Prompt Panel */}
+      <PromptPanel />
+
       {/* Footer */}
       {history.length > 0 && (
         <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
@@ -1154,6 +1220,12 @@ export function WorkspaceTreeSidebar({
 
       {/* Plugin Dialog (portal-rendered) */}
       <PluginDialog />
+
+      {/* Agent Dialog (portal-rendered) */}
+      <AgentDialog />
+
+      {/* Prompt Dialog (portal-rendered) */}
+      <PromptDialog />
 
       {/* Toast Notifications */}
       <SkillMemoryToast />
