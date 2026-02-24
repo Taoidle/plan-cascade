@@ -439,6 +439,9 @@ struct OrchestratorTaskSpawner {
     shared_analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
     /// Shared permission gate from the parent orchestrator.
     shared_permission_gate: Option<Arc<super::permission_gate::PermissionGate>>,
+    /// Shared pause flag from the parent orchestrator.
+    /// Sub-agents inherit this so that pausing the parent also pauses sub-agents.
+    shared_paused: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -680,24 +680,34 @@ impl OrchestratorService {
                 let mut last_err = None;
                 for attempt in 0..=max_retries {
                     let result = if self.config.streaming {
-                        self.provider
-                            .stream_message(
+                        tokio::select! {
+                            r = self.provider.stream_message(
                                 messages.to_vec(),
                                 system_prompt.clone(),
                                 api_tools.to_vec(),
                                 tx.clone(),
                                 request_options.clone(),
-                            )
-                            .await
+                            ) => r,
+                            _ = self.cancellation_token.cancelled() => {
+                                Err(crate::services::llm::LlmError::Other {
+                                    message: "Execution cancelled".to_string(),
+                                })
+                            }
+                        }
                     } else {
-                        self.provider
-                            .send_message(
+                        tokio::select! {
+                            r = self.provider.send_message(
                                 messages.to_vec(),
                                 system_prompt.clone(),
                                 api_tools.to_vec(),
                                 request_options.clone(),
-                            )
-                            .await
+                            ) => r,
+                            _ = self.cancellation_token.cancelled() => {
+                                Err(crate::services::llm::LlmError::Other {
+                                    message: "Execution cancelled".to_string(),
+                                })
+                            }
+                        }
                     };
                     match result {
                         Ok(r) => break 'retry_loop r,
@@ -945,7 +955,25 @@ impl OrchestratorService {
                         });
                     }
 
-                    let results = futures_util::future::join_all(futures).await;
+                    let results = tokio::select! {
+                        results = futures_util::future::join_all(futures) => results,
+                        _ = self.cancellation_token.cancelled() => {
+                            // Cancelled: emit cancellation results for all tool calls
+                            for (tc_id, _name, _) in &valid_calls {
+                                messages.push(Message::tool_result(
+                                    tc_id,
+                                    "Tool execution cancelled".to_string(),
+                                    true,
+                                ));
+                                let _ = tx.send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tc_id.clone(),
+                                    result: None,
+                                    error: Some("Cancelled".to_string()),
+                                }).await;
+                            }
+                            continue; // Back to loop top, which checks cancellation and exits
+                        }
+                    };
                     let analysis_phase = request_options.analysis_phase.as_deref();
 
                     // Process results in original order
@@ -1060,6 +1088,23 @@ impl OrchestratorService {
                     // Step 3b: SEQUENTIAL native execution (sub-agent)
                     // ═══════════════════════════════════════════════════
                     for (tc_id, effective_tool_name, effective_args) in &valid_calls {
+                        // Check cancellation before each tool execution
+                        if self.cancellation_token.is_cancelled() {
+                            messages.push(Message::tool_result(
+                                tc_id,
+                                "Tool execution cancelled".to_string(),
+                                true,
+                            ));
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tc_id.clone(),
+                                    result: None,
+                                    error: Some("Cancelled".to_string()),
+                                })
+                                .await;
+                            continue;
+                        }
+
                         // Emit tool start event
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolStart {
@@ -1302,7 +1347,22 @@ impl OrchestratorService {
                         });
                     }
 
-                    let results = futures_util::future::join_all(futures).await;
+                    let results = tokio::select! {
+                        results = futures_util::future::join_all(futures) => results,
+                        _ = self.cancellation_token.cancelled() => {
+                            for (tool_id, _name, _) in &valid_fallback_calls {
+                                let _ = tx.send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tool_id.clone(),
+                                    result: None,
+                                    error: Some("Cancelled".to_string()),
+                                }).await;
+                                tool_results.push(format_tool_result(
+                                    "cancelled", tool_id, "Tool execution cancelled", true,
+                                ));
+                            }
+                            continue;
+                        }
+                    };
                     let analysis_phase = request_options.analysis_phase.as_deref();
 
                     // Process results in original order
@@ -1392,6 +1452,24 @@ impl OrchestratorService {
                     // Sequential fallback execution (existing logic)
                     // ═══════════════════════════════════════════════════
                     for (tool_id, effective_tool_name, effective_args) in &valid_fallback_calls {
+                        // Check cancellation before each tool execution
+                        if self.cancellation_token.is_cancelled() {
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tool_id.clone(),
+                                    result: None,
+                                    error: Some("Cancelled".to_string()),
+                                })
+                                .await;
+                            tool_results.push(format_tool_result(
+                                effective_tool_name,
+                                tool_id,
+                                "Tool execution cancelled",
+                                true,
+                            ));
+                            continue;
+                        }
+
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolStart {
                                 tool_id: tool_id.clone(),
@@ -1723,6 +1801,7 @@ impl OrchestratorService {
             shared_analytics_tx: self.analytics_tx.clone(),
             shared_analytics_cost_calculator: self.analytics_cost_calculator.clone(),
             shared_permission_gate: self.permission_gate.clone(),
+            shared_paused: Arc::clone(&self.paused),
         });
         let max_concurrent = self.config.provider.effective_max_concurrent_subagents();
         Some(TaskContext {
@@ -2167,7 +2246,24 @@ impl OrchestratorService {
                         });
                     }
 
-                    let results = futures_util::future::join_all(futures).await;
+                    let results = tokio::select! {
+                        results = futures_util::future::join_all(futures) => results,
+                        _ = self.cancellation_token.cancelled() => {
+                            for (tc_id, _name, _) in &valid_calls {
+                                messages.push(Message::tool_result(
+                                    tc_id,
+                                    "Tool execution cancelled".to_string(),
+                                    true,
+                                ));
+                                let _ = tx.send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tc_id.clone(),
+                                    result: None,
+                                    error: Some("Cancelled".to_string()),
+                                }).await;
+                            }
+                            continue;
+                        }
+                    };
 
                     // Process results in original order (events, messages, loop detection)
                     for (tc_id, effective_tool_name, result) in results {
@@ -2294,6 +2390,23 @@ impl OrchestratorService {
                     // Step 3b: SEQUENTIAL execution path (existing logic)
                     // ═══════════════════════════════════════════════════════
                     for (tc_id, effective_tool_name, effective_args) in &valid_calls {
+                        // Check cancellation before each tool execution
+                        if self.cancellation_token.is_cancelled() {
+                            messages.push(Message::tool_result(
+                                tc_id,
+                                "Tool execution cancelled".to_string(),
+                                true,
+                            ));
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tc_id.clone(),
+                                    result: None,
+                                    error: Some("Cancelled".to_string()),
+                                })
+                                .await;
+                            continue;
+                        }
+
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolStart {
                                 tool_id: tc_id.clone(),
@@ -2615,7 +2728,22 @@ impl OrchestratorService {
                         });
                     }
 
-                    let results = futures_util::future::join_all(futures).await;
+                    let results = tokio::select! {
+                        results = futures_util::future::join_all(futures) => results,
+                        _ = self.cancellation_token.cancelled() => {
+                            for (tool_id, _name, _) in &valid_fallback_calls {
+                                let _ = tx.send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tool_id.clone(),
+                                    result: None,
+                                    error: Some("Cancelled".to_string()),
+                                }).await;
+                                tool_results.push(format_tool_result(
+                                    "cancelled", tool_id, "Tool execution cancelled", true,
+                                ));
+                            }
+                            continue;
+                        }
+                    };
 
                     for (tool_id, effective_tool_name, result) in results {
                         let _ = tx
@@ -2717,6 +2845,24 @@ impl OrchestratorService {
                     // Sequential fallback execution (existing logic with hooks/event_actions)
                     // ═══════════════════════════════════════════════════
                     for (tool_id, effective_tool_name, effective_args) in &valid_fallback_calls {
+                        // Check cancellation before each tool execution
+                        if self.cancellation_token.is_cancelled() {
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tool_id.clone(),
+                                    result: None,
+                                    error: Some("Cancelled".to_string()),
+                                })
+                                .await;
+                            tool_results.push(format_tool_result(
+                                effective_tool_name,
+                                tool_id,
+                                "Tool execution cancelled",
+                                true,
+                            ));
+                            continue;
+                        }
+
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolStart {
                                 tool_id: tool_id.clone(),
@@ -3640,15 +3786,19 @@ impl OrchestratorService {
         let max_delay_secs: u64 = 60;
 
         for attempt in 0..=max_retries {
-            let result = self
-                .provider
-                .send_message(
+            let result = tokio::select! {
+                r = self.provider.send_message(
                     messages.to_vec(),
                     system.clone(),
                     api_tools.to_vec(),
                     request_options.clone(),
-                )
-                .await;
+                ) => r,
+                _ = self.cancellation_token.cancelled() => {
+                    return Err(crate::services::llm::LlmError::Other {
+                        message: "Execution cancelled".to_string(),
+                    });
+                }
+            };
             match result {
                 Ok(r) => return Ok(r),
                 Err(e) if e.is_retryable() && attempt < max_retries => {
@@ -3663,7 +3813,15 @@ impl OrchestratorService {
                         max_retries,
                         wait
                     );
-                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                    // Wait with cancellation support
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(wait)) => {}
+                        _ = self.cancellation_token.cancelled() => {
+                            return Err(crate::services::llm::LlmError::Other {
+                                message: "Execution cancelled during retry wait".to_string(),
+                            });
+                        }
+                    }
                 }
                 Err(e) => return Err(e),
             }
@@ -3693,16 +3851,20 @@ impl OrchestratorService {
         let max_delay_secs: u64 = 60;
 
         for attempt in 0..=max_retries {
-            let result = self
-                .provider
-                .stream_message(
+            let result = tokio::select! {
+                r = self.provider.stream_message(
                     messages.to_vec(),
                     system.clone(),
                     api_tools.to_vec(),
                     tx.clone(),
                     request_options.clone(),
-                )
-                .await;
+                ) => r,
+                _ = self.cancellation_token.cancelled() => {
+                    return Err(crate::services::llm::LlmError::Other {
+                        message: "Execution cancelled".to_string(),
+                    });
+                }
+            };
             match result {
                 Ok(r) => return Ok(r),
                 Err(e) if e.is_retryable() && attempt < max_retries => {
@@ -3717,7 +3879,15 @@ impl OrchestratorService {
                         max_retries,
                         wait
                     );
-                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                    // Wait with cancellation support
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(wait)) => {}
+                        _ = self.cancellation_token.cancelled() => {
+                            return Err(crate::services::llm::LlmError::Other {
+                                message: "Execution cancelled during retry wait".to_string(),
+                            });
+                        }
+                    }
                 }
                 Err(e) => return Err(e),
             }

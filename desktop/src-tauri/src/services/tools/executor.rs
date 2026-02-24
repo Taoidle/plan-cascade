@@ -200,6 +200,9 @@ pub struct ToolExecutor {
     file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
     /// Optional permission gate for tool execution approval.
     permission_gate: Option<Arc<crate::services::orchestrator::permission_gate::PermissionGate>>,
+    /// Cancellation token propagated from the orchestrator.
+    /// Used by `build_tool_context()` so that tools can respond to cancellation.
+    cancellation_token: tokio_util::sync::CancellationToken,
 }
 
 impl ToolExecutor {
@@ -252,6 +255,7 @@ impl ToolExecutor {
             registry: Self::build_registry(),
             file_change_tracker: None,
             permission_gate: None,
+            cancellation_token: tokio_util::sync::CancellationToken::new(),
         }
     }
 
@@ -279,6 +283,7 @@ impl ToolExecutor {
             registry: Self::build_registry(),
             file_change_tracker: None,
             permission_gate: None,
+            cancellation_token: tokio_util::sync::CancellationToken::new(),
         }
     }
 
@@ -364,6 +369,15 @@ impl ToolExecutor {
         self.file_change_tracker.clone()
     }
 
+    /// Set the cancellation token propagated from the orchestrator.
+    ///
+    /// When set, `build_tool_context()` uses this token instead of creating
+    /// a fresh one, enabling tools (e.g., Bash) to respond to orchestrator
+    /// cancellation requests.
+    pub fn set_cancellation_token(&mut self, token: tokio_util::sync::CancellationToken) {
+        self.cancellation_token = token;
+    }
+
     /// Set the permission gate for tool execution approval.
     pub fn set_permission_gate(
         &mut self,
@@ -419,7 +433,7 @@ impl ToolExecutor {
             working_directory: Arc::clone(&self.current_working_dir),
             read_cache: Arc::clone(&self.read_cache),
             read_files: Arc::clone(&self.read_files),
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
+            cancellation_token: self.cancellation_token.clone(),
             web_fetch: Arc::clone(&self.web_fetch),
             web_search: self.web_search.clone(),
             index_store: self.index_store.clone(),

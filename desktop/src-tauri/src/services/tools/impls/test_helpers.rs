@@ -26,5 +26,6 @@ pub(crate) fn make_test_ctx(dir: &Path) -> ToolExecutionContext {
         task_context: None,
         core_context: None,
         file_change_tracker: None,
+        permission_gate: None,
     }
 }

@@ -11,7 +11,6 @@ use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::process::Command;
-use tokio::time::timeout;
 
 use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
@@ -159,7 +158,56 @@ impl Tool for BashTool {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let result = timeout(Duration::from_millis(timeout_ms), cmd.output()).await;
+        // Use spawn + select! so we can cancel or timeout and kill the child process.
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(e) => return ToolResult::err(format!("Failed to spawn command: {}", e)),
+        };
+
+        // Take stdout/stderr handles before awaiting, so `child` is not consumed.
+        let child_stdout = child.stdout.take();
+        let child_stderr = child.stderr.take();
+
+        let result = tokio::select! {
+            status = child.wait() => {
+                match status {
+                    Ok(status) => {
+                        // Read captured output from taken handles
+                        let stdout_bytes = if let Some(mut out) = child_stdout {
+                            let mut buf = Vec::new();
+                            let _ = tokio::io::AsyncReadExt::read_to_end(&mut out, &mut buf).await;
+                            buf
+                        } else {
+                            Vec::new()
+                        };
+                        let stderr_bytes = if let Some(mut err) = child_stderr {
+                            let mut buf = Vec::new();
+                            let _ = tokio::io::AsyncReadExt::read_to_end(&mut err, &mut buf).await;
+                            buf
+                        } else {
+                            Vec::new()
+                        };
+                        let output = std::process::Output {
+                            status,
+                            stdout: stdout_bytes,
+                            stderr: stderr_bytes,
+                        };
+                        Ok(Ok(output))
+                    }
+                    Err(e) => Ok(Err(e)),
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_millis(timeout_ms)) => {
+                // Timeout: kill the child process
+                let _ = child.kill().await;
+                Err("timeout")
+            }
+            _ = ctx.cancellation_token.cancelled() => {
+                // Cancelled: kill the child process
+                let _ = child.kill().await;
+                return ToolResult::err("Command cancelled".to_string());
+            }
+        };
 
         match result {
             Ok(Ok(output)) => {
@@ -205,7 +253,7 @@ impl Tool for BashTool {
                 }
             }
             Ok(Err(e)) => ToolResult::err(format!("Failed to execute command: {}", e)),
-            Err(_) => ToolResult::err(format!("Command timed out after {} ms", timeout_ms)),
+            Err(_) => ToolResult::err(format!("Command timed out after {} ms", timeout_ms)), // "timeout" sentinel
         }
     }
 }

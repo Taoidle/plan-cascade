@@ -317,6 +317,7 @@ for line in sys.stdin:
             task_context: None,
             core_context: None,
             file_change_tracker: None,
+            permission_gate: None,
         };
 
         let result = adapter.execute(&ctx, json!({"name": "Rust"})).await;

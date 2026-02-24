@@ -235,6 +235,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             self.skills_snapshot.clone(),
             self.memories_snapshot.clone(),
             knowledge_block_snapshot,
+            Some(Arc::clone(&self.shared_paused)),
         );
         // Propagate analytics tracking to sub-agent
         sub_agent.analytics_tx = self.shared_analytics_tx.clone();
@@ -422,7 +423,9 @@ impl OrchestratorService {
             ProviderType::Ollama => Arc::new(OllamaProvider::new(config.provider.clone())),
         };
 
-        let tool_executor = ToolExecutor::new(&config.project_root);
+        let mut tool_executor = ToolExecutor::new(&config.project_root);
+        let cancellation_token = CancellationToken::new();
+        tool_executor.set_cancellation_token(cancellation_token.clone());
         let compactor = build_compactor(&provider);
 
         Self {
@@ -430,7 +433,7 @@ impl OrchestratorService {
             provider,
             tool_executor,
             compactor,
-            cancellation_token: CancellationToken::new(),
+            cancellation_token,
             paused: Arc::new(AtomicBool::new(false)),
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -488,7 +491,8 @@ impl OrchestratorService {
             ProviderType::Ollama => Arc::new(OllamaProvider::new(config.provider.clone())),
         };
 
-        let tool_executor = ToolExecutor::new(&config.project_root);
+        let mut tool_executor = ToolExecutor::new(&config.project_root);
+        tool_executor.set_cancellation_token(cancellation_token.clone());
         let compactor = build_compactor(&provider);
 
         Self {
@@ -538,6 +542,7 @@ impl OrchestratorService {
         skills_snapshot: Vec<crate::services::skills::model::SkillMatch>,
         memories_snapshot: Vec<crate::services::memory::store::MemoryEntry>,
         knowledge_block_snapshot: Option<String>,
+        shared_paused: Option<Arc<AtomicBool>>,
     ) -> Self {
         let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
@@ -552,6 +557,7 @@ impl OrchestratorService {
 
         let mut tool_executor =
             ToolExecutor::new_with_shared_cache(&config.project_root, shared_read_cache);
+        tool_executor.set_cancellation_token(cancellation_token.clone());
 
         // Wire the parent's index store and embedding service to the sub-agent's tool executor
         if let Some(store) = &shared_index_store {
@@ -588,7 +594,7 @@ impl OrchestratorService {
             tool_executor,
             compactor,
             cancellation_token,
-            paused: Arc::new(AtomicBool::new(false)),
+            paused: shared_paused.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
             db_pool: None,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
             analysis_store: AnalysisRunStore::new(analysis_artifacts_root),
