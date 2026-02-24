@@ -532,6 +532,22 @@ impl OrchestratorService {
                 }
             }
 
+            // Inject plugin instructions for sub-agents
+            if let Some(ref instructions) = self.plugin_instructions {
+                let section = build_plugin_instructions_section(instructions);
+                if !section.is_empty() {
+                    parts.push(section);
+                }
+            }
+
+            // Inject plugin skills for sub-agents
+            if let Some(ref plugin_skills) = self.plugin_skills {
+                let section = build_plugin_skills_section(plugin_skills);
+                if !section.is_empty() {
+                    parts.push(section);
+                }
+            }
+
             // Determine effective fallback mode for sub-agent
             let sub_effective_mode = self
                 .config
@@ -1784,6 +1800,9 @@ impl OrchestratorService {
             .ok()
             .and_then(|guard| guard.clone());
 
+        let plugin_instructions_snapshot = self.plugin_instructions.clone();
+        let plugin_skills_snapshot = self.plugin_skills.clone();
+
         let task_spawner = Arc::new(OrchestratorTaskSpawner {
             provider_config: self.config.provider.clone(),
             project_root: self.config.project_root.clone(),
@@ -1802,6 +1821,8 @@ impl OrchestratorService {
             shared_analytics_cost_calculator: self.analytics_cost_calculator.clone(),
             shared_permission_gate: self.permission_gate.clone(),
             shared_paused: Arc::clone(&self.paused),
+            plugin_instructions_snapshot,
+            plugin_skills_snapshot,
         });
         let max_concurrent = self.config.provider.effective_max_concurrent_subagents();
         Some(TaskContext {
@@ -3714,6 +3735,17 @@ impl OrchestratorService {
                 }
             }
         }
+
+        // Inject plugin instructions (from enabled plugins' CLAUDE.md files)
+        if let Some(ref instructions) = self.plugin_instructions {
+            prompt.push_str(&build_plugin_instructions_section(instructions));
+        }
+
+        // Inject plugin skills (from enabled plugins' skills/)
+        if let Some(ref plugin_skills) = self.plugin_skills {
+            prompt.push_str(&build_plugin_skills_section(plugin_skills));
+        }
+
         drop(detected_lang);
 
         // Inject cached knowledge context (populated by populate_knowledge_context)

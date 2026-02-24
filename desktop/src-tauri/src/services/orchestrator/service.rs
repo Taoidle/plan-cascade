@@ -53,12 +53,12 @@ use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 use crate::services::streaming::UnifiedStreamEvent;
 #[allow(deprecated)]
 use crate::services::tools::{
-    build_memory_section, build_project_summary, build_skills_section,
-    build_sub_agent_tool_guidance, build_system_prompt_with_memories, build_tool_call_instructions,
-    detect_language, extract_text_without_tool_calls, format_tool_result,
-    get_basic_tool_definitions_from_registry, get_tool_definitions_from_registry,
-    merge_system_prompts, parse_tool_calls, ParsedToolCall, SubAgentType, TaskContext,
-    TaskExecutionResult, TaskSpawner, ToolExecutor, MAX_SUB_AGENT_DEPTH,
+    build_memory_section, build_plugin_instructions_section, build_plugin_skills_section,
+    build_project_summary, build_skills_section, build_sub_agent_tool_guidance,
+    build_system_prompt_with_memories, build_tool_call_instructions, detect_language,
+    extract_text_without_tool_calls, format_tool_result, get_basic_tool_definitions_from_registry,
+    get_tool_definitions_from_registry, merge_system_prompts, parse_tool_calls, ParsedToolCall,
+    SubAgentType, TaskContext, TaskExecutionResult, TaskSpawner, ToolExecutor, MAX_SUB_AGENT_DEPTH,
 };
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -400,6 +400,10 @@ pub struct OrchestratorService {
     /// Optional permission gate for tool execution approval.
     /// Shared across parent and sub-agents via Arc.
     pub(crate) permission_gate: Option<Arc<super::permission_gate::PermissionGate>>,
+    /// Plugin instructions (CLAUDE.md content from enabled plugins), cached at construction.
+    plugin_instructions: Option<String>,
+    /// Plugin skills (from enabled plugins' skills/), cached at construction.
+    plugin_skills: Option<Vec<crate::services::plugins::models::PluginSkill>>,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances
@@ -442,6 +446,10 @@ struct OrchestratorTaskSpawner {
     /// Shared pause flag from the parent orchestrator.
     /// Sub-agents inherit this so that pausing the parent also pauses sub-agents.
     shared_paused: Arc<AtomicBool>,
+    /// Plugin instructions snapshot from parent for sub-agent prompt injection.
+    plugin_instructions_snapshot: Option<String>,
+    /// Plugin skills snapshot from parent for sub-agent prompt injection.
+    plugin_skills_snapshot: Option<Vec<crate::services::plugins::models::PluginSkill>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

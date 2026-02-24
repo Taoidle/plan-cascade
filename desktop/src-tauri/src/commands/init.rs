@@ -10,6 +10,7 @@ use tauri::{AppHandle, State};
 
 use crate::commands::plugins::PluginState;
 use crate::commands::remote::RemoteState;
+use crate::commands::spec_interview::SpecInterviewState;
 use crate::commands::standalone::StandaloneState;
 use crate::models::response::CommandResponse;
 use crate::services::orchestrator::index_manager::IndexManager;
@@ -39,6 +40,7 @@ pub async fn init_app(
     standalone_state: State<'_, StandaloneState>,
     remote_state: State<'_, RemoteState>,
     plugin_state: State<'_, PluginState>,
+    spec_interview_state: State<'_, SpecInterviewState>,
     app: AppHandle,
 ) -> Result<CommandResponse<InitResult>, String> {
     // Initialize all services
@@ -71,6 +73,13 @@ pub async fn init_app(
                     if let Some(ref manager) = *mgr_lock {
                         manager.ensure_indexed(&working_dir).await;
                     }
+                }
+            }
+
+            // Initialize the spec interview service
+            if let Ok(pool) = state.with_database(|db| Ok(db.pool().clone())).await {
+                if let Err(e) = spec_interview_state.initialize(pool).await {
+                    tracing::warn!("Spec interview initialization failed: {}", e);
                 }
             }
 

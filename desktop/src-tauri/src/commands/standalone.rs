@@ -1026,6 +1026,7 @@ pub async fn execute_standalone(
     standalone_state: State<'_, StandaloneState>,
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     analytics_state: State<'_, super::analytics::AnalyticsState>,
+    plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<ExecutionResult>, String> {
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&provider) {
@@ -1188,6 +1189,9 @@ pub async fn execute_standalone(
                 .with_analytics_cost_calculator(analytics_state.cost_calculator());
         }
     }
+
+    // Wire plugin context (instructions, skills, hooks) from enabled plugins
+    orchestrator = plugin_state.wire_orchestrator(orchestrator).await;
 
     // Create channel for streaming events
     let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
@@ -1381,6 +1385,7 @@ pub async fn execute_standalone_with_session(
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     analytics_state: State<'_, super::analytics::AnalyticsState>,
     permission_state: State<'_, super::permissions::PermissionState>,
+    plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&request.provider) {
@@ -1501,6 +1506,9 @@ pub async fn execute_standalone_with_session(
                 .with_analytics_cost_calculator(analytics_state.cost_calculator());
         }
     }
+
+    // Wire plugin context (instructions, skills, hooks) from enabled plugins
+    orchestrator = plugin_state.wire_orchestrator(orchestrator).await;
 
     let orchestrator = Arc::new(orchestrator);
 
@@ -1787,6 +1795,7 @@ pub async fn resume_standalone_execution(
     standalone_state: State<'_, StandaloneState>,
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     permission_state: State<'_, super::permissions::PermissionState>,
+    plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     // Get database pool
     let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
@@ -1958,6 +1967,9 @@ pub async fn resume_standalone_execution(
             orchestrator = orchestrator.with_embedding_manager(emb_mgr);
         }
     }
+
+    // Wire plugin context (instructions, skills, hooks) from enabled plugins
+    orchestrator = plugin_state.wire_orchestrator(orchestrator).await;
 
     let orchestrator = Arc::new(orchestrator);
 

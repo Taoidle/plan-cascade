@@ -236,6 +236,8 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             self.memories_snapshot.clone(),
             knowledge_block_snapshot,
             Some(Arc::clone(&self.shared_paused)),
+            self.plugin_instructions_snapshot.clone(),
+            self.plugin_skills_snapshot.clone(),
         );
         // Propagate analytics tracking to sub-agent
         sub_agent.analytics_tx = self.shared_analytics_tx.clone();
@@ -450,6 +452,8 @@ impl OrchestratorService {
             analytics_tx: None,
             analytics_cost_calculator: None,
             permission_gate: None,
+            plugin_instructions: None,
+            plugin_skills: None,
         }
     }
 
@@ -517,6 +521,8 @@ impl OrchestratorService {
             analytics_tx: None,
             analytics_cost_calculator: None,
             permission_gate: None,
+            plugin_instructions: None,
+            plugin_skills: None,
         }
     }
 
@@ -543,6 +549,8 @@ impl OrchestratorService {
         memories_snapshot: Vec<crate::services::memory::store::MemoryEntry>,
         knowledge_block_snapshot: Option<String>,
         shared_paused: Option<Arc<AtomicBool>>,
+        plugin_instructions_snapshot: Option<String>,
+        plugin_skills_snapshot: Option<Vec<crate::services::plugins::models::PluginSkill>>,
     ) -> Self {
         let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
@@ -610,6 +618,8 @@ impl OrchestratorService {
             analytics_tx: None,
             analytics_cost_calculator: None,
             permission_gate: None,
+            plugin_instructions: plugin_instructions_snapshot,
+            plugin_skills: plugin_skills_snapshot,
         }
     }
 
@@ -712,6 +722,34 @@ impl OrchestratorService {
             loaded_memories.clone(),
         );
         self.loaded_memories = Some(loaded_memories);
+        self
+    }
+
+    /// Wire plugin context (instructions, skills, hooks) into the orchestrator.
+    ///
+    /// Extracts data from the PluginManager at construction time:
+    /// 1. Registers plugin shell hooks into AgenticHooks
+    /// 2. Caches plugin instructions for system prompt injection
+    /// 3. Caches plugin skills for system prompt injection
+    pub fn with_plugin_context(
+        mut self,
+        plugin_manager: &crate::services::plugins::manager::PluginManager,
+    ) -> Self {
+        // Register plugin lifecycle hooks (SessionStart, UserPromptSubmit, PreToolUse, etc.)
+        plugin_manager.register_hooks(&mut self.hooks);
+
+        // Cache instructions for system prompt injection
+        let instructions = plugin_manager.collect_instructions();
+        if !instructions.is_empty() {
+            self.plugin_instructions = Some(instructions);
+        }
+
+        // Cache skills for system prompt injection
+        let skills = plugin_manager.collect_skills();
+        if !skills.is_empty() {
+            self.plugin_skills = Some(skills);
+        }
+
         self
     }
 

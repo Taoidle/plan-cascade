@@ -627,6 +627,36 @@ pub fn build_skills_section(
     section
 }
 
+/// Build a plugin instructions section for system prompt injection.
+pub fn build_plugin_instructions_section(instructions: &str) -> String {
+    if instructions.is_empty() {
+        return String::new();
+    }
+    format!("\n\n## Plugin Instructions\n\n{}", instructions)
+}
+
+/// Build a plugin skills section for system prompt injection.
+pub fn build_plugin_skills_section(
+    plugin_skills: &[crate::services::plugins::models::PluginSkill],
+) -> String {
+    if plugin_skills.is_empty() {
+        return String::new();
+    }
+    let mut section = String::from("\n\n## Plugin Skills\n\n");
+    section.push_str("The following skills are provided by enabled plugins:\n");
+    for (i, skill) in plugin_skills.iter().enumerate() {
+        section.push_str(&format!("\n### {}\n", skill.name));
+        section.push_str(&format!("*{}*\n\n", skill.description));
+        section.push_str(&skill.body);
+        if i < plugin_skills.len() - 1 {
+            section.push_str("\n\n---\n");
+        } else {
+            section.push('\n');
+        }
+    }
+    section
+}
+
 /// Build a full system prompt with optional skills injection.
 ///
 /// This is a convenience wrapper that combines `build_system_prompt` with

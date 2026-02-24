@@ -67,6 +67,25 @@ impl PluginState {
             None => Err("Plugin system not initialized. Call init_app first.".to_string()),
         }
     }
+
+    /// Wire plugin context into an OrchestratorService.
+    ///
+    /// Acquires a brief read lock on the plugin manager, extracts all plugin
+    /// data (instructions, skills, hooks), and returns the wired orchestrator.
+    /// Returns the orchestrator unchanged if the plugin system is not initialized.
+    pub async fn wire_orchestrator(
+        &self,
+        orchestrator: crate::services::orchestrator::OrchestratorService,
+    ) -> crate::services::orchestrator::OrchestratorService {
+        let guard = self.inner.read().await;
+        match &*guard {
+            Some(manager) => orchestrator.with_plugin_context(manager),
+            None => {
+                eprintln!("[plugins] Plugin system not initialized, skipping plugin wiring");
+                orchestrator
+            }
+        }
+    }
 }
 
 impl Default for PluginState {
