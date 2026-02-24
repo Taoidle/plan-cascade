@@ -48,16 +48,76 @@ impl PromptService {
         }
 
         let builtins = vec![
-            ("builtin-code-review", "Code Review", "coding", "Review this code for bugs, performance, and best practices:\n\n{{code}}", "Analyze code for issues and improvements"),
-            ("builtin-explain-code", "Explain Code", "coding", "Explain what this code does in simple terms:\n\n{{code}}", "Get a clear explanation of code"),
-            ("builtin-refactor", "Refactor", "coding", "Refactor this code to improve readability and maintainability:\n\n{{code}}", "Improve code structure"),
-            ("builtin-write-tests", "Write Tests", "coding", "Write comprehensive unit tests for:\n\n{{code}}", "Generate test cases"),
-            ("builtin-fix-bug", "Fix Bug", "coding", "Find and fix the bug:\n\n{{code}}\n\nError: {{error}}", "Debug and fix issues"),
-            ("builtin-explain-error", "Explain Error", "coding", "Explain this error and suggest a fix:\n\n{{error}}", "Understand error messages"),
-            ("builtin-summarize", "Summarize", "writing", "Summarize concisely:\n\n{{text}}", "Create concise summaries"),
-            ("builtin-improve-writing", "Improve Writing", "writing", "Improve clarity and flow:\n\n{{text}}", "Enhance writing quality"),
-            ("builtin-translate", "Translate", "writing", "Translate to {{language}}:\n\n{{text}}", "Translate text to another language"),
-            ("builtin-analyze", "Analyze", "analysis", "Analyze and provide key insights:\n\n{{content}}", "Extract key insights from content"),
+            (
+                "builtin-code-review",
+                "Code Review",
+                "coding",
+                "Review this code for bugs, performance, and best practices:\n\n{{code}}",
+                "Analyze code for issues and improvements",
+            ),
+            (
+                "builtin-explain-code",
+                "Explain Code",
+                "coding",
+                "Explain what this code does in simple terms:\n\n{{code}}",
+                "Get a clear explanation of code",
+            ),
+            (
+                "builtin-refactor",
+                "Refactor",
+                "coding",
+                "Refactor this code to improve readability and maintainability:\n\n{{code}}",
+                "Improve code structure",
+            ),
+            (
+                "builtin-write-tests",
+                "Write Tests",
+                "coding",
+                "Write comprehensive unit tests for:\n\n{{code}}",
+                "Generate test cases",
+            ),
+            (
+                "builtin-fix-bug",
+                "Fix Bug",
+                "coding",
+                "Find and fix the bug:\n\n{{code}}\n\nError: {{error}}",
+                "Debug and fix issues",
+            ),
+            (
+                "builtin-explain-error",
+                "Explain Error",
+                "coding",
+                "Explain this error and suggest a fix:\n\n{{error}}",
+                "Understand error messages",
+            ),
+            (
+                "builtin-summarize",
+                "Summarize",
+                "writing",
+                "Summarize concisely:\n\n{{text}}",
+                "Create concise summaries",
+            ),
+            (
+                "builtin-improve-writing",
+                "Improve Writing",
+                "writing",
+                "Improve clarity and flow:\n\n{{text}}",
+                "Enhance writing quality",
+            ),
+            (
+                "builtin-translate",
+                "Translate",
+                "writing",
+                "Translate to {{language}}:\n\n{{text}}",
+                "Translate text to another language",
+            ),
+            (
+                "builtin-analyze",
+                "Analyze",
+                "analysis",
+                "Analyze and provide key insights:\n\n{{content}}",
+                "Extract key insights from content",
+            ),
         ];
 
         for (id, title, category, content, description) in builtins {
@@ -112,9 +172,7 @@ impl PromptService {
             params_vec.iter().map(|p| p.as_ref()).collect();
 
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_refs.as_slice(), |row| {
-            Ok(row_to_prompt(row))
-        })?;
+        let rows = stmt.query_map(params_refs.as_slice(), |row| Ok(row_to_prompt(row)))?;
 
         let mut prompts = Vec::new();
         for row in rows {
@@ -154,8 +212,7 @@ impl PromptService {
         let id = Uuid::new_v4().to_string();
         let variables = extract_variables(&req.content);
         let tags_json = serde_json::to_string(&req.tags).unwrap_or_else(|_| "[]".to_string());
-        let variables_json =
-            serde_json::to_string(&variables).unwrap_or_else(|_| "[]".to_string());
+        let variables_json = serde_json::to_string(&variables).unwrap_or_else(|_| "[]".to_string());
 
         conn.execute(
             "INSERT INTO prompts (id, title, content, description, category, tags, variables, is_builtin, is_pinned, use_count)
@@ -196,8 +253,7 @@ impl PromptService {
 
         let variables = extract_variables(&content);
         let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
-        let variables_json =
-            serde_json::to_string(&variables).unwrap_or_else(|_| "[]".to_string());
+        let variables_json = serde_json::to_string(&variables).unwrap_or_else(|_| "[]".to_string());
 
         conn.execute(
             "UPDATE prompts SET title = ?1, content = ?2, description = ?3, category = ?4,

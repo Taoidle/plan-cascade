@@ -176,6 +176,7 @@ fn main() {
             plan_cascade_desktop::commands::standalone::check_provider_health,
             plan_cascade_desktop::commands::standalone::execute_standalone,
             plan_cascade_desktop::commands::standalone::save_output_export,
+            plan_cascade_desktop::commands::standalone::save_binary_export,
             plan_cascade_desktop::commands::standalone::get_usage_stats,
             // Session-based standalone commands
             plan_cascade_desktop::commands::standalone::execute_standalone_with_session,

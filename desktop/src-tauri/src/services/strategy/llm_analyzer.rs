@@ -71,10 +71,7 @@ impl LlmStrategyResponse {
         let normalized = json_str
             .replace("\"estimated_stories\"", "\"estimatedStories\"")
             .replace("\"risk_level\"", "\"riskLevel\"")
-            .replace(
-                "\"parallelization_benefit\"",
-                "\"parallelizationBenefit\"",
-            )
+            .replace("\"parallelization_benefit\"", "\"parallelizationBenefit\"")
             .replace("\"has_dependencies\"", "\"hasDependencies\"")
             .replace("\"functional_areas\"", "\"functionalAreas\"");
 

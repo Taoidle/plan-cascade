@@ -485,5 +485,34 @@
     "title": "/ 提示词",
     "back": "返回",
     "insertPrompt": "插入提示词"
+  },
+
+  "export": {
+    "markdown": "Markdown (.md)",
+    "conversationTranscript": "对话记录",
+    "latestReply": "最新 AI 回复",
+    "chooseReply": "选择回复编号",
+    "rawOutput": "原始完整输出",
+    "pdf": "PDF",
+    "png": "PNG",
+    "jpg": "JPG",
+    "textFormats": "文本",
+    "visualFormats": "视觉",
+    "noContent": "没有可导出的内容。",
+    "noReplies": "没有可导出的 AI 回复。",
+    "invalidReplyNumber": "无效的回复编号。",
+    "replyOutOfRange": "回复编号必须在 1-{{max}} 范围内。",
+    "chooseReplyPrompt": "导出哪条 AI 回复？请输入 1-{{max}}",
+    "canceled": "导出已取消。",
+    "capturing": "正在捕获...",
+    "exportFailed": "导出失败：{{error}}",
+    "markdownExported": "Markdown 已导出。",
+    "transcriptExported": "对话记录已导出。",
+    "latestReplyExported": "最新 AI 回复已导出。",
+    "replyExported": "AI 回复 #{{number}} 已导出。",
+    "rawExported": "原始输出已导出。",
+    "pdfExported": "PDF 已导出。",
+    "pngExported": "PNG 已导出。",
+    "jpgExported": "JPG 已导出。"
   }
 }

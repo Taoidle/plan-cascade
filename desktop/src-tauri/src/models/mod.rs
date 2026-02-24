@@ -14,11 +14,11 @@ pub mod mega;
 pub mod orchestrator;
 pub mod prd;
 pub mod project;
+pub mod prompt;
 pub mod quality_gates;
 pub mod response;
 pub mod session;
 pub mod settings;
-pub mod prompt;
 pub mod worktree;
 
 pub use agent::*;

@@ -485,5 +485,34 @@
     "title": "/ プロンプト",
     "back": "戻る",
     "insertPrompt": "プロンプトを挿入"
+  },
+
+  "export": {
+    "markdown": "Markdown (.md)",
+    "conversationTranscript": "会話記録",
+    "latestReply": "最新AIの返答",
+    "chooseReply": "返答番号を選択",
+    "rawOutput": "完全な生出力",
+    "pdf": "PDF",
+    "png": "PNG",
+    "jpg": "JPG",
+    "textFormats": "テキスト",
+    "visualFormats": "ビジュアル",
+    "noContent": "エクスポートできるコンテンツがありません。",
+    "noReplies": "エクスポートできるAIの返答がありません。",
+    "invalidReplyNumber": "無効な返答番号です。",
+    "replyOutOfRange": "返答番号は1〜{{max}}の範囲で指定してください。",
+    "chooseReplyPrompt": "どのAI返答をエクスポートしますか？1〜{{max}}を入力",
+    "canceled": "エクスポートがキャンセルされました。",
+    "capturing": "キャプチャ中...",
+    "exportFailed": "エクスポートに失敗しました：{{error}}",
+    "markdownExported": "Markdownをエクスポートしました。",
+    "transcriptExported": "会話記録をエクスポートしました。",
+    "latestReplyExported": "最新のAI返答をエクスポートしました。",
+    "replyExported": "AI返答 #{{number}} をエクスポートしました。",
+    "rawExported": "生出力をエクスポートしました。",
+    "pdfExported": "PDFをエクスポートしました。",
+    "pngExported": "PNGをエクスポートしました。",
+    "jpgExported": "JPGをエクスポートしました。"
   }
 }

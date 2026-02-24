@@ -10,7 +10,6 @@
 
 import React, { useEffect, useRef, useState, useCallback, useMemo, memo } from 'react';
 import { clsx } from 'clsx';
-import { invoke } from '@tauri-apps/api/core';
 import {
   ArrowDownIcon,
   Cross2Icon,
@@ -18,9 +17,22 @@ import {
   CheckCircledIcon,
   CrossCircledIcon,
 } from '@radix-ui/react-icons';
+import { useTranslation } from 'react-i18next';
 import { useExecutionStore, StreamLine, StreamLineType } from '../../store/execution';
 import { useModeStore } from '../../store/mode';
 import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
+import {
+  saveTextWithDialog,
+  saveBinaryWithDialog,
+  localTimestampForFilename,
+  serializeRawOutput,
+  serializeConversationOutput,
+  serializeConversationMarkdown,
+  collectAssistantReplies,
+  captureElementToBlob,
+  captureElementToPdfBlob,
+  blobToBase64,
+} from '../../lib/exportUtils';
 
 // ============================================================================
 // Types
@@ -35,80 +47,6 @@ interface StreamingOutputProps {
   showClear?: boolean;
   /** Compact mode for SimpleMode (reduced padding, smaller text) */
   compact?: boolean;
-}
-
-interface CommandResponse<T> {
-  success: boolean;
-  data: T | null;
-  error: string | null;
-}
-
-async function saveTextWithDialog(filename: string, content: string): Promise<boolean> {
-  const { save } = await import('@tauri-apps/plugin-dialog');
-  const selected = await save({
-    title: 'Export Output',
-    defaultPath: filename,
-    canCreateDirectories: true,
-  });
-  if (!selected || Array.isArray(selected)) return false;
-  const result = await invoke<CommandResponse<boolean>>('save_output_export', {
-    path: selected,
-    content,
-  });
-  if (!result.success) {
-    throw new Error(result.error || 'Failed to save export');
-  }
-  return true;
-}
-
-function localTimestampForFilename(): string {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-}
-
-function serializeRawOutput(lines: StreamLine[]): string {
-  return lines
-    .map((line) => {
-      const prefix = LINE_TYPE_PREFIX[line.type];
-      if (line.type === 'text') return line.content;
-      return `${prefix}${line.content}`;
-    })
-    .join('\n');
-}
-
-function serializeConversationOutput(lines: StreamLine[]): string {
-  const out: string[] = [];
-  for (const line of lines) {
-    const content = line.content.trim();
-    if (!content) continue;
-    switch (line.type) {
-      case 'info':
-        out.push(`User: ${content}`);
-        break;
-      case 'text':
-        out.push(`Assistant: ${content}`);
-        break;
-      case 'error':
-        out.push(`Error: ${content}`);
-        break;
-      case 'warning':
-        out.push(`Warning: ${content}`);
-        break;
-      case 'success':
-        out.push(`Status: ${content}`);
-        break;
-      default:
-        break;
-    }
-  }
-  return out.join('\n\n');
-}
-
-function collectAssistantReplies(lines: StreamLine[]): Array<{ id: number; content: string }> {
-  return lines
-    .filter((line) => line.type === 'text' && line.content.trim().length > 0)
-    .map((line) => ({ id: line.id, content: line.content }));
 }
 
 // ============================================================================
@@ -159,6 +97,7 @@ export function StreamingOutput({
   const { streamingOutput, clearStreamingOutput, status } = useExecutionStore();
   const mode = useModeStore((state) => state.mode);
   const isSimpleMode = mode === 'simple';
+  const { t } = useTranslation('simpleMode');
   // Split display blocks into stable historical blocks and the active streaming
   // block. Only the active block re-renders during streaming, preventing full
   // MarkdownRenderer re-parses on every text delta.
@@ -172,9 +111,11 @@ export function StreamingOutput({
     return { historicalBlocks: blocks, activeBlock: null as DisplayBlock | null };
   }, [streamingOutput, isSimpleMode]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
   const [exportNotice, setExportNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(
     null
   );
@@ -241,100 +182,154 @@ export function StreamingOutput({
     [streamingOutput]
   );
 
+  const exportMarkdown = useCallback(async () => {
+    try {
+      const content = serializeConversationMarkdown(streamingOutput);
+      if (!content.trim()) {
+        notifyExport('error', t('export.noContent'));
+        return;
+      }
+      const stamp = localTimestampForFilename();
+      const saved = await saveTextWithDialog(`conversation-${stamp}.md`, content);
+      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      notifyExport('ok', t('export.markdownExported'));
+    } catch (error) {
+      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+    }
+  }, [notifyExport, streamingOutput, t]);
+
   const exportAll = useCallback(async () => {
     try {
       const content = serializeConversationOutput(streamingOutput);
       if (!content.trim()) {
-        notifyExport('error', 'No conversation content available to export.');
+        notifyExport('error', t('export.noContent'));
         return;
       }
       const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`conversation-${stamp}.txt`, content);
-      if (!saved) {
-        notifyExport('error', 'Export canceled.');
-        return;
-      }
-      notifyExport('ok', 'Conversation transcript exported.');
+      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      notifyExport('ok', t('export.transcriptExported'));
     } catch (error) {
-      console.error('Failed to export conversation transcript:', error);
-      notifyExport('error', `Export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
     }
-  }, [notifyExport, streamingOutput]);
+  }, [notifyExport, streamingOutput, t]);
 
   const exportRaw = useCallback(async () => {
     try {
       const content = serializeRawOutput(streamingOutput);
       if (!content.trim()) {
-        notifyExport('error', 'No output available to export.');
+        notifyExport('error', t('export.noContent'));
         return;
       }
       const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`output-raw-${stamp}.txt`, content);
-      if (!saved) {
-        notifyExport('error', 'Export canceled.');
-        return;
-      }
-      notifyExport('ok', 'Raw output exported.');
+      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      notifyExport('ok', t('export.rawExported'));
     } catch (error) {
-      console.error('Failed to export raw output:', error);
-      notifyExport('error', `Export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
     }
-  }, [notifyExport, streamingOutput]);
+  }, [notifyExport, streamingOutput, t]);
 
   const exportLatestReply = useCallback(async () => {
     try {
       const latest = assistantReplies[assistantReplies.length - 1];
       if (!latest) {
-        notifyExport('error', 'No AI reply available to export.');
+        notifyExport('error', t('export.noReplies'));
         return;
       }
       const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`ai-reply-latest-${stamp}.md`, latest.content);
-      if (!saved) {
-        notifyExport('error', 'Export canceled.');
-        return;
-      }
-      notifyExport('ok', 'Latest AI reply exported.');
+      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      notifyExport('ok', t('export.latestReplyExported'));
     } catch (error) {
-      console.error('Failed to export latest reply:', error);
-      notifyExport('error', `Export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
     }
-  }, [assistantReplies, notifyExport]);
+  }, [assistantReplies, notifyExport, t]);
 
   const exportReplyByNumber = useCallback(async () => {
     try {
       if (assistantReplies.length === 0) {
-        notifyExport('error', 'No AI replies available to export.');
+        notifyExport('error', t('export.noReplies'));
         return;
       }
       const raw = window.prompt(
-        `Export which AI reply? Enter 1-${assistantReplies.length}`,
+        t('export.chooseReplyPrompt', { max: assistantReplies.length }),
         String(assistantReplies.length)
       );
       if (!raw) return;
       const selected = Number(raw);
       if (!Number.isFinite(selected)) {
-        notifyExport('error', 'Invalid reply number.');
+        notifyExport('error', t('export.invalidReplyNumber'));
         return;
       }
       const index = Math.floor(selected) - 1;
       if (index < 0 || index >= assistantReplies.length) {
-        notifyExport('error', `Reply number must be in range 1-${assistantReplies.length}.`);
+        notifyExport('error', t('export.replyOutOfRange', { max: assistantReplies.length }));
         return;
       }
       const reply = assistantReplies[index];
       const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`ai-reply-${index + 1}-${stamp}.md`, reply.content);
-      if (!saved) {
-        notifyExport('error', 'Export canceled.');
-        return;
-      }
-      notifyExport('ok', `AI reply #${index + 1} exported.`);
+      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      notifyExport('ok', t('export.replyExported', { number: index + 1 }));
     } catch (error) {
-      console.error('Failed to export selected reply:', error);
-      notifyExport('error', `Export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
     }
-  }, [assistantReplies, notifyExport]);
+  }, [assistantReplies, notifyExport, t]);
+
+  const exportPng = useCallback(async () => {
+    if (!outputRef.current) return;
+    try {
+      setIsCapturing(true);
+      notifyExport('ok', t('export.capturing'));
+      const blob = await captureElementToBlob(outputRef.current, 'png');
+      const b64 = await blobToBase64(blob);
+      const stamp = localTimestampForFilename();
+      const saved = await saveBinaryWithDialog(`output-${stamp}.png`, b64);
+      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      notifyExport('ok', t('export.pngExported'));
+    } catch (error) {
+      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [notifyExport, t]);
+
+  const exportJpg = useCallback(async () => {
+    if (!outputRef.current) return;
+    try {
+      setIsCapturing(true);
+      notifyExport('ok', t('export.capturing'));
+      const blob = await captureElementToBlob(outputRef.current, 'jpeg');
+      const b64 = await blobToBase64(blob);
+      const stamp = localTimestampForFilename();
+      const saved = await saveBinaryWithDialog(`output-${stamp}.jpg`, b64);
+      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      notifyExport('ok', t('export.jpgExported'));
+    } catch (error) {
+      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [notifyExport, t]);
+
+  const exportPdf = useCallback(async () => {
+    if (!outputRef.current) return;
+    try {
+      setIsCapturing(true);
+      notifyExport('ok', t('export.capturing'));
+      const blob = await captureElementToPdfBlob(outputRef.current);
+      const b64 = await blobToBase64(blob);
+      const stamp = localTimestampForFilename();
+      const saved = await saveBinaryWithDialog(`output-${stamp}.pdf`, b64);
+      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      notifyExport('ok', t('export.pdfExported'));
+    } catch (error) {
+      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [notifyExport, t]);
 
 
   if (streamingOutput.length === 0) {
@@ -413,53 +408,75 @@ export function StreamingOutput({
             <div ref={exportMenuRef} className="relative">
               <button
                 onClick={() => setShowExportMenu((v) => !v)}
-                disabled={streamingOutput.length === 0}
+                disabled={streamingOutput.length === 0 || isCapturing}
                 className="px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed text-2xs font-mono transition-colors"
                 title="Export output"
               >
-                export
+                {isCapturing ? t('export.capturing') : 'export'}
               </button>
               {showExportMenu && (
-                <div className="absolute right-0 mt-1 w-44 rounded border border-gray-700 bg-gray-900 shadow-lg z-20 p-1">
+                <div className="absolute right-0 mt-1 w-52 rounded border border-gray-700 bg-gray-900 shadow-lg z-20 p-1">
+                  {/* Text formats */}
+                  <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">{t('export.textFormats')}</div>
                   <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportAll();
-                    }}
+                    onClick={() => { setShowExportMenu(false); void exportMarkdown(); }}
                     disabled={streamingOutput.length === 0}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    conversation transcript
+                    {t('export.markdown')}
                   </button>
                   <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportLatestReply();
-                    }}
-                    disabled={assistantReplies.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    latest AI reply
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportReplyByNumber();
-                    }}
-                    disabled={assistantReplies.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    choose reply number
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportRaw();
-                    }}
+                    onClick={() => { setShowExportMenu(false); void exportAll(); }}
                     disabled={streamingOutput.length === 0}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    raw full output
+                    {t('export.conversationTranscript')}
+                  </button>
+                  <button
+                    onClick={() => { setShowExportMenu(false); void exportLatestReply(); }}
+                    disabled={assistantReplies.length === 0}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t('export.latestReply')}
+                  </button>
+                  <button
+                    onClick={() => { setShowExportMenu(false); void exportReplyByNumber(); }}
+                    disabled={assistantReplies.length === 0}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t('export.chooseReply')}
+                  </button>
+                  <button
+                    onClick={() => { setShowExportMenu(false); void exportRaw(); }}
+                    disabled={streamingOutput.length === 0}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t('export.rawOutput')}
+                  </button>
+                  {/* Divider */}
+                  <div className="my-1 border-t border-gray-700/60" />
+                  {/* Visual formats */}
+                  <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">{t('export.visualFormats')}</div>
+                  <button
+                    onClick={() => { setShowExportMenu(false); void exportPdf(); }}
+                    disabled={streamingOutput.length === 0 || status === 'running'}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t('export.pdf')}
+                  </button>
+                  <button
+                    onClick={() => { setShowExportMenu(false); void exportPng(); }}
+                    disabled={streamingOutput.length === 0 || status === 'running'}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t('export.png')}
+                  </button>
+                  <button
+                    onClick={() => { setShowExportMenu(false); void exportJpg(); }}
+                    disabled={streamingOutput.length === 0 || status === 'running'}
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t('export.jpg')}
                   </button>
                 </div>
               )}
@@ -477,6 +494,7 @@ export function StreamingOutput({
 
       {/* Output panel */}
       <div
+        ref={outputRef}
         className={clsx(
           'rounded-b-lg overflow-y-auto overflow-x-hidden',
           'bg-gray-950 border border-gray-800',
@@ -520,7 +538,7 @@ export function StreamingOutput({
         })()}
 
         {/* Working indicator — visible while AI is processing */}
-        {status === 'running' && <WorkingIndicator />}
+        {status === 'running' && <div data-export-exclude="true"><WorkingIndicator /></div>}
 
         {/* Bottom anchor for auto-scroll */}
         <div ref={bottomRef} />
@@ -529,6 +547,7 @@ export function StreamingOutput({
       {/* Scroll to bottom button */}
       {showScrollButton && (
         <button
+          data-export-exclude="true"
           onClick={scrollToBottom}
           className={clsx(
             'absolute bottom-4 right-4',

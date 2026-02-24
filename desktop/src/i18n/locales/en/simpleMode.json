@@ -485,5 +485,34 @@
     "title": "/ Prompts",
     "back": "Back",
     "insertPrompt": "Insert Prompt"
+  },
+
+  "export": {
+    "markdown": "Markdown (.md)",
+    "conversationTranscript": "Conversation transcript",
+    "latestReply": "Latest AI reply",
+    "chooseReply": "Choose reply number",
+    "rawOutput": "Raw full output",
+    "pdf": "PDF",
+    "png": "PNG",
+    "jpg": "JPG",
+    "textFormats": "Text",
+    "visualFormats": "Visual",
+    "noContent": "No content available to export.",
+    "noReplies": "No AI replies available to export.",
+    "invalidReplyNumber": "Invalid reply number.",
+    "replyOutOfRange": "Reply number must be in range 1-{{max}}.",
+    "chooseReplyPrompt": "Export which AI reply? Enter 1-{{max}}",
+    "canceled": "Export canceled.",
+    "capturing": "Capturing...",
+    "exportFailed": "Export failed: {{error}}",
+    "markdownExported": "Markdown exported.",
+    "transcriptExported": "Conversation transcript exported.",
+    "latestReplyExported": "Latest AI reply exported.",
+    "replyExported": "AI reply #{{number}} exported.",
+    "rawExported": "Raw output exported.",
+    "pdfExported": "PDF exported.",
+    "pngExported": "PNG exported.",
+    "jpgExported": "JPG exported."
   }
 }

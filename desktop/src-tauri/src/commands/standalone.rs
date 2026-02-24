@@ -1241,6 +1241,29 @@ pub async fn save_output_export(path: String, content: String) -> CommandRespons
     }
 }
 
+/// Save binary data (base64-encoded) to a user-selected file path.
+#[tauri::command]
+pub async fn save_binary_export(path: String, data_base64: String) -> CommandResponse<bool> {
+    use base64::Engine;
+    let target = PathBuf::from(path.trim());
+    if target.as_os_str().is_empty() {
+        return CommandResponse::err("Invalid target path");
+    }
+    if let Some(parent) = target.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return CommandResponse::err(format!("Failed to prepare export directory: {}", e));
+        }
+    }
+    let decoded = match base64::engine::general_purpose::STANDARD.decode(&data_base64) {
+        Ok(bytes) => bytes,
+        Err(e) => return CommandResponse::err(format!("Failed to decode base64 data: {}", e)),
+    };
+    match std::fs::write(&target, decoded) {
+        Ok(_) => CommandResponse::ok(true),
+        Err(e) => CommandResponse::err(format!("Failed to save export: {}", e)),
+    }
+}
+
 /// Get usage statistics from the database
 ///
 /// Deprecated: Use the new analytics system (`services/analytics/`) via
