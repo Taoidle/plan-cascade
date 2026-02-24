@@ -12,9 +12,11 @@
 
 pub mod analyzer;
 pub mod classifier;
+pub mod llm_analyzer;
 
 pub use analyzer::{
     analyze_task_for_mode, Benefit, DimensionScores, ExecutionMode, ExecutionStrategy, RiskLevel,
     StrategyAnalysis, StrategyAnalyzer, StrategyDecision,
 };
 pub use classifier::{Intent, IntentClassifier, IntentResult};
+pub use llm_analyzer::enhance_strategy_analysis;

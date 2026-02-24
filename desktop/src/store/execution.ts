@@ -632,6 +632,9 @@ interface ExecutionState {
   /** Set pending task context to inject into next sendFollowUp (Claude Code backend) */
   setPendingTaskContext: (context: string) => void;
 
+  /** Clear pending task context */
+  clearPendingTaskContext: () => void;
+
   /** Fork conversation at a turn: background original session, create truncated foreground copy */
   forkSessionAtTurn: (userLineId: number) => void;
 }
@@ -1455,7 +1458,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           analysisSessionId: standaloneSessionId,
           enableCompaction: settings.enableContextCompaction ?? true,
           enableThinking: settings.enableThinking ?? false,
-          maxTotalTokens: settings.maxTotalTokens ?? undefined,
           maxIterations: settings.maxIterations ?? undefined,
           maxConcurrentSubagents: settings.maxConcurrentSubagents || undefined,
         });
@@ -2924,7 +2926,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           analysisSessionId: standaloneSessionId,
           enableCompaction: settingsSnapshot.enableContextCompaction ?? true,
           enableThinking: settingsSnapshot.enableThinking ?? false,
-          maxTotalTokens: settingsSnapshot.maxTotalTokens ?? undefined,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
           maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
         });
@@ -3113,7 +3114,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           analysisSessionId: standaloneSessionId,
           enableCompaction: settingsSnapshot.enableContextCompaction ?? true,
           enableThinking: settingsSnapshot.enableThinking ?? false,
-          maxTotalTokens: settingsSnapshot.maxTotalTokens ?? undefined,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
           maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
         });
@@ -3183,6 +3183,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
   setPendingTaskContext: (context: string) => {
     set({ _pendingTaskContext: context });
+  },
+
+  clearPendingTaskContext: () => {
+    set({ _pendingTaskContext: null });
   },
 }));
 

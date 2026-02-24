@@ -229,6 +229,20 @@
     "refreshAnalyticsTitle": "刷新分析数据"
   },
 
+  "contextBridge": {
+    "contextWillTransfer": "对话历史将传递到任务模式",
+    "pendingTaskContext": "任务上下文待注入",
+    "historyTransferred": "已传递 {{count}} 轮对话",
+    "clearContext": "清除待注入的上下文",
+    "clearHistory": "清除对话历史",
+    "clear": "清除",
+    "contextCleared": "上下文已清除",
+    "historyCleared": "对话历史已清除",
+    "switchToTaskWithContext": "切换到任务模式，携带对话上下文",
+    "switchToChatWithTaskContext": "切换到对话模式，携带任务上下文",
+    "contextReset": "已为新任务清除上下文"
+  },
+
   "workflow": {
     "cancelWorkflow": "取消工作流",
 
@@ -397,7 +411,8 @@
       "prdApproved": "PRD 已批准！开始执行...",
       "prdFeedbackNoted": "PRD 反馈已记录：「{{feedback}}」。使用 PRD 卡片上的编辑按钮进行修改。",
       "workflowCancelled": "工作流已取消。",
-      "configUpdated": "配置已更新：{{details}}"
+      "configUpdated": "配置已更新：{{details}}",
+      "enhancingAnalysis": "正在使用AI增强分析..."
     }
   }
 }

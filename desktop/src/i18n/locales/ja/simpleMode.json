@@ -229,6 +229,20 @@
     "refreshAnalyticsTitle": "分析データを更新"
   },
 
+  "contextBridge": {
+    "contextWillTransfer": "チャット履歴がタスクに転送されます",
+    "pendingTaskContext": "タスクコンテキストが注入待ち",
+    "historyTransferred": "{{count}}件の会話が転送されました",
+    "clearContext": "保留中のコンテキストをクリア",
+    "clearHistory": "会話履歴をクリア",
+    "clear": "クリア",
+    "contextCleared": "コンテキストがクリアされました",
+    "historyCleared": "会話履歴がクリアされました",
+    "switchToTaskWithContext": "チャットコンテキスト付きでタスクモードに切り替え",
+    "switchToChatWithTaskContext": "タスクコンテキスト付きでチャットモードに切り替え",
+    "contextReset": "新しいタスクのためにコンテキストをクリアしました"
+  },
+
   "workflow": {
     "cancelWorkflow": "ワークフローをキャンセル",
 
@@ -397,7 +411,8 @@
       "prdApproved": "PRDが承認されました！実行を開始...",
       "prdFeedbackNoted": "PRDフィードバックを記録しました：「{{feedback}}」。PRDカードの編集ボタンで変更してください。",
       "workflowCancelled": "ワークフローがキャンセルされました。",
-      "configUpdated": "設定が更新されました：{{details}}"
+      "configUpdated": "設定が更新されました：{{details}}",
+      "enhancingAnalysis": "AIで分析を強化中..."
     }
   }
 }

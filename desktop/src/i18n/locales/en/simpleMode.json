@@ -229,6 +229,20 @@
     "refreshAnalyticsTitle": "Refresh analytics data"
   },
 
+  "contextBridge": {
+    "contextWillTransfer": "Chat history will transfer to Task",
+    "pendingTaskContext": "Task context ready to inject",
+    "historyTransferred": "{{count}} conversation turns transferred",
+    "clearContext": "Clear pending context",
+    "clearHistory": "Clear conversation history",
+    "clear": "Clear",
+    "contextCleared": "Context cleared",
+    "historyCleared": "Conversation history cleared",
+    "switchToTaskWithContext": "Switching to Task mode with chat context",
+    "switchToChatWithTaskContext": "Switching to Chat mode with task context",
+    "contextReset": "Context cleared for new task"
+  },
+
   "workflow": {
     "cancelWorkflow": "Cancel workflow",
 
@@ -397,7 +411,8 @@
       "prdApproved": "PRD approved! Starting execution...",
       "prdFeedbackNoted": "PRD feedback noted: \"{{feedback}}\". Use the Edit button on the PRD card to make changes.",
       "workflowCancelled": "Workflow cancelled.",
-      "configUpdated": "Config updated: {{details}}"
+      "configUpdated": "Config updated: {{details}}",
+      "enhancingAnalysis": "Enhancing analysis with AI..."
     }
   }
 }

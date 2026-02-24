@@ -48,6 +48,8 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
   const commitLog = useGitStore((s) => s.commitLog);
   const branches = useGitStore((s) => s.branches);
   const taskId = useExecutionStore((s) => s.taskId);
+  const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
+  const activeSessionId = taskId || standaloneSessionId;
   const aiChangeCount = useFileChangesStore((s) =>
     s.turnChanges.reduce((acc, t) => acc + t.changes.length, 0),
   );
@@ -85,7 +87,7 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
       <div className="flex-1 min-h-0 overflow-y-auto">
         {selectedTab === 'changes' && <ChangesTab />}
         {selectedTab === 'ai-changes' && (
-          <AIChangesTab sessionId={taskId} projectRoot={workspacePath} />
+          <AIChangesTab sessionId={activeSessionId} projectRoot={workspacePath} />
         )}
         {selectedTab === 'history' && <HistoryTab />}
         {selectedTab === 'branches' && <BranchesTab />}

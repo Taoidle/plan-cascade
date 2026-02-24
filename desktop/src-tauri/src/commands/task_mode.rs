@@ -518,7 +518,7 @@ pub async fn generate_task_prd(
 ///
 /// Looks up the API key from the keyring if not provided explicitly.
 /// Returns an Arc<dyn LlmProvider> ready for use.
-async fn resolve_llm_provider(
+pub(crate) async fn resolve_llm_provider(
     provider_name: &str,
     model: &str,
     explicit_api_key: Option<String>,

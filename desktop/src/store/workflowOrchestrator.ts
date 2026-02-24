@@ -88,6 +88,7 @@ interface WorkflowOrchestratorState {
   addPrdFeedback: (feedback: string) => void;
   cancelWorkflow: () => Promise<void>;
   resetWorkflow: () => void;
+  clearConversationHistory: () => void;
 }
 
 // ============================================================================
@@ -240,6 +241,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
    * Phase transitions: idle → analyzing → configuring
    */
   startWorkflow: async (description: string) => {
+    // Add user message as 'info' StreamLine so it appears as a chat bubble in ChatTranscript
+    useExecutionStore.getState().appendStreamLine(description, 'info');
+
     set({ phase: 'analyzing', taskDescription: description, error: null });
     injectInfo(i18n.t('workflow.orchestrator.analyzingTask', { ns: 'simpleMode' }), 'info');
 
@@ -259,16 +263,48 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       }
 
       const sessionId = taskModeState.sessionId;
-      const analysis = taskModeState.strategyAnalysis;
+      let analysis = taskModeState.strategyAnalysis;
+
+      // 2. Try LLM enhancement of strategy analysis
+      if (analysis) {
+        try {
+          injectInfo(i18n.t('workflow.orchestrator.enhancingAnalysis', { ns: 'simpleMode' }), 'info');
+
+          const settings = useSettingsStore.getState();
+          const { resolveProviderBaseUrl } = await import('../lib/providers');
+          const baseUrl = settings.provider
+            ? resolveProviderBaseUrl(settings.provider, settings)
+            : undefined;
+
+          const enhanced = await invoke<{ success: boolean; data: StrategyAnalysis | null; error: string | null }>(
+            'enhance_strategy_with_llm',
+            {
+              description,
+              keywordAnalysis: analysis,
+              provider: settings.provider || null,
+              model: settings.model || null,
+              apiKey: null,
+              baseUrl: baseUrl || null,
+            }
+          );
+
+          if (enhanced.success && enhanced.data) {
+            analysis = enhanced.data;
+            useTaskModeStore.setState({ strategyAnalysis: analysis });
+          }
+        } catch {
+          // LLM enhancement failed — silently use keyword analysis
+        }
+      }
 
       set({ sessionId, strategyAnalysis: analysis });
 
-      // 2. Inject strategy card
+      // 3. Inject strategy card (with LLM-enhanced or keyword result)
       if (analysis) {
         injectCard('strategy_card', buildStrategyCardData(analysis));
       }
 
-      // 3. Build recommended config from analysis
+      // 4. Build recommended config from analysis
       const config: WorkflowConfig = { ...DEFAULT_CONFIG };
       if (analysis) {
         if (analysis.riskLevel === 'high') {
@@ -292,7 +328,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
       set({ config, phase: 'configuring' });
 
-      // 4. Inject config card (user interacts with it to advance)
+      // 5. Inject config card (user interacts with it to advance)
       injectCard('config_card', buildConfigCardData(config, false), true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -363,6 +399,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
   /** Parse natural language config override */
   overrideConfigNatural: (text: string) => {
+    // Add user message as 'info' StreamLine so it appears as a chat bubble
+    useExecutionStore.getState().appendStreamLine(text, 'info');
+
     const updates: Partial<WorkflowConfig> = {};
     const lower = text.toLowerCase();
 
@@ -417,6 +456,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   submitInterviewAnswer: async (answer: string) => {
     const { pendingQuestion } = get();
     if (!pendingQuestion) return;
+
+    // Add user message as 'info' StreamLine so it appears as a chat bubble
+    useExecutionStore.getState().appendStreamLine(answer, 'info');
 
     // Inject answer card
     const answerData: InterviewAnswerCardData = {
@@ -605,6 +647,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
   /** Add feedback to editable PRD (during reviewing_prd phase) */
   addPrdFeedback: (_feedback: string) => {
+    // Add user message as 'info' StreamLine so it appears as a chat bubble
+    useExecutionStore.getState().appendStreamLine(_feedback, 'info');
+
     // In the future, this could use LLM to apply NL edits to the PRD.
     // For now, inject as info message.
     injectInfo(i18n.t('workflow.orchestrator.prdFeedbackNoted', { ns: 'simpleMode', feedback: _feedback }), 'info');
@@ -640,6 +685,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     useSpecInterviewStore.getState().reset();
 
     set({ ...DEFAULT_STATE });
+  },
+
+  /** Clear conversation history without resetting the entire workflow */
+  clearConversationHistory: () => {
+    set({ _conversationHistory: [] });
   },
 }));
 

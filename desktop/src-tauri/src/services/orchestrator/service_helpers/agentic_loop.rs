@@ -648,34 +648,6 @@ impl OrchestratorService {
                 };
             }
 
-            // Check token budget
-            if total_usage.total_tokens() >= self.config.max_total_tokens {
-                let error_msg = format!(
-                    "Token budget ({}) exceeded (used {})",
-                    self.config.max_total_tokens,
-                    total_usage.total_tokens()
-                );
-                let _ = tx
-                    .send(UnifiedStreamEvent::Error {
-                        message: error_msg.clone(),
-                        code: Some("token_budget".to_string()),
-                    })
-                    .await;
-                let _ = tx
-                    .send(UnifiedStreamEvent::Complete {
-                        stop_reason: Some("token_budget".to_string()),
-                    })
-                    .await;
-                emit_usage(&tx, &total_usage).await;
-                return ExecutionResult {
-                    response: None,
-                    usage: total_usage,
-                    iterations,
-                    success: false,
-                    error: Some(error_msg),
-                };
-            }
-
             iterations += 1;
 
             // Determine which tools to pass to the LLM API, filtering out any
@@ -1922,34 +1894,6 @@ impl OrchestratorService {
                     usage: total_usage,
                     iterations,
                     success,
-                    error: Some(error_msg),
-                };
-            }
-
-            // Check token budget
-            if total_usage.total_tokens() >= self.config.max_total_tokens {
-                let error_msg = format!(
-                    "Token budget ({}) exceeded (used {})",
-                    self.config.max_total_tokens,
-                    total_usage.total_tokens()
-                );
-                let _ = tx
-                    .send(UnifiedStreamEvent::Error {
-                        message: error_msg.clone(),
-                        code: Some("token_budget".to_string()),
-                    })
-                    .await;
-                let _ = tx
-                    .send(UnifiedStreamEvent::Complete {
-                        stop_reason: Some("token_budget".to_string()),
-                    })
-                    .await;
-                emit_usage(&tx, &total_usage).await;
-                return ExecutionResult {
-                    response: None,
-                    usage: total_usage,
-                    iterations,
-                    success: false,
                     error: Some(error_msg),
                 };
             }
@@ -3284,14 +3228,18 @@ impl OrchestratorService {
 
     /// Check if context compaction should be triggered based on input token usage.
     ///
-    /// Compaction triggers when the last LLM response's input_tokens exceeds 60% of max_total_tokens.
-    /// This uses per-call input_tokens (not cumulative) since it reflects the actual current context size.
+    /// Compaction triggers when the last LLM call's input_tokens exceeds a percentage of the
+    /// provider's context window. This uses per-call input_tokens (not cumulative) since it
+    /// reflects the actual current context size being sent to the LLM.
+    ///
+    /// - Normal mode: 90% of context_window (e.g. Claude 200K → 180K)
+    /// - Aggressive mode (analysis): 70% of context_window (e.g. Claude 200K → 140K)
     fn should_compact(&self, last_input_tokens: u32, aggressive: bool) -> bool {
         if !self.config.enable_compaction {
             return false;
         }
-        let ratio = if aggressive { 0.35 } else { 0.6 };
-        let threshold = (self.config.max_total_tokens as f64 * ratio) as u32;
+        let ratio = if aggressive { 0.7 } else { 0.9 };
+        let threshold = (self.provider.context_window() as f64 * ratio) as u32;
         last_input_tokens > threshold
     }
 

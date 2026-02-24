@@ -51,7 +51,6 @@
       "title": "Execution Limits",
       "maxParallelStories": "Max Parallel Stories",
       "maxIterations": "Max Iterations",
-      "maxTotalTokens": "Max Token Budget",
       "timeout": "Timeout (seconds)",
       "maxConcurrentSubagents": "Max Concurrent Sub-agents",
       "maxConcurrentSubagentsHelp": "0 = auto (provider default)"

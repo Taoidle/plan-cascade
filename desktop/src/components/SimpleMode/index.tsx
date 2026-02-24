@@ -40,6 +40,7 @@ import { useToolPermissionStore } from '../../store/toolPermission';
 import { useGitStore } from '../../store/git';
 import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
 import type { CardPayload } from '../../types/workflowCard';
+import { useToast } from '../shared/Toast';
 
 type WorkflowMode = 'chat' | 'task';
 
@@ -50,6 +51,7 @@ function formatNumber(value: number | null | undefined): string {
 
 export function SimpleMode() {
   const { t } = useTranslation('simpleMode');
+  const { showToast } = useToast();
   const {
     status,
     connectionStatus,
@@ -95,6 +97,27 @@ export function SimpleMode() {
   const setShowDiffPanel = useGitStore((s) => s.setDiffPanelVisible);
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
 
+  // Handle workflow mode changes with context inheritance notifications
+  const handleWorkflowModeChange = useCallback(
+    (newMode: WorkflowMode) => {
+      if (newMode === workflowMode) return;
+
+      // Check for context inheritance
+      const hasChatHistory = streamingOutput.length > 0;
+      const hasPendingTaskContext = useExecutionStore.getState()._pendingTaskContext;
+
+      // Show notification about context inheritance
+      if (newMode === 'task' && hasChatHistory) {
+        showToast(t('contextBridge.switchToTaskWithContext', { defaultValue: 'Switching to Task mode with chat context' }), 'info');
+      } else if (newMode === 'chat' && hasPendingTaskContext) {
+        showToast(t('contextBridge.switchToChatWithTaskContext', { defaultValue: 'Switching to Chat mode with task context' }), 'info');
+      }
+
+      setWorkflowMode(newMode);
+    },
+    [workflowMode, streamingOutput, showToast, t]
+  );
+
   useEffect(() => {
     initialize();
     return () => {
@@ -113,10 +136,15 @@ export function SimpleMode() {
   }, [workspacePath, isChatSession, reset, clearStrategyAnalysis]);
 
   // File change card bridge: converts file-change events into inline chat cards
+  // Both backends emit `file-change-recorded` events keyed by session ID:
+  //   - Claude Code backend uses `taskId`
+  //   - Standalone/multi-LLM backend uses `standaloneSessionId`
   const taskId = useExecutionStore((s) => s.taskId);
+  const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
+  const bridgeSessionId = taskId || standaloneSessionId;
   useEffect(() => {
-    if (!taskId || !workspacePath) return;
-    const bridge = createFileChangeCardBridge(taskId, workspacePath);
+    if (!bridgeSessionId || !workspacePath) return;
+    const bridge = createFileChangeCardBridge(bridgeSessionId, workspacePath);
     const unlistenPromise = bridge.startListening();
 
     // Listen for turn end (status transitions from running to something else)
@@ -135,7 +163,7 @@ export function SimpleMode() {
       unsub();
       bridge.reset();
     };
-  }, [taskId, workspacePath]);
+  }, [bridgeSessionId, workspacePath]);
 
   const workflowPhase = useWorkflowOrchestratorStore((s) => s.phase);
   const pendingQuestion = useWorkflowOrchestratorStore((s) => s.pendingQuestion);
@@ -199,20 +227,26 @@ export function SimpleMode() {
   }, [description, isSubmitting, sendFollowUp, workflowMode, workflowPhase, submitInterviewAnswer, overrideConfigNatural, addPrdFeedback]);
 
   const handleNewTask = useCallback(() => {
+    const hasContext = streamingOutput.length > 0 || useExecutionStore.getState()._pendingTaskContext;
+    
     resetWorkflow();
     reset();
     clearStrategyAnalysis();
     setDescription('');
-  }, [reset, clearStrategyAnalysis, resetWorkflow]);
+    
+    if (hasContext) {
+      showToast(t('contextBridge.contextReset', { defaultValue: 'Context cleared for new task' }), 'info');
+    }
+  }, [reset, clearStrategyAnalysis, resetWorkflow, streamingOutput, showToast, t]);
 
   const handleRestoreHistory = useCallback(
     (historyId: string) => {
       restoreFromHistory(historyId);
       setShowOutputPanel(false);
       setShowDiffPanel(false);
-      setWorkflowMode('chat');
+      handleWorkflowModeChange('chat');
     },
-    [restoreFromHistory, setShowDiffPanel]
+    [restoreFromHistory, setShowDiffPanel, handleWorkflowModeChange]
   );
 
   const isRunning = status === 'running' || status === 'paused';
@@ -268,7 +302,7 @@ export function SimpleMode() {
 
           <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-700 overflow-hidden">
             <button
-              onClick={() => setWorkflowMode('chat')}
+              onClick={() => handleWorkflowModeChange('chat')}
               className={clsx(
                 'px-3 py-1.5 text-xs font-medium transition-colors',
                 workflowMode === 'chat'
@@ -279,7 +313,7 @@ export function SimpleMode() {
               {t('workflowMode.chat', { defaultValue: 'Chat' })}
             </button>
             <button
-              onClick={() => setWorkflowMode('task')}
+              onClick={() => handleWorkflowModeChange('task')}
               className={clsx(
                 'px-3 py-1.5 text-xs font-medium transition-colors',
                 workflowMode === 'task'

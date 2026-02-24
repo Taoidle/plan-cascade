@@ -9,6 +9,7 @@ use crate::services::strategy::analyzer::{
     StrategyOption,
 };
 use crate::services::strategy::classifier::{IntentClassifier, IntentResult};
+use crate::state::AppState;
 
 /// Analyze a task description and return a strategy recommendation.
 ///
@@ -124,6 +125,68 @@ pub async fn analyze_task_for_mode(
     let analysis =
         crate::services::strategy::analyzer::analyze_task_for_mode(&description, context.as_ref());
     CommandResponse::ok(analysis)
+}
+
+/// Enhance a keyword-based strategy analysis using an LLM.
+///
+/// Takes the task description and a pre-computed keyword analysis, calls the
+/// configured LLM provider for a more accurate strategy recommendation, and
+/// returns the enhanced analysis. Falls back to the keyword analysis on failure.
+///
+/// # Arguments
+/// * `description` - The task description
+/// * `keyword_analysis` - Pre-computed keyword-based analysis to enhance
+/// * `provider` - LLM provider name (e.g., "anthropic", "openai")
+/// * `model` - Model name (e.g., "claude-sonnet-4-20250514")
+/// * `api_key` - Optional explicit API key (uses keyring if not provided)
+/// * `base_url` - Optional custom base URL for the provider
+/// * `app_state` - Tauri application state
+///
+/// # Returns
+/// `CommandResponse<StrategyAnalysis>` with the LLM-enhanced analysis.
+#[tauri::command]
+pub async fn enhance_strategy_with_llm(
+    description: String,
+    keyword_analysis: StrategyAnalysis,
+    provider: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<CommandResponse<StrategyAnalysis>, String> {
+    if description.trim().is_empty() {
+        return Ok(CommandResponse::err("Task description cannot be empty"));
+    }
+
+    let resolved_provider = provider.unwrap_or_else(|| "anthropic".to_string());
+    let resolved_model = model.unwrap_or_default();
+
+    let llm = match crate::commands::task_mode::resolve_llm_provider(
+        &resolved_provider,
+        &resolved_model,
+        api_key,
+        base_url,
+        &app_state,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e)),
+    };
+
+    // Call LLM analyzer with 30s timeout
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        crate::services::strategy::enhance_strategy_analysis(llm, &description, &keyword_analysis),
+    )
+    .await
+    {
+        Ok(Ok(enhanced)) => Ok(CommandResponse::ok(enhanced)),
+        Ok(Err(e)) => Ok(CommandResponse::err(e)),
+        Err(_) => Ok(CommandResponse::err(
+            "Strategy LLM analysis timed out after 30 seconds",
+        )),
+    }
 }
 
 #[cfg(test)]
