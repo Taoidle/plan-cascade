@@ -54,6 +54,7 @@ interface FileChangesState {
   ) => Promise<void>;
   selectTurn: (turnIndex: number | null) => void;
   toggleExpanded: (changeId: string) => void;
+  prefillDiffCache: (changeId: string, diff: string) => void;
   reset: () => void;
 }
 
@@ -149,6 +150,14 @@ export const useFileChangesStore = create<FileChangesState>((set, get) => ({
   },
 
   selectTurn: (turnIndex) => set({ selectedTurnIndex: turnIndex }),
+
+  prefillDiffCache: (changeId, diff) => {
+    const existing = get().diffCache;
+    if (existing.has(changeId)) return;
+    const newCache = new Map(existing);
+    newCache.set(changeId, diff);
+    set({ diffCache: newCache });
+  },
 
   toggleExpanded: (changeId) => {
     const expanded = new Set(get().expandedChangeIds);

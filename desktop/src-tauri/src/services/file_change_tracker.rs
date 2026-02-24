@@ -55,6 +55,10 @@ struct FileChangeEvent {
     turn_index: u32,
     file_path: String,
     tool_name: String,
+    change_id: String,
+    before_hash: Option<String>,
+    after_hash: String,
+    description: String,
 }
 
 /// Tracks LLM file modifications per session with CAS backing.
@@ -175,20 +179,23 @@ impl FileChangeTracker {
             timestamp: chrono::Utc::now().timestamp_millis(),
             description: description.to_string(),
         };
+        // Capture event fields before moving change into the vec
+        let event = FileChangeEvent {
+            session_id: self.session_id.clone(),
+            turn_index: self.current_turn_index,
+            file_path: change.file_path.clone(),
+            tool_name: change.tool_name.clone(),
+            change_id: change.id.clone(),
+            before_hash: change.before_hash.clone(),
+            after_hash: change.after_hash.clone(),
+            description: change.description.clone(),
+        };
         self.changes.push(change);
         // Persist after each change (fire-and-forget)
         let _ = self.persist();
         // Notify the frontend about the new change
         if let Some(ref handle) = self.app_handle {
-            let _ = handle.emit(
-                "file-change-recorded",
-                FileChangeEvent {
-                    session_id: self.session_id.clone(),
-                    turn_index: self.current_turn_index,
-                    file_path: file_path.to_string(),
-                    tool_name: tool_name.to_string(),
-                },
-            );
+            let _ = handle.emit("file-change-recorded", event);
         }
     }
 

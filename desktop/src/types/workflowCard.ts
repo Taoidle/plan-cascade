@@ -20,6 +20,7 @@ export type WorkflowPhase =
   | 'interviewing'
   | 'generating_prd'
   | 'reviewing_prd'
+  | 'generating_design_doc'
   | 'executing'
   | 'completed'
   | 'failed'
@@ -32,11 +33,14 @@ export type CardType =
   | 'interview_question'
   | 'interview_answer'
   | 'prd_card'
+  | 'design_doc_card'
   | 'execution_update'
   | 'gate_result'
   | 'completion_report'
   | 'workflow_info'
-  | 'workflow_error';
+  | 'workflow_error'
+  | 'file_change'
+  | 'turn_change_summary';
 
 // ============================================================================
 // Card Payload (stored in StreamLine.content as JSON)
@@ -57,11 +61,14 @@ export interface CardDataMap {
   interview_question: InterviewQuestionCardData;
   interview_answer: InterviewAnswerCardData;
   prd_card: PrdCardData;
+  design_doc_card: DesignDocCardData;
   execution_update: ExecutionUpdateCardData;
   gate_result: GateResultCardData;
   completion_report: CompletionReportCardData;
   workflow_info: WorkflowInfoData;
   workflow_error: WorkflowErrorData;
+  file_change: FileChangeCardData;
+  turn_change_summary: TurnChangeSummaryCardData;
 }
 
 // ============================================================================
@@ -187,4 +194,49 @@ export interface WorkflowErrorData {
   title: string;
   description: string;
   suggestedFix: string | null;
+}
+
+/** Design document summary card data */
+export interface DesignDocCardData {
+  title: string;
+  summary: string;
+  componentsCount: number;
+  componentNames: string[];
+  patternsCount: number;
+  patternNames: string[];
+  decisionsCount: number;
+  featureMappingsCount: number;
+  savedPath: string | null;
+}
+
+/** Inline file change preview card data */
+export interface FileChangeCardData {
+  changeId: string;
+  filePath: string;
+  toolName: 'Write' | 'Edit';
+  changeType: 'new_file' | 'modified';
+  beforeHash: string | null;
+  afterHash: string;
+  diffPreview: string | null;
+  linesAdded: number;
+  linesRemoved: number;
+  sessionId: string;
+  turnIndex: number;
+  description: string;
+}
+
+/** Turn change summary card data */
+export interface TurnChangeSummaryCardData {
+  turnIndex: number;
+  sessionId: string;
+  totalFiles: number;
+  files: Array<{
+    filePath: string;
+    toolName: 'Write' | 'Edit';
+    changeType: 'new_file' | 'modified';
+    linesAdded: number;
+    linesRemoved: number;
+  }>;
+  totalLinesAdded: number;
+  totalLinesRemoved: number;
 }

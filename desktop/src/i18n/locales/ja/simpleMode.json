@@ -271,6 +271,16 @@
       "backToForm": "フォームに戻る"
     },
 
+    "designDoc": {
+      "title": "設計ドキュメント",
+      "summary": "PRDから推論されたアーキテクチャ概要",
+      "components": "コンポーネント",
+      "patterns": "パターン",
+      "decisions": "決定",
+      "featureMappings": "機能マッピング",
+      "savedTo": "保存先: {{path}}"
+    },
+
     "progress": {
       "title": "ワークフロー進捗",
       "phaseAnalyze": "分析",
@@ -278,6 +288,7 @@
       "phaseInterview": "インタビュー",
       "phasePrd": "PRD",
       "phaseReview": "レビュー",
+      "phaseDesignDoc": "設計",
       "phaseExecute": "実行",
       "phaseDone": "完了",
       "batch": "バッチ {{current}}/{{total}}",
@@ -351,9 +362,29 @@
 
     "input": {
       "taskPlaceholder": "タスクを説明してください（実装 / 分析 / リファクタリング）...",
+      "configuringPlaceholder": "設定を入力（例：「6並列、TDD有効」）するか、上のカードで続行をクリック...",
       "interviewPlaceholder": "回答を入力...",
       "prdFeedbackPlaceholder": "フィードバックを追加するか、PRDカードの承認ボタンを押してください...",
       "waitingPlaceholder": "応答を待っています..."
+    },
+
+    "fileChange": {
+      "newFile": "新規ファイル",
+      "modified": "変更済み",
+      "expandDiff": "完全なDiffを展開",
+      "collapseDiff": "折りたたむ",
+      "viewInChanges": "変更一覧で表示",
+      "revert": "元に戻す",
+      "revertConfirm": "このファイルを以前の状態に戻しますか？",
+      "linesChanged": "+{{added}} -{{removed}}",
+      "moreLines": "... 他 {{count}} 行"
+    },
+
+    "turnSummary": {
+      "title": "ターン変更",
+      "files": "{{count}} ファイル",
+      "viewAll": "すべての変更を表示",
+      "revertAll": "すべて元に戻す"
     },
 
     "orchestrator": {
@@ -361,6 +392,8 @@
       "startingInterview": "要件インタビューを開始...",
       "interviewComplete": "インタビュー完了！要件をコンパイル中...",
       "generatingPrd": "タスク説明からPRDを生成中...",
+      "generatingDesignDoc": "設計ドキュメントを生成中...",
+      "designDocFailed": "設計ドキュメント生成に失敗しました（非ブロッキング）、続行します...",
       "prdApproved": "PRDが承認されました！実行を開始...",
       "prdFeedbackNoted": "PRDフィードバックを記録しました：「{{feedback}}」。PRDカードの編集ボタンで変更してください。",
       "workflowCancelled": "ワークフローがキャンセルされました。",

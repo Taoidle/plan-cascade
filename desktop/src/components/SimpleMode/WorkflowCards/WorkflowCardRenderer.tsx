@@ -10,20 +10,26 @@ import { ConfigCard } from './ConfigCard';
 import { InterviewQuestionCard } from './InterviewQuestionCard';
 import { InterviewAnswerCard } from './InterviewAnswerCard';
 import { PrdCard } from './PrdCard';
+import { DesignDocCard } from './DesignDocCard';
 import { ExecutionUpdateCard } from './ExecutionUpdateCard';
 import { GateResultCard } from './GateResultCard';
 import { CompletionReportCard } from './CompletionReportCard';
+import { FileChangeCard } from './FileChangeCard';
+import { TurnChangeSummaryCard } from './TurnChangeSummaryCard';
 import type {
   StrategyCardData,
   ConfigCardData,
   InterviewQuestionCardData,
   InterviewAnswerCardData,
   PrdCardData,
+  DesignDocCardData,
   ExecutionUpdateCardData,
   GateResultCardData,
   CompletionReportCardData,
   WorkflowInfoData,
   WorkflowErrorData,
+  FileChangeCardData,
+  TurnChangeSummaryCardData,
 } from '../../../types/workflowCard';
 
 export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
@@ -38,6 +44,8 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
       return <InterviewAnswerCard data={payload.data as InterviewAnswerCardData} />;
     case 'prd_card':
       return <PrdCard data={payload.data as PrdCardData} interactive={payload.interactive} />;
+    case 'design_doc_card':
+      return <DesignDocCard data={payload.data as DesignDocCardData} />;
     case 'execution_update':
       return <ExecutionUpdateCard data={payload.data as ExecutionUpdateCardData} />;
     case 'gate_result':
@@ -48,6 +56,10 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
       return <WorkflowInfoCard data={payload.data as WorkflowInfoData} />;
     case 'workflow_error':
       return <WorkflowErrorCard data={payload.data as WorkflowErrorData} />;
+    case 'file_change':
+      return <FileChangeCard data={payload.data as FileChangeCardData} />;
+    case 'turn_change_summary':
+      return <TurnChangeSummaryCard data={payload.data as TurnChangeSummaryCardData} />;
     default:
       return null;
   }

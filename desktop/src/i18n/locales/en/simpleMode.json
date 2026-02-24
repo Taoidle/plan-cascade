@@ -271,6 +271,16 @@
       "backToForm": "Back to form"
     },
 
+    "designDoc": {
+      "title": "Design Document",
+      "summary": "Architecture summary derived from PRD",
+      "components": "Components",
+      "patterns": "Patterns",
+      "decisions": "Decisions",
+      "featureMappings": "Feature Mappings",
+      "savedTo": "Saved to {{path}}"
+    },
+
     "progress": {
       "title": "Workflow Progress",
       "phaseAnalyze": "Analyze",
@@ -278,6 +288,7 @@
       "phaseInterview": "Interview",
       "phasePrd": "PRD",
       "phaseReview": "Review",
+      "phaseDesignDoc": "Design",
       "phaseExecute": "Execute",
       "phaseDone": "Done",
       "batch": "Batch {{current}}/{{total}}",
@@ -351,9 +362,29 @@
 
     "input": {
       "taskPlaceholder": "Describe a task (implementation / analysis / refactor)...",
+      "configuringPlaceholder": "Type config overrides (e.g. \"6 parallel, enable TDD\") or click Continue above...",
       "interviewPlaceholder": "Type your answer...",
       "prdFeedbackPlaceholder": "Add feedback or press Approve on the PRD card...",
       "waitingPlaceholder": "Waiting for response..."
+    },
+
+    "fileChange": {
+      "newFile": "New File",
+      "modified": "Modified",
+      "expandDiff": "Expand Full Diff",
+      "collapseDiff": "Collapse",
+      "viewInChanges": "View in Changes",
+      "revert": "Revert",
+      "revertConfirm": "Revert this file to its previous state?",
+      "linesChanged": "+{{added}} -{{removed}}",
+      "moreLines": "... +{{count}} more lines"
+    },
+
+    "turnSummary": {
+      "title": "Turn Changes",
+      "files": "{{count}} files",
+      "viewAll": "View All Changes",
+      "revertAll": "Revert All"
     },
 
     "orchestrator": {
@@ -361,6 +392,8 @@
       "startingInterview": "Starting requirements interview...",
       "interviewComplete": "Interview complete! Compiling requirements...",
       "generatingPrd": "Generating PRD from task description...",
+      "generatingDesignDoc": "Generating design document...",
+      "designDocFailed": "Design doc generation failed (non-blocking), continuing...",
       "prdApproved": "PRD approved! Starting execution...",
       "prdFeedbackNoted": "PRD feedback noted: \"{{feedback}}\". Use the Edit button on the PRD card to make changes.",
       "workflowCancelled": "Workflow cancelled.",

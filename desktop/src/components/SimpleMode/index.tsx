@@ -37,6 +37,8 @@ import { ToolPermissionOverlay } from './ToolPermissionOverlay';
 import { PermissionSelector } from './PermissionSelector';
 import { WorkflowProgressPanel } from './WorkflowProgressPanel';
 import { useToolPermissionStore } from '../../store/toolPermission';
+import { useGitStore } from '../../store/git';
+import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
 import type { CardPayload } from '../../types/workflowCard';
 
 type WorkflowMode = 'chat' | 'task';
@@ -89,7 +91,8 @@ export function SimpleMode() {
 
   const [description, setDescription] = useState('');
   const [showOutputPanel, setShowOutputPanel] = useState(false);
-  const [showDiffPanel, setShowDiffPanel] = useState(false);
+  const showDiffPanel = useGitStore((s) => s.diffPanelVisible);
+  const setShowDiffPanel = useGitStore((s) => s.setDiffPanelVisible);
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
 
   useEffect(() => {
@@ -108,6 +111,31 @@ export function SimpleMode() {
     }
     prevPathRef.current = workspacePath;
   }, [workspacePath, isChatSession, reset, clearStrategyAnalysis]);
+
+  // File change card bridge: converts file-change events into inline chat cards
+  const taskId = useExecutionStore((s) => s.taskId);
+  useEffect(() => {
+    if (!taskId || !workspacePath) return;
+    const bridge = createFileChangeCardBridge(taskId, workspacePath);
+    const unlistenPromise = bridge.startListening();
+
+    // Listen for turn end (status transitions from running to something else)
+    let prevStatus = useExecutionStore.getState().status;
+    const unsub = useExecutionStore.subscribe((state) => {
+      if (prevStatus === 'running' && state.status !== 'running') {
+        const currentTurn = state.streamingOutput
+          .filter((l) => l.type === 'info').length - 1;
+        if (currentTurn >= 0) bridge.onTurnEnd(currentTurn);
+      }
+      prevStatus = state.status;
+    });
+
+    return () => {
+      unlistenPromise.then((fn) => fn());
+      unsub();
+      bridge.reset();
+    };
+  }, [taskId, workspacePath]);
 
   const workflowPhase = useWorkflowOrchestratorStore((s) => s.phase);
   const pendingQuestion = useWorkflowOrchestratorStore((s) => s.pendingQuestion);
@@ -184,7 +212,7 @@ export function SimpleMode() {
       setShowDiffPanel(false);
       setWorkflowMode('chat');
     },
-    [restoreFromHistory]
+    [restoreFromHistory, setShowDiffPanel]
   );
 
   const isRunning = status === 'running' || status === 'paused';
@@ -265,11 +293,9 @@ export function SimpleMode() {
 
           <button
             onClick={() => {
-              setShowOutputPanel((v) => {
-                const next = !v;
-                if (next) setShowDiffPanel(false);
-                return next;
-              });
+              const next = !showOutputPanel;
+              setShowOutputPanel(next);
+              if (next) setShowDiffPanel(false);
             }}
             className={clsx(
               'text-sm px-3 py-1.5 rounded-lg transition-colors',
@@ -284,11 +310,9 @@ export function SimpleMode() {
 
           <button
             onClick={() => {
-              setShowDiffPanel((v) => {
-                const next = !v;
-                if (next) setShowOutputPanel(false);
-                return next;
-              });
+              const next = !showDiffPanel;
+              setShowDiffPanel(next);
+              if (next) setShowOutputPanel(false);
             }}
             className={clsx(
               'text-sm px-3 py-1.5 rounded-lg transition-colors',
@@ -367,6 +391,8 @@ export function SimpleMode() {
                         ? t('workflow.input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
                         : workflowMode === 'task' && workflowPhase === 'interviewing'
                           ? t('workflow.input.interviewPlaceholder', { defaultValue: 'Type your answer...' })
+                          : workflowMode === 'task' && workflowPhase === 'configuring'
+                          ? t('workflow.input.configuringPlaceholder', { defaultValue: 'Type config overrides (e.g. "6 parallel, enable TDD") or click Continue above...' })
                           : workflowMode === 'task' && workflowPhase === 'reviewing_prd'
                             ? t('workflow.input.prdFeedbackPlaceholder', { defaultValue: 'Add feedback or press Approve on the PRD card...' })
                             : workflowMode === 'task'
@@ -524,9 +550,17 @@ function ChatTranscript({
     navigator.clipboard.writeText(content).catch(() => {});
   }, []);
 
-  // Auto-scroll
-  useEffect(() => {
+  // Sticky-bottom auto-scroll: only scroll if user is near the bottom
+  const isNearBottom = useRef(true);
+
+  const handleScroll = useCallback(() => {
     if (!containerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+    isNearBottom.current = scrollHeight - scrollTop - clientHeight < 50;
+  }, []);
+
+  useEffect(() => {
+    if (!containerRef.current || !isNearBottom.current) return;
     containerRef.current.scrollTop = containerRef.current.scrollHeight;
   }, [lines]);
 
@@ -542,7 +576,7 @@ function ChatTranscript({
   }
 
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto px-4 py-4 space-y-4">
+    <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto px-4 py-4 space-y-4">
       {richTurns.map((turn) => {
         const isLastTurn = turn.turnIndex === lastTurnIndex;
 

@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { ChevronRightIcon, ChevronDownIcon } from '@radix-ui/react-icons';
 import { useFileChangesStore } from '../../../../store/fileChanges';
+import { DiffViewer } from '../../../shared/DiffViewer';
 import type { FileChange } from '../../../../types/fileChanges';
 
 interface FileChangeEntryProps {
@@ -91,19 +92,7 @@ export function FileChangeEntry({ change, sessionId, projectRoot }: FileChangeEn
           {loadingDiff ? (
             <p className="text-2xs text-gray-400 py-2">{t('aiChanges.loadingDiff')}</p>
           ) : diffContent ? (
-            <pre className="text-2xs font-mono bg-gray-50 dark:bg-gray-800/70 rounded p-2 max-h-64 overflow-auto whitespace-pre-wrap break-all">
-              {diffContent.split('\n').map((line, i) => (
-                <div
-                  key={i}
-                  className={clsx(
-                    line.startsWith('+') && 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20',
-                    line.startsWith('-') && 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20',
-                  )}
-                >
-                  {line}
-                </div>
-              ))}
-            </pre>
+            <DiffViewer diffContent={diffContent} />
           ) : (
             <p className="text-2xs text-gray-400 py-2">{t('aiChanges.noDiff')}</p>
           )}

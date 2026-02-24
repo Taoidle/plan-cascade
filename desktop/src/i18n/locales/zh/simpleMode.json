@@ -271,6 +271,16 @@
       "backToForm": "返回表单"
     },
 
+    "designDoc": {
+      "title": "设计文档",
+      "summary": "从 PRD 推导的架构摘要",
+      "components": "组件",
+      "patterns": "模式",
+      "decisions": "决策",
+      "featureMappings": "功能映射",
+      "savedTo": "已保存到 {{path}}"
+    },
+
     "progress": {
       "title": "工作流进度",
       "phaseAnalyze": "分析",
@@ -278,6 +288,7 @@
       "phaseInterview": "访谈",
       "phasePrd": "PRD",
       "phaseReview": "审查",
+      "phaseDesignDoc": "设计",
       "phaseExecute": "执行",
       "phaseDone": "完成",
       "batch": "批次 {{current}}/{{total}}",
@@ -351,9 +362,29 @@
 
     "input": {
       "taskPlaceholder": "描述一个任务（实现 / 分析 / 重构）...",
+      "configuringPlaceholder": "输入配置（如\"6个并行，启用TDD\"）或点击上方的继续按钮...",
       "interviewPlaceholder": "输入你的回答...",
       "prdFeedbackPlaceholder": "添加反馈或在 PRD 卡片上点击批准...",
       "waitingPlaceholder": "等待响应中..."
+    },
+
+    "fileChange": {
+      "newFile": "新文件",
+      "modified": "已修改",
+      "expandDiff": "展开完整 Diff",
+      "collapseDiff": "收起",
+      "viewInChanges": "在变更中查看",
+      "revert": "还原",
+      "revertConfirm": "将此文件还原到之前的状态？",
+      "linesChanged": "+{{added}} -{{removed}}",
+      "moreLines": "... 还有 {{count}} 行"
+    },
+
+    "turnSummary": {
+      "title": "本轮变更",
+      "files": "{{count}} 个文件",
+      "viewAll": "查看所有变更",
+      "revertAll": "全部还原"
     },
 
     "orchestrator": {
@@ -361,6 +392,8 @@
       "startingInterview": "开始需求访谈...",
       "interviewComplete": "访谈完成！正在编译需求...",
       "generatingPrd": "正在从任务描述生成 PRD...",
+      "generatingDesignDoc": "正在生成设计文档...",
+      "designDocFailed": "设计文档生成失败（非阻塞），继续执行...",
       "prdApproved": "PRD 已批准！开始执行...",
       "prdFeedbackNoted": "PRD 反馈已记录：「{{feedback}}」。使用 PRD 卡片上的编辑按钮进行修改。",
       "workflowCancelled": "工作流已取消。",

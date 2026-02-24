@@ -5,7 +5,7 @@
  * Collapsible header with turn number, change count, timestamp, and restore button.
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import {
@@ -31,8 +31,21 @@ export function TurnGroup({ turn, sessionId, projectRoot, onRestoreComplete }: T
   const [showRestoreDialog, setShowRestoreDialog] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreResult, setRestoreResult] = useState<RestoredFile[] | null>(null);
+  const groupRef = useRef<HTMLDivElement>(null);
 
   const restoreToTurn = useFileChangesStore((s) => s.restoreToTurn);
+  const selectedTurnIndex = useFileChangesStore((s) => s.selectedTurnIndex);
+
+  // Auto-expand and scroll into view when selected from chat card
+  useEffect(() => {
+    if (selectedTurnIndex === turn.turn_index) {
+      setCollapsed(false);
+      // Scroll into view with a small delay to allow DOM update
+      requestAnimationFrame(() => {
+        groupRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+  }, [selectedTurnIndex, turn.turn_index]);
 
   const handleToggle = useCallback(() => {
     setCollapsed((prev) => !prev);
@@ -80,7 +93,7 @@ export function TurnGroup({ turn, sessionId, projectRoot, onRestoreComplete }: T
 
   return (
     <>
-      <div className="border-b border-gray-100 dark:border-gray-800 last:border-b-0">
+      <div ref={groupRef} className="border-b border-gray-100 dark:border-gray-800 last:border-b-0">
         {/* Turn header */}
         <button
           onClick={handleToggle}
