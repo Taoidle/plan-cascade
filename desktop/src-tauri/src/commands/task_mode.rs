@@ -15,6 +15,7 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::models::CommandResponse;
+use crate::services::design::GenerateResult;
 use crate::services::strategy::analyzer::{analyze_task_for_mode, StrategyAnalysis};
 use crate::services::task_mode::agent_resolver::AgentResolver;
 use crate::services::task_mode::batch_executor::{
@@ -1266,6 +1267,54 @@ pub async fn exit_task_mode(
         _ => Ok(CommandResponse::err(
             "Invalid session ID or no active session",
         )),
+    }
+}
+
+// ============================================================================
+// Design Doc Preparation
+// ============================================================================
+
+/// Prepare a design document for a Task Mode PRD.
+///
+/// Serializes the in-memory TaskPrd to `prd.json` in the project directory,
+/// then runs the deterministic DesignDocGenerator to produce `design_doc.json`.
+/// This enables `batch_executor` to inject `StoryContext` during execution.
+///
+/// # Arguments
+/// * `prd` - The task PRD (in-memory, from the workflow)
+/// * `project_path` - Optional project root. Falls back to cwd.
+#[tauri::command]
+pub async fn prepare_design_doc_for_task(
+    prd: TaskPrd,
+    project_path: Option<String>,
+) -> Result<CommandResponse<GenerateResult>, String> {
+    use crate::services::design::DesignDocGenerator;
+
+    // 1. Resolve project path
+    let base = match project_path {
+        Some(ref p) if !p.trim().is_empty() => std::path::PathBuf::from(p),
+        _ => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    };
+
+    // 2. Serialize PRD to JSON and save as {base}/prd.json
+    let prd_path = base.join("prd.json");
+    let json = match serde_json::to_string_pretty(&prd) {
+        Ok(j) => j,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!(
+                "Failed to serialize PRD: {}",
+                e
+            )))
+        }
+    };
+    if let Err(e) = std::fs::write(&prd_path, &json) {
+        return Ok(CommandResponse::err(format!("Failed to write PRD: {}", e)));
+    }
+
+    // 3. Call existing DesignDocGenerator
+    match DesignDocGenerator::generate_from_file(&prd_path, None, true) {
+        Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
 

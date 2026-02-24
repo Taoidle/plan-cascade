@@ -12,6 +12,7 @@
  */
 
 import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import i18n from '../i18n';
 import { useExecutionStore } from './execution';
@@ -28,6 +29,7 @@ import type {
   StrategyCardData,
   ConfigCardData,
   PrdCardData,
+  DesignDocCardData,
   ExecutionUpdateCardData,
   GateResultCardData,
   CompletionReportCardData,
@@ -290,11 +292,8 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
       set({ config, phase: 'configuring' });
 
-      // 4. Inject config card
+      // 4. Inject config card (user interacts with it to advance)
       injectCard('config_card', buildConfigCardData(config, false), true);
-
-      // 5. Auto-advance in Simple mode (no manual config step)
-      await get().confirmConfig();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ phase: 'failed', error: msg });
@@ -538,7 +537,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     });
   },
 
-  /** Approve PRD and start execution */
+  /** Approve PRD and start execution (with design doc generation) */
   approvePrd: async (editedPrd?: TaskPrd) => {
     const state = get();
     const prd = editedPrd || state.editablePrd;
@@ -547,7 +546,41 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       return;
     }
 
-    set({ phase: 'executing', editablePrd: prd });
+    // Phase 1: Generate design doc
+    set({ phase: 'generating_design_doc', editablePrd: prd });
+    injectInfo(i18n.t('workflow.orchestrator.generatingDesignDoc', { ns: 'simpleMode' }), 'info');
+
+    try {
+      const projectPath = useSettingsStore.getState().workspacePath || null;
+      const designResult = await invoke<{ success: boolean; data?: { design_doc: { overview: { title: string; summary: string }; architecture: { components: { name: string }[]; patterns: { name: string }[] }; decisions: unknown[]; feature_mappings: Record<string, unknown> }; saved_path: string | null; generation_info: unknown }; error?: string }>(
+        'prepare_design_doc_for_task',
+        { prd, projectPath }
+      );
+      if (designResult.success && designResult.data) {
+        const doc = designResult.data.design_doc;
+        const cardData: DesignDocCardData = {
+          title: doc.overview.title,
+          summary: doc.overview.summary,
+          componentsCount: doc.architecture.components.length,
+          componentNames: doc.architecture.components.map((c) => c.name),
+          patternsCount: doc.architecture.patterns.length,
+          patternNames: doc.architecture.patterns.map((p) => p.name),
+          decisionsCount: doc.decisions.length,
+          featureMappingsCount: Object.keys(doc.feature_mappings).length,
+          savedPath: designResult.data.saved_path,
+        };
+        injectCard('design_doc_card', cardData);
+      }
+      // Design doc failure is non-blocking — warn but continue
+      if (!designResult.success) {
+        injectInfo(i18n.t('workflow.orchestrator.designDocFailed', { ns: 'simpleMode' }), 'warning');
+      }
+    } catch {
+      injectInfo(i18n.t('workflow.orchestrator.designDocFailed', { ns: 'simpleMode' }), 'warning');
+    }
+
+    // Phase 2: Start execution
+    set({ phase: 'executing' });
     injectInfo(i18n.t('workflow.orchestrator.prdApproved', { ns: 'simpleMode' }), 'success');
 
     try {

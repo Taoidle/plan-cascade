@@ -17,6 +17,7 @@ const PHASE_STEPS: { phase: WorkflowPhase; labelKey: string }[] = [
   { phase: 'interviewing', labelKey: 'workflow.progress.phaseInterview' },
   { phase: 'generating_prd', labelKey: 'workflow.progress.phasePrd' },
   { phase: 'reviewing_prd', labelKey: 'workflow.progress.phaseReview' },
+  { phase: 'generating_design_doc', labelKey: 'workflow.progress.phaseDesignDoc' },
   { phase: 'executing', labelKey: 'workflow.progress.phaseExecute' },
   { phase: 'completed', labelKey: 'workflow.progress.phaseDone' },
 ];
