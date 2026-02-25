@@ -648,7 +648,43 @@ pub fn build_plugin_skills_section(
         section.push_str(&format!("\n### {}\n", skill.name));
         section.push_str(&format!("*{}*\n\n", skill.description));
         section.push_str(&skill.body);
+        if !skill.allowed_tools.is_empty() {
+            section.push_str(&format!(
+                "\n\n**Allowed tools**: {}\n",
+                skill.allowed_tools.join(", ")
+            ));
+        }
         if i < plugin_skills.len() - 1 {
+            section.push_str("\n\n---\n");
+        } else {
+            section.push('\n');
+        }
+    }
+    section
+}
+
+/// Build a plugin commands section for system prompt injection.
+///
+/// Each command is formatted as `### /<name>` with description and body.
+/// The LLM should follow the command body when the user invokes `/<command-name>`.
+pub fn build_plugin_commands_section(
+    plugin_commands: &[crate::services::plugins::models::PluginCommand],
+) -> String {
+    if plugin_commands.is_empty() {
+        return String::new();
+    }
+    let mut section = String::from("\n\n## Plugin Commands\n\n");
+    section.push_str(
+        "The following commands are provided by enabled plugins. When the user invokes a command \
+         (e.g. `/<command-name>`), follow the instructions in the command body.\n",
+    );
+    for (i, cmd) in plugin_commands.iter().enumerate() {
+        section.push_str(&format!("\n### /{}\n", cmd.name));
+        if !cmd.description.is_empty() {
+            section.push_str(&format!("*{}*\n\n", cmd.description));
+        }
+        section.push_str(&cmd.body);
+        if i < plugin_commands.len() - 1 {
             section.push_str("\n\n---\n");
         } else {
             section.push('\n');

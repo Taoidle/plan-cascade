@@ -46,6 +46,29 @@ pub async fn init_app(
     // Initialize all services
     match state.initialize().await {
         Ok(_) => {
+            // Initialize the plugin system early (ADR-F003).
+            // Plugin discovery is fast (directory scanning only) and does not
+            // depend on the database or index. Initializing it before the
+            // potentially slow ensure_indexed() prevents a race where the
+            // frontend's plugin retry logic (~7.5 s) exhausts before init_app
+            // finishes, causing "Plugin system not initialized" errors.
+            {
+                let plugin_root = {
+                    let wd = standalone_state.working_directory.read().await;
+                    let wd_str = wd.to_string_lossy().to_string();
+                    if wd_str.is_empty() || wd_str == "." {
+                        // Fall back to user home directory
+                        dirs::home_dir()
+                            .map(|h| h.to_string_lossy().to_string())
+                            .unwrap_or_else(|| ".".to_string())
+                    } else {
+                        wd_str
+                    }
+                };
+                plugin_state.initialize(&plugin_root).await;
+                tracing::info!("Plugin system initialized with root: {}", plugin_root);
+            }
+
             // Initialize IndexManager with the database pool.
             // Store in StandaloneState BEFORE calling ensure_indexed() so that
             // get_index_status queries can immediately retrieve the manager and
@@ -81,24 +104,6 @@ pub async fn init_app(
                 if let Err(e) = spec_interview_state.initialize(pool).await {
                     tracing::warn!("Spec interview initialization failed: {}", e);
                 }
-            }
-
-            // Initialize the plugin system (ADR-F003)
-            {
-                let plugin_root = {
-                    let wd = standalone_state.working_directory.read().await;
-                    let wd_str = wd.to_string_lossy().to_string();
-                    if wd_str.is_empty() || wd_str == "." {
-                        // Fall back to user home directory
-                        dirs::home_dir()
-                            .map(|h| h.to_string_lossy().to_string())
-                            .unwrap_or_else(|| ".".to_string())
-                    } else {
-                        wd_str
-                    }
-                };
-                plugin_state.initialize(&plugin_root).await;
-                tracing::info!("Plugin system initialized with root: {}", plugin_root);
             }
 
             // Scan for incomplete executions after initialization

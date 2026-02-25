@@ -267,6 +267,7 @@ fn main() {
             plan_cascade_desktop::commands::prompts::toggle_prompt_pin,
             // Plugin commands
             plan_cascade_desktop::commands::plugins::list_plugins,
+            plan_cascade_desktop::commands::plugins::list_invocable_plugin_skills,
             plan_cascade_desktop::commands::plugins::toggle_plugin,
             plan_cascade_desktop::commands::plugins::refresh_plugins,
             plan_cascade_desktop::commands::plugins::get_plugin_detail,

@@ -404,6 +404,8 @@ pub struct OrchestratorService {
     plugin_instructions: Option<String>,
     /// Plugin skills (from enabled plugins' skills/), cached at construction.
     plugin_skills: Option<Vec<crate::services::plugins::models::PluginSkill>>,
+    /// Plugin commands (from enabled plugins' commands/), cached at construction.
+    plugin_commands: Option<Vec<crate::services::plugins::models::PluginCommand>>,
 }
 
 /// Task spawner that creates sub-agent OrchestratorService instances
@@ -450,6 +452,8 @@ struct OrchestratorTaskSpawner {
     plugin_instructions_snapshot: Option<String>,
     /// Plugin skills snapshot from parent for sub-agent prompt injection.
     plugin_skills_snapshot: Option<Vec<crate::services::plugins::models::PluginSkill>>,
+    /// Plugin commands snapshot from parent for sub-agent prompt injection.
+    plugin_commands_snapshot: Option<Vec<crate::services::plugins::models::PluginCommand>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

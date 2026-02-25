@@ -9,12 +9,17 @@
 //! 3. Plan Cascade: `~/.plan-cascade/plugins/` (lowest)
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use tokio::sync::mpsc;
+
+use crate::services::llm::provider::LlmProvider;
 use crate::services::orchestrator::hooks::AgenticHooks;
 use crate::services::plugins::dispatcher::register_plugin_hooks;
 use crate::services::plugins::loader::{discover_all_plugins, discover_all_plugins_with_home};
 use crate::services::plugins::models::*;
 use crate::services::plugins::settings::{load_plugin_settings, save_plugin_settings};
+use crate::services::streaming::UnifiedStreamEvent;
 
 /// Unified plugin manager.
 ///
@@ -136,7 +141,15 @@ impl PluginManager {
     /// This should be called after `discover_and_load()` and whenever
     /// plugins are toggled. Creates hook closures that execute shell
     /// commands or LLM prompts when triggered.
-    pub fn register_hooks(&self, hooks: &mut AgenticHooks) {
+    ///
+    /// - `llm_provider`: If provided, `Prompt` type hooks are evaluated via this LLM.
+    /// - `event_tx`: If provided, hook failures are reported to the frontend as errors.
+    pub fn register_hooks(
+        &self,
+        hooks: &mut AgenticHooks,
+        llm_provider: Option<Arc<dyn LlmProvider>>,
+        event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
+    ) {
         for plugin in &self.plugins {
             if !plugin.enabled {
                 continue;
@@ -150,6 +163,8 @@ impl PluginManager {
                 plugin.hooks.clone(),
                 plugin.manifest.name.clone(),
                 plugin.root_path.clone(),
+                llm_provider.clone(),
+                event_tx.clone(),
             );
 
             eprintln!(
@@ -204,6 +219,38 @@ impl PluginManager {
         }
 
         instructions.join("\n\n")
+    }
+
+    /// Collect merged permissions from all enabled plugins.
+    ///
+    /// Deny takes precedence: if any plugin denies a tool, it is denied.
+    /// Allow lists are unioned: a tool must be in at least one plugin's allow list.
+    pub fn collect_permissions(&self) -> PluginPermissions {
+        let mut merged = PluginPermissions::default();
+        for plugin in &self.plugins {
+            if !plugin.enabled {
+                continue;
+            }
+            // Deny takes precedence — union all deny lists
+            for tool in &plugin.permissions.deny {
+                if !merged.deny.contains(tool) {
+                    merged.deny.push(tool.clone());
+                }
+            }
+            // Union all allow lists
+            for tool in &plugin.permissions.allow {
+                if !merged.allow.contains(tool) {
+                    merged.allow.push(tool.clone());
+                }
+            }
+            // Union all always_approve lists
+            for tool in &plugin.permissions.always_approve {
+                if !merged.always_approve.contains(tool) {
+                    merged.always_approve.push(tool.clone());
+                }
+            }
+        }
+        merged
     }
 
     /// List all plugins with lightweight info summaries.
@@ -268,7 +315,7 @@ impl PluginManager {
 /// This is a convenience function for wiring plugin hooks into the
 /// OrchestratorService's hook system alongside skill and memory hooks.
 pub fn register_plugin_hooks_on_agentic_hooks(hooks: &mut AgenticHooks, manager: &PluginManager) {
-    manager.register_hooks(hooks);
+    manager.register_hooks(hooks, None, None);
 }
 
 // ============================================================================
@@ -493,7 +540,7 @@ mod tests {
         manager.discover_and_load();
 
         let mut hooks = AgenticHooks::new();
-        manager.register_hooks(&mut hooks);
+        manager.register_hooks(&mut hooks, None, None);
 
         // We registered 1 PreToolUse hook
         assert_eq!(hooks.total_hooks(), 1);
@@ -511,7 +558,7 @@ mod tests {
         manager.toggle_plugin("disabled-hook", false);
 
         let mut hooks = AgenticHooks::new();
-        manager.register_hooks(&mut hooks);
+        manager.register_hooks(&mut hooks, None, None);
 
         assert_eq!(
             hooks.total_hooks(),

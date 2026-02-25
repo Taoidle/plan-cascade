@@ -71,15 +71,18 @@ impl PluginState {
     /// Wire plugin context into an OrchestratorService.
     ///
     /// Acquires a brief read lock on the plugin manager, extracts all plugin
-    /// data (instructions, skills, hooks), and returns the wired orchestrator.
+    /// data (instructions, skills, commands, hooks, permissions), and returns the wired orchestrator.
     /// Returns the orchestrator unchanged if the plugin system is not initialized.
+    ///
+    /// - `event_tx`: Optional stream event sender for reporting hook failures to the frontend.
     pub async fn wire_orchestrator(
         &self,
         orchestrator: crate::services::orchestrator::OrchestratorService,
+        event_tx: Option<tokio::sync::mpsc::Sender<crate::services::streaming::UnifiedStreamEvent>>,
     ) -> crate::services::orchestrator::OrchestratorService {
         let guard = self.inner.read().await;
         match &*guard {
-            Some(manager) => orchestrator.with_plugin_context(manager),
+            Some(manager) => orchestrator.with_plugin_context(manager, event_tx),
             None => {
                 eprintln!("[plugins] Plugin system not initialized, skipping plugin wiring");
                 orchestrator
@@ -114,6 +117,28 @@ pub async fn list_plugins(
 ) -> Result<CommandResponse<Vec<PluginInfo>>, String> {
     match state.with_manager(|m| m.list_plugins()).await {
         Ok(plugins) => Ok(CommandResponse::ok(plugins)),
+        Err(e) => Ok(CommandResponse::err(e)),
+    }
+}
+
+/// List user-invocable plugin skills.
+///
+/// Returns skills from enabled plugins where `user_invocable: true`.
+/// These can be invoked from the chat input via `/<skill-name>`.
+#[tauri::command]
+pub async fn list_invocable_plugin_skills(
+    state: State<'_, PluginState>,
+) -> Result<CommandResponse<Vec<PluginSkill>>, String> {
+    match state
+        .with_manager(|m| {
+            m.collect_skills()
+                .into_iter()
+                .filter(|s| s.user_invocable)
+                .collect::<Vec<_>>()
+        })
+        .await
+    {
+        Ok(skills) => Ok(CommandResponse::ok(skills)),
         Err(e) => Ok(CommandResponse::err(e)),
     }
 }

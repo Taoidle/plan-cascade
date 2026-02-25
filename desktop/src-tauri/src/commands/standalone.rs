@@ -676,11 +676,13 @@ pub async fn get_working_directory(
 
 /// Set the working directory for standalone LLM sessions.
 /// Validates that the path exists and is a directory.
-/// When a new directory is set, background indexing is triggered via the IndexManager.
+/// When a new directory is set, background indexing is triggered via the IndexManager
+/// and the plugin system is re-initialized to discover project-level plugins.
 #[tauri::command]
 pub async fn set_working_directory(
     path: String,
     standalone_state: State<'_, StandaloneState>,
+    plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<String>, String> {
     let new_path = PathBuf::from(&path);
 
@@ -722,6 +724,10 @@ pub async fn set_working_directory(
         let mut wd = standalone_state.working_directory.write().await;
         *wd = canonical;
     }
+
+    // Re-initialize the plugin system for the new project root so that
+    // project-level plugins (<project>/.claude-plugin/) are discovered.
+    plugin_state.initialize(&result).await;
 
     // Trigger indexing for the new directory
     if !result.is_empty() {
@@ -1190,11 +1196,13 @@ pub async fn execute_standalone(
         }
     }
 
-    // Wire plugin context (instructions, skills, hooks) from enabled plugins
-    orchestrator = plugin_state.wire_orchestrator(orchestrator).await;
-
-    // Create channel for streaming events
+    // Create channel for streaming events (created before plugin wiring so hooks can report errors)
     let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
+
+    // Wire plugin context (instructions, skills, commands, hooks, permissions) from enabled plugins
+    orchestrator = plugin_state
+        .wire_orchestrator(orchestrator, Some(tx.clone()))
+        .await;
 
     // Spawn task to forward events to frontend
     let app_clone = app.clone();
@@ -1507,8 +1515,8 @@ pub async fn execute_standalone_with_session(
         }
     }
 
-    // Wire plugin context (instructions, skills, hooks) from enabled plugins
-    orchestrator = plugin_state.wire_orchestrator(orchestrator).await;
+    // Wire plugin context (instructions, skills, commands, hooks, permissions) from enabled plugins
+    orchestrator = plugin_state.wire_orchestrator(orchestrator, None).await;
 
     let orchestrator = Arc::new(orchestrator);
 
@@ -1968,8 +1976,8 @@ pub async fn resume_standalone_execution(
         }
     }
 
-    // Wire plugin context (instructions, skills, hooks) from enabled plugins
-    orchestrator = plugin_state.wire_orchestrator(orchestrator).await;
+    // Wire plugin context (instructions, skills, commands, hooks, permissions) from enabled plugins
+    orchestrator = plugin_state.wire_orchestrator(orchestrator, None).await;
 
     let orchestrator = Arc::new(orchestrator);
 

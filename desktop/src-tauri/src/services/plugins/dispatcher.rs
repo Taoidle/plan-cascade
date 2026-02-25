@@ -8,18 +8,28 @@
 //! - `PreToolUse` -> `on_before_tool` (exit code 2 blocks tool)
 //! - `PostToolUse` -> `on_after_tool` (stdout injected as context)
 //! - `Stop` / `SessionEnd` -> `on_session_end`
-//! - `PreCompact` -> `on_compaction`
+//! - `PreCompact` / `PostCompact` -> `on_compaction`
+//! - `PreLlmCall` -> `on_before_llm`
+//! - `PostLlmCall` -> `on_after_llm`
 //!
-//! Shell hooks are executed via `tokio::process::Command` with JSON stdin
-//! and environment variables (CLAUDE_PROJECT_DIR, TOOL_NAME, etc.).
+//! Hook types:
+//! - `Command` hooks execute shell commands via `tokio::process::Command`
+//! - `Prompt` hooks evaluate the hook body via the LLM provider
+//!
+//! Hook failures are reported to the frontend via `UnifiedStreamEvent::Error`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use regex::Regex;
+use tokio::sync::mpsc;
 
-use crate::services::orchestrator::hooks::{AgenticHooks, BeforeToolResult};
+use crate::services::llm::provider::LlmProvider;
+use crate::services::llm::types::{LlmRequestOptions, Message};
+use crate::services::orchestrator::hooks::{AfterToolResult, AgenticHooks, BeforeToolResult};
 use crate::services::plugins::models::*;
+use crate::services::streaming::UnifiedStreamEvent;
 
 // ============================================================================
 // Shell Hook Execution
@@ -118,6 +128,87 @@ pub async fn execute_shell_hook(
 }
 
 // ============================================================================
+// Prompt Hook Execution (LLM-based)
+// ============================================================================
+
+/// Execute a prompt hook by sending the prompt to an LLM provider.
+///
+/// Performs `{{key}}` variable substitution on the template, sends a single-turn
+/// message to the provider, and returns the LLM's response as stdout.
+/// Falls back gracefully on timeout or provider error.
+pub async fn execute_prompt_hook(
+    provider: &Arc<dyn LlmProvider>,
+    prompt_template: &str,
+    context_vars: &HashMap<String, String>,
+    timeout_ms: u64,
+) -> ShellResult {
+    // Variable substitution: {{key}} -> value
+    let mut prompt = prompt_template.to_string();
+    for (key, value) in context_vars {
+        prompt = prompt.replace(&format!("{{{{{}}}}}", key), value);
+    }
+
+    let messages = vec![Message::user(prompt)];
+    let request_options = LlmRequestOptions::default();
+
+    let result = tokio::time::timeout(
+        Duration::from_millis(timeout_ms),
+        provider.send_message(messages, None, vec![], request_options),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(response)) => {
+            let text = response.content.unwrap_or_default();
+            ShellResult {
+                exit_code: 0,
+                stdout: text,
+                stderr: String::new(),
+            }
+        }
+        Ok(Err(e)) => ShellResult {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: format!("LLM prompt hook failed: {}", e),
+        },
+        Err(_) => ShellResult {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: format!("Prompt hook timed out after {}ms", timeout_ms),
+        },
+    }
+}
+
+// ============================================================================
+// Error Reporting Helper
+// ============================================================================
+
+/// Send a hook failure event to the frontend if an event sender is available.
+fn send_hook_error(
+    event_tx: &Option<mpsc::Sender<UnifiedStreamEvent>>,
+    plugin_name: &str,
+    hook_event: &str,
+    error_msg: &str,
+) {
+    if let Some(ref tx) = event_tx {
+        let event = UnifiedStreamEvent::Error {
+            message: format!(
+                "[Plugin: {}] {} hook failed: {}",
+                plugin_name, hook_event, error_msg
+            ),
+            code: Some("plugin_hook_error".to_string()),
+        };
+        // Non-blocking send; if the channel is full, we still log to stderr
+        if tx.try_send(event).is_err() {
+            eprintln!(
+                "[plugin:{}] Failed to send hook error event to frontend",
+                plugin_name
+            );
+        }
+    }
+}
+
+// ============================================================================
 // Hook Dispatcher
 // ============================================================================
 
@@ -125,14 +216,17 @@ pub async fn execute_shell_hook(
 ///
 /// For each plugin hook, the dispatcher:
 /// 1. Maps the HookEvent to the appropriate AgenticHooks registration method
-/// 2. Creates a closure that executes the hook command with appropriate env vars
+/// 2. Creates a closure that executes the hook command (shell) or prompt (LLM)
 /// 3. For PreToolUse hooks, checks the exit code to determine if the tool should be blocked
 /// 4. For async hooks, spawns the execution in the background
+/// 5. Reports hook failures to the frontend via the event sender
 pub fn register_plugin_hooks(
     hooks: &mut AgenticHooks,
     plugin_hooks: Vec<PluginHook>,
     plugin_name: String,
     plugin_root: String,
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
 ) {
     for plugin_hook in plugin_hooks {
         match plugin_hook.event {
@@ -142,6 +236,8 @@ pub fn register_plugin_hooks(
                     plugin_hook,
                     plugin_name.clone(),
                     plugin_root.clone(),
+                    llm_provider.clone(),
+                    event_tx.clone(),
                 );
             }
             HookEvent::UserPromptSubmit => {
@@ -150,6 +246,8 @@ pub fn register_plugin_hooks(
                     plugin_hook,
                     plugin_name.clone(),
                     plugin_root.clone(),
+                    llm_provider.clone(),
+                    event_tx.clone(),
                 );
             }
             HookEvent::PreToolUse => {
@@ -158,6 +256,8 @@ pub fn register_plugin_hooks(
                     plugin_hook,
                     plugin_name.clone(),
                     plugin_root.clone(),
+                    llm_provider.clone(),
+                    event_tx.clone(),
                 );
             }
             HookEvent::PostToolUse => {
@@ -166,6 +266,8 @@ pub fn register_plugin_hooks(
                     plugin_hook,
                     plugin_name.clone(),
                     plugin_root.clone(),
+                    llm_provider.clone(),
+                    event_tx.clone(),
                 );
             }
             HookEvent::Stop | HookEvent::SessionEnd => {
@@ -174,20 +276,45 @@ pub fn register_plugin_hooks(
                     plugin_hook,
                     plugin_name.clone(),
                     plugin_root.clone(),
+                    llm_provider.clone(),
+                    event_tx.clone(),
                 );
             }
-            HookEvent::PreCompact => {
+            HookEvent::PreCompact | HookEvent::PostCompact => {
                 register_compaction_hook(
                     hooks,
                     plugin_hook,
                     plugin_name.clone(),
                     plugin_root.clone(),
+                    llm_provider.clone(),
+                    event_tx.clone(),
                 );
             }
-            // Other events are logged but not yet mapped to Desktop hooks
+            HookEvent::PreLlmCall => {
+                register_before_llm_hook(
+                    hooks,
+                    plugin_hook,
+                    plugin_name.clone(),
+                    plugin_root.clone(),
+                    llm_provider.clone(),
+                    event_tx.clone(),
+                );
+            }
+            HookEvent::PostLlmCall => {
+                register_after_llm_hook(
+                    hooks,
+                    plugin_hook,
+                    plugin_name.clone(),
+                    plugin_root.clone(),
+                    llm_provider.clone(),
+                    event_tx.clone(),
+                );
+            }
+            // Remaining events: SubAgentSpawn, SubAgentComplete, Notification, Error
+            // These require new hook vectors in AgenticHooks — deferred to follow-up PR.
             _ => {
                 eprintln!(
-                    "[plugin:{}] Hook event {:?} not yet mapped to Desktop hooks",
+                    "[plugin:{}] Hook event {:?} not yet mapped to Desktop hooks (deferred)",
                     plugin_name, plugin_hook.event
                 );
             }
@@ -211,15 +338,44 @@ fn build_base_env(
     env
 }
 
+/// Execute a hook command or prompt based on hook_type.
+async fn execute_hook(
+    hook_type: &HookType,
+    command: &str,
+    env: &HashMap<String, String>,
+    stdin_json: Option<&str>,
+    timeout_ms: u64,
+    llm_provider: &Option<Arc<dyn LlmProvider>>,
+) -> ShellResult {
+    match hook_type {
+        HookType::Command => execute_shell_hook(command, env, stdin_json, timeout_ms).await,
+        HookType::Prompt => {
+            if let Some(ref provider) = llm_provider {
+                execute_prompt_hook(provider, command, env, timeout_ms).await
+            } else {
+                eprintln!("[plugin] Prompt hook skipped: no LLM provider available");
+                ShellResult {
+                    exit_code: 0,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                }
+            }
+        }
+    }
+}
+
 fn register_session_start_hook(
     hooks: &mut AgenticHooks,
     plugin_hook: PluginHook,
     plugin_name: String,
     plugin_root: String,
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
 ) {
     let is_async = plugin_hook.async_hook;
     let command = plugin_hook.command.clone();
     let timeout = plugin_hook.timeout;
+    let hook_type = plugin_hook.hook_type.clone();
 
     hooks.register_on_session_start(Box::new(move |ctx| {
         let cmd = command.clone();
@@ -227,6 +383,9 @@ fn register_session_start_hook(
         let root = plugin_root.clone();
         let timeout_ms = timeout;
         let project_path = ctx.project_path.to_string_lossy().to_string();
+        let ht = hook_type.clone();
+        let provider = llm_provider.clone();
+        let etx = event_tx.clone();
 
         Box::pin(async move {
             let env = build_base_env(&project_path, &root, &name);
@@ -239,22 +398,26 @@ fn register_session_start_hook(
 
             if is_async {
                 tokio::spawn(async move {
-                    let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                    let result =
+                        execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
                     if !result.is_success() {
                         eprintln!(
                             "[plugin:{}] Async SessionStart hook failed: {}",
                             name, result.stderr
                         );
+                        send_hook_error(&etx, &name, "SessionStart", &result.stderr);
                     }
                 });
                 Ok(())
             } else {
-                let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                let result =
+                    execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
                 if !result.is_success() {
                     eprintln!(
                         "[plugin:{}] SessionStart hook failed: {}",
                         name, result.stderr
                     );
+                    send_hook_error(&etx, &name, "SessionStart", &result.stderr);
                 }
                 Ok(())
             }
@@ -267,9 +430,12 @@ fn register_user_message_hook(
     plugin_hook: PluginHook,
     plugin_name: String,
     plugin_root: String,
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
 ) {
     let command = plugin_hook.command.clone();
     let timeout = plugin_hook.timeout;
+    let hook_type = plugin_hook.hook_type.clone();
 
     hooks.register_on_user_message(Box::new(move |ctx, msg| {
         let cmd = command.clone();
@@ -277,21 +443,31 @@ fn register_user_message_hook(
         let root = plugin_root.clone();
         let timeout_ms = timeout;
         let project_path = ctx.project_path.to_string_lossy().to_string();
+        let ht = hook_type.clone();
+        let provider = llm_provider.clone();
+        let etx = event_tx.clone();
 
         Box::pin(async move {
-            let env = build_base_env(&project_path, &root, &name);
+            let mut env = build_base_env(&project_path, &root, &name);
+            env.insert("USER_MESSAGE".to_string(), msg.clone());
             let stdin = serde_json::json!({
                 "session_id": ctx.session_id,
                 "message": msg,
             })
             .to_string();
 
-            let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
             if result.is_success() && !result.stdout.trim().is_empty() {
-                // If the hook returned non-empty stdout, use it as the modified message
                 Ok(Some(result.stdout.trim().to_string()))
             } else {
-                Ok(None) // No modification
+                if !result.is_success() {
+                    eprintln!(
+                        "[plugin:{}] UserPromptSubmit hook failed: {}",
+                        name, result.stderr
+                    );
+                    send_hook_error(&etx, &name, "UserPromptSubmit", &result.stderr);
+                }
+                Ok(None)
             }
         })
     }));
@@ -302,10 +478,13 @@ fn register_before_tool_hook(
     plugin_hook: PluginHook,
     plugin_name: String,
     plugin_root: String,
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
 ) {
     let command = plugin_hook.command.clone();
     let timeout = plugin_hook.timeout;
     let matcher_pattern = plugin_hook.matcher.clone();
+    let hook_type = plugin_hook.hook_type.clone();
 
     hooks.register_on_before_tool(Box::new(move |ctx, tool_name, arguments| {
         let cmd = command.clone();
@@ -314,6 +493,9 @@ fn register_before_tool_hook(
         let timeout_ms = timeout;
         let matcher = matcher_pattern.clone();
         let project_path = ctx.project_path.to_string_lossy().to_string();
+        let ht = hook_type.clone();
+        let provider = llm_provider.clone();
+        let etx = event_tx.clone();
 
         Box::pin(async move {
             // Check matcher regex
@@ -325,7 +507,6 @@ fn register_before_tool_hook(
                         }
                     }
                     Err(_) => {
-                        // Invalid regex - skip this hook
                         return Ok(BeforeToolResult::default());
                     }
                 }
@@ -342,10 +523,9 @@ fn register_before_tool_hook(
             })
             .to_string();
 
-            let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
 
             if result.is_block() {
-                // Exit code 2 = block the tool
                 let reason = if result.stderr.trim().is_empty() {
                     format!(
                         "Plugin '{}' blocked tool '{}': {}",
@@ -370,8 +550,14 @@ fn register_before_tool_hook(
                     skip: true,
                     skip_reason: Some(reason),
                 })
+            } else if !result.is_success() {
+                eprintln!(
+                    "[plugin:{}] PreToolUse hook failed: {}",
+                    name, result.stderr
+                );
+                send_hook_error(&etx, &name, "PreToolUse", &result.stderr);
+                Ok(BeforeToolResult::default())
             } else {
-                // Exit code 0 = continue, stdout may be injected as context
                 Ok(BeforeToolResult::default())
             }
         })
@@ -383,11 +569,14 @@ fn register_after_tool_hook(
     plugin_hook: PluginHook,
     plugin_name: String,
     plugin_root: String,
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
 ) {
     let is_async = plugin_hook.async_hook;
     let command = plugin_hook.command.clone();
     let timeout = plugin_hook.timeout;
     let matcher_pattern = plugin_hook.matcher.clone();
+    let hook_type = plugin_hook.hook_type.clone();
 
     hooks.register_on_after_tool(Box::new(move |ctx, tool_name, success, output_snippet| {
         let cmd = command.clone();
@@ -396,6 +585,9 @@ fn register_after_tool_hook(
         let timeout_ms = timeout;
         let matcher = matcher_pattern.clone();
         let project_path = ctx.project_path.to_string_lossy().to_string();
+        let ht = hook_type.clone();
+        let provider = llm_provider.clone();
+        let etx = event_tx.clone();
 
         Box::pin(async move {
             // Check matcher regex
@@ -403,10 +595,10 @@ fn register_after_tool_hook(
                 match Regex::new(pattern) {
                     Ok(re) => {
                         if !re.is_match(&tool_name) {
-                            return Ok(());
+                            return Ok(AfterToolResult::default());
                         }
                     }
-                    Err(_) => return Ok(()),
+                    Err(_) => return Ok(AfterToolResult::default()),
                 }
             }
 
@@ -426,26 +618,43 @@ fn register_after_tool_hook(
             .to_string();
 
             if is_async {
+                let name_cloned = name.clone();
+                let etx_cloned = etx.clone();
                 tokio::spawn(async move {
-                    let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                    let result =
+                        execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
                     if !result.is_success() {
                         eprintln!(
                             "[plugin:{}] Async PostToolUse hook failed: {}",
-                            name, result.stderr
+                            name_cloned, result.stderr
                         );
+                        send_hook_error(&etx_cloned, &name_cloned, "PostToolUse", &result.stderr);
                     }
                 });
+                Ok(AfterToolResult::default())
             } else {
-                let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                let result =
+                    execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
                 if !result.is_success() {
                     eprintln!(
                         "[plugin:{}] PostToolUse hook failed: {}",
                         name, result.stderr
                     );
+                    send_hook_error(&etx, &name, "PostToolUse", &result.stderr);
+                    Ok(AfterToolResult::default())
+                } else {
+                    // Inject stdout as context if non-empty
+                    let stdout = result.stdout.trim().to_string();
+                    if stdout.is_empty() {
+                        Ok(AfterToolResult::default())
+                    } else {
+                        Ok(AfterToolResult::with_context(format!(
+                            "[Plugin: {}] {}",
+                            name, stdout
+                        )))
+                    }
                 }
             }
-
-            Ok(())
         })
     }));
 }
@@ -455,10 +664,13 @@ fn register_session_end_hook(
     plugin_hook: PluginHook,
     plugin_name: String,
     plugin_root: String,
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
 ) {
     let is_async = plugin_hook.async_hook;
     let command = plugin_hook.command.clone();
     let timeout = plugin_hook.timeout;
+    let hook_type = plugin_hook.hook_type.clone();
 
     hooks.register_on_session_end(Box::new(move |ctx, summary| {
         let cmd = command.clone();
@@ -466,6 +678,9 @@ fn register_session_end_hook(
         let root = plugin_root.clone();
         let timeout_ms = timeout;
         let project_path = ctx.project_path.to_string_lossy().to_string();
+        let ht = hook_type.clone();
+        let provider = llm_provider.clone();
+        let etx = event_tx.clone();
 
         Box::pin(async move {
             let env = build_base_env(&project_path, &root, &name);
@@ -479,21 +694,25 @@ fn register_session_end_hook(
 
             if is_async {
                 tokio::spawn(async move {
-                    let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                    let result =
+                        execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
                     if !result.is_success() {
                         eprintln!(
                             "[plugin:{}] Async SessionEnd hook failed: {}",
                             name, result.stderr
                         );
+                        send_hook_error(&etx, &name, "SessionEnd", &result.stderr);
                     }
                 });
             } else {
-                let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+                let result =
+                    execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
                 if !result.is_success() {
                     eprintln!(
                         "[plugin:{}] SessionEnd hook failed: {}",
                         name, result.stderr
                     );
+                    send_hook_error(&etx, &name, "SessionEnd", &result.stderr);
                 }
             }
 
@@ -507,9 +726,13 @@ fn register_compaction_hook(
     plugin_hook: PluginHook,
     plugin_name: String,
     plugin_root: String,
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
 ) {
     let command = plugin_hook.command.clone();
     let timeout = plugin_hook.timeout;
+    let hook_type = plugin_hook.hook_type.clone();
+    let event_name = format!("{:?}", plugin_hook.event);
 
     hooks.register_on_compaction(Box::new(move |ctx, snippets| {
         let cmd = command.clone();
@@ -517,6 +740,10 @@ fn register_compaction_hook(
         let root = plugin_root.clone();
         let timeout_ms = timeout;
         let project_path = ctx.project_path.to_string_lossy().to_string();
+        let ht = hook_type.clone();
+        let provider = llm_provider.clone();
+        let etx = event_tx.clone();
+        let evt_name = event_name.clone();
 
         Box::pin(async move {
             let env = build_base_env(&project_path, &root, &name);
@@ -526,12 +753,115 @@ fn register_compaction_hook(
             })
             .to_string();
 
-            let result = execute_shell_hook(&cmd, &env, Some(&stdin), timeout_ms).await;
+            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
             if !result.is_success() {
                 eprintln!(
-                    "[plugin:{}] PreCompact hook failed: {}",
+                    "[plugin:{}] {} hook failed: {}",
+                    name, evt_name, result.stderr
+                );
+                send_hook_error(&etx, &name, &evt_name, &result.stderr);
+            }
+
+            Ok(())
+        })
+    }));
+}
+
+// ============================================================================
+// New Hook Registrations (Fix 4: PreLlmCall, PostLlmCall)
+// ============================================================================
+
+fn register_before_llm_hook(
+    hooks: &mut AgenticHooks,
+    plugin_hook: PluginHook,
+    plugin_name: String,
+    plugin_root: String,
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
+) {
+    let command = plugin_hook.command.clone();
+    let timeout = plugin_hook.timeout;
+    let hook_type = plugin_hook.hook_type.clone();
+
+    hooks.register_on_before_llm(Box::new(move |ctx, iteration| {
+        let cmd = command.clone();
+        let name = plugin_name.clone();
+        let root = plugin_root.clone();
+        let timeout_ms = timeout;
+        let project_path = ctx.project_path.to_string_lossy().to_string();
+        let ht = hook_type.clone();
+        let provider = llm_provider.clone();
+        let etx = event_tx.clone();
+
+        Box::pin(async move {
+            let mut env = build_base_env(&project_path, &root, &name);
+            env.insert("ITERATION".to_string(), iteration.to_string());
+            let stdin = serde_json::json!({
+                "session_id": ctx.session_id,
+                "iteration": iteration,
+            })
+            .to_string();
+
+            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+            if !result.is_success() {
+                eprintln!(
+                    "[plugin:{}] PreLlmCall hook failed: {}",
                     name, result.stderr
                 );
+                send_hook_error(&etx, &name, "PreLlmCall", &result.stderr);
+            }
+
+            Ok(())
+        })
+    }));
+}
+
+fn register_after_llm_hook(
+    hooks: &mut AgenticHooks,
+    plugin_hook: PluginHook,
+    plugin_name: String,
+    plugin_root: String,
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    event_tx: Option<mpsc::Sender<UnifiedStreamEvent>>,
+) {
+    let command = plugin_hook.command.clone();
+    let timeout = plugin_hook.timeout;
+    let hook_type = plugin_hook.hook_type.clone();
+
+    hooks.register_on_after_llm(Box::new(move |ctx, response_text| {
+        let cmd = command.clone();
+        let name = plugin_name.clone();
+        let root = plugin_root.clone();
+        let timeout_ms = timeout;
+        let project_path = ctx.project_path.to_string_lossy().to_string();
+        let ht = hook_type.clone();
+        let provider = llm_provider.clone();
+        let etx = event_tx.clone();
+
+        Box::pin(async move {
+            let mut env = build_base_env(&project_path, &root, &name);
+            if let Some(ref text) = response_text {
+                // Truncate response text in env var to avoid huge env values
+                let truncated = if text.len() > 500 {
+                    format!("{}...", &text[..500])
+                } else {
+                    text.clone()
+                };
+                env.insert("LLM_RESPONSE".to_string(), truncated);
+            }
+            let stdin = serde_json::json!({
+                "session_id": ctx.session_id,
+                "response_text": response_text,
+            })
+            .to_string();
+
+            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+            if !result.is_success() {
+                eprintln!(
+                    "[plugin:{}] PostLlmCall hook failed: {}",
+                    name, result.stderr
+                );
+                send_hook_error(&etx, &name, "PostLlmCall", &result.stderr);
             }
 
             Ok(())
@@ -637,6 +967,8 @@ mod tests {
             plugin_hooks,
             "test-plugin".to_string(),
             "/tmp/plugin".to_string(),
+            None,
+            None,
         );
 
         assert_eq!(hooks.total_hooks(), 1);
@@ -701,6 +1033,8 @@ mod tests {
             plugin_hooks,
             "test-plugin".to_string(),
             "/tmp/plugin".to_string(),
+            None,
+            None,
         );
 
         // SessionStart(1) + UserMessage(1) + BeforeTool(1) + AfterTool(1) + SessionEnd(1) + Compaction(1) = 6
@@ -725,6 +1059,8 @@ mod tests {
             plugin_hooks,
             "test".to_string(),
             "/tmp".to_string(),
+            None,
+            None,
         );
 
         let ctx = test_hook_context();
@@ -755,6 +1091,8 @@ mod tests {
             plugin_hooks,
             "test".to_string(),
             "/tmp".to_string(),
+            None,
+            None,
         );
 
         let ctx = test_hook_context();
@@ -787,6 +1125,8 @@ mod tests {
             plugin_hooks,
             "test".to_string(),
             "/tmp".to_string(),
+            None,
+            None,
         );
 
         let ctx = test_hook_context();
@@ -812,6 +1152,8 @@ mod tests {
             plugin_hooks,
             "test".to_string(),
             "/tmp".to_string(),
+            None,
+            None,
         );
 
         let ctx = test_hook_context();
@@ -837,6 +1179,8 @@ mod tests {
             plugin_hooks,
             "test".to_string(),
             "/tmp".to_string(),
+            None,
+            None,
         );
 
         let ctx = test_hook_context();
@@ -870,6 +1214,8 @@ mod tests {
             plugin_hooks,
             "test".to_string(),
             "/tmp".to_string(),
+            None,
+            None,
         );
 
         let ctx = test_hook_context();
@@ -940,6 +1286,8 @@ mod tests {
             plugin_hooks,
             "test".to_string(),
             "/tmp".to_string(),
+            None,
+            None,
         );
 
         // Notification is not mapped, so no hooks should be registered

@@ -365,6 +365,8 @@ interface PersistedForegroundSnapshot {
   foregroundOriginHistoryId: string | null;
   foregroundOriginSessionId: string | null;
   foregroundDirty: boolean;
+  /** Workspace path active when this foreground was persisted */
+  workspacePath?: string;
 }
 
 interface PersistedSessionStateV1 {
@@ -967,6 +969,7 @@ function buildPersistedForegroundSnapshot(state: ExecutionState): PersistedForeg
       state.foregroundOriginSessionId
       || buildHistorySessionId(state.taskId, state.standaloneSessionId),
     foregroundDirty: state.foregroundDirty,
+    workspacePath: settings.workspacePath || undefined,
   };
 }
 
@@ -990,7 +993,13 @@ function persistSessionStateSnapshot(state: ExecutionState): void {
   }
 }
 
-function loadPersistedSessionState(): Partial<ExecutionState> | null {
+interface PersistedSessionRestoreResult {
+  state: Partial<ExecutionState>;
+  /** Workspace path from the persisted foreground, to be restored into settings store */
+  foregroundWorkspacePath?: string;
+}
+
+function loadPersistedSessionState(): PersistedSessionRestoreResult | null {
   try {
     if (typeof localStorage === 'undefined') return null;
     const raw = localStorage.getItem(SESSION_STATE_KEY);
@@ -1007,39 +1016,44 @@ function loadPersistedSessionState(): Partial<ExecutionState> | null {
 
     if (!parsed.foreground) {
       return {
-        backgroundSessions: restoredBackground,
-        activeSessionId: parsed.activeSessionId || null,
-        foregroundParentSessionId: null,
-        foregroundBgId: null,
-        foregroundOriginHistoryId: null,
-        foregroundOriginSessionId: null,
-        foregroundDirty: false,
+        state: {
+          backgroundSessions: restoredBackground,
+          activeSessionId: parsed.activeSessionId || null,
+          foregroundParentSessionId: null,
+          foregroundBgId: null,
+          foregroundOriginHistoryId: null,
+          foregroundOriginSessionId: null,
+          foregroundDirty: false,
+        },
       };
     }
 
     const fg = parsed.foreground;
     return {
-      backgroundSessions: restoredBackground,
-      activeSessionId: parsed.activeSessionId || null,
-      taskDescription: fg.taskDescription,
-      status: normalizeRestoredStatus(fg.status),
-      streamingOutput: [...fg.streamingOutput],
-      streamLineCounter: fg.streamLineCounter,
-      currentTurnStartLineId: fg.currentTurnStartLineId,
-      taskId: null,
-      isChatSession: false,
-      standaloneTurns: [...fg.standaloneTurns],
-      standaloneSessionId: fg.standaloneSessionId,
-      latestUsage: fg.latestUsage ? { ...fg.latestUsage } : null,
-      sessionUsageTotals: fg.sessionUsageTotals ? { ...fg.sessionUsageTotals } : null,
-      turnUsageTotals: fg.turnUsageTotals ? { ...fg.turnUsageTotals } : null,
-      startedAt: fg.startedAt,
-      foregroundParentSessionId: fg.foregroundParentSessionId,
-      foregroundBgId: fg.foregroundBgId,
-      foregroundOriginHistoryId: fg.foregroundOriginHistoryId,
-      foregroundOriginSessionId: fg.foregroundOriginSessionId,
-      foregroundDirty: fg.foregroundDirty,
-      toolCallFilter: new ToolCallStreamFilter(),
+      state: {
+        backgroundSessions: restoredBackground,
+        activeSessionId: parsed.activeSessionId || null,
+        taskDescription: fg.taskDescription,
+        status: normalizeRestoredStatus(fg.status),
+        streamingOutput: [...fg.streamingOutput],
+        streamLineCounter: fg.streamLineCounter,
+        currentTurnStartLineId: fg.currentTurnStartLineId,
+        taskId: null,
+        isChatSession: false,
+        standaloneTurns: [...fg.standaloneTurns],
+        standaloneSessionId: fg.standaloneSessionId,
+        latestUsage: fg.latestUsage ? { ...fg.latestUsage } : null,
+        sessionUsageTotals: fg.sessionUsageTotals ? { ...fg.sessionUsageTotals } : null,
+        turnUsageTotals: fg.turnUsageTotals ? { ...fg.turnUsageTotals } : null,
+        startedAt: fg.startedAt,
+        foregroundParentSessionId: fg.foregroundParentSessionId,
+        foregroundBgId: fg.foregroundBgId,
+        foregroundOriginHistoryId: fg.foregroundOriginHistoryId,
+        foregroundOriginSessionId: fg.foregroundOriginSessionId,
+        foregroundDirty: fg.foregroundDirty,
+        toolCallFilter: new ToolCallStreamFilter(),
+      },
+      foregroundWorkspacePath: fg.workspacePath,
     };
   } catch {
     return null;
@@ -1287,7 +1301,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   initialize: () => {
     const persisted = loadPersistedSessionState();
     if (persisted) {
-      set(persisted);
+      set(persisted.state);
+      // Restore foreground workspace path into settings store
+      if (persisted.foregroundWorkspacePath) {
+        useSettingsStore.setState({ workspacePath: persisted.foregroundWorkspacePath });
+      }
       get().addLog('Restored session tree from local cache');
     }
 
@@ -2625,6 +2643,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       llmProvider: targetSnapshot.llmProvider,
       llmModel: targetSnapshot.llmModel,
     });
+
+    // Restore workspace path from the target snapshot
+    if (targetSnapshot.workspacePath) {
+      useSettingsStore.setState({ workspacePath: targetSnapshot.workspacePath });
+    }
   },
 
   removeBackgroundSession: (id: string) => {

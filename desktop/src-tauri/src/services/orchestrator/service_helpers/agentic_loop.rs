@@ -548,6 +548,15 @@ impl OrchestratorService {
                 }
             }
 
+            // Inject plugin commands for sub-agents
+            if let Some(ref plugin_commands) = self.plugin_commands {
+                let section =
+                    crate::services::tools::build_plugin_commands_section(plugin_commands);
+                if !section.is_empty() {
+                    parts.push(section);
+                }
+            }
+
             // Determine effective fallback mode for sub-agent
             let sub_effective_mode = self
                 .config
@@ -1802,6 +1811,7 @@ impl OrchestratorService {
 
         let plugin_instructions_snapshot = self.plugin_instructions.clone();
         let plugin_skills_snapshot = self.plugin_skills.clone();
+        let plugin_commands_snapshot = self.plugin_commands.clone();
 
         let task_spawner = Arc::new(OrchestratorTaskSpawner {
             provider_config: self.config.provider.clone(),
@@ -1823,6 +1833,7 @@ impl OrchestratorService {
             shared_paused: Arc::clone(&self.paused),
             plugin_instructions_snapshot,
             plugin_skills_snapshot,
+            plugin_commands_snapshot,
         });
         let max_concurrent = self.config.provider.effective_max_concurrent_subagents();
         Some(TaskContext {
@@ -2287,7 +2298,7 @@ impl OrchestratorService {
                     };
 
                     // Process results in original order (events, messages, loop detection)
-                    for (tc_id, effective_tool_name, result) in results {
+                    for (tc_id, effective_tool_name, mut result) in results {
                         // Emit tool result event
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolResult {
@@ -2305,8 +2316,9 @@ impl OrchestratorService {
                             })
                             .await;
 
-                        // Hook: on_after_tool
-                        self.hooks
+                        // Hook: on_after_tool — capture injected context
+                        let after_tool_ctx = self
+                            .hooks
                             .fire_on_after_tool(
                                 &hook_ctx,
                                 &effective_tool_name,
@@ -2314,6 +2326,12 @@ impl OrchestratorService {
                                 result.output.as_ref().map(|o| truncate_for_log(o, 200)),
                             )
                             .await;
+
+                        // Append plugin-injected context to tool output
+                        if let Some(ref injected) = after_tool_ctx {
+                            let existing = result.output.take().unwrap_or_default();
+                            result.output = Some(format!("{}\n\n{}", existing, injected));
+                        }
 
                         // Add to messages
                         if result.is_dedup {
@@ -2460,7 +2478,7 @@ impl OrchestratorService {
                             continue;
                         }
 
-                        let (result, nested_usage, nested_iterations) =
+                        let (mut result, nested_usage, nested_iterations) =
                             if effective_tool_name == "Analyze" {
                                 self.execute_analyze_tool_result(effective_args, &tx).await
                             } else {
@@ -2496,8 +2514,9 @@ impl OrchestratorService {
                             })
                             .await;
 
-                        // Hook: on_after_tool
-                        self.hooks
+                        // Hook: on_after_tool — capture injected context
+                        let after_tool_ctx = self
+                            .hooks
                             .fire_on_after_tool(
                                 &hook_ctx,
                                 effective_tool_name,
@@ -2505,6 +2524,12 @@ impl OrchestratorService {
                                 result.output.as_ref().map(|o| truncate_for_log(o, 200)),
                             )
                             .await;
+
+                        // Append plugin-injected context to tool output
+                        if let Some(ref injected) = after_tool_ctx {
+                            let existing = result.output.take().unwrap_or_default();
+                            result.output = Some(format!("{}\n\n{}", existing, injected));
+                        }
 
                         // Apply EventActions if the tool declared any side effects.
                         if let Some(ref actions) = result.event_actions {
@@ -2766,7 +2791,7 @@ impl OrchestratorService {
                         }
                     };
 
-                    for (tool_id, effective_tool_name, result) in results {
+                    for (tool_id, effective_tool_name, mut result) in results {
                         let _ = tx
                             .send(UnifiedStreamEvent::ToolResult {
                                 tool_id: tool_id.clone(),
@@ -2783,8 +2808,9 @@ impl OrchestratorService {
                             })
                             .await;
 
-                        // Hook: on_after_tool (parallel-safe tools have minimal hooks)
-                        self.hooks
+                        // Hook: on_after_tool — capture injected context
+                        let after_tool_ctx = self
+                            .hooks
                             .fire_on_after_tool(
                                 &hook_ctx,
                                 &effective_tool_name,
@@ -2792,6 +2818,12 @@ impl OrchestratorService {
                                 result.output.as_ref().map(|o| truncate_for_log(o, 200)),
                             )
                             .await;
+
+                        // Append plugin-injected context to tool output
+                        if let Some(ref injected) = after_tool_ctx {
+                            let existing = result.output.take().unwrap_or_default();
+                            result.output = Some(format!("{}\n\n{}", existing, injected));
+                        }
 
                         if result.is_dedup {
                             let dedup_msg = result.output.as_deref().unwrap_or(
@@ -2914,7 +2946,7 @@ impl OrchestratorService {
                             continue;
                         }
 
-                        let (result, nested_usage, nested_iterations) =
+                        let (mut result, nested_usage, nested_iterations) =
                             if effective_tool_name == "Analyze" {
                                 self.execute_analyze_tool_result(effective_args, &tx).await
                             } else {
@@ -2949,8 +2981,9 @@ impl OrchestratorService {
                             })
                             .await;
 
-                        // Hook: on_after_tool (fallback path)
-                        self.hooks
+                        // Hook: on_after_tool — capture injected context
+                        let after_tool_ctx = self
+                            .hooks
                             .fire_on_after_tool(
                                 &hook_ctx,
                                 effective_tool_name,
@@ -2958,6 +2991,12 @@ impl OrchestratorService {
                                 result.output.as_ref().map(|o| truncate_for_log(o, 200)),
                             )
                             .await;
+
+                        // Append plugin-injected context to tool output
+                        if let Some(ref injected) = after_tool_ctx {
+                            let existing = result.output.take().unwrap_or_default();
+                            result.output = Some(format!("{}\n\n{}", existing, injected));
+                        }
 
                         // Apply EventActions if the tool declared any side effects
                         if let Some(ref actions) = result.event_actions {
@@ -3744,6 +3783,13 @@ impl OrchestratorService {
         // Inject plugin skills (from enabled plugins' skills/)
         if let Some(ref plugin_skills) = self.plugin_skills {
             prompt.push_str(&build_plugin_skills_section(plugin_skills));
+        }
+
+        // Inject plugin commands (from enabled plugins' commands/)
+        if let Some(ref plugin_commands) = self.plugin_commands {
+            prompt.push_str(&crate::services::tools::build_plugin_commands_section(
+                plugin_commands,
+            ));
         }
 
         drop(detected_lang);

@@ -412,7 +412,7 @@ pub fn register_guardrail_hooks(
                         _ => {}
                     }
                 }
-                Ok(())
+                Ok(crate::services::orchestrator::hooks::AfterToolResult::default())
             })
         },
     ));

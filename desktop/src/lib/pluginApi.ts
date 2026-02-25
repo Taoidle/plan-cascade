@@ -6,7 +6,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { PluginInfo, PluginDetail, MarketplacePlugin, MarketplaceInfo } from '../types/plugin';
+import type { PluginInfo, PluginDetail, PluginSkill, MarketplacePlugin, MarketplaceInfo } from '../types/plugin';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -20,6 +20,22 @@ interface CommandResponse<T> {
 export async function listPlugins(): Promise<CommandResponse<PluginInfo[]>> {
   try {
     return await invoke<CommandResponse<PluginInfo[]>>('list_plugins');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * List user-invocable plugin skills.
+ * Returns skills from enabled plugins where user_invocable is true.
+ */
+export async function listInvocableSkills(): Promise<CommandResponse<PluginSkill[]>> {
+  try {
+    return await invoke<CommandResponse<PluginSkill[]>>('list_invocable_plugin_skills');
   } catch (error) {
     return {
       success: false,

@@ -238,6 +238,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             Some(Arc::clone(&self.shared_paused)),
             self.plugin_instructions_snapshot.clone(),
             self.plugin_skills_snapshot.clone(),
+            self.plugin_commands_snapshot.clone(),
         );
         // Propagate analytics tracking to sub-agent
         sub_agent.analytics_tx = self.shared_analytics_tx.clone();
@@ -454,6 +455,7 @@ impl OrchestratorService {
             permission_gate: None,
             plugin_instructions: None,
             plugin_skills: None,
+            plugin_commands: None,
         }
     }
 
@@ -523,6 +525,7 @@ impl OrchestratorService {
             permission_gate: None,
             plugin_instructions: None,
             plugin_skills: None,
+            plugin_commands: None,
         }
     }
 
@@ -551,6 +554,7 @@ impl OrchestratorService {
         shared_paused: Option<Arc<AtomicBool>>,
         plugin_instructions_snapshot: Option<String>,
         plugin_skills_snapshot: Option<Vec<crate::services::plugins::models::PluginSkill>>,
+        plugin_commands_snapshot: Option<Vec<crate::services::plugins::models::PluginCommand>>,
     ) -> Self {
         let analysis_artifacts_root = config.analysis_artifacts_root.clone();
         let provider: Arc<dyn LlmProvider> = match config.provider.provider {
@@ -620,6 +624,7 @@ impl OrchestratorService {
             permission_gate: None,
             plugin_instructions: plugin_instructions_snapshot,
             plugin_skills: plugin_skills_snapshot,
+            plugin_commands: plugin_commands_snapshot,
         }
     }
 
@@ -725,18 +730,22 @@ impl OrchestratorService {
         self
     }
 
-    /// Wire plugin context (instructions, skills, hooks) into the orchestrator.
+    /// Wire plugin context (instructions, skills, commands, hooks, permissions) into the orchestrator.
     ///
     /// Extracts data from the PluginManager at construction time:
-    /// 1. Registers plugin shell hooks into AgenticHooks
+    /// 1. Registers plugin shell/prompt hooks into AgenticHooks
     /// 2. Caches plugin instructions for system prompt injection
     /// 3. Caches plugin skills for system prompt injection
+    /// 4. Caches plugin commands for system prompt injection
+    /// 5. Registers permission enforcement hooks (deny/allow lists)
     pub fn with_plugin_context(
         mut self,
         plugin_manager: &crate::services::plugins::manager::PluginManager,
+        event_tx: Option<tokio::sync::mpsc::Sender<crate::services::streaming::UnifiedStreamEvent>>,
     ) -> Self {
         // Register plugin lifecycle hooks (SessionStart, UserPromptSubmit, PreToolUse, etc.)
-        plugin_manager.register_hooks(&mut self.hooks);
+        // Pass the LLM provider for Prompt-type hooks and event sender for error reporting
+        plugin_manager.register_hooks(&mut self.hooks, Some(self.provider.clone()), event_tx);
 
         // Cache instructions for system prompt injection
         let instructions = plugin_manager.collect_instructions();
@@ -748,6 +757,47 @@ impl OrchestratorService {
         let skills = plugin_manager.collect_skills();
         if !skills.is_empty() {
             self.plugin_skills = Some(skills);
+        }
+
+        // Cache commands for system prompt injection
+        let commands = plugin_manager.collect_commands();
+        if !commands.is_empty() {
+            self.plugin_commands = Some(commands);
+        }
+
+        // Register permission enforcement hooks (Fix 6)
+        let permissions = plugin_manager.collect_permissions();
+        if !permissions.deny.is_empty() || !permissions.allow.is_empty() {
+            let deny_list = permissions.deny.clone();
+            let allow_list = permissions.allow.clone();
+            self.hooks
+                .register_on_before_tool(Box::new(move |_ctx, tool_name, _arguments| {
+                    let deny = deny_list.clone();
+                    let allow = allow_list.clone();
+                    Box::pin(async move {
+                        // Deny takes precedence
+                        if deny.iter().any(|d| d == &tool_name) {
+                            return Ok(crate::services::orchestrator::hooks::BeforeToolResult {
+                                skip: true,
+                                skip_reason: Some(format!(
+                                    "Tool '{}' is denied by plugin permissions",
+                                    tool_name
+                                )),
+                            });
+                        }
+                        // If allow list is non-empty, only allowed tools may proceed
+                        if !allow.is_empty() && !allow.iter().any(|a| a == &tool_name) {
+                            return Ok(crate::services::orchestrator::hooks::BeforeToolResult {
+                                skip: true,
+                                skip_reason: Some(format!(
+                                    "Tool '{}' is not in plugin allow list",
+                                    tool_name
+                                )),
+                            });
+                        }
+                        Ok(crate::services::orchestrator::hooks::BeforeToolResult::default())
+                    })
+                }));
         }
 
         self

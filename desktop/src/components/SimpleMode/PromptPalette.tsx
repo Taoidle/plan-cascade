@@ -2,7 +2,7 @@
  * PromptPalette Component
  *
  * Floating panel triggered by "/" in InputBox.
- * Shows filtered prompt templates with keyboard navigation.
+ * Shows filtered prompt templates and plugin skills with keyboard navigation.
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { usePromptsStore } from '../../store/prompts';
 import { substituteVariables } from '../../types/prompt';
+import { listInvocableSkills } from '../../lib/pluginApi';
+import type { PluginSkill } from '../../types/plugin';
 
 // ============================================================================
 // Types
@@ -21,6 +23,11 @@ interface PromptPaletteProps {
   onClose: () => void;
   onKeyboardNav?: (handler: (e: React.KeyboardEvent) => boolean) => void;
 }
+
+/** Unified palette item representing either a prompt template or a plugin skill. */
+type PaletteItem =
+  | { kind: 'prompt'; id: string; title: string; description?: string; category: string }
+  | { kind: 'skill'; name: string; description: string; body: string };
 
 // ============================================================================
 // PromptPalette
@@ -37,6 +44,7 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
   const [variableMode, setVariableMode] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
+  const [pluginSkills, setPluginSkills] = useState<PluginSkill[]>([]);
   const paletteRef = useRef<HTMLDivElement>(null);
 
   // Fetch prompts on mount
@@ -46,27 +54,69 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
     }
   }, [prompts.length, fetchPrompts]);
 
-  // Filter prompts by query
-  const filteredPrompts = useMemo(() => {
+  // Fetch invocable plugin skills on mount
+  useEffect(() => {
+    listInvocableSkills().then((res) => {
+      if (res.success && res.data) {
+        setPluginSkills(res.data);
+      }
+    });
+  }, []);
+
+  // Build unified palette items: prompts + plugin skills, filtered by query
+  const filteredItems = useMemo(() => {
+    const promptItems: PaletteItem[] = prompts.map((p) => ({
+      kind: 'prompt' as const,
+      id: p.id,
+      title: p.title,
+      description: p.description || undefined,
+      category: p.category,
+    }));
+    const skillItems: PaletteItem[] = pluginSkills.map((s) => ({
+      kind: 'skill' as const,
+      name: s.name,
+      description: s.description,
+      body: s.body,
+    }));
+
+    const all = [...promptItems, ...skillItems];
+
     if (!query.trim()) {
-      // Show pinned first, then by use_count
-      return [...prompts]
+      // Show pinned prompts first, then by use_count, then skills at end
+      const sortedPrompts = [...prompts]
         .sort((a, b) => {
           if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
           return b.use_count - a.use_count;
         })
-        .slice(0, 8);
+        .slice(0, 6)
+        .map((p): PaletteItem => ({
+          kind: 'prompt',
+          id: p.id,
+          title: p.title,
+          description: p.description || undefined,
+          category: p.category,
+        }));
+      const skills = skillItems.slice(0, 8 - sortedPrompts.length);
+      return [...sortedPrompts, ...skills];
     }
+
     const q = query.toLowerCase();
-    return prompts
-      .filter(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q) ||
-          (p.description && p.description.toLowerCase().includes(q))
-      )
+    return all
+      .filter((item) => {
+        if (item.kind === 'prompt') {
+          return (
+            item.title.toLowerCase().includes(q) ||
+            item.category.toLowerCase().includes(q) ||
+            (item.description && item.description.toLowerCase().includes(q))
+          );
+        }
+        return (
+          item.name.toLowerCase().includes(q) ||
+          item.description.toLowerCase().includes(q)
+        );
+      })
       .slice(0, 8);
-  }, [prompts, query]);
+  }, [prompts, pluginSkills, query]);
 
   const selectedPrompt = useMemo(
     () => prompts.find((p) => p.id === selectedPromptId),
@@ -76,17 +126,24 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
   // Reset selection when filtered list changes
   useEffect(() => {
     setSelectedIndex(0);
-  }, [filteredPrompts.length]);
+  }, [filteredItems.length]);
 
-  const handleSelectPrompt = useCallback(
-    (promptId: string) => {
-      const prompt = prompts.find((p) => p.id === promptId);
+  const handleSelectItem = useCallback(
+    (item: PaletteItem) => {
+      if (item.kind === 'skill') {
+        // Prepend skill body as a system instruction
+        const text = `[Plugin Skill: ${item.name}]\n${item.body}`;
+        onSelect(text);
+        return;
+      }
+
+      const prompt = prompts.find((p) => p.id === item.id);
       if (!prompt) return;
 
       recordUse(prompt.id);
 
       if (prompt.variables.length > 0) {
-        setSelectedPromptId(promptId);
+        setSelectedPromptId(item.id);
         setVariableMode(true);
         setVariableValues({});
       } else {
@@ -119,23 +176,23 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setSelectedIndex((prev) =>
-          prev < filteredPrompts.length - 1 ? prev + 1 : prev
+          prev < filteredItems.length - 1 ? prev + 1 : prev
         );
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
       } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        const selected = filteredPrompts[selectedIndex];
+        const selected = filteredItems[selectedIndex];
         if (selected) {
-          handleSelectPrompt(selected.id);
+          handleSelectItem(selected);
         }
       } else if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
       }
     },
-    [variableMode, filteredPrompts, selectedIndex, handleSelectPrompt, handleVariableSubmit, onClose]
+    [variableMode, filteredItems, selectedIndex, handleSelectItem, handleVariableSubmit, onClose]
   );
 
   // Expose keyboard handler via ref-like pattern
@@ -153,10 +210,11 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
     coding: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
     writing: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
     analysis: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+    plugin: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
     custom: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
   };
 
-  if (filteredPrompts.length === 0 && !variableMode) return null;
+  if (filteredItems.length === 0 && !variableMode) return null;
 
   return (
     <div
@@ -215,46 +273,53 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
           </button>
         </div>
       ) : (
-        /* Prompt list mode */
+        /* Prompt & skill list mode */
         <>
           <div className="sticky top-0 px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
             <span className="text-xs text-gray-500 dark:text-gray-400">
               {t('promptPalette.title', { defaultValue: '/ Prompts' })}
-              {query && ` — ${filteredPrompts.length} matches`}
+              {query && ` — ${filteredItems.length} matches`}
             </span>
           </div>
           <div className="py-1">
-            {filteredPrompts.map((prompt, index) => (
-              <button
-                key={prompt.id}
-                onClick={() => handleSelectPrompt(prompt.id)}
-                className={clsx(
-                  'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
-                  index === selectedIndex
-                    ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-900 dark:text-primary-100'
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                )}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-medium truncate">{prompt.title}</span>
-                    <span
-                      className={clsx(
-                        'text-2xs px-1 py-0.5 rounded shrink-0',
-                        categoryBadgeColor[prompt.category] || categoryBadgeColor.custom
-                      )}
-                    >
-                      {prompt.category}
-                    </span>
-                  </div>
-                  {prompt.description && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {prompt.description}
-                    </div>
+            {filteredItems.map((item, index) => {
+              const key = item.kind === 'prompt' ? item.id : `skill:${item.name}`;
+              const title = item.kind === 'prompt' ? item.title : item.name;
+              const desc = item.description;
+              const badge = item.kind === 'prompt' ? item.category : 'plugin';
+
+              return (
+                <button
+                  key={key}
+                  onClick={() => handleSelectItem(item)}
+                  className={clsx(
+                    'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
+                    index === selectedIndex
+                      ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-900 dark:text-primary-100'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-700'
                   )}
-                </div>
-              </button>
-            ))}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-medium truncate">{title}</span>
+                      <span
+                        className={clsx(
+                          'text-2xs px-1 py-0.5 rounded shrink-0',
+                          categoryBadgeColor[badge] || categoryBadgeColor.custom
+                        )}
+                      >
+                        {badge}
+                      </span>
+                    </div>
+                    {desc && (
+                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        {desc}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </>
       )}

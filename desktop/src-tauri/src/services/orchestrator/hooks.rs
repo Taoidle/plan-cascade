@@ -81,6 +81,22 @@ impl Default for BeforeToolResult {
     }
 }
 
+/// Result of an on_after_tool hook: can optionally inject context into the conversation.
+#[derive(Debug, Clone, Default)]
+pub struct AfterToolResult {
+    /// If present, this context is appended to the tool result message so the LLM sees it.
+    pub injected_context: Option<String>,
+}
+
+impl AfterToolResult {
+    /// Create a result with injected context.
+    pub fn with_context(context: String) -> Self {
+        Self {
+            injected_context: Some(context),
+        }
+    }
+}
+
 // ============================================================================
 // Type Aliases for Hook Callbacks
 // ============================================================================
@@ -127,13 +143,14 @@ pub type OnBeforeToolHook = Box<
 >;
 
 /// Hook fired after tool execution. Receives tool name, success flag, and output snippet.
+/// Returns `AfterToolResult` which can optionally inject context into the conversation.
 pub type OnAfterToolHook = Box<
     dyn Fn(
             HookContext,
             String,
             bool,
             Option<String>,
-        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+        ) -> Pin<Box<dyn Future<Output = Result<AfterToolResult, String>> + Send>>
         + Send
         + Sync,
 >;
@@ -353,15 +370,19 @@ impl AgenticHooks {
     }
 
     /// Fire all on_after_tool hooks sequentially.
+    ///
+    /// Returns aggregated injected context from all hooks that returned non-empty context.
+    /// This context should be appended to the tool result message.
     pub async fn fire_on_after_tool(
         &self,
         ctx: &HookContext,
         tool_name: &str,
         success: bool,
         output_snippet: Option<String>,
-    ) {
+    ) -> Option<String> {
+        let mut injected_parts: Vec<String> = Vec::new();
         for (i, hook) in self.on_after_tool.iter().enumerate() {
-            if let Err(e) = hook(
+            match hook(
                 ctx.clone(),
                 tool_name.to_string(),
                 success,
@@ -369,8 +390,22 @@ impl AgenticHooks {
             )
             .await
             {
-                eprintln!("[hooks] on_after_tool hook {} failed: {}", i, e);
+                Ok(result) => {
+                    if let Some(ctx_text) = result.injected_context {
+                        if !ctx_text.trim().is_empty() {
+                            injected_parts.push(ctx_text);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[hooks] on_after_tool hook {} failed: {}", i, e);
+                }
             }
+        }
+        if injected_parts.is_empty() {
+            None
+        } else {
+            Some(injected_parts.join("\n"))
         }
     }
 

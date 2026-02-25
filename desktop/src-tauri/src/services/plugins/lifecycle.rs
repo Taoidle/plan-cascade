@@ -169,6 +169,9 @@ pub type AfterExecutionHook = Box<
 ///
 /// Hooks execute sequentially in registration order with optional
 /// short-circuit behavior on errors.
+#[deprecated(
+    note = "Use AgenticHooks instead. AgenticHooks covers all equivalent lifecycle points (on_session_start, on_user_message, on_before_tool, on_after_tool, on_before_llm, on_after_llm, on_session_end, on_compaction) and is fully wired into the chat execution pipeline."
+)]
 pub struct PluginLifecycleHooks {
     before_execution: Vec<BeforeExecutionHook>,
     on_message: Vec<OnMessageHook>,

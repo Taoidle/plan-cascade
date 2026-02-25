@@ -4008,6 +4008,7 @@ fn test_sub_agent_inherits_skills_snapshot() {
         None,
         None,
         None,
+        None,
     );
 
     // The sub-agent should have selected_skills populated
@@ -4056,6 +4057,7 @@ fn test_sub_agent_inherits_memories_snapshot() {
         None,
         None,
         None,
+        None,
     );
 
     // The sub-agent should have loaded_memories populated
@@ -4096,6 +4098,7 @@ fn test_sub_agent_knowledge_block_capped() {
         shared_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         plugin_instructions_snapshot: None,
         plugin_skills_snapshot: None,
+        plugin_commands_snapshot: None,
     };
 
     // The truncation happens in spawn_task() — simulate it here
@@ -4136,6 +4139,7 @@ fn test_sub_agent_detected_language_wired() {
         None,
         None,
         None,
+        None,
     );
 
     let lang = sub.detected_language.lock().unwrap();
@@ -4158,6 +4162,7 @@ fn test_sub_agent_empty_snapshots_remain_none() {
         None,
         vec![],
         vec![],
+        None,
         None,
         None,
         None,
