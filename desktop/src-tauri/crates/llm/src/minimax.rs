@@ -315,6 +315,7 @@ impl MinimaxProvider {
             stop_reason,
             usage,
             model: response.model.clone(),
+            search_citations: Vec::new(),
         }
     }
 
@@ -403,6 +404,7 @@ impl MinimaxProvider {
             stop_reason,
             usage,
             model,
+            search_citations: Vec::new(),
         }
     }
 }
@@ -687,6 +689,7 @@ impl LlmProvider for MinimaxProvider {
             stop_reason,
             usage,
             model: self.config.model.clone(),
+            search_citations: Vec::new(),
         })
     }
 

@@ -10,7 +10,9 @@
 //! If precise control over temperature/max_tokens is required, consider using
 //! the OpenAI-compatible endpoint with raw reqwest instead. See findings.md.
 
-use async_dashscope::operation::common::{FunctionBuilder, FunctionCallBuilder, ParametersBuilder};
+use async_dashscope::operation::common::{
+    FunctionBuilder, FunctionCallBuilder, ParametersBuilder, SearchOptionsBuilder,
+};
 use async_dashscope::operation::generation::{GenerationOutput, GenerationParamBuilder};
 use async_dashscope::Client as DashScopeClient;
 use async_trait::async_trait;
@@ -72,6 +74,58 @@ impl QwenProvider {
     fn model_supports_reasoning(&self) -> bool {
         let model = self.config.model.to_lowercase();
         model.contains("qwen3") || model.contains("qwq") || model.contains("thinking")
+    }
+
+    /// Check if native web search is enabled via provider options.
+    fn native_search_enabled(&self) -> bool {
+        self.config
+            .options
+            .get("enable_search")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    }
+
+    /// Build DashScope SearchOptions from provider config options.
+    ///
+    /// Returns `None` if native search is disabled or if building fails.
+    fn build_search_options(&self) -> Option<async_dashscope::operation::common::SearchOptions> {
+        if !self.native_search_enabled() {
+            return None;
+        }
+        let mut builder = SearchOptionsBuilder::default();
+        if let Some(v) = self
+            .config
+            .options
+            .get("search_forced")
+            .and_then(|v| v.as_bool())
+        {
+            builder.forced_search(v);
+        }
+        if let Some(v) = self
+            .config
+            .options
+            .get("search_enable_source")
+            .and_then(|v| v.as_bool())
+        {
+            builder.enable_source(v);
+        }
+        if let Some(v) = self
+            .config
+            .options
+            .get("search_enable_citation")
+            .and_then(|v| v.as_bool())
+        {
+            builder.enable_citation(v);
+        }
+        if let Some(v) = self
+            .config
+            .options
+            .get("search_strategy")
+            .and_then(|v| v.as_str())
+        {
+            builder.search_strategy(v.to_string());
+        }
+        builder.build().ok()
     }
 
     /// Build the SDK Input from unified messages.
@@ -280,6 +334,13 @@ impl QwenProvider {
             }
         }
 
+        if self.native_search_enabled() {
+            builder.enable_search(true);
+            if let Some(opts) = self.build_search_options() {
+                builder.search_options(opts);
+            }
+        }
+
         if !tools.is_empty() {
             let sdk_tools = Self::convert_tools(tools);
             builder.tools(sdk_tools);
@@ -391,6 +452,24 @@ impl QwenProvider {
             })
             .unwrap_or_default();
 
+        let search_citations = output
+            .output
+            .search_info
+            .as_ref()
+            .map(|si| {
+                si.search_results
+                    .iter()
+                    .map(|sr| super::types::SearchCitationInfo {
+                        index: sr.index,
+                        title: sr.title.clone(),
+                        url: sr.url.clone(),
+                        site_name: sr.site_name.clone(),
+                        icon: sr.icon.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         LlmResponse {
             content,
             thinking,
@@ -398,6 +477,7 @@ impl QwenProvider {
             stop_reason,
             usage,
             model: self.config.model.clone(),
+            search_citations,
         }
     }
 
@@ -445,6 +525,9 @@ impl LlmProvider for QwenProvider {
     }
     fn supports_tools(&self) -> bool {
         true
+    }
+    fn supports_native_search(&self) -> bool {
+        self.native_search_enabled()
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
@@ -549,6 +632,8 @@ impl LlmProvider for QwenProvider {
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
         let mut in_reasoning = false;
+
+        let mut accumulated_citations: Vec<super::types::SearchCitationInfo> = Vec::new();
 
         let mut pending_tool_id: Option<String> = None;
         let mut pending_tool_name: Option<String> = None;
@@ -692,6 +777,38 @@ impl LlmProvider for QwenProvider {
                         }
                     }
 
+                    // Extract search citations from streaming events
+                    if let Some(si) = &output.output.search_info {
+                        let citations: Vec<
+                            plan_cascade_core::streaming::SearchCitationEntry,
+                        > = si
+                            .search_results
+                            .iter()
+                            .map(|sr| plan_cascade_core::streaming::SearchCitationEntry {
+                                index: sr.index,
+                                title: sr.title.clone(),
+                                url: sr.url.clone(),
+                                site_name: sr.site_name.clone(),
+                                icon: sr.icon.clone(),
+                            })
+                            .collect();
+                        if !citations.is_empty() {
+                            // Accumulate for final response
+                            for sr in &si.search_results {
+                                accumulated_citations.push(super::types::SearchCitationInfo {
+                                    index: sr.index,
+                                    title: sr.title.clone(),
+                                    url: sr.url.clone(),
+                                    site_name: sr.site_name.clone(),
+                                    icon: sr.icon.clone(),
+                                });
+                            }
+                            let _ = tx
+                                .send(UnifiedStreamEvent::SearchCitations { citations })
+                                .await;
+                        }
+                    }
+
                     if let Some(reason) = &output.output.finish_reason {
                         stop_reason = StopReason::from(reason.as_str());
                     }
@@ -762,6 +879,7 @@ impl LlmProvider for QwenProvider {
             stop_reason,
             usage,
             model: self.config.model.clone(),
+            search_citations: accumulated_citations,
         })
     }
 
@@ -980,5 +1098,63 @@ mod tests {
         let messages = vec![Message::user("Test")];
         let result = provider.build_generation_param(&messages, None, &[], false);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_native_search_disabled_by_default() {
+        let provider = QwenProvider::new(test_config());
+        assert!(!provider.native_search_enabled());
+        assert!(!provider.supports_native_search());
+    }
+
+    #[test]
+    fn test_native_search_enabled_via_options() {
+        let mut config = test_config();
+        config
+            .options
+            .insert("enable_search".to_string(), serde_json::json!(true));
+        let provider = QwenProvider::new(config);
+        assert!(provider.native_search_enabled());
+        assert!(provider.supports_native_search());
+    }
+
+    #[test]
+    fn test_search_options_from_config() {
+        let mut config = test_config();
+        config
+            .options
+            .insert("enable_search".to_string(), serde_json::json!(true));
+        config
+            .options
+            .insert("search_forced".to_string(), serde_json::json!(true));
+        config
+            .options
+            .insert("search_strategy".to_string(), serde_json::json!("turbo"));
+        let provider = QwenProvider::new(config);
+        let opts = provider.build_search_options();
+        assert!(opts.is_some());
+    }
+
+    #[test]
+    fn test_search_options_none_when_disabled() {
+        let provider = QwenProvider::new(test_config());
+        assert!(provider.build_search_options().is_none());
+    }
+
+    #[test]
+    fn test_build_parameters_includes_search() {
+        let mut config = test_config();
+        config
+            .options
+            .insert("enable_search".to_string(), serde_json::json!(true));
+        let provider = QwenProvider::new(config);
+        let params = provider.build_sdk_parameters(&[], false);
+        assert!(params.is_some());
+        // Verify the parameters include search by serializing to JSON
+        let json = serde_json::to_value(&params.unwrap()).unwrap();
+        assert_eq!(
+            json.get("enable_search").and_then(|v| v.as_bool()),
+            Some(true)
+        );
     }
 }

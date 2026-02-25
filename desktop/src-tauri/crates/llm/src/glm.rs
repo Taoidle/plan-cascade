@@ -74,6 +74,24 @@ impl GlmProvider {
         model.contains("4.6") || model.contains("4.7")
     }
 
+    fn native_search_enabled(&self) -> bool {
+        self.config.options.get("enable_search")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    }
+
+    fn search_engine(&self) -> &str {
+        self.config.options.get("search_engine")
+            .and_then(|v| v.as_str())
+            .unwrap_or("search_pro")
+    }
+
+    fn search_result_count(&self) -> u64 {
+        self.config.options.get("search_result_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5)
+    }
+
     /// Convert our ToolDefinition to zai-rs Tools::Function.
     fn tool_to_zai(tool: &ToolDefinition) -> ZaiTools {
         let params = serde_json::to_value(&tool.input_schema).unwrap_or_default();
@@ -141,6 +159,25 @@ impl GlmProvider {
                 // GLM thinking models may not support tool_choice "required" --
                 // skip it and let the model default to "auto".
                 body["tool_choice"] = serde_json::json!("required");
+            }
+        }
+
+        // Inject web_search tool type if native search is enabled.
+        // This is a GLM-specific tool type that sits alongside function tools.
+        if self.native_search_enabled() {
+            let ws_tool = serde_json::json!({
+                "type": "web_search",
+                "web_search": {
+                    "enable": true,
+                    "search_engine": self.search_engine(),
+                    "search_result": true,
+                    "count": self.search_result_count()
+                }
+            });
+            if let Some(arr) = body.get_mut("tools").and_then(|v| v.as_array_mut()) {
+                arr.push(ws_tool);
+            } else {
+                body["tools"] = serde_json::json!([ws_tool]);
             }
         }
 
@@ -364,6 +401,7 @@ impl GlmProvider {
             stop_reason,
             usage,
             model: response.model().unwrap_or(&self.config.model).to_string(),
+            search_citations: Vec::new(),
         }
     }
 
@@ -394,6 +432,9 @@ impl LlmProvider for GlmProvider {
     }
     fn supports_tools(&self) -> bool {
         true
+    }
+    fn supports_native_search(&self) -> bool {
+        self.native_search_enabled()
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
@@ -701,6 +742,7 @@ impl LlmProvider for GlmProvider {
             stop_reason,
             usage,
             model: self.config.model.clone(),
+            search_citations: Vec::new(),
         })
     }
 
@@ -985,5 +1027,83 @@ mod tests {
             ..test_config()
         });
         assert!(!provider45.model_supports_tool_stream());
+    }
+
+    #[test]
+    fn test_native_search_disabled_by_default() {
+        let provider = GlmProvider::new(test_config());
+        assert!(!provider.native_search_enabled());
+        assert!(!provider.supports_native_search());
+    }
+
+    #[test]
+    fn test_native_search_enabled_via_options() {
+        let mut config = test_config();
+        config.options.insert("enable_search".to_string(), serde_json::json!(true));
+        let provider = GlmProvider::new(config);
+        assert!(provider.native_search_enabled());
+        assert!(provider.supports_native_search());
+    }
+
+    #[test]
+    fn test_build_request_body_with_native_search() {
+        let mut config = test_config();
+        config.options.insert("enable_search".to_string(), serde_json::json!(true));
+        let provider = GlmProvider::new(config);
+        let messages = vec![Message::user("test")];
+        let body = provider.build_request_body(&messages, None, &[], false, &LlmRequestOptions::default());
+        let tools = body["tools"].as_array().expect("tools should be present");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "web_search");
+        assert_eq!(tools[0]["web_search"]["enable"], true);
+        assert_eq!(tools[0]["web_search"]["search_engine"], "search_pro");
+    }
+
+    #[test]
+    fn test_build_request_body_with_native_search_and_function_tools() {
+        let mut config = test_config();
+        config.options.insert("enable_search".to_string(), serde_json::json!(true));
+        let provider = GlmProvider::new(config);
+        let messages = vec![Message::user("test")];
+        let tools = vec![ToolDefinition {
+            name: "get_weather".to_string(),
+            description: "Get weather".to_string(),
+            input_schema: super::super::types::ParameterSchema::object(
+                None,
+                std::collections::HashMap::new(),
+                vec![],
+            ),
+        }];
+        let body = provider.build_request_body(&messages, None, &tools, false, &LlmRequestOptions::default());
+        let body_tools = body["tools"].as_array().expect("tools should be present");
+        assert_eq!(body_tools.len(), 2, "should have function tool + web_search tool");
+        // First tool should be function type
+        assert_eq!(body_tools[0]["type"], "function");
+        // Second tool should be web_search type
+        assert_eq!(body_tools[1]["type"], "web_search");
+    }
+
+    #[test]
+    fn test_compat_body_strips_web_search() {
+        let mut config = test_config();
+        config.options.insert("enable_search".to_string(), serde_json::json!(true));
+        let provider = GlmProvider::new(config);
+        let messages = vec![Message::user("test")];
+        let body = provider.build_compat_request_body(&messages, None, false, &LlmRequestOptions::default());
+        assert!(body.get("tools").is_none(), "compat body should strip all tools including web_search");
+    }
+
+    #[test]
+    fn test_search_engine_default() {
+        let provider = GlmProvider::new(test_config());
+        assert_eq!(provider.search_engine(), "search_pro");
+    }
+
+    #[test]
+    fn test_search_engine_custom() {
+        let mut config = test_config();
+        config.options.insert("search_engine".to_string(), serde_json::json!("search_std"));
+        let provider = GlmProvider::new(config);
+        assert_eq!(provider.search_engine(), "search_std");
     }
 }

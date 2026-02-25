@@ -452,6 +452,11 @@ mod backend {
             page: &mut chromiumoxide::Page,
             url: &str,
         ) -> Result<BrowserActionResult, String> {
+            // SSRF prevention: validate URL before navigation
+            crate::services::tools::url_validation::validate_url_ssrf(url)
+                .await
+                .map_err(|e| format!("Navigation blocked: {}", e))?;
+
             debug!("BrowserBackend: Navigating to {}", url);
 
             page.goto(url)

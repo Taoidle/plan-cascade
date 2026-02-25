@@ -59,6 +59,15 @@ pub trait LlmProvider: Send + Sync {
         false // Default: text-only
     }
 
+    /// Returns whether this provider has native web search enabled.
+    ///
+    /// When true, the provider injects search parameters at the API level
+    /// (e.g., Qwen `enable_search`, GLM `web_search` tool type) and may
+    /// return search citations alongside the response.
+    fn supports_native_search(&self) -> bool {
+        false
+    }
+
     /// Returns the model's context window size in tokens.
     ///
     /// Used to derive token budgets for sub-agents. Providers should override

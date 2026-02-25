@@ -23,6 +23,7 @@ use crate::services::task_mode::batch_executor::{
     ExecutionConfig, StoryContext, StoryExecutionContext, StoryExecutionOutcome,
     StoryExecutionState, TaskModeProgressEvent, TASK_MODE_EVENT_CHANNEL,
 };
+use crate::services::task_mode::exploration::{self, ExplorationResult};
 use crate::services::task_mode::prd_generator;
 
 use crate::state::AppState;
@@ -51,6 +52,8 @@ pub enum StoryExecutionMode {
 pub enum TaskModeStatus {
     /// Session initialized, ready for PRD generation
     Initialized,
+    /// Project exploration in progress
+    Exploring,
     /// PRD is being generated
     GeneratingPrd,
     /// PRD generated, awaiting review/approval
@@ -111,6 +114,8 @@ pub struct TaskModeSession {
     pub strategy_analysis: Option<StrategyAnalysis>,
     /// Generated PRD
     pub prd: Option<TaskPrd>,
+    /// Project exploration result
+    pub exploration_result: Option<ExplorationResult>,
     /// Execution progress
     pub progress: Option<BatchExecutionProgress>,
     /// When the session was created
@@ -334,6 +339,7 @@ pub async fn enter_task_mode(
         status: TaskModeStatus::Initialized,
         strategy_analysis: Some(analysis),
         prd: None,
+        exploration_result: None,
         progress: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
@@ -480,11 +486,22 @@ pub async fn generate_task_prd(
     // Call LLM for PRD generation with conversation history context
     let history = conversation_history.unwrap_or_default();
     let context_budget = max_context_tokens.unwrap_or(200_000);
+
+    // Read exploration result from session for context injection
+    let exploration_context_str = {
+        let session_guard = state.session.read().await;
+        session_guard
+            .as_ref()
+            .and_then(|s| s.exploration_result.as_ref())
+            .map(exploration::format_exploration_context)
+    };
+
     let prd = match prd_generator::generate_prd_with_llm(
         llm_provider,
         &description,
         &history,
         context_budget,
+        exploration_context_str.as_deref(),
     )
     .await
     {
@@ -512,6 +529,307 @@ pub async fn generate_task_prd(
     }
 
     Ok(CommandResponse::ok(prd))
+}
+
+/// Explore the project codebase to gather context for PRD generation.
+///
+/// Runs project exploration based on flow level:
+/// - `quick`: Skips exploration entirely (returns empty result)
+/// - `standard`: Deterministic-only exploration (IndexStore project summary)
+/// - `full`: Deterministic + LLM-assisted exploration via coordinator OrchestratorService
+///
+/// Exploration failure is non-blocking — returns a warning-level result and the workflow
+/// continues to PRD generation.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn explore_project(
+    session_id: String,
+    flow_level: String,
+    task_description: String,
+    provider: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+    apiKey: Option<String>,
+    base_url: Option<String>,
+    baseUrl: Option<String>,
+    state: tauri::State<'_, TaskModeState>,
+    app_state: tauri::State<'_, AppState>,
+    standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
+    app_handle: tauri::AppHandle,
+) -> Result<CommandResponse<ExplorationResult>, String> {
+    use tauri::Emitter;
+
+    // Validate session
+    {
+        let session_guard = state.session.read().await;
+        match session_guard.as_ref() {
+            Some(s) if s.session_id == session_id => {
+                if s.status != TaskModeStatus::Initialized {
+                    return Ok(CommandResponse::err(format!(
+                        "Cannot explore in {:?} status",
+                        s.status
+                    )));
+                }
+            }
+            _ => {
+                return Ok(CommandResponse::err(
+                    "Invalid session ID or no active session",
+                ))
+            }
+        }
+    }
+
+    // Set status to Exploring
+    {
+        let mut session_guard = state.session.write().await;
+        if let Some(s) = session_guard.as_mut() {
+            s.status = TaskModeStatus::Exploring;
+        }
+    }
+
+    let start = std::time::Instant::now();
+
+    // Quick flow: skip exploration entirely
+    if flow_level == "quick" {
+        let result = ExplorationResult {
+            tech_stack: exploration::TechStackSummary {
+                languages: vec![],
+                frameworks: vec![],
+                build_tools: vec![],
+                test_frameworks: vec![],
+                package_manager: None,
+            },
+            key_files: vec![],
+            components: vec![],
+            patterns: vec![],
+            llm_summary: None,
+            duration_ms: 0,
+            used_llm_exploration: false,
+        };
+
+        // Reset status
+        {
+            let mut session_guard = state.session.write().await;
+            if let Some(s) = session_guard.as_mut() {
+                s.status = TaskModeStatus::Initialized;
+                s.exploration_result = Some(result.clone());
+            }
+        }
+        return Ok(CommandResponse::ok(result));
+    }
+
+    // Resolve project path from standalone state
+    let project_path = {
+        let wd = standalone_state.working_directory.read().await;
+        wd.clone()
+    };
+
+    // --- Deterministic exploration ---
+    let deterministic_result = {
+        // Try to get IndexStore from standalone_state
+        let index_manager_guard = standalone_state.index_manager.read().await;
+        if let Some(ref index_manager) = *index_manager_guard {
+            let store = index_manager.index_store();
+            let project_path_str = project_path.to_string_lossy();
+            match store.get_project_summary(&project_path_str) {
+                Ok(summary) => {
+                    Some(exploration::deterministic_explore(&summary, &project_path))
+                }
+                Err(e) => {
+                    eprintln!("[explore_project] IndexStore summary failed: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    };
+
+    let mut result = deterministic_result.unwrap_or_else(|| ExplorationResult {
+        tech_stack: exploration::TechStackSummary {
+            languages: vec![],
+            frameworks: vec![],
+            build_tools: vec![],
+            test_frameworks: vec![],
+            package_manager: None,
+        },
+        key_files: vec![],
+        components: vec![],
+        patterns: vec![],
+        llm_summary: None,
+        duration_ms: 0,
+        used_llm_exploration: false,
+    });
+
+    // Emit progress event
+    let _ = app_handle.emit(
+        "exploration-progress",
+        serde_json::json!({
+            "sessionId": session_id,
+            "phase": "deterministic_complete",
+        }),
+    );
+
+    // --- LLM exploration (full flow only) ---
+    if flow_level == "full" {
+        // Resolve provider/model for the coordinator
+        let resolved_provider = match provider {
+            Some(ref p) if !p.is_empty() => p.clone(),
+            _ => {
+                match app_state
+                    .with_database(|db| db.get_setting("llm_provider"))
+                    .await
+                {
+                    Ok(Some(p)) if !p.is_empty() => p,
+                    _ => "anthropic".to_string(),
+                }
+            }
+        };
+        let resolved_model = match model {
+            Some(ref m) if !m.is_empty() => m.clone(),
+            _ => {
+                match app_state
+                    .with_database(|db| db.get_setting("llm_model"))
+                    .await
+                {
+                    Ok(Some(m)) if !m.is_empty() => m,
+                    _ => match resolved_provider.as_str() {
+                        "anthropic" => "claude-sonnet-4-20250514".to_string(),
+                        "openai" => "gpt-4o".to_string(),
+                        "deepseek" => "deepseek-chat".to_string(),
+                        "ollama" => "qwen2.5-coder:14b".to_string(),
+                        _ => "claude-sonnet-4-20250514".to_string(),
+                    },
+                }
+            }
+        };
+
+        match resolve_provider_config(
+            &resolved_provider,
+            &resolved_model,
+            base_url.or(baseUrl),
+            &app_state,
+        )
+        .await
+        {
+            Ok(provider_config) => {
+                let _ = app_handle.emit(
+                    "exploration-progress",
+                    serde_json::json!({
+                        "sessionId": session_id,
+                        "phase": "llm_exploration_started",
+                    }),
+                );
+
+                // Create coordinator OrchestratorService
+                let coordinator_prompt =
+                    exploration::build_coordinator_exploration_prompt(&task_description, &result);
+
+                let config = crate::services::orchestrator::OrchestratorConfig {
+                    provider: provider_config,
+                    system_prompt: Some(coordinator_prompt),
+                    max_iterations: 8,
+                    max_total_tokens: 200_000,
+                    project_root: project_path.clone(),
+                    analysis_artifacts_root: dirs::home_dir()
+                        .unwrap_or_else(|| std::env::temp_dir())
+                        .join(".plan-cascade")
+                        .join("analysis-runs"),
+                    streaming: true,
+                    enable_compaction: true,
+                    analysis_profile: Default::default(),
+                    analysis_limits: Default::default(),
+                    analysis_session_id: None,
+                    project_id: None,
+                    compaction_config: Default::default(),
+                    task_type: Some("explore".to_string()),
+                    sub_agent_depth: Some(0), // Allow spawning explore sub-agents
+                };
+
+                let mut coordinator =
+                    crate::services::orchestrator::OrchestratorService::new(config);
+
+                // Wire database pool for CodebaseSearch
+                if let Ok(pool) = app_state
+                    .with_database(|db| Ok(db.pool().clone()))
+                    .await
+                {
+                    coordinator = coordinator.with_database(pool);
+                }
+
+                // Create event channel (drain events in background)
+                let (tx, mut rx) =
+                    tokio::sync::mpsc::channel::<crate::services::streaming::UnifiedStreamEvent>(
+                        256,
+                    );
+                let session_id_clone = session_id.clone();
+                let app_handle_clone = app_handle.clone();
+                tokio::spawn(async move {
+                    while let Some(event) = rx.recv().await {
+                        // Forward progress events to frontend
+                        let _ = app_handle_clone.emit(
+                            "exploration-progress",
+                            serde_json::json!({
+                                "sessionId": session_id_clone,
+                                "phase": "llm_exploring",
+                                "event": format!("{:?}", event),
+                            }),
+                        );
+                    }
+                });
+
+                // Run the coordinator agentic loop
+                let coordinator_result = coordinator
+                    .execute(
+                        format!(
+                            "Explore this project's codebase to gather context for the following task:\n\n{}",
+                            task_description
+                        ),
+                        tx,
+                    )
+                    .await;
+
+                if coordinator_result.success {
+                    if let Some(response) = coordinator_result.response {
+                        result.llm_summary = exploration::parse_coordinator_summary(&response);
+                        result.used_llm_exploration = true;
+                    }
+                } else {
+                    eprintln!(
+                        "[explore_project] LLM exploration failed: {:?}",
+                        coordinator_result.error
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("[explore_project] Provider resolution failed for LLM exploration: {}", e);
+                // Non-blocking: continue with deterministic-only result
+            }
+        }
+    }
+
+    // Update duration
+    result.duration_ms = start.elapsed().as_millis() as u64;
+
+    // Store result and reset status
+    {
+        let mut session_guard = state.session.write().await;
+        if let Some(s) = session_guard.as_mut() {
+            s.status = TaskModeStatus::Initialized;
+            s.exploration_result = Some(result.clone());
+        }
+    }
+
+    let _ = app_handle.emit(
+        "exploration-progress",
+        serde_json::json!({
+            "sessionId": session_id,
+            "phase": "complete",
+            "durationMs": result.duration_ms,
+        }),
+    );
+
+    Ok(CommandResponse::ok(result))
 }
 
 /// Resolve an LLM provider from frontend parameters and OS keyring.
@@ -1861,6 +2179,7 @@ mod tests {
             status: TaskModeStatus::Initialized,
             strategy_analysis: None,
             prd: None,
+            exploration_result: None,
             progress: None,
             created_at: "2026-02-18T00:00:00Z".to_string(),
         };

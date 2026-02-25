@@ -235,6 +235,7 @@ pub async fn generate_prd_with_llm(
     task_description: &str,
     conversation_history: &[ConversationTurnInput],
     max_context_tokens: usize,
+    exploration_context: Option<&str>,
 ) -> Result<TaskPrd, String> {
     let system_prompt = build_prd_system_prompt();
     let user_message = build_prd_user_message(task_description);
@@ -242,6 +243,15 @@ pub async fn generate_prd_with_llm(
     // Build messages with compacted conversation history
     let mut messages =
         compact_conversation_history(&provider, conversation_history, max_context_tokens).await;
+
+    // Inject exploration context (project structure awareness) before the PRD request
+    if let Some(ctx) = exploration_context {
+        messages.push(Message::user(ctx));
+        messages.push(Message::assistant(
+            "I've reviewed the project context and will use this information to create well-aligned stories that match the existing codebase structure.",
+        ));
+    }
+
     messages.push(Message::user(&user_message));
 
     // First attempt
@@ -633,6 +643,7 @@ mod tests {
                 stop_reason: StopReason::EndTurn,
                 usage: UsageStats::default(),
                 model: "mock-model".to_string(),
+                search_citations: vec![],
             })])
         }
 
@@ -993,7 +1004,7 @@ Hope this helps!"#;
         ]"#;
 
         let provider = Arc::new(MockLlmProvider::with_text_response(mock_response));
-        let prd = generate_prd_with_llm(provider, "Build a web service", &[], 200_000)
+        let prd = generate_prd_with_llm(provider, "Build a web service", &[], 200_000, None)
             .await
             .unwrap();
 
@@ -1014,6 +1025,7 @@ Hope this helps!"#;
             stop_reason: StopReason::EndTurn,
             usage: UsageStats::default(),
             model: "mock".to_string(),
+            search_citations: vec![],
         });
 
         // Second response (after repair prompt): valid JSON
@@ -1036,6 +1048,7 @@ Hope this helps!"#;
             stop_reason: StopReason::EndTurn,
             usage: UsageStats::default(),
             model: "mock".to_string(),
+            search_citations: vec![],
         });
 
         let provider = Arc::new(MockLlmProvider::with_responses(vec![
@@ -1043,7 +1056,7 @@ Hope this helps!"#;
             second_response,
         ]));
 
-        let prd = generate_prd_with_llm(provider, "Fix a bug", &[], 200_000)
+        let prd = generate_prd_with_llm(provider, "Fix a bug", &[], 200_000, None)
             .await
             .unwrap();
         assert_eq!(prd.stories.len(), 1);
@@ -1060,6 +1073,7 @@ Hope this helps!"#;
             stop_reason: StopReason::EndTurn,
             usage: UsageStats::default(),
             model: "mock".to_string(),
+            search_citations: vec![],
         });
 
         let bad2 = Ok(LlmResponse {
@@ -1069,11 +1083,12 @@ Hope this helps!"#;
             stop_reason: StopReason::EndTurn,
             usage: UsageStats::default(),
             model: "mock".to_string(),
+            search_citations: vec![],
         });
 
         let provider = Arc::new(MockLlmProvider::with_responses(vec![bad1, bad2]));
 
-        let result = generate_prd_with_llm(provider, "Some task", &[], 200_000).await;
+        let result = generate_prd_with_llm(provider, "Some task", &[], 200_000, None).await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -1088,7 +1103,7 @@ Hope this helps!"#;
             },
         )]));
 
-        let result = generate_prd_with_llm(provider, "Some task", &[], 200_000).await;
+        let result = generate_prd_with_llm(provider, "Some task", &[], 200_000, None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("LLM request failed"));
     }
@@ -1102,9 +1117,10 @@ Hope this helps!"#;
             stop_reason: StopReason::EndTurn,
             usage: UsageStats::default(),
             model: "mock".to_string(),
+            search_citations: vec![],
         })]));
 
-        let result = generate_prd_with_llm(provider, "Some task", &[], 200_000).await;
+        let result = generate_prd_with_llm(provider, "Some task", &[], 200_000, None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("no text content"));
     }
@@ -1214,7 +1230,7 @@ Hope this helps!"#;
         ]"#;
 
         let provider = Arc::new(MockLlmProvider::with_text_response(mock_json));
-        let prd = generate_prd_with_llm(provider, "Build item management service", &[], 200_000)
+        let prd = generate_prd_with_llm(provider, "Build item management service", &[], 200_000, None)
             .await
             .unwrap();
 
@@ -1351,7 +1367,7 @@ Hope this helps!"#;
             assistant: "Sure, I'll help with Google OAuth.".to_string(),
         }];
 
-        let prd = generate_prd_with_llm(provider, "Implement OAuth", &history, 200_000)
+        let prd = generate_prd_with_llm(provider, "Implement OAuth", &history, 200_000, None)
             .await
             .unwrap();
 

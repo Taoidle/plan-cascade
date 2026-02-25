@@ -27,6 +27,7 @@ pub mod prompt_fallback;
 pub mod system_prompt;
 pub mod task_spawner;
 pub mod trait_def;
+pub mod url_validation;
 pub mod web_fetch;
 pub mod web_search;
 

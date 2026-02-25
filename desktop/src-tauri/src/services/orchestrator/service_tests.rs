@@ -130,6 +130,7 @@ fn test_parse_fallback_tool_calls_uses_content_and_thinking() {
         stop_reason: crate::services::llm::StopReason::EndTurn,
         usage: UsageStats::default(),
         model: "test-model".to_string(),
+        search_citations: vec![],
     };
 
     let parsed = parse_fallback_tool_calls(&response, None);
@@ -162,6 +163,7 @@ fn test_parse_fallback_tool_calls_collects_dropped_reasons_in_analysis_mode() {
         stop_reason: crate::services::llm::StopReason::EndTurn,
         usage: UsageStats::default(),
         model: "test-model".to_string(),
+        search_citations: vec![],
     };
 
     let parsed = parse_fallback_tool_calls(&response, Some("architecture_trace"));

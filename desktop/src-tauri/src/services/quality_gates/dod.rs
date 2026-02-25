@@ -460,6 +460,7 @@ mod tests {
                     cache_creation_tokens: None,
                 },
                 model: "mock-model".to_string(),
+                search_citations: vec![],
             })
         }
         async fn stream_message(

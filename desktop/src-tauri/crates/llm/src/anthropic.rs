@@ -287,6 +287,7 @@ impl AnthropicProvider {
                 cache_creation_tokens: response.usage.cache_creation_input_tokens,
             },
             model: response.model.clone(),
+            search_citations: Vec::new(),
         }
     }
 }
@@ -532,6 +533,7 @@ impl LlmProvider for AnthropicProvider {
             stop_reason,
             usage,
             model: self.config.model.clone(),
+            search_citations: Vec::new(),
         })
     }
 

@@ -77,6 +77,11 @@ pub enum UnifiedStreamEvent {
         cache_creation_tokens: Option<u32>,
     },
 
+    /// Search citation data from provider-native web search (Qwen enable_search, GLM web_search, etc.)
+    SearchCitations {
+        citations: Vec<SearchCitationEntry>,
+    },
+
     /// Error during streaming
     Error {
         message: String,
@@ -397,6 +402,23 @@ pub enum UnifiedStreamEvent {
         /// Whether the tool execution is allowed
         allowed: bool,
     },
+}
+
+/// A single search citation entry from provider-native web search.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SearchCitationEntry {
+    /// Citation index (position in search results)
+    pub index: i32,
+    /// Title of the search result
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// URL of the search result
+    pub url: String,
+    /// Name of the source website
+    pub site_name: String,
+    /// Icon URL of the source website
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// Errors that can occur during stream adaptation

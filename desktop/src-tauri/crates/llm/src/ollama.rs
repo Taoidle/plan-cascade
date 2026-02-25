@@ -283,6 +283,7 @@ impl OllamaProvider {
             stop_reason,
             usage,
             model: response.model.clone(),
+            search_citations: Vec::new(),
         }
     }
 
@@ -713,6 +714,7 @@ impl LlmProvider for OllamaProvider {
             stop_reason,
             usage,
             model: response_model,
+            search_citations: Vec::new(),
         })
     }
 

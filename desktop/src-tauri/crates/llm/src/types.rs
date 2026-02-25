@@ -494,6 +494,21 @@ impl From<&str> for StopReason {
     }
 }
 
+/// Search citation information from provider-native web search.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchCitationInfo {
+    /// Citation index (position in search results)
+    pub index: i32,
+    /// Title of the search result
+    pub title: Option<String>,
+    /// URL of the search result
+    pub url: String,
+    /// Name of the source website
+    pub site_name: String,
+    /// Icon URL of the source website
+    pub icon: Option<String>,
+}
+
 /// Response from an LLM provider
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmResponse {
@@ -512,6 +527,9 @@ pub struct LlmResponse {
     pub usage: UsageStats,
     /// The model that generated the response
     pub model: String,
+    /// Search citations from provider-native web search (Qwen, GLM, etc.)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub search_citations: Vec<SearchCitationInfo>,
 }
 
 impl LlmResponse {
@@ -779,6 +797,7 @@ mod tests {
             stop_reason: StopReason::EndTurn,
             usage: UsageStats::default(),
             model: "claude-3-5-sonnet".to_string(),
+            search_citations: Vec::new(),
         };
 
         assert!(!response.has_tool_calls());

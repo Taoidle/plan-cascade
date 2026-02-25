@@ -128,6 +128,7 @@ tracing = "0.1"
 # Web content
 html2md = "0.2"
 url = "2"
+urlencoding = "2"
 
 # Document parsing
 pdf-extract = "0.10"

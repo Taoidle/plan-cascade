@@ -297,11 +297,25 @@
       "savedTo": "Saved to {{path}}"
     },
 
+    "exploration": {
+      "title": "Project Exploration",
+      "techStack": "Tech Stack",
+      "components": "Components",
+      "keyFiles": "Key Files",
+      "patterns": "Patterns",
+      "llmSummary": "AI Exploration Summary",
+      "deterministic": "Deterministic",
+      "aiAssisted": "AI-Assisted",
+      "duration": "{{ms}}ms",
+      "fileCount": "{{count}} files"
+    },
+
     "progress": {
       "title": "Workflow Progress",
       "phaseAnalyze": "Analyze",
       "phaseConfig": "Config",
       "phaseInterview": "Interview",
+      "phaseExplore": "Explore",
       "phasePrd": "PRD",
       "phaseReview": "Review",
       "phaseDesignDoc": "Design",
@@ -414,7 +428,9 @@
       "prdFeedbackNoted": "PRD feedback noted: \"{{feedback}}\". Use the Edit button on the PRD card to make changes.",
       "workflowCancelled": "Workflow cancelled.",
       "configUpdated": "Config updated: {{details}}",
-      "enhancingAnalysis": "Enhancing analysis with AI..."
+      "enhancingAnalysis": "Enhancing analysis with AI...",
+      "exploringProject": "Exploring project structure and codebase...",
+      "explorationFailed": "Project exploration failed (non-blocking), continuing..."
     }
   },
 

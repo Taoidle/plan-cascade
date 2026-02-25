@@ -14,6 +14,7 @@ import { DesignDocCard } from './DesignDocCard';
 import { ExecutionUpdateCard } from './ExecutionUpdateCard';
 import { GateResultCard } from './GateResultCard';
 import { CompletionReportCard } from './CompletionReportCard';
+import { ExplorationCard } from './ExplorationCard';
 import { FileChangeCard } from './FileChangeCard';
 import { TurnChangeSummaryCard } from './TurnChangeSummaryCard';
 import type {
@@ -26,6 +27,7 @@ import type {
   ExecutionUpdateCardData,
   GateResultCardData,
   CompletionReportCardData,
+  ExplorationCardData,
   WorkflowInfoData,
   WorkflowErrorData,
   FileChangeCardData,
@@ -52,6 +54,8 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
       return <GateResultCard data={payload.data as GateResultCardData} />;
     case 'completion_report':
       return <CompletionReportCard data={payload.data as CompletionReportCardData} />;
+    case 'exploration_card':
+      return <ExplorationCard data={payload.data as ExplorationCardData} />;
     case 'workflow_info':
       return <WorkflowInfoCard data={payload.data as WorkflowInfoData} />;
     case 'workflow_error':

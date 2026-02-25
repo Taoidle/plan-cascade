@@ -297,11 +297,25 @@
       "savedTo": "保存先: {{path}}"
     },
 
+    "exploration": {
+      "title": "プロジェクト探索",
+      "techStack": "技術スタック",
+      "components": "コンポーネント",
+      "keyFiles": "キーファイル",
+      "patterns": "パターン",
+      "llmSummary": "AI探索サマリー",
+      "deterministic": "確定的",
+      "aiAssisted": "AI支援",
+      "duration": "{{ms}}ms",
+      "fileCount": "{{count}} ファイル"
+    },
+
     "progress": {
       "title": "ワークフロー進捗",
       "phaseAnalyze": "分析",
       "phaseConfig": "設定",
       "phaseInterview": "インタビュー",
+      "phaseExplore": "探索",
       "phasePrd": "PRD",
       "phaseReview": "レビュー",
       "phaseDesignDoc": "設計",
@@ -414,7 +428,9 @@
       "prdFeedbackNoted": "PRDフィードバックを記録しました：「{{feedback}}」。PRDカードの編集ボタンで変更してください。",
       "workflowCancelled": "ワークフローがキャンセルされました。",
       "configUpdated": "設定が更新されました：{{details}}",
-      "enhancingAnalysis": "AIで分析を強化中..."
+      "enhancingAnalysis": "AIで分析を強化中...",
+      "exploringProject": "プロジェクト構造とコードベースを探索中...",
+      "explorationFailed": "プロジェクト探索に失敗しました（非ブロッキング）、続行します..."
     }
   },
 

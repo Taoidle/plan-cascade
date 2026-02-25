@@ -15,6 +15,7 @@ const PHASE_STEPS: { phase: WorkflowPhase; labelKey: string }[] = [
   { phase: 'analyzing', labelKey: 'workflow.progress.phaseAnalyze' },
   { phase: 'configuring', labelKey: 'workflow.progress.phaseConfig' },
   { phase: 'interviewing', labelKey: 'workflow.progress.phaseInterview' },
+  { phase: 'exploring', labelKey: 'workflow.progress.phaseExplore' },
   { phase: 'generating_prd', labelKey: 'workflow.progress.phasePrd' },
   { phase: 'reviewing_prd', labelKey: 'workflow.progress.phaseReview' },
   { phase: 'generating_design_doc', labelKey: 'workflow.progress.phaseDesignDoc' },
@@ -33,10 +34,12 @@ export function WorkflowProgressPanel() {
   const totalBatches = useTaskModeStore((s) => s.totalBatches);
   const prd = useTaskModeStore((s) => s.prd);
 
-  // Filter out interview step if not enabled
-  const visibleSteps = config.specInterviewEnabled
-    ? PHASE_STEPS
-    : PHASE_STEPS.filter((s) => s.phase !== 'interviewing');
+  // Filter out conditional steps
+  const visibleSteps = PHASE_STEPS.filter((s) => {
+    if (s.phase === 'interviewing' && !config.specInterviewEnabled) return false;
+    if (s.phase === 'exploring' && config.flowLevel === 'quick') return false;
+    return true;
+  });
 
   return (
     <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-3">

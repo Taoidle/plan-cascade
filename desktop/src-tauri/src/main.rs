@@ -204,6 +204,7 @@ fn main() {
             plan_cascade_desktop::commands::strategy::enhance_strategy_with_llm,
             // Task Mode commands
             plan_cascade_desktop::commands::task_mode::enter_task_mode,
+            plan_cascade_desktop::commands::task_mode::explore_project,
             plan_cascade_desktop::commands::task_mode::generate_task_prd,
             plan_cascade_desktop::commands::task_mode::approve_task_prd,
             plan_cascade_desktop::commands::task_mode::get_task_execution_status,

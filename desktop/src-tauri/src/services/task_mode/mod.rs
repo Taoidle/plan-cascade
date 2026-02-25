@@ -7,6 +7,7 @@
 
 pub mod agent_resolver;
 pub mod batch_executor;
+pub mod exploration;
 pub mod prd_generator;
 
 pub use agent_resolver::{

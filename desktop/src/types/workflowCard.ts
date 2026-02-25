@@ -18,6 +18,7 @@ export type WorkflowPhase =
   | 'analyzing'
   | 'configuring'
   | 'interviewing'
+  | 'exploring'
   | 'generating_prd'
   | 'reviewing_prd'
   | 'generating_design_doc'
@@ -39,6 +40,7 @@ export type CardType =
   | 'completion_report'
   | 'workflow_info'
   | 'workflow_error'
+  | 'exploration_card'
   | 'file_change'
   | 'turn_change_summary';
 
@@ -67,6 +69,7 @@ export interface CardDataMap {
   completion_report: CompletionReportCardData;
   workflow_info: WorkflowInfoData;
   workflow_error: WorkflowErrorData;
+  exploration_card: ExplorationCardData;
   file_change: FileChangeCardData;
   turn_change_summary: TurnChangeSummaryCardData;
 }
@@ -207,6 +210,23 @@ export interface DesignDocCardData {
   decisionsCount: number;
   featureMappingsCount: number;
   savedPath: string | null;
+}
+
+/** Project exploration result card data */
+export interface ExplorationCardData {
+  techStack: {
+    languages: string[];
+    frameworks: string[];
+    buildTools: string[];
+    testFrameworks: string[];
+    packageManager: string | null;
+  };
+  keyFiles: Array<{ path: string; fileType: string; relevance: string }>;
+  components: Array<{ name: string; path: string; description: string; fileCount: number }>;
+  patterns: string[];
+  llmSummary: string | null;
+  durationMs: number;
+  usedLlmExploration: boolean;
 }
 
 /** Inline file change preview card data */

@@ -30,6 +30,7 @@ import type {
   ConfigCardData,
   PrdCardData,
   DesignDocCardData,
+  ExplorationCardData,
   ExecutionUpdateCardData,
   GateResultCardData,
   CompletionReportCardData,
@@ -60,6 +61,9 @@ interface WorkflowOrchestratorState {
 
   /** Strategy analysis result (cached from taskMode) */
   strategyAnalysis: StrategyAnalysis | null;
+
+  /** Project exploration result */
+  explorationResult: ExplorationCardData | null;
 
   /** Working copy of PRD during review phase */
   editablePrd: TaskPrd | null;
@@ -114,6 +118,7 @@ const DEFAULT_STATE = {
   taskDescription: '',
   config: { ...DEFAULT_CONFIG },
   strategyAnalysis: null as StrategyAnalysis | null,
+  explorationResult: null as ExplorationCardData | null,
   editablePrd: null as TaskPrd | null,
   pendingQuestion: null as InterviewQuestionCardData | null,
   error: null as string | null,
@@ -382,8 +387,8 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           injectCard('interview_question', questionData, true);
         }
       } else {
-        // Skip interview, go straight to PRD generation
-        await generatePrdPhase(set, get);
+        // Skip interview, explore project then generate PRD
+        await exploreAndGeneratePrd(set, get);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -492,8 +497,8 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       });
 
       if (compiled) {
-        // Advance to PRD generation with compiled spec
-        await generatePrdPhase(set, get);
+        // Advance to exploration then PRD generation
+        await exploreAndGeneratePrd(set, get);
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
@@ -545,7 +550,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         tdd_mode: config.tddMode === 'off' ? null : config.tddMode,
       });
       if (compiled) {
-        await generatePrdPhase(set, get);
+        await exploreAndGeneratePrd(set, get);
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
@@ -699,6 +704,66 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
 type SetFn = (partial: Partial<WorkflowOrchestratorState> | ((state: WorkflowOrchestratorState) => Partial<WorkflowOrchestratorState>)) => void;
 type GetFn = () => WorkflowOrchestratorState;
+
+/**
+ * Explore project codebase then generate PRD.
+ *
+ * For quick flow: skips exploration and goes straight to PRD generation.
+ * For standard/full flow: runs project exploration, injects results as card,
+ * then continues to PRD generation with exploration context.
+ */
+async function exploreAndGeneratePrd(set: SetFn, get: GetFn) {
+  const { config, taskDescription, sessionId } = get();
+
+  // Quick flow: skip exploration entirely
+  if (config.flowLevel === 'quick') {
+    await generatePrdPhase(set, get);
+    return;
+  }
+
+  set({ phase: 'exploring' });
+  injectInfo(i18n.t('workflow.orchestrator.exploringProject', { ns: 'simpleMode' }), 'info');
+
+  try {
+    const settings = useSettingsStore.getState();
+    const { resolveProviderBaseUrl } = await import('../lib/providers');
+    const baseUrl = settings.provider
+      ? resolveProviderBaseUrl(settings.provider, settings)
+      : undefined;
+
+    const result = await invoke<{
+      success: boolean;
+      data: ExplorationCardData | null;
+      error: string | null;
+    }>('explore_project', {
+      sessionId,
+      flowLevel: config.flowLevel,
+      taskDescription,
+      provider: settings.provider || null,
+      model: settings.model || null,
+      apiKey: null,
+      baseUrl: baseUrl || null,
+    });
+
+    if (result.success && result.data) {
+      set({ explorationResult: result.data });
+      injectCard('exploration_card', result.data);
+    } else {
+      injectInfo(
+        i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }),
+        'warning'
+      );
+    }
+  } catch {
+    injectInfo(
+      i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }),
+      'warning'
+    );
+  }
+
+  // Continue to PRD generation regardless of exploration success
+  await generatePrdPhase(set, get);
+}
 
 /**
  * Generate PRD phase (called after config confirmation or interview completion).

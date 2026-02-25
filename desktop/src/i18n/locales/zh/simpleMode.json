@@ -297,11 +297,25 @@
       "savedTo": "已保存到 {{path}}"
     },
 
+    "exploration": {
+      "title": "项目探索",
+      "techStack": "技术栈",
+      "components": "组件",
+      "keyFiles": "关键文件",
+      "patterns": "模式",
+      "llmSummary": "AI 探索摘要",
+      "deterministic": "确定性",
+      "aiAssisted": "AI 辅助",
+      "duration": "{{ms}}ms",
+      "fileCount": "{{count}} 个文件"
+    },
+
     "progress": {
       "title": "工作流进度",
       "phaseAnalyze": "分析",
       "phaseConfig": "配置",
       "phaseInterview": "访谈",
+      "phaseExplore": "探索",
       "phasePrd": "PRD",
       "phaseReview": "审查",
       "phaseDesignDoc": "设计",
@@ -414,7 +428,9 @@
       "prdFeedbackNoted": "PRD 反馈已记录：「{{feedback}}」。使用 PRD 卡片上的编辑按钮进行修改。",
       "workflowCancelled": "工作流已取消。",
       "configUpdated": "配置已更新：{{details}}",
-      "enhancingAnalysis": "正在使用AI增强分析..."
+      "enhancingAnalysis": "正在使用AI增强分析...",
+      "exploringProject": "正在探索项目结构和代码库...",
+      "explorationFailed": "项目探索失败（非阻塞），继续执行..."
     }
   },
 

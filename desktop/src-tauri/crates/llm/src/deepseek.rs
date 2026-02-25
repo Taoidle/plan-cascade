@@ -289,6 +289,7 @@ impl DeepSeekProvider {
                 .model
                 .clone()
                 .unwrap_or_else(|| self.config.model.clone()),
+            search_citations: Vec::new(),
         }
     }
 
@@ -601,6 +602,7 @@ impl LlmProvider for DeepSeekProvider {
             stop_reason,
             usage,
             model: self.config.model.clone(),
+            search_citations: Vec::new(),
         })
     }
 
