@@ -12,7 +12,6 @@ import { useTranslation } from 'react-i18next';
 import { useArtifactsStore, type ScopeFilter } from '../../store/artifacts';
 import { useProjectsStore } from '../../store/projects';
 import { ArtifactDetail } from './ArtifactDetail';
-import type { ArtifactMeta } from '../../lib/artifactsApi';
 
 // ---------------------------------------------------------------------------
 // ArtifactBrowserPanel

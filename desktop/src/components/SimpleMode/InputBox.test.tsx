@@ -129,7 +129,7 @@ describe('InputBox compact-first layout', () => {
     });
 
     it('remains expanded when content exists even after blur', () => {
-      const { rerender } = render(<InputBox value="some content" onChange={vi.fn()} onSubmit={vi.fn()} />);
+      render(<InputBox value="some content" onChange={vi.fn()} onSubmit={vi.fn()} />);
       const textarea = screen.getByRole('textbox');
 
       // Focus then blur

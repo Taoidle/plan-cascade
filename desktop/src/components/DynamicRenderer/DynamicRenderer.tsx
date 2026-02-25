@@ -15,7 +15,7 @@
  * Story 002: DynamicRenderer frontend component
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import type {
   RichContentEvent,
   SurfaceMap,

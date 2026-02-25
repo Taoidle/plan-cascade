@@ -7,7 +7,7 @@
  */
 
 import { create } from 'zustand';
-import type { KnowledgeCollection, DocumentInput, SearchResult, RagQueryResult } from '../lib/knowledgeApi';
+import type { KnowledgeCollection, DocumentInput, SearchResult } from '../lib/knowledgeApi';
 import { ragListCollections, ragIngestDocuments, ragQuery, ragDeleteCollection } from '../lib/knowledgeApi';
 
 // ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ const DEFAULT_STATE = {
 // Store
 // ---------------------------------------------------------------------------
 
-export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
+export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
   ...DEFAULT_STATE,
 
   fetchCollections: async (projectId: string) => {

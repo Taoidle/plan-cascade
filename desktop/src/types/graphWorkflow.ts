@@ -5,7 +5,7 @@
  * desktop/src-tauri/src/services/agent_composer/graph_types.rs
  */
 
-import type { AgentStep, AgentConfig } from './agentComposer';
+import type { AgentStep } from './agentComposer';
 
 /** A graph-based workflow definition */
 export interface GraphWorkflow {

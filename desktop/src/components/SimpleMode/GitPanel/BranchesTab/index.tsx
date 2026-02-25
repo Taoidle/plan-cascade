@@ -23,7 +23,7 @@ export function BranchesTab() {
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const { localBranches, remoteBranches, currentBranch, isLoading, error, refresh } = useGitBranches();
 
-  const { startMerge, isInMerge } = useGitStore();
+  const { startMerge } = useGitStore();
 
   // Dialog state
   const [dialogType, setDialogType] = useState<BranchActionType | null>(null);

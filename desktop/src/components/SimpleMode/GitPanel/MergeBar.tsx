@@ -60,7 +60,7 @@ export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
         {mergeSourceBranch && <span className="text-amber-600 dark:text-amber-500">({mergeSourceBranch})</span>}
         {totalCount > 0 && (
           <span className="text-xs text-amber-600 dark:text-amber-500">
-            {t('mergeBar.conflictsResolved', { count: `${resolvedCount}/${totalCount}` })}
+            {t('mergeBar.conflictsResolved', { progress: `${resolvedCount}/${totalCount}` })}
           </span>
         )}
       </div>

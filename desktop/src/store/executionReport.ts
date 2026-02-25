@@ -9,13 +9,7 @@
  */
 
 import { create } from 'zustand';
-import type {
-  TaskPrd,
-  ExecutionReport,
-  StoryQualityGateResults,
-  DimensionScore,
-  BatchExecutionProgress,
-} from './taskMode';
+import type { TaskPrd, ExecutionReport, StoryQualityGateResults } from './taskMode';
 
 // ============================================================================
 // Types

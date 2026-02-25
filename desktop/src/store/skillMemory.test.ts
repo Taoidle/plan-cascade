@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { useSkillMemoryStore } from './skillMemory';
-import type { SkillSummary, MemoryEntry, SkillsOverview } from '../types/skillMemory';
+import type { SkillSummary, MemoryEntry } from '../types/skillMemory';
 
 // Mock invoke is already mocked in test setup
 const mockInvoke = vi.mocked(invoke);

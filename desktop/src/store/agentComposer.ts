@@ -7,7 +7,7 @@
 
 import { create } from 'zustand';
 import type { AgentPipeline, AgentPipelineInfo, AgentStep, AgentEvent } from '../types/agentComposer';
-import { createEmptyPipeline, createLlmStep } from '../types/agentComposer';
+import { createEmptyPipeline } from '../types/agentComposer';
 import {
   listAgentPipelines,
   getAgentPipeline,

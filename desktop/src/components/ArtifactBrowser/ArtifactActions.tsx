@@ -17,7 +17,7 @@ interface ArtifactActionsProps {
 
 export function ArtifactActions({ artifact, projectId }: ArtifactActionsProps) {
   const { t } = useTranslation('artifacts');
-  const { previewContent, deleteArtifact, isDeleting } = useArtifactsStore();
+  const { previewContent } = useArtifactsStore();
   const [copied, setCopied] = useState(false);
 
   const handleDownload = useCallback(() => {

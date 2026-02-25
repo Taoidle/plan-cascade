@@ -44,7 +44,7 @@
     "abort": "中止",
     "aborting": "正在中止...",
     "continue": "继续",
-    "conflictsResolved": "{{count}} 个冲突已解决",
+    "conflictsResolved": "{{progress}} 个冲突已解决",
     "merging": "合并中",
     "rebasing": "变基中",
     "cherryPicking": "拣选中",

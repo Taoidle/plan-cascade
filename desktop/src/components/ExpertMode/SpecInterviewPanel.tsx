@@ -125,6 +125,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
       max_questions: maxQuestions,
       first_principles: firstPrinciples,
       project_path: null,
+      exploration_context: null,
     });
   };
 

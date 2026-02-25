@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 // Use vi.hoisted to define mock functions that can be referenced in vi.mock factories
 const { mockShellOpen } = vi.hoisted(() => ({

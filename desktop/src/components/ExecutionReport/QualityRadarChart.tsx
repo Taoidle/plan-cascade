@@ -8,7 +8,6 @@
  */
 
 import { useMemo } from 'react';
-import { clsx } from 'clsx';
 import type { RadarDimension } from '../../store/executionReport';
 
 // ============================================================================

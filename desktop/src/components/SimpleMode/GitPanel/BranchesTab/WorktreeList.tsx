@@ -11,7 +11,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
-import type { Worktree, WorktreeStatus, CommandResponse } from '../../../../types/git';
+import type { Worktree, WorktreeStatus } from '../../../../types/git';
+import type { CommandResponse } from '../../../../lib/tauri';
 
 // ---------------------------------------------------------------------------
 // Types

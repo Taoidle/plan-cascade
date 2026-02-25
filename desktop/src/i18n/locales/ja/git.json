@@ -44,7 +44,7 @@
     "abort": "中止",
     "aborting": "中止中...",
     "continue": "続行",
-    "conflictsResolved": "{{count}} 件のコンフリクトが解決済み",
+    "conflictsResolved": "{{progress}} 件のコンフリクトが解決済み",
     "merging": "マージ中",
     "rebasing": "リベース中",
     "cherryPicking": "チェリーピック中",

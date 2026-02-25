@@ -70,7 +70,6 @@ export function deriveConversationTurns(lines: StreamLine[]): ConversationTurn[]
     // Concatenate assistant text from 'text' type lines
     const assistantSegments: string[] = [];
     const assistantStartIndex = i + 1;
-    const assistantEndIndex = endIndex >= assistantStartIndex ? endIndex : assistantStartIndex;
 
     for (let j = assistantStartIndex; j <= endIndex; j++) {
       if (lines[j].type === 'text') {

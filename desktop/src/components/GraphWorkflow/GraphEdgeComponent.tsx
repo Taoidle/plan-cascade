@@ -19,7 +19,7 @@ interface GraphEdgeComponentProps {
 const NODE_WIDTH = 140;
 const NODE_HEIGHT = 60;
 
-export function GraphEdgeComponent({ edge, index, nodes, isSelected, onClick }: GraphEdgeComponentProps) {
+export function GraphEdgeComponent({ edge, index: _index, nodes, isSelected, onClick }: GraphEdgeComponentProps) {
   const fromNode = nodes[edge.from];
   if (!fromNode?.position) return null;
 

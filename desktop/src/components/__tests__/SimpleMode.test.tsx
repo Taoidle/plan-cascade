@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { SimpleMode } from '../SimpleMode/index';
 import { createMockStrategyAnalysis } from './test-utils';
 

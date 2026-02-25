@@ -94,7 +94,7 @@ const DEFAULT_STATE = {
 // Store
 // ---------------------------------------------------------------------------
 
-export const useArtifactsStore = create<ArtifactsState>()((set, get) => ({
+export const useArtifactsStore = create<ArtifactsState>()((set, _get) => ({
   ...DEFAULT_STATE,
 
   fetchArtifacts: async (projectId: string, sessionId?: string, userId?: string) => {

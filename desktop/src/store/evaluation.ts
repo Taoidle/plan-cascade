@@ -17,7 +17,7 @@ import type {
   EvaluationCriteria,
   EvaluationProgressEvent,
 } from '../types/evaluation';
-import { createDefaultCriteria, createDefaultEvaluator } from '../types/evaluation';
+import { createDefaultEvaluator } from '../types/evaluation';
 import {
   listEvaluators,
   createEvaluator,
@@ -212,7 +212,7 @@ export const useEvaluationStore = create<EvaluationState>((set, get) => ({
   },
 
   saveEvaluator: async () => {
-    const { currentEvaluator, isCreatingEvaluator } = get();
+    const { currentEvaluator } = get();
     if (!currentEvaluator) return;
 
     set((s) => ({ loading: { ...s.loading, save: true }, error: null }));

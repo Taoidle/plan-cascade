@@ -44,7 +44,7 @@
     "abort": "Abort",
     "aborting": "Aborting...",
     "continue": "Continue",
-    "conflictsResolved": "{{count}} conflicts resolved",
+    "conflictsResolved": "{{progress}} conflicts resolved",
     "merging": "MERGING",
     "rebasing": "REBASING",
     "cherryPicking": "CHERRY-PICKING",

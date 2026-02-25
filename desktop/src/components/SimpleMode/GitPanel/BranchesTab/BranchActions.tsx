@@ -11,7 +11,8 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
-import type { BranchInfo, CommandResponse } from '../../../../types/git';
+import type { BranchInfo } from '../../../../types/git';
+import type { CommandResponse } from '../../../../lib/tauri';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -135,7 +136,7 @@ function CreateBranchDialog({
     } finally {
       setIsCreating(false);
     }
-  }, [name, base, repoPath, onSuccess]);
+  }, [name, base, repoPath, onSuccess, t]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -365,7 +366,7 @@ function RenameBranchDialog({
     } finally {
       setIsRenaming(false);
     }
-  }, [branch, newName, repoPath, onSuccess]);
+  }, [branch, newName, repoPath, onSuccess, t]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

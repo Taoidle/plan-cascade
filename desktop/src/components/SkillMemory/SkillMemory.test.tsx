@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import type { SkillSummary, MemoryEntry } from '../../types/skillMemory';
 
 // Mock react-i18next
 vi.mock('react-i18next', () => ({
@@ -46,15 +47,15 @@ vi.mock('../../store/settings', () => ({
 
 // Mock skillMemory store - we'll override per test
 const mockStore = {
-  skills: [],
+  skills: [] as SkillSummary[],
   skillsLoading: false,
-  memories: [],
+  memories: [] as MemoryEntry[],
   memoriesLoading: false,
   panelOpen: false,
   dialogOpen: false,
   activeTab: 'skills' as const,
   toastMessage: null as string | null,
-  toastType: 'info' as const,
+  toastType: 'info' as 'info' | 'success' | 'error',
   loadSkills: vi.fn(),
   loadMemories: vi.fn(),
   loadMemoryStats: vi.fn(),
@@ -80,7 +81,6 @@ import { ActiveSkillsIndicator } from './ActiveSkillsIndicator';
 import { SkillMemoryToast } from './SkillMemoryToast';
 import { SkillRow } from '../SimpleMode/SkillRow';
 import { MemoryRow } from '../SimpleMode/MemoryRow';
-import type { SkillSummary, MemoryEntry } from '../../types/skillMemory';
 
 // ============================================================================
 // Helpers

@@ -4,8 +4,8 @@
  * Story 004: Execution Report visualization components
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import { SummaryCard } from '../SummaryCard';
 import { QualityRadarChart } from '../QualityRadarChart';
 import { TimelineWaterfall } from '../TimelineWaterfall';

@@ -11,7 +11,8 @@ import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
-import type { BranchInfo, RemoteBranchInfo, CommandResponse } from '../../../../types/git';
+import type { BranchInfo, RemoteBranchInfo } from '../../../../types/git';
+import type { CommandResponse } from '../../../../lib/tauri';
 import { useGitStore } from '../../../../store/git';
 
 // ---------------------------------------------------------------------------

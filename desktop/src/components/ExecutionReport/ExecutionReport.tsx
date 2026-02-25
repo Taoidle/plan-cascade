@@ -10,7 +10,7 @@
 
 import { useCallback } from 'react';
 import { clsx } from 'clsx';
-import { DownloadIcon, FileTextIcon, CodeIcon } from '@radix-ui/react-icons';
+import { FileTextIcon, CodeIcon } from '@radix-ui/react-icons';
 import { useExecutionReportStore } from '../../store/executionReport';
 import { SummaryCard } from './SummaryCard';
 import { QualityRadarChart } from './QualityRadarChart';

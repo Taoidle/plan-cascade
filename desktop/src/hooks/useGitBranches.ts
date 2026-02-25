@@ -10,7 +10,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { BranchInfo, RemoteBranchInfo, CommandResponse } from '../types/git';
+import type { BranchInfo, RemoteBranchInfo } from '../types/git';
+import type { CommandResponse } from '../lib/tauri';
 import { useSettingsStore } from '../store/settings';
 
 interface UseGitBranchesReturn {

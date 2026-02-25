@@ -7,6 +7,7 @@
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { GraphNode } from '../../types/graphWorkflow';
+import type { AgentStep } from '../../types/agentComposer';
 
 interface GraphNodeConfigProps {
   node: GraphNode;
@@ -74,7 +75,7 @@ export function GraphNodeConfig({ node, isEntryNode, onUpdate, onSetEntry, onDel
                 agent_step: {
                   ...node.agent_step,
                   instruction: e.target.value || null,
-                },
+                } as AgentStep,
               });
             }}
             className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white h-24 resize-y"

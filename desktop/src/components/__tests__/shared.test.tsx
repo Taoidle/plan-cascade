@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { Skeleton, SkeletonGroup, SettingsSkeleton, ListItemSkeleton, TableSkeleton } from '../shared/Skeleton';
 import { ContextualActions } from '../shared/ContextualActions';
 import { ShortcutOverlay } from '../shared/ShortcutOverlay';

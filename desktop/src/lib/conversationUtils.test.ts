@@ -1,10 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import {
-  deriveConversationTurns,
-  rebuildStandaloneTurns,
-  buildPromptWithAttachments,
-  type ConversationTurn,
-} from './conversationUtils';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { deriveConversationTurns, rebuildStandaloneTurns, buildPromptWithAttachments } from './conversationUtils';
 import type { StreamLine } from '../store/execution';
 import type { FileAttachmentData } from '../types/attachment';
 

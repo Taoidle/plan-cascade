@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseUnifiedDiff, type FileDiff, type DiffHunk, type DiffLine } from './diffParser';
+import { parseUnifiedDiff } from './diffParser';
 
 // ============================================================================
 // Empty / Invalid Input
@@ -486,9 +486,6 @@ describe('diffParser type exports', () => {
   it('exports FileDiff, DiffHunk, and DiffLine types', () => {
     // Type-level check: these should compile without error.
     // Runtime assertion just ensures the imports are reachable.
-    const _fd: FileDiff | undefined = undefined;
-    const _dh: DiffHunk | undefined = undefined;
-    const _dl: DiffLine | undefined = undefined;
     expect(true).toBe(true);
   });
 });

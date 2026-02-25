@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { GeneralSection } from '../Settings/GeneralSection';
 import { LLMBackendSection } from '../Settings/LLMBackendSection';
 import { SettingsDialog } from '../Settings/SettingsDialog';
