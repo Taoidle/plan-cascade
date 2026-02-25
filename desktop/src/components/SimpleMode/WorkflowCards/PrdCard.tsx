@@ -9,6 +9,7 @@ import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { PrdCardData, PrdStoryData } from '../../../types/workflowCard';
+import { Collapsible } from '../Collapsible';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
 import type { TaskStory } from '../../../store/taskMode';
 
@@ -222,7 +223,7 @@ function StoryRow({
         )}
       </button>
 
-      {expanded && (
+      <Collapsible open={expanded}>
         <div className="ml-5 mt-1 space-y-1">
           {isEditing ? (
             <textarea
@@ -245,7 +246,7 @@ function StoryRow({
             </div>
           )}
         </div>
-      )}
+      </Collapsible>
     </div>
   );
 }

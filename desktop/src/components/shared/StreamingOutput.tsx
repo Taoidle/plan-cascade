@@ -54,15 +54,15 @@ interface StreamingOutputProps {
 // ============================================================================
 
 const LINE_TYPE_COLORS: Record<StreamLineType, string> = {
-  text: 'text-gray-200',
-  info: 'text-blue-400',
-  error: 'text-red-400',
-  success: 'text-green-400',
-  warning: 'text-yellow-400',
-  tool: 'text-purple-400',
-  tool_result: 'text-cyan-400',
-  sub_agent: 'text-amber-400',
-  analysis: 'text-sky-300',
+  text: 'text-gray-700 dark:text-gray-200',
+  info: 'text-blue-600 dark:text-blue-400',
+  error: 'text-red-600 dark:text-red-400',
+  success: 'text-green-600 dark:text-green-400',
+  warning: 'text-yellow-600 dark:text-yellow-400',
+  tool: 'text-purple-600 dark:text-purple-400',
+  tool_result: 'text-cyan-700 dark:text-cyan-400',
+  sub_agent: 'text-amber-600 dark:text-amber-400',
+  analysis: 'text-sky-700 dark:text-sky-300',
   thinking: 'text-gray-500 italic',
   code: 'text-cyan-300',
   card: 'text-indigo-400',
@@ -337,7 +337,7 @@ export function StreamingOutput({
       <div
         className={clsx(
           'rounded-lg font-mono text-xs',
-          'bg-gray-950 border border-gray-800',
+          'bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800',
           'flex items-center justify-center gap-3',
           compact ? 'p-4' : 'p-6',
           className
@@ -347,10 +347,10 @@ export function StreamingOutput({
         {status === 'running' ? (
           <>
             <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-gray-400">Processing...</span>
+            <span className="text-gray-500 dark:text-gray-400">{t('output.processing')}</span>
           </>
         ) : (
-          <span className="text-gray-600">Waiting for output...</span>
+          <span className="text-gray-400 dark:text-gray-600">{t('output.waiting')}</span>
         )}
       </div>
     );
@@ -361,8 +361,9 @@ export function StreamingOutput({
       {/* Header bar */}
       <div
         className={clsx(
-          'flex items-center justify-between rounded-t-lg border border-b-0 border-gray-800',
-          'bg-gray-900 px-3 py-1.5'
+          'flex items-center justify-between rounded-t-lg border border-b-0',
+          'border-gray-200 dark:border-gray-800',
+          'bg-gray-50 dark:bg-gray-900 px-3 py-1.5'
         )}
       >
         <div className="flex items-center gap-2">
@@ -371,25 +372,25 @@ export function StreamingOutput({
             <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
             <div className="w-2.5 h-2.5 rounded-full bg-green-500/70" />
           </div>
-          <span className="text-2xs text-gray-500 font-mono ml-2">
-            output ({streamingOutput.length} lines)
+          <span className="text-2xs text-gray-500 dark:text-gray-500 font-mono ml-2">
+            {t('output.headerLines', { count: streamingOutput.length })}
           </span>
           {status === 'running' && (
-            <span className="flex items-center gap-1 text-2xs text-primary-400 font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
-              running
+            <span className="flex items-center gap-1 text-2xs text-primary-600 dark:text-primary-400 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary-500 dark:bg-primary-400 animate-pulse" />
+              {t('output.running')}
             </span>
           )}
           {status === 'completed' && streamingOutput.length > 0 && (
-            <span className="flex items-center gap-1 text-2xs text-green-400 font-mono">
+            <span className="flex items-center gap-1 text-2xs text-green-600 dark:text-green-400 font-mono">
               <CheckCircledIcon className="w-3 h-3" />
-              done
+              {t('output.done')}
             </span>
           )}
           {status === 'failed' && streamingOutput.length > 0 && (
-            <span className="flex items-center gap-1 text-2xs text-red-400 font-mono">
+            <span className="flex items-center gap-1 text-2xs text-red-600 dark:text-red-400 font-mono">
               <CrossCircledIcon className="w-3 h-3" />
-              failed
+              {t('output.failed')}
             </span>
           )}
         </div>
@@ -399,7 +400,7 @@ export function StreamingOutput({
               <span
                 className={clsx(
                   'text-2xs font-mono',
-                  exportNotice.type === 'ok' ? 'text-green-400' : 'text-red-400'
+                  exportNotice.type === 'ok' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                 )}
               >
                 {exportNotice.text}
@@ -409,72 +410,72 @@ export function StreamingOutput({
               <button
                 onClick={() => setShowExportMenu((v) => !v)}
                 disabled={streamingOutput.length === 0 || isCapturing}
-                className="px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed text-2xs font-mono transition-colors"
+                className="px-2 py-1 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed text-2xs font-mono transition-colors"
                 title="Export output"
               >
                 {isCapturing ? t('export.capturing') : 'export'}
               </button>
               {showExportMenu && (
-                <div className="absolute right-0 mt-1 w-52 rounded border border-gray-700 bg-gray-900 shadow-lg z-20 p-1">
+                <div className="absolute right-0 mt-1 w-52 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-20 p-1 animate-fade-in">
                   {/* Text formats */}
                   <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">{t('export.textFormats')}</div>
                   <button
                     onClick={() => { setShowExportMenu(false); void exportMarkdown(); }}
                     disabled={streamingOutput.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.markdown')}
                   </button>
                   <button
                     onClick={() => { setShowExportMenu(false); void exportAll(); }}
                     disabled={streamingOutput.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.conversationTranscript')}
                   </button>
                   <button
                     onClick={() => { setShowExportMenu(false); void exportLatestReply(); }}
                     disabled={assistantReplies.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.latestReply')}
                   </button>
                   <button
                     onClick={() => { setShowExportMenu(false); void exportReplyByNumber(); }}
                     disabled={assistantReplies.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.chooseReply')}
                   </button>
                   <button
                     onClick={() => { setShowExportMenu(false); void exportRaw(); }}
                     disabled={streamingOutput.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.rawOutput')}
                   </button>
                   {/* Divider */}
-                  <div className="my-1 border-t border-gray-700/60" />
+                  <div className="my-1 border-t border-gray-200 dark:border-gray-700/60" />
                   {/* Visual formats */}
                   <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">{t('export.visualFormats')}</div>
                   <button
                     onClick={() => { setShowExportMenu(false); void exportPdf(); }}
                     disabled={streamingOutput.length === 0 || status === 'running'}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.pdf')}
                   </button>
                   <button
                     onClick={() => { setShowExportMenu(false); void exportPng(); }}
                     disabled={streamingOutput.length === 0 || status === 'running'}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.png')}
                   </button>
                   <button
                     onClick={() => { setShowExportMenu(false); void exportJpg(); }}
                     disabled={streamingOutput.length === 0 || status === 'running'}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.jpg')}
                   </button>
@@ -483,7 +484,7 @@ export function StreamingOutput({
             </div>
             <button
               onClick={clearStreamingOutput}
-              className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+              className="p-1 rounded text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
               title="Clear output"
             >
               <Cross2Icon className="w-3 h-3" />
@@ -497,7 +498,7 @@ export function StreamingOutput({
         ref={outputRef}
         className={clsx(
           'rounded-b-lg overflow-y-auto overflow-x-hidden',
-          'bg-gray-950 border border-gray-800',
+          'bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800',
           compact ? 'text-2xs p-2' : 'text-xs p-3',
           isFillHeight && 'flex-1 min-h-0'
         )}
@@ -514,7 +515,7 @@ export function StreamingOutput({
             // After completion: use full MarkdownRenderer for final formatting
             if (status === 'running') {
               return (
-                <div key={`active-${line.id}`} className="text-gray-200">
+                <div key={`active-${line.id}`} className="text-gray-800 dark:text-gray-200">
                   <pre className={clsx('whitespace-pre-wrap break-words font-sans', compact ? 'text-xs' : 'text-sm')}>
                     {line.content}
                   </pre>
@@ -522,7 +523,7 @@ export function StreamingOutput({
               );
             }
             return (
-              <div key={line.id} className="text-gray-200">
+              <div key={line.id} className="text-gray-800 dark:text-gray-200">
                 <MarkdownRenderer content={line.content} className={compact ? 'text-xs' : 'text-sm'} />
               </div>
             );
@@ -552,14 +553,15 @@ export function StreamingOutput({
           className={clsx(
             'absolute bottom-4 right-4',
             'flex items-center gap-1 px-2 py-1 rounded-md',
-            'bg-gray-800/90 text-gray-300 text-xs',
-            'border border-gray-700',
-            'hover:bg-gray-700 transition-colors',
-            'shadow-lg backdrop-blur-sm'
+            'bg-white/90 dark:bg-gray-800/90 text-gray-600 dark:text-gray-300 text-xs',
+            'border border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors',
+            'shadow-lg backdrop-blur-sm',
+            'animate-fade-in'
           )}
         >
           <ArrowDownIcon className="w-3 h-3" />
-          Scroll to bottom
+          {t('output.scrollToBottom')}
         </button>
       )}
     </div>
@@ -682,7 +684,7 @@ export function buildDisplayBlocks(lines: StreamLine[], compactMode: boolean): D
 function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
   if (line.type === 'text') {
     return (
-      <div key={line.id} className="text-gray-200">
+      <div key={line.id} className="text-gray-800 dark:text-gray-200">
         <MarkdownRenderer content={line.content} className={compact ? 'text-xs' : 'text-sm'} />
       </div>
     );
@@ -732,7 +734,7 @@ function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
     return (
       <div
         key={line.id}
-        className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-green-700/50 bg-green-950/30 text-green-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
+        className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-green-200 dark:border-green-700/50 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
       >
         <CheckCircledIcon className="w-3.5 h-3.5 flex-shrink-0" />
         <span>{line.content}</span>
@@ -744,7 +746,7 @@ function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
     return (
       <div
         key={line.id}
-        className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-red-700/50 bg-red-950/30 text-red-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
+        className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-red-200 dark:border-red-700/50 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
       >
         <CrossCircledIcon className="w-3.5 h-3.5 flex-shrink-0" />
         <span>{line.content}</span>
@@ -819,6 +821,7 @@ export function EventGroupLine({
   lines: StreamLine[];
   compact: boolean;
 }) {
+  const { t } = useTranslation('simpleMode');
   const [expanded, setExpanded] = useState(false);
 
   const toolCalls = useMemo(() => lines.filter((line) => line.type === 'tool').length, [lines]);
@@ -827,20 +830,20 @@ export function EventGroupLine({
 
   const title =
     kind === 'tool_activity'
-      ? `Tool activity (${lines.length} events)`
-      : `Analysis activity (${lines.length} events)`;
+      ? t('output.toolActivity', { count: lines.length })
+      : t('output.analysisActivity', { count: lines.length });
   const summary =
     kind === 'tool_activity'
-      ? `${toolCalls} calls, ${toolResults} results`
-      : `${analysisEvents} evidence/progress updates`;
+      ? t('output.toolCalls', { calls: toolCalls, results: toolResults })
+      : t('output.analysisUpdates', { count: analysisEvents });
 
   return (
     <div
       className={clsx(
         'my-1 rounded border',
         kind === 'tool_activity'
-          ? 'border-purple-800/40 bg-purple-950/20'
-          : 'border-sky-800/40 bg-sky-950/20',
+          ? 'border-purple-200 bg-purple-50 dark:border-purple-800/40 dark:bg-purple-950/20'
+          : 'border-sky-200 bg-sky-50 dark:border-sky-800/40 dark:bg-sky-950/20',
         compact ? 'px-2 py-1' : 'px-3 py-1.5'
       )}
     >
@@ -848,13 +851,13 @@ export function EventGroupLine({
         <GearIcon
           className={clsx(
             'w-3 h-3 flex-shrink-0',
-            kind === 'tool_activity' ? 'text-purple-300' : 'text-sky-300'
+            kind === 'tool_activity' ? 'text-purple-500 dark:text-purple-300' : 'text-sky-600 dark:text-sky-300'
           )}
         />
         <span
           className={clsx(
             'font-mono text-xs font-semibold',
-            kind === 'tool_activity' ? 'text-purple-300' : 'text-sky-300'
+            kind === 'tool_activity' ? 'text-purple-700 dark:text-purple-300' : 'text-sky-700 dark:text-sky-300'
           )}
         >
           {title}
@@ -862,21 +865,21 @@ export function EventGroupLine({
         <span
           className={clsx(
             'font-mono text-xs truncate',
-            kind === 'tool_activity' ? 'text-purple-400/80' : 'text-sky-400/80'
+            kind === 'tool_activity' ? 'text-purple-500 dark:text-purple-400/80' : 'text-sky-600 dark:text-sky-400/80'
           )}
         >
           {summary}
         </span>
         <button
           onClick={() => setExpanded((value) => !value)}
-          className="ml-auto text-2xs text-gray-400 hover:text-gray-200"
+          className="ml-auto text-2xs text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
         >
-          {expanded ? 'collapse' : 'expand'}
+          {expanded ? t('output.collapse') : t('output.expand')}
         </button>
       </div>
 
       {expanded && (
-        <div className="mt-2 space-y-1 border-t border-gray-700/40 pt-2">
+        <div className="mt-2 space-y-1 border-t border-gray-200 dark:border-gray-700/40 pt-2">
           {lines.map((line) => (
             <div
               key={`${groupId}-${line.id}`}
@@ -907,6 +910,7 @@ export function SubAgentGroupPanel({
   depth: number;
   compact: boolean;
 }) {
+  const { t } = useTranslation('simpleMode');
   const [expanded, setExpanded] = useState(false);
 
   // Detect sub-agent status from start/end markers
@@ -917,15 +921,15 @@ export function SubAgentGroupPanel({
   const isRunning = hasStart && !isComplete;
 
   const borderClass = isFailed
-    ? 'border-red-700/40 bg-red-950/20'
+    ? 'border-red-200 bg-red-50 dark:border-red-700/40 dark:bg-red-950/20'
     : isComplete
-      ? 'border-green-700/40 bg-green-950/20'
-      : 'border-amber-700/40 bg-amber-950/20';
+      ? 'border-green-200 bg-green-50 dark:border-green-700/40 dark:bg-green-950/20'
+      : 'border-amber-200 bg-amber-50 dark:border-amber-700/40 dark:bg-amber-950/20';
   const labelClass = isFailed
-    ? 'text-red-300'
+    ? 'text-red-700 dark:text-red-300'
     : isComplete
-      ? 'text-green-300'
-      : 'text-amber-300';
+      ? 'text-green-700 dark:text-green-300'
+      : 'text-amber-700 dark:text-amber-300';
 
   // Extract prompt preview from the start line
   const startLine = lines.find((l) => l.type === 'sub_agent' && l.content.includes('[sub_agent:start]'));
@@ -946,31 +950,31 @@ export function SubAgentGroupPanel({
     >
       <div className="flex items-center gap-2">
         {isFailed ? (
-          <CrossCircledIcon className="w-3 h-3 text-red-400 flex-shrink-0" />
+          <CrossCircledIcon className="w-3 h-3 text-red-600 dark:text-red-400 flex-shrink-0" />
         ) : isComplete ? (
-          <CheckCircledIcon className="w-3 h-3 text-green-400 flex-shrink-0" />
+          <CheckCircledIcon className="w-3 h-3 text-green-600 dark:text-green-400 flex-shrink-0" />
         ) : (
-          <GearIcon className={clsx('w-3 h-3 text-amber-400', isRunning && 'animate-spin')} />
+          <GearIcon className={clsx('w-3 h-3 text-amber-600 dark:text-amber-400', isRunning && 'animate-spin')} />
         )}
         <span className={clsx('font-mono text-xs font-semibold uppercase tracking-wide', labelClass)}>
-          Sub-agent
+          {t('output.subAgent')}
         </span>
-        <span className={clsx('font-mono text-xs truncate', labelClass.replace('300', '400/80'))}>
+        <span className={clsx('font-mono text-xs truncate', isFailed ? 'text-red-600 dark:text-red-400/80' : isComplete ? 'text-green-600 dark:text-green-400/80' : 'text-amber-600 dark:text-amber-400/80')}>
           {promptPreview}
         </span>
         <span className="font-mono text-2xs text-gray-500 ml-auto flex-shrink-0">
-          {eventCount} events
+          {t('output.events', { count: eventCount })}
         </span>
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="text-2xs text-gray-400 hover:text-gray-200 flex-shrink-0"
+          className="text-2xs text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 flex-shrink-0"
         >
-          {expanded ? 'collapse' : 'expand'}
+          {expanded ? t('output.collapse') : t('output.expand')}
         </button>
       </div>
 
       {expanded && (
-        <div className="mt-2 space-y-1 border-t border-gray-700/40 pt-2">
+        <div className="mt-2 space-y-1 border-t border-gray-200 dark:border-gray-700/40 pt-2">
           {lines.map((line) => (
             <div
               key={`sa-${subAgentId}-${line.id}`}
@@ -1017,17 +1021,18 @@ export const ToolCallLine = memo(function ToolCallLine({ content, compact }: { c
   return (
     <div
       className={clsx(
-        'my-1 rounded border border-purple-800/40 bg-purple-950/30',
+        'my-1 rounded border',
+        'border-purple-200 bg-purple-50 dark:border-purple-800/40 dark:bg-purple-950/30',
         compact ? 'px-2 py-1' : 'px-3 py-1.5',
       )}
     >
       <div className="flex items-center gap-2">
-        <GearIcon className="w-3 h-3 text-purple-400 animate-spin" />
-        <span className="font-mono text-purple-300 font-semibold text-xs">
+        <GearIcon className="w-3 h-3 text-purple-500 dark:text-purple-400 animate-spin" />
+        <span className="font-mono text-purple-700 dark:text-purple-300 font-semibold text-xs">
           {toolName}
         </span>
         {args && (
-          <span className="font-mono text-purple-400/70 text-xs truncate">
+          <span className="font-mono text-purple-500 dark:text-purple-400/70 text-xs truncate">
             {args}
           </span>
         )}
@@ -1066,6 +1071,7 @@ function parseSubAgentContent(content: string): {
 }
 
 export const SubAgentLine = memo(function SubAgentLine({ content, compact }: { content: string; compact: boolean }) {
+  const { t } = useTranslation('simpleMode');
   const parsed = parseSubAgentContent(content);
   const isStart = parsed.phase === 'start';
   const isEndSuccess = parsed.phase === 'end' && parsed.success === true;
@@ -1076,33 +1082,33 @@ export const SubAgentLine = memo(function SubAgentLine({ content, compact }: { c
       className={clsx(
         'my-1 rounded border',
         isEndSuccess
-          ? 'border-green-700/40 bg-green-950/20'
+          ? 'border-green-200 bg-green-50 dark:border-green-700/40 dark:bg-green-950/20'
           : isEndFail
-            ? 'border-red-700/40 bg-red-950/20'
-            : 'border-amber-700/40 bg-amber-950/20',
+            ? 'border-red-200 bg-red-50 dark:border-red-700/40 dark:bg-red-950/20'
+            : 'border-amber-200 bg-amber-50 dark:border-amber-700/40 dark:bg-amber-950/20',
         compact ? 'px-2 py-1' : 'px-3 py-1.5',
       )}
     >
       <div className="flex items-center gap-2">
         {isEndSuccess ? (
-          <CheckCircledIcon className="w-3 h-3 text-green-400 flex-shrink-0" />
+          <CheckCircledIcon className="w-3 h-3 text-green-600 dark:text-green-400 flex-shrink-0" />
         ) : isEndFail ? (
-          <CrossCircledIcon className="w-3 h-3 text-red-400 flex-shrink-0" />
+          <CrossCircledIcon className="w-3 h-3 text-red-600 dark:text-red-400 flex-shrink-0" />
         ) : (
-          <GearIcon className={clsx('w-3 h-3 text-amber-400', isStart && 'animate-spin')} />
+          <GearIcon className={clsx('w-3 h-3 text-amber-600 dark:text-amber-400', isStart && 'animate-spin')} />
         )}
         <span
           className={clsx(
             'font-mono text-xs font-semibold uppercase tracking-wide',
-            isEndSuccess ? 'text-green-300' : isEndFail ? 'text-red-300' : 'text-amber-300'
+            isEndSuccess ? 'text-green-700 dark:text-green-300' : isEndFail ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'
           )}
         >
-          Sub-agent
+          {t('output.subAgent')}
         </span>
         <span
           className={clsx(
             'font-mono text-xs truncate',
-            isEndSuccess ? 'text-green-400/80' : isEndFail ? 'text-red-400/80' : 'text-amber-400/80'
+            isEndSuccess ? 'text-green-600 dark:text-green-400/80' : isEndFail ? 'text-red-600 dark:text-red-400/80' : 'text-amber-600 dark:text-amber-400/80'
           )}
         >
           {parsed.details}
@@ -1152,20 +1158,20 @@ export const AnalysisLine = memo(function AnalysisLine({ content, compact }: { c
   const isDone = parsed.kind === 'phase_end' && !isError;
 
   const borderClass = isError
-    ? 'border-red-800/40 bg-red-950/20'
+    ? 'border-red-200 bg-red-50 dark:border-red-800/40 dark:bg-red-950/20'
     : isDone
-      ? 'border-green-800/40 bg-green-950/20'
-      : 'border-sky-800/40 bg-sky-950/20';
+      ? 'border-green-200 bg-green-50 dark:border-green-800/40 dark:bg-green-950/20'
+      : 'border-sky-200 bg-sky-50 dark:border-sky-800/40 dark:bg-sky-950/20';
   const textClass = isError
-    ? 'text-red-300'
+    ? 'text-red-700 dark:text-red-300'
     : isDone
-      ? 'text-green-300'
-      : 'text-sky-300';
+      ? 'text-green-700 dark:text-green-300'
+      : 'text-sky-700 dark:text-sky-300';
   const detailClass = isError
-    ? 'text-red-400/80'
+    ? 'text-red-600 dark:text-red-400/80'
     : isDone
-      ? 'text-green-400/80'
-      : 'text-sky-400/80';
+      ? 'text-green-600 dark:text-green-400/80'
+      : 'text-sky-600 dark:text-sky-400/80';
 
   const label = parsed.kind === 'evidence'
     ? 'Evidence'
@@ -1184,11 +1190,11 @@ export const AnalysisLine = memo(function AnalysisLine({ content, compact }: { c
     >
       <div className="flex items-center gap-2">
         {isDone ? (
-          <CheckCircledIcon className="w-3 h-3 text-green-400 flex-shrink-0" />
+          <CheckCircledIcon className="w-3 h-3 text-green-600 dark:text-green-400 flex-shrink-0" />
         ) : isError ? (
-          <CrossCircledIcon className="w-3 h-3 text-red-400 flex-shrink-0" />
+          <CrossCircledIcon className="w-3 h-3 text-red-600 dark:text-red-400 flex-shrink-0" />
         ) : (
-          <GearIcon className="w-3 h-3 text-sky-400" />
+          <GearIcon className="w-3 h-3 text-sky-600 dark:text-sky-400" />
         )}
         <span className={clsx('font-mono text-xs font-semibold uppercase tracking-wide', textClass)}>
           {label}{phaseLabel}
@@ -1215,6 +1221,7 @@ function parseToolResultContent(content: string): { toolId: string; result: stri
 }
 
 export const ToolResultLine = memo(function ToolResultLine({ content, compact }: { content: string; compact: boolean }) {
+  const { t } = useTranslation('simpleMode');
   const { result, isError } = parseToolResultContent(content);
   const [expanded, setExpanded] = useState(false);
   const isLong = result.length > 200;
@@ -1225,33 +1232,33 @@ export const ToolResultLine = memo(function ToolResultLine({ content, compact }:
       className={clsx(
         'my-1 rounded border',
         isError
-          ? 'border-red-800/40 bg-red-950/20'
-          : 'border-cyan-800/30 bg-cyan-950/20',
+          ? 'border-red-200 bg-red-50 dark:border-red-800/40 dark:bg-red-950/20'
+          : 'border-cyan-200 bg-cyan-50 dark:border-cyan-800/30 dark:bg-cyan-950/20',
         compact ? 'px-2 py-1' : 'px-3 py-1.5',
       )}
     >
       <div className="flex items-center gap-2 mb-0.5">
         {isError ? (
-          <CrossCircledIcon className="w-3 h-3 text-red-400 flex-shrink-0" />
+          <CrossCircledIcon className="w-3 h-3 text-red-600 dark:text-red-400 flex-shrink-0" />
         ) : (
-          <CheckCircledIcon className="w-3 h-3 text-cyan-400 flex-shrink-0" />
+          <CheckCircledIcon className="w-3 h-3 text-cyan-600 dark:text-cyan-400 flex-shrink-0" />
         )}
-        <span className={clsx('font-mono text-xs font-semibold', isError ? 'text-red-300' : 'text-cyan-300')}>
-          {isError ? 'Error' : 'Result'}
+        <span className={clsx('font-mono text-xs font-semibold', isError ? 'text-red-700 dark:text-red-300' : 'text-cyan-700 dark:text-cyan-300')}>
+          {isError ? t('output.error') : t('output.result')}
         </span>
         {isLong && (
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-2xs text-gray-500 hover:text-gray-300 ml-auto"
+            className="text-2xs text-gray-600 hover:text-gray-800 dark:text-gray-500 dark:hover:text-gray-300 ml-auto"
           >
-            {expanded ? 'collapse' : 'expand'}
+            {expanded ? t('output.collapse') : t('output.expand')}
           </button>
         )}
       </div>
       <pre
         className={clsx(
           'font-mono text-xs whitespace-pre-wrap break-all',
-          isError ? 'text-red-400/80' : 'text-cyan-400/70',
+          isError ? 'text-red-600 dark:text-red-400/80' : 'text-cyan-700 dark:text-cyan-400/70',
         )}
       >
         {displayText}

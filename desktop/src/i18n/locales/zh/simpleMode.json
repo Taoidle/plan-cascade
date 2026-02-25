@@ -184,7 +184,33 @@
 
   "output": {
     "label": "输出",
-    "toggleTitle": "切换详细输出面板"
+    "toggleTitle": "切换详细输出面板",
+    "headerLines": "输出 ({{count}} 行)",
+    "running": "运行中",
+    "done": "完成",
+    "failed": "失败",
+    "processing": "处理中...",
+    "waiting": "等待输出...",
+    "scrollToBottom": "滚动到底部",
+    "collapse": "收起",
+    "expand": "展开",
+    "events": "{{count}} 个事件",
+    "toolActivity": "工具活动 ({{count}} 个事件)",
+    "analysisActivity": "分析活动 ({{count}} 个事件)",
+    "toolCalls": "{{calls}} 次调用, {{results}} 个结果",
+    "analysisUpdates": "{{count}} 个证据/进度更新",
+    "subAgent": "子代理",
+    "result": "结果",
+    "error": "错误"
+  },
+  "executionLogs": {
+    "title": "执行日志"
+  },
+  "analysisCoverage": {
+    "title": "分析覆盖率",
+    "observed": "已观察",
+    "readDepth": "读取深度",
+    "testsRead": "测试已读"
   },
 
   "emptyChat": {
@@ -577,5 +603,23 @@
     "pdfExported": "PDF 已导出。",
     "pngExported": "PNG 已导出。",
     "jpgExported": "JPG 已导出。"
+  },
+
+  "chatToolbar": {
+    "attachFile": "附加文件",
+    "toggleOutput": "输出",
+    "pause": "暂停",
+    "resume": "继续",
+    "cancel": "取消"
+  },
+  "rightPanel": {
+    "outputTab": "输出",
+    "gitTab": "Git"
+  },
+  "edgeButton": {
+    "expandSidebar": "展开侧边栏",
+    "collapseSidebar": "收起侧边栏",
+    "expandPanel": "展开面板",
+    "collapsePanel": "收起面板"
   }
 }

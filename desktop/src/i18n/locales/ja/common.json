@@ -46,6 +46,13 @@
     "settingsTooltip": "設定"
   },
 
+  "topNavBar": {
+    "menuTooltip": "ナビゲーションメニュー",
+    "searchTooltip": "コマンド検索",
+    "themeTooltip": "テーマ切替",
+    "settingsTooltip": "設定"
+  },
+
   "modeSwitch": {
     "label": "モードを選択",
     "simple": {

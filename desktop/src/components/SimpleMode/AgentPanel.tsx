@@ -11,6 +11,7 @@ import { clsx } from 'clsx';
 import { GearIcon, PlayIcon, Pencil1Icon } from '@radix-ui/react-icons';
 import { useAgentsStore, getFilteredAgents } from '../../store/agents';
 import { useExecutionStore } from '../../store/execution';
+import { Collapsible } from './Collapsible';
 
 // ============================================================================
 // AgentPanel
@@ -55,9 +56,8 @@ export function AgentPanel() {
     openDialog();
   }, [openDialog]);
 
-  if (!panelOpen) return null;
-
   return (
+    <Collapsible open={panelOpen}>
     <div
       data-testid="agent-panel"
       className="border-t border-gray-200 dark:border-gray-700"
@@ -173,6 +173,7 @@ export function AgentPanel() {
         </button>
       </div>
     </div>
+    </Collapsible>
   );
 }
 

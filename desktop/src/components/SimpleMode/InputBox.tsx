@@ -14,13 +14,14 @@ import {
   useState,
   useCallback,
   useEffect,
+  forwardRef,
+  useImperativeHandle,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import {
   PaperPlaneIcon,
   UpdateIcon,
-  FilePlusIcon,
   Cross2Icon,
   FileTextIcon,
   ImageIcon,
@@ -118,7 +119,11 @@ function getFileNameFromPath(filePath: string): string {
 // InputBox Component
 // ============================================================================
 
-export function InputBox({
+export interface InputBoxHandle {
+  pickFile: () => Promise<void>;
+}
+
+export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function InputBox({
   value,
   onChange,
   onSubmit,
@@ -132,7 +137,7 @@ export function InputBox({
   activeAgentName,
   onClearAgent,
   enterSubmits = false,
-}: InputBoxProps) {
+}, ref) {
   const { t } = useTranslation('simpleMode');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
@@ -383,6 +388,11 @@ export function InputBox({
       input.click();
     }
   }, [disabled, onAttach, readFileAndAttach, t]);
+
+  // Expose pickFile via ref for external components (e.g. ChatToolbar)
+  useImperativeHandle(ref, () => ({
+    pickFile: handleFilePick,
+  }), [handleFilePick]);
 
   // ============================================================================
   // @ Autocomplete
@@ -809,27 +819,6 @@ export function InputBox({
           </button>
         )}
 
-        {/* Attach button */}
-        {onAttach && (
-          <button
-            onClick={handleFilePick}
-            disabled={disabled || isReadingFile}
-            className={clsx(
-              'flex items-center justify-center',
-              'w-10 h-10 rounded-lg',
-              'text-gray-500 dark:text-gray-400',
-              'hover:bg-gray-100 dark:hover:bg-gray-700',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              'dark:focus:ring-offset-gray-800',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors'
-            )}
-            title={t('attachment.pickFile', { defaultValue: 'Pick a file' })}
-          >
-            <FilePlusIcon className="w-5 h-5" />
-          </button>
-        )}
-
         {/* Submit button */}
         <button
           onClick={onSubmit}
@@ -855,7 +844,7 @@ export function InputBox({
       </div>
     </div>
   );
-}
+});
 
 // ============================================================================
 // FileChip Component

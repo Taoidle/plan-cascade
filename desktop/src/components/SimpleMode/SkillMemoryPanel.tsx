@@ -13,7 +13,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import {
-  ChevronDownIcon,
   ChevronRightIcon,
   GearIcon,
 } from '@radix-ui/react-icons';
@@ -22,6 +21,7 @@ import { useSettingsStore } from '../../store/settings';
 import { SkillRow } from './SkillRow';
 import { MemoryRow } from './MemoryRow';
 import type { SkillSummary } from '../../types/skillMemory';
+import { Collapsible } from './Collapsible';
 
 // ============================================================================
 // CollapsibleSection
@@ -50,11 +50,7 @@ function CollapsibleSection({
           'hover:bg-gray-50 dark:hover:bg-gray-800'
         )}
       >
-        {expanded ? (
-          <ChevronDownIcon className="w-3.5 h-3.5 shrink-0" />
-        ) : (
-          <ChevronRightIcon className="w-3.5 h-3.5 shrink-0" />
-        )}
+        <ChevronRightIcon className={clsx('w-3.5 h-3.5 shrink-0 transition-transform duration-200', expanded && 'rotate-90')} />
         <span className="flex-1 text-left">{title}</span>
         {count > 0 && (
           <span className="text-2xs px-1.5 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 shrink-0">
@@ -62,7 +58,7 @@ function CollapsibleSection({
           </span>
         )}
       </button>
-      {expanded && <div className="mt-0.5">{children}</div>}
+      <Collapsible open={expanded}><div className="mt-0.5">{children}</div></Collapsible>
     </div>
   );
 }
@@ -132,9 +128,8 @@ export function SkillMemoryPanel() {
     [openDialog]
   );
 
-  if (!panelOpen) return null;
-
   return (
+    <Collapsible open={panelOpen}>
     <div
       data-testid="skill-memory-panel"
       className="border-t border-gray-200 dark:border-gray-700"
@@ -256,6 +251,7 @@ export function SkillMemoryPanel() {
         </button>
       </div>
     </div>
+    </Collapsible>
   );
 }
 

@@ -10,13 +10,13 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import {
   ChevronRightIcon,
-  ChevronDownIcon,
   ResetIcon,
 } from '@radix-ui/react-icons';
 import type { TurnChanges, RestoredFile } from '../../../../types/fileChanges';
 import { useFileChangesStore } from '../../../../store/fileChanges';
 import { FileChangeEntry } from './FileChangeEntry';
 import { RestoreConfirmDialog } from './RestoreConfirmDialog';
+import { Collapsible } from '../../Collapsible';
 
 interface TurnGroupProps {
   turn: TurnChanges;
@@ -99,11 +99,7 @@ export function TurnGroup({ turn, sessionId, projectRoot, onRestoreComplete }: T
           onClick={handleToggle}
           className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group"
         >
-          {collapsed ? (
-            <ChevronRightIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-          ) : (
-            <ChevronDownIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-          )}
+          <ChevronRightIcon className={clsx('w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200', !collapsed && 'rotate-90')} />
 
           <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
             {t('aiChanges.turn', { index: turn.turn_index })}
@@ -137,7 +133,7 @@ export function TurnGroup({ turn, sessionId, projectRoot, onRestoreComplete }: T
         </button>
 
         {/* File changes list */}
-        {!collapsed && (
+        <Collapsible open={!collapsed}>
           <div className="pl-3">
             {turn.changes.map((change) => (
               <FileChangeEntry
@@ -148,7 +144,7 @@ export function TurnGroup({ turn, sessionId, projectRoot, onRestoreComplete }: T
               />
             ))}
           </div>
-        )}
+        </Collapsible>
       </div>
 
       {/* Restore confirmation dialog */}

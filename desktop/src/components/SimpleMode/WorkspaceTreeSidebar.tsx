@@ -11,7 +11,6 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import {
   ChevronRightIcon,
-  ChevronDownIcon,
   PlusIcon,
   Cross2Icon,
 } from '@radix-ui/react-icons';
@@ -21,6 +20,7 @@ import { useSkillMemoryStore } from '../../store/skillMemory';
 import { usePluginStore } from '../../store/plugins';
 import { useAgentsStore } from '../../store/agents';
 import { usePromptsStore } from '../../store/prompts';
+import { Collapsible } from './Collapsible';
 import { SkillMemoryPanel } from './SkillMemoryPanel';
 import { PluginPanel } from './PluginPanel';
 import { AgentPanel } from './AgentPanel';
@@ -468,11 +468,7 @@ function DirectoryNode({
         }}
       >
         {/* Expand/collapse chevron */}
-        {isExpanded ? (
-          <ChevronDownIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        ) : (
-          <ChevronRightIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        )}
+        <ChevronRightIcon className={clsx('w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200', isExpanded && 'rotate-90')} />
 
         {/* Folder icon */}
         <svg
@@ -515,34 +511,36 @@ function DirectoryNode({
       </div>
 
       {/* Child items: background sessions (with fork tree) + history sessions */}
-      {isExpanded && totalCount > 0 && (
-        <div className="mt-0.5">
-          {/* Background sessions with fork hierarchy */}
-          {onSwitchSession && onRemoveSession && bgTree.map((node) => (
-            <BackgroundSessionTreeItem
-              key={node.id}
-              node={node}
-              depth={2}
-              onSwitch={onSwitchSession}
-              onRemove={onRemoveSession}
-              foregroundParentSessionId={foregroundParentSessionId}
-              foregroundBgId={foregroundBgId}
-              currentSessionDescription={currentSessionDescription}
-            />
-          ))}
+      {totalCount > 0 && (
+        <Collapsible open={isExpanded}>
+          <div className="mt-0.5">
+            {/* Background sessions with fork hierarchy */}
+            {onSwitchSession && onRemoveSession && bgTree.map((node) => (
+              <BackgroundSessionTreeItem
+                key={node.id}
+                node={node}
+                depth={2}
+                onSwitch={onSwitchSession}
+                onRemove={onRemoveSession}
+                foregroundParentSessionId={foregroundParentSessionId}
+                foregroundBgId={foregroundBgId}
+                currentSessionDescription={currentSessionDescription}
+              />
+            ))}
 
-          {/* History sessions */}
-          {group.sessions.map((session) => (
-            <SessionItem
-              key={session.id}
-              session={session}
-              depth={2}
-              onRestore={onRestore}
-              onDelete={onDelete}
-              onRename={onRename}
-            />
-          ))}
-        </div>
+            {/* History sessions */}
+            {group.sessions.map((session) => (
+              <SessionItem
+                key={session.id}
+                session={session}
+                depth={2}
+                onRestore={onRestore}
+                onDelete={onDelete}
+                onRename={onRename}
+              />
+            ))}
+          </div>
+        </Collapsible>
       )}
     </div>
   );
@@ -586,11 +584,7 @@ function OtherSessionsGroup({
           if (e.key === 'Enter' || e.key === ' ') onToggle();
         }}
       >
-        {isExpanded ? (
-          <ChevronDownIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        ) : (
-          <ChevronRightIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        )}
+        <ChevronRightIcon className={clsx('w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200', isExpanded && 'rotate-90')} />
 
         <span className="flex-1 min-w-0 text-xs font-medium text-gray-500 dark:text-gray-400">
           {t('sidebar.otherSessions')}
@@ -602,7 +596,7 @@ function OtherSessionsGroup({
       </div>
 
       {/* Sessions */}
-      {isExpanded && (
+      <Collapsible open={isExpanded}>
         <div className="mt-0.5">
           {sessions.map((session) => (
             <SessionItem
@@ -615,7 +609,7 @@ function OtherSessionsGroup({
             />
           ))}
         </div>
-      )}
+      </Collapsible>
     </div>
   );
 }
@@ -759,11 +753,7 @@ function BackgroundSessionTreeItem({
             onClick={handleToggle}
             tabIndex={-1}
           >
-            {expanded ? (
-              <ChevronDownIcon className="w-3 h-3" />
-            ) : (
-              <ChevronRightIcon className="w-3 h-3" />
-            )}
+            <ChevronRightIcon className={clsx('w-3 h-3 transition-transform duration-200', expanded && 'rotate-90')} />
           </button>
         ) : (
           <span className="w-4 shrink-0" />
@@ -1092,7 +1082,7 @@ export function WorkspaceTreeSidebar({
   const isEmpty = pinnedDirectories.length === 0 && visibleHistory.length === 0 && !hasBgSessions;
 
   return (
-    <div className="min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+    <div className="h-full min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
       {/* Toolbar */}
       <SidebarToolbar
         onNewTask={onNewTask}

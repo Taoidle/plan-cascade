@@ -11,6 +11,7 @@ import { clsx } from 'clsx';
 import { GearIcon, GlobeIcon } from '@radix-ui/react-icons';
 import { usePluginStore } from '../../store/plugins';
 import { getPluginSourceLabel } from '../../types/plugin';
+import { Collapsible } from './Collapsible';
 
 // ============================================================================
 // PluginPanel
@@ -50,9 +51,8 @@ export function PluginPanel() {
     openDialog();
   }, [setActiveTab, openDialog]);
 
-  if (!panelOpen) return null;
-
   return (
+    <Collapsible open={panelOpen}>
     <div
       data-testid="plugin-panel"
       className="border-t border-gray-200 dark:border-gray-700"
@@ -184,6 +184,7 @@ export function PluginPanel() {
         </button>
       </div>
     </div>
+    </Collapsible>
   );
 }
 

@@ -2,7 +2,7 @@
  * App Component
  *
  * Main application layout integrating all components.
- * Uses a left icon rail for navigation with full vertical space for content.
+ * Uses a top navigation bar with hamburger menu for mode switching.
  *
  * Story 004: Command Palette Enhancement - Global command palette integration
  * Story 005: Navigation Flow Refinement - Contextual actions, shortcut overlay
@@ -12,7 +12,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { AnimatedModeContent } from './components/ModeSwitch';
-import { IconRail } from './components/IconRail';
+import { TopNavBar } from './components/TopNavBar';
 import { SimpleMode } from './components/SimpleMode';
 import { ExpertMode } from './components/ExpertMode';
 import { ClaudeCodeMode } from './components/ClaudeCodeMode';
@@ -77,9 +77,9 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Callback for showing shortcuts (settings is handled by IconRail)
+  // Callback for showing shortcuts (settings is handled by TopNavBar)
   const handleOpenSettings = useCallback(() => {
-    // Settings is handled by IconRail component's internal state
+    // Settings is handled by TopNavBar component's internal state
     // This is a placeholder for command palette integration
   }, []);
 
@@ -94,7 +94,7 @@ function AppContent() {
   });
 
   return (
-    <div className="h-screen flex flex-row bg-gray-50 dark:bg-gray-950">
+    <div className="h-screen flex flex-col bg-gray-100 dark:bg-gray-950">
       {/* Recovery Prompt - shows when interrupted executions are detected (Story-004) */}
       <RecoveryPrompt />
 
@@ -116,8 +116,8 @@ function AppContent() {
         onFinish={endTour}
       />
 
-      {/* Left Icon Rail Navigation */}
-      <IconRail onOpenCommandPalette={openCommandPalette} />
+      {/* Top Navigation Bar */}
+      <TopNavBar onOpenCommandPalette={openCommandPalette} />
 
       {/* Main Content with animated transitions */}
       <main className="flex-1 overflow-hidden flex flex-col min-w-0">

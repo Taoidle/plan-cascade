@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { GearIcon, DrawingPinIcon, DrawingPinFilledIcon } from '@radix-ui/react-icons';
 import { usePromptsStore } from '../../store/prompts';
+import { Collapsible } from './Collapsible';
 
 // ============================================================================
 // PromptPanel
@@ -66,9 +67,8 @@ export function PromptPanel() {
     custom: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
   };
 
-  if (!panelOpen) return null;
-
   return (
+    <Collapsible open={panelOpen}>
     <div
       data-testid="prompt-panel"
       className="border-t border-gray-200 dark:border-gray-700"
@@ -169,6 +169,7 @@ export function PromptPanel() {
         </button>
       </div>
     </div>
+    </Collapsible>
   );
 }
 

@@ -14,6 +14,7 @@ interface PermissionSelectorProps {
   level: PermissionLevel;
   onLevelChange: (level: PermissionLevel) => void;
   sessionId: string;
+  dropdownDirection?: 'up' | 'down';
 }
 
 const LEVELS: PermissionLevel[] = ['strict', 'standard', 'permissive'];
@@ -23,6 +24,7 @@ const LEVEL_ICON = '\u{1F6E1}'; // shield
 export function PermissionSelector({
   level,
   onLevelChange,
+  dropdownDirection = 'down',
 }: PermissionSelectorProps) {
   const { t } = useTranslation('simpleMode');
   const [open, setOpen] = useState(false);
@@ -67,7 +69,11 @@ export function PermissionSelector({
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 w-56 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
+        <div className={clsx(
+          'absolute left-0 w-56 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1',
+          dropdownDirection === 'up' ? 'bottom-full mb-1' : 'top-full mt-1',
+          'animate-in fade-in-0 zoom-in-95 duration-150'
+        )}>
           {LEVELS.map((l) => (
             <button
               key={l}

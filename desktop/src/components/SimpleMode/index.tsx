@@ -1,25 +1,28 @@
 /**
  * SimpleMode Component
  *
- * Three-panel layout:
- * - Left: conversation/session manager
- * - Middle: normal chat view
- * - Right (optional): detailed output/tool activity
+ * IM-style layout with:
+ * - Left (optional): WorkspaceTreeSidebar
+ * - Middle: ChatTranscript + ChatToolbar + InputBox
+ * - Right (optional): TabbedRightPanel (Output + Git tabs)
+ * - Bottom: Status bar (connection, project, model, permission, index, tokens)
+ * - Edge collapse buttons for left/right panels
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
-import { InputBox } from './InputBox';
-import { ConnectionStatus } from './ConnectionStatus';
+import { Collapsible } from './Collapsible';
+import { InputBox, type InputBoxHandle } from './InputBox';
 import { MessageActions, EditMode } from './MessageActions';
-import { ModelSwitcher } from './ModelSwitcher';
 import { WorkspaceTreeSidebar } from './WorkspaceTreeSidebar';
-import { GitPanel } from './GitPanel';
+import { EdgeCollapseButton } from './EdgeCollapseButton';
+import { BottomStatusBar } from './BottomStatusBar';
+import { ChatToolbar } from './ChatToolbar';
+import { TabbedRightPanel, type RightPanelTab } from './TabbedRightPanel';
 import { useExecutionStore, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
-import { StreamingOutput, ErrorState, ProjectSelector, IndexStatus } from '../shared';
 import {
   buildDisplayBlocks,
   ToolCallLine,
@@ -29,26 +32,17 @@ import {
   SubAgentGroupPanel,
   EventGroupLine,
 } from '../shared/StreamingOutput';
-import { ContextualActions } from '../shared/ContextualActions';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { WorkflowCardRenderer } from './WorkflowCards/WorkflowCardRenderer';
 import { StructuredInputOverlay } from './StructuredInputOverlay';
 import { ToolPermissionOverlay } from './ToolPermissionOverlay';
-import { PermissionSelector } from './PermissionSelector';
-import { WorkflowProgressPanel } from './WorkflowProgressPanel';
 import { useToolPermissionStore } from '../../store/toolPermission';
-import { useGitStore } from '../../store/git';
 import { useAgentsStore } from '../../store/agents';
 import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
 import type { CardPayload } from '../../types/workflowCard';
 import { useToast } from '../shared/Toast';
 
 type WorkflowMode = 'chat' | 'task';
-
-function formatNumber(value: number | null | undefined): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '0';
-  return value.toLocaleString();
-}
 
 export function SimpleMode() {
   const { t } = useTranslation('simpleMode');
@@ -94,10 +88,12 @@ export function SimpleMode() {
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
 
   const [description, setDescription] = useState('');
-  const [showOutputPanel, setShowOutputPanel] = useState(false);
-  const showDiffPanel = useGitStore((s) => s.diffPanelVisible);
-  const setShowDiffPanel = useGitStore((s) => s.setDiffPanelVisible);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('output');
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
+
+  // Ref for InputBox to call pickFile externally
+  const inputBoxRef = useRef<InputBoxHandle>(null);
 
   // Handle workflow mode changes with context inheritance notifications
   const handleWorkflowModeChange = useCallback(
@@ -230,12 +226,12 @@ export function SimpleMode() {
 
   const handleNewTask = useCallback(() => {
     const hasContext = streamingOutput.length > 0 || useExecutionStore.getState()._pendingTaskContext;
-    
+
     resetWorkflow();
     reset();
     clearStrategyAnalysis();
     setDescription('');
-    
+
     if (hasContext) {
       showToast(t('contextBridge.contextReset', { defaultValue: 'Context cleared for new task' }), 'info');
     }
@@ -244,11 +240,10 @@ export function SimpleMode() {
   const handleRestoreHistory = useCallback(
     (historyId: string) => {
       restoreFromHistory(historyId);
-      setShowOutputPanel(false);
-      setShowDiffPanel(false);
+      setRightPanelOpen(false);
       handleWorkflowModeChange('chat');
     },
-    [restoreFromHistory, setShowDiffPanel, handleWorkflowModeChange]
+    [restoreFromHistory, handleWorkflowModeChange]
   );
 
   const isRunning = status === 'running' || status === 'paused';
@@ -259,145 +254,83 @@ export function SimpleMode() {
     [streamingOutput]
   );
 
-  // Whether any right panel is visible (for grid layout calculation)
-  const showRightPanel = showOutputPanel || showDiffPanel;
+  // Output button toggle logic
+  const handleToggleOutput = useCallback(() => {
+    if (!rightPanelOpen) {
+      setRightPanelOpen(true);
+      setRightPanelTab('output');
+    } else if (rightPanelTab === 'output') {
+      setRightPanelOpen(false);
+    } else {
+      setRightPanelTab('output');
+    }
+  }, [rightPanelOpen, rightPanelTab]);
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between px-6 py-3 shrink-0 max-w-[2200px] mx-auto w-full">
-        <div className="flex items-center gap-2">
-          <ConnectionStatus status={connectionStatus} />
-          <ProjectSelector compact />
-          <ModelSwitcher />
-          <PermissionSelector
-            level={permissionLevel}
-            onLevelChange={(level) => setPermissionLevel('current-session', level)}
-            sessionId="current-session"
-          />
-          {workspacePath && <IndexStatus compact />}
-          <TokenUsageInline turnUsage={turnUsageTotals} totals={sessionUsageTotals} />
-        </div>
+      {/* Main content area */}
+      <div className="flex-1 min-h-0 px-4 py-2">
+        <div className="h-full max-w-[2200px] mx-auto w-full flex">
 
-        <div className="flex items-center gap-2">
-          <ContextualActions
-            className="hidden lg:flex"
-            onPauseExecution={pause}
-            onResumeExecution={resume}
-            onCancelExecution={cancel}
-            onResetExecution={reset}
-          />
-
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={clsx(
-              'text-sm px-3 py-1.5 rounded-lg transition-colors',
-              'text-gray-600 dark:text-gray-400',
-              'hover:bg-gray-100 dark:hover:bg-gray-800',
-              !sidebarCollapsed && 'bg-gray-100 dark:bg-gray-800'
-            )}
-            title={t('sidebar.toggleSidebar', { defaultValue: 'Toggle sidebar' })}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-            </svg>
-          </button>
-
-          <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-700 overflow-hidden">
-            <button
-              onClick={() => handleWorkflowModeChange('chat')}
-              className={clsx(
-                'px-3 py-1.5 text-xs font-medium transition-colors',
-                workflowMode === 'chat'
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-              )}
-            >
-              {t('workflowMode.chat', { defaultValue: 'Chat' })}
-            </button>
-            <button
-              onClick={() => handleWorkflowModeChange('task')}
-              className={clsx(
-                'px-3 py-1.5 text-xs font-medium transition-colors',
-                workflowMode === 'task'
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-              )}
-            >
-              {t('workflowMode.task', { defaultValue: 'Task' })}
-            </button>
+          {/* Left panel: WorkspaceTreeSidebar */}
+          <div className={clsx(
+            'shrink-0 transition-all duration-200 ease-out overflow-hidden',
+            sidebarCollapsed ? 'w-0 opacity-0' : 'w-[280px] opacity-100 mr-3'
+          )}>
+            <div className="w-[280px] h-full">
+              <WorkspaceTreeSidebar
+                history={history}
+                onRestore={handleRestoreHistory}
+                onDelete={deleteHistory}
+                onRename={renameHistory}
+                onClear={clearHistory}
+                onNewTask={handleNewTask}
+                currentTask={isChatSession ? (streamingOutput[0]?.content || null) : null}
+                backgroundSessions={backgroundSessions}
+                onSwitchSession={switchToSession}
+                onRemoveSession={removeBackgroundSession}
+                foregroundParentSessionId={foregroundParentSessionId}
+                foregroundBgId={foregroundBgId}
+              />
+            </div>
           </div>
 
-          <button
-            onClick={() => {
-              const next = !showOutputPanel;
-              setShowOutputPanel(next);
-              if (next) setShowDiffPanel(false);
-            }}
-            className={clsx(
-              'text-sm px-3 py-1.5 rounded-lg transition-colors',
-              'text-gray-600 dark:text-gray-400',
-              'hover:bg-gray-100 dark:hover:bg-gray-800',
-              showOutputPanel && 'bg-gray-100 dark:bg-gray-800'
-            )}
-            title={t('output.toggleTitle', { defaultValue: 'Toggle detailed output panel' })}
-          >
-            {t('output.label', { defaultValue: 'Output' })}{detailLineCount > 0 ? ` (${detailLineCount})` : ''}
-          </button>
-
-          <button
-            onClick={() => {
-              const next = !showDiffPanel;
-              setShowDiffPanel(next);
-              if (next) setShowOutputPanel(false);
-            }}
-            className={clsx(
-              'text-sm px-3 py-1.5 rounded-lg transition-colors',
-              'text-gray-600 dark:text-gray-400',
-              'hover:bg-gray-100 dark:hover:bg-gray-800',
-              showDiffPanel && 'bg-gray-100 dark:bg-gray-800'
-            )}
-            title={t('diffPanel.title', { defaultValue: 'Changes' })}
-          >
-            {t('diffPanel.title', { defaultValue: 'Diffs' })}
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 min-h-0 px-6 pb-4">
-        <div
-          className={clsx(
-            'h-full max-w-[2200px] mx-auto w-full grid gap-4',
-            sidebarCollapsed
-              ? (showRightPanel
-                  ? 'grid-cols-1 xl:grid-cols-[minmax(480px,1fr)_minmax(520px,0.95fr)]'
-                  : 'grid-cols-1 xl:grid-cols-[minmax(640px,1fr)]')
-              : (showRightPanel
-                  ? 'grid-cols-1 xl:grid-cols-[280px_minmax(480px,1fr)_minmax(520px,0.95fr)]'
-                  : 'grid-cols-1 xl:grid-cols-[280px_minmax(640px,1fr)]')
-          )}
-        >
-          {!sidebarCollapsed && (
-            <WorkspaceTreeSidebar
-              history={history}
-              onRestore={handleRestoreHistory}
-              onDelete={deleteHistory}
-              onRename={renameHistory}
-              onClear={clearHistory}
-              onNewTask={handleNewTask}
-              currentTask={isChatSession ? (streamingOutput[0]?.content || null) : null}
-              backgroundSessions={backgroundSessions}
-              onSwitchSession={switchToSession}
-              onRemoveSession={removeBackgroundSession}
-              foregroundParentSessionId={foregroundParentSessionId}
-              foregroundBgId={foregroundBgId}
+          {/* Middle column: conversation + toolbar + input */}
+          <div className="relative flex-1 min-w-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+            {/* Edge collapse buttons — absolute overlay inside chat area */}
+            <EdgeCollapseButton
+              side="left"
+              expanded={!sidebarCollapsed}
+              onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
-          )}
+            <EdgeCollapseButton
+              side="right"
+              expanded={rightPanelOpen}
+              onToggle={() => setRightPanelOpen(!rightPanelOpen)}
+            />
 
-          <div className="min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+            {/* Chat transcript */}
             <div className="flex-1 min-h-0">
               <ChatTranscript lines={streamingOutput} status={status} />
             </div>
 
+            {/* Chat toolbar */}
+            <ChatToolbar
+              workflowMode={workflowMode}
+              onWorkflowModeChange={handleWorkflowModeChange}
+              onFilePick={() => inputBoxRef.current?.pickFile()}
+              isFilePickDisabled={isDisabled}
+              executionStatus={status}
+              onPause={pause}
+              onResume={resume}
+              onCancel={cancel}
+              rightPanelOpen={rightPanelOpen}
+              rightPanelTab={rightPanelTab}
+              onToggleOutput={handleToggleOutput}
+              detailLineCount={detailLineCount}
+            />
+
+            {/* Input area */}
             <div className="shrink-0 border-t border-gray-200 dark:border-gray-700">
               {/* Priority 1: Tool permission approval overlay */}
               {permissionRequest ? (
@@ -418,6 +351,7 @@ export function SimpleMode() {
               ) : (
                 <div className="p-4">
                   <InputBox
+                    ref={inputBoxRef}
                     value={description}
                     onChange={setDescription}
                     onSubmit={isChatSession || (workflowMode === 'task' && workflowPhase !== 'idle') ? handleFollowUp : handleStart}
@@ -472,37 +406,37 @@ export function SimpleMode() {
             </div>
           </div>
 
-          {showOutputPanel && (
-            <div className="min-h-0 flex flex-col">
-              <div className="shrink-0 space-y-2 mb-2">
-                {workflowMode === 'task' ? (
-                  <>
-                    {/* Task mode: show workflow progress panel */}
-                    {workflowPhase !== 'idle' && <WorkflowProgressPanel />}
-                    <ExecutionLogsCard logs={logs} />
-                    <ErrorState maxErrors={3} />
-                  </>
-                ) : (
-                  <>
-                    {/* Chat mode: no progress section, only analysis coverage */}
-                    {analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
-                    <ExecutionLogsCard logs={logs} />
-                    <ErrorState maxErrors={3} />
-                  </>
-                )}
-              </div>
-              <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0" />
+          {/* Right panel: Output + Git tabs */}
+          <div className={clsx(
+            'shrink-0 transition-all duration-200 ease-out overflow-hidden',
+            rightPanelOpen ? 'w-[520px] opacity-100 ml-3' : 'w-0 opacity-0'
+          )}>
+            <div className="w-[520px] h-full">
+              <TabbedRightPanel
+                activeTab={rightPanelTab}
+                onTabChange={setRightPanelTab}
+                workflowMode={workflowMode}
+                workflowPhase={workflowPhase}
+                logs={logs}
+                analysisCoverage={analysisCoverage}
+                streamingOutput={streamingOutput}
+                workspacePath={workspacePath}
+              />
             </div>
-          )}
-
-          {showDiffPanel && (
-            <GitPanel
-              streamingOutput={streamingOutput}
-              workspacePath={workspacePath}
-            />
-          )}
+          </div>
         </div>
       </div>
+
+      {/* Bottom status bar */}
+      <BottomStatusBar
+        connectionStatus={connectionStatus}
+        workspacePath={workspacePath}
+        permissionLevel={permissionLevel}
+        onPermissionLevelChange={(level) => setPermissionLevel('current-session', level)}
+        sessionId="current-session"
+        turnUsage={turnUsageTotals}
+        sessionUsage={sessionUsageTotals}
+      />
     </div>
   );
 }
@@ -594,11 +528,18 @@ function ChatTranscript({
 
   // Sticky-bottom auto-scroll: only scroll if user is near the bottom
   const isNearBottom = useRef(true);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
   const handleScroll = useCallback(() => {
     if (!containerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-    isNearBottom.current = scrollHeight - scrollTop - clientHeight < 50;
+    const nearBottom = scrollHeight - scrollTop - clientHeight < 50;
+    isNearBottom.current = nearBottom;
+    setShowScrollBtn(!nearBottom);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' });
   }, []);
 
   useEffect(() => {
@@ -618,66 +559,92 @@ function ChatTranscript({
   }
 
   return (
-    <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto px-4 py-4 space-y-4">
-      {richTurns.map((turn) => {
-        const isLastTurn = turn.turnIndex === lastTurnIndex;
+    <div className="relative h-full">
+      <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto px-4 py-4 space-y-4">
+        {richTurns.map((turn) => {
+          const isLastTurn = turn.turnIndex === lastTurnIndex;
 
-        return (
-          <Fragment key={turn.userLine.id}>
-            {/* User message bubble */}
-            {editingLineId === turn.userLine.id ? (
-              <div className="flex justify-end">
-                <EditMode
-                  content={turn.userLine.content}
-                  onSave={(newContent) => handleEdit(turn.userLine.id, newContent)}
-                  onCancel={handleEditCancel}
-                  isClaudeCodeBackend={isClaudeCodeBackendValue}
-                />
-              </div>
-            ) : (
-              <div className="group relative flex justify-end">
-                <div className="max-w-[82%] px-4 py-2 rounded-2xl rounded-br-sm bg-primary-600 text-white text-sm whitespace-pre-wrap">
-                  {turn.userLine.content}
+          return (
+            <Fragment key={turn.userLine.id}>
+              {/* User message bubble */}
+              {editingLineId === turn.userLine.id ? (
+                <div className="flex justify-end">
+                  <EditMode
+                    content={turn.userLine.content}
+                    onSave={(newContent) => handleEdit(turn.userLine.id, newContent)}
+                    onCancel={handleEditCancel}
+                    isClaudeCodeBackend={isClaudeCodeBackendValue}
+                  />
                 </div>
-                <MessageActions
-                  line={turn.userLine}
-                  isUserMessage={true}
+              ) : (
+                <div className="group relative flex justify-end">
+                  <div className="max-w-[82%] px-4 py-2 rounded-2xl rounded-br-sm bg-primary-600 text-white text-sm whitespace-pre-wrap">
+                    {turn.userLine.content}
+                  </div>
+                  <MessageActions
+                    line={turn.userLine}
+                    isUserMessage={true}
+                    isLastTurn={isLastTurn}
+                    isClaudeCodeBackend={isClaudeCodeBackendValue}
+                    disabled={isActionsDisabled}
+                    onEdit={handleEdit}
+                    onRegenerate={() => useExecutionStore.getState().regenerateResponse(turn.userLine.id)}
+                    onRollback={() => useExecutionStore.getState().rollbackToTurn(turn.userLine.id)}
+                    onCopy={handleCopy}
+                    onEditStart={handleEditStart}
+                    onEditCancel={handleEditCancel}
+                  />
+                </div>
+              )}
+
+              {/* Assistant response section */}
+              {turn.assistantLines.length > 0 ? (
+                <ChatAssistantSection
+                  lines={turn.assistantLines}
                   isLastTurn={isLastTurn}
-                  isClaudeCodeBackend={isClaudeCodeBackendValue}
+                  userLineId={turn.userLine.id}
                   disabled={isActionsDisabled}
+                  isClaudeCodeBackend={isClaudeCodeBackendValue}
                   onEdit={handleEdit}
-                  onRegenerate={() => useExecutionStore.getState().regenerateResponse(turn.userLine.id)}
-                  onRollback={() => useExecutionStore.getState().rollbackToTurn(turn.userLine.id)}
                   onCopy={handleCopy}
-                  onEditStart={handleEditStart}
-                  onEditCancel={handleEditCancel}
+                  onFork={() => useExecutionStore.getState().forkSessionAtTurn(turn.userLine.id)}
                 />
-              </div>
-            )}
-
-            {/* Assistant response section */}
-            {turn.assistantLines.length > 0 ? (
-              <ChatAssistantSection
-                lines={turn.assistantLines}
-                isLastTurn={isLastTurn}
-                userLineId={turn.userLine.id}
-                disabled={isActionsDisabled}
-                isClaudeCodeBackend={isClaudeCodeBackendValue}
-                onEdit={handleEdit}
-                onCopy={handleCopy}
-                onFork={() => useExecutionStore.getState().forkSessionAtTurn(turn.userLine.id)}
-              />
-            ) : status === 'running' && isLastTurn ? (
-              <div className="flex justify-start">
-                <div className="px-4 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-sm italic flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
-                  {t('emptyChat.thinking', { defaultValue: 'Thinking...' })}
+              ) : status === 'running' && isLastTurn ? (
+                <div className="flex justify-start">
+                  <div className="px-4 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-sm italic flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
+                    {t('emptyChat.thinking', { defaultValue: 'Thinking...' })}
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </Fragment>
-        );
-      })}
+              ) : null}
+            </Fragment>
+          );
+        })}
+      </div>
+
+      {/* Scroll to bottom button */}
+      {showScrollBtn && (
+        <button
+          onClick={scrollToBottom}
+          className={clsx(
+            'absolute bottom-4 left-1/2 -translate-x-1/2 z-10',
+            'flex items-center justify-center',
+            'w-8 h-8 rounded-full',
+            'bg-white dark:bg-gray-800',
+            'border border-gray-200 dark:border-gray-700',
+            'shadow-md',
+            'text-gray-500 dark:text-gray-400',
+            'hover:bg-gray-50 dark:hover:bg-gray-700',
+            'transition-colors',
+            'animate-in fade-in-0 zoom-in-75 duration-150'
+          )}
+          title={t('chat.scrollToBottom', { defaultValue: 'Scroll to bottom' })}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 6l4 4 4-4" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -859,131 +826,11 @@ function ChatThinkingSection({ lines }: { lines: StreamLine[] }) {
         <span className="italic">Thinking</span>
         <span className="text-2xs text-gray-400 dark:text-gray-500">({content.length} chars)</span>
       </button>
-      {expanded && (
+      <Collapsible open={expanded}>
         <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-600 text-xs text-gray-500 dark:text-gray-400 italic font-mono whitespace-pre-wrap max-h-64 overflow-y-auto">
           {content}
         </div>
-      )}
-    </div>
-  );
-}
-
-function TokenUsageInline({
-  turnUsage,
-  totals,
-}: {
-  turnUsage: ReturnType<typeof useExecutionStore.getState>['turnUsageTotals'];
-  totals: ReturnType<typeof useExecutionStore.getState>['sessionUsageTotals'];
-}) {
-  if (!turnUsage && !totals) return null;
-
-  const turn = turnUsage || {
-    input_tokens: 0,
-    output_tokens: 0,
-    thinking_tokens: 0,
-    cache_read_tokens: 0,
-    cache_creation_tokens: 0,
-  };
-  const total = totals || turn;
-
-  return (
-    <div className="hidden xl:flex items-center gap-2 ml-1">
-      <span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-2xs">
-        turn in {formatNumber(turn.input_tokens)} / out {formatNumber(turn.output_tokens)}
-      </span>
-      <span className="px-2 py-1 rounded bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 text-2xs">
-        session in {formatNumber(total.input_tokens)} / out {formatNumber(total.output_tokens)}
-      </span>
-    </div>
-  );
-}
-
-
-function pct(value: number | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function AnalysisCoveragePanel({
-  coverage,
-}: {
-  coverage: NonNullable<ReturnType<typeof useExecutionStore.getState>['analysisCoverage']>;
-}) {
-  const coverageProgress = Math.max(0, Math.min(100, (coverage.coverageRatio || 0) * 100));
-  const sampledProgress = Math.max(0, Math.min(100, (coverage.sampledReadRatio || 0) * 100));
-  const testsProgress = Math.max(0, Math.min(100, (coverage.testCoverageRatio || 0) * 100));
-
-  return (
-    <div className="p-3 rounded-lg bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-sky-700 dark:text-sky-300">Analysis Coverage</p>
-        <span className="text-xs text-sky-600 dark:text-sky-400">{coverage.status}</span>
-      </div>
-
-      <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-        <MetricBar label="Observed" value={pct(coverage.coverageRatio)} progress={coverageProgress} />
-        <MetricBar label="Read Depth" value={pct(coverage.sampledReadRatio)} progress={sampledProgress} />
-        <MetricBar label="Tests Read" value={pct(coverage.testCoverageRatio)} progress={testsProgress} />
-      </div>
-
-      <div className="mt-2 text-xs text-sky-700/90 dark:text-sky-300/90">
-        files {coverage.observedPaths}/{coverage.inventoryTotalFiles} | sampled {coverage.sampledReadFiles} | tests {coverage.testFilesRead}/{coverage.testFilesTotal}
-      </div>
-
-      {(coverage.coverageTargetRatio || coverage.sampledReadTargetRatio || coverage.testCoverageTargetRatio) && (
-        <div className="mt-1 text-xs text-sky-600 dark:text-sky-400">
-          targets: observed {pct(coverage.coverageTargetRatio)} | read depth {pct(coverage.sampledReadTargetRatio)} | tests {pct(coverage.testCoverageTargetRatio)}
-        </div>
-      )}
-
-      {coverage.validationIssues.length > 0 && (
-        <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-          validation: {coverage.validationIssues.slice(0, 2).join(' ; ')}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MetricBar({
-  label,
-  value,
-  progress,
-}: {
-  label: string;
-  value: string;
-  progress: number;
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between text-sky-700 dark:text-sky-300">
-        <span>{label}</span>
-        <span>{value}</span>
-      </div>
-      <div className="mt-1 h-1.5 rounded bg-sky-100 dark:bg-sky-900/50 overflow-hidden">
-        <div className="h-full bg-sky-500" style={{ width: `${progress}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function ExecutionLogsCard({ logs }: { logs: string[] }) {
-  const recent = logs.slice(-20).reverse();
-  if (recent.length === 0) return null;
-
-  return (
-    <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Execution Logs</p>
-        <span className="text-2xs text-gray-500 dark:text-gray-400">{recent.length}</span>
-      </div>
-      <div className="mt-2 max-h-32 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-2 font-mono text-2xs text-gray-700 dark:text-gray-300 space-y-1">
-        {recent.map((line, idx) => (
-          <div key={`${idx}-${line.slice(0, 16)}`} className="whitespace-pre-wrap break-words">
-            {line}
-          </div>
-        ))}
-      </div>
+      </Collapsible>
     </div>
   );
 }

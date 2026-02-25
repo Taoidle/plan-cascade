@@ -15,12 +15,12 @@ import {
   CheckCircledIcon,
   CrossCircledIcon,
   ClockIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
+  ChevronRightIcon,
   ResetIcon,
 } from '@radix-ui/react-icons';
 import { useExecutionStore } from '../../store/execution';
 import type { ExecutionHistoryItem } from '../../store/execution';
+import { Collapsible } from './Collapsible';
 
 interface HistoryPanelProps {
   onClose: () => void;
@@ -242,11 +242,7 @@ function HistoryItem({ item, isExpanded, onToggleExpand, onRestore }: HistoryIte
                   'transition-colors'
                 )}
               >
-                {isExpanded ? (
-                  <ChevronUpIcon className="w-3 h-3" />
-                ) : (
-                  <ChevronDownIcon className="w-3 h-3" />
-                )}
+                <ChevronRightIcon className={clsx('w-3 h-3 transition-transform duration-200', isExpanded && 'rotate-90')} />
                 {isExpanded ? 'Collapse' : 'View conversation'}
               </button>
 
@@ -268,16 +264,18 @@ function HistoryItem({ item, isExpanded, onToggleExpand, onRestore }: HistoryIte
           )}
 
           {/* Expanded conversation content */}
-          {isExpanded && item.conversationContent && (
-            <div
-              className={clsx(
-                'mt-3 p-3 rounded-lg max-h-64 overflow-y-auto',
-                'bg-gray-950 border border-gray-800',
-                'font-mono text-xs text-gray-300 whitespace-pre-wrap'
-              )}
-            >
-              {item.conversationContent}
-            </div>
+          {item.conversationContent && (
+            <Collapsible open={isExpanded}>
+              <div
+                className={clsx(
+                  'mt-3 p-3 rounded-lg max-h-64 overflow-y-auto',
+                  'bg-gray-950 border border-gray-800',
+                  'font-mono text-xs text-gray-300 whitespace-pre-wrap'
+                )}
+              >
+                {item.conversationContent}
+              </div>
+            </Collapsible>
           )}
         </div>
       </div>

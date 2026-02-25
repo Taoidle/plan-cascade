@@ -46,6 +46,13 @@
     "settingsTooltip": "设置"
   },
 
+  "topNavBar": {
+    "menuTooltip": "导航菜单",
+    "searchTooltip": "搜索命令",
+    "themeTooltip": "切换主题",
+    "settingsTooltip": "设置"
+  },
+
   "modeSwitch": {
     "label": "选择模式",
     "simple": {

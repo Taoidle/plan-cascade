@@ -184,7 +184,33 @@
 
   "output": {
     "label": "出力",
-    "toggleTitle": "詳細出力パネルの切替"
+    "toggleTitle": "詳細出力パネルの切替",
+    "headerLines": "出力 ({{count}} 行)",
+    "running": "実行中",
+    "done": "完了",
+    "failed": "失敗",
+    "processing": "処理中...",
+    "waiting": "出力を待機中...",
+    "scrollToBottom": "最下部へスクロール",
+    "collapse": "折りたたむ",
+    "expand": "展開",
+    "events": "{{count}} イベント",
+    "toolActivity": "ツール活動 ({{count}} イベント)",
+    "analysisActivity": "分析活動 ({{count}} イベント)",
+    "toolCalls": "{{calls}} 回の呼出, {{results}} 件の結果",
+    "analysisUpdates": "{{count}} 件のエビデンス/進捗更新",
+    "subAgent": "サブエージェント",
+    "result": "結果",
+    "error": "エラー"
+  },
+  "executionLogs": {
+    "title": "実行ログ"
+  },
+  "analysisCoverage": {
+    "title": "分析カバレッジ",
+    "observed": "観測済",
+    "readDepth": "読取深度",
+    "testsRead": "テスト読込"
   },
 
   "emptyChat": {
@@ -577,5 +603,23 @@
     "pdfExported": "PDFをエクスポートしました。",
     "pngExported": "PNGをエクスポートしました。",
     "jpgExported": "JPGをエクスポートしました。"
+  },
+
+  "chatToolbar": {
+    "attachFile": "ファイルを添付",
+    "toggleOutput": "出力",
+    "pause": "一時停止",
+    "resume": "再開",
+    "cancel": "キャンセル"
+  },
+  "rightPanel": {
+    "outputTab": "出力",
+    "gitTab": "Git"
+  },
+  "edgeButton": {
+    "expandSidebar": "サイドバーを展開",
+    "collapseSidebar": "サイドバーを折りたたむ",
+    "expandPanel": "パネルを展開",
+    "collapsePanel": "パネルを折りたたむ"
   }
 }

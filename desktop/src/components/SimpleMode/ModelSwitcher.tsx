@@ -61,7 +61,11 @@ function classifyTransition(currentBackend: Backend, targetBackend: Backend): Tr
 // Component
 // ============================================================================
 
-export function ModelSwitcher() {
+interface ModelSwitcherProps {
+  dropdownDirection?: 'up' | 'down';
+}
+
+export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps = {}) {
   const { t } = useTranslation('simpleMode');
   const { t: tSettings } = useTranslation('settings');
 
@@ -324,12 +328,13 @@ export function ModelSwitcher() {
       {open && (
         <div
           className={clsx(
-            'absolute top-full left-0 mt-1 z-50',
+            dropdownDirection === 'up' ? 'absolute bottom-full left-0 mb-1 z-50' : 'absolute top-full left-0 mt-1 z-50',
             'w-[320px] max-h-[420px] overflow-y-auto',
             'rounded-lg border border-gray-200 dark:border-gray-700',
             'bg-white dark:bg-gray-900',
             'shadow-lg',
-            'py-1'
+            'py-1',
+            'animate-in fade-in-0 zoom-in-95 duration-150'
           )}
         >
           {providerGroups.map((group, groupIdx) => (

@@ -8,7 +8,9 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { ChevronRightIcon } from '@radix-ui/react-icons';
 import type { DesignDocCardData } from '../../../types/workflowCard';
+import { Collapsible } from '../Collapsible';
 
 export function DesignDocCard({ data }: { data: DesignDocCardData }) {
   const { t } = useTranslation('simpleMode');
@@ -26,7 +28,7 @@ export function DesignDocCard({ data }: { data: DesignDocCardData }) {
             onClick={() => setExpanded((v) => !v)}
             className="text-2xs text-teal-600 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-200 transition-colors"
           >
-            {expanded ? '▲' : '▼'}
+            <ChevronRightIcon className={clsx('w-3.5 h-3.5 transition-transform duration-200', expanded && 'rotate-90')} />
           </button>
         </div>
       </div>
@@ -45,7 +47,7 @@ export function DesignDocCard({ data }: { data: DesignDocCardData }) {
         </div>
 
         {/* Expanded details */}
-        {expanded && (
+        <Collapsible open={expanded}>
           <div className="space-y-2 pt-1 border-t border-teal-200 dark:border-teal-800">
             {/* Component names */}
             {data.componentNames.length > 0 && (
@@ -92,7 +94,7 @@ export function DesignDocCard({ data }: { data: DesignDocCardData }) {
               </p>
             )}
           </div>
-        )}
+        </Collapsible>
       </div>
     </div>
   );

@@ -184,7 +184,33 @@
 
   "output": {
     "label": "Output",
-    "toggleTitle": "Toggle detailed output panel"
+    "toggleTitle": "Toggle detailed output panel",
+    "headerLines": "output ({{count}} lines)",
+    "running": "running",
+    "done": "done",
+    "failed": "failed",
+    "processing": "Processing...",
+    "waiting": "Waiting for output...",
+    "scrollToBottom": "Scroll to bottom",
+    "collapse": "collapse",
+    "expand": "expand",
+    "events": "{{count}} events",
+    "toolActivity": "Tool activity ({{count}} events)",
+    "analysisActivity": "Analysis activity ({{count}} events)",
+    "toolCalls": "{{calls}} calls, {{results}} results",
+    "analysisUpdates": "{{count}} evidence/progress updates",
+    "subAgent": "Sub-agent",
+    "result": "Result",
+    "error": "Error"
+  },
+  "executionLogs": {
+    "title": "Execution Logs"
+  },
+  "analysisCoverage": {
+    "title": "Analysis Coverage",
+    "observed": "Observed",
+    "readDepth": "Read Depth",
+    "testsRead": "Tests Read"
   },
 
   "emptyChat": {
@@ -577,5 +603,23 @@
     "pdfExported": "PDF exported.",
     "pngExported": "PNG exported.",
     "jpgExported": "JPG exported."
+  },
+
+  "chatToolbar": {
+    "attachFile": "Attach file",
+    "toggleOutput": "Output",
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancel": "Cancel"
+  },
+  "rightPanel": {
+    "outputTab": "Output",
+    "gitTab": "Git"
+  },
+  "edgeButton": {
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar",
+    "expandPanel": "Expand panel",
+    "collapsePanel": "Collapse panel"
   }
 }

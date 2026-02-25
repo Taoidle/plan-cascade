@@ -73,14 +73,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+        <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in-0 duration-200" />
         <Dialog.Content
           className={clsx(
             'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
-            'w-full max-w-4xl max-h-[90vh]',
+            'w-full max-w-4xl h-[85vh]',
             'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
             'flex flex-col',
-            'focus:outline-none'
+            'focus:outline-none',
+            'animate-in fade-in-0 zoom-in-95 duration-200'
           )}
           aria-describedby={undefined}
         >

@@ -32,9 +32,9 @@
   --surface-sunken: #f9fafb;
 
   /* -- Backgrounds ----------------------------------------------- */
-  --bg-app: #f9fafb;
-  --bg-subtle: #f3f4f6;
-  --bg-muted: #e5e7eb;
+  --bg-app: #f3f4f6;
+  --bg-subtle: #e5e7eb;
+  --bg-muted: #d1d5db;
 
   /* -- Borders --------------------------------------------------- */
   --border-default: #e5e7eb;

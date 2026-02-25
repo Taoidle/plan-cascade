@@ -46,6 +46,13 @@
     "settingsTooltip": "Settings"
   },
 
+  "topNavBar": {
+    "menuTooltip": "Navigation menu",
+    "searchTooltip": "Search commands",
+    "themeTooltip": "Toggle theme",
+    "settingsTooltip": "Settings"
+  },
+
   "modeSwitch": {
     "label": "Select Mode",
     "simple": {
