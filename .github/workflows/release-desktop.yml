@@ -3,8 +3,8 @@ name: Release Desktop Application
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-desktop"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+-desktop"
 
 permissions:
   contents: write
@@ -34,17 +34,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: desktop/package-lock.json
+          cache: "pnpm"
+          cache-dependency-path: desktop/pnpm-lock.yaml
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -54,11 +72,11 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: desktop
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build frontend
         working-directory: desktop
-        run: npm run build
+        run: pnpm run build
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -97,13 +115,15 @@ jobs:
       - name: Extract version from tag
         id: version
         run: |
+          # Strip "refs/tags/v" prefix and "-desktop" suffix
           VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION=${VERSION%-desktop}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Check if prerelease
         id: prerelease
         run: |
-          if [[ "$GITHUB_REF" == *"-rc."* ]]; then
+          if [[ "${{ steps.version.outputs.VERSION }}" == *"-rc."* ]]; then
             echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
           else
             echo "IS_PRERELEASE=false" >> $GITHUB_OUTPUT
