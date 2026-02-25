@@ -17,7 +17,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import i18n from '../i18n';
 import { useExecutionStore } from './execution';
 import { useTaskModeStore, type TaskPrd, type StrategyAnalysis, type GateResult } from './taskMode';
-import { useSpecInterviewStore, type InterviewQuestion } from './specInterview';
+import { useSpecInterviewStore, type InterviewQuestion, type InterviewSession } from './specInterview';
 import { useSettingsStore } from './settings';
 import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
@@ -379,14 +379,30 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
         const workspacePath = useSettingsStore.getState().workspacePath;
         const { explorationResult } = get();
-        const session = await useSpecInterviewStore.getState().startInterview({
+        const interviewConfig = {
           description: state.taskDescription,
           flow_level: config.flowLevel,
           max_questions: config.flowLevel === 'quick' ? 5 : config.flowLevel === 'full' ? 15 : 10,
           first_principles: false,
           project_path: workspacePath,
           exploration_context: explorationResult ? JSON.stringify(explorationResult) : null,
-        });
+        };
+
+        // Retry with exponential backoff if backend not yet initialized (race with init_app)
+        const maxRetries = 5;
+        const baseDelay = 500;
+        let session: InterviewSession | null = null;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          session = await useSpecInterviewStore.getState().startInterview(interviewConfig);
+          if (session) break;
+          const interviewError = useSpecInterviewStore.getState().error || '';
+          if (interviewError.includes('not initialized') && attempt < maxRetries - 1) {
+            await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt)));
+            useSpecInterviewStore.getState().clearError();
+            continue;
+          }
+          break;
+        }
 
         if (!session) {
           const interviewError = useSpecInterviewStore.getState().error;
