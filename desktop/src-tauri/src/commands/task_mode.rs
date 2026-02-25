@@ -274,6 +274,66 @@ pub struct TaskExecutionStatus {
 }
 
 // ============================================================================
+// Persona & New Phase Types
+// ============================================================================
+
+/// Result of the requirement analysis phase (ProductManager persona).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequirementAnalysisResult {
+    /// Natural language PM analysis (shown in card as markdown)
+    pub analysis: String,
+    /// Key requirements identified by the PM
+    pub key_requirements: Vec<String>,
+    /// Gaps identified in the requirements
+    pub identified_gaps: Vec<String>,
+    /// Suggested scope summary
+    pub suggested_scope: String,
+    /// Persona role that produced this analysis
+    pub persona_role: String,
+}
+
+/// A concern identified during architecture review.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewConcern {
+    /// Severity: "high", "medium", or "low"
+    pub severity: String,
+    /// Description of the concern
+    pub description: String,
+}
+
+/// A suggested PRD modification from the architect.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrdModification {
+    /// Story ID to modify (or "new" for new story suggestion)
+    pub story_id: String,
+    /// Action: "modify", "add", "remove", "split"
+    pub action: String,
+    /// Reason for the modification
+    pub reason: String,
+}
+
+/// Result of the architecture review phase (SoftwareArchitect persona).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchitectureReviewResult {
+    /// Natural language architecture analysis (shown in card as markdown)
+    pub analysis: String,
+    /// Architectural concerns with severity
+    pub concerns: Vec<ReviewConcern>,
+    /// Improvement suggestions
+    pub suggestions: Vec<String>,
+    /// Suggested PRD modifications (user can accept/reject)
+    pub prd_modifications: Vec<PrdModification>,
+    /// Whether the architect approves the PRD as-is
+    pub approved: bool,
+    /// Persona role that produced this analysis
+    pub persona_role: String,
+}
+
+// ============================================================================
 // State
 // ============================================================================
 
@@ -632,9 +692,7 @@ pub async fn explore_project(
             let store = index_manager.index_store();
             let project_path_str = project_path.to_string_lossy();
             match store.get_project_summary(&project_path_str) {
-                Ok(summary) => {
-                    Some(exploration::deterministic_explore(&summary, &project_path))
-                }
+                Ok(summary) => Some(exploration::deterministic_explore(&summary, &project_path)),
                 Err(e) => {
                     eprintln!("[explore_project] IndexStore summary failed: {}", e);
                     None
@@ -750,18 +808,14 @@ pub async fn explore_project(
                     crate::services::orchestrator::OrchestratorService::new(config);
 
                 // Wire database pool for CodebaseSearch
-                if let Ok(pool) = app_state
-                    .with_database(|db| Ok(db.pool().clone()))
-                    .await
-                {
+                if let Ok(pool) = app_state.with_database(|db| Ok(db.pool().clone())).await {
                     coordinator = coordinator.with_database(pool);
                 }
 
                 // Create event channel (drain events in background)
-                let (tx, mut rx) =
-                    tokio::sync::mpsc::channel::<crate::services::streaming::UnifiedStreamEvent>(
-                        256,
-                    );
+                let (tx, mut rx) = tokio::sync::mpsc::channel::<
+                    crate::services::streaming::UnifiedStreamEvent,
+                >(256);
                 let session_id_clone = session_id.clone();
                 let app_handle_clone = app_handle.clone();
                 tokio::spawn(async move {
@@ -802,7 +856,10 @@ pub async fn explore_project(
                 }
             }
             Err(e) => {
-                eprintln!("[explore_project] Provider resolution failed for LLM exploration: {}", e);
+                eprintln!(
+                    "[explore_project] Provider resolution failed for LLM exploration: {}",
+                    e
+                );
                 // Non-blocking: continue with deterministic-only result
             }
         }
@@ -1585,6 +1642,385 @@ pub async fn exit_task_mode(
         _ => Ok(CommandResponse::err(
             "Invalid session ID or no active session",
         )),
+    }
+}
+
+// ============================================================================
+// Requirement Analysis & Architecture Review
+// ============================================================================
+
+/// Run requirement analysis using the ProductManager persona.
+///
+/// Uses the Expert+Formatter pipeline to produce a structured analysis of
+/// requirements from the task description, interview results, and exploration context.
+/// The expert step produces natural language analysis; the formatter step
+/// extracts structured key requirements, gaps, and scope.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn run_requirement_analysis(
+    session_id: String,
+    task_description: String,
+    interview_result: Option<String>,
+    exploration_context: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+    apiKey: Option<String>,
+    base_url: Option<String>,
+    baseUrl: Option<String>,
+    app_state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, TaskModeState>,
+) -> Result<CommandResponse<RequirementAnalysisResult>, String> {
+    use crate::services::persona::{PersonaRegistry, PersonaRole};
+
+    // Validate session
+    {
+        let session_guard = state.session.read().await;
+        match session_guard.as_ref() {
+            Some(s) if s.session_id == session_id => {}
+            _ => {
+                return Ok(CommandResponse::err(
+                    "Invalid session ID or no active session",
+                ))
+            }
+        }
+    }
+
+    // Resolve provider/model
+    let resolved_provider = match provider {
+        Some(ref p) if !p.is_empty() => p.clone(),
+        _ => match app_state
+            .with_database(|db| db.get_setting("llm_provider"))
+            .await
+        {
+            Ok(Some(p)) if !p.is_empty() => p,
+            _ => "anthropic".to_string(),
+        },
+    };
+    let resolved_model = match model {
+        Some(ref m) if !m.is_empty() => m.clone(),
+        _ => match app_state
+            .with_database(|db| db.get_setting("llm_model"))
+            .await
+        {
+            Ok(Some(m)) if !m.is_empty() => m,
+            _ => match resolved_provider.as_str() {
+                "anthropic" => "claude-sonnet-4-20250514".to_string(),
+                "openai" => "gpt-4o".to_string(),
+                "deepseek" => "deepseek-chat".to_string(),
+                "ollama" => "qwen2.5-coder:14b".to_string(),
+                _ => "claude-sonnet-4-20250514".to_string(),
+            },
+        },
+    };
+
+    let llm_provider = match resolve_llm_provider(
+        &resolved_provider,
+        &resolved_model,
+        api_key.or(apiKey),
+        base_url.or(baseUrl),
+        &app_state,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e)),
+    };
+
+    let persona = PersonaRegistry::get(PersonaRole::ProductManager);
+
+    // Build phase instructions for the PM expert
+    let phase_instructions = format!(
+        r#"Analyze the following task and produce a thorough requirements analysis.
+
+## Task Description
+{task_description}
+{}{}
+
+## Your Analysis Should Cover
+1. **Key Requirements**: List the essential functional and non-functional requirements
+2. **Identified Gaps**: What's missing or ambiguous in the requirements?
+3. **Suggested Scope**: Define a clear, achievable scope for this task
+4. **Risk Assessment**: Any requirements that could be problematic
+5. **Priority Ranking**: Which requirements are most critical
+
+Be specific and actionable. Reference concrete technical details when available."#,
+        interview_result
+            .as_ref()
+            .map(|i| format!("\n\n## Interview Results\n{}", i))
+            .unwrap_or_default(),
+        exploration_context
+            .as_ref()
+            .map(|e| format!("\n\n## Project Context\n{}", e))
+            .unwrap_or_default(),
+    );
+
+    let target_schema = r#"{
+  "analysis": "string - Natural language analysis in markdown format",
+  "key_requirements": ["string - Each key requirement as a clear statement"],
+  "identified_gaps": ["string - Each gap or ambiguity found"],
+  "suggested_scope": "string - Clear scope definition"
+}"#;
+
+    use crate::services::llm::types::Message;
+
+    let user_messages = vec![Message::user(format!(
+        "Analyze the requirements for: {}",
+        task_description
+    ))];
+
+    match crate::services::persona::run_expert_formatter::<serde_json::Value>(
+        llm_provider.clone(),
+        None,
+        &persona,
+        &phase_instructions,
+        exploration_context.as_deref(),
+        user_messages,
+        target_schema,
+        None,
+    )
+    .await
+    {
+        Ok(result) => {
+            let structured = &result.structured_output;
+            Ok(CommandResponse::ok(RequirementAnalysisResult {
+                analysis: result.expert_analysis,
+                key_requirements: structured
+                    .get("key_requirements")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                identified_gaps: structured
+                    .get("identified_gaps")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                suggested_scope: structured
+                    .get("suggested_scope")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Not specified")
+                    .to_string(),
+                persona_role: "ProductManager".to_string(),
+            }))
+        }
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Requirement analysis failed: {}",
+            e
+        ))),
+    }
+}
+
+/// Run architecture review using the SoftwareArchitect persona.
+///
+/// Reviews the approved PRD from an architectural perspective.
+/// The architect identifies concerns, suggests improvements, and may
+/// propose PRD modifications. Returns an interactive result that
+/// the frontend can display for user approval.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn run_architecture_review(
+    session_id: String,
+    prd_json: String,
+    exploration_context: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+    apiKey: Option<String>,
+    base_url: Option<String>,
+    baseUrl: Option<String>,
+    app_state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, TaskModeState>,
+) -> Result<CommandResponse<ArchitectureReviewResult>, String> {
+    use crate::services::persona::{PersonaRegistry, PersonaRole};
+
+    // Validate session
+    {
+        let session_guard = state.session.read().await;
+        match session_guard.as_ref() {
+            Some(s) if s.session_id == session_id => {}
+            _ => {
+                return Ok(CommandResponse::err(
+                    "Invalid session ID or no active session",
+                ))
+            }
+        }
+    }
+
+    // Resolve provider/model
+    let resolved_provider = match provider {
+        Some(ref p) if !p.is_empty() => p.clone(),
+        _ => match app_state
+            .with_database(|db| db.get_setting("llm_provider"))
+            .await
+        {
+            Ok(Some(p)) if !p.is_empty() => p,
+            _ => "anthropic".to_string(),
+        },
+    };
+    let resolved_model = match model {
+        Some(ref m) if !m.is_empty() => m.clone(),
+        _ => match app_state
+            .with_database(|db| db.get_setting("llm_model"))
+            .await
+        {
+            Ok(Some(m)) if !m.is_empty() => m,
+            _ => match resolved_provider.as_str() {
+                "anthropic" => "claude-sonnet-4-20250514".to_string(),
+                "openai" => "gpt-4o".to_string(),
+                "deepseek" => "deepseek-chat".to_string(),
+                "ollama" => "qwen2.5-coder:14b".to_string(),
+                _ => "claude-sonnet-4-20250514".to_string(),
+            },
+        },
+    };
+
+    let llm_provider = match resolve_llm_provider(
+        &resolved_provider,
+        &resolved_model,
+        api_key.or(apiKey),
+        base_url.or(baseUrl),
+        &app_state,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e)),
+    };
+
+    let persona = PersonaRegistry::get(PersonaRole::SoftwareArchitect);
+
+    // Build phase instructions for the architect expert
+    let phase_instructions = format!(
+        r#"Review the following PRD (Product Requirements Document) from an architectural perspective.
+
+## PRD
+{prd_json}
+{}
+
+## Your Review Should Cover
+1. **Architectural Concerns**: Identify potential issues with the proposed stories
+   - Severity levels: "high" (blocking), "medium" (should address), "low" (nice to have)
+2. **Improvement Suggestions**: General architectural improvements
+3. **PRD Modifications**: Specific changes to stories if needed
+   - Actions: "modify" (change existing story), "add" (new story needed), "remove" (unnecessary), "split" (too large)
+4. **Overall Assessment**: Whether the PRD is architecturally sound
+
+Consider: scalability, maintainability, separation of concerns, error handling,
+testing strategy, dependency management, and integration patterns."#,
+        exploration_context
+            .as_ref()
+            .map(|e| format!("\n\n## Project Context\n{}", e))
+            .unwrap_or_default(),
+    );
+
+    let target_schema = r#"{
+  "analysis": "string - Natural language architecture analysis in markdown",
+  "concerns": [{"severity": "high|medium|low", "description": "string"}],
+  "suggestions": ["string - Each improvement suggestion"],
+  "prd_modifications": [{"story_id": "string", "action": "modify|add|remove|split", "reason": "string"}],
+  "approved": "boolean - Whether the PRD is architecturally sound as-is"
+}"#;
+
+    use crate::services::llm::types::Message;
+
+    let user_messages = vec![Message::user(format!(
+        "Review this PRD from an architectural perspective:\n\n{}",
+        prd_json
+    ))];
+
+    match crate::services::persona::run_expert_formatter::<serde_json::Value>(
+        llm_provider.clone(),
+        None,
+        &persona,
+        &phase_instructions,
+        exploration_context.as_deref(),
+        user_messages,
+        target_schema,
+        None,
+    )
+    .await
+    {
+        Ok(result) => {
+            let structured = &result.structured_output;
+            Ok(CommandResponse::ok(ArchitectureReviewResult {
+                analysis: result.expert_analysis,
+                concerns: structured
+                    .get("concerns")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| {
+                                Some(ReviewConcern {
+                                    severity: v
+                                        .get("severity")
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("medium")
+                                        .to_string(),
+                                    description: v
+                                        .get("description")
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                suggestions: structured
+                    .get("suggestions")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                prd_modifications: structured
+                    .get("prd_modifications")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| {
+                                Some(PrdModification {
+                                    story_id: v
+                                        .get("story_id")
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    action: v
+                                        .get("action")
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("modify")
+                                        .to_string(),
+                                    reason: v
+                                        .get("reason")
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                approved: structured
+                    .get("approved")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                persona_role: "SoftwareArchitect".to_string(),
+            }))
+        }
+        Err(e) => Ok(CommandResponse::err(format!(
+            "Architecture review failed: {}",
+            e
+        ))),
     }
 }
 

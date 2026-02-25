@@ -36,6 +36,8 @@ pub struct PersistedInterviewState {
     pub created_at: String,
     /// Last updated timestamp (ISO-8601)
     pub updated_at: String,
+    /// JSON-serialized conversation context for LLM-driven BA interviews
+    pub conversation_context: String,
 }
 
 /// A single turn in the interview conversation
@@ -91,10 +93,17 @@ impl InterviewStateManager {
                 project_path TEXT,
                 spec_data TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                conversation_context TEXT NOT NULL DEFAULT '{}'
             )",
             [],
         )?;
+
+        // Migration: add conversation_context column for existing databases
+        let _ = conn.execute(
+            "ALTER TABLE interviews ADD COLUMN conversation_context TEXT NOT NULL DEFAULT '{}'",
+            [],
+        );
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS interview_turns (
@@ -142,8 +151,9 @@ impl InterviewStateManager {
 
         conn.execute(
             "INSERT INTO interviews (id, status, phase, flow_level, first_principles, max_questions,
-             question_cursor, description, project_path, spec_data, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             question_cursor, description, project_path, spec_data, created_at, updated_at,
+             conversation_context)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 state.id,
                 state.status,
@@ -157,6 +167,7 @@ impl InterviewStateManager {
                 state.spec_data,
                 state.created_at,
                 state.updated_at,
+                state.conversation_context,
             ],
         )?;
 
@@ -172,7 +183,8 @@ impl InterviewStateManager {
 
         let result = conn.query_row(
             "SELECT id, status, phase, flow_level, first_principles, max_questions,
-             question_cursor, description, project_path, spec_data, created_at, updated_at
+             question_cursor, description, project_path, spec_data, created_at, updated_at,
+             conversation_context
              FROM interviews WHERE id = ?1",
             params![id],
             |row| {
@@ -192,6 +204,7 @@ impl InterviewStateManager {
                     spec_data: row.get(9)?,
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
+                    conversation_context: row.get(12)?,
                 })
             },
         );
@@ -213,7 +226,8 @@ impl InterviewStateManager {
         conn.execute(
             "UPDATE interviews SET status = ?2, phase = ?3, flow_level = ?4,
              first_principles = ?5, max_questions = ?6, question_cursor = ?7,
-             description = ?8, project_path = ?9, spec_data = ?10, updated_at = ?11
+             description = ?8, project_path = ?9, spec_data = ?10, updated_at = ?11,
+             conversation_context = ?12
              WHERE id = ?1",
             params![
                 state.id,
@@ -227,6 +241,7 @@ impl InterviewStateManager {
                 state.project_path,
                 state.spec_data,
                 state.updated_at,
+                state.conversation_context,
             ],
         )?;
 
@@ -247,7 +262,8 @@ impl InterviewStateManager {
             if let Some(status) = status_filter {
                 (
                     "SELECT id, status, phase, flow_level, first_principles, max_questions,
-                 question_cursor, description, project_path, spec_data, created_at, updated_at
+                 question_cursor, description, project_path, spec_data, created_at, updated_at,
+                 conversation_context
                  FROM interviews WHERE status = ?1 ORDER BY updated_at DESC"
                         .to_string(),
                     vec![Box::new(status.to_string()) as Box<dyn rusqlite::types::ToSql>],
@@ -255,7 +271,8 @@ impl InterviewStateManager {
             } else {
                 (
                     "SELECT id, status, phase, flow_level, first_principles, max_questions,
-                 question_cursor, description, project_path, spec_data, created_at, updated_at
+                 question_cursor, description, project_path, spec_data, created_at, updated_at,
+                 conversation_context
                  FROM interviews ORDER BY updated_at DESC"
                         .to_string(),
                     vec![],
@@ -283,6 +300,7 @@ impl InterviewStateManager {
                     spec_data: row.get(9)?,
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
+                    conversation_context: row.get(12)?,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -427,6 +445,7 @@ mod tests {
             spec_data: "{}".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
+            conversation_context: "{}".to_string(),
         };
 
         mgr.create_interview(&state).unwrap();
@@ -458,6 +477,7 @@ mod tests {
             spec_data: "{}".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
+            conversation_context: "{}".to_string(),
         };
 
         mgr.create_interview(&state).unwrap();
@@ -490,6 +510,7 @@ mod tests {
             spec_data: "{}".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
+            conversation_context: "{}".to_string(),
         };
         mgr.create_interview(&state).unwrap();
 
@@ -548,6 +569,7 @@ mod tests {
                 spec_data: "{}".to_string(),
                 created_at: format!("2024-01-01T00:00:{:02}Z", i),
                 updated_at: format!("2024-01-01T00:00:{:02}Z", i),
+                conversation_context: "{}".to_string(),
             };
             mgr.create_interview(&state).unwrap();
         }
@@ -581,6 +603,7 @@ mod tests {
             spec_data: "{}".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
+            conversation_context: "{}".to_string(),
         };
         mgr.create_interview(&state).unwrap();
 

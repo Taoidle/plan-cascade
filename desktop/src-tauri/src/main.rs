@@ -212,6 +212,8 @@ fn main() {
             plan_cascade_desktop::commands::task_mode::get_task_execution_report,
             plan_cascade_desktop::commands::task_mode::exit_task_mode,
             plan_cascade_desktop::commands::task_mode::prepare_design_doc_for_task,
+            plan_cascade_desktop::commands::task_mode::run_requirement_analysis,
+            plan_cascade_desktop::commands::task_mode::run_architecture_review,
             // Spec Interview commands
             plan_cascade_desktop::commands::spec_interview::start_spec_interview,
             plan_cascade_desktop::commands::spec_interview::submit_interview_answer,

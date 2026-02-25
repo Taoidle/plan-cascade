@@ -63,6 +63,7 @@ export interface InterviewConfig {
   max_questions: number;
   first_principles: boolean;
   project_path: string | null;
+  exploration_context: string | null;
 }
 
 /** Compiled spec output from the backend */
@@ -79,6 +80,14 @@ export interface CompileOptions {
   tdd_mode: string | null;
   confirm: boolean;
   no_confirm: boolean;
+}
+
+/** LLM provider settings for BA-driven interviews */
+export interface InterviewProviderSettings {
+  provider?: string;
+  model?: string;
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 /** Standard command response from Tauri */
@@ -110,7 +119,11 @@ interface SpecInterviewState {
   /** Error message */
   error: string | null;
 
+  /** LLM provider settings for BA-driven mode */
+  providerSettings: InterviewProviderSettings | null;
+
   /** Actions */
+  setProviderSettings: (settings: InterviewProviderSettings | null) => void;
   startInterview: (config: InterviewConfig) => Promise<InterviewSession | null>;
   submitAnswer: (answer: string) => Promise<InterviewSession | null>;
   fetchState: (interviewId: string) => Promise<InterviewSession | null>;
@@ -129,6 +142,11 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
     compiling: false,
   },
   error: null,
+  providerSettings: null,
+
+  setProviderSettings: (settings: InterviewProviderSettings | null) => {
+    set({ providerSettings: settings });
+  },
 
   startInterview: async (config: InterviewConfig) => {
     set((state) => ({
@@ -138,9 +156,16 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
     }));
 
     try {
+      const { providerSettings } = get();
       const response = await invoke<CommandResponse<InterviewSession>>(
         'start_spec_interview',
-        { config }
+        {
+          config,
+          provider: providerSettings?.provider ?? null,
+          model: providerSettings?.model ?? null,
+          apiKey: providerSettings?.apiKey ?? null,
+          baseUrl: providerSettings?.baseUrl ?? null,
+        }
       );
 
       if (response.success && response.data) {
@@ -166,7 +191,7 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
   },
 
   submitAnswer: async (answer: string) => {
-    const { session } = get();
+    const { session, providerSettings } = get();
     if (!session) {
       set({ error: 'No active interview session' });
       return null;
@@ -180,7 +205,14 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
     try {
       const response = await invoke<CommandResponse<InterviewSession>>(
         'submit_interview_answer',
-        { interviewId: session.id, answer }
+        {
+          interviewId: session.id,
+          answer,
+          provider: providerSettings?.provider ?? null,
+          model: providerSettings?.model ?? null,
+          apiKey: providerSettings?.apiKey ?? null,
+          baseUrl: providerSettings?.baseUrl ?? null,
+        }
       );
 
       if (response.success && response.data) {
@@ -298,6 +330,7 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
         compiling: false,
       },
       error: null,
+      providerSettings: null,
     });
   },
 

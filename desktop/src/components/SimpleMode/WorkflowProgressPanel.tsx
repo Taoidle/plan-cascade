@@ -14,10 +14,12 @@ import type { WorkflowPhase } from '../../types/workflowCard';
 const PHASE_STEPS: { phase: WorkflowPhase; labelKey: string }[] = [
   { phase: 'analyzing', labelKey: 'workflow.progress.phaseAnalyze' },
   { phase: 'configuring', labelKey: 'workflow.progress.phaseConfig' },
-  { phase: 'interviewing', labelKey: 'workflow.progress.phaseInterview' },
   { phase: 'exploring', labelKey: 'workflow.progress.phaseExplore' },
+  { phase: 'interviewing', labelKey: 'workflow.progress.phaseInterview' },
+  { phase: 'requirement_analysis', labelKey: 'workflow.progress.phaseRequirements' },
   { phase: 'generating_prd', labelKey: 'workflow.progress.phasePrd' },
   { phase: 'reviewing_prd', labelKey: 'workflow.progress.phaseReview' },
+  { phase: 'architecture_review', labelKey: 'workflow.progress.phaseArchReview' },
   { phase: 'generating_design_doc', labelKey: 'workflow.progress.phaseDesignDoc' },
   { phase: 'executing', labelKey: 'workflow.progress.phaseExecute' },
   { phase: 'completed', labelKey: 'workflow.progress.phaseDone' },
@@ -38,6 +40,8 @@ export function WorkflowProgressPanel() {
   const visibleSteps = PHASE_STEPS.filter((s) => {
     if (s.phase === 'interviewing' && !config.specInterviewEnabled) return false;
     if (s.phase === 'exploring' && config.flowLevel === 'quick') return false;
+    if (s.phase === 'requirement_analysis' && config.flowLevel === 'quick') return false;
+    if (s.phase === 'architecture_review' && config.flowLevel === 'quick') return false;
     return true;
   });
 

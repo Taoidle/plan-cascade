@@ -310,14 +310,46 @@
       "fileCount": "{{count}} ファイル"
     },
 
+    "persona": {
+      "TechLead": "テックリード",
+      "SeniorEngineer": "シニアエンジニア",
+      "BusinessAnalyst": "ビジネスアナリスト",
+      "ProductManager": "プロダクトマネージャー",
+      "SoftwareArchitect": "ソフトウェアアーキテクト",
+      "Developer": "デベロッパー",
+      "QaEngineer": "QAエンジニア",
+      "active": "{{name}} が作業中..."
+    },
+
+    "requirementAnalysis": {
+      "title": "要件分析",
+      "keyRequirements": "主要要件",
+      "gaps": "特定されたギャップ",
+      "scope": "推奨スコープ",
+      "fullAnalysis": "完全分析"
+    },
+
+    "architectureReview": {
+      "title": "アーキテクチャレビュー",
+      "concerns": "アーキテクチャの懸念事項",
+      "suggestions": "提案",
+      "prdChanges": "提案されたPRD変更",
+      "fullAnalysis": "完全分析",
+      "approve": "承認して続行",
+      "requestChanges": "選択した項目を適用してPRDを修正",
+      "approved": "承認済み"
+    },
+
     "progress": {
       "title": "ワークフロー進捗",
       "phaseAnalyze": "分析",
       "phaseConfig": "設定",
-      "phaseInterview": "インタビュー",
       "phaseExplore": "探索",
+      "phaseInterview": "インタビュー",
+      "phaseRequirements": "要件",
       "phasePrd": "PRD",
       "phaseReview": "レビュー",
+      "phaseArchReview": "アーキレビュー",
       "phaseDesignDoc": "設計",
       "phaseExecute": "実行",
       "phaseDone": "完了",
@@ -430,7 +462,14 @@
       "configUpdated": "設定が更新されました：{{details}}",
       "enhancingAnalysis": "AIで分析を強化中...",
       "exploringProject": "プロジェクト構造とコードベースを探索中...",
-      "explorationFailed": "プロジェクト探索に失敗しました（非ブロッキング）、続行します..."
+      "explorationFailed": "プロジェクト探索に失敗しました（非ブロッキング）、続行します...",
+      "analyzingRequirements": "プロダクトマネージャーが要件を分析中...",
+      "requirementAnalysisFailed": "要件分析を完了できませんでした。続行します...",
+      "reviewingArchitecture": "ソフトウェアアーキテクトがアーキテクチャをレビュー中...",
+      "architectureReviewFailed": "アーキテクチャレビューを完了できませんでした。続行します...",
+      "architectureApproved": "アーキテクチャレビューが承認されました。設計ドキュメントを生成中...",
+      "architectureRevisionRequested": "{{count}} 件のアーキテクチャ提案を適用中。PRDレビューに戻ります...",
+      "architectureReviewMaxRounds": "アーキテクチャレビューの上限に達しました（3ラウンド）。現在のPRDで続行します。"
     }
   },
 

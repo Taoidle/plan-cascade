@@ -17,6 +17,9 @@ import { CompletionReportCard } from './CompletionReportCard';
 import { ExplorationCard } from './ExplorationCard';
 import { FileChangeCard } from './FileChangeCard';
 import { TurnChangeSummaryCard } from './TurnChangeSummaryCard';
+import { RequirementAnalysisCard } from './RequirementAnalysisCard';
+import { ArchitectureReviewCard } from './ArchitectureReviewCard';
+import { PersonaIndicatorCard } from './PersonaIndicatorCard';
 import type {
   StrategyCardData,
   ConfigCardData,
@@ -32,6 +35,9 @@ import type {
   WorkflowErrorData,
   FileChangeCardData,
   TurnChangeSummaryCardData,
+  RequirementAnalysisCardData,
+  ArchitectureReviewCardData,
+  PersonaIndicatorData,
 } from '../../../types/workflowCard';
 
 export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
@@ -64,6 +70,12 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
       return <FileChangeCard data={payload.data as FileChangeCardData} />;
     case 'turn_change_summary':
       return <TurnChangeSummaryCard data={payload.data as TurnChangeSummaryCardData} />;
+    case 'requirement_analysis_card':
+      return <RequirementAnalysisCard data={payload.data as RequirementAnalysisCardData} />;
+    case 'architecture_review_card':
+      return <ArchitectureReviewCard data={payload.data as ArchitectureReviewCardData} interactive={payload.interactive} />;
+    case 'persona_indicator':
+      return <PersonaIndicatorCard data={payload.data as PersonaIndicatorData} />;
     default:
       return null;
   }

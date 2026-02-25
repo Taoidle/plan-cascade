@@ -310,14 +310,46 @@
       "fileCount": "{{count}} files"
     },
 
+    "persona": {
+      "TechLead": "Tech Lead",
+      "SeniorEngineer": "Senior Engineer",
+      "BusinessAnalyst": "Business Analyst",
+      "ProductManager": "Product Manager",
+      "SoftwareArchitect": "Software Architect",
+      "Developer": "Developer",
+      "QaEngineer": "QA Engineer",
+      "active": "{{name}} is working..."
+    },
+
+    "requirementAnalysis": {
+      "title": "Requirement Analysis",
+      "keyRequirements": "Key Requirements",
+      "gaps": "Identified Gaps",
+      "scope": "Suggested Scope",
+      "fullAnalysis": "Full Analysis"
+    },
+
+    "architectureReview": {
+      "title": "Architecture Review",
+      "concerns": "Architectural Concerns",
+      "suggestions": "Suggestions",
+      "prdChanges": "Suggested PRD Changes",
+      "fullAnalysis": "Full Analysis",
+      "approve": "Accept & Continue",
+      "requestChanges": "Apply Selected & Revise PRD",
+      "approved": "Approved"
+    },
+
     "progress": {
       "title": "Workflow Progress",
       "phaseAnalyze": "Analyze",
       "phaseConfig": "Config",
-      "phaseInterview": "Interview",
       "phaseExplore": "Explore",
+      "phaseInterview": "Interview",
+      "phaseRequirements": "Requirements",
       "phasePrd": "PRD",
       "phaseReview": "Review",
+      "phaseArchReview": "Arch Review",
       "phaseDesignDoc": "Design",
       "phaseExecute": "Execute",
       "phaseDone": "Done",
@@ -430,7 +462,14 @@
       "configUpdated": "Config updated: {{details}}",
       "enhancingAnalysis": "Enhancing analysis with AI...",
       "exploringProject": "Exploring project structure and codebase...",
-      "explorationFailed": "Project exploration failed (non-blocking), continuing..."
+      "explorationFailed": "Project exploration failed (non-blocking), continuing...",
+      "analyzingRequirements": "Analyzing requirements with Product Manager...",
+      "requirementAnalysisFailed": "Requirement analysis could not be completed. Continuing...",
+      "reviewingArchitecture": "Reviewing architecture with Software Architect...",
+      "architectureReviewFailed": "Architecture review could not be completed. Continuing...",
+      "architectureApproved": "Architecture review accepted. Generating design document...",
+      "architectureRevisionRequested": "Applying {{count}} architectural suggestions. Returning to PRD review...",
+      "architectureReviewMaxRounds": "Architecture review limit reached (3 rounds). Proceeding with current PRD."
     }
   },
 

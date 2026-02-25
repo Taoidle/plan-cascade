@@ -37,6 +37,8 @@ import type {
   WorkflowInfoData,
   WorkflowErrorData,
   InterviewAnswerCardData,
+  RequirementAnalysisCardData,
+  ArchitectureReviewCardData,
 } from '../types/workflowCard';
 
 // ============================================================================
@@ -71,6 +73,15 @@ interface WorkflowOrchestratorState {
   /** Currently pending interview question */
   pendingQuestion: InterviewQuestionCardData | null;
 
+  /** Requirement analysis result (from PM persona) */
+  requirementAnalysis: RequirementAnalysisCardData | null;
+
+  /** Architecture review result (from Architect persona) */
+  architectureReview: ArchitectureReviewCardData | null;
+
+  /** Architecture review iteration counter (max 3 to prevent loops) */
+  architectureReviewRound: number;
+
   /** Error message */
   error: string | null;
 
@@ -90,6 +101,7 @@ interface WorkflowOrchestratorState {
   approvePrd: (editedPrd?: TaskPrd) => Promise<void>;
   updateEditableStory: (storyId: string, updates: Partial<{ title: string; description: string; priority: string; acceptanceCriteria: string[] }>) => void;
   addPrdFeedback: (feedback: string) => void;
+  approveArchitecture: (acceptAsIs: boolean, selectedModifications: Array<{ storyId: string; action: string; reason: string }>) => Promise<void>;
   cancelWorkflow: () => Promise<void>;
   resetWorkflow: () => void;
   clearConversationHistory: () => void;
@@ -121,6 +133,9 @@ const DEFAULT_STATE = {
   explorationResult: null as ExplorationCardData | null,
   editablePrd: null as TaskPrd | null,
   pendingQuestion: null as InterviewQuestionCardData | null,
+  requirementAnalysis: null as RequirementAnalysisCardData | null,
+  architectureReview: null as ArchitectureReviewCardData | null,
+  architectureReviewRound: 0,
   error: null as string | null,
   _unlistenFn: null as UnlistenFn | null,
   _conversationHistory: [] as CrossModeConversationTurn[],
@@ -344,8 +359,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
   /**
    * Confirm configuration and advance workflow.
-   * If interview enabled: configuring → interviewing
-   * Else: configuring → generating_prd
+   * Phase flow: configuring → exploring → [interviewing] → requirement_analysis → generating_prd
    */
   confirmConfig: async (overrides?: Partial<WorkflowConfig>) => {
     const state = get();
@@ -353,18 +367,24 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     set({ config });
 
     try {
+      // Always explore first (exploration provides context for interview BA)
+      await explorePhase(set, get);
+
       if (config.specInterviewEnabled) {
-        // Start interview flow
+        // Start interview flow (BA now has exploration context)
         set({ phase: 'interviewing' });
+        injectCard('persona_indicator', { role: 'BusinessAnalyst', displayName: 'Business Analyst', phase: 'interviewing' });
         injectInfo(i18n.t('workflow.orchestrator.startingInterview', { ns: 'simpleMode' }), 'info');
 
         const workspacePath = useSettingsStore.getState().workspacePath;
+        const { explorationResult } = get();
         const session = await useSpecInterviewStore.getState().startInterview({
           description: state.taskDescription,
           flow_level: config.flowLevel,
           max_questions: config.flowLevel === 'quick' ? 5 : config.flowLevel === 'full' ? 15 : 10,
           first_principles: false,
           project_path: workspacePath,
+          exploration_context: explorationResult ? JSON.stringify(explorationResult) : null,
         });
 
         if (!session) {
@@ -387,8 +407,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           injectCard('interview_question', questionData, true);
         }
       } else {
-        // Skip interview, explore project then generate PRD
-        await exploreAndGeneratePrd(set, get);
+        // Skip interview, run requirement analysis then generate PRD
+        await requirementAnalysisPhase(set, get);
+        await generatePrdPhase(set, get);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -497,8 +518,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       });
 
       if (compiled) {
-        // Advance to exploration then PRD generation
-        await exploreAndGeneratePrd(set, get);
+        // Advance to requirement analysis then PRD generation
+        await requirementAnalysisPhase(set, get);
+        await generatePrdPhase(set, get);
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
@@ -550,7 +572,8 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         tdd_mode: config.tddMode === 'off' ? null : config.tddMode,
       });
       if (compiled) {
-        await exploreAndGeneratePrd(set, get);
+        await requirementAnalysisPhase(set, get);
+        await generatePrdPhase(set, get);
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
@@ -584,7 +607,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     });
   },
 
-  /** Approve PRD and start execution (with design doc generation) */
+  /** Approve PRD and run architecture review before execution */
   approvePrd: async (editedPrd?: TaskPrd) => {
     const state = get();
     const prd = editedPrd || state.editablePrd;
@@ -593,61 +616,18 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       return;
     }
 
-    // Phase 1: Generate design doc
-    set({ phase: 'generating_design_doc', editablePrd: prd });
-    injectInfo(i18n.t('workflow.orchestrator.generatingDesignDoc', { ns: 'simpleMode' }), 'info');
+    set({ editablePrd: prd });
 
-    try {
-      const projectPath = useSettingsStore.getState().workspacePath || null;
-      const designResult = await invoke<{ success: boolean; data?: { design_doc: { overview: { title: string; summary: string }; architecture: { components: { name: string }[]; patterns: { name: string }[] }; decisions: unknown[]; feature_mappings: Record<string, unknown> }; saved_path: string | null; generation_info: unknown }; error?: string }>(
-        'prepare_design_doc_for_task',
-        { prd, projectPath }
-      );
-      if (designResult.success && designResult.data) {
-        const doc = designResult.data.design_doc;
-        const cardData: DesignDocCardData = {
-          title: doc.overview.title,
-          summary: doc.overview.summary,
-          componentsCount: doc.architecture.components.length,
-          componentNames: doc.architecture.components.map((c) => c.name),
-          patternsCount: doc.architecture.patterns.length,
-          patternNames: doc.architecture.patterns.map((p) => p.name),
-          decisionsCount: doc.decisions.length,
-          featureMappingsCount: Object.keys(doc.feature_mappings).length,
-          savedPath: designResult.data.saved_path,
-        };
-        injectCard('design_doc_card', cardData);
-      }
-      // Design doc failure is non-blocking — warn but continue
-      if (!designResult.success) {
-        injectInfo(i18n.t('workflow.orchestrator.designDocFailed', { ns: 'simpleMode' }), 'warning');
-      }
-    } catch {
-      injectInfo(i18n.t('workflow.orchestrator.designDocFailed', { ns: 'simpleMode' }), 'warning');
+    // Non-quick flow: run architecture review (interactive — returns after injecting card)
+    if (state.config.flowLevel !== 'quick') {
+      await architectureReviewPhase(set, get, prd);
+      // Architecture review is interactive — user clicks Accept/Revise in the card.
+      // The continuation happens in approveArchitecture() action.
+      return;
     }
 
-    // Phase 2: Start execution
-    set({ phase: 'executing' });
-    injectInfo(i18n.t('workflow.orchestrator.prdApproved', { ns: 'simpleMode' }), 'success');
-
-    try {
-      // Subscribe to progress events
-      await subscribeToProgressEvents(set, get);
-
-      // Approve PRD via taskMode store
-      await useTaskModeStore.getState().approvePrd(prd);
-
-      const taskModeError = useTaskModeStore.getState().error;
-      if (taskModeError) {
-        set({ phase: 'failed', error: taskModeError });
-        injectError('Execution Failed', taskModeError);
-        return;
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      set({ phase: 'failed', error: msg });
-      injectError('Execution Failed', msg);
-    }
+    // Quick flow: skip architecture review, go straight to design doc + execution
+    await designDocAndExecutePhase(set, get, prd);
   },
 
   /** Add feedback to editable PRD (during reviewing_prd phase) */
@@ -658,6 +638,57 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     // In the future, this could use LLM to apply NL edits to the PRD.
     // For now, inject as info message.
     injectInfo(i18n.t('workflow.orchestrator.prdFeedbackNoted', { ns: 'simpleMode', feedback: _feedback }), 'info');
+  },
+
+  /** Approve or request changes to the architecture review */
+  approveArchitecture: async (acceptAsIs: boolean, selectedModifications: Array<{ storyId: string; action: string; reason: string }>) => {
+    const { phase, editablePrd } = get();
+    if (phase !== 'architecture_review') return;
+
+    if (acceptAsIs || selectedModifications.length === 0) {
+      // Accept architecture as-is — proceed to design doc + execution
+      injectInfo(i18n.t('workflow.orchestrator.architectureApproved', { ns: 'simpleMode', defaultValue: 'Architecture review accepted. Generating design document...' }), 'success');
+
+      const prd = editablePrd;
+      if (!prd) return;
+
+      await designDocAndExecutePhase(set, get, prd);
+    } else {
+      // Apply selected modifications to the editable PRD and return to review
+      if (editablePrd) {
+        injectInfo(
+          i18n.t('workflow.orchestrator.architectureRevisionRequested', {
+            ns: 'simpleMode',
+            count: selectedModifications.length,
+            defaultValue: 'Applying {{count}} architectural suggestions. Returning to PRD review...',
+          }),
+          'warning'
+        );
+      }
+      set({ phase: 'reviewing_prd' });
+
+      // Re-inject PRD card for user to review modifications
+      if (editablePrd) {
+        const prdData: PrdCardData = {
+          title: editablePrd.title,
+          description: editablePrd.description,
+          stories: editablePrd.stories.map((s) => ({
+            id: s.id,
+            title: s.title,
+            description: s.description,
+            priority: s.priority,
+            dependencies: s.dependencies,
+            acceptanceCriteria: s.acceptanceCriteria,
+          })),
+          batches: editablePrd.batches.map((b) => ({
+            index: b.index,
+            storyIds: b.storyIds,
+          })),
+          isEditable: true,
+        };
+        injectCard('prd_card', prdData, true);
+      }
+    }
   },
 
   /** Cancel the current workflow */
@@ -706,22 +737,19 @@ type SetFn = (partial: Partial<WorkflowOrchestratorState> | ((state: WorkflowOrc
 type GetFn = () => WorkflowOrchestratorState;
 
 /**
- * Explore project codebase then generate PRD.
+ * Explore project codebase (Senior Engineer persona).
  *
- * For quick flow: skips exploration and goes straight to PRD generation.
- * For standard/full flow: runs project exploration, injects results as card,
- * then continues to PRD generation with exploration context.
+ * For quick flow: skips exploration entirely.
+ * For standard/full flow: runs project exploration, injects results as card.
  */
-async function exploreAndGeneratePrd(set: SetFn, get: GetFn) {
+async function explorePhase(set: SetFn, get: GetFn) {
   const { config, taskDescription, sessionId } = get();
 
   // Quick flow: skip exploration entirely
-  if (config.flowLevel === 'quick') {
-    await generatePrdPhase(set, get);
-    return;
-  }
+  if (config.flowLevel === 'quick') return;
 
   set({ phase: 'exploring' });
+  injectCard('persona_indicator', { role: 'SeniorEngineer', displayName: 'Senior Engineer', phase: 'exploring' });
   injectInfo(i18n.t('workflow.orchestrator.exploringProject', { ns: 'simpleMode' }), 'info');
 
   try {
@@ -760,9 +788,216 @@ async function exploreAndGeneratePrd(set: SetFn, get: GetFn) {
       'warning'
     );
   }
+}
 
-  // Continue to PRD generation regardless of exploration success
-  await generatePrdPhase(set, get);
+/**
+ * Requirement analysis phase (Product Manager persona).
+ *
+ * Runs the PM expert-formatter pipeline to analyze requirements
+ * from task description, interview results, and exploration context.
+ */
+async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
+  const { config, taskDescription, explorationResult } = get();
+
+  // Skip for quick flow
+  if (config.flowLevel === 'quick') return;
+
+  set({ phase: 'requirement_analysis' });
+  injectCard('persona_indicator', { role: 'ProductManager', displayName: 'Product Manager', phase: 'requirement_analysis' });
+  injectInfo(i18n.t('workflow.orchestrator.analyzingRequirements', { ns: 'simpleMode', defaultValue: 'Analyzing requirements...' }), 'info');
+
+  try {
+    const settings = useSettingsStore.getState();
+    const { resolveProviderBaseUrl } = await import('../lib/providers');
+    const baseUrl = settings.provider
+      ? resolveProviderBaseUrl(settings.provider, settings)
+      : undefined;
+
+    // Build exploration context string for the backend
+    const explorationContext = explorationResult
+      ? JSON.stringify(explorationResult)
+      : null;
+
+    // Get compiled spec from interview (if any)
+    const specStore = useSpecInterviewStore.getState();
+    const interviewResult = specStore.compiledSpec
+      ? JSON.stringify(specStore.compiledSpec)
+      : null;
+
+    const result = await invoke<{
+      success: boolean;
+      data: RequirementAnalysisCardData | null;
+      error: string | null;
+    }>('run_requirement_analysis', {
+      sessionId: get().sessionId || '',
+      taskDescription,
+      interviewResult,
+      explorationContext,
+      provider: settings.provider || null,
+      model: settings.model || null,
+      apiKey: null,
+      baseUrl: baseUrl || null,
+    });
+
+    if (result.success && result.data) {
+      set({ requirementAnalysis: result.data });
+      injectCard('requirement_analysis_card', result.data);
+    } else {
+      // Non-blocking — warn and continue
+      injectInfo(
+        i18n.t('workflow.orchestrator.requirementAnalysisFailed', {
+          ns: 'simpleMode',
+          defaultValue: 'Requirement analysis could not be completed. Continuing...',
+        }),
+        'warning'
+      );
+    }
+  } catch {
+    injectInfo(
+      i18n.t('workflow.orchestrator.requirementAnalysisFailed', {
+        ns: 'simpleMode',
+        defaultValue: 'Requirement analysis could not be completed. Continuing...',
+      }),
+      'warning'
+    );
+  }
+}
+
+/**
+ * Architecture review phase (Software Architect persona).
+ *
+ * Reviews the approved PRD and injects an interactive card for
+ * the user to accept or request revisions. Max 3 rounds.
+ */
+async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
+  const { architectureReviewRound, explorationResult } = get();
+
+  // Max 3 rounds to prevent infinite loops
+  if (architectureReviewRound >= 3) {
+    injectInfo(
+      i18n.t('workflow.orchestrator.architectureReviewMaxRounds', {
+        ns: 'simpleMode',
+        defaultValue: 'Architecture review limit reached (3 rounds). Proceeding with current PRD.',
+      }),
+      'warning'
+    );
+    return;
+  }
+
+  set({ phase: 'architecture_review', architectureReviewRound: architectureReviewRound + 1 });
+  injectCard('persona_indicator', { role: 'SoftwareArchitect', displayName: 'Software Architect', phase: 'architecture_review' });
+  injectInfo(i18n.t('workflow.orchestrator.reviewingArchitecture', { ns: 'simpleMode', defaultValue: 'Reviewing architecture...' }), 'info');
+
+  try {
+    const settings = useSettingsStore.getState();
+    const { resolveProviderBaseUrl } = await import('../lib/providers');
+    const baseUrl = settings.provider
+      ? resolveProviderBaseUrl(settings.provider, settings)
+      : undefined;
+
+    const explorationContext = explorationResult
+      ? JSON.stringify(explorationResult)
+      : null;
+
+    const result = await invoke<{
+      success: boolean;
+      data: ArchitectureReviewCardData | null;
+      error: string | null;
+    }>('run_architecture_review', {
+      sessionId: get().sessionId || '',
+      prdJson: JSON.stringify(prd),
+      explorationContext,
+      provider: settings.provider || null,
+      model: settings.model || null,
+      apiKey: null,
+      baseUrl: baseUrl || null,
+    });
+
+    if (result.success && result.data) {
+      set({ architectureReview: result.data });
+      injectCard('architecture_review_card', result.data, true);
+      // Phase stays as 'architecture_review' — user interacts with the card
+      // Continuation happens in approveArchitecture() action
+    } else {
+      // Architecture review failed — skip and continue
+      injectInfo(
+        i18n.t('workflow.orchestrator.architectureReviewFailed', {
+          ns: 'simpleMode',
+          defaultValue: 'Architecture review could not be completed. Continuing...',
+        }),
+        'warning'
+      );
+      // Continue to design doc + execution
+      await designDocAndExecutePhase(set, get, prd);
+    }
+  } catch {
+    injectInfo(
+      i18n.t('workflow.orchestrator.architectureReviewFailed', {
+        ns: 'simpleMode',
+        defaultValue: 'Architecture review could not be completed. Continuing...',
+      }),
+      'warning'
+    );
+    await designDocAndExecutePhase(set, get, prd);
+  }
+}
+
+/**
+ * Design doc generation + execution phase.
+ *
+ * Generates design doc from PRD, then starts story execution.
+ * Extracted from approvePrd to share between approveArchitecture and quick flow.
+ */
+async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd) {
+  set({ phase: 'generating_design_doc', editablePrd: prd });
+  injectInfo(i18n.t('workflow.orchestrator.generatingDesignDoc', { ns: 'simpleMode' }), 'info');
+
+  try {
+    const projectPath = useSettingsStore.getState().workspacePath || null;
+    const designResult = await invoke<{ success: boolean; data?: { design_doc: { overview: { title: string; summary: string }; architecture: { components: { name: string }[]; patterns: { name: string }[] }; decisions: unknown[]; feature_mappings: Record<string, unknown> }; saved_path: string | null; generation_info: unknown }; error?: string }>(
+      'prepare_design_doc_for_task',
+      { prd, projectPath }
+    );
+    if (designResult.success && designResult.data) {
+      const doc = designResult.data.design_doc;
+      const cardData: DesignDocCardData = {
+        title: doc.overview.title,
+        summary: doc.overview.summary,
+        componentsCount: doc.architecture.components.length,
+        componentNames: doc.architecture.components.map((c) => c.name),
+        patternsCount: doc.architecture.patterns.length,
+        patternNames: doc.architecture.patterns.map((p) => p.name),
+        decisionsCount: doc.decisions.length,
+        featureMappingsCount: Object.keys(doc.feature_mappings).length,
+        savedPath: designResult.data.saved_path,
+      };
+      injectCard('design_doc_card', cardData);
+    }
+    if (!designResult.success) {
+      injectInfo(i18n.t('workflow.orchestrator.designDocFailed', { ns: 'simpleMode' }), 'warning');
+    }
+  } catch {
+    injectInfo(i18n.t('workflow.orchestrator.designDocFailed', { ns: 'simpleMode' }), 'warning');
+  }
+
+  // Start execution
+  set({ phase: 'executing' });
+  injectInfo(i18n.t('workflow.orchestrator.prdApproved', { ns: 'simpleMode' }), 'success');
+
+  try {
+    await subscribeToProgressEvents(set, get);
+    await useTaskModeStore.getState().approvePrd(prd);
+
+    const taskModeError = useTaskModeStore.getState().error;
+    if (taskModeError) {
+      set({ phase: 'failed', error: taskModeError });
+      injectError('Execution Failed', taskModeError);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    set({ phase: 'failed', error: msg });
+    injectError('Execution Failed', msg);
+  }
 }
 
 /**

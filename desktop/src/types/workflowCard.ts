@@ -19,8 +19,10 @@ export type WorkflowPhase =
   | 'configuring'
   | 'interviewing'
   | 'exploring'
+  | 'requirement_analysis'
   | 'generating_prd'
   | 'reviewing_prd'
+  | 'architecture_review'
   | 'generating_design_doc'
   | 'executing'
   | 'completed'
@@ -42,7 +44,10 @@ export type CardType =
   | 'workflow_error'
   | 'exploration_card'
   | 'file_change'
-  | 'turn_change_summary';
+  | 'turn_change_summary'
+  | 'requirement_analysis_card'
+  | 'architecture_review_card'
+  | 'persona_indicator';
 
 // ============================================================================
 // Card Payload (stored in StreamLine.content as JSON)
@@ -72,6 +77,9 @@ export interface CardDataMap {
   exploration_card: ExplorationCardData;
   file_change: FileChangeCardData;
   turn_change_summary: TurnChangeSummaryCardData;
+  requirement_analysis_card: RequirementAnalysisCardData;
+  architecture_review_card: ArchitectureReviewCardData;
+  persona_indicator: PersonaIndicatorData;
 }
 
 // ============================================================================
@@ -259,4 +267,34 @@ export interface TurnChangeSummaryCardData {
   }>;
   totalLinesAdded: number;
   totalLinesRemoved: number;
+}
+
+// ============================================================================
+// Persona & New Phase Card Data
+// ============================================================================
+
+/** Requirement analysis card data (ProductManager persona) */
+export interface RequirementAnalysisCardData {
+  personaRole: string;
+  analysis: string;
+  keyRequirements: string[];
+  identifiedGaps: string[];
+  suggestedScope: string;
+}
+
+/** Architecture review card data (SoftwareArchitect persona) */
+export interface ArchitectureReviewCardData {
+  personaRole: string;
+  analysis: string;
+  concerns: Array<{ severity: string; description: string }>;
+  suggestions: string[];
+  prdModifications: Array<{ storyId: string; action: string; reason: string }>;
+  approved: boolean;
+}
+
+/** Persona indicator badge data */
+export interface PersonaIndicatorData {
+  role: string;
+  displayName: string;
+  phase: string;
 }

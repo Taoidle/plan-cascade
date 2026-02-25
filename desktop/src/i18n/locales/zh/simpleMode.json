@@ -310,14 +310,46 @@
       "fileCount": "{{count}} 个文件"
     },
 
+    "persona": {
+      "TechLead": "技术负责人",
+      "SeniorEngineer": "高级工程师",
+      "BusinessAnalyst": "业务分析师",
+      "ProductManager": "产品经理",
+      "SoftwareArchitect": "软件架构师",
+      "Developer": "开发人员",
+      "QaEngineer": "QA 工程师",
+      "active": "{{name}} 正在工作..."
+    },
+
+    "requirementAnalysis": {
+      "title": "需求分析",
+      "keyRequirements": "关键需求",
+      "gaps": "发现的差距",
+      "scope": "建议范围",
+      "fullAnalysis": "完整分析"
+    },
+
+    "architectureReview": {
+      "title": "架构审查",
+      "concerns": "架构关注点",
+      "suggestions": "建议",
+      "prdChanges": "建议的 PRD 变更",
+      "fullAnalysis": "完整分析",
+      "approve": "接受并继续",
+      "requestChanges": "应用选中项并修改 PRD",
+      "approved": "已批准"
+    },
+
     "progress": {
       "title": "工作流进度",
       "phaseAnalyze": "分析",
       "phaseConfig": "配置",
-      "phaseInterview": "访谈",
       "phaseExplore": "探索",
+      "phaseInterview": "访谈",
+      "phaseRequirements": "需求",
       "phasePrd": "PRD",
       "phaseReview": "审查",
+      "phaseArchReview": "架构审查",
       "phaseDesignDoc": "设计",
       "phaseExecute": "执行",
       "phaseDone": "完成",
@@ -430,7 +462,14 @@
       "configUpdated": "配置已更新：{{details}}",
       "enhancingAnalysis": "正在使用AI增强分析...",
       "exploringProject": "正在探索项目结构和代码库...",
-      "explorationFailed": "项目探索失败（非阻塞），继续执行..."
+      "explorationFailed": "项目探索失败（非阻塞），继续执行...",
+      "analyzingRequirements": "产品经理正在分析需求...",
+      "requirementAnalysisFailed": "需求分析未能完成，继续执行...",
+      "reviewingArchitecture": "软件架构师正在审查架构...",
+      "architectureReviewFailed": "架构审查未能完成，继续执行...",
+      "architectureApproved": "架构审查已通过。正在生成设计文档...",
+      "architectureRevisionRequested": "正在应用 {{count}} 个架构建议。返回 PRD 审查...",
+      "architectureReviewMaxRounds": "架构审查已达上限（3轮）。使用当前 PRD 继续。"
     }
   },
 

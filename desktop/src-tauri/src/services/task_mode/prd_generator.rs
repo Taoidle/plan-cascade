@@ -11,6 +11,7 @@ use tracing::debug;
 use crate::commands::task_mode::{ConversationTurnInput, TaskPrd, TaskStory};
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
+use crate::services::persona::{PersonaRegistry, PersonaRole};
 use crate::services::task_mode::batch_executor::ExecutableStory;
 use crate::services::task_mode::calculate_batches;
 
@@ -18,13 +19,24 @@ use crate::services::task_mode::calculate_batches;
 const DEFAULT_MAX_PARALLEL: usize = 4;
 
 /// Token budget reserved for system prompt + PRD request + response.
-const PRD_RESERVED_TOKENS: usize = 4000;
+/// Increased from 4000 to 8000 to accommodate the two-step expert+formatter pipeline.
+const PRD_RESERVED_TOKENS: usize = 8000;
 
 /// Build the system prompt for PRD generation.
 ///
-/// Instructs the LLM to decompose a task description into stories with structured JSON output.
+/// Uses the ProductManager persona for domain-focused decomposition guidance,
+/// combined with strict JSON output instructions for the stories format.
 pub fn build_prd_system_prompt() -> String {
-    r#"You are a technical project planner. Your job is to decompose a task description into a set of implementation stories.
+    let persona = PersonaRegistry::get(PersonaRole::ProductManager);
+    let persona_prefix = format!(
+        "{}\n\n## Thinking Approach\n{}\n\n---\n\n",
+        persona.identity_prompt, persona.thinking_style
+    );
+
+    format!(
+        "{}{}",
+        persona_prefix,
+        r#"Your job is to decompose a task description into a set of implementation stories.
 
 Each story must have the following fields:
 - "id": A unique identifier (e.g., "story-001", "story-002")
@@ -61,7 +73,8 @@ Example output:
     "dependencies": ["story-001"],
     "acceptanceCriteria": ["POST /api/register accepts email and password", "Validation errors return 400 status"]
   }
-]"#.to_string()
+]"#
+    )
 }
 
 /// Build the user message for PRD generation from a task description.
@@ -1230,9 +1243,15 @@ Hope this helps!"#;
         ]"#;
 
         let provider = Arc::new(MockLlmProvider::with_text_response(mock_json));
-        let prd = generate_prd_with_llm(provider, "Build item management service", &[], 200_000, None)
-            .await
-            .unwrap();
+        let prd = generate_prd_with_llm(
+            provider,
+            "Build item management service",
+            &[],
+            200_000,
+            None,
+        )
+        .await
+        .unwrap();
 
         // Verify stories
         assert_eq!(prd.stories.len(), 4);

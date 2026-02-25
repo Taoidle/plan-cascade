@@ -13,6 +13,7 @@ use crate::services::spec_interview::interview::{InterviewConfig, InterviewSessi
 use crate::services::spec_interview::{
     CompileOptions, InterviewManager, InterviewStateManager, SpecCompiler,
 };
+use crate::state::AppState;
 use crate::storage::database::DbPool;
 
 /// State for the Spec Interview service, managed by Tauri
@@ -71,10 +72,19 @@ impl Default for SpecInterviewState {
 ///
 /// Creates a new interview with the given configuration and returns
 /// the initial session state with the first question.
+/// When provider params are given, uses LLM-driven BA for question generation.
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn start_spec_interview(
     config: InterviewConfig,
+    provider: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+    apiKey: Option<String>,
+    base_url: Option<String>,
+    baseUrl: Option<String>,
     state: State<'_, SpecInterviewState>,
+    app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<InterviewSession>, String> {
     let mgr_lock = state.interview_manager.read().await;
     let mgr = match SpecInterviewState::ensure_initialized_sync(&mgr_lock) {
@@ -82,9 +92,35 @@ pub async fn start_spec_interview(
         Err(e) => return Ok(CommandResponse::err(e)),
     };
 
-    match mgr.start_interview(config) {
-        Ok(session) => Ok(CommandResponse::ok(session)),
-        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    // Try to resolve LLM provider for BA-driven interview
+    let llm_provider = resolve_interview_provider(
+        provider,
+        model,
+        api_key.or(apiKey),
+        base_url.or(baseUrl),
+        &app_state,
+    )
+    .await;
+
+    match llm_provider {
+        Some(provider) => {
+            let config_clone = config.clone();
+            match mgr.start_interview_with_llm(config, provider).await {
+                Ok(session) => Ok(CommandResponse::ok(session)),
+                Err(e) => {
+                    // Fall back to deterministic on LLM failure
+                    tracing::warn!(error = %e, "LLM-driven interview start failed, falling back to deterministic");
+                    match mgr.start_interview(config_clone) {
+                        Ok(session) => Ok(CommandResponse::ok(session)),
+                        Err(e) => Ok(CommandResponse::err(e.to_string())),
+                    }
+                }
+            }
+        }
+        None => match mgr.start_interview(config) {
+            Ok(session) => Ok(CommandResponse::ok(session)),
+            Err(e) => Ok(CommandResponse::err(e.to_string())),
+        },
     }
 }
 
@@ -92,11 +128,20 @@ pub async fn start_spec_interview(
 ///
 /// Records the answer, updates the spec data, and returns the next question.
 /// If the interview is complete, returns the session with no current question.
+/// When provider params are given, uses LLM-driven BA for next question generation.
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn submit_interview_answer(
     interview_id: String,
     answer: String,
+    provider: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+    apiKey: Option<String>,
+    base_url: Option<String>,
+    baseUrl: Option<String>,
     state: State<'_, SpecInterviewState>,
+    app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<InterviewSession>, String> {
     let mgr_lock = state.interview_manager.read().await;
     let mgr = match SpecInterviewState::ensure_initialized_sync(&mgr_lock) {
@@ -104,9 +149,37 @@ pub async fn submit_interview_answer(
         Err(e) => return Ok(CommandResponse::err(e)),
     };
 
-    match mgr.submit_answer(&interview_id, &answer) {
-        Ok(session) => Ok(CommandResponse::ok(session)),
-        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    // Try to resolve LLM provider for BA-driven question generation
+    let llm_provider = resolve_interview_provider(
+        provider,
+        model,
+        api_key.or(apiKey),
+        base_url.or(baseUrl),
+        &app_state,
+    )
+    .await;
+
+    match llm_provider {
+        Some(provider) => {
+            match mgr
+                .submit_answer_with_llm(&interview_id, &answer, provider)
+                .await
+            {
+                Ok(session) => Ok(CommandResponse::ok(session)),
+                Err(e) => {
+                    // Fall back to deterministic on LLM failure
+                    tracing::warn!(error = %e, "LLM-driven answer submission failed, falling back to deterministic");
+                    match mgr.submit_answer(&interview_id, &answer) {
+                        Ok(session) => Ok(CommandResponse::ok(session)),
+                        Err(e) => Ok(CommandResponse::err(e.to_string())),
+                    }
+                }
+            }
+        }
+        None => match mgr.submit_answer(&interview_id, &answer) {
+            Ok(session) => Ok(CommandResponse::ok(session)),
+            Err(e) => Ok(CommandResponse::err(e.to_string())),
+        },
     }
 }
 
@@ -160,6 +233,67 @@ pub async fn compile_spec(
     }
 }
 
+/// Resolve an LLM provider for interview BA usage.
+///
+/// Follows the same resolution pattern as task_mode commands:
+/// provider: explicit param → database `llm_provider` → None (deterministic mode)
+/// model: explicit param → database `llm_model` → provider-specific default
+///
+/// Returns None if no provider can be resolved (falls back to deterministic mode).
+async fn resolve_interview_provider(
+    provider: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    app_state: &State<'_, AppState>,
+) -> Option<Arc<dyn crate::services::llm::provider::LlmProvider>> {
+    // Resolve provider name: explicit > database settings > none
+    let resolved_provider = match provider {
+        Some(ref p) if !p.is_empty() => p.clone(),
+        _ => match app_state
+            .with_database(|db| db.get_setting("llm_provider"))
+            .await
+        {
+            Ok(Some(p)) if !p.is_empty() => p,
+            _ => return None, // No provider configured — use deterministic mode
+        },
+    };
+
+    // Resolve model: explicit > database settings > provider-specific default
+    let resolved_model = match model {
+        Some(ref m) if !m.is_empty() => m.clone(),
+        _ => match app_state
+            .with_database(|db| db.get_setting("llm_model"))
+            .await
+        {
+            Ok(Some(m)) if !m.is_empty() => m,
+            _ => match resolved_provider.as_str() {
+                "anthropic" => "claude-sonnet-4-20250514".to_string(),
+                "openai" => "gpt-4o".to_string(),
+                "deepseek" => "deepseek-chat".to_string(),
+                "ollama" => "qwen2.5-coder:14b".to_string(),
+                _ => "claude-sonnet-4-20250514".to_string(),
+            },
+        },
+    };
+
+    match crate::commands::task_mode::resolve_llm_provider(
+        &resolved_provider,
+        &resolved_model,
+        api_key,
+        base_url,
+        app_state,
+    )
+    .await
+    {
+        Ok(provider) => Some(provider),
+        Err(e) => {
+            tracing::debug!(error = %e, "Could not resolve LLM provider for interview, using deterministic mode");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,6 +313,7 @@ mod tests {
             max_questions: 18,
             first_principles: false,
             project_path: Some("/tmp/test".to_string()),
+            exploration_context: None,
         };
 
         let json = serde_json::to_string(&config).unwrap();

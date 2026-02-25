@@ -3,10 +3,18 @@
 //! Manages multi-turn LLM-driven conversations that generate contextual
 //! follow-up questions to elicit project requirements.
 
+use std::sync::Arc;
+
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use uuid::Uuid;
 
+use crate::services::llm::provider::LlmProvider;
+use crate::services::llm::types::{LlmRequestOptions, Message};
+use crate::services::persona::prompt_builder;
+use crate::services::persona::registry::PersonaRegistry;
+use crate::services::persona::types::PersonaRole;
 use crate::utils::error::{AppError, AppResult};
 
 use super::state::{InterviewStateManager, InterviewTurn, PersistedInterviewState};
@@ -139,6 +147,9 @@ pub struct InterviewConfig {
     pub first_principles: bool,
     /// Optional project path for context
     pub project_path: Option<String>,
+    /// Optional exploration result for BA context
+    #[serde(default)]
+    pub exploration_context: Option<String>,
 }
 
 fn default_flow_level() -> String {
@@ -160,10 +171,17 @@ impl InterviewManager {
         Self { state_manager }
     }
 
-    /// Start a new interview session
+    /// Start a new interview session (deterministic fallback)
     pub fn start_interview(&self, config: InterviewConfig) -> AppResult<InterviewSession> {
         let interview_id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
+
+        // Store exploration context in conversation_context
+        let conversation_context = if let Some(ref ctx) = config.exploration_context {
+            serde_json::json!({ "exploration_context": ctx }).to_string()
+        } else {
+            "{}".to_string()
+        };
 
         let state = PersistedInterviewState {
             id: interview_id.clone(),
@@ -178,11 +196,68 @@ impl InterviewManager {
             spec_data: "{}".to_string(),
             created_at: now.clone(),
             updated_at: now,
+            conversation_context,
         };
 
         self.state_manager.create_interview(&state)?;
 
         let first_question = self.generate_next_question(&state)?;
+
+        Ok(InterviewSession {
+            id: interview_id,
+            status: "in_progress".to_string(),
+            phase: InterviewPhase::Overview,
+            flow_level: config.flow_level,
+            description: config.description,
+            question_cursor: 0,
+            max_questions: config.max_questions,
+            current_question: Some(first_question),
+            progress: 0.0,
+            history: vec![],
+        })
+    }
+
+    /// Start a new interview session with LLM-driven BA
+    pub async fn start_interview_with_llm(
+        &self,
+        config: InterviewConfig,
+        llm_provider: Arc<dyn LlmProvider>,
+    ) -> AppResult<InterviewSession> {
+        let interview_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+
+        let conversation_context = if let Some(ref ctx) = config.exploration_context {
+            serde_json::json!({
+                "exploration_context": ctx,
+                "mode": "llm_driven"
+            })
+            .to_string()
+        } else {
+            serde_json::json!({ "mode": "llm_driven" }).to_string()
+        };
+
+        let state = PersistedInterviewState {
+            id: interview_id.clone(),
+            status: "in_progress".to_string(),
+            phase: "overview".to_string(),
+            flow_level: config.flow_level.clone(),
+            first_principles: config.first_principles,
+            max_questions: config.max_questions,
+            question_cursor: 0,
+            description: config.description.clone(),
+            project_path: config.project_path.clone(),
+            spec_data: "{}".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            conversation_context,
+        };
+
+        self.state_manager.create_interview(&state)?;
+
+        // Generate first question using LLM BA
+        let first_question = self
+            .generate_next_question_llm(&state, &[], &llm_provider)
+            .await?;
 
         Ok(InterviewSession {
             id: interview_id,
@@ -272,6 +347,147 @@ impl InterviewManager {
             })
             .collect();
 
+        let progress = self.calculate_progress(&actual_phase, &state);
+
+        Ok(InterviewSession {
+            id: interview_id.to_string(),
+            status: state.status,
+            phase: actual_phase,
+            flow_level: state.flow_level,
+            description: state.description,
+            question_cursor: state.question_cursor,
+            max_questions: state.max_questions,
+            current_question: next_question,
+            progress,
+            history,
+        })
+    }
+
+    /// Submit an answer with LLM-driven BA for next question generation
+    pub async fn submit_answer_with_llm(
+        &self,
+        interview_id: &str,
+        answer: &str,
+        llm_provider: Arc<dyn LlmProvider>,
+    ) -> AppResult<InterviewSession> {
+        let mut state = self
+            .state_manager
+            .get_interview(interview_id)?
+            .ok_or_else(|| AppError::not_found(format!("Interview not found: {}", interview_id)))?;
+
+        if state.status == "finalized" || state.status == "complete" {
+            return Err(AppError::validation("Interview is already complete"));
+        }
+
+        // Load existing turns to get the last question text
+        let existing_turns = self.state_manager.get_turns(interview_id)?;
+        let last_question = existing_turns
+            .last()
+            .map(|t| t.question.clone())
+            .unwrap_or_else(|| "Initial question".to_string());
+
+        // Record the turn
+        let turn = InterviewTurn {
+            id: Uuid::new_v4().to_string(),
+            interview_id: interview_id.to_string(),
+            turn_number: state.question_cursor + 1,
+            phase: state.phase.clone(),
+            question: last_question,
+            answer: answer.to_string(),
+            field_name: "ba_response".to_string(),
+            created_at: Utc::now().to_rfc3339(),
+        };
+
+        self.state_manager.add_turn(&turn)?;
+        state.question_cursor += 1;
+
+        // Check if max questions reached
+        let force_complete = state.question_cursor >= state.max_questions;
+
+        // Load all turns for BA context
+        let all_turns = self.state_manager.get_turns(interview_id)?;
+
+        // Generate next question using LLM
+        let ba_result = if force_complete {
+            BaQuestionResult::Complete {
+                summary: "Maximum number of questions reached. Finalizing interview.".to_string(),
+            }
+        } else {
+            match self
+                .generate_next_question_llm(&state, &all_turns, &llm_provider)
+                .await
+            {
+                Ok(q) => BaQuestionResult::Question(q),
+                Err(e) if e.to_string().contains("INTERVIEW_COMPLETE") => {
+                    // BA determined interview has sufficient information
+                    BaQuestionResult::Complete {
+                        summary: "BA determined the interview has sufficient information."
+                            .to_string(),
+                    }
+                }
+                Err(e) => {
+                    // Real error — fall back to deterministic question generation
+                    debug!(error = %e, "LLM BA question generation failed, using deterministic fallback");
+                    match self.generate_next_question(&state) {
+                        Ok(q) => BaQuestionResult::Question(q),
+                        Err(_) => BaQuestionResult::Complete {
+                            summary: "Interview complete (fallback).".to_string(),
+                        },
+                    }
+                }
+            }
+        };
+
+        let (next_question, is_complete) = match ba_result {
+            BaQuestionResult::Question(q) => (Some(q), false),
+            BaQuestionResult::Complete { summary } => {
+                // Extract structured spec_data from conversation
+                if let Ok(spec_data) = self
+                    .extract_spec_data_from_conversation(&state, &all_turns, &llm_provider)
+                    .await
+                {
+                    state.spec_data =
+                        serde_json::to_string(&spec_data).unwrap_or_else(|_| "{}".to_string());
+                }
+
+                // Store summary in conversation_context
+                let mut ctx: serde_json::Value = serde_json::from_str(&state.conversation_context)
+                    .unwrap_or(serde_json::json!({}));
+                if let Some(o) = ctx.as_object_mut() {
+                    o.insert(
+                        "completion_summary".to_string(),
+                        serde_json::Value::String(summary),
+                    );
+                }
+                state.conversation_context =
+                    serde_json::to_string(&ctx).unwrap_or_else(|_| "{}".to_string());
+
+                (None, true)
+            }
+        };
+
+        if is_complete {
+            state.phase = InterviewPhase::Complete.as_str().to_string();
+            state.status = "finalized".to_string();
+        }
+
+        state.updated_at = Utc::now().to_rfc3339();
+        self.state_manager.update_interview(&state)?;
+
+        // Build history
+        let final_turns = self.state_manager.get_turns(interview_id)?;
+        let history: Vec<InterviewHistoryEntry> = final_turns
+            .into_iter()
+            .map(|t| InterviewHistoryEntry {
+                turn_number: t.turn_number,
+                phase: t.phase,
+                question: t.question,
+                answer: t.answer,
+                timestamp: t.created_at,
+            })
+            .collect();
+
+        let actual_phase = InterviewPhase::from_str(&state.phase);
         let progress = self.calculate_progress(&actual_phase, &state);
 
         Ok(InterviewSession {
@@ -1155,6 +1371,276 @@ impl InterviewManager {
             (state.question_cursor as f64 / state.max_questions.max(1) as f64).min(1.0) * 0.1;
         ((phase_progress + q_weight) * 100.0).min(100.0)
     }
+
+    // ========================================================================
+    // LLM-driven BA methods
+    // ========================================================================
+
+    /// Generate the next question using LLM-driven Business Analyst persona.
+    ///
+    /// Builds a full conversation history and asks the BA to generate the next
+    /// contextual follow-up question. Returns `[INTERVIEW_COMPLETE]` detection
+    /// as the BA deciding the interview has sufficient information.
+    async fn generate_next_question_llm(
+        &self,
+        state: &PersistedInterviewState,
+        turns: &[InterviewTurn],
+        provider: &Arc<dyn LlmProvider>,
+    ) -> AppResult<InterviewQuestion> {
+        let persona = PersonaRegistry::get(PersonaRole::BusinessAnalyst);
+
+        // Extract exploration context from conversation_context
+        let conv_ctx: serde_json::Value =
+            serde_json::from_str(&state.conversation_context).unwrap_or(serde_json::json!({}));
+        let exploration_context = conv_ctx
+            .get("exploration_context")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // Build BA instructions
+        let phase_instructions = format!(
+            r#"You are conducting a requirements interview for the following project:
+"{description}"
+
+Flow level: {flow_level} (quick = fewer questions, standard = balanced, full = comprehensive)
+Questions answered so far: {cursor} / {max}
+
+Based on the conversation so far, ask the next most valuable question to better understand the project requirements. Your question should:
+- Build on previous answers and not repeat what's already been discussed
+- Explore areas that haven't been covered yet
+- Be specific and actionable
+- Help create a complete project specification covering: goals, scope, requirements, interfaces, and stories
+
+When you have gathered enough information for a complete specification, respond with EXACTLY:
+[INTERVIEW_COMPLETE]
+Followed by a brief summary of the key findings.
+
+Otherwise, respond with ONLY your next question. No formatting, no preamble — just the question text."#,
+            description = state.description,
+            flow_level = state.flow_level,
+            cursor = state.question_cursor,
+            max = state.max_questions,
+        );
+
+        let system_prompt = prompt_builder::build_expert_system_prompt(
+            &persona,
+            &phase_instructions,
+            exploration_context.as_deref(),
+        );
+
+        // Build conversation messages from turns
+        let mut messages = Vec::new();
+
+        // Initial context message
+        messages.push(Message::user(format!(
+            "I want to build: {}. Please begin the requirements interview.",
+            state.description
+        )));
+
+        // Add conversation history as alternating assistant/user messages
+        for turn in turns {
+            messages.push(Message::assistant(&turn.question));
+            messages.push(Message::user(&turn.answer));
+        }
+
+        let options = LlmRequestOptions {
+            temperature_override: Some(persona.expert_temperature),
+            ..Default::default()
+        };
+
+        debug!(
+            interview_id = %state.id,
+            turn_count = turns.len(),
+            "BA: generating next question via LLM"
+        );
+
+        let response = provider
+            .send_message(messages, Some(system_prompt), vec![], options)
+            .await
+            .map_err(|e| AppError::command(format!("BA LLM call failed: {}", e)))?;
+
+        let response_text = response
+            .content
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or(response.thinking.as_deref())
+            .ok_or_else(|| AppError::parse("BA returned empty response".to_string()))?;
+
+        // Check for completion signal
+        if response_text.contains("[INTERVIEW_COMPLETE]") {
+            return Err(AppError::validation("INTERVIEW_COMPLETE"));
+        }
+
+        // Extract question text (strip any markdown formatting)
+        let question_text = response_text
+            .trim()
+            .trim_start_matches('#')
+            .trim_start_matches("**Question:**")
+            .trim_start_matches("Question:")
+            .trim()
+            .to_string();
+
+        if question_text.is_empty() {
+            return Err(AppError::parse("BA returned empty question".to_string()));
+        }
+
+        Ok(InterviewQuestion {
+            id: Uuid::new_v4().to_string(),
+            question: question_text,
+            phase: InterviewPhase::from_str(&state.phase),
+            hint: None,
+            required: false,
+            input_type: "textarea".to_string(),
+            field_name: "ba_response".to_string(),
+        })
+    }
+
+    /// Extract structured spec_data from the full conversation using LLM formatter.
+    ///
+    /// Called when the BA signals [INTERVIEW_COMPLETE]. Converts free-form
+    /// conversation into the standard spec JSON structure.
+    async fn extract_spec_data_from_conversation(
+        &self,
+        state: &PersistedInterviewState,
+        turns: &[InterviewTurn],
+        provider: &Arc<dyn LlmProvider>,
+    ) -> AppResult<serde_json::Value> {
+        let target_schema = r#"{
+  "overview": { "title": "string", "goal": "string", "problem": "string (optional)", "success_metrics": ["string"], "non_goals": ["string"] },
+  "scope": { "in_scope": ["string"], "out_of_scope": ["string"], "do_not_touch": ["string"], "assumptions": ["string"] },
+  "requirements": {
+    "functional": ["string"],
+    "non_functional": { "performance_targets": ["string"], "security": ["string"], "reliability": ["string"], "scalability": ["string"], "accessibility": ["string"] }
+  },
+  "interfaces": { "api": [{"name": "string", "notes": "string"}], "data_models": [{"name": "string", "fields": ["string"]}] },
+  "stories": [{ "id": "story-NNN", "title": "string", "category": "setup|core|integration|polish|test", "description": "string", "acceptance_criteria": ["string"], "verification": {"commands": ["string"], "manual_steps": ["string"]}, "dependencies": ["story-NNN"], "context_estimate": "small|medium|large" }],
+  "open_questions": ["string"]
+}"#;
+
+        let formatter_system = prompt_builder::build_formatter_system_prompt(target_schema);
+
+        // Build conversation summary for the formatter
+        let mut conversation_text = format!(
+            "Project Description: {}\n\nInterview Conversation:\n",
+            state.description
+        );
+        for turn in turns {
+            conversation_text.push_str(&format!("\nQ: {}\nA: {}\n", turn.question, turn.answer));
+        }
+
+        let formatter_user = prompt_builder::build_formatter_user_message(&conversation_text);
+
+        let options = LlmRequestOptions {
+            temperature_override: Some(0.1),
+            ..Default::default()
+        };
+
+        debug!(
+            interview_id = %state.id,
+            turn_count = turns.len(),
+            "BA: extracting structured spec_data from conversation"
+        );
+
+        let response = provider
+            .send_message(
+                vec![Message::user(&formatter_user)],
+                Some(formatter_system.clone()),
+                vec![],
+                options.clone(),
+            )
+            .await
+            .map_err(|e| AppError::command(format!("Spec extraction failed: {}", e)))?;
+
+        let response_text = response
+            .content
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::parse("Spec extraction returned empty response".to_string())
+            })?;
+
+        let json_str = extract_json_from_response(response_text);
+
+        // Try parsing, with one retry on failure
+        match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(value) => Ok(value),
+            Err(first_error) => {
+                debug!(error = %first_error, "Spec extraction parse failed, retrying");
+
+                let repair_msg = format!(
+                    "Your previous response could not be parsed as valid JSON.\n\
+                     Parse error: {}\n\n\
+                     Please respond with ONLY valid JSON matching the schema.",
+                    first_error
+                );
+
+                let retry_response = provider
+                    .send_message(
+                        vec![
+                            Message::user(&formatter_user),
+                            Message::assistant(response_text),
+                            Message::user(&repair_msg),
+                        ],
+                        Some(formatter_system),
+                        vec![],
+                        options,
+                    )
+                    .await
+                    .map_err(|e| {
+                        AppError::command(format!("Spec extraction retry failed: {}", e))
+                    })?;
+
+                let retry_text = retry_response
+                    .content
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or_else(|| {
+                        AppError::parse("Spec extraction retry returned empty".to_string())
+                    })?;
+
+                let retry_json = extract_json_from_response(retry_text);
+                serde_json::from_str(&retry_json).map_err(|e| {
+                    AppError::parse(format!("Spec extraction failed after retry: {}", e))
+                })
+            }
+        }
+    }
+}
+
+/// Result from BA question generation
+enum BaQuestionResult {
+    /// BA generated a follow-up question
+    Question(InterviewQuestion),
+    /// BA determined interview is complete
+    Complete { summary: String },
+}
+
+/// Extract JSON from an LLM response string, handling markdown fences.
+fn extract_json_from_response(text: &str) -> String {
+    let trimmed = text.trim();
+
+    // Try markdown code fences
+    if let Some(start) = trimmed.find("```") {
+        let after_fence = &trimmed[start + 3..];
+        let content_start = if let Some(nl) = after_fence.find('\n') {
+            nl + 1
+        } else {
+            0
+        };
+        let content = &after_fence[content_start..];
+        if let Some(end) = content.find("```") {
+            return content[..end].trim().to_string();
+        }
+    }
+
+    // Try JSON object { ... }
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+        if start <= end {
+            return trimmed[start..=end].to_string();
+        }
+    }
+
+    trimmed.to_string()
 }
 
 // ============================================================================

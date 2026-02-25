@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::services::orchestrator::index_store::ProjectIndexSummary;
+use crate::services::persona::{PersonaRegistry, PersonaRole};
 
 // ============================================================================
 // Types
@@ -186,14 +187,11 @@ fn detect_tech_stack(languages: &[String], project_root: &Path) -> TechStackSumm
     {
         frameworks.push("Next.js".to_string());
     }
-    if project_root.join("nuxt.config.ts").exists()
-        || project_root.join("nuxt.config.js").exists()
+    if project_root.join("nuxt.config.ts").exists() || project_root.join("nuxt.config.js").exists()
     {
         frameworks.push("Nuxt".to_string());
     }
-    if project_root.join("tauri.conf.json").exists()
-        || project_root.join("src-tauri").exists()
-    {
+    if project_root.join("tauri.conf.json").exists() || project_root.join("src-tauri").exists() {
         frameworks.push("Tauri".to_string());
     }
 
@@ -203,14 +201,11 @@ fn detect_tech_stack(languages: &[String], project_root: &Path) -> TechStackSumm
     {
         test_frameworks.push("vitest".to_string());
     }
-    if project_root.join("jest.config.ts").exists()
-        || project_root.join("jest.config.js").exists()
+    if project_root.join("jest.config.ts").exists() || project_root.join("jest.config.js").exists()
     {
         test_frameworks.push("jest".to_string());
     }
-    if project_root.join("pytest.ini").exists()
-        || project_root.join("pyproject.toml").exists()
-    {
+    if project_root.join("pytest.ini").exists() || project_root.join("pyproject.toml").exists() {
         // Check for pytest in languages context
         if languages.iter().any(|l| l.to_lowercase() == "python") {
             test_frameworks.push("pytest".to_string());
@@ -226,10 +221,7 @@ fn detect_tech_stack(languages: &[String], project_root: &Path) -> TechStackSumm
             frameworks.push("React".to_string());
         }
     }
-    if languages
-        .iter()
-        .any(|l| l.to_lowercase().contains("vue"))
-    {
+    if languages.iter().any(|l| l.to_lowercase().contains("vue")) {
         if !frameworks.iter().any(|f| f == "Nuxt") {
             frameworks.push("Vue".to_string());
         }
@@ -356,8 +348,14 @@ pub fn build_coordinator_exploration_prompt(
         .collect::<Vec<_>>()
         .join("\n");
 
+    let persona = PersonaRegistry::get(PersonaRole::SeniorEngineer);
+
     format!(
-        r#"You are a Project Exploration Coordinator. Your job is to explore the codebase to gather context that will help generate a high-quality PRD (Product Requirements Document) for the user's task.
+        r#"{persona_prompt}
+
+---
+
+Your job is to explore the codebase to gather context that will help generate a high-quality PRD (Product Requirements Document) for the user's task.
 
 ## Task Description
 {task_description}
@@ -398,7 +396,8 @@ pub fn build_coordinator_exploration_prompt(
 IMPORTANT:
 - This is a READ-ONLY exploration. Do NOT modify any files.
 - Focus on gathering context that will make the PRD more accurate and aligned with the existing codebase.
-- Be thorough but efficient — explore the most relevant areas first."#
+- Be thorough but efficient — explore the most relevant areas first."#,
+        persona_prompt = persona.identity_prompt
     )
 }
 
@@ -484,7 +483,10 @@ pub fn format_exploration_context(result: &ExplorationResult) -> String {
     if !result.key_files.is_empty() {
         parts.push("## Key Files".to_string());
         for file in &result.key_files {
-            parts.push(format!("- `{}` [{}]: {}", file.path, file.file_type, file.relevance));
+            parts.push(format!(
+                "- `{}` [{}]: {}",
+                file.path, file.file_type, file.relevance
+            ));
         }
         parts.push(String::new());
     }
@@ -524,7 +526,11 @@ mod tests {
     fn sample_summary() -> ProjectIndexSummary {
         ProjectIndexSummary {
             total_files: 120,
-            languages: vec!["Rust".to_string(), "TypeScript".to_string(), "TSX".to_string()],
+            languages: vec![
+                "Rust".to_string(),
+                "TypeScript".to_string(),
+                "TSX".to_string(),
+            ],
             components: vec![
                 IndexComponentSummary {
                     name: "src-tauri/src/commands".to_string(),

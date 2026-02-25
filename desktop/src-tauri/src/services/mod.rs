@@ -27,6 +27,7 @@ pub mod mcp;
 pub mod mega;
 pub mod memory;
 pub mod orchestrator;
+pub mod persona;
 pub mod phase;
 pub mod plugins;
 pub mod project;
