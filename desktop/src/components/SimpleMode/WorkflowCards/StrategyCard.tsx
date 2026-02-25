@@ -20,18 +20,25 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
           <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wide">
             {t('workflow.strategy.title')}
           </span>
-          <span
-            className={clsx(
-              'text-xs px-2 py-0.5 rounded-full font-medium',
-              confidencePct >= 80
-                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                : confidencePct >= 50
-                  ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
-                  : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
+          <div className="flex items-center gap-2">
+            {data.model && (
+              <span className="text-2xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-500 dark:text-blue-400">
+                {data.model}
+              </span>
             )}
-          >
-            {t('workflow.strategy.confidence', { pct: confidencePct })}
-          </span>
+            <span
+              className={clsx(
+                'text-xs px-2 py-0.5 rounded-full font-medium',
+                confidencePct >= 80
+                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                  : confidencePct >= 50
+                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
+              )}
+            >
+              {t('workflow.strategy.confidence', { pct: confidencePct })}
+            </span>
+          </div>
         </div>
       </div>
 

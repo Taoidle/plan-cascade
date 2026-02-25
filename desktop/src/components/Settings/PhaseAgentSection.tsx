@@ -2,6 +2,10 @@
  * PhaseAgentSection Component
  *
  * Configure agent assignments for different execution phases.
+ * Split into two groups:
+ *   - Planning phases: LLM-only selection with "(Global Default)" option
+ *   - Execution phases: CLI agents + LLM providers with fallback chains
+ *
  * Reads/writes phase configs from the Zustand settings store (persisted to localStorage).
  */
 
@@ -18,7 +22,16 @@ import type { CommandResponse } from '../../lib/tauri';
 // Phase definitions (static metadata only -- runtime config lives in the store)
 // ---------------------------------------------------------------------------
 
-const PHASE_IDS = [
+const PLANNING_PHASE_IDS = [
+  { id: 'plan_strategy', i18nKey: 'planStrategy' },
+  { id: 'plan_exploration', i18nKey: 'planExploration' },
+  { id: 'plan_interview', i18nKey: 'planInterview' },
+  { id: 'plan_requirements', i18nKey: 'planRequirements' },
+  { id: 'plan_architecture', i18nKey: 'planArchitecture' },
+  { id: 'plan_prd', i18nKey: 'planPrd' },
+] as const;
+
+const EXECUTION_PHASE_IDS = [
   { id: 'planning', i18nKey: 'planning' },
   { id: 'implementation', i18nKey: 'implementation' },
   { id: 'retry', i18nKey: 'retry' },
@@ -83,6 +96,35 @@ function AgentSelectOptions({
   );
 }
 
+/** LLM-only select options (for planning phases) with "(Global Default)" */
+function LlmSelectOptions({
+  globalDefaultLabel,
+  configuredProviders,
+}: {
+  globalDefaultLabel: string;
+  configuredProviders: string[];
+}) {
+  return (
+    <>
+      <option value="">{globalDefaultLabel}</option>
+      {configuredProviders.map((provider) => {
+        const models = FALLBACK_MODELS_BY_PROVIDER[provider];
+        if (!models || models.length === 0) return null;
+        const label = PROVIDER_DISPLAY_NAMES[provider] ?? provider;
+        return (
+          <optgroup key={provider} label={label}>
+            {models.map((model) => (
+              <option key={`llm:${provider}:${model}`} value={`llm:${provider}:${model}`}>
+                {model}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -95,6 +137,7 @@ export function PhaseAgentSection() {
 
   const enabledAgents = agents.filter((a) => a.enabled);
   const cliAgentsLabel = t('phases.cliAgents');
+  const globalDefaultLabel = t('phases.globalDefault');
 
   // Fetch providers that have API keys configured (+ ollama which needs none)
   useEffect(() => {
@@ -170,8 +213,85 @@ export function PhaseAgentSection() {
         <p className="text-sm text-gray-500 dark:text-gray-400">{t('phases.description')}</p>
       </div>
 
-      {/* Phase Table */}
-      <section className="space-y-4">
+      {/* ================================================================== */}
+      {/* Planning Phases (LLM-only, no fallback chains) */}
+      {/* ================================================================== */}
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t('phases.groups.planning')}</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t('phases.groups.planningDesc')}</p>
+        </div>
+
+        <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+          {/* Header */}
+          <div
+            className={clsx(
+              'grid grid-cols-12 gap-4 px-4 py-3',
+              'bg-gray-50 dark:bg-gray-800',
+              'text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider',
+            )}
+          >
+            <div className="col-span-5">{t('phases.columns.phase')}</div>
+            <div className="col-span-7">{t('phases.columns.defaultAgent')}</div>
+          </div>
+
+          {/* Rows */}
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            {PLANNING_PHASE_IDS.map((phase) => {
+              const config = phaseConfigs[phase.id] ?? { defaultAgent: '', fallbackChain: [] };
+
+              return (
+                <div
+                  key={phase.id}
+                  className={clsx(
+                    'grid grid-cols-12 gap-4 px-4 py-3 items-center',
+                    'bg-white dark:bg-gray-900',
+                    'hover:bg-gray-50 dark:hover:bg-gray-800/50',
+                  )}
+                >
+                  {/* Phase Name */}
+                  <div className="col-span-5">
+                    <div className="font-medium text-gray-900 dark:text-white">{t(`phases.${phase.i18nKey}.name`)}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {t(`phases.${phase.i18nKey}.description`)}
+                    </div>
+                  </div>
+
+                  {/* Default Agent (LLM-only + Global Default) */}
+                  <div className="col-span-7">
+                    <select
+                      value={config.defaultAgent}
+                      onChange={(e) => handleDefaultAgentChange(phase.id, e.target.value)}
+                      className={clsx(
+                        'w-full px-3 py-1.5 rounded-lg border text-sm',
+                        'border-gray-200 dark:border-gray-700',
+                        'bg-white dark:bg-gray-800',
+                        'text-gray-900 dark:text-white',
+                        'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                      )}
+                    >
+                      <LlmSelectOptions
+                        globalDefaultLabel={globalDefaultLabel}
+                        configuredProviders={configuredProviders}
+                      />
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* ================================================================== */}
+      {/* Execution Phases (CLI agents + LLM, with fallback chains) */}
+      {/* ================================================================== */}
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t('phases.groups.execution')}</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t('phases.groups.executionDesc')}</p>
+        </div>
+
         <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
           {/* Header */}
           <div
@@ -188,7 +308,7 @@ export function PhaseAgentSection() {
 
           {/* Rows */}
           <div className="divide-y divide-gray-200 dark:divide-gray-700">
-            {PHASE_IDS.map((phase) => {
+            {EXECUTION_PHASE_IDS.map((phase) => {
               const config = phaseConfigs[phase.id] ?? { defaultAgent: '', fallbackChain: [] };
 
               return (

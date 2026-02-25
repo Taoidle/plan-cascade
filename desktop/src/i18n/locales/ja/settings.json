@@ -330,11 +330,44 @@
     "description": "各実行フェーズにデフォルトエージェントとフォールバックチェーンを割り当てます。",
 
     "cliAgents": "CLIエージェント",
+    "globalDefault": "(グローバルデフォルト)",
 
     "columns": {
       "phase": "フェーズ",
       "defaultAgent": "デフォルトエージェント",
       "fallbackChain": "フォールバックチェーン"
+    },
+
+    "groups": {
+      "planning": "計画フェーズ",
+      "planningDesc": "各計画ステップのLLMを設定。「グローバルデフォルト」はメインLLMバックエンドを使用。",
+      "execution": "実行フェーズ",
+      "executionDesc": "ストーリー実行のエージェントを設定。"
+    },
+
+    "planStrategy": {
+      "name": "戦略分析",
+      "description": "タスク分析と戦略選択"
+    },
+    "planExploration": {
+      "name": "プロジェクト探索",
+      "description": "コードベーススキャンと構造分析"
+    },
+    "planInterview": {
+      "name": "仕様インタビュー",
+      "description": "Q&Aによる要件収集"
+    },
+    "planRequirements": {
+      "name": "要件分析",
+      "description": "要件のフォーマットと分析"
+    },
+    "planArchitecture": {
+      "name": "アーキテクチャレビュー",
+      "description": "アーキテクチャのレビューと検証"
+    },
+    "planPrd": {
+      "name": "PRD生成",
+      "description": "ユーザーストーリーとPRD生成"
     },
 
     "planning": {

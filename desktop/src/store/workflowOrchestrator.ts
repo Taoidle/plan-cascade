@@ -222,7 +222,7 @@ function mapInterviewQuestion(
 }
 
 /** Build strategy card data from analysis */
-function buildStrategyCardData(analysis: StrategyAnalysis): StrategyCardData {
+function buildStrategyCardData(analysis: StrategyAnalysis, model?: string): StrategyCardData {
   const recommendations: string[] = [];
   if (analysis.parallelizationBenefit === 'significant') {
     recommendations.push(i18n.t('workflow.strategy.highParallelization', { ns: 'simpleMode' }));
@@ -245,6 +245,7 @@ function buildStrategyCardData(analysis: StrategyAnalysis): StrategyCardData {
     parallelizationBenefit: analysis.parallelizationBenefit,
     functionalAreas: analysis.functionalAreas,
     recommendations,
+    model,
   };
 }
 
@@ -297,23 +298,21 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       let analysis = taskModeState.strategyAnalysis;
 
       // 2. Try LLM enhancement of strategy analysis
+      const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+      const strategyResolved = resolvePhaseAgent('plan_strategy');
       if (analysis) {
         try {
           injectInfo(i18n.t('workflow.orchestrator.enhancingAnalysis', { ns: 'simpleMode' }), 'info');
-
-          const settings = useSettingsStore.getState();
-          const { resolveProviderBaseUrl } = await import('../lib/providers');
-          const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
 
           const enhanced = await invoke<{ success: boolean; data: StrategyAnalysis | null; error: string | null }>(
             'enhance_strategy_with_llm',
             {
               description,
               keywordAnalysis: analysis,
-              provider: settings.provider || null,
-              model: settings.model || null,
+              provider: strategyResolved.provider || null,
+              model: strategyResolved.model || null,
               apiKey: null,
-              baseUrl: baseUrl || null,
+              baseUrl: strategyResolved.baseUrl || null,
               locale: i18n.language,
             },
           );
@@ -331,7 +330,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
       // 3. Inject strategy card (with LLM-enhanced or keyword result)
       if (analysis) {
-        injectCard('strategy_card', buildStrategyCardData(analysis));
+        injectCard('strategy_card', buildStrategyCardData(analysis, formatModelDisplay(strategyResolved)));
       }
 
       // 4. Build recommended config from analysis
@@ -380,10 +379,15 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (config.specInterviewEnabled) {
         // Start interview flow (BA now has exploration context)
         set({ phase: 'interviewing' });
+
+        const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+        const interviewResolved = resolvePhaseAgent('plan_interview');
+
         injectCard('persona_indicator', {
           role: 'BusinessAnalyst',
           displayName: 'Business Analyst',
           phase: 'interviewing',
+          model: formatModelDisplay(interviewResolved),
         });
         injectInfo(i18n.t('workflow.orchestrator.startingInterview', { ns: 'simpleMode' }), 'info');
 
@@ -401,13 +405,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         };
 
         // Set LLM provider settings so specInterview store passes them to backend
-        if (settings.provider) {
-          const { resolveProviderBaseUrl } = await import('../lib/providers');
-          const baseUrl = resolveProviderBaseUrl(settings.provider, settings);
+        if (interviewResolved.provider) {
           useSpecInterviewStore.getState().setProviderSettings({
-            provider: settings.provider,
-            model: settings.model || undefined,
-            baseUrl: baseUrl || undefined,
+            provider: interviewResolved.provider,
+            model: interviewResolved.model || undefined,
+            baseUrl: interviewResolved.baseUrl || undefined,
           });
         }
 
@@ -805,14 +807,19 @@ async function explorePhase(set: SetFn, get: GetFn) {
   if (config.flowLevel === 'quick') return;
 
   set({ phase: 'exploring' });
-  injectCard('persona_indicator', { role: 'SeniorEngineer', displayName: 'Senior Engineer', phase: 'exploring' });
+
+  const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+  const explorationResolved = resolvePhaseAgent('plan_exploration');
+
+  injectCard('persona_indicator', {
+    role: 'SeniorEngineer',
+    displayName: 'Senior Engineer',
+    phase: 'exploring',
+    model: formatModelDisplay(explorationResolved),
+  });
   injectInfo(i18n.t('workflow.orchestrator.exploringProject', { ns: 'simpleMode' }), 'info');
 
   try {
-    const settings = useSettingsStore.getState();
-    const { resolveProviderBaseUrl } = await import('../lib/providers');
-    const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
-
     const result = await invoke<{
       success: boolean;
       data: ExplorationCardData | null;
@@ -821,10 +828,10 @@ async function explorePhase(set: SetFn, get: GetFn) {
       sessionId,
       flowLevel: config.flowLevel,
       taskDescription,
-      provider: settings.provider || null,
-      model: settings.model || null,
+      provider: explorationResolved.provider || null,
+      model: explorationResolved.model || null,
       apiKey: null,
-      baseUrl: baseUrl || null,
+      baseUrl: explorationResolved.baseUrl || null,
     });
 
     if (result.success && result.data) {
@@ -851,10 +858,15 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
   if (config.flowLevel === 'quick') return;
 
   set({ phase: 'requirement_analysis' });
+
+  const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+  const reqResolved = resolvePhaseAgent('plan_requirements');
+
   injectCard('persona_indicator', {
     role: 'ProductManager',
     displayName: 'Product Manager',
     phase: 'requirement_analysis',
+    model: formatModelDisplay(reqResolved),
   });
   injectInfo(
     i18n.t('workflow.orchestrator.analyzingRequirements', {
@@ -865,10 +877,6 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
   );
 
   try {
-    const settings = useSettingsStore.getState();
-    const { resolveProviderBaseUrl } = await import('../lib/providers');
-    const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
-
     // Build exploration context string for the backend
     const explorationContext = explorationResult ? JSON.stringify(explorationResult) : null;
 
@@ -885,10 +893,10 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
       taskDescription,
       interviewResult,
       explorationContext,
-      provider: settings.provider || null,
-      model: settings.model || null,
+      provider: reqResolved.provider || null,
+      model: reqResolved.model || null,
       apiKey: null,
-      baseUrl: baseUrl || null,
+      baseUrl: reqResolved.baseUrl || null,
     });
 
     if (result.success && result.data) {
@@ -937,10 +945,15 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
   }
 
   set({ phase: 'architecture_review', architectureReviewRound: architectureReviewRound + 1 });
+
+  const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+  const archResolved = resolvePhaseAgent('plan_architecture');
+
   injectCard('persona_indicator', {
     role: 'SoftwareArchitect',
     displayName: 'Software Architect',
     phase: 'architecture_review',
+    model: formatModelDisplay(archResolved),
   });
   injectInfo(
     i18n.t('workflow.orchestrator.reviewingArchitecture', {
@@ -951,10 +964,6 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
   );
 
   try {
-    const settings = useSettingsStore.getState();
-    const { resolveProviderBaseUrl } = await import('../lib/providers');
-    const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
-
     const explorationContext = explorationResult ? JSON.stringify(explorationResult) : null;
 
     const result = await invoke<{
@@ -965,10 +974,10 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
       sessionId: get().sessionId || '',
       prdJson: JSON.stringify(prd),
       explorationContext,
-      provider: settings.provider || null,
-      model: settings.model || null,
+      provider: archResolved.provider || null,
+      model: archResolved.model || null,
       apiKey: null,
-      baseUrl: baseUrl || null,
+      baseUrl: archResolved.baseUrl || null,
     });
 
     if (result.success && result.data) {
@@ -1073,6 +1082,16 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd) {
  */
 async function generatePrdPhase(set: SetFn, get: GetFn) {
   set({ phase: 'generating_prd' });
+
+  const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+  const prdResolved = resolvePhaseAgent('plan_prd');
+
+  injectCard('persona_indicator', {
+    role: 'TechLead',
+    displayName: 'Tech Lead',
+    phase: 'generating_prd',
+    model: formatModelDisplay(prdResolved),
+  });
   injectInfo(i18n.t('workflow.orchestrator.generatingPrd', { ns: 'simpleMode' }), 'info');
 
   try {
@@ -1080,7 +1099,15 @@ async function generatePrdPhase(set: SetFn, get: GetFn) {
     const history = get()._conversationHistory || [];
     const settings = useSettingsStore.getState();
     const maxContextTokens = settings.maxTotalTokens ?? 200_000;
-    await useTaskModeStore.getState().generatePrd(history, maxContextTokens);
+    await useTaskModeStore
+      .getState()
+      .generatePrd(
+        history,
+        maxContextTokens,
+        prdResolved.provider || undefined,
+        prdResolved.model || undefined,
+        prdResolved.baseUrl,
+      );
 
     const taskModeState = useTaskModeStore.getState();
     if (taskModeState.error) {

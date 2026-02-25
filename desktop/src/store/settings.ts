@@ -219,6 +219,14 @@ const defaultSettings = {
 
   // Phase agent configs
   phaseConfigs: {
+    // Planning phases (LLM-only, '' = use global settings)
+    plan_strategy: { defaultAgent: '', fallbackChain: [] },
+    plan_exploration: { defaultAgent: '', fallbackChain: [] },
+    plan_interview: { defaultAgent: '', fallbackChain: [] },
+    plan_requirements: { defaultAgent: '', fallbackChain: [] },
+    plan_architecture: { defaultAgent: '', fallbackChain: [] },
+    plan_prd: { defaultAgent: '', fallbackChain: [] },
+    // Execution phases (CLI agents + LLM)
     planning: { defaultAgent: 'claude-code', fallbackChain: ['codex'] },
     implementation: { defaultAgent: 'claude-code', fallbackChain: ['codex', 'aider'] },
     retry: { defaultAgent: 'claude-code', fallbackChain: ['aider'] },
@@ -340,6 +348,19 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'plan-cascade-settings',
+      merge: (persisted, current) => {
+        const merged = { ...current, ...(persisted as object) };
+        // Ensure new planning phase configs exist for old users
+        const defaultPhases = defaultSettings.phaseConfigs;
+        const storedPhases = (merged as SettingsState).phaseConfigs || {};
+        for (const key of Object.keys(defaultPhases)) {
+          if (!(key in storedPhases)) {
+            storedPhases[key] = defaultPhases[key];
+          }
+        }
+        (merged as SettingsState).phaseConfigs = storedPhases;
+        return merged as SettingsState;
+      },
       onRehydrateStorage: () => (state) => {
         // Apply theme on rehydration
         if (state?.theme) {

@@ -96,6 +96,7 @@ export interface StrategyCardData {
   parallelizationBenefit: string;
   functionalAreas: string[];
   recommendations: string[];
+  model?: string;
 }
 
 /** Workflow configuration card data */
@@ -298,4 +299,5 @@ export interface PersonaIndicatorData {
   role: string;
   displayName: string;
   phase: string;
+  model?: string;
 }

@@ -330,11 +330,44 @@
     "description": "Assign default agents and fallback chains to each execution phase.",
 
     "cliAgents": "CLI Agents",
+    "globalDefault": "(Global Default)",
 
     "columns": {
       "phase": "Phase",
       "defaultAgent": "Default Agent",
       "fallbackChain": "Fallback Chain"
+    },
+
+    "groups": {
+      "planning": "Planning Phases",
+      "planningDesc": "Configure LLM for each planning step. \"Global Default\" uses your main LLM Backend.",
+      "execution": "Execution Phases",
+      "executionDesc": "Configure agents for story execution."
+    },
+
+    "planStrategy": {
+      "name": "Strategy Analysis",
+      "description": "Task analysis and strategy selection"
+    },
+    "planExploration": {
+      "name": "Project Exploration",
+      "description": "Codebase scanning and structure analysis"
+    },
+    "planInterview": {
+      "name": "Spec Interview",
+      "description": "Requirements gathering through Q&A"
+    },
+    "planRequirements": {
+      "name": "Requirement Analysis",
+      "description": "Requirement formatting and analysis"
+    },
+    "planArchitecture": {
+      "name": "Architecture Review",
+      "description": "Architecture review and validation"
+    },
+    "planPrd": {
+      "name": "PRD Generation",
+      "description": "User story and PRD generation"
     },
 
     "planning": {

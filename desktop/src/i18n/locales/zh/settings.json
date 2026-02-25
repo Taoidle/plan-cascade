@@ -330,11 +330,44 @@
     "description": "为每个执行阶段分配默认代理和备选链。",
 
     "cliAgents": "CLI 代理",
+    "globalDefault": "(全局默认)",
 
     "columns": {
       "phase": "阶段",
       "defaultAgent": "默认代理",
       "fallbackChain": "备选链"
+    },
+
+    "groups": {
+      "planning": "规划阶段",
+      "planningDesc": "为每个规划步骤配置 LLM。\"全局默认\"使用主 LLM 后端设置。",
+      "execution": "执行阶段",
+      "executionDesc": "配置故事执行的代理。"
+    },
+
+    "planStrategy": {
+      "name": "策略分析",
+      "description": "任务分析和策略选择"
+    },
+    "planExploration": {
+      "name": "项目探索",
+      "description": "代码库扫描和结构分析"
+    },
+    "planInterview": {
+      "name": "需求访谈",
+      "description": "通过问答收集需求"
+    },
+    "planRequirements": {
+      "name": "需求分析",
+      "description": "需求格式化和分析"
+    },
+    "planArchitecture": {
+      "name": "架构审查",
+      "description": "架构审查和验证"
+    },
+    "planPrd": {
+      "name": "PRD 生成",
+      "description": "用户故事和 PRD 生成"
     },
 
     "planning": {

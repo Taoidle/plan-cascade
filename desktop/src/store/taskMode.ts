@@ -232,7 +232,13 @@ export interface TaskModeState {
   enterTaskMode: (description: string) => Promise<void>;
 
   /** Generate PRD from current session, optionally with conversation history for context */
-  generatePrd: (conversationHistory?: CrossModeConversationTurn[], maxContextTokens?: number) => Promise<void>;
+  generatePrd: (
+    conversationHistory?: CrossModeConversationTurn[],
+    maxContextTokens?: number,
+    overrideProvider?: string,
+    overrideModel?: string,
+    overrideBaseUrl?: string,
+  ) => Promise<void>;
 
   /** Approve PRD (optionally with edits) and start execution */
   approvePrd: (prd: TaskPrd) => Promise<void>;
@@ -329,7 +335,13 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
   },
 
-  generatePrd: async (conversationHistory?: CrossModeConversationTurn[], maxContextTokens?: number) => {
+  generatePrd: async (
+    conversationHistory?: CrossModeConversationTurn[],
+    maxContextTokens?: number,
+    overrideProvider?: string,
+    overrideModel?: string,
+    overrideBaseUrl?: string,
+  ) => {
     const { sessionId } = get();
     if (!sessionId) {
       set({ error: 'No active session' });
@@ -340,15 +352,20 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       // Read provider/model + endpoint settings from settings store
       const settingsStore = (await import('./settings')).useSettingsStore.getState();
       const { provider, model, glmEndpoint, qwenEndpoint, minimaxEndpoint } = settingsStore;
+      const finalProvider = overrideProvider || provider;
+      const finalModel = overrideModel || model;
       const { resolveProviderBaseUrl } = await import('../lib/providers');
-      const baseUrl = provider
-        ? resolveProviderBaseUrl(provider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
-        : undefined;
+      const finalBaseUrl =
+        overrideBaseUrl !== undefined
+          ? overrideBaseUrl
+          : finalProvider
+            ? resolveProviderBaseUrl(finalProvider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
+            : undefined;
       const result = await invoke<CommandResponse<TaskPrd>>('generate_task_prd', {
         sessionId,
-        provider: provider || null,
-        model: model || null,
-        baseUrl: baseUrl || null,
+        provider: finalProvider || null,
+        model: finalModel || null,
+        baseUrl: finalBaseUrl || null,
         conversationHistory: conversationHistory || [],
         maxContextTokens: maxContextTokens ?? null,
       });
