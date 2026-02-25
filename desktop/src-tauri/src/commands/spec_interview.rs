@@ -60,6 +60,24 @@ impl SpecInterviewState {
             "Spec interview service not initialized. Call init_app first.".to_string()
         })
     }
+
+    /// Lazy initialization: if init_app failed to initialize this service
+    /// (e.g. silent pool retrieval failure), try to initialize from AppState now.
+    pub async fn ensure_initialized(&self, app_state: &AppState) -> Result<(), String> {
+        // Fast path: already initialized
+        {
+            let mgr = self.interview_manager.read().await;
+            if mgr.is_some() {
+                return Ok(());
+            }
+        }
+        // Slow path: initialize from database pool
+        let pool = app_state
+            .with_database(|db| Ok(db.pool().clone()))
+            .await
+            .map_err(|e| format!("Database not available for spec interview init: {}", e))?;
+        self.initialize(pool).await
+    }
 }
 
 impl Default for SpecInterviewState {
@@ -86,6 +104,11 @@ pub async fn start_spec_interview(
     state: State<'_, SpecInterviewState>,
     app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<InterviewSession>, String> {
+    // Lazy init: if init_app failed to initialize spec interview, try now
+    if let Err(e) = state.ensure_initialized(&app_state).await {
+        tracing::warn!("Spec interview lazy init failed: {}", e);
+    }
+
     let mgr_lock = state.interview_manager.read().await;
     let mgr = match SpecInterviewState::ensure_initialized_sync(&mgr_lock) {
         Ok(m) => m,
@@ -143,6 +166,11 @@ pub async fn submit_interview_answer(
     state: State<'_, SpecInterviewState>,
     app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<InterviewSession>, String> {
+    // Lazy init: if init_app failed to initialize spec interview, try now
+    if let Err(e) = state.ensure_initialized(&app_state).await {
+        tracing::warn!("Spec interview lazy init failed: {}", e);
+    }
+
     let mgr_lock = state.interview_manager.read().await;
     let mgr = match SpecInterviewState::ensure_initialized_sync(&mgr_lock) {
         Ok(m) => m,
@@ -191,7 +219,12 @@ pub async fn submit_interview_answer(
 pub async fn get_interview_state(
     interview_id: String,
     state: State<'_, SpecInterviewState>,
+    app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<InterviewSession>, String> {
+    if let Err(e) = state.ensure_initialized(&app_state).await {
+        tracing::warn!("Spec interview lazy init failed: {}", e);
+    }
+
     let mgr_lock = state.interview_manager.read().await;
     let mgr = match SpecInterviewState::ensure_initialized_sync(&mgr_lock) {
         Ok(m) => m,
@@ -212,7 +245,12 @@ pub async fn compile_spec(
     interview_id: String,
     options: Option<CompileOptions>,
     state: State<'_, SpecInterviewState>,
+    app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<CompiledSpec>, String> {
+    if let Err(e) = state.ensure_initialized(&app_state).await {
+        tracing::warn!("Spec interview lazy init failed: {}", e);
+    }
+
     let mgr_lock = state.interview_manager.read().await;
     let mgr = match SpecInterviewState::ensure_initialized_sync(&mgr_lock) {
         Ok(m) => m,
