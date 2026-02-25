@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import type { BranchInfo, RemoteBranchInfo, CommandResponse } from '../../../../types/git';
+import { useGitStore } from '../../../../store/git';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -255,14 +256,18 @@ function BranchContextMenu({
   const handlePush = useCallback(async () => {
     setLoading(true);
     try {
-      await invoke<CommandResponse<void>>('git_push', {
+      const res = await invoke<CommandResponse<void>>('git_push', {
         repoPath,
+        remote: 'origin',
         branch: menu.branch.name,
         setUpstream: !menu.branch.upstream,
       });
+      if (!res.success) {
+        useGitStore.getState().setError(res.error || 'Push failed');
+      }
       await onRefresh();
-    } catch {
-      // Silently fail
+    } catch (e) {
+      useGitStore.getState().setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
       onClose();
@@ -272,10 +277,13 @@ function BranchContextMenu({
   const handlePull = useCallback(async () => {
     setLoading(true);
     try {
-      await invoke<CommandResponse<void>>('git_pull', { repoPath });
+      const res = await invoke<CommandResponse<void>>('git_pull', { repoPath });
+      if (!res.success) {
+        useGitStore.getState().setError(res.error || 'Pull failed');
+      }
       await onRefresh();
-    } catch {
-      // Silently fail
+    } catch (e) {
+      useGitStore.getState().setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
       onClose();
@@ -396,10 +404,13 @@ export function BranchList({
     if (isFetching) return;
     setIsFetching(true);
     try {
-      await invoke<CommandResponse<void>>('git_fetch', { repoPath });
+      const res = await invoke<CommandResponse<void>>('git_fetch', { repoPath });
+      if (!res.success) {
+        useGitStore.getState().setError(res.error || 'Fetch failed');
+      }
       await onRefresh();
-    } catch {
-      // Silently fail
+    } catch (e) {
+      useGitStore.getState().setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsFetching(false);
     }

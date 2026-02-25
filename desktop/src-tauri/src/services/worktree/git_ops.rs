@@ -246,7 +246,7 @@ impl GitOps {
 
     /// Commit changes
     pub fn commit(&self, cwd: &Path, message: &str) -> AppResult<String> {
-        let result = self.execute(cwd, &["commit", "--no-gpg-sign", "-m", message])?;
+        let result = self.execute(cwd, &["commit", "-m", message])?;
         if result.success {
             // Get the commit SHA
             let sha = self

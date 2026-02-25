@@ -392,6 +392,11 @@ fn main() {
             plan_cascade_desktop::commands::git::git_summarize_commit,
             plan_cascade_desktop::commands::git::git_check_llm_available,
             plan_cascade_desktop::commands::git::git_configure_llm,
+            plan_cascade_desktop::commands::git::git_operation_abort,
+            plan_cascade_desktop::commands::git::git_operation_continue,
+            plan_cascade_desktop::commands::git::git_list_tags,
+            plan_cascade_desktop::commands::git::git_create_tag,
+            plan_cascade_desktop::commands::git::git_delete_tag,
             // Browser Automation commands
             plan_cascade_desktop::commands::browser::execute_browser_action,
             plan_cascade_desktop::commands::browser::get_browser_status,

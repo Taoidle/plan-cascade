@@ -83,10 +83,9 @@ impl GitService {
 
     /// Amend the last commit with a new message.
     pub fn amend_commit(&self, repo_path: &Path, message: &str) -> AppResult<String> {
-        let result = self.git.execute(
-            repo_path,
-            &["commit", "--amend", "--no-gpg-sign", "-m", message],
-        )?;
+        let result = self
+            .git
+            .execute(repo_path, &["commit", "--amend", "-m", message])?;
         if result.success {
             let sha = self
                 .git
@@ -117,6 +116,47 @@ impl GitService {
             args.push(p.as_str());
         }
         self.git.execute(repo_path, &args)?.into_result()?;
+        Ok(())
+    }
+
+    /// Smart discard: handles both tracked and untracked files.
+    ///
+    /// For tracked files, uses `git checkout --`. For untracked files, uses `git clean -f --`.
+    pub fn smart_discard(&self, repo_path: &Path, paths: &[String]) -> AppResult<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+
+        // Query full status to classify tracked vs untracked
+        let status = self.full_status(repo_path)?;
+        let untracked_set: std::collections::HashSet<&str> =
+            status.untracked.iter().map(|f| f.path.as_str()).collect();
+
+        let mut tracked: Vec<&str> = Vec::new();
+        let mut untracked: Vec<&str> = Vec::new();
+
+        for p in paths {
+            if untracked_set.contains(p.as_str()) {
+                untracked.push(p.as_str());
+            } else {
+                tracked.push(p.as_str());
+            }
+        }
+
+        // Discard tracked files via git checkout
+        if !tracked.is_empty() {
+            let mut args: Vec<&str> = vec!["checkout", "--"];
+            args.extend(&tracked);
+            self.git.execute(repo_path, &args)?.into_result()?;
+        }
+
+        // Remove untracked files via git clean
+        if !untracked.is_empty() {
+            let mut args: Vec<&str> = vec!["clean", "-f", "--"];
+            args.extend(&untracked);
+            self.git.execute(repo_path, &args)?.into_result()?;
+        }
+
         Ok(())
     }
 
@@ -286,6 +326,113 @@ impl GitService {
         Ok(sha)
     }
 
+    // -----------------------------------------------------------------------
+    // Rebase / Cherry-pick / Revert abort & continue
+    // -----------------------------------------------------------------------
+
+    /// Abort a rebase in progress.
+    pub fn rebase_abort(&self, repo_path: &Path) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["rebase", "--abort"])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Continue a rebase in progress.
+    pub fn rebase_continue(&self, repo_path: &Path) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["rebase", "--continue"])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Abort a cherry-pick in progress.
+    pub fn cherry_pick_abort(&self, repo_path: &Path) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["cherry-pick", "--abort"])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Continue a cherry-pick in progress.
+    pub fn cherry_pick_continue(&self, repo_path: &Path) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["cherry-pick", "--continue"])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Abort a revert in progress.
+    pub fn revert_abort(&self, repo_path: &Path) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["revert", "--abort"])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Continue a revert in progress.
+    pub fn revert_continue(&self, repo_path: &Path) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["revert", "--continue"])?
+            .into_result()?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Tags
+    // -----------------------------------------------------------------------
+
+    /// List all tags.
+    pub fn list_tags(&self, repo_path: &Path) -> AppResult<Vec<TagInfo>> {
+        let output = self
+            .git
+            .execute(
+                repo_path,
+                &[
+                    "tag",
+                    "-l",
+                    "--format=%(refname:short)%00%(objectname:short)%00%(objecttype)%00%(subject)%00%(taggername)%00%(creatordate:iso8601)",
+                ],
+            )?
+            .into_result()?;
+
+        Ok(parse_tag_list(&output))
+    }
+
+    /// Create a lightweight tag.
+    pub fn create_tag(&self, repo_path: &Path, name: &str, target: Option<&str>) -> AppResult<()> {
+        let mut args = vec!["tag", name];
+        if let Some(t) = target {
+            args.push(t);
+        }
+        self.git.execute(repo_path, &args)?.into_result()?;
+        Ok(())
+    }
+
+    /// Create an annotated tag.
+    pub fn create_annotated_tag(
+        &self,
+        repo_path: &Path,
+        name: &str,
+        message: &str,
+        target: Option<&str>,
+    ) -> AppResult<()> {
+        let mut args = vec!["tag", "-a", name, "-m", message];
+        if let Some(t) = target {
+            args.push(t);
+        }
+        self.git.execute(repo_path, &args)?.into_result()?;
+        Ok(())
+    }
+
+    /// Delete a tag.
+    pub fn delete_tag(&self, repo_path: &Path, name: &str) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["tag", "-d", name])?
+            .into_result()?;
+        Ok(())
+    }
+
     /// List remote branches.
     pub fn list_remote_branches(&self, repo_path: &Path) -> AppResult<Vec<RemoteBranchInfo>> {
         let output = self
@@ -349,8 +496,16 @@ impl GitService {
     }
 
     /// Save current changes to stash.
-    pub fn stash_save(&self, repo_path: &Path, message: Option<&str>) -> AppResult<()> {
+    pub fn stash_save(
+        &self,
+        repo_path: &Path,
+        message: Option<&str>,
+        include_untracked: bool,
+    ) -> AppResult<()> {
         let mut args = vec!["stash", "push"];
+        if include_untracked {
+            args.push("--include-untracked");
+        }
         if let Some(msg) = message {
             args.push("-m");
             args.push(msg);
@@ -495,6 +650,9 @@ impl GitService {
     }
 
     /// Push to remote.
+    ///
+    /// When `branch` is specified but `remote` is None, defaults remote to "origin"
+    /// to prevent git from interpreting the branch name as a remote.
     pub fn push(
         &self,
         repo_path: &Path,
@@ -510,7 +668,14 @@ impl GitService {
         if force {
             args.push("--force-with-lease");
         }
-        if let Some(r) = remote {
+        // If branch is given but remote is not, default to "origin"
+        // to avoid git interpreting the branch name as a remote name.
+        let effective_remote = match (remote, branch) {
+            (Some(r), _) => Some(r),
+            (None, Some(_)) => Some("origin"),
+            (None, None) => None,
+        };
+        if let Some(r) = effective_remote {
             args.push(r);
         }
         if let Some(b) = branch {
@@ -771,6 +936,7 @@ pub fn parse_unified_diff(output: &str) -> DiffOutput {
                 is_deleted: false,
                 is_renamed: false,
                 old_path: None,
+                is_binary: false,
                 hunks: Vec::new(),
             });
         } else if line.starts_with("new file mode") {
@@ -785,6 +951,22 @@ pub fn parse_unified_diff(output: &str) -> DiffOutput {
             if let Some(ref mut file) = current_file {
                 file.is_renamed = true;
                 file.old_path = Some(line.strip_prefix("rename from ").unwrap_or("").to_string());
+            }
+        } else if line.starts_with("--- a/") {
+            // Use --- a/ line for more reliable path extraction
+            // (handles spaces and special characters better than diff --git header)
+        } else if line.starts_with("+++ b/") {
+            // Update path from +++ b/ line (authoritative for the new file path)
+            if let Some(ref mut file) = current_file {
+                let path = line.strip_prefix("+++ b/").unwrap_or("").to_string();
+                if !path.is_empty() {
+                    file.path = path;
+                }
+            }
+        } else if line.starts_with("Binary files ") {
+            // Mark file as binary
+            if let Some(ref mut file) = current_file {
+                file.is_binary = true;
             }
         } else if line.starts_with("@@ ") {
             // Flush previous hunk
@@ -1106,6 +1288,48 @@ pub fn parse_remotes(output: &str) -> Vec<RemoteInfo> {
     }
 
     map.into_values().collect()
+}
+
+/// Parse `git tag -l` output with NUL-separated fields.
+pub fn parse_tag_list(output: &str) -> Vec<TagInfo> {
+    output
+        .lines()
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split('\0').collect();
+            if parts.len() < 6 {
+                return None;
+            }
+            let name = parts[0].to_string();
+            let sha = parts[1].to_string();
+            let obj_type = parts[2]; // "commit" or "tag"
+            let is_annotated = obj_type == "tag";
+            let message = if parts[3].is_empty() {
+                None
+            } else {
+                Some(parts[3].to_string())
+            };
+            let tagger = if parts[4].is_empty() {
+                None
+            } else {
+                Some(parts[4].to_string())
+            };
+            let date = if parts[5].is_empty() {
+                None
+            } else {
+                Some(parts[5].to_string())
+            };
+
+            Some(TagInfo {
+                name,
+                sha,
+                is_annotated,
+                message,
+                tagger,
+                date,
+            })
+        })
+        .collect()
 }
 
 /// Parse `git for-each-ref` output for remote branches.

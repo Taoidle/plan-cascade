@@ -230,6 +230,7 @@ export interface FileDiff {
   is_new: boolean;
   is_deleted: boolean;
   is_renamed: boolean;
+  is_binary?: boolean;
   old_path?: string;
   hunks: DiffHunk[];
 }
@@ -258,6 +259,19 @@ export interface RemoteInfo {
   name: string;
   fetch_url: string;
   push_url: string;
+}
+
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+
+export interface TagInfo {
+  name: string;
+  sha: string;
+  is_annotated: boolean;
+  message?: string;
+  tagger?: string;
+  date?: string;
 }
 
 // ---------------------------------------------------------------------------

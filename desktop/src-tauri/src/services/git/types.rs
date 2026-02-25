@@ -358,6 +358,9 @@ pub struct FileDiff {
     /// Original path (for renames).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old_path: Option<String>,
+    /// Whether this is a binary file.
+    #[serde(default)]
+    pub is_binary: bool,
     /// Hunks in this diff.
     pub hunks: Vec<DiffHunk>,
 }
@@ -386,6 +389,30 @@ pub struct RemoteInfo {
     pub fetch_url: String,
     /// Push URL.
     pub push_url: String,
+}
+
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+
+/// Information about a git tag.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagInfo {
+    /// Tag name.
+    pub name: String,
+    /// SHA the tag points to.
+    pub sha: String,
+    /// Whether this is an annotated tag.
+    pub is_annotated: bool,
+    /// Tag message (for annotated tags).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// Tagger name (for annotated tags).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tagger: Option<String>,
+    /// Tag date (for annotated tags).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +617,7 @@ mod tests {
                 is_deleted: false,
                 is_renamed: false,
                 old_path: None,
+                is_binary: false,
                 hunks: vec![DiffHunk {
                     header: "@@ -1,5 +1,7 @@".to_string(),
                     old_start: 1,

@@ -1,11 +1,16 @@
 //! Git Commands
 //!
 //! Tauri IPC commands for the git source control service.
-//! Exposes ~28 commands for status, staging, commits, diffs, branches,
-//! stash, merge state, conflicts, remotes, and LLM-assisted operations.
+//! Exposes ~35 commands for status, staging, commits, diffs, branches,
+//! stash, merge state, conflicts, remotes, tags, and LLM-assisted operations.
+//!
+//! All synchronous git operations are wrapped in `spawn_blocking` to avoid
+//! blocking the Tokio runtime. Network operations (fetch/pull/push) additionally
+//! use `tokio::time::timeout` to prevent indefinite hangs.
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 use crate::commands::standalone::normalize_provider_name;
@@ -22,6 +27,57 @@ use crate::services::llm::{
 };
 use crate::state::AppState;
 use crate::storage::KeyringService;
+
+// ===========================================================================
+// Helpers — spawn_blocking wrappers
+// ===========================================================================
+
+/// Run a synchronous git operation on a blocking thread to avoid blocking
+/// the Tokio runtime. GitService methods call `std::process::Command::output()`
+/// which is synchronous and would block the async executor.
+async fn run_git_blocking<F, T>(svc: &Arc<RwLock<GitService>>, f: F) -> Result<T, String>
+where
+    F: FnOnce(&GitService) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let svc = Arc::clone(svc);
+    tokio::task::spawn_blocking(move || {
+        let guard = svc.blocking_read();
+        f(&guard)
+    })
+    .await
+    .map_err(|e| format!("Git task panicked: {}", e))
+}
+
+/// Like `run_git_blocking` but with a timeout. Used for network operations
+/// (fetch, pull, push) that could hang indefinitely on network issues.
+async fn run_git_blocking_with_timeout<F, T>(
+    svc: &Arc<RwLock<GitService>>,
+    timeout_secs: u64,
+    f: F,
+) -> Result<T, String>
+where
+    F: FnOnce(&GitService) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let svc = Arc::clone(svc);
+    match tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        tokio::task::spawn_blocking(move || {
+            let guard = svc.blocking_read();
+            f(&guard)
+        }),
+    )
+    .await
+    {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(e)) => Err(format!("Git task panicked: {}", e)),
+        Err(_) => Err(format!(
+            "Git operation timed out after {}s. Check your network connection.",
+            timeout_secs
+        )),
+    }
+}
 
 /// State for the git service, managed by Tauri.
 pub struct GitState {
@@ -78,9 +134,8 @@ pub async fn git_full_status(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<GitFullStatus>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.full_status(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.full_status(&path)).await? {
         Ok(status) => Ok(CommandResponse::ok(status)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -97,9 +152,8 @@ pub async fn git_stage_files(
     repo_path: String,
     paths: Vec<String>,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.stage_files(&path, &paths) {
+    match run_git_blocking(&state.service, move |svc| svc.stage_files(&path, &paths)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -112,9 +166,8 @@ pub async fn git_unstage_files(
     repo_path: String,
     paths: Vec<String>,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.unstage_files(&path, &paths) {
+    match run_git_blocking(&state.service, move |svc| svc.unstage_files(&path, &paths)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -129,9 +182,12 @@ pub async fn git_stage_hunk(
     hunk_index: usize,
     reverse: bool,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.stage_hunk(&path, &file_path, hunk_index, reverse) {
+    match run_git_blocking(&state.service, move |svc| {
+        svc.stage_hunk(&path, &file_path, hunk_index, reverse)
+    })
+    .await?
+    {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -148,9 +204,8 @@ pub async fn git_commit(
     repo_path: String,
     message: String,
 ) -> Result<CommandResponse<String>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.commit(&path, &message) {
+    match run_git_blocking(&state.service, move |svc| svc.commit(&path, &message)).await? {
         Ok(sha) => Ok(CommandResponse::ok(sha)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -163,9 +218,8 @@ pub async fn git_amend_commit(
     repo_path: String,
     message: String,
 ) -> Result<CommandResponse<String>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.amend_commit(&path, &message) {
+    match run_git_blocking(&state.service, move |svc| svc.amend_commit(&path, &message)).await? {
         Ok(sha) => Ok(CommandResponse::ok(sha)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -175,16 +229,15 @@ pub async fn git_amend_commit(
 // Discard Commands
 // ===========================================================================
 
-/// Discard unstaged changes for specific files.
+/// Discard changes for specific files (supports both tracked and untracked).
 #[tauri::command]
 pub async fn git_discard_changes(
     state: tauri::State<'_, GitState>,
     repo_path: String,
     paths: Vec<String>,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.discard_changes(&path, &paths) {
+    match run_git_blocking(&state.service, move |svc| svc.smart_discard(&path, &paths)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -200,9 +253,8 @@ pub async fn git_diff_staged(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<DiffOutput>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.diff_staged(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.diff_staged(&path)).await? {
         Ok(diff) => Ok(CommandResponse::ok(diff)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -214,9 +266,8 @@ pub async fn git_diff_unstaged(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<DiffOutput>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.diff_unstaged(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.diff_unstaged(&path)).await? {
         Ok(diff) => Ok(CommandResponse::ok(diff)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -229,9 +280,8 @@ pub async fn git_diff_file(
     repo_path: String,
     file_path: String,
 ) -> Result<CommandResponse<DiffOutput>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.diff_file(&path, &file_path) {
+    match run_git_blocking(&state.service, move |svc| svc.diff_file(&path, &file_path)).await? {
         Ok(diff) => Ok(CommandResponse::ok(diff)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -249,9 +299,10 @@ pub async fn git_log(
     count: Option<usize>,
     all_branches: Option<bool>,
 ) -> Result<CommandResponse<Vec<CommitNode>>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.log(&path, count.unwrap_or(100), all_branches.unwrap_or(false)) {
+    let c = count.unwrap_or(100);
+    let all = all_branches.unwrap_or(false);
+    match run_git_blocking(&state.service, move |svc| svc.log(&path, c, all)).await? {
         Ok(commits) => Ok(CommandResponse::ok(commits)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -264,9 +315,9 @@ pub async fn git_log_graph(
     repo_path: String,
     count: Option<usize>,
 ) -> Result<CommandResponse<GraphLayout>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.log(&path, count.unwrap_or(100), true) {
+    let c = count.unwrap_or(100);
+    match run_git_blocking(&state.service, move |svc| svc.log(&path, c, true)).await? {
         Ok(commits) => {
             let layout = compute_graph_layout(&commits);
             Ok(CommandResponse::ok(layout))
@@ -285,9 +336,8 @@ pub async fn git_list_branches(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<Vec<BranchInfo>>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.list_branches(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.list_branches(&path)).await? {
         Ok(branches) => Ok(CommandResponse::ok(branches)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -301,9 +351,12 @@ pub async fn git_create_branch(
     name: String,
     base: String,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.create_branch(&path, &name, &base) {
+    match run_git_blocking(&state.service, move |svc| {
+        svc.create_branch(&path, &name, &base)
+    })
+    .await?
+    {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -317,9 +370,9 @@ pub async fn git_delete_branch(
     name: String,
     force: Option<bool>,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.delete_branch(&path, &name, force.unwrap_or(false)) {
+    let f = force.unwrap_or(false);
+    match run_git_blocking(&state.service, move |svc| svc.delete_branch(&path, &name, f)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -332,9 +385,8 @@ pub async fn git_checkout_branch(
     repo_path: String,
     name: String,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.checkout_branch(&path, &name) {
+    match run_git_blocking(&state.service, move |svc| svc.checkout_branch(&path, &name)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -350,9 +402,8 @@ pub async fn git_list_stashes(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<Vec<StashEntry>>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.list_stashes(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.list_stashes(&path)).await? {
         Ok(stashes) => Ok(CommandResponse::ok(stashes)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -364,10 +415,15 @@ pub async fn git_stash_save(
     state: tauri::State<'_, GitState>,
     repo_path: String,
     message: Option<String>,
+    include_untracked: Option<bool>,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.stash_save(&path, message.as_deref()) {
+    let untracked = include_untracked.unwrap_or(true);
+    match run_git_blocking(&state.service, move |svc| {
+        svc.stash_save(&path, message.as_deref(), untracked)
+    })
+    .await?
+    {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -380,9 +436,8 @@ pub async fn git_stash_pop(
     repo_path: String,
     index: Option<u32>,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.stash_pop(&path, index) {
+    match run_git_blocking(&state.service, move |svc| svc.stash_pop(&path, index)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -395,9 +450,8 @@ pub async fn git_stash_drop(
     repo_path: String,
     index: u32,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.stash_drop(&path, index) {
+    match run_git_blocking(&state.service, move |svc| svc.stash_drop(&path, index)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -413,9 +467,8 @@ pub async fn git_get_merge_state(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<MergeState>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.get_merge_state(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.get_merge_state(&path)).await? {
         Ok(merge_state) => Ok(CommandResponse::ok(merge_state)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -427,19 +480,20 @@ pub async fn git_get_conflict_files(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<Vec<ConflictFile>>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-
-    // First get the list of conflicted files from git status
-    match service.full_status(&path) {
-        Ok(status) => {
-            let conflicted_paths: Vec<String> =
-                status.conflicted.iter().map(|f| f.path.clone()).collect();
-            match conflict::get_conflict_files(&path, &conflicted_paths) {
-                Ok(files) => Ok(CommandResponse::ok(files)),
-                Err(e) => Ok(CommandResponse::err(e.to_string())),
+    match run_git_blocking(&state.service, move |svc| {
+        match svc.full_status(&path) {
+            Ok(status) => {
+                let conflicted_paths: Vec<String> =
+                    status.conflicted.iter().map(|f| f.path.clone()).collect();
+                conflict::get_conflict_files(&path, &conflicted_paths)
             }
+            Err(e) => Err(e),
         }
+    })
+    .await?
+    {
+        Ok(files) => Ok(CommandResponse::ok(files)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -452,45 +506,55 @@ pub async fn git_resolve_conflict(
     file_path: String,
     strategy: ConflictStrategy,
 ) -> Result<CommandResponse<()>, String> {
-    let path = PathBuf::from(&repo_path);
-    let full_path = path.join(&file_path);
+    let result = tokio::task::spawn_blocking(move || {
+        let path = PathBuf::from(&repo_path);
+        let full_path = path.join(&file_path);
 
-    // Read the file
-    let content = match std::fs::read_to_string(&full_path) {
-        Ok(c) => c,
-        Err(e) => return Ok(CommandResponse::err(format!("Failed to read file: {}", e))),
-    };
+        let content = match std::fs::read_to_string(&full_path) {
+            Ok(c) => c,
+            Err(e) => return Err(format!("Failed to read file: {}", e)),
+        };
 
-    // Resolve
-    let resolved = conflict::resolve_file(&content, strategy);
+        let resolved = conflict::resolve_file(&content, strategy);
 
-    // Write back
-    match conflict::write_resolved(&path, &file_path, &resolved) {
+        match conflict::write_resolved(&path, &file_path, &resolved) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task panicked: {}", e))?;
+
+    match result {
         Ok(()) => Ok(CommandResponse::ok(())),
-        Err(e) => Ok(CommandResponse::err(e.to_string())),
+        Err(e) => Ok(CommandResponse::err(e)),
     }
 }
 
 // ===========================================================================
-// Remote Commands
+// Remote Commands (with network timeout)
 // ===========================================================================
 
-/// Fetch from remotes.
+/// Fetch from remotes (60s timeout).
 #[tauri::command]
 pub async fn git_fetch(
     state: tauri::State<'_, GitState>,
     repo_path: String,
     remote: Option<String>,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.fetch(&path, remote.as_deref()) {
-        Ok(()) => Ok(CommandResponse::ok(())),
-        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    match run_git_blocking_with_timeout(&state.service, 60, move |svc| {
+        svc.fetch(&path, remote.as_deref())
+    })
+    .await
+    {
+        Ok(Ok(())) => Ok(CommandResponse::ok(())),
+        Ok(Err(e)) => Ok(CommandResponse::err(e.to_string())),
+        Err(e) => Ok(CommandResponse::err(e)),
     }
 }
 
-/// Pull from remote.
+/// Pull from remote (120s timeout).
 #[tauri::command]
 pub async fn git_pull(
     state: tauri::State<'_, GitState>,
@@ -498,15 +562,19 @@ pub async fn git_pull(
     remote: Option<String>,
     branch: Option<String>,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.pull(&path, remote.as_deref(), branch.as_deref()) {
-        Ok(()) => Ok(CommandResponse::ok(())),
-        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    match run_git_blocking_with_timeout(&state.service, 120, move |svc| {
+        svc.pull(&path, remote.as_deref(), branch.as_deref())
+    })
+    .await
+    {
+        Ok(Ok(())) => Ok(CommandResponse::ok(())),
+        Ok(Err(e)) => Ok(CommandResponse::err(e.to_string())),
+        Err(e) => Ok(CommandResponse::err(e)),
     }
 }
 
-/// Push to remote.
+/// Push to remote (120s timeout).
 #[tauri::command]
 pub async fn git_push(
     state: tauri::State<'_, GitState>,
@@ -516,17 +584,17 @@ pub async fn git_push(
     set_upstream: Option<bool>,
     force: Option<bool>,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.push(
-        &path,
-        remote.as_deref(),
-        branch.as_deref(),
-        set_upstream.unwrap_or(false),
-        force.unwrap_or(false),
-    ) {
-        Ok(()) => Ok(CommandResponse::ok(())),
-        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    let su = set_upstream.unwrap_or(false);
+    let f = force.unwrap_or(false);
+    match run_git_blocking_with_timeout(&state.service, 120, move |svc| {
+        svc.push(&path, remote.as_deref(), branch.as_deref(), su, f)
+    })
+    .await
+    {
+        Ok(Ok(())) => Ok(CommandResponse::ok(())),
+        Ok(Err(e)) => Ok(CommandResponse::err(e.to_string())),
+        Err(e) => Ok(CommandResponse::err(e)),
     }
 }
 
@@ -536,9 +604,8 @@ pub async fn git_get_remotes(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<Vec<RemoteInfo>>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.get_remotes(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.get_remotes(&path)).await? {
         Ok(remotes) => Ok(CommandResponse::ok(remotes)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -555,9 +622,8 @@ pub async fn git_merge_branch(
     repo_path: String,
     branch: String,
 ) -> Result<CommandResponse<MergeBranchResult>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.merge_branch(&path, &branch) {
+    match run_git_blocking(&state.service, move |svc| svc.merge_branch(&path, &branch)).await? {
         Ok(result) => Ok(CommandResponse::ok(result)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -569,9 +635,8 @@ pub async fn git_merge_abort(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.merge_abort(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.merge_abort(&path)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -583,9 +648,8 @@ pub async fn git_merge_continue(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<String>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.merge_continue(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.merge_continue(&path)).await? {
         Ok(sha) => Ok(CommandResponse::ok(sha)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -599,9 +663,12 @@ pub async fn git_rename_branch(
     old_name: String,
     new_name: String,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.rename_branch(&path, &old_name, &new_name) {
+    match run_git_blocking(&state.service, move |svc| {
+        svc.rename_branch(&path, &old_name, &new_name)
+    })
+    .await?
+    {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -613,9 +680,8 @@ pub async fn git_list_remote_branches(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<Vec<RemoteBranchInfo>>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.list_remote_branches(&path) {
+    match run_git_blocking(&state.service, move |svc| svc.list_remote_branches(&path)).await? {
         Ok(branches) => Ok(CommandResponse::ok(branches)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -628,9 +694,12 @@ pub async fn git_read_file_content(
     repo_path: String,
     file_path: String,
 ) -> Result<CommandResponse<String>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.read_file_content(&path, &file_path) {
+    match run_git_blocking(&state.service, move |svc| {
+        svc.read_file_content(&path, &file_path)
+    })
+    .await?
+    {
         Ok(content) => Ok(CommandResponse::ok(content)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -643,9 +712,12 @@ pub async fn git_parse_file_conflicts(
     repo_path: String,
     file_path: String,
 ) -> Result<CommandResponse<Vec<ConflictRegion>>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.parse_file_conflicts(&path, &file_path) {
+    match run_git_blocking(&state.service, move |svc| {
+        svc.parse_file_conflicts(&path, &file_path)
+    })
+    .await?
+    {
         Ok(regions) => Ok(CommandResponse::ok(regions)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -659,9 +731,121 @@ pub async fn git_resolve_file_and_stage(
     file_path: String,
     content: String,
 ) -> Result<CommandResponse<()>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
-    match service.resolve_file_and_stage(&path, &file_path, &content) {
+    match run_git_blocking(&state.service, move |svc| {
+        svc.resolve_file_and_stage(&path, &file_path, &content)
+    })
+    .await?
+    {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+// ===========================================================================
+// Operation Abort/Continue Commands (rebase, cherry-pick, revert)
+// ===========================================================================
+
+/// Abort a rebase, cherry-pick, or revert operation.
+#[tauri::command]
+pub async fn git_operation_abort(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    kind: String,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| match kind.as_str() {
+        "merging" => svc.merge_abort(&path),
+        "rebasing" => svc.rebase_abort(&path),
+        "cherry_picking" => svc.cherry_pick_abort(&path),
+        "reverting" => svc.revert_abort(&path),
+        _ => Err(crate::utils::error::AppError::command(format!(
+            "Unknown operation kind: {}",
+            kind
+        ))),
+    })
+    .await?
+    {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Continue a rebase, cherry-pick, or revert operation.
+#[tauri::command]
+pub async fn git_operation_continue(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    kind: String,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| match kind.as_str() {
+        "merging" => svc.merge_continue(&path).map(|_| ()),
+        "rebasing" => svc.rebase_continue(&path),
+        "cherry_picking" => svc.cherry_pick_continue(&path),
+        "reverting" => svc.revert_continue(&path),
+        _ => Err(crate::utils::error::AppError::command(format!(
+            "Unknown operation kind: {}",
+            kind
+        ))),
+    })
+    .await?
+    {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+// ===========================================================================
+// Tag Commands
+// ===========================================================================
+
+/// List all tags.
+#[tauri::command]
+pub async fn git_list_tags(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+) -> Result<CommandResponse<Vec<TagInfo>>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| svc.list_tags(&path)).await? {
+        Ok(tags) => Ok(CommandResponse::ok(tags)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Create a tag (lightweight or annotated).
+#[tauri::command]
+pub async fn git_create_tag(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    name: String,
+    message: Option<String>,
+    target: Option<String>,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| {
+        if let Some(ref msg) = message {
+            svc.create_annotated_tag(&path, &name, msg, target.as_deref())
+        } else {
+            svc.create_tag(&path, &name, target.as_deref())
+        }
+    })
+    .await?
+    {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Delete a tag.
+#[tauri::command]
+pub async fn git_delete_tag(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    name: String,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| svc.delete_tag(&path, &name)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -677,11 +861,10 @@ pub async fn git_generate_commit_message(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<String>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
 
-    // Get staged diff
-    let diff = match service.diff_staged(&path) {
+    // Get staged diff on a blocking thread
+    let diff = match run_git_blocking(&state.service, move |svc| svc.diff_staged(&path)).await? {
         Ok(d) => d,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
@@ -692,7 +875,6 @@ pub async fn git_generate_commit_message(
         ));
     }
 
-    // Convert diff to text for LLM
     let diff_text = diff_output_to_text(&diff);
 
     let assist = state.llm_assist.read().await;
@@ -713,16 +895,23 @@ pub async fn git_review_diff(
     state: tauri::State<'_, GitState>,
     repo_path: String,
 ) -> Result<CommandResponse<String>, String> {
-    let service = state.service.read().await;
-    let path = PathBuf::from(&repo_path);
+    let path_staged = PathBuf::from(&repo_path);
+    let path_unstaged = PathBuf::from(&repo_path);
 
-    // Get staged diff (or unstaged if nothing staged)
-    let diff = match service.diff_staged(&path) {
-        Ok(d) if !d.files.is_empty() => d,
-        _ => match service.diff_unstaged(&path) {
+    // Get staged diff
+    let staged = run_git_blocking(&state.service, move |svc| svc.diff_staged(&path_staged))
+        .await?
+        .ok();
+
+    let diff = if staged.as_ref().map_or(true, |d| d.files.is_empty()) {
+        match run_git_blocking(&state.service, move |svc| svc.diff_unstaged(&path_unstaged))
+            .await?
+        {
             Ok(d) => d,
             Err(e) => return Ok(CommandResponse::err(e.to_string())),
-        },
+        }
+    } else {
+        staged.unwrap()
     };
 
     if diff.files.is_empty() {
@@ -744,22 +933,20 @@ pub async fn git_review_diff(
 }
 
 /// Resolve a conflict in a file using LLM.
-///
-/// Reads the file content with conflict markers and asks the LLM to resolve.
 #[tauri::command]
 pub async fn git_resolve_conflict_ai(
     state: tauri::State<'_, GitState>,
     repo_path: String,
     file_path: String,
 ) -> Result<CommandResponse<String>, String> {
-    let path = PathBuf::from(&repo_path);
-    let full_path = path.join(&file_path);
-
-    // Read the file with conflict markers
-    let content = match std::fs::read_to_string(&full_path) {
-        Ok(c) => c,
-        Err(e) => return Ok(CommandResponse::err(format!("Failed to read file: {}", e))),
-    };
+    let content = tokio::task::spawn_blocking(move || {
+        let path = PathBuf::from(&repo_path);
+        let full_path = path.join(&file_path);
+        std::fs::read_to_string(&full_path)
+            .map_err(|e| format!("Failed to read file: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task panicked: {}", e))??;
 
     let assist = state.llm_assist.read().await;
     match assist.as_ref() {
@@ -774,31 +961,30 @@ pub async fn git_resolve_conflict_ai(
 }
 
 /// Summarize a commit using LLM.
-///
-/// Gets the diff and message for a specific commit SHA and summarizes it.
 #[tauri::command]
 pub async fn git_summarize_commit(
     state: tauri::State<'_, GitState>,
     repo_path: String,
     sha: String,
 ) -> Result<CommandResponse<String>, String> {
-    let service = state.service.read().await;
     let path = PathBuf::from(&repo_path);
+    let sha_clone = sha.clone();
 
-    // Get the commit's diff using git show
-    let diff_text = match service.diff_for_commit(&path, &sha) {
-        Ok(d) => diff_output_to_text(&d),
-        Err(_) => String::new(),
-    };
-
-    // Get commit message for the specific SHA using git log -1 <sha>
-    let commit_message = match service
-        .git_ops()
-        .execute(&path, &["log", "-1", "--format=%s%n%n%b", &sha])
-    {
-        Ok(output) => output.into_result().unwrap_or_default().trim().to_string(),
-        Err(_) => String::new(),
-    };
+    let (diff_text, commit_message) = run_git_blocking(&state.service, move |svc| {
+        let dt = match svc.diff_for_commit(&path, &sha_clone) {
+            Ok(d) => diff_output_to_text(&d),
+            Err(_) => String::new(),
+        };
+        let cm = match svc
+            .git_ops()
+            .execute(&path, &["log", "-1", "--format=%s%n%n%b", &sha_clone])
+        {
+            Ok(output) => output.into_result().unwrap_or_default().trim().to_string(),
+            Err(_) => String::new(),
+        };
+        (dt, cm)
+    })
+    .await?;
 
     if commit_message.is_empty() && diff_text.is_empty() {
         return Ok(CommandResponse::err(
@@ -836,11 +1022,6 @@ pub async fn git_check_llm_available(
 }
 
 /// Configure the LLM provider for git operations at runtime.
-///
-/// Accepts provider name, model, and API key from the frontend,
-/// creates the appropriate LlmProvider, and sets it on GitState.
-/// Also resolves base_url and proxy settings from the database to
-/// match the same configuration used by chat/pipeline execution.
 #[tauri::command]
 pub async fn git_configure_llm(
     state: tauri::State<'_, GitState>,
@@ -850,7 +1031,6 @@ pub async fn git_configure_llm(
     api_key: String,
     base_url: Option<String>,
 ) -> Result<CommandResponse<bool>, String> {
-    // Normalize provider name (e.g. "claude" -> "anthropic")
     let canonical = match normalize_provider_name(&provider) {
         Some(c) => c,
         None => {
@@ -861,7 +1041,6 @@ pub async fn git_configure_llm(
         }
     };
 
-    // Map to ProviderType
     let provider_type = match canonical {
         "anthropic" => ProviderType::Anthropic,
         "openai" => ProviderType::OpenAI,
@@ -878,7 +1057,6 @@ pub async fn git_configure_llm(
         }
     };
 
-    // Ollama doesn't require an API key; others do
     let api_key_opt = if api_key.is_empty() {
         None
     } else {
@@ -892,8 +1070,6 @@ pub async fn git_configure_llm(
         )));
     }
 
-    // Fall back to a sensible default model when the frontend sends an empty string
-    // (e.g. user selected "Provider Default" in the model dropdown).
     let resolved_model = if model.trim().is_empty() {
         match provider_type {
             ProviderType::Anthropic => "claude-3-5-sonnet-20241022".to_string(),
@@ -908,8 +1084,6 @@ pub async fn git_configure_llm(
         model
     };
 
-    // Resolve base_url: frontend-provided (from zustand endpoint settings) takes priority,
-    // then database, then None (provider default).
     let frontend_base_url = base_url.filter(|u| !u.is_empty());
     let resolved_base_url = if frontend_base_url.is_some() {
         frontend_base_url
@@ -925,7 +1099,6 @@ pub async fn git_configure_llm(
             .filter(|u| !u.is_empty())
     };
 
-    // Resolve proxy for this provider (same as execute_standalone / pipeline_execution)
     let keyring = KeyringService::new();
     let proxy = app_state
         .with_database(|db| {
@@ -945,7 +1118,6 @@ pub async fn git_configure_llm(
         ..Default::default()
     };
 
-    // Create provider using the same factory pattern as pipeline_execution
     let llm_provider: Arc<dyn LlmProvider> = match config.provider {
         ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config)),
         ProviderType::OpenAI => Arc::new(OpenAIProvider::new(config)),
@@ -1011,6 +1183,7 @@ mod tests {
                 is_deleted: false,
                 is_renamed: false,
                 old_path: None,
+                is_binary: false,
                 hunks: vec![DiffHunk {
                     header: "@@ -1,2 +1,3 @@".to_string(),
                     old_start: 1,

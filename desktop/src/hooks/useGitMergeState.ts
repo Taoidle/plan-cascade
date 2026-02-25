@@ -25,7 +25,7 @@ export function useGitMergeState() {
   useEffect(() => {
     mountedRef.current = true;
     if (workspacePath) {
-      refreshMergeState(workspacePath);
+      refreshMergeState();
     }
     return () => {
       mountedRef.current = false;
@@ -42,14 +42,14 @@ export function useGitMergeState() {
       try {
         const unsub1 = await listen('git-status-changed', () => {
           if (mountedRef.current && workspacePath) {
-            refreshMergeState(workspacePath);
+            refreshMergeState();
           }
         });
         unlisteners.push(unsub1);
 
         const unsub2 = await listen('git-head-changed', () => {
           if (mountedRef.current && workspacePath) {
-            refreshMergeState(workspacePath);
+            refreshMergeState();
           }
         });
         unlisteners.push(unsub2);

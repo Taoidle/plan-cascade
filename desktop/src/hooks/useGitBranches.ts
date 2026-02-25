@@ -7,7 +7,7 @@
  * Feature-004: Branches Tab & Merge Conflict Resolution
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { BranchInfo, RemoteBranchInfo, CommandResponse } from '../types/git';
@@ -89,6 +89,19 @@ export function useGitBranches(): UseGitBranchesReturn {
     };
   }, [refresh]);
 
+  // Debounced refresh for event listeners (300ms)
+  const debouncedRefresh = useMemo(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    return () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (mountedRef.current) {
+          refresh();
+        }
+      }, 300);
+    };
+  }, [refresh]);
+
   // Listen for git events to auto-refresh
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -97,14 +110,14 @@ export function useGitBranches(): UseGitBranchesReturn {
       try {
         const unsub1 = await listen('git-status-changed', () => {
           if (mountedRef.current) {
-            refresh();
+            debouncedRefresh();
           }
         });
         unlisteners.push(unsub1);
 
         const unsub2 = await listen('git-head-changed', () => {
           if (mountedRef.current) {
-            refresh();
+            debouncedRefresh();
           }
         });
         unlisteners.push(unsub2);
@@ -120,7 +133,7 @@ export function useGitBranches(): UseGitBranchesReturn {
         unsub();
       }
     };
-  }, [refresh]);
+  }, [debouncedRefresh]);
 
   const currentBranch = localBranches.find((b) => b.is_head) || null;
 

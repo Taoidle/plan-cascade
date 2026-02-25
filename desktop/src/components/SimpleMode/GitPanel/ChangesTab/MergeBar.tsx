@@ -79,36 +79,22 @@ export function MergeBar() {
     if (!repoPath || !mergeState) return;
 
     try {
-      // Determine the right abort command based on merge state kind
-      let command: string;
-      switch (mergeState.kind) {
-        case 'merging':
-          command = 'merge';
-          break;
-        case 'rebasing':
-          command = 'rebase';
-          break;
-        case 'cherry_picking':
-          command = 'cherry-pick';
-          break;
-        case 'reverting':
-          command = 'revert';
-          break;
-        default:
-          return;
+      if (mergeState.kind === 'merging') {
+        // Use existing merge abort command
+        const res = await invoke<CommandResponse<void>>('git_merge_abort', { repoPath });
+        if (!res.success) {
+          setError(res.error || 'Merge abort failed');
+        }
+      } else {
+        // Use the new generic operation abort command
+        const res = await invoke<CommandResponse<null>>('git_operation_abort', {
+          repoPath,
+          kind: mergeState.kind,
+        });
+        if (!res.success) {
+          setError(res.error || `Abort ${mergeState.kind} failed`);
+        }
       }
-
-      // Use git_stage_files with the abort argument through the shell
-      // Since we don't have a dedicated abort command, we use a generic approach
-      // by running git <command> --abort via the git service
-      const response = await invoke<CommandResponse<null>>('git_stage_files', {
-        repoPath,
-        paths: [],
-      }).catch(() => null);
-
-      // Actually, we need a proper abort. Let's use the commit command with a special message
-      // In practice, the git service should have abort commands. For now, let's provide feedback.
-      setError(`Abort not yet supported via IPC. Use terminal: git ${command} --abort`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -120,15 +106,21 @@ export function MergeBar() {
     if (!repoPath || !mergeState) return;
 
     try {
-      // For merge continue, we just commit (git already knows it's a merge commit)
       if (mergeState.kind === 'merging') {
-        // Trigger a commit with the default merge message
-        await invoke<CommandResponse<string>>('git_commit', {
-          repoPath,
-          message: `Merge branch '${mergeState.branch_name || 'unknown'}'`,
-        });
+        // Use existing merge continue command
+        const res = await invoke<CommandResponse<string>>('git_merge_continue', { repoPath });
+        if (!res.success) {
+          setError(res.error || 'Merge continue failed');
+        }
       } else {
-        setError(`Continue not yet supported via IPC for ${mergeState.kind}. Use terminal.`);
+        // Use the new generic operation continue command
+        const res = await invoke<CommandResponse<null>>('git_operation_continue', {
+          repoPath,
+          kind: mergeState.kind,
+        });
+        if (!res.success) {
+          setError(res.error || `Continue ${mergeState.kind} failed`);
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

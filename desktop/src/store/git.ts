@@ -335,7 +335,11 @@ export const useGitStore = create<GitState>((set, get) => ({
     if (!repoPath) return;
 
     try {
-      await invokeGit<null>('git_stash_save', { repoPath, message: message || null });
+      await invokeGit<null>('git_stash_save', {
+        repoPath,
+        message: message || null,
+        includeUntracked: true,
+      });
       await get().refreshAll();
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) });
