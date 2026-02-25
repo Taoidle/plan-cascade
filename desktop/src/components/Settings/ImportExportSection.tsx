@@ -1,15 +1,23 @@
 /**
- * ImportExportSection Component
+ * ImportExportSection Component (v6.0)
  *
- * Configuration import/export functionality.
+ * Unified import/export covering frontend settings, backend config, and encrypted API keys.
  */
 
 import { useState, useRef } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { clsx } from 'clsx';
-import { DownloadIcon, UploadIcon, Cross2Icon, CheckCircledIcon, ExclamationTriangleIcon } from '@radix-ui/react-icons';
+import {
+  DownloadIcon,
+  UploadIcon,
+  Cross2Icon,
+  CheckCircledIcon,
+  ExclamationTriangleIcon,
+  LockClosedIcon,
+} from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
+import { exportAllSettings, importAllSettings, type ImportResult } from '../../lib/settingsApi';
 
 type MessageType = 'success' | 'error' | 'warning';
 
@@ -23,64 +31,46 @@ export function ImportExportSection() {
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [message, setMessage] = useState<StatusMessage | null>(null);
-  const [importPreview, setImportPreview] = useState<object | null>(null);
+  const [importPreview, setImportPreview] = useState<{ raw: string; parsed: Record<string, unknown> } | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [includeSecrets, setIncludeSecrets] = useState(true);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [showResultDialog, setShowResultDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Password dialog state
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [passwordMode, setPasswordMode] = useState<'export' | 'import'>('export');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+
+  // ========================================================================
+  // Export
+  // ========================================================================
+
   const handleExport = async () => {
+    if (includeSecrets) {
+      setPasswordMode('export');
+      setPassword('');
+      setConfirmPassword('');
+      setPasswordError('');
+      setShowPasswordDialog(true);
+      return;
+    }
+    await doExport(null);
+  };
+
+  const doExport = async (pw: string | null) => {
     setIsExporting(true);
     setMessage(null);
 
     try {
-      // Export settings from store (v5.1 - complete settings)
       const settings = useSettingsStore.getState();
-      const exportData = {
-        version: '5.1',
-        exported_at: new Date().toISOString(),
-        settings: {
-          // Backend
-          backend: settings.backend,
-          provider: settings.provider,
-          model: settings.model,
-          theme: settings.theme,
-          default_mode: settings.defaultMode,
-          // Agents
-          agents: settings.agents,
-          agent_selection: settings.agentSelection,
-          default_agent: settings.defaultAgent,
-          // Quality gates
-          quality_gates: settings.qualityGates,
-          // Execution
-          max_parallel_stories: settings.maxParallelStories,
-          max_iterations: settings.maxIterations,
-          max_total_tokens: settings.maxTotalTokens,
-          timeout_seconds: settings.timeoutSeconds,
-          standalone_context_turns: settings.standaloneContextTurns,
-          // UI
-          language: settings.language,
-          show_line_numbers: settings.showLineNumbers,
-          max_file_attachment_size: settings.maxFileAttachmentSize,
-          enable_markdown_math: settings.enableMarkdownMath,
-          enable_code_block_copy: settings.enableCodeBlockCopy,
-          // Context & display
-          enable_context_compaction: settings.enableContextCompaction,
-          show_reasoning_output: settings.showReasoningOutput,
-          enable_thinking: settings.enableThinking,
-          show_sub_agent_events: settings.showSubAgentEvents,
-          // Endpoints
-          glm_endpoint: settings.glmEndpoint,
-          minimax_endpoint: settings.minimaxEndpoint,
-          qwen_endpoint: settings.qwenEndpoint,
-          // Search
-          search_provider: settings.searchProvider,
-          // Workspace
-          pinned_directories: settings.pinnedDirectories,
-          sidebar_collapsed: settings.sidebarCollapsed,
-          workspace_path: settings.workspacePath,
-        },
-      };
+      const frontendState = buildFrontendExportState(settings);
+      const exportData = await exportAllSettings(frontendState, pw);
 
-      // Create blob and download
+      // Download as JSON file
       const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -94,11 +84,28 @@ export function ImportExportSection() {
       setMessage({ type: 'success', text: t('importExport.export.success') });
     } catch (error) {
       console.error('Export failed:', error);
-      setMessage({ type: 'error', text: t('importExport.export.error') });
+      setMessage({ type: 'error', text: String(error) });
     } finally {
       setIsExporting(false);
     }
   };
+
+  const handleExportPasswordConfirm = () => {
+    if (password !== confirmPassword) {
+      setPasswordError(t('importExport.export.passwordMismatch'));
+      return;
+    }
+    if (!password) {
+      setPasswordError(t('importExport.export.passwordRequired'));
+      return;
+    }
+    setShowPasswordDialog(false);
+    doExport(password);
+  };
+
+  // ========================================================================
+  // Import
+  // ========================================================================
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -110,8 +117,9 @@ export function ImportExportSection() {
         const content = e.target?.result as string;
         const parsed = JSON.parse(content);
 
-        // Basic validation
-        if (!parsed.version || !parsed.settings) {
+        // Validate: must have version field
+        const version = parsed.version;
+        if (!version) {
           setMessage({
             type: 'error',
             text: t('importExport.import.invalidFormat'),
@@ -119,7 +127,16 @@ export function ImportExportSection() {
           return;
         }
 
-        setImportPreview(parsed);
+        // For v5.x, must also have settings
+        if (version.startsWith('5.') && !parsed.settings) {
+          setMessage({
+            type: 'error',
+            text: t('importExport.import.invalidFormat'),
+          });
+          return;
+        }
+
+        setImportPreview({ raw: content, parsed });
         setShowConfirmDialog(true);
       } catch {
         setMessage({ type: 'error', text: t('importExport.import.parseError') });
@@ -127,7 +144,6 @@ export function ImportExportSection() {
     };
     reader.readAsText(file);
 
-    // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -136,38 +152,86 @@ export function ImportExportSection() {
   const handleImportConfirm = async () => {
     if (!importPreview) return;
 
+    const parsed = importPreview.parsed;
+
+    // If v6.0 with encrypted secrets, ask for password
+    if (parsed.version === '6.0' && parsed.has_encrypted_secrets) {
+      setShowConfirmDialog(false);
+      setPasswordMode('import');
+      setPassword('');
+      setPasswordError('');
+      setShowPasswordDialog(true);
+      return;
+    }
+
+    await doImport(null);
+  };
+
+  const handleImportPasswordConfirm = () => {
+    if (!password) {
+      setPasswordError(t('importExport.import.passwordRequired'));
+      return;
+    }
+    setShowPasswordDialog(false);
+    doImport(password);
+  };
+
+  const doImport = async (pw: string | null) => {
+    if (!importPreview) return;
+
     setIsImporting(true);
     setMessage(null);
+    setShowConfirmDialog(false);
 
     try {
-      // Update frontend store with imported settings (v5.0 - Pure Rust backend)
-      const { settings } = importPreview as { settings: Record<string, unknown> };
-      syncSettingsToStore(settings);
+      const result = await importAllSettings(importPreview.raw, pw);
 
-      setMessage({ type: 'success', text: t('importExport.import.success') });
-      setShowConfirmDialog(false);
+      // Apply frontend settings to Zustand store
+      if (result.frontend) {
+        syncSettingsToStore(result.frontend as Record<string, unknown>);
+      }
+
+      setImportResult(result);
+      setShowResultDialog(true);
       setImportPreview(null);
+
+      if (result.success) {
+        setMessage({ type: 'success', text: t('importExport.import.success') });
+      } else if (result.errors.length > 0 && result.errors[0].includes('Wrong password')) {
+        setMessage({ type: 'error', text: t('importExport.import.wrongPassword') });
+      } else {
+        setMessage({ type: 'warning', text: t('importExport.import.partialSuccess') });
+      }
     } catch (error) {
       console.error('Import failed:', error);
-      setMessage({ type: 'error', text: t('importExport.import.error') });
+      setMessage({ type: 'error', text: String(error) });
     } finally {
       setIsImporting(false);
     }
   };
 
+  // ========================================================================
+  // Reset
+  // ========================================================================
+
   const handleReset = async () => {
     setMessage(null);
 
     try {
-      // Reset frontend store (v5.0 - Pure Rust backend)
       useSettingsStore.getState().resetToDefaults();
-
       setMessage({ type: 'success', text: t('importExport.reset.success') });
     } catch (error) {
       console.error('Reset failed:', error);
       setMessage({ type: 'error', text: t('importExport.reset.error') });
     }
   };
+
+  // ========================================================================
+  // Render
+  // ========================================================================
+
+  const isLegacy = String(importPreview?.parsed.version ?? '').startsWith('5.');
+  const previewVersion = String(importPreview?.parsed.version ?? '');
 
   return (
     <div className="space-y-8">
@@ -218,20 +282,35 @@ export function ImportExportSection() {
         >
           <DownloadIcon className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500 mb-4" />
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{t('importExport.export.description')}</p>
-          <button
-            onClick={handleExport}
-            disabled={isExporting}
-            className={clsx(
-              'inline-flex items-center gap-2 px-4 py-2 rounded-lg',
-              'bg-primary-600 text-white',
-              'hover:bg-primary-700',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-            )}
-          >
-            <DownloadIcon className="w-4 h-4" />
-            {isExporting ? t('importExport.export.exporting') : t('importExport.export.button')}
-          </button>
+
+          {/* Include secrets checkbox */}
+          <label className="inline-flex items-center gap-2 mb-4 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={includeSecrets}
+              onChange={(e) => setIncludeSecrets(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            <LockClosedIcon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+            <span className="text-sm text-gray-700 dark:text-gray-300">{t('importExport.export.includeSecrets')}</span>
+          </label>
+
+          <div>
+            <button
+              onClick={handleExport}
+              disabled={isExporting}
+              className={clsx(
+                'inline-flex items-center gap-2 px-4 py-2 rounded-lg',
+                'bg-primary-600 text-white',
+                'hover:bg-primary-700',
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+              )}
+            >
+              <DownloadIcon className="w-4 h-4" />
+              {isExporting ? t('importExport.export.exporting') : t('importExport.export.button')}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -321,22 +400,52 @@ export function ImportExportSection() {
               {t('importExport.import.dialogDescription')}
             </Dialog.Description>
 
-            {/* Preview */}
+            {/* Version badge */}
             {importPreview && (
+              <div className="mt-3">
+                <span
+                  className={clsx(
+                    'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
+                    isLegacy
+                      ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+                      : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+                  )}
+                >
+                  v{previewVersion}
+                  {isLegacy && ` - ${t('importExport.import.legacyFormat')}`}
+                </span>
+                {!!importPreview.parsed.has_encrypted_secrets && (
+                  <span className="inline-flex items-center gap-1 ml-2 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                    <LockClosedIcon className="w-3 h-3" />
+                    {t('importExport.export.includeSecrets')}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Preview */}
+            {importPreview && !isLegacy && (
               <div className="mt-4">
                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   {t('importExport.import.preview')}
                 </h4>
-                <div
-                  className={clsx(
-                    'max-h-48 overflow-auto p-3 rounded-lg',
-                    'bg-gray-50 dark:bg-gray-800',
-                    'border border-gray-200 dark:border-gray-700',
-                    'text-xs font-mono text-gray-600 dark:text-gray-400',
+                <div className="space-y-1 text-xs text-gray-600 dark:text-gray-400">
+                  <p>
+                    Backend sections: config, embedding, proxy, webhooks, guardrails, remote, a2a_agents, mcp_servers,
+                    plugin_settings
+                  </p>
+                  {!!importPreview.parsed.has_encrypted_secrets && (
+                    <p className="text-green-600 dark:text-green-400">+ Encrypted API keys (password required)</p>
                   )}
-                >
-                  <pre>{JSON.stringify((importPreview as { settings: object }).settings, null, 2)}</pre>
                 </div>
+              </div>
+            )}
+
+            {isLegacy && (
+              <div className="mt-4 p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800">
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                  {t('importExport.import.legacyFormatNote')}
+                </p>
               </div>
             )}
 
@@ -378,8 +487,265 @@ export function ImportExportSection() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      {/* Password Dialog */}
+      <Dialog.Root open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+          <Dialog.Content
+            className={clsx(
+              'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+              'w-full max-w-md',
+              'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
+              'p-6',
+              'focus:outline-none',
+            )}
+          >
+            <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <LockClosedIcon className="w-5 h-5" />
+              {passwordMode === 'export'
+                ? t('importExport.export.passwordPrompt')
+                : t('importExport.import.passwordPrompt')}
+            </Dialog.Title>
+
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  {t('importExport.password.label')}
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPasswordError('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (passwordMode === 'export') handleExportPasswordConfirm();
+                      else handleImportPasswordConfirm();
+                    }
+                  }}
+                  className={clsx(
+                    'w-full px-3 py-2 rounded-lg border',
+                    'bg-white dark:bg-gray-800',
+                    'border-gray-300 dark:border-gray-600',
+                    'text-gray-900 dark:text-white',
+                    'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                  )}
+                  autoFocus
+                />
+              </div>
+
+              {passwordMode === 'export' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    {t('importExport.export.confirmPassword')}
+                  </label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => {
+                      setConfirmPassword(e.target.value);
+                      setPasswordError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleExportPasswordConfirm();
+                    }}
+                    className={clsx(
+                      'w-full px-3 py-2 rounded-lg border',
+                      'bg-white dark:bg-gray-800',
+                      'border-gray-300 dark:border-gray-600',
+                      'text-gray-900 dark:text-white',
+                      'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                    )}
+                  />
+                </div>
+              )}
+
+              {passwordError && <p className="text-sm text-red-600 dark:text-red-400">{passwordError}</p>}
+
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('importExport.password.hint')}</p>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <Dialog.Close asChild>
+                <button
+                  className={clsx(
+                    'px-4 py-2 rounded-lg',
+                    'bg-gray-100 dark:bg-gray-800',
+                    'text-gray-700 dark:text-gray-300',
+                    'hover:bg-gray-200 dark:hover:bg-gray-700',
+                  )}
+                >
+                  {t('importExport.import.cancel')}
+                </button>
+              </Dialog.Close>
+              <button
+                onClick={passwordMode === 'export' ? handleExportPasswordConfirm : handleImportPasswordConfirm}
+                className={clsx('px-4 py-2 rounded-lg', 'bg-primary-600 text-white', 'hover:bg-primary-700')}
+              >
+                {passwordMode === 'export' ? t('importExport.export.button') : t('importExport.import.importButton')}
+              </button>
+            </div>
+
+            <Dialog.Close asChild>
+              <button
+                className={clsx('absolute top-4 right-4 p-1 rounded-lg', 'hover:bg-gray-100 dark:hover:bg-gray-800')}
+                aria-label={t('importExport.import.close')}
+              >
+                <Cross2Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              </button>
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Import Result Dialog */}
+      <Dialog.Root open={showResultDialog} onOpenChange={setShowResultDialog}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+          <Dialog.Content
+            className={clsx(
+              'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+              'w-full max-w-lg max-h-[85vh] overflow-auto',
+              'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
+              'p-6',
+              'focus:outline-none',
+            )}
+          >
+            <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
+              {t('importExport.import.resultTitle')}
+            </Dialog.Title>
+
+            {importResult && (
+              <div className="mt-4 space-y-4">
+                {/* Imported sections */}
+                {importResult.imported_sections.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-green-700 dark:text-green-300 mb-1">
+                      {t('importExport.import.importedSections')}
+                    </h4>
+                    <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-0.5">
+                      {importResult.imported_sections.map((s) => (
+                        <li key={s} className="flex items-center gap-1.5">
+                          <CheckCircledIcon className="w-3.5 h-3.5 text-green-500" />
+                          {s}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Skipped sections */}
+                {importResult.skipped_sections.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
+                      {t('importExport.import.skippedSections')}
+                    </h4>
+                    <ul className="text-sm text-gray-500 dark:text-gray-500 space-y-0.5">
+                      {importResult.skipped_sections.map((s) => (
+                        <li key={s}>- {s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Warnings */}
+                {importResult.warnings.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-yellow-700 dark:text-yellow-300 mb-1">
+                      {t('importExport.import.importWarnings')}
+                    </h4>
+                    <ul className="text-sm text-yellow-600 dark:text-yellow-400 space-y-0.5">
+                      {importResult.warnings.map((w, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <ExclamationTriangleIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                          {w}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Errors */}
+                {importResult.errors.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-red-700 dark:text-red-300 mb-1">
+                      {t('importExport.import.importErrors')}
+                    </h4>
+                    <ul className="text-sm text-red-600 dark:text-red-400 space-y-0.5">
+                      {importResult.errors.map((e, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <Cross2Icon className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                          {e}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end">
+              <Dialog.Close asChild>
+                <button className={clsx('px-4 py-2 rounded-lg', 'bg-primary-600 text-white', 'hover:bg-primary-700')}>
+                  {t('importExport.import.close')}
+                </button>
+              </Dialog.Close>
+            </div>
+
+            <Dialog.Close asChild>
+              <button
+                className={clsx('absolute top-4 right-4 p-1 rounded-lg', 'hover:bg-gray-100 dark:hover:bg-gray-800')}
+                aria-label={t('importExport.import.close')}
+              >
+                <Cross2Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              </button>
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
+}
+
+/** Build the frontend state object for export (same shape as v5.1 settings) */
+function buildFrontendExportState(settings: ReturnType<typeof useSettingsStore.getState>): Record<string, unknown> {
+  return {
+    backend: settings.backend,
+    provider: settings.provider,
+    model: settings.model,
+    theme: settings.theme,
+    default_mode: settings.defaultMode,
+    agents: settings.agents,
+    agent_selection: settings.agentSelection,
+    default_agent: settings.defaultAgent,
+    quality_gates: settings.qualityGates,
+    max_parallel_stories: settings.maxParallelStories,
+    max_iterations: settings.maxIterations,
+    max_total_tokens: settings.maxTotalTokens,
+    timeout_seconds: settings.timeoutSeconds,
+    standalone_context_turns: settings.standaloneContextTurns,
+    language: settings.language,
+    show_line_numbers: settings.showLineNumbers,
+    max_file_attachment_size: settings.maxFileAttachmentSize,
+    enable_markdown_math: settings.enableMarkdownMath,
+    enable_code_block_copy: settings.enableCodeBlockCopy,
+    enable_context_compaction: settings.enableContextCompaction,
+    show_reasoning_output: settings.showReasoningOutput,
+    enable_thinking: settings.enableThinking,
+    show_sub_agent_events: settings.showSubAgentEvents,
+    glm_endpoint: settings.glmEndpoint,
+    minimax_endpoint: settings.minimaxEndpoint,
+    qwen_endpoint: settings.qwenEndpoint,
+    search_provider: settings.searchProvider,
+    max_concurrent_subagents: settings.maxConcurrentSubagents,
+    phase_configs: settings.phaseConfigs,
+    pinned_directories: settings.pinnedDirectories,
+    sidebar_collapsed: settings.sidebarCollapsed,
+    workspace_path: settings.workspacePath,
+  };
 }
 
 function syncSettingsToStore(settings: Record<string, unknown>) {
@@ -496,6 +862,28 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
   // Search
   if (settings.search_provider && ['tavily', 'brave', 'duckduckgo'].includes(settings.search_provider as string)) {
     store.setSearchProvider(settings.search_provider as 'tavily' | 'brave' | 'duckduckgo');
+  }
+
+  // Execution (additional)
+  if (typeof settings.max_concurrent_subagents === 'number') {
+    store.setMaxConcurrentSubagents(settings.max_concurrent_subagents);
+  }
+
+  // Phase agent configs
+  if (settings.phase_configs && typeof settings.phase_configs === 'object') {
+    const pc = settings.phase_configs as Record<string, { defaultAgent?: string; fallbackChain?: string[] }>;
+    const validConfigs: Record<string, { defaultAgent: string; fallbackChain: string[] }> = {};
+    for (const [phaseId, config] of Object.entries(pc)) {
+      if (config && typeof config === 'object') {
+        validConfigs[phaseId] = {
+          defaultAgent: typeof config.defaultAgent === 'string' ? config.defaultAgent : '',
+          fallbackChain: Array.isArray(config.fallbackChain) ? config.fallbackChain : [],
+        };
+      }
+    }
+    if (Object.keys(validConfigs).length > 0) {
+      store.setPhaseConfigs(validConfigs);
+    }
   }
 
   // Workspace

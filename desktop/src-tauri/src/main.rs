@@ -58,6 +58,8 @@ fn main() {
             // Settings commands
             plan_cascade_desktop::commands::settings::get_settings,
             plan_cascade_desktop::commands::settings::update_settings,
+            plan_cascade_desktop::commands::settings::export_all_settings,
+            plan_cascade_desktop::commands::settings::import_all_settings,
             // Project commands
             plan_cascade_desktop::commands::projects::list_projects,
             plan_cascade_desktop::commands::projects::get_project,

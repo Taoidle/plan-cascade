@@ -52,15 +52,9 @@ export type {
   StatusHandler,
 } from './claudeCodeClient';
 
-// Settings API (v5.0)
-export {
-  getSettings,
-  updateSettings,
-  exportSettingsToJson,
-  parseImportedSettings,
-  isTauriAvailable,
-} from './settingsApi';
-export type { AppConfig, SettingsUpdate } from './settingsApi';
+// Settings API (v6.0)
+export { getSettings, updateSettings, exportAllSettings, importAllSettings, isTauriAvailable } from './settingsApi';
+export type { AppConfig, SettingsUpdate, UnifiedSettingsExport, ImportResult } from './settingsApi';
 
 // Embedding API (v5.0)
 export {

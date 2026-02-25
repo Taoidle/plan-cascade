@@ -68,6 +68,7 @@ r2d2_sqlite = "0.25"
 # Secure secret storage (AES-256-GCM encrypted local file, no OS keychain prompts)
 aes-gcm = "0.10"
 rand = "0.8"
+pbkdf2 = "0.12"
 
 # Error handling
 thiserror = "2"

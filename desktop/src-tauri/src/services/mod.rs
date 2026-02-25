@@ -37,6 +37,7 @@ pub mod quality_gates;
 pub mod recovery;
 pub mod remote;
 pub mod session;
+pub mod settings_export;
 pub mod skills;
 pub mod spec_interview;
 pub mod strategy;

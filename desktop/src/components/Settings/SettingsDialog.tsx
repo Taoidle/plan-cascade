@@ -234,13 +234,15 @@ async function saveSettingsToBackend() {
   // Get settings from store
   const settings = useSettingsStore.getState();
 
-  // Save to Tauri backend using invoke
+  // Sync key fields to Tauri backend config.json
+  // (Zustand persist middleware already saves all settings to localStorage automatically)
   try {
     const { updateSettings, isTauriAvailable } = await import('../../lib/settingsApi');
 
     if (isTauriAvailable()) {
       await updateSettings({
         theme: settings.theme,
+        language: settings.language,
         default_provider: settings.provider,
         default_model: settings.model,
       });
@@ -248,18 +250,6 @@ async function saveSettingsToBackend() {
   } catch (error) {
     console.warn('Tauri settings save failed, settings saved locally:', error);
   }
-
-  // Always save to local storage as backup
-  localStorage.setItem(
-    'plan-cascade-settings',
-    JSON.stringify({
-      backend: settings.backend,
-      provider: settings.provider,
-      model: settings.model,
-      defaultMode: settings.defaultMode,
-      theme: settings.theme,
-    }),
-  );
 }
 
 export default SettingsDialog;

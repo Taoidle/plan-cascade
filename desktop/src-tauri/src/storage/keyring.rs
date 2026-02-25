@@ -254,6 +254,43 @@ impl KeyringService {
     pub fn is_healthy(&self) -> bool {
         self.inner.is_some()
     }
+
+    /// Export all stored secrets as decrypted plaintext key-value pairs.
+    ///
+    /// Returns a map of provider name → plaintext API key for all stored secrets.
+    pub fn export_all_decrypted(&self) -> AppResult<HashMap<String, String>> {
+        let store = self.store()?;
+        let secrets = store.load();
+        let mut result = HashMap::new();
+
+        for (key, encrypted_value) in &secrets {
+            match store.decrypt(encrypted_value) {
+                Ok(plaintext) => {
+                    result.insert(key.clone(), plaintext);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to decrypt secret for '{}': {}", key, e);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Import secrets from a plaintext key-value map, re-encrypting each with the internal key.
+    ///
+    /// This replaces all existing secrets with the provided ones.
+    pub fn import_all(&self, secrets: &HashMap<String, String>) -> AppResult<()> {
+        let store = self.store()?;
+        let mut encrypted_map = HashMap::new();
+
+        for (key, plaintext) in secrets {
+            let encrypted = store.encrypt(plaintext)?;
+            encrypted_map.insert(key.clone(), encrypted);
+        }
+
+        store.save(&encrypted_map)
+    }
 }
 
 impl Default for KeyringService {

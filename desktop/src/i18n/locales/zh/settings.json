@@ -376,19 +376,24 @@
 
   "importExport": {
     "title": "导入和导出",
-    "description": "备份你的设置或将其转移到另一个安装。",
+    "description": "备份你的设置或将其转移到另一个安装。导出包含所有前端和后端设置。",
 
     "export": {
       "title": "导出设置",
-      "description": "将当前设置下载为JSON文件以进行备份或转移。",
+      "description": "将所有设置（前端 + 后端）下载为 JSON 文件。可选包含加密的 API Key。",
       "button": "导出设置",
       "exporting": "导出中...",
       "success": "设置导出成功",
-      "error": "导出设置失败。请重试。"
+      "error": "导出设置失败。请重试。",
+      "includeSecrets": "包含 API Key（加密）",
+      "passwordPrompt": "加密 API Key",
+      "confirmPassword": "确认密码",
+      "passwordMismatch": "两次输入的密码不一致",
+      "passwordRequired": "请输入密码"
     },
     "import": {
       "title": "导入设置",
-      "description": "从之前导出的JSON文件中导入设置。",
+      "description": "从之前导出的 JSON 文件中导入设置。支持 v5.x 和 v6.0 格式。",
       "button": "选择文件",
       "dialogTitle": "导入设置",
       "dialogDescription": "这将覆盖你当前的设置。确定要继续吗？",
@@ -399,8 +404,23 @@
       "close": "关闭",
       "success": "设置导入成功",
       "error": "导入设置失败。请重试。",
-      "invalidFormat": "无效的设置文件格式。需要 \"version\" 和 \"settings\" 字段。",
-      "parseError": "解析设置文件失败。请确保它是有效的JSON。"
+      "partialSuccess": "导入完成，但存在部分警告或错误，请查看详情。",
+      "invalidFormat": "无效的设置文件格式。",
+      "parseError": "解析设置文件失败。请确保它是有效的 JSON。",
+      "passwordPrompt": "解密 API Key",
+      "passwordRequired": "请输入密码",
+      "wrongPassword": "密码错误：无法解密 API Key。",
+      "legacyFormat": "旧版格式",
+      "legacyFormatNote": "这是旧版 v5.x 格式，仅会导入前端设置。后端设置不包含在此格式中。",
+      "resultTitle": "导入结果",
+      "importedSections": "成功导入",
+      "skippedSections": "已跳过",
+      "importWarnings": "警告",
+      "importErrors": "错误"
+    },
+    "password": {
+      "label": "密码",
+      "hint": "此密码用于加密你的 API Key。在其他设备导入时需要输入相同的密码。"
     },
     "reset": {
       "title": "重置为默认",

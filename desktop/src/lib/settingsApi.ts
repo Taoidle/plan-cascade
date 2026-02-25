@@ -1,8 +1,8 @@
 /**
- * Settings API (v5.0 Pure Rust Backend)
+ * Settings API (v6.0 Unified Export/Import)
  *
  * Provides type-safe access to settings via Tauri IPC.
- * Replaces the legacy HTTP-based API that connected to Python sidecar.
+ * Includes unified export/import covering frontend + backend + encrypted secrets.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -39,6 +39,43 @@ export interface SettingsUpdate {
   debug_mode?: boolean;
 }
 
+/** Unified settings export (v6.0) */
+export interface UnifiedSettingsExport {
+  version: string;
+  exported_at: string;
+  has_encrypted_secrets: boolean;
+  frontend: Record<string, unknown>;
+  backend: {
+    config: Record<string, unknown>;
+    embedding: Record<string, unknown> | null;
+    proxy: {
+      global: Record<string, unknown> | null;
+      strategies: Record<string, unknown>;
+      custom_configs: Record<string, unknown>;
+    };
+    webhooks: Record<string, unknown>[];
+    guardrails: { id: string; name: string; pattern: string; action: string; enabled: boolean }[];
+    remote: {
+      gateway: Record<string, unknown> | null;
+      telegram: Record<string, unknown> | null;
+    };
+    a2a_agents: Record<string, unknown>[];
+    mcp_servers: Record<string, unknown>[];
+    plugin_settings: Record<string, unknown> | null;
+  };
+  encrypted_secrets: string | null;
+}
+
+/** Import result from the backend */
+export interface ImportResult {
+  success: boolean;
+  frontend: Record<string, unknown> | null;
+  imported_sections: string[];
+  skipped_sections: string[];
+  warnings: string[];
+  errors: string[];
+}
+
 // ============================================================================
 // Settings API Functions
 // ============================================================================
@@ -66,28 +103,34 @@ export async function updateSettings(update: SettingsUpdate): Promise<AppConfig>
 }
 
 /**
- * Export settings to JSON (client-side export using current store state)
+ * Export all settings (frontend + backend + optionally encrypted API keys)
  */
-export function exportSettingsToJson(settings: object): string {
-  const exportData = {
-    version: '5.0',
-    exported_at: new Date().toISOString(),
-    settings,
-  };
-  return JSON.stringify(exportData, null, 2);
+export async function exportAllSettings(
+  frontendState: Record<string, unknown>,
+  password: string | null,
+): Promise<UnifiedSettingsExport> {
+  const result = await invoke<CommandResponse<UnifiedSettingsExport>>('export_all_settings', {
+    frontendState,
+    password,
+  });
+  if (!result.success || !result.data) {
+    throw new Error(result.error || 'Failed to export settings');
+  }
+  return result.data;
 }
 
 /**
- * Parse imported settings JSON
+ * Import settings from a unified export JSON string
  */
-export function parseImportedSettings(jsonContent: string): { version: string; settings: object } {
-  const parsed = JSON.parse(jsonContent);
-
-  if (!parsed.version || !parsed.settings) {
-    throw new Error('Invalid settings file format. Expected "version" and "settings" fields.');
+export async function importAllSettings(exportJson: string, password: string | null): Promise<ImportResult> {
+  const result = await invoke<CommandResponse<ImportResult>>('import_all_settings', {
+    exportJson,
+    password,
+  });
+  if (!result.success || !result.data) {
+    throw new Error(result.error || 'Failed to import settings');
   }
-
-  return parsed;
+  return result.data;
 }
 
 /**
@@ -100,7 +143,7 @@ export function isTauriAvailable(): boolean {
 export default {
   getSettings,
   updateSettings,
-  exportSettingsToJson,
-  parseImportedSettings,
+  exportAllSettings,
+  importAllSettings,
   isTauriAvailable,
 };

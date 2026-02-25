@@ -165,6 +165,39 @@ impl AppState {
         }
     }
 
+    /// Export all stored API keys as decrypted plaintext
+    pub async fn export_all_secrets(&self) -> AppResult<std::collections::HashMap<String, String>> {
+        let guard = self.keyring.read().await;
+        match &*guard {
+            Some(keyring) => keyring.export_all_decrypted(),
+            None => Err(AppError::keyring("Keyring service not initialized")),
+        }
+    }
+
+    /// Import API keys from a plaintext map, re-encrypting with the internal key
+    pub async fn import_all_secrets(
+        &self,
+        secrets: &std::collections::HashMap<String, String>,
+    ) -> AppResult<()> {
+        let guard = self.keyring.read().await;
+        match &*guard {
+            Some(keyring) => keyring.import_all(secrets),
+            None => Err(AppError::keyring("Keyring service not initialized")),
+        }
+    }
+
+    /// Get mutable config service access for settings import
+    pub async fn with_config_mut<F, T>(&self, f: F) -> AppResult<T>
+    where
+        F: FnOnce(&mut ConfigService) -> AppResult<T>,
+    {
+        let mut guard = self.config.write().await;
+        match &mut *guard {
+            Some(config) => f(config),
+            None => Err(AppError::config("Config service not initialized")),
+        }
+    }
+
     /// Get database access for direct queries
     pub async fn with_database<F, T>(&self, f: F) -> AppResult<T>
     where

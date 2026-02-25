@@ -376,19 +376,24 @@
 
   "importExport": {
     "title": "インポート＆エクスポート",
-    "description": "設定をバックアップするか、別のインストールに転送します。",
+    "description": "設定をバックアップするか、別のインストールに転送します。フロントエンドとバックエンドのすべての設定が含まれます。",
 
     "export": {
       "title": "設定をエクスポート",
-      "description": "バックアップまたは転送のために現在の設定をJSONファイルとしてダウンロードします。",
+      "description": "すべての設定（フロントエンド + バックエンド）をJSONファイルとしてダウンロードします。暗号化されたAPIキーを含めることもできます。",
       "button": "設定をエクスポート",
       "exporting": "エクスポート中...",
       "success": "設定のエクスポートに成功しました",
-      "error": "設定のエクスポートに失敗しました。もう一度お試しください。"
+      "error": "設定のエクスポートに失敗しました。もう一度お試しください。",
+      "includeSecrets": "APIキーを含める（暗号化）",
+      "passwordPrompt": "APIキーの暗号化",
+      "confirmPassword": "パスワードの確認",
+      "passwordMismatch": "パスワードが一致しません",
+      "passwordRequired": "パスワードを入力してください"
     },
     "import": {
       "title": "設定をインポート",
-      "description": "以前にエクスポートしたJSONファイルから設定をインポートします。",
+      "description": "以前にエクスポートしたJSONファイルから設定をインポートします。v5.xとv6.0の両方の形式に対応しています。",
       "button": "ファイルを選択",
       "dialogTitle": "設定をインポート",
       "dialogDescription": "現在の設定が上書きされます。続行しますか？",
@@ -399,8 +404,23 @@
       "close": "閉じる",
       "success": "設定のインポートに成功しました",
       "error": "設定のインポートに失敗しました。もう一度お試しください。",
-      "invalidFormat": "無効な設定ファイル形式です。\"version\"と\"settings\"フィールドが必要です。",
-      "parseError": "設定ファイルの解析に失敗しました。有効なJSONであることを確認してください。"
+      "partialSuccess": "インポートは完了しましたが、一部の警告またはエラーがあります。詳細を確認してください。",
+      "invalidFormat": "無効な設定ファイル形式です。",
+      "parseError": "設定ファイルの解析に失敗しました。有効なJSONであることを確認してください。",
+      "passwordPrompt": "APIキーの復号化",
+      "passwordRequired": "パスワードを入力してください",
+      "wrongPassword": "パスワードが間違っています：APIキーの復号化に失敗しました。",
+      "legacyFormat": "レガシー形式",
+      "legacyFormatNote": "これはレガシーv5.x形式です。フロントエンド設定のみがインポートされます。バックエンド設定はこの形式に含まれていません。",
+      "resultTitle": "インポート結果",
+      "importedSections": "インポート成功",
+      "skippedSections": "スキップ",
+      "importWarnings": "警告",
+      "importErrors": "エラー"
+    },
+    "password": {
+      "label": "パスワード",
+      "hint": "このパスワードはAPIキーの暗号化に使用されます。別のマシンでインポートする際に同じパスワードが必要です。"
     },
     "reset": {
       "title": "デフォルトにリセット",

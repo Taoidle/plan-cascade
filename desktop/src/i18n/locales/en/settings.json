@@ -376,19 +376,24 @@
 
   "importExport": {
     "title": "Import & Export",
-    "description": "Backup your settings or transfer them to another installation.",
+    "description": "Backup your settings or transfer them to another installation. Exports include all frontend and backend settings.",
 
     "export": {
       "title": "Export Settings",
-      "description": "Download your current settings as a JSON file for backup or transfer.",
+      "description": "Download all settings (frontend + backend) as a JSON file. Optionally include encrypted API keys.",
       "button": "Export Settings",
       "exporting": "Exporting...",
       "success": "Settings exported successfully",
-      "error": "Failed to export settings. Please try again."
+      "error": "Failed to export settings. Please try again.",
+      "includeSecrets": "Include API keys (encrypted)",
+      "passwordPrompt": "Encrypt API Keys",
+      "confirmPassword": "Confirm password",
+      "passwordMismatch": "Passwords do not match",
+      "passwordRequired": "Password is required"
     },
     "import": {
       "title": "Import Settings",
-      "description": "Import settings from a previously exported JSON file.",
+      "description": "Import settings from a previously exported JSON file. Supports both v5.x and v6.0 formats.",
       "button": "Choose File",
       "dialogTitle": "Import Settings",
       "dialogDescription": "This will overwrite your current settings. Are you sure you want to continue?",
@@ -399,8 +404,23 @@
       "close": "Close",
       "success": "Settings imported successfully",
       "error": "Failed to import settings. Please try again.",
-      "invalidFormat": "Invalid settings file format. Expected \"version\" and \"settings\" fields.",
-      "parseError": "Failed to parse settings file. Please ensure it is valid JSON."
+      "partialSuccess": "Import completed with some warnings or errors. Check the details.",
+      "invalidFormat": "Invalid settings file format.",
+      "parseError": "Failed to parse settings file. Please ensure it is valid JSON.",
+      "passwordPrompt": "Decrypt API Keys",
+      "passwordRequired": "Password is required",
+      "wrongPassword": "Wrong password: failed to decrypt API keys.",
+      "legacyFormat": "Legacy format",
+      "legacyFormatNote": "This is a legacy v5.x format. Only frontend settings will be imported. Backend settings are not included in this format.",
+      "resultTitle": "Import Results",
+      "importedSections": "Successfully imported",
+      "skippedSections": "Skipped",
+      "importWarnings": "Warnings",
+      "importErrors": "Errors"
+    },
+    "password": {
+      "label": "Password",
+      "hint": "This password encrypts your API keys. You will need it when importing on another machine."
     },
     "reset": {
       "title": "Reset to Defaults",
