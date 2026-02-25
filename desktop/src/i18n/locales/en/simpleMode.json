@@ -286,7 +286,10 @@
       "confidence": "{{pct}}% confidence",
       "risk": "Risk",
       "stories": "Stories",
-      "parallel": "Parallel"
+      "parallel": "Parallel",
+      "highParallelization": "High parallelization potential — multiple stories can execute concurrently",
+      "highRisk": "High risk — consider enabling TDD mode and full quality gates",
+      "manyStories": "{{count}} estimated stories — consider increasing max parallel agents"
     },
 
     "config": {
@@ -412,7 +415,11 @@
       "no": "No",
       "skipBtn": "Skip",
       "submit": "Submit",
-      "submitCount": "Submit ({{count}})"
+      "submitCount": "Submit ({{count}})",
+      "other": "Other...",
+      "customPlaceholder": "Type your custom answer...",
+      "backToOptions": "Back to options",
+      "generating": "Generating next question..."
     },
 
     "prd": {

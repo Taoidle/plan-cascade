@@ -129,6 +129,7 @@ export interface InterviewQuestionCardData {
   required: boolean;
   inputType: 'text' | 'textarea' | 'single_select' | 'multi_select' | 'boolean';
   options: string[];
+  allowCustom: boolean;
   questionNumber: number;
   totalQuestions: number;
 }

@@ -89,6 +89,8 @@ export function createMockInterviewQuestion(overrides: Partial<InterviewQuestion
     required: true,
     input_type: 'text',
     field_name: 'purpose',
+    options: [],
+    allow_custom: false,
     ...overrides,
   };
 }

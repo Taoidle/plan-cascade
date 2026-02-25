@@ -286,7 +286,10 @@
       "confidence": "{{pct}}% 置信度",
       "risk": "风险",
       "stories": "故事数",
-      "parallel": "并行度"
+      "parallel": "并行度",
+      "highParallelization": "高并行潜力 — 多个故事可以同时执行",
+      "highRisk": "高风险 — 建议启用 TDD 模式和完整质量门禁",
+      "manyStories": "预计 {{count}} 个故事 — 建议增加最大并行代理数"
     },
 
     "config": {
@@ -412,7 +415,11 @@
       "no": "否",
       "skipBtn": "跳过",
       "submit": "提交",
-      "submitCount": "提交 ({{count}})"
+      "submitCount": "提交 ({{count}})",
+      "other": "其他...",
+      "customPlaceholder": "请输入自定义答案...",
+      "backToOptions": "返回选项",
+      "generating": "正在生成下一个问题..."
     },
 
     "prd": {

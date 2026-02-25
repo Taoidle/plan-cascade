@@ -152,6 +152,7 @@ pub async fn enhance_strategy_with_llm(
     model: Option<String>,
     api_key: Option<String>,
     base_url: Option<String>,
+    locale: Option<String>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<CommandResponse<StrategyAnalysis>, String> {
     if description.trim().is_empty() {
@@ -174,10 +175,17 @@ pub async fn enhance_strategy_with_llm(
         Err(e) => return Ok(CommandResponse::err(e)),
     };
 
+    let locale_str = locale.unwrap_or_else(|| "en".to_string());
+
     // Call LLM analyzer with 30s timeout
     match tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        crate::services::strategy::enhance_strategy_analysis(llm, &description, &keyword_analysis),
+        crate::services::strategy::enhance_strategy_analysis(
+            llm,
+            &description,
+            &keyword_analysis,
+            &locale_str,
+        ),
     )
     .await
     {

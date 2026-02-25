@@ -128,13 +128,17 @@ pub async fn start_spec_interview(
     match llm_provider {
         Some(provider) => {
             let config_clone = config.clone();
+            let provider_for_translate = Some(Arc::clone(&provider));
             match mgr.start_interview_with_llm(config, provider).await {
                 Ok(session) => Ok(CommandResponse::ok(session)),
                 Err(e) => {
                     // Fall back to deterministic on LLM failure
                     tracing::warn!(error = %e, "LLM-driven interview start failed, falling back to deterministic");
                     match mgr.start_interview(config_clone) {
-                        Ok(session) => Ok(CommandResponse::ok(session)),
+                        Ok(mut session) => {
+                            translate_session_question(&mut session, &provider_for_translate).await;
+                            Ok(CommandResponse::ok(session))
+                        }
                         Err(e) => Ok(CommandResponse::err(e.to_string())),
                     }
                 }
@@ -189,6 +193,7 @@ pub async fn submit_interview_answer(
 
     match llm_provider {
         Some(provider) => {
+            let provider_for_translate = Some(Arc::clone(&provider));
             match mgr
                 .submit_answer_with_llm(&interview_id, &answer, provider)
                 .await
@@ -198,7 +203,10 @@ pub async fn submit_interview_answer(
                     // Fall back to deterministic on LLM failure
                     tracing::warn!(error = %e, "LLM-driven answer submission failed, falling back to deterministic");
                     match mgr.submit_answer(&interview_id, &answer) {
-                        Ok(session) => Ok(CommandResponse::ok(session)),
+                        Ok(mut session) => {
+                            translate_session_question(&mut session, &provider_for_translate).await;
+                            Ok(CommandResponse::ok(session))
+                        }
                         Err(e) => Ok(CommandResponse::err(e.to_string())),
                     }
                 }
@@ -268,6 +276,21 @@ pub async fn compile_spec(
     match SpecCompiler::compile(&spec_data, &compile_options) {
         Ok(compiled) => Ok(CommandResponse::ok(compiled)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Translate the current question in a session if locale is non-English and a provider is available.
+///
+/// This is used for deterministic-mode interviews to translate the fixed English questions.
+/// LLM-driven mode already handles locale via prompt instructions.
+async fn translate_session_question(
+    session: &mut InterviewSession,
+    llm_provider: &Option<Arc<dyn crate::services::llm::provider::LlmProvider>>,
+) {
+    if let (Some(ref mut q), Some(ref provider)) = (&mut session.current_question, llm_provider) {
+        if session.locale != "en" && !session.locale.is_empty() {
+            InterviewManager::translate_question(q, &session.locale, provider).await;
+        }
     }
 }
 
@@ -352,6 +375,7 @@ mod tests {
             first_principles: false,
             project_path: Some("/tmp/test".to_string()),
             exploration_context: None,
+            locale: "en".to_string(),
         };
 
         let json = serde_json::to_string(&config).unwrap();

@@ -286,7 +286,10 @@
       "confidence": "{{pct}}% 信頼度",
       "risk": "リスク",
       "stories": "ストーリー数",
-      "parallel": "並列度"
+      "parallel": "並列度",
+      "highParallelization": "高並列化ポテンシャル — 複数のストーリーを同時に実行可能",
+      "highRisk": "高リスク — TDDモードと完全な品質ゲートの有効化を推奨",
+      "manyStories": "推定 {{count}} ストーリー — 最大並列エージェント数の増加を推奨"
     },
 
     "config": {
@@ -412,7 +415,11 @@
       "no": "いいえ",
       "skipBtn": "スキップ",
       "submit": "送信",
-      "submitCount": "送信 ({{count}})"
+      "submitCount": "送信 ({{count}})",
+      "other": "その他...",
+      "customPlaceholder": "カスタム回答を入力...",
+      "backToOptions": "選択肢に戻る",
+      "generating": "次の質問を生成中..."
     },
 
     "prd": {

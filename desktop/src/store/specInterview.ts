@@ -22,8 +22,10 @@ export interface InterviewQuestion {
   phase: InterviewPhase;
   hint: string | null;
   required: boolean;
-  input_type: 'text' | 'textarea' | 'list' | 'boolean';
+  input_type: 'text' | 'textarea' | 'list' | 'boolean' | 'single_select' | 'multi_select';
   field_name: string;
+  options: string[];
+  allow_custom: boolean;
 }
 
 /** A single entry in the interview history */
@@ -57,6 +59,7 @@ export interface InterviewConfig {
   first_principles: boolean;
   project_path: string | null;
   exploration_context: string | null;
+  locale: string;
 }
 
 /** Compiled spec output from the backend */

@@ -34,7 +34,7 @@ import {
 } from '../shared/StreamingOutput';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { WorkflowCardRenderer } from './WorkflowCards/WorkflowCardRenderer';
-import { StructuredInputOverlay } from './StructuredInputOverlay';
+import { InterviewInputPanel } from './InterviewInputPanel';
 import { ToolPermissionOverlay } from './ToolPermissionOverlay';
 import { useToolPermissionStore } from '../../store/toolPermission';
 import { useAgentsStore } from '../../store/agents';
@@ -208,10 +208,9 @@ export function SimpleMode() {
     setDescription('');
 
     // Route through orchestrator if in active Task workflow phase
+    // Note: interviewing phase is handled by InterviewInputPanel, not InputBox
     if (workflowMode === 'task' && workflowPhase !== 'idle') {
-      if (workflowPhase === 'interviewing') {
-        await submitInterviewAnswer(prompt);
-      } else if (workflowPhase === 'configuring') {
+      if (workflowPhase === 'configuring') {
         overrideConfigNatural(prompt);
       } else if (workflowPhase === 'reviewing_prd') {
         addPrdFeedback(prompt);
@@ -220,16 +219,7 @@ export function SimpleMode() {
     }
 
     await sendFollowUp(prompt);
-  }, [
-    description,
-    isSubmitting,
-    sendFollowUp,
-    workflowMode,
-    workflowPhase,
-    submitInterviewAnswer,
-    overrideConfigNatural,
-    addPrdFeedback,
-  ]);
+  }, [description, isSubmitting, sendFollowUp, workflowMode, workflowPhase, overrideConfigNatural, addPrdFeedback]);
 
   const handleNewTask = useCallback(() => {
     const hasContext = streamingOutput.length > 0 || useExecutionStore.getState()._pendingTaskContext;
@@ -332,6 +322,14 @@ export function SimpleMode() {
               onPause={pause}
               onResume={resume}
               onCancel={cancel}
+              taskWorkflowActive={
+                workflowMode === 'task' &&
+                workflowPhase !== 'idle' &&
+                workflowPhase !== 'completed' &&
+                workflowPhase !== 'failed' &&
+                workflowPhase !== 'cancelled'
+              }
+              onCancelWorkflow={cancelWorkflow}
               rightPanelOpen={rightPanelOpen}
               rightPanelTab={rightPanelTab}
               onToggleOutput={handleToggleOutput}
@@ -348,17 +346,32 @@ export function SimpleMode() {
                   loading={isPermissionResponding}
                   queueSize={permissionQueueSize}
                 />
-              ) : /* Priority 2: Structured input overlay for interview boolean/select questions */
-              workflowMode === 'task' &&
-                pendingQuestion &&
-                pendingQuestion.inputType !== 'text' &&
-                pendingQuestion.inputType !== 'textarea' ? (
-                <StructuredInputOverlay
+              ) : /* Priority 2: Interview input panel (replaces InputBox during interviews) */
+              workflowMode === 'task' && workflowPhase === 'interviewing' && pendingQuestion ? (
+                <InterviewInputPanel
                   question={pendingQuestion}
                   onSubmit={submitInterviewAnswer}
                   onSkip={skipInterviewQuestion}
                   loading={isInterviewSubmitting}
                 />
+              ) : /* Priority 3: Interview loading state (LLM generating next question) */
+              workflowMode === 'task' && workflowPhase === 'interviewing' && !pendingQuestion ? (
+                <div className="px-4 py-3 flex items-center gap-2 text-sm text-violet-600 dark:text-violet-400">
+                  <svg
+                    className="animate-spin h-4 w-4"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  <span>{t('workflow.interview.generating', { defaultValue: 'Generating next question...' })}</span>
+                </div>
               ) : (
                 <div className="p-4">
                   <InputBox
@@ -371,28 +384,26 @@ export function SimpleMode() {
                         : handleStart
                     }
                     disabled={isDisabled}
-                    enterSubmits={workflowMode === 'task' && workflowPhase === 'interviewing'}
+                    enterSubmits={false}
                     placeholder={
                       isRunning
                         ? t('workflow.input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
-                        : workflowMode === 'task' && workflowPhase === 'interviewing'
-                          ? t('workflow.input.interviewPlaceholder', { defaultValue: 'Type your answer...' })
-                          : workflowMode === 'task' && workflowPhase === 'configuring'
-                            ? t('workflow.input.configuringPlaceholder', {
-                                defaultValue:
-                                  'Type config overrides (e.g. "6 parallel, enable TDD") or click Continue above...',
+                        : workflowMode === 'task' && workflowPhase === 'configuring'
+                          ? t('workflow.input.configuringPlaceholder', {
+                              defaultValue:
+                                'Type config overrides (e.g. "6 parallel, enable TDD") or click Continue above...',
+                            })
+                          : workflowMode === 'task' && workflowPhase === 'reviewing_prd'
+                            ? t('workflow.input.prdFeedbackPlaceholder', {
+                                defaultValue: 'Add feedback or press Approve on the PRD card...',
                               })
-                            : workflowMode === 'task' && workflowPhase === 'reviewing_prd'
-                              ? t('workflow.input.prdFeedbackPlaceholder', {
-                                  defaultValue: 'Add feedback or press Approve on the PRD card...',
+                            : workflowMode === 'task'
+                              ? t('workflow.input.taskPlaceholder', {
+                                  defaultValue: 'Describe a task (implementation / analysis / refactor)...',
                                 })
-                              : workflowMode === 'task'
-                                ? t('workflow.input.taskPlaceholder', {
-                                    defaultValue: 'Describe a task (implementation / analysis / refactor)...',
-                                  })
-                                : t('input.followUpPlaceholder', {
-                                    defaultValue: 'Type a normal chat message...',
-                                  })
+                              : t('input.followUpPlaceholder', {
+                                  defaultValue: 'Type a normal chat message...',
+                                })
                     }
                     isLoading={isRunning}
                     attachments={attachments}
@@ -412,21 +423,6 @@ export function SimpleMode() {
                   <p className="text-sm text-red-600 dark:text-red-400">{apiError}</p>
                 </div>
               )}
-              {/* Cancel button during active workflow */}
-              {workflowMode === 'task' &&
-                workflowPhase !== 'idle' &&
-                workflowPhase !== 'completed' &&
-                workflowPhase !== 'failed' &&
-                workflowPhase !== 'cancelled' && (
-                  <div className="px-4 pb-3">
-                    <button
-                      onClick={cancelWorkflow}
-                      className="text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                    >
-                      {t('workflow.cancelWorkflow')}
-                    </button>
-                  </div>
-                )}
             </div>
           </div>
 

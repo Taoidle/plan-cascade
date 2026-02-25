@@ -98,9 +98,18 @@ pub async fn enhance_strategy_analysis(
     provider: Arc<dyn LlmProvider>,
     description: &str,
     keyword_analysis: &StrategyAnalysis,
+    locale: &str,
 ) -> Result<StrategyAnalysis, String> {
     let user_message = build_user_message(description, keyword_analysis);
     let messages = vec![Message::user(&user_message)];
+
+    // Build locale-aware system prompt
+    let locale_instruction = match locale {
+        "zh" => "\n\nCRITICAL: The \"reasoning\" field in your JSON response MUST be written in Simplified Chinese (简体中文).",
+        "ja" => "\n\nCRITICAL: The \"reasoning\" field in your JSON response MUST be written in Japanese (日本語).",
+        _ => "",
+    };
+    let system_prompt = format!("{}{}", STRATEGY_SYSTEM_PROMPT, locale_instruction);
 
     let options = LlmRequestOptions::default();
 
@@ -108,7 +117,7 @@ pub async fn enhance_strategy_analysis(
     let response = provider
         .send_message(
             messages.clone(),
-            Some(STRATEGY_SYSTEM_PROMPT.to_string()),
+            Some(system_prompt.clone()),
             vec![],
             options.clone(),
         )
@@ -139,7 +148,7 @@ pub async fn enhance_strategy_analysis(
             let retry_response = provider
                 .send_message(
                     retry_messages,
-                    Some(STRATEGY_SYSTEM_PROMPT.to_string()),
+                    Some(system_prompt),
                     vec![],
                     options,
                 )

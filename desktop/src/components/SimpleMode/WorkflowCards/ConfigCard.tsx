@@ -31,6 +31,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
     if (layer === 2) {
       updateConfig(localConfig);
     }
+    setLayer(1);
     confirmConfig();
   }, [layer, localConfig, updateConfig, confirmConfig]);
 
@@ -51,7 +52,13 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
           {t('workflow.config.title')}
         </span>
         <div className="flex items-center gap-1.5">
-          {data.isOverridden && (
+          {(data.isOverridden ||
+            (acted &&
+              (localConfig.flowLevel !== data.flowLevel ||
+                localConfig.tddMode !== data.tddMode ||
+                localConfig.maxParallel !== data.maxParallel ||
+                localConfig.qualityGatesEnabled !== data.qualityGatesEnabled ||
+                localConfig.specInterviewEnabled !== data.specInterviewEnabled))) && (
             <span className="text-2xs px-1.5 py-0.5 rounded bg-sky-200 dark:bg-sky-800 text-sky-600 dark:text-sky-400">
               {t('workflow.config.customized')}
             </span>
@@ -73,16 +80,16 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
           )}
         >
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <ConfigRow label={t('workflow.config.flow')} value={data.flowLevel} />
-            <ConfigRow label={t('workflow.config.tdd')} value={data.tddMode} />
-            <ConfigRow label={t('workflow.config.maxParallel')} value={String(data.maxParallel)} />
+            <ConfigRow label={t('workflow.config.flow')} value={localConfig.flowLevel} />
+            <ConfigRow label={t('workflow.config.tdd')} value={localConfig.tddMode} />
+            <ConfigRow label={t('workflow.config.maxParallel')} value={String(localConfig.maxParallel)} />
             <ConfigRow
               label={t('workflow.config.qualityGates')}
-              value={data.qualityGatesEnabled ? t('workflow.config.on') : t('workflow.config.off')}
+              value={localConfig.qualityGatesEnabled ? t('workflow.config.on') : t('workflow.config.off')}
             />
             <ConfigRow
               label={t('workflow.config.interview')}
-              value={data.specInterviewEnabled ? t('workflow.config.enabled') : t('workflow.config.skip')}
+              value={localConfig.specInterviewEnabled ? t('workflow.config.enabled') : t('workflow.config.skip')}
             />
           </div>
 

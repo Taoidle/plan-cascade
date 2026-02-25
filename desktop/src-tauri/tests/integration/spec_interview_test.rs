@@ -43,6 +43,8 @@ fn standard_config() -> InterviewConfig {
         max_questions: 18,
         first_principles: false,
         project_path: Some("/tmp/test-project".to_string()),
+        exploration_context: None,
+        locale: "en".to_string(),
     }
 }
 
@@ -122,6 +124,8 @@ fn test_first_principles_mode_adds_problem_question() {
         max_questions: 18,
         first_principles: true,
         project_path: None,
+        exploration_context: None,
+        locale: "en".to_string(),
     };
 
     let session = manager.start_interview(config).unwrap();
@@ -180,6 +184,8 @@ fn test_submit_answer_to_completed_interview_fails() {
         spec_data: "{}".to_string(),
         created_at: "2024-01-01T00:00:00Z".to_string(),
         updated_at: "2024-01-01T00:00:00Z".to_string(),
+        conversation_context: "{}".to_string(),
+        locale: "en".to_string(),
     };
     mgr.create_interview(&state).unwrap();
 
@@ -241,6 +247,8 @@ fn test_turn_persistence() {
         spec_data: "{}".to_string(),
         created_at: "2024-01-01T00:00:00Z".to_string(),
         updated_at: "2024-01-01T00:00:00Z".to_string(),
+        conversation_context: "{}".to_string(),
+        locale: "en".to_string(),
     };
     mgr.create_interview(&state).unwrap();
 
@@ -287,6 +295,8 @@ fn test_interview_update_and_retrieval() {
         spec_data: "{}".to_string(),
         created_at: "2024-01-01T00:00:00Z".to_string(),
         updated_at: "2024-01-01T00:00:00Z".to_string(),
+        conversation_context: "{}".to_string(),
+        locale: "en".to_string(),
     };
     mgr.create_interview(&state).unwrap();
 
@@ -323,6 +333,8 @@ fn test_list_interviews_filter() {
             spec_data: "{}".to_string(),
             created_at: format!("2024-01-01T00:00:{:02}Z", i),
             updated_at: format!("2024-01-01T00:00:{:02}Z", i),
+            conversation_context: "{}".to_string(),
+            locale: "en".to_string(),
         };
         mgr.create_interview(&state).unwrap();
     }
@@ -354,6 +366,8 @@ fn test_delete_interview_cascades_turns() {
         spec_data: "{}".to_string(),
         created_at: "2024-01-01T00:00:00Z".to_string(),
         updated_at: "2024-01-01T00:00:00Z".to_string(),
+        conversation_context: "{}".to_string(),
+        locale: "en".to_string(),
     };
     mgr.create_interview(&state).unwrap();
 
@@ -748,6 +762,8 @@ fn test_quick_flow_config() {
         max_questions: 8,
         first_principles: false,
         project_path: None,
+        exploration_context: None,
+        locale: "en".to_string(),
     };
 
     let session = manager.start_interview(config).unwrap();

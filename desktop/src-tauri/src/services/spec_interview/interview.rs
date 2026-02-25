@@ -125,10 +125,16 @@ pub struct InterviewQuestion {
     pub hint: Option<String>,
     /// Whether the answer is required (vs optional)
     pub required: bool,
-    /// Input type: "text", "textarea", "list", "boolean"
+    /// Input type: "text", "textarea", "list", "boolean", "single_select", "multi_select"
     pub input_type: String,
     /// Phase-specific field name (e.g. "title", "goal", "functional_requirements")
     pub field_name: String,
+    /// Preset options list for select-type inputs
+    #[serde(default)]
+    pub options: Vec<String>,
+    /// Whether custom input is allowed in select mode ("Other" option)
+    #[serde(default)]
+    pub allow_custom: bool,
 }
 
 /// Configuration for starting a new interview
@@ -150,6 +156,13 @@ pub struct InterviewConfig {
     /// Optional exploration result for BA context
     #[serde(default)]
     pub exploration_context: Option<String>,
+    /// User locale for question language (e.g., "en", "zh", "ja")
+    #[serde(default = "default_locale")]
+    pub locale: String,
+}
+
+fn default_locale() -> String {
+    "en".to_string()
 }
 
 fn default_flow_level() -> String {
@@ -158,6 +171,23 @@ fn default_flow_level() -> String {
 
 fn default_max_questions() -> i32 {
     18
+}
+
+/// Parsed exploration context for adaptive question generation
+#[derive(Debug, Clone)]
+struct ExplorationSummary {
+    /// Detected component names from the project
+    components: Vec<String>,
+    /// Key file paths detected
+    key_files: Vec<String>,
+    /// Tech stack (languages, frameworks, build tools)
+    tech_stack: Vec<String>,
+    /// Test frameworks detected
+    test_frameworks: Vec<String>,
+    /// Architectural patterns detected
+    patterns: Vec<String>,
+    /// Number of key files
+    file_count: usize,
 }
 
 /// The interview manager orchestrating multi-turn conversations
@@ -197,6 +227,7 @@ impl InterviewManager {
             created_at: now.clone(),
             updated_at: now,
             conversation_context,
+            locale: config.locale.clone(),
         };
 
         self.state_manager.create_interview(&state)?;
@@ -212,6 +243,7 @@ impl InterviewManager {
             question_cursor: 0,
             max_questions: config.max_questions,
             current_question: Some(first_question),
+            locale: config.locale,
             progress: 0.0,
             history: vec![],
         })
@@ -250,6 +282,7 @@ impl InterviewManager {
             created_at: now.clone(),
             updated_at: now,
             conversation_context,
+            locale: config.locale.clone(),
         };
 
         self.state_manager.create_interview(&state)?;
@@ -268,6 +301,7 @@ impl InterviewManager {
             question_cursor: 0,
             max_questions: config.max_questions,
             current_question: Some(first_question),
+            locale: config.locale,
             progress: 0.0,
             history: vec![],
         })
@@ -358,6 +392,7 @@ impl InterviewManager {
             question_cursor: state.question_cursor,
             max_questions: state.max_questions,
             current_question: next_question,
+            locale: state.locale,
             progress,
             history,
         })
@@ -499,6 +534,7 @@ impl InterviewManager {
             question_cursor: state.question_cursor,
             max_questions: state.max_questions,
             current_question: next_question,
+            locale: state.locale,
             progress,
             history,
         })
@@ -542,6 +578,7 @@ impl InterviewManager {
             question_cursor: state.question_cursor,
             max_questions: state.max_questions,
             current_question: next_question,
+            locale: state.locale,
             progress,
             history,
         })
@@ -559,6 +596,87 @@ impl InterviewManager {
     }
 
     // ========================================================================
+    // Exploration context parsing
+    // ========================================================================
+
+    /// Parsed exploration context for adaptive question generation
+    fn parse_exploration(state: &PersistedInterviewState) -> Option<ExplorationSummary> {
+        let ctx: serde_json::Value =
+            serde_json::from_str(&state.conversation_context).ok()?;
+        let exploration_str = ctx.get("exploration_context")?.as_str()?;
+        let exploration: serde_json::Value =
+            serde_json::from_str(exploration_str).ok()?;
+
+        let components: Vec<String> = exploration
+            .get("components")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| c.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let key_files: Vec<String> = exploration
+            .get("keyFiles")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|f| f.get("path").and_then(|p| p.as_str()).map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let tech_stack: Vec<String> = {
+            let mut stack = Vec::new();
+            if let Some(ts) = exploration.get("techStack") {
+                for field in &["languages", "frameworks", "buildTools"] {
+                    if let Some(arr) = ts.get(*field).and_then(|v| v.as_array()) {
+                        for item in arr {
+                            if let Some(s) = item.as_str() {
+                                stack.push(s.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            stack
+        };
+
+        let test_frameworks: Vec<String> = exploration
+            .get("techStack")
+            .and_then(|ts| ts.get("testFrameworks"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let patterns: Vec<String> = exploration
+            .get("patterns")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let file_count = key_files.len();
+
+        Some(ExplorationSummary {
+            components,
+            key_files,
+            tech_stack,
+            test_frameworks,
+            patterns,
+            file_count,
+        })
+    }
+
+    // ========================================================================
     // Internal question generation logic
     // ========================================================================
 
@@ -570,14 +688,15 @@ impl InterviewManager {
         let phase = InterviewPhase::from_str(&state.phase);
         let spec_data: serde_json::Value =
             serde_json::from_str(&state.spec_data).unwrap_or(serde_json::json!({}));
+        let exploration = Self::parse_exploration(state);
 
         let question = match phase {
-            InterviewPhase::Overview => self.gen_overview_question(&spec_data, state),
-            InterviewPhase::Scope => self.gen_scope_question(&spec_data, state),
-            InterviewPhase::Requirements => self.gen_requirements_question(&spec_data, state),
-            InterviewPhase::Interfaces => self.gen_interfaces_question(&spec_data, state),
-            InterviewPhase::Stories => self.gen_stories_question(&spec_data, state),
-            InterviewPhase::Review => self.gen_review_question(&spec_data, state),
+            InterviewPhase::Overview => self.gen_overview_question(&spec_data, state, &exploration),
+            InterviewPhase::Scope => self.gen_scope_question(&spec_data, state, &exploration),
+            InterviewPhase::Requirements => self.gen_requirements_question(&spec_data, state, &exploration),
+            InterviewPhase::Interfaces => self.gen_interfaces_question(&spec_data, state, &exploration),
+            InterviewPhase::Stories => self.gen_stories_question(&spec_data, state, &exploration),
+            InterviewPhase::Review => self.gen_review_question(&spec_data, state, &exploration),
             InterviewPhase::Complete => {
                 return Err(AppError::validation("Interview is already complete"));
             }
@@ -590,6 +709,7 @@ impl InterviewManager {
         &self,
         spec: &serde_json::Value,
         state: &PersistedInterviewState,
+        _exploration: &Option<ExplorationSummary>,
     ) -> InterviewQuestion {
         let overview = spec
             .get("overview")
@@ -610,6 +730,8 @@ impl InterviewManager {
                 required: true,
                 input_type: "text".to_string(),
                 field_name: "title".to_string(),
+                options: vec![],
+                allow_custom: false,
             };
         }
 
@@ -631,6 +753,8 @@ impl InterviewManager {
                 required: true,
                 input_type: "textarea".to_string(),
                 field_name: "problem".to_string(),
+                options: vec![],
+                allow_custom: false,
             };
         }
 
@@ -648,6 +772,8 @@ impl InterviewManager {
                 required: true,
                 input_type: "textarea".to_string(),
                 field_name: "goal".to_string(),
+                options: vec![],
+                allow_custom: false,
             };
         }
 
@@ -660,10 +786,18 @@ impl InterviewManager {
                 id: Uuid::new_v4().to_string(),
                 question: "What are the success metrics for this project?".to_string(),
                 phase: InterviewPhase::Overview,
-                hint: Some("Comma-separated list of measurable outcomes".to_string()),
+                hint: Some("Select applicable metrics or add your own".to_string()),
                 required: state.flow_level == "full",
-                input_type: "list".to_string(),
+                input_type: "multi_select".to_string(),
                 field_name: "success_metrics".to_string(),
+                options: vec![
+                    "Feature completeness".to_string(),
+                    "Performance benchmarks met".to_string(),
+                    "Test coverage ≥80%".to_string(),
+                    "Zero critical bugs".to_string(),
+                    "User acceptance".to_string(),
+                ],
+                allow_custom: true,
             };
         }
 
@@ -678,8 +812,16 @@ impl InterviewManager {
                 phase: InterviewPhase::Overview,
                 hint: Some("Things explicitly NOT included in this work".to_string()),
                 required: state.flow_level == "full",
-                input_type: "list".to_string(),
+                input_type: "multi_select".to_string(),
                 field_name: "non_goals".to_string(),
+                options: vec![
+                    "UI/UX redesign".to_string(),
+                    "Performance optimization".to_string(),
+                    "Migration to new stack".to_string(),
+                    "Backward compatibility".to_string(),
+                    "Documentation overhaul".to_string(),
+                ],
+                allow_custom: true,
             };
         }
 
@@ -689,10 +831,15 @@ impl InterviewManager {
             question: "Overview looks good. Anything else to add before moving to Scope?"
                 .to_string(),
             phase: InterviewPhase::Overview,
-            hint: Some("Type 'next' to continue or add additional context".to_string()),
+            hint: None,
             required: false,
-            input_type: "text".to_string(),
+            input_type: "single_select".to_string(),
             field_name: "_transition".to_string(),
+            options: vec![
+                "Continue to Scope".to_string(),
+                "Add more details".to_string(),
+            ],
+            allow_custom: false,
         }
     }
 
@@ -700,6 +847,7 @@ impl InterviewManager {
         &self,
         spec: &serde_json::Value,
         state: &PersistedInterviewState,
+        exploration: &Option<ExplorationSummary>,
     ) -> InterviewQuestion {
         let scope = spec.get("scope").cloned().unwrap_or(serde_json::json!({}));
 
@@ -708,14 +856,26 @@ impl InterviewManager {
             .and_then(|v| v.as_array())
             .map_or(true, |a| a.is_empty())
         {
+            // Use exploration components as options if available
+            let component_names: Vec<String> = exploration
+                .as_ref()
+                .map(|e| e.components.clone())
+                .unwrap_or_default();
+            let (input_type, hint) = if component_names.is_empty() {
+                ("list".to_string(), "List the key deliverables and areas of work".to_string())
+            } else {
+                ("multi_select".to_string(), "Based on project analysis — select components in scope".to_string())
+            };
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What is in scope for this project?".to_string(),
                 phase: InterviewPhase::Scope,
-                hint: Some("List the key deliverables and areas of work".to_string()),
+                hint: Some(hint),
                 required: false,
-                input_type: "list".to_string(),
+                input_type,
                 field_name: "in_scope".to_string(),
+                options: component_names,
+                allow_custom: true,
             };
         }
 
@@ -724,14 +884,37 @@ impl InterviewManager {
             .and_then(|v| v.as_array())
             .map_or(true, |a| a.is_empty())
         {
+            // Offer components NOT selected in in_scope as out_of_scope options
+            let in_scope_items: Vec<String> = scope
+                .get("in_scope")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
+            let remaining: Vec<String> = exploration
+                .as_ref()
+                .map(|e| {
+                    e.components
+                        .iter()
+                        .filter(|c| !in_scope_items.iter().any(|s| s.contains(c.as_str())))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            let (input_type, hint) = if remaining.is_empty() {
+                ("list".to_string(), "Items that will NOT be addressed".to_string())
+            } else {
+                ("multi_select".to_string(), "Components not in scope — select any to explicitly exclude".to_string())
+            };
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question: "What is explicitly out of scope?".to_string(),
                 phase: InterviewPhase::Scope,
-                hint: Some("Items that will NOT be addressed".to_string()),
+                hint: Some(hint),
                 required: state.flow_level == "full",
-                input_type: "list".to_string(),
+                input_type,
                 field_name: "out_of_scope".to_string(),
+                options: remaining,
+                allow_custom: true,
             };
         }
 
@@ -740,16 +923,28 @@ impl InterviewManager {
             .and_then(|v| v.as_array())
             .map_or(true, |a| a.is_empty())
         {
+            // Offer key files as do_not_touch options
+            let key_file_options: Vec<String> = exploration
+                .as_ref()
+                .map(|e| e.key_files.iter().take(8).cloned().collect())
+                .unwrap_or_default();
+            let (input_type, hint) = if key_file_options.is_empty() {
+                ("list".to_string(), "Files/modules to preserve as-is".to_string())
+            } else {
+                ("multi_select".to_string(), "Key files detected — select any that should NOT be modified".to_string())
+            };
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
                 question:
                     "Are there any modules, files, or components that should NOT be modified?"
                         .to_string(),
                 phase: InterviewPhase::Scope,
-                hint: Some("Files/modules to preserve as-is".to_string()),
+                hint: Some(hint),
                 required: false,
-                input_type: "list".to_string(),
+                input_type,
                 field_name: "do_not_touch".to_string(),
+                options: key_file_options,
+                allow_custom: true,
             };
         }
 
@@ -762,10 +957,17 @@ impl InterviewManager {
                 id: Uuid::new_v4().to_string(),
                 question: "What assumptions are being made?".to_string(),
                 phase: InterviewPhase::Scope,
-                hint: Some("e.g., Node.js 20+ available, database already configured".to_string()),
+                hint: Some("Select applicable assumptions or add your own".to_string()),
                 required: false,
-                input_type: "list".to_string(),
+                input_type: "multi_select".to_string(),
                 field_name: "assumptions".to_string(),
+                options: vec![
+                    "Existing DB schema available".to_string(),
+                    "API backward compatibility required".to_string(),
+                    "CI/CD pipeline configured".to_string(),
+                    "Auth system in place".to_string(),
+                ],
+                allow_custom: true,
             };
         }
 
@@ -773,10 +975,15 @@ impl InterviewManager {
             id: Uuid::new_v4().to_string(),
             question: "Scope looks good. Anything else before moving to Requirements?".to_string(),
             phase: InterviewPhase::Scope,
-            hint: Some("Type 'next' to continue".to_string()),
+            hint: None,
             required: false,
-            input_type: "text".to_string(),
+            input_type: "single_select".to_string(),
             field_name: "_transition".to_string(),
+            options: vec![
+                "Continue to Requirements".to_string(),
+                "Add more details".to_string(),
+            ],
+            allow_custom: false,
         }
     }
 
@@ -784,6 +991,7 @@ impl InterviewManager {
         &self,
         spec: &serde_json::Value,
         state: &PersistedInterviewState,
+        exploration: &Option<ExplorationSummary>,
     ) -> InterviewQuestion {
         let reqs = spec
             .get("requirements")
@@ -803,6 +1011,8 @@ impl InterviewManager {
                 required: false,
                 input_type: "list".to_string(),
                 field_name: "functional".to_string(),
+                options: vec![],
+                allow_custom: false,
             };
         }
 
@@ -820,12 +1030,17 @@ impl InterviewManager {
                 id: Uuid::new_v4().to_string(),
                 question: "Any performance targets or constraints?".to_string(),
                 phase: InterviewPhase::Requirements,
-                hint: Some(
-                    "e.g., API response time < 200ms, support 1000 concurrent users".to_string(),
-                ),
+                hint: Some("Select applicable targets or add your own".to_string()),
                 required: false,
-                input_type: "list".to_string(),
+                input_type: "multi_select".to_string(),
                 field_name: "performance_targets".to_string(),
+                options: vec![
+                    "API response <200ms".to_string(),
+                    "Page load <2s".to_string(),
+                    "Support 1K concurrent users".to_string(),
+                    "Database queries <50ms".to_string(),
+                ],
+                allow_custom: true,
             };
         }
 
@@ -838,15 +1053,27 @@ impl InterviewManager {
                 id: Uuid::new_v4().to_string(),
                 question: "Any security requirements?".to_string(),
                 phase: InterviewPhase::Requirements,
-                hint: Some("e.g., authentication required, data encryption at rest".to_string()),
+                hint: Some("Select applicable security requirements".to_string()),
                 required: false,
-                input_type: "list".to_string(),
+                input_type: "multi_select".to_string(),
                 field_name: "security".to_string(),
+                options: vec![
+                    "Authentication required".to_string(),
+                    "Authorization/RBAC".to_string(),
+                    "Data encryption at rest".to_string(),
+                    "Input validation/sanitization".to_string(),
+                    "CSRF/XSS protection".to_string(),
+                    "Rate limiting".to_string(),
+                ],
+                allow_custom: true,
             };
         }
 
-        // For quick flow, skip remaining NFR
-        if state.flow_level != "quick" {
+        // For quick flow or small projects, skip remaining NFR
+        let is_small_project = exploration
+            .as_ref()
+            .map_or(false, |e| e.file_count < 20);
+        if state.flow_level != "quick" && !is_small_project {
             if nfr
                 .get("reliability")
                 .and_then(|v| v.as_array())
@@ -856,10 +1083,17 @@ impl InterviewManager {
                     id: Uuid::new_v4().to_string(),
                     question: "Any reliability expectations?".to_string(),
                     phase: InterviewPhase::Requirements,
-                    hint: Some("e.g., 99.9% uptime, graceful degradation".to_string()),
+                    hint: Some("Select applicable reliability requirements".to_string()),
                     required: false,
-                    input_type: "list".to_string(),
+                    input_type: "multi_select".to_string(),
                     field_name: "reliability".to_string(),
+                    options: vec![
+                        "Graceful degradation".to_string(),
+                        "Retry with backoff".to_string(),
+                        "Health checks".to_string(),
+                        "Error monitoring/alerting".to_string(),
+                    ],
+                    allow_custom: true,
                 };
             }
 
@@ -872,10 +1106,17 @@ impl InterviewManager {
                     id: Uuid::new_v4().to_string(),
                     question: "Any scalability expectations?".to_string(),
                     phase: InterviewPhase::Requirements,
-                    hint: Some("e.g., horizontal scaling, handle 10x traffic growth".to_string()),
+                    hint: Some("Select applicable scalability requirements".to_string()),
                     required: false,
-                    input_type: "list".to_string(),
+                    input_type: "multi_select".to_string(),
                     field_name: "scalability".to_string(),
+                    options: vec![
+                        "Horizontal scaling".to_string(),
+                        "Database sharding/replication".to_string(),
+                        "Caching layer".to_string(),
+                        "Message queue/async processing".to_string(),
+                    ],
+                    allow_custom: true,
                 };
             }
 
@@ -888,10 +1129,18 @@ impl InterviewManager {
                     id: Uuid::new_v4().to_string(),
                     question: "Any accessibility requirements?".to_string(),
                     phase: InterviewPhase::Requirements,
-                    hint: Some("e.g., WCAG 2.1 AA compliance, keyboard navigation".to_string()),
+                    hint: Some("Select applicable accessibility requirements".to_string()),
                     required: false,
-                    input_type: "list".to_string(),
+                    input_type: "multi_select".to_string(),
                     field_name: "accessibility".to_string(),
+                    options: vec![
+                        "WCAG 2.1 AA".to_string(),
+                        "Keyboard navigation".to_string(),
+                        "Screen reader support".to_string(),
+                        "Color contrast".to_string(),
+                        "Focus management".to_string(),
+                    ],
+                    allow_custom: true,
                 };
             }
         }
@@ -901,10 +1150,15 @@ impl InterviewManager {
             question: "Requirements captured. Anything else before moving to Interfaces?"
                 .to_string(),
             phase: InterviewPhase::Requirements,
-            hint: Some("Type 'next' to continue".to_string()),
+            hint: None,
             required: false,
-            input_type: "text".to_string(),
+            input_type: "single_select".to_string(),
             field_name: "_transition".to_string(),
+            options: vec![
+                "Continue to Interfaces".to_string(),
+                "Add more details".to_string(),
+            ],
+            allow_custom: false,
         }
     }
 
@@ -912,6 +1166,7 @@ impl InterviewManager {
         &self,
         spec: &serde_json::Value,
         _state: &PersistedInterviewState,
+        _exploration: &Option<ExplorationSummary>,
     ) -> InterviewQuestion {
         let interfaces = spec
             .get("interfaces")
@@ -931,6 +1186,8 @@ impl InterviewManager {
                 required: false,
                 input_type: "list".to_string(),
                 field_name: "api".to_string(),
+                options: vec![],
+                allow_custom: false,
             };
         }
 
@@ -947,6 +1204,8 @@ impl InterviewManager {
                 required: false,
                 input_type: "list".to_string(),
                 field_name: "data_models".to_string(),
+                options: vec![],
+                allow_custom: false,
             };
         }
 
@@ -954,10 +1213,15 @@ impl InterviewManager {
             id: Uuid::new_v4().to_string(),
             question: "Interfaces defined. Ready to decompose into stories?".to_string(),
             phase: InterviewPhase::Interfaces,
-            hint: Some("Type 'next' to continue".to_string()),
+            hint: None,
             required: false,
-            input_type: "text".to_string(),
+            input_type: "single_select".to_string(),
             field_name: "_transition".to_string(),
+            options: vec![
+                "Continue to Stories".to_string(),
+                "Add more details".to_string(),
+            ],
+            allow_custom: false,
         }
     }
 
@@ -965,6 +1229,7 @@ impl InterviewManager {
         &self,
         spec: &serde_json::Value,
         _state: &PersistedInterviewState,
+        _exploration: &Option<ExplorationSummary>,
     ) -> InterviewQuestion {
         let stories = spec.get("stories").and_then(|v| v.as_array());
 
@@ -973,10 +1238,16 @@ impl InterviewManager {
                 id: Uuid::new_v4().to_string(),
                 question: "How many implementation stories should this project have?".to_string(),
                 phase: InterviewPhase::Stories,
-                hint: Some("Recommended: 3-7 stories for standard flow".to_string()),
+                hint: Some("Choose based on project complexity".to_string()),
                 required: true,
-                input_type: "text".to_string(),
+                input_type: "single_select".to_string(),
                 field_name: "story_count".to_string(),
+                options: vec![
+                    "3-5 (small project)".to_string(),
+                    "5-8 (medium project)".to_string(),
+                    "8-12 (large project)".to_string(),
+                ],
+                allow_custom: true,
             };
         }
 
@@ -1001,6 +1272,8 @@ impl InterviewManager {
                 required: true,
                 input_type: "textarea".to_string(),
                 field_name: format!("story_{}", idx),
+                options: vec![],
+                allow_custom: false,
             };
         }
 
@@ -1008,10 +1281,15 @@ impl InterviewManager {
             id: Uuid::new_v4().to_string(),
             question: "Stories defined. Ready to review the complete specification?".to_string(),
             phase: InterviewPhase::Stories,
-            hint: Some("Type 'next' to continue to review".to_string()),
+            hint: None,
             required: false,
-            input_type: "text".to_string(),
+            input_type: "single_select".to_string(),
             field_name: "_transition".to_string(),
+            options: vec![
+                "Continue to Review".to_string(),
+                "Add more stories".to_string(),
+            ],
+            allow_custom: false,
         }
     }
 
@@ -1019,6 +1297,7 @@ impl InterviewManager {
         &self,
         spec: &serde_json::Value,
         _state: &PersistedInterviewState,
+        _exploration: &Option<ExplorationSummary>,
     ) -> InterviewQuestion {
         let open_questions = spec.get("open_questions").and_then(|v| v.as_array());
 
@@ -1027,21 +1306,34 @@ impl InterviewManager {
                 id: Uuid::new_v4().to_string(),
                 question: "Any open questions or concerns about this specification?".to_string(),
                 phase: InterviewPhase::Review,
-                hint: Some("Leave empty or type 'done' to finalize".to_string()),
+                hint: Some("Select any concerns or choose 'No concerns' to proceed".to_string()),
                 required: false,
-                input_type: "list".to_string(),
+                input_type: "multi_select".to_string(),
                 field_name: "open_questions".to_string(),
+                options: vec![
+                    "No concerns".to_string(),
+                    "Need clarification on scope".to_string(),
+                    "Performance requirements unclear".to_string(),
+                    "Security review needed".to_string(),
+                    "Dependencies not fully mapped".to_string(),
+                ],
+                allow_custom: true,
             };
         }
 
         InterviewQuestion {
             id: Uuid::new_v4().to_string(),
-            question: "Specification review complete. Type 'done' to finalize.".to_string(),
+            question: "Specification review complete. Ready to finalize?".to_string(),
             phase: InterviewPhase::Review,
-            hint: Some("Type 'done' to compile spec, or add more details".to_string()),
+            hint: None,
             required: false,
-            input_type: "text".to_string(),
+            input_type: "single_select".to_string(),
             field_name: "_finalize".to_string(),
+            options: vec![
+                "Finalize specification".to_string(),
+                "Go back and revise".to_string(),
+            ],
+            allow_custom: false,
         }
     }
 
@@ -1411,16 +1703,85 @@ Based on the conversation so far, ask the next most valuable question to better 
 - Be specific and actionable
 - Help create a complete project specification covering: goals, scope, requirements, interfaces, and stories
 
+When asking a question, respond in this JSON format:
+{{
+  "question": "your question text",
+  "input_type": "text" | "textarea" | "single_select" | "multi_select",
+  "options": ["option1", "option2"],
+  "allow_custom": true,
+  "hint": "optional hint text or null"
+}}
+
+Guidelines for question format:
+- Use single_select when user should choose one from a set of options
+- Use multi_select when multiple items can be selected
+- Always set allow_custom: true for select types so user can type a custom answer
+- Use text/textarea for open-ended questions with empty options array
+- Provide 3-6 options for select types, covering common choices
+
 When you have gathered enough information for a complete specification, respond with EXACTLY:
 [INTERVIEW_COMPLETE]
 Followed by a brief summary of the key findings.
 
-Otherwise, respond with ONLY your next question. No formatting, no preamble — just the question text."#,
+Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no markdown code fences."#,
             description = state.description,
             flow_level = state.flow_level,
             cursor = state.question_cursor,
             max = state.max_questions,
         );
+
+        // Inject locale instruction for non-English locales
+        let locale_instruction = match state.locale.as_str() {
+            "zh" => "\n\nCRITICAL: You MUST conduct this entire interview in Simplified Chinese (简体中文). All question text, hints, and option labels in the JSON must be in Chinese.",
+            "ja" => "\n\nCRITICAL: You MUST conduct this entire interview in Japanese (日本語). All question text, hints, and option labels in the JSON must be in Japanese.",
+            _ => "",
+        };
+
+        // Inject exploration guidance if available
+        let exploration_guidance = if let Some(ref ctx) = exploration_context {
+            if let Ok(exploration) = serde_json::from_str::<serde_json::Value>(ctx) {
+                let mut parts = Vec::new();
+                parts.push("\n\n## Project Analysis Available".to_string());
+                parts.push("The project has been analyzed. Use this to:".to_string());
+                parts.push("- Ask targeted questions about areas NOT covered by the analysis".to_string());
+                parts.push("- Reference specific components/files when asking about scope".to_string());
+                parts.push("- Provide detected items as options in your questions".to_string());
+                parts.push("- Skip questions whose answers are obvious from the codebase".to_string());
+
+                if let Some(components) = exploration.get("components").and_then(|v| v.as_array()) {
+                    if !components.is_empty() {
+                        let names: Vec<&str> = components
+                            .iter()
+                            .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
+                            .take(10)
+                            .collect();
+                        parts.push(format!("\nDetected components: {}", names.join(", ")));
+                    }
+                }
+                if let Some(ts) = exploration.get("techStack") {
+                    let mut stack = Vec::new();
+                    for field in &["languages", "frameworks"] {
+                        if let Some(arr) = ts.get(*field).and_then(|v| v.as_array()) {
+                            for item in arr {
+                                if let Some(s) = item.as_str() {
+                                    stack.push(s);
+                                }
+                            }
+                        }
+                    }
+                    if !stack.is_empty() {
+                        parts.push(format!("Tech stack: {}", stack.join(", ")));
+                    }
+                }
+                parts.join("\n")
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        let phase_instructions = format!("{}{}{}", phase_instructions, locale_instruction, exploration_guidance);
 
         let system_prompt = prompt_builder::build_expert_system_prompt(
             &persona,
@@ -1431,11 +1792,13 @@ Otherwise, respond with ONLY your next question. No formatting, no preamble — 
         // Build conversation messages from turns
         let mut messages = Vec::new();
 
-        // Initial context message
-        messages.push(Message::user(format!(
-            "I want to build: {}. Please begin the requirements interview.",
-            state.description
-        )));
+        // Initial context message (localized)
+        let initial_message = match state.locale.as_str() {
+            "zh" => format!("我想构建：{}。请开始需求访谈。", state.description),
+            "ja" => format!("次のものを構築したいです：{}。要件インタビューを始めてください。", state.description),
+            _ => format!("I want to build: {}. Please begin the requirements interview.", state.description),
+        };
+        messages.push(Message::user(initial_message));
 
         // Add conversation history as alternating assistant/user messages
         for turn in turns {
@@ -1471,9 +1834,71 @@ Otherwise, respond with ONLY your next question. No formatting, no preamble — 
             return Err(AppError::validation("INTERVIEW_COMPLETE"));
         }
 
-        // Extract question text (strip any markdown formatting)
-        let question_text = response_text
-            .trim()
+        // Try to parse structured JSON response first
+        let trimmed = response_text.trim();
+        // Strip markdown code fences if present
+        let json_candidate = if trimmed.starts_with("```") {
+            trimmed
+                .trim_start_matches("```json")
+                .trim_start_matches("```")
+                .trim_end_matches("```")
+                .trim()
+        } else {
+            trimmed
+        };
+
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_candidate) {
+            let question_text = parsed
+                .get("question")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            if question_text.is_empty() {
+                return Err(AppError::parse("BA returned empty question in JSON".to_string()));
+            }
+
+            let input_type = parsed
+                .get("input_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("textarea")
+                .to_string();
+
+            let options: Vec<String> = parsed
+                .get("options")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let allow_custom = parsed
+                .get("allow_custom")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+
+            let hint = parsed
+                .get("hint")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            return Ok(InterviewQuestion {
+                id: Uuid::new_v4().to_string(),
+                question: question_text,
+                phase: InterviewPhase::from_str(&state.phase),
+                hint,
+                required: false,
+                input_type,
+                field_name: "ba_response".to_string(),
+                options,
+                allow_custom,
+            });
+        }
+
+        // Fallback: plain text response
+        let question_text = trimmed
             .trim_start_matches('#')
             .trim_start_matches("**Question:**")
             .trim_start_matches("Question:")
@@ -1492,7 +1917,85 @@ Otherwise, respond with ONLY your next question. No formatting, no preamble — 
             required: false,
             input_type: "textarea".to_string(),
             field_name: "ba_response".to_string(),
+            options: vec![],
+            allow_custom: false,
         })
+    }
+
+    /// Translate a deterministic-mode question to the target locale using LLM.
+    ///
+    /// Falls back to the original English text if LLM is unavailable or fails.
+    /// Only translates question text, hint, and options — not structural fields.
+    pub async fn translate_question(
+        question: &mut InterviewQuestion,
+        locale: &str,
+        provider: &Arc<dyn LlmProvider>,
+    ) {
+        if locale == "en" || locale.is_empty() {
+            return;
+        }
+
+        let locale_name = match locale {
+            "zh" => "Simplified Chinese (简体中文)",
+            "ja" => "Japanese (日本語)",
+            _ => return, // Unsupported locale, keep English
+        };
+
+        let payload = serde_json::json!({
+            "question": question.question,
+            "hint": question.hint,
+            "options": question.options,
+        });
+
+        let system = format!(
+            "You are a professional translator. Translate the following UI text to {}. \
+             Respond with ONLY the translated JSON, no explanation. \
+             The JSON must have the exact same structure as the input.",
+            locale_name
+        );
+
+        let messages = vec![Message::user(payload.to_string())];
+        let options = LlmRequestOptions {
+            temperature_override: Some(0.1),
+            ..Default::default()
+        };
+
+        match provider
+            .send_message(messages, Some(system), vec![], options)
+            .await
+        {
+            Ok(response) => {
+                let content = response
+                    .content
+                    .as_deref()
+                    .or(response.thinking.as_deref())
+                    .unwrap_or("");
+                // Strip markdown code fences if present
+                let json_str = content
+                    .trim()
+                    .trim_start_matches("```json")
+                    .trim_start_matches("```")
+                    .trim_end_matches("```")
+                    .trim();
+                if let Ok(translated) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    if let Some(q) = translated.get("question").and_then(|v| v.as_str()) {
+                        question.question = q.to_string();
+                    }
+                    if let Some(h) = translated.get("hint").and_then(|v| v.as_str()) {
+                        question.hint = Some(h.to_string());
+                    }
+                    if let Some(opts) = translated.get("options").and_then(|v| v.as_array()) {
+                        question.options = opts
+                            .iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect();
+                    }
+                }
+            }
+            Err(e) => {
+                debug!(error = %e, "Translation failed, keeping English text");
+            }
+        }
     }
 
     /// Extract structured spec_data from the full conversation using LLM formatter.
@@ -1666,6 +2169,9 @@ pub struct InterviewSession {
     pub max_questions: i32,
     /// The current question to display
     pub current_question: Option<InterviewQuestion>,
+    /// User locale for question language
+    #[serde(default = "default_locale")]
+    pub locale: String,
     /// Progress percentage (0-100)
     pub progress: f64,
     /// Conversation history

@@ -126,6 +126,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
       first_principles: firstPrinciples,
       project_path: null,
       exploration_context: null,
+      locale: 'en',
     });
   };
 

@@ -25,6 +25,9 @@ interface ChatToolbarProps {
   onPause: () => void;
   onResume: () => void;
   onCancel: () => void;
+  // Task workflow controls
+  taskWorkflowActive?: boolean;
+  onCancelWorkflow?: () => void;
   // Right panel
   rightPanelOpen: boolean;
   rightPanelTab: 'output' | 'git';
@@ -41,6 +44,8 @@ export function ChatToolbar({
   onPause,
   onResume,
   onCancel,
+  taskWorkflowActive,
+  onCancelWorkflow,
   rightPanelOpen,
   rightPanelTab,
   onToggleOutput,
@@ -103,10 +108,10 @@ export function ChatToolbar({
         </button>
       </div>
 
-      {/* Center group: execution controls (only when running/paused) */}
-      {isExecuting && (
+      {/* Center group: execution controls (chat running/paused OR task workflow active) */}
+      {(isExecuting || taskWorkflowActive) && (
         <div className="flex items-center gap-1">
-          {executionStatus === 'running' ? (
+          {isExecuting && executionStatus === 'running' && (
             <button
               onClick={onPause}
               className={clsx(
@@ -120,7 +125,8 @@ export function ChatToolbar({
             >
               <PauseIcon className="w-4 h-4" />
             </button>
-          ) : (
+          )}
+          {isExecuting && executionStatus === 'paused' && (
             <button
               onClick={onResume}
               className={clsx(
@@ -135,19 +141,37 @@ export function ChatToolbar({
               <PlayIcon className="w-4 h-4" />
             </button>
           )}
-          <button
-            onClick={onCancel}
-            className={clsx(
-              'flex items-center justify-center',
-              'w-7 h-7 rounded-md',
-              'text-red-500 dark:text-red-400',
-              'hover:bg-red-50 dark:hover:bg-red-900/20',
-              'transition-colors',
-            )}
-            title={t('chatToolbar.cancel', { defaultValue: 'Cancel' })}
-          >
-            <Cross2Icon className="w-4 h-4" />
-          </button>
+          {isExecuting && (
+            <button
+              onClick={onCancel}
+              className={clsx(
+                'flex items-center justify-center',
+                'w-7 h-7 rounded-md',
+                'text-red-500 dark:text-red-400',
+                'hover:bg-red-50 dark:hover:bg-red-900/20',
+                'transition-colors',
+              )}
+              title={t('chatToolbar.cancel', { defaultValue: 'Cancel' })}
+            >
+              <Cross2Icon className="w-4 h-4" />
+            </button>
+          )}
+          {taskWorkflowActive && !isExecuting && onCancelWorkflow && (
+            <button
+              onClick={onCancelWorkflow}
+              className={clsx(
+                'flex items-center gap-1',
+                'px-2 py-1 rounded-md text-xs',
+                'text-red-500 dark:text-red-400',
+                'hover:bg-red-50 dark:hover:bg-red-900/20',
+                'transition-colors',
+              )}
+              title={t('workflow.cancelWorkflow')}
+            >
+              <Cross2Icon className="w-3.5 h-3.5" />
+              <span>{t('workflow.cancelWorkflow')}</span>
+            </button>
+          )}
         </div>
       )}
 

@@ -198,6 +198,12 @@ function mapInterviewQuestion(
     case 'boolean':
       inputType = 'boolean';
       break;
+    case 'single_select':
+      inputType = 'single_select';
+      break;
+    case 'multi_select':
+      inputType = 'multi_select';
+      break;
     default:
       inputType = 'text';
   }
@@ -208,7 +214,8 @@ function mapInterviewQuestion(
     hint: q.hint,
     required: q.required,
     inputType,
-    options: [],
+    options: q.options ?? [],
+    allowCustom: q.allow_custom ?? true,
     questionNumber,
     totalQuestions,
   };
@@ -218,13 +225,15 @@ function mapInterviewQuestion(
 function buildStrategyCardData(analysis: StrategyAnalysis): StrategyCardData {
   const recommendations: string[] = [];
   if (analysis.parallelizationBenefit === 'significant') {
-    recommendations.push('High parallelization potential — multiple stories can execute concurrently');
+    recommendations.push(i18n.t('workflow.strategy.highParallelization', { ns: 'simpleMode' }));
   }
   if (analysis.riskLevel === 'high') {
-    recommendations.push('High risk — consider enabling TDD mode and full quality gates');
+    recommendations.push(i18n.t('workflow.strategy.highRisk', { ns: 'simpleMode' }));
   }
   if (analysis.estimatedStories > 6) {
-    recommendations.push(`${analysis.estimatedStories} estimated stories — consider increasing max parallel agents`);
+    recommendations.push(
+      i18n.t('workflow.strategy.manyStories', { ns: 'simpleMode', count: analysis.estimatedStories }),
+    );
   }
 
   return {
@@ -305,6 +314,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
               model: settings.model || null,
               apiKey: null,
               baseUrl: baseUrl || null,
+              locale: i18n.language,
             },
           );
 
@@ -361,7 +371,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   confirmConfig: async (overrides?: Partial<WorkflowConfig>) => {
     const state = get();
     const config = overrides ? { ...state.config, ...overrides } : state.config;
-    set({ config });
+    set({ config, phase: 'exploring' });
 
     try {
       // Always explore first (exploration provides context for interview BA)
@@ -377,7 +387,8 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         });
         injectInfo(i18n.t('workflow.orchestrator.startingInterview', { ns: 'simpleMode' }), 'info');
 
-        const workspacePath = useSettingsStore.getState().workspacePath;
+        const settings = useSettingsStore.getState();
+        const workspacePath = settings.workspacePath;
         const { explorationResult } = get();
         const interviewConfig = {
           description: state.taskDescription,
@@ -386,7 +397,19 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           first_principles: false,
           project_path: workspacePath,
           exploration_context: explorationResult ? JSON.stringify(explorationResult) : null,
+          locale: i18n.language,
         };
+
+        // Set LLM provider settings so specInterview store passes them to backend
+        if (settings.provider) {
+          const { resolveProviderBaseUrl } = await import('../lib/providers');
+          const baseUrl = resolveProviderBaseUrl(settings.provider, settings);
+          useSpecInterviewStore.getState().setProviderSettings({
+            provider: settings.provider,
+            model: settings.model || undefined,
+            baseUrl: baseUrl || undefined,
+          });
+        }
 
         // Retry with exponential backoff if backend not yet initialized (race with init_app)
         const maxRetries = 5;
@@ -507,9 +530,6 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   submitInterviewAnswer: async (answer: string) => {
     const { pendingQuestion } = get();
     if (!pendingQuestion) return;
-
-    // Add user message as 'info' StreamLine so it appears as a chat bubble
-    useExecutionStore.getState().appendStreamLine(answer, 'info');
 
     // Inject answer card
     const answerData: InterviewAnswerCardData = {
