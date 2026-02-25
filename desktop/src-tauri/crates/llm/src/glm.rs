@@ -75,19 +75,25 @@ impl GlmProvider {
     }
 
     fn native_search_enabled(&self) -> bool {
-        self.config.options.get("enable_search")
+        self.config
+            .options
+            .get("enable_search")
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
     }
 
     fn search_engine(&self) -> &str {
-        self.config.options.get("search_engine")
+        self.config
+            .options
+            .get("search_engine")
             .and_then(|v| v.as_str())
             .unwrap_or("search_pro")
     }
 
     fn search_result_count(&self) -> u64 {
-        self.config.options.get("search_result_count")
+        self.config
+            .options
+            .get("search_result_count")
             .and_then(|v| v.as_u64())
             .unwrap_or(5)
     }
@@ -1039,7 +1045,9 @@ mod tests {
     #[test]
     fn test_native_search_enabled_via_options() {
         let mut config = test_config();
-        config.options.insert("enable_search".to_string(), serde_json::json!(true));
+        config
+            .options
+            .insert("enable_search".to_string(), serde_json::json!(true));
         let provider = GlmProvider::new(config);
         assert!(provider.native_search_enabled());
         assert!(provider.supports_native_search());
@@ -1048,10 +1056,13 @@ mod tests {
     #[test]
     fn test_build_request_body_with_native_search() {
         let mut config = test_config();
-        config.options.insert("enable_search".to_string(), serde_json::json!(true));
+        config
+            .options
+            .insert("enable_search".to_string(), serde_json::json!(true));
         let provider = GlmProvider::new(config);
         let messages = vec![Message::user("test")];
-        let body = provider.build_request_body(&messages, None, &[], false, &LlmRequestOptions::default());
+        let body =
+            provider.build_request_body(&messages, None, &[], false, &LlmRequestOptions::default());
         let tools = body["tools"].as_array().expect("tools should be present");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], "web_search");
@@ -1062,7 +1073,9 @@ mod tests {
     #[test]
     fn test_build_request_body_with_native_search_and_function_tools() {
         let mut config = test_config();
-        config.options.insert("enable_search".to_string(), serde_json::json!(true));
+        config
+            .options
+            .insert("enable_search".to_string(), serde_json::json!(true));
         let provider = GlmProvider::new(config);
         let messages = vec![Message::user("test")];
         let tools = vec![ToolDefinition {
@@ -1074,9 +1087,19 @@ mod tests {
                 vec![],
             ),
         }];
-        let body = provider.build_request_body(&messages, None, &tools, false, &LlmRequestOptions::default());
+        let body = provider.build_request_body(
+            &messages,
+            None,
+            &tools,
+            false,
+            &LlmRequestOptions::default(),
+        );
         let body_tools = body["tools"].as_array().expect("tools should be present");
-        assert_eq!(body_tools.len(), 2, "should have function tool + web_search tool");
+        assert_eq!(
+            body_tools.len(),
+            2,
+            "should have function tool + web_search tool"
+        );
         // First tool should be function type
         assert_eq!(body_tools[0]["type"], "function");
         // Second tool should be web_search type
@@ -1086,11 +1109,21 @@ mod tests {
     #[test]
     fn test_compat_body_strips_web_search() {
         let mut config = test_config();
-        config.options.insert("enable_search".to_string(), serde_json::json!(true));
+        config
+            .options
+            .insert("enable_search".to_string(), serde_json::json!(true));
         let provider = GlmProvider::new(config);
         let messages = vec![Message::user("test")];
-        let body = provider.build_compat_request_body(&messages, None, false, &LlmRequestOptions::default());
-        assert!(body.get("tools").is_none(), "compat body should strip all tools including web_search");
+        let body = provider.build_compat_request_body(
+            &messages,
+            None,
+            false,
+            &LlmRequestOptions::default(),
+        );
+        assert!(
+            body.get("tools").is_none(),
+            "compat body should strip all tools including web_search"
+        );
     }
 
     #[test]
@@ -1102,7 +1135,9 @@ mod tests {
     #[test]
     fn test_search_engine_custom() {
         let mut config = test_config();
-        config.options.insert("search_engine".to_string(), serde_json::json!("search_std"));
+        config
+            .options
+            .insert("search_engine".to_string(), serde_json::json!("search_std"));
         let provider = GlmProvider::new(config);
         assert_eq!(provider.search_engine(), "search_std");
     }

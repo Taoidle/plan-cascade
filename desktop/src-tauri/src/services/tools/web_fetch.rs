@@ -3,8 +3,8 @@
 //! Fetches web pages, converts HTML to markdown, with caching and SSRF protection.
 
 use mini_moka::sync::Cache;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Maximum requests per domain per minute
@@ -62,7 +62,11 @@ impl WebFetchService {
             .time_to_live(Duration::from_secs(RATE_LIMIT_WINDOW_SECS))
             .build();
 
-        Self { client, cache, domain_counters }
+        Self {
+            client,
+            cache,
+            domain_counters,
+        }
     }
 
     /// Fetch a URL and return its content as markdown.

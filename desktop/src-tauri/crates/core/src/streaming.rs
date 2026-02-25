@@ -78,9 +78,7 @@ pub enum UnifiedStreamEvent {
     },
 
     /// Search citation data from provider-native web search (Qwen enable_search, GLM web_search, etc.)
-    SearchCitations {
-        citations: Vec<SearchCitationEntry>,
-    },
+    SearchCitations { citations: Vec<SearchCitationEntry> },
 
     /// Error during streaming
     Error {

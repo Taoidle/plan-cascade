@@ -262,7 +262,10 @@ impl SearchProvider for DuckDuckGoProvider {
                 let snippet_abs = pos + snippet_pos;
                 if let Some(snippet_content_start) = html[snippet_abs..].find('>') {
                     let s_start = snippet_abs + snippet_content_start + 1;
-                    if let Some(s_end) = html[s_start..].find("</a>").or_else(|| html[s_start..].find("</span>")) {
+                    if let Some(s_end) = html[s_start..]
+                        .find("</a>")
+                        .or_else(|| html[s_start..].find("</span>"))
+                    {
                         strip_html_tags(&html[s_start..s_start + s_end])
                     } else {
                         String::new()
@@ -334,11 +337,7 @@ impl SearchProvider for SearxngProvider {
         let response = self
             .client
             .get(&url)
-            .query(&[
-                ("q", query),
-                ("format", "json"),
-                ("categories", "general"),
-            ])
+            .query(&[("q", query), ("format", "json"), ("categories", "general")])
             .send()
             .await
             .map_err(|e| format!("SearXNG request failed: {}", e))?;

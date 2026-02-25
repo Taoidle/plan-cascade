@@ -13,11 +13,9 @@ pub fn is_private_ip(ip: IpAddr) -> bool {
                 || ipv4.is_private()     // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
                 || ipv4.is_link_local()  // 169.254.0.0/16
                 || ipv4.is_unspecified() // 0.0.0.0
-                || ipv4.is_broadcast()   // 255.255.255.255
+                || ipv4.is_broadcast() // 255.255.255.255
         }
-        IpAddr::V6(ipv6) => {
-            ipv6.is_loopback() || ipv6.is_unspecified()
-        }
+        IpAddr::V6(ipv6) => ipv6.is_loopback() || ipv6.is_unspecified(),
     }
 }
 

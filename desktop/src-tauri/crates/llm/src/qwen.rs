@@ -779,9 +779,7 @@ impl LlmProvider for QwenProvider {
 
                     // Extract search citations from streaming events
                     if let Some(si) = &output.output.search_info {
-                        let citations: Vec<
-                            plan_cascade_core::streaming::SearchCitationEntry,
-                        > = si
+                        let citations: Vec<plan_cascade_core::streaming::SearchCitationEntry> = si
                             .search_results
                             .iter()
                             .map(|sr| plan_cascade_core::streaming::SearchCitationEntry {
