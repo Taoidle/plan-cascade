@@ -291,7 +291,8 @@
       "nlDescription": "Describe your configuration preferences in natural language:",
       "nlPlaceholder": "e.g., \"use 6 parallel agents and enable TDD\"",
       "apply": "Apply",
-      "backToForm": "Back to form"
+      "backToForm": "Back to form",
+      "applied": "Applied"
     },
 
     "designDoc": {

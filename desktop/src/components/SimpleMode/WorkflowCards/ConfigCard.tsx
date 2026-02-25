@@ -18,6 +18,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
   const [layer, setLayer] = useState<1 | 2 | 3>(1);
   const [localConfig, setLocalConfig] = useState(data);
   const [nlOverride, setNlOverride] = useState('');
+  const [acted, setActed] = useState(false);
   const updateConfig = useWorkflowOrchestratorStore((s) => s.updateConfig);
   const confirmConfig = useWorkflowOrchestratorStore((s) => s.confirmConfig);
   const overrideConfigNatural = useWorkflowOrchestratorStore((s) => s.overrideConfigNatural);
@@ -26,6 +27,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
   const isActive = interactive && phase === 'configuring';
 
   const handleConfirm = useCallback(() => {
+    setActed(true);
     if (layer === 2) {
       updateConfig(localConfig);
     }
@@ -34,6 +36,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
 
   const handleNlSubmit = useCallback(() => {
     if (nlOverride.trim()) {
+      setActed(true);
       overrideConfigNatural(nlOverride.trim());
       setNlOverride('');
       setLayer(1);
@@ -47,11 +50,18 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
         <span className="text-xs font-semibold text-sky-700 dark:text-sky-300 uppercase tracking-wide">
           {t('workflow.config.title')}
         </span>
-        {data.isOverridden && (
-          <span className="text-2xs px-1.5 py-0.5 rounded bg-sky-200 dark:bg-sky-800 text-sky-600 dark:text-sky-400">
-            {t('workflow.config.customized')}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {data.isOverridden && (
+            <span className="text-2xs px-1.5 py-0.5 rounded bg-sky-200 dark:bg-sky-800 text-sky-600 dark:text-sky-400">
+              {t('workflow.config.customized')}
+            </span>
+          )}
+          {!isActive && acted && (
+            <span className="text-2xs px-1.5 py-0.5 rounded bg-green-200 dark:bg-green-800 text-green-600 dark:text-green-400">
+              {t('workflow.config.applied')}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="px-3 py-2 space-y-2">

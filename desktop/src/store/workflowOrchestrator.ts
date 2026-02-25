@@ -191,7 +191,7 @@ function mapInterviewQuestion(
       inputType = 'textarea';
       break;
     case 'list':
-      inputType = 'multi_select';
+      inputType = 'text';
       break;
     case 'boolean':
       inputType = 'boolean';

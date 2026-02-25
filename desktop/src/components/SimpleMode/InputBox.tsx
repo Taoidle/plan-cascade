@@ -52,6 +52,8 @@ interface InputBoxProps {
   workspacePath?: string | null;
   activeAgentName?: string | null;
   onClearAgent?: () => void;
+  /** When true, plain Enter submits (Shift+Enter for newline). For interview answers. */
+  enterSubmits?: boolean;
 }
 
 interface WorkspaceFileResult {
@@ -129,6 +131,7 @@ export function InputBox({
   workspacePath,
   activeAgentName,
   onClearAgent,
+  enterSubmits = false,
 }: InputBoxProps) {
   const { t } = useTranslation('simpleMode');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -577,8 +580,8 @@ export function InputBox({
       }
     }
 
-    // Submit on Cmd/Ctrl + Enter
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    // Submit on Cmd/Ctrl + Enter (or plain Enter when enterSubmits is true)
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || (enterSubmits && !e.shiftKey))) {
       e.preventDefault();
       if (!disabled && !isLoading && value.trim()) {
         onSubmit();

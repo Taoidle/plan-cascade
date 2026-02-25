@@ -422,6 +422,7 @@ export function SimpleMode() {
                     onChange={setDescription}
                     onSubmit={isChatSession || (workflowMode === 'task' && workflowPhase !== 'idle') ? handleFollowUp : handleStart}
                     disabled={isDisabled}
+                    enterSubmits={workflowMode === 'task' && workflowPhase === 'interviewing'}
                     placeholder={
                       isRunning
                         ? t('workflow.input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
@@ -769,7 +770,11 @@ function ChatAssistantSection({
           if (line.type === 'card') {
             try {
               const payload = JSON.parse(line.content) as CardPayload;
-              return <WorkflowCardRenderer key={line.id} payload={payload} />;
+              return (
+                <div key={line.id} className="my-1">
+                  <WorkflowCardRenderer payload={payload} />
+                </div>
+              );
             } catch {
               return null;
             }

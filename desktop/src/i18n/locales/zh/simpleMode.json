@@ -291,7 +291,8 @@
       "nlDescription": "用自然语言描述你的配置偏好：",
       "nlPlaceholder": "例如：「使用 6 个并行代理并启用 TDD」",
       "apply": "应用",
-      "backToForm": "返回表单"
+      "backToForm": "返回表单",
+      "applied": "已应用"
     },
 
     "designDoc": {

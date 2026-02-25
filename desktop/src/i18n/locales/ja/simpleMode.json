@@ -291,7 +291,8 @@
       "nlDescription": "自然言語で設定の希望を記述してください：",
       "nlPlaceholder": "例：「6個の並列エージェントを使用してTDDを有効にする」",
       "apply": "適用",
-      "backToForm": "フォームに戻る"
+      "backToForm": "フォームに戻る",
+      "applied": "適用済み"
     },
 
     "designDoc": {
