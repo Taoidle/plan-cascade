@@ -157,7 +157,14 @@
     "importance": "重要度",
     "content": "内容",
     "keywords": "キーワード",
-    "activeSkillsTooltip": "{{count}} 個のアクティブスキル"
+    "activeSkillsTooltip": "{{count}} 個のアクティブスキル",
+    "totalMemories": "{{count}} 件のメモリ",
+    "avgImportance": "平均重要度: {{pct}}%",
+    "keywordsPlaceholder": "入力してEnter",
+    "addMemory": "メモリを追加",
+    "contentRequired": "内容は必須です",
+    "clearAll": "すべてクリア",
+    "clearAllConfirm": "このプロジェクトのすべてのメモリを削除しますか？元に戻せません。"
   },
 
   "pluginPanel": {

@@ -7,6 +7,7 @@ use tauri::State;
 
 use crate::models::response::CommandResponse;
 use crate::services::memory::extraction::MemoryExtractor;
+use crate::services::memory::maintenance::MemoryMaintenance;
 use crate::services::memory::retrieval::search_memories;
 use crate::services::memory::store::{
     MemoryCategory, MemoryEntry, MemorySearchRequest, MemorySearchResult, MemoryStats,
@@ -187,6 +188,45 @@ pub async fn get_memory_stats(
         Ok(stats) => Ok(CommandResponse::ok(stats)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
+}
+
+/// Result of running maintenance operations
+#[derive(Debug, Clone, Serialize)]
+pub struct MaintenanceResult {
+    pub decayed_count: usize,
+    pub pruned_count: usize,
+    pub compacted_count: usize,
+}
+
+/// Run memory maintenance: decay, prune, and compact.
+///
+/// Called fire-and-forget when the memory dialog opens. Gracefully
+/// handles failures in each step (returns 0 for that step).
+#[tauri::command]
+pub async fn run_memory_maintenance(
+    project_path: String,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<MaintenanceResult>, String> {
+    let decayed_count = state
+        .with_memory_store(|store| MemoryMaintenance::decay_memories(store, &project_path))
+        .await
+        .unwrap_or(0);
+
+    let pruned_count = state
+        .with_memory_store(|store| MemoryMaintenance::prune_memories(store, &project_path, 0.05))
+        .await
+        .unwrap_or(0);
+
+    let compacted_count = state
+        .with_memory_store(|store| MemoryMaintenance::compact_memories(store, &project_path))
+        .await
+        .unwrap_or(0);
+
+    Ok(CommandResponse::ok(MaintenanceResult {
+        decayed_count,
+        pruned_count,
+        compacted_count,
+    }))
 }
 
 /// Result of automatic memory extraction from a session

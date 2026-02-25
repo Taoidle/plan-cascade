@@ -104,7 +104,9 @@ interface SkillMemoryState {
     }
   ) => Promise<void>;
   deleteMemory: (id: string) => Promise<void>;
+  clearMemories: (projectPath: string) => Promise<void>;
   searchMemories: (projectPath: string, query: string) => Promise<void>;
+  runMaintenance: (projectPath: string) => Promise<void>;
   setMemorySearchQuery: (query: string) => void;
   setMemoryCategoryFilter: (filter: MemoryCategoryFilter) => void;
 
@@ -459,6 +461,22 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     }
   },
 
+  clearMemories: async (projectPath: string) => {
+    try {
+      const response = await invoke<CommandResponse<number>>('clear_project_memories', {
+        projectPath,
+      });
+      if (response.success) {
+        set({ memories: [], memoryStats: null, memoryHasMore: false });
+        get().showToast('All memories cleared', 'success');
+      } else {
+        get().showToast(response.error || 'Failed to clear memories', 'error');
+      }
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  },
+
   searchMemories: async (projectPath: string, query: string) => {
     set({ memoriesLoading: true, memorySearchQuery: query });
     if (!query.trim()) {
@@ -492,6 +510,17 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         memoriesError: error instanceof Error ? error.message : String(error),
         memoriesLoading: false,
       });
+    }
+  },
+
+  runMaintenance: async (projectPath: string) => {
+    try {
+      await invoke<CommandResponse<{ decayed_count: number; pruned_count: number; compacted_count: number }>>('run_memory_maintenance', {
+        projectPath,
+      });
+      // Silent success — maintenance is non-critical
+    } catch {
+      // Silent failure — maintenance is non-critical
     }
   },
 

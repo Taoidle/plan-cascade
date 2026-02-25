@@ -157,7 +157,14 @@
     "importance": "Importance",
     "content": "Content",
     "keywords": "Keywords",
-    "activeSkillsTooltip": "{{count}} active skill(s)"
+    "activeSkillsTooltip": "{{count}} active skill(s)",
+    "totalMemories": "{{count}} memories",
+    "avgImportance": "Avg. importance: {{pct}}%",
+    "keywordsPlaceholder": "Type and press Enter",
+    "addMemory": "Add Memory",
+    "contentRequired": "Content is required",
+    "clearAll": "Clear all",
+    "clearAllConfirm": "Delete all memories for this project? This cannot be undone."
   },
 
   "pluginPanel": {

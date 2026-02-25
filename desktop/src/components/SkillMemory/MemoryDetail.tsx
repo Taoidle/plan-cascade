@@ -43,6 +43,8 @@ export function MemoryDetail({
   const [editContent, setEditContent] = useState(memory.content);
   const [editCategory, setEditCategory] = useState<MemoryCategory>(memory.category);
   const [editImportance, setEditImportance] = useState(memory.importance);
+  const [editKeywords, setEditKeywords] = useState<string[]>(memory.keywords);
+  const [keywordInput, setKeywordInput] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleSave = useCallback(() => {
@@ -50,12 +52,13 @@ export function MemoryDetail({
     if (editContent !== memory.content) updates.content = editContent;
     if (editCategory !== memory.category) updates.category = editCategory;
     if (editImportance !== memory.importance) updates.importance = editImportance;
+    if (JSON.stringify(editKeywords) !== JSON.stringify(memory.keywords)) updates.keywords = editKeywords;
 
     if (Object.keys(updates).length > 0) {
       onUpdate(memory.id, updates);
     }
     setEditing(false);
-  }, [memory, editContent, editCategory, editImportance, onUpdate]);
+  }, [memory, editContent, editCategory, editImportance, editKeywords, onUpdate]);
 
   const handleDelete = useCallback(() => {
     if (confirmDelete) {
@@ -73,6 +76,8 @@ export function MemoryDetail({
     setEditContent(memory.content);
     setEditCategory(memory.category);
     setEditImportance(memory.importance);
+    setEditKeywords(memory.keywords);
+    setKeywordInput('');
   }, [memory]);
 
   return (
@@ -167,6 +172,54 @@ export function MemoryDetail({
                 value={editImportance * 100}
                 onChange={(e) => setEditImportance(Number(e.target.value) / 100)}
                 className="w-full h-1.5 accent-primary-600"
+              />
+            </div>
+
+            {/* Keywords tag input */}
+            <div>
+              <label className="text-2xs font-medium text-gray-500 dark:text-gray-400 block mb-1">
+                {t('skillPanel.keywords')}
+              </label>
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {editKeywords.map((kw) => (
+                  <span
+                    key={kw}
+                    className="inline-flex items-center gap-0.5 text-2xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                  >
+                    {kw}
+                    <button
+                      type="button"
+                      onClick={() => setEditKeywords((prev) => prev.filter((k) => k !== kw))}
+                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={keywordInput}
+                onChange={(e) => setKeywordInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.key === 'Enter' || e.key === ',') && keywordInput.trim()) {
+                    e.preventDefault();
+                    const newKw = keywordInput.trim().replace(/,+$/, '');
+                    if (newKw && !editKeywords.includes(newKw)) {
+                      setEditKeywords((prev) => [...prev, newKw]);
+                    }
+                    setKeywordInput('');
+                  }
+                }}
+                placeholder={t('skillPanel.keywordsPlaceholder')}
+                className={clsx(
+                  'w-full px-2 py-1.5 rounded-md text-xs',
+                  'bg-white dark:bg-gray-800',
+                  'border border-gray-300 dark:border-gray-600',
+                  'text-gray-700 dark:text-gray-300',
+                  'placeholder:text-gray-400 dark:placeholder:text-gray-500',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                )}
               />
             </div>
 

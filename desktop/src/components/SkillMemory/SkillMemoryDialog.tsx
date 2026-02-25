@@ -13,16 +13,18 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Tabs from '@radix-ui/react-tabs';
-import { Cross2Icon, MagnifyingGlassIcon, ReloadIcon } from '@radix-ui/react-icons';
+import { Cross2Icon, MagnifyingGlassIcon, PlusIcon, ReloadIcon, TrashIcon } from '@radix-ui/react-icons';
 import { useSkillMemoryStore, type SkillSourceFilter, type MemoryCategoryFilter } from '../../store/skillMemory';
 import { useSettingsStore } from '../../store/settings';
 import { SkillRow } from '../SimpleMode/SkillRow';
 import { SkillDetail } from './SkillDetail';
 import { MemoryDetail } from './MemoryDetail';
+import { AddMemoryForm } from './AddMemoryForm';
 import { CategoryBadge } from './CategoryBadge';
 import { ImportanceBar } from './ImportanceBar';
 import { EmptyState } from './EmptyState';
-import type { SkillSummary, MemoryEntry } from '../../types/skillMemory';
+import { debounce } from '../Projects/utils';
+import type { SkillSummary, MemoryEntry, MemoryCategory } from '../../types/skillMemory';
 import { MEMORY_CATEGORIES } from '../../types/skillMemory';
 
 // ============================================================================
@@ -237,8 +239,13 @@ function MemoryTab() {
   const searchMemories = useSkillMemoryStore((s) => s.searchMemories);
   const updateMemory = useSkillMemoryStore((s) => s.updateMemory);
   const deleteMemory = useSkillMemoryStore((s) => s.deleteMemory);
+  const addMemory = useSkillMemoryStore((s) => s.addMemory);
+  const clearMemories = useSkillMemoryStore((s) => s.clearMemories);
+  const memoryStats = useSkillMemoryStore((s) => s.memoryStats);
+  const loadMemoryStats = useSkillMemoryStore((s) => s.loadMemoryStats);
 
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntry | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
 
   // Reload when category filter changes
   useEffect(() => {
@@ -251,19 +258,27 @@ function MemoryTab() {
     }
   }, [memoryCategoryFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const debouncedSearch = useMemo(
+    () =>
+      debounce((query: string) => {
+        if (workspacePath) {
+          if (query.trim()) {
+            searchMemories(workspacePath, query);
+          } else {
+            loadMemories(workspacePath);
+          }
+        }
+      }, 300),
+    [workspacePath, searchMemories, loadMemories]
+  );
+
   const handleSearch = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const query = e.target.value;
       setMemorySearchQuery(query);
-      if (workspacePath) {
-        if (query.trim()) {
-          searchMemories(workspacePath, query);
-        } else {
-          loadMemories(workspacePath);
-        }
-      }
+      debouncedSearch(query);
     },
-    [workspacePath, setMemorySearchQuery, searchMemories, loadMemories]
+    [setMemorySearchQuery, debouncedSearch]
   );
 
   const handleLoadMore = useCallback(() => {
@@ -278,6 +293,33 @@ function MemoryTab() {
     },
     [setMemoryCategoryFilter]
   );
+
+  const handleAddMemory = useCallback(
+    async (category: MemoryCategory, content: string, keywords: string[], importance: number) => {
+      if (workspacePath) {
+        await addMemory(workspacePath, category, content, keywords, importance);
+        setShowAddForm(false);
+        loadMemoryStats(workspacePath);
+      }
+    },
+    [workspacePath, addMemory, loadMemoryStats]
+  );
+
+  const handleClearAll = useCallback(() => {
+    if (workspacePath && window.confirm(t('skillPanel.clearAllConfirm'))) {
+      clearMemories(workspacePath);
+    }
+  }, [workspacePath, clearMemories, t]);
+
+  // If add form is open, show it
+  if (showAddForm) {
+    return (
+      <AddMemoryForm
+        onSave={handleAddMemory}
+        onCancel={() => setShowAddForm(false)}
+      />
+    );
+  }
 
   // If a memory is selected, show detail view
   if (selectedMemory) {
@@ -320,7 +362,7 @@ function MemoryTab() {
           />
         </div>
 
-        {/* Category filter */}
+        {/* Category filter + action buttons */}
         <div className="flex items-center gap-1 flex-wrap">
           <button
             onClick={() => handleCategoryFilter('all')}
@@ -347,8 +389,46 @@ function MemoryTab() {
               {cat.charAt(0).toUpperCase() + cat.slice(1)}
             </button>
           ))}
+          <button
+            onClick={() => setShowAddForm(true)}
+            className={clsx(
+              'ml-auto p-1 rounded-md transition-colors',
+              'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+              'hover:bg-gray-100 dark:hover:bg-gray-800'
+            )}
+            title={t('skillPanel.addMemory')}
+          >
+            <PlusIcon className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={handleClearAll}
+            disabled={memories.length === 0}
+            className={clsx(
+              'p-1 rounded-md transition-colors',
+              memories.length === 0
+                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
+            )}
+            title={t('skillPanel.clearAll')}
+          >
+            <TrashIcon className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
+
+      {/* Stats bar */}
+      {memoryStats && (
+        <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
+          <span>{t('skillPanel.totalMemories', { count: memoryStats.total_count })}</span>
+          <span className="text-gray-300 dark:text-gray-600">|</span>
+          <span>{t('skillPanel.avgImportance', { pct: (memoryStats.avg_importance * 100).toFixed(0) })}</span>
+          {Object.entries(memoryStats.category_counts).map(([cat, count]) => (
+            <span key={cat} className="text-gray-400 dark:text-gray-500">
+              {cat}: {count as number}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Memory list */}
       <div className="flex-1 overflow-y-auto">
@@ -360,6 +440,7 @@ function MemoryTab() {
           <EmptyState
             title={t('skillPanel.noMemoriesFound')}
             description={t('skillPanel.noMemoriesFoundHint')}
+            action={{ label: t('skillPanel.addMemory'), onClick: () => setShowAddForm(true) }}
           />
         ) : (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -439,6 +520,7 @@ export function SkillMemoryDialog() {
   const loadSkills = useSkillMemoryStore((s) => s.loadSkills);
   const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
   const loadMemoryStats = useSkillMemoryStore((s) => s.loadMemoryStats);
+  const runMaintenance = useSkillMemoryStore((s) => s.runMaintenance);
 
   // Load data when dialog opens
   useEffect(() => {
@@ -446,8 +528,9 @@ export function SkillMemoryDialog() {
       loadSkills(workspacePath);
       loadMemories(workspacePath);
       loadMemoryStats(workspacePath);
+      runMaintenance(workspacePath);
     }
-  }, [dialogOpen, workspacePath, loadSkills, loadMemories, loadMemoryStats]);
+  }, [dialogOpen, workspacePath, loadSkills, loadMemories, loadMemoryStats, runMaintenance]);
 
   return (
     <Dialog.Root open={dialogOpen} onOpenChange={(open) => !open && closeDialog()}>

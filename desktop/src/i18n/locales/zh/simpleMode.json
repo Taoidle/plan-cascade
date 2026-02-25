@@ -157,7 +157,14 @@
     "importance": "重要性",
     "content": "内容",
     "keywords": "关键词",
-    "activeSkillsTooltip": "{{count}} 个活跃技能"
+    "activeSkillsTooltip": "{{count}} 个活跃技能",
+    "totalMemories": "{{count}} 条记忆",
+    "avgImportance": "平均重要性: {{pct}}%",
+    "keywordsPlaceholder": "输入后按回车",
+    "addMemory": "添加记忆",
+    "contentRequired": "内容不能为空",
+    "clearAll": "清除全部",
+    "clearAllConfirm": "确定删除此项目的所有记忆？此操作不可撤销。"
   },
 
   "pluginPanel": {
