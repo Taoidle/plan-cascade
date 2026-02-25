@@ -18,7 +18,20 @@
     "tauri:build:windows": "tauri build --target x86_64-pc-windows-msvc",
     "tauri:build:macos": "tauri build --target universal-apple-darwin",
     "tauri:build:linux": "tauri build --target x86_64-unknown-linux-gnu",
-    "tauri:build:windows:debug": "tauri build --target x86_64-pc-windows-msvc --debug"
+    "tauri:build:windows:debug": "tauri build --target x86_64-pc-windows-msvc --debug",
+    "prepare": "cd .. && husky desktop/.husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+    ],
+    "*.{css,json}": [
+      "prettier --write"
+    ],
+    "*.{js,mjs,cjs}": [
+      "prettier --write"
+    ]
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -73,7 +86,9 @@
     "eslint": "^9.18.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "globals": "^15.14.0",
+    "husky": "^9.1.7",
     "jsdom": "^27.4.0",
+    "lint-staged": "^16.2.7",
     "monaco-editor": "^0.55.1",
     "postcss": "^8.5.1",
     "prettier": "^3.8.1",

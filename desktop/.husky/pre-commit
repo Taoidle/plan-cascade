@@ -1,0 +1,18 @@
+cd desktop
+
+# Frontend: prettier + eslint via lint-staged
+npx lint-staged
+
+# Backend: rustfmt for staged .rs files
+STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM -- 'desktop/src-tauri/**/*.rs')
+if [ -n "$STAGED_RS" ]; then
+  echo "Running cargo fmt on staged Rust files..."
+  cd src-tauri && cargo fmt --all
+  cd ..
+  # Re-stage formatted .rs files
+  echo "$STAGED_RS" | while IFS= read -r file; do
+    # Strip 'desktop/' prefix since we're already in desktop/
+    local_file="${file#desktop/}"
+    git add "$local_file"
+  done
+fi
